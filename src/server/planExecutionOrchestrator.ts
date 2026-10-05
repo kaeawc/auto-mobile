@@ -27,7 +27,12 @@ import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
-import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
+import {
+  AndroidSegmentedPlanVideoSession,
+  ROTATION_STOP_TIMEOUT_MS,
+  type SegmentedSessionResult,
+} from "./androidSegmentedPlanVideoSession";
+import { daemonPlanDeviceOwnership, type PlanDeviceOwnership } from "./planDeviceOwnership";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 import {
   getVideoRecordingMetadata as defaultGetVideoRecordingMetadata,
@@ -108,6 +113,8 @@ export interface PlanExecutionDependencies {
   timer?: Timer;
   /** Video recording manager surface — replaced by a fake in tests. */
   videoRecorder?: VideoRecorder;
+  /** Whether the plan's session still holds its device at teardown — replaced by a fake in tests. */
+  deviceOwnership?: PlanDeviceOwnership;
 }
 
 interface VideoState {
@@ -134,12 +141,30 @@ const DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS = 300;
 // Allow small timestamp skew between backend completion and the orchestrator stop attempt.
 const IOS_VIDEO_PLAN_END_TOLERANCE_MS = 100;
 /**
- * Bound on discarding a cancelled plan's recording (#9885). The discard is a
- * device-side `pkill -9 screenrecord` plus `rm -f` and a host process reap, which
- * takes well under a second when the device answers; this caps a wedged device so a
- * cancelled `executePlan` still returns promptly.
+ * Bound on discarding a cancelled plan's recording after its session released the
+ * device (#9885). The discard is a host process reap plus our own device temp file's
+ * `rm -f` and row deletes, which takes well under a second when the device answers;
+ * this caps a wedged device so a cancelled `executePlan` still returns promptly.
  */
 const CANCELLED_VIDEO_DISCARD_TIMEOUT_MS = 5_000;
+/**
+ * Overall bound on stopping and pulling the recording of a plan cancelled while its
+ * session still owns the device (deadline, client cancel). It is the existing budget
+ * for one whole segment stop-and-pull (rotation's `ROTATION_STOP_TIMEOUT_MS`, the
+ * 10 s between screenrecord's 180 s cap and the 170 s rotation), applied once to the
+ * whole teardown rather than per segment.
+ */
+const CANCELLED_VIDEO_FINALIZE_TIMEOUT_MS = ROTATION_STOP_TIMEOUT_MS;
+
+/** One way to tear down a cancelled plan's recording, bounded by {@link runShieldedTeardown}. */
+interface CancelledVideoTeardown {
+  label: string;
+  capMs: number;
+  run: () => Promise<FinalizedVideo>;
+  /** What survives when `run` fails or hits its cap. */
+  salvage: () => Promise<FinalizedVideo>;
+  successWarning: string;
+}
 
 const getDeviceType = (device: BootedDevice): "emulator" | "simulator" | "device" => {
   if (device.platform === "android") {
@@ -294,6 +319,7 @@ export class PlanExecutionOrchestrator {
     "loadSchema" | "validateYaml"
   >;
   private readonly videoRecorder: VideoRecorder;
+  private readonly deviceOwnership: PlanDeviceOwnership;
 
   // Set in execute(); used by all phase methods for [PERF +Xms] elapsed-time logs.
   private perfStart = 0;
@@ -308,6 +334,7 @@ export class PlanExecutionOrchestrator {
     this.timer = deps.timer ?? defaultTimer;
     this.testExecutionRepository = deps.testExecutionRepository ?? sharedTestExecutionRepository;
     this.createSchemaValidator = deps.createSchemaValidator ?? (() => new PlanSchemaValidator());
+    this.deviceOwnership = deps.deviceOwnership ?? daemonPlanDeviceOwnership;
     this.videoRecorder = deps.videoRecorder ?? {
       startVideoRecording: defaultStartVideoRecording,
       stopVideoRecording: defaultStopVideoRecording,
@@ -743,51 +770,20 @@ export class PlanExecutionOrchestrator {
   }
 
   private async finalizeVideo(video: VideoState): Promise<FinalizedVideo> {
-    if (this.signal?.aborted) {
-      const discard = this.cancelledVideoDiscard(video);
-      if (discard) {
-        return this.discardCancelledVideo(discard);
-      }
+    if (this.signal?.aborted && (video.androidSession || video.iosRecordingId)) {
+      return this.finalizeCancelledVideo(video);
     }
+    return this.finalizeRunningVideo(video);
+  }
+
+  /** Stops, pulls and packages the recording the way an uncancelled plan does. */
+  private async finalizeRunningVideo(video: VideoState): Promise<FinalizedVideo> {
     if (video.androidSession) {
       return this.finalizeWithFallback(
         "Finalizing segmented video recording",
         "Failed to finalize segmented video",
         async () => {
-          const finalized = await video.androidSession!.finalize();
-          const videoWarnings = [
-            ...new Set([
-              ...(finalized.warnings ?? []),
-              ...finalized.metadata.flatMap((metadata) => metadata.warnings ?? []),
-            ]),
-          ];
-          this.perfLog(`Segmented video finalized (${finalized.filePaths.length} file(s))`);
-          // Best-effort manifest so a plan run's ordered segments are discoverable on disk,
-          // matching the raw videoRecording stop path (writeSegmentManifest logs-and-continues
-          // on failure). The session handle is the first segment's recordingId, mirroring the
-          // tool path's sessionId grouping.
-          const segments: StoppedSegment[] = finalized.recordingIds.map((recordingId, index) => ({
-            recordingId,
-            filePath: finalized.filePaths[index],
-            segmentIndex: index,
-            ...(finalized.metadata[index]?.recordedPanel && {
-              recordedPanel: finalized.metadata[index].recordedPanel,
-            }),
-            ...(finalized.metadata[index]?.transitions && {
-              transitions: finalized.metadata[index].transitions,
-            }),
-            ...(finalized.metadata[index]?.warnings && {
-              warnings: finalized.metadata[index].warnings,
-            }),
-          }));
-          if (segments.length > 0) {
-            await writeSegmentManifest(segments[0].recordingId, segments, videoWarnings);
-          }
-          return {
-            videoFilePaths: finalized.filePaths,
-            videoRecordingIds: finalized.recordingIds,
-            ...(videoWarnings.length ? { videoWarnings } : {}),
-          };
+          return this.packageAndroidVideo(await video.androidSession!.finalize());
         },
         video.warnings,
       );
@@ -826,49 +822,160 @@ export class PlanExecutionOrchestrator {
     };
   }
 
-  /**
-   * A plan cancelled by a session release no longer owns its device, and every
-   * adb call under the cancelled request signal fails at once, so a graceful
-   * stop-and-pull can only burn its waits (about 13.5 s measured, #9885). Stop the
-   * capture and delete the device file on a short, non-aborted budget instead,
-   * and skip the pull.
-   */
-  private async discardCancelledVideo(discard: {
-    run: () => Promise<void>;
-    warnings: string[];
-  }): Promise<FinalizedVideo> {
-    const warnings = [...discard.warnings];
-    this.perfLog("Plan cancelled; discarding video recording without a pull");
-    try {
-      // Teardown must not inherit the aborted request signal, or it would fail before it started.
-      await runWithAbortSignal(undefined, () =>
-        raceWithDeadline(discard.run, {
-          timer: this.timer,
-          timeoutMs: CANCELLED_VIDEO_DISCARD_TIMEOUT_MS,
-          label: "Cancelled plan video discard",
-        }),
-      );
-      warnings.push("Plan was cancelled; its video recording was stopped and discarded");
-    } catch (error) {
-      logger.warn(`Failed to discard video of a cancelled plan: ${errorMessage(error)}`, error);
-      warnings.push(`Failed to discard video of a cancelled plan: ${errorMessage(error)}`);
+  /** Packages a segmented session's result, with the best-effort on-disk manifest. */
+  private async packageAndroidVideo(finalized: SegmentedSessionResult): Promise<FinalizedVideo> {
+    const videoWarnings = [
+      ...new Set([
+        ...(finalized.warnings ?? []),
+        ...finalized.metadata.flatMap((metadata) => metadata.warnings ?? []),
+      ]),
+    ];
+    this.perfLog(`Segmented video finalized (${finalized.filePaths.length} file(s))`);
+    // Best-effort manifest so a plan run's ordered segments are discoverable on disk,
+    // matching the raw videoRecording stop path (writeSegmentManifest logs-and-continues
+    // on failure). The session handle is the first segment's recordingId, mirroring the
+    // tool path's sessionId grouping.
+    const segments: StoppedSegment[] = finalized.recordingIds.map((recordingId, index) => ({
+      recordingId,
+      filePath: finalized.filePaths[index],
+      segmentIndex: index,
+      ...(finalized.metadata[index]?.recordedPanel && {
+        recordedPanel: finalized.metadata[index].recordedPanel,
+      }),
+      ...(finalized.metadata[index]?.transitions && {
+        transitions: finalized.metadata[index].transitions,
+      }),
+      ...(finalized.metadata[index]?.warnings && {
+        warnings: finalized.metadata[index].warnings,
+      }),
+    }));
+    if (segments.length > 0) {
+      await writeSegmentManifest(segments[0].recordingId, segments, videoWarnings);
     }
-    return { videoFilePaths: [], videoRecordingIds: [], videoWarnings: [...new Set(warnings)] };
+    return {
+      videoFilePaths: finalized.filePaths,
+      videoRecordingIds: finalized.recordingIds,
+      ...(videoWarnings.length ? { videoWarnings } : {}),
+    };
   }
 
-  /** How to discard this plan's recording without a pull, or undefined when no discard seam exists. */
-  private cancelledVideoDiscard(
-    video: VideoState,
-  ): { run: () => Promise<void>; warnings: string[] } | undefined {
-    const warnings = video.warnings ?? [];
+  /**
+   * Whether the plan's session still holds its device. The abort signal cannot say:
+   * it also fires for a request deadline, a client cancel or disconnect, so only the
+   * session/pool lookup tells a release from those (#9885 review). An ownership
+   * lookup that fails is treated as "released", the choice that issues no device command.
+   */
+  private stillOwnsDevice(): boolean {
+    const { sessionUuid } = this.request;
+    if (!sessionUuid) {
+      return true;
+    }
+    try {
+      return this.deviceOwnership.ownsDevice(sessionUuid, this.device.deviceId);
+    } catch (error) {
+      logger.warn(
+        `Could not determine device ownership for a cancelled plan: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * A plan whose signal aborted: its video is neither thrown away nor pulled blindly.
+   * The request signal is already aborted, so every adb call under it fails at once and
+   * a graceful stop-and-pull only burns its waits (about 13.5 s measured, #9885); each
+   * teardown below therefore runs under its own signal and bound instead.
+   */
+  private async finalizeCancelledVideo(video: VideoState): Promise<FinalizedVideo> {
+    const owned = this.stillOwnsDevice();
+    const teardown = this.cancelledVideoTeardown(video, owned);
+    this.perfLog(
+      owned
+        ? "Plan cancelled while its session still owns the device; finalizing video"
+        : "Plan cancelled after its device was released; discarding the active video segment",
+    );
+    let finalized: FinalizedVideo;
+    let warning: string;
+    try {
+      finalized = await this.runShieldedTeardown(teardown);
+      warning = teardown.successWarning;
+    } catch (error) {
+      logger.warn(`${teardown.label} failed: ${errorMessage(error)}`, error);
+      finalized = await teardown.salvage();
+      warning = `Plan was cancelled; ${teardown.label} did not complete: ${errorMessage(error)}`;
+    }
+    const videoWarnings = [
+      ...new Set([...(video.warnings ?? []), ...(finalized.videoWarnings ?? []), warning]),
+    ];
+    return { ...finalized, videoWarnings };
+  }
+
+  private cancelledVideoTeardown(video: VideoState, owned: boolean): CancelledVideoTeardown {
     const { androidSession, iosRecordingId } = video;
     const rollback = this.videoRecorder.rollbackVideoRecordingStart;
-    if (androidSession) {
-      return { run: () => androidSession.abort(), warnings };
+    const empty: FinalizedVideo = { videoFilePaths: [], videoRecordingIds: [] };
+    const salvage = async (): Promise<FinalizedVideo> =>
+      androidSession ? this.packageAndroidVideo(androidSession.completedResult()) : empty;
+    if (owned || (!androidSession && !(iosRecordingId && rollback))) {
+      return {
+        label: "Cancelled plan video finalize",
+        capMs: CANCELLED_VIDEO_FINALIZE_TIMEOUT_MS,
+        run: () => this.finalizeRunningVideo(video),
+        salvage,
+        successWarning: "Plan was cancelled; its video recording was finalized after cancellation",
+      };
     }
-    return iosRecordingId && rollback
-      ? { run: () => rollback(iosRecordingId), warnings }
-      : undefined;
+    return {
+      label: "Cancelled plan video discard",
+      capMs: CANCELLED_VIDEO_DISCARD_TIMEOUT_MS,
+      run: async () => {
+        if (androidSession) {
+          return this.packageAndroidVideo(await androidSession.finalizeWithoutDevice());
+        }
+        await rollback!(iosRecordingId!, { deviceWide: false });
+        return empty;
+      },
+      salvage,
+      successWarning:
+        "Plan was cancelled after its device was released; its in-progress video segment was discarded",
+    };
+  }
+
+  /**
+   * Runs a teardown under a private abort signal, not the cancelled request's, and
+   * bounded by its cap. The cap cannot cancel work already started, so reaching it
+   * aborts the private signal, which fails every further adb call that honors the
+   * ambient signal (exec and spawn do); calls already past that check, and host-side
+   * database work, still run to completion. A failure after the cap is logged here,
+   * once, since the caller has stopped waiting.
+   */
+  private async runShieldedTeardown(teardown: CancelledVideoTeardown): Promise<FinalizedVideo> {
+    const shield = new AbortController();
+    let capped = false;
+    const observed = () =>
+      teardown.run().catch((error: unknown) => {
+        if (capped) {
+          logger.warn(
+            `${teardown.label} failed after its ${teardown.capMs}ms cap: ${errorMessage(error)}`,
+            error,
+          );
+        }
+        throw error;
+      });
+    return runWithAbortSignal(shield.signal, () =>
+      raceWithDeadline(observed, {
+        timer: this.timer,
+        timeoutMs: teardown.capMs,
+        label: teardown.label,
+        onTimeout: () => {
+          capped = true;
+          shield.abort(
+            new ActionableError(`${teardown.label} exceeded its ${teardown.capMs}ms cap`),
+          );
+        },
+      }),
+    );
   }
 
   private async recoverCompletedIosVideo(

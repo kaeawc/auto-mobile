@@ -103,18 +103,18 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
   const booted = input.kind === "booted" ? input.device : input.booted!;
   const pooled = input.pooled;
   const imageFacts = bootedImageFacts(input, booted);
-  const description = describeBooted(
-    booted,
-    imageFacts.admittedImage,
-    imageFacts.authoritative,
+  const description = describeBooted({
+    device: booted,
+    admittedImage: imageFacts.admittedImage,
+    admittedImageAuthoritative: imageFacts.authoritative,
     pooled,
-    input.session,
-    input.deviceSessionUuid,
-    input.serviceStatus,
-    input.locked,
-    input.orientation,
-    input.kind === "booted" ? input.configured : undefined,
-  );
+    session: input.session,
+    deviceSessionUuid: input.deviceSessionUuid,
+    serviceStatus: input.serviceStatus,
+    locked: input.locked,
+    orientation: input.orientation,
+    configured: input.kind === "booted" ? input.configured : undefined,
+  });
   return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
 
@@ -155,19 +155,32 @@ function provisionedImage(provisioned: ExactProvisionedDevice): DeviceInfo {
   };
 }
 
+interface BootedDescriptionOptions {
+  device: BootedDevice;
+  admittedImage: ImageLike | undefined;
+  admittedImageAuthoritative: boolean;
+  pooled: PooledDevice | undefined;
+  session: DeviceSessionLike | undefined;
+  deviceSessionUuid: string | undefined;
+  serviceStatus: DeviceServiceStatusLike | undefined;
+  locked?: boolean | null;
+  orientation?: "portrait" | "landscape";
+  configured?: StableConfiguredDeviceImage;
+}
+
 // oxlint-disable-next-line complexity -- one exhaustive canonical booted projection preserves precedence.
-function describeBooted(
-  device: BootedDevice,
-  admittedImage: ImageLike | undefined,
-  admittedImageAuthoritative: boolean,
-  pooled: PooledDevice | undefined,
-  session: DeviceSessionLike | undefined,
-  deviceSessionUuid: string | undefined,
-  serviceStatus: DeviceServiceStatusLike | undefined,
-  locked: boolean | null = null,
-  orientation?: "portrait" | "landscape",
-  configured?: StableConfiguredDeviceImage,
-): DeviceDescription {
+function describeBooted({
+  device,
+  admittedImage,
+  admittedImageAuthoritative,
+  pooled,
+  session,
+  deviceSessionUuid,
+  serviceStatus,
+  locked = null,
+  orientation,
+  configured,
+}: BootedDescriptionOptions): DeviceDescription {
   const merged = mergeRuntimeFacts(device, admittedImage, admittedImageAuthoritative);
   // A cold-boot adapter can report a temporary non-emulator transport id even
   // though the selected configured image proves this is a virtual device.

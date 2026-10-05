@@ -2953,12 +2953,26 @@ describe("LaunchApp", () => {
         successful: opts.listingSuccessful,
       });
 
+      const calls: string[] = [];
+      const listInstalledApps = installedApps.listInstalledApps.bind(installedApps);
+      spyOn(installedApps, "listInstalledApps").mockImplementation(async () => {
+        calls.push("listapps");
+        return listInstalledApps();
+      });
       const fakeSimctl = {
-        launchApp: async () =>
-          opts.launchSuccess === false
+        launchApp: async (
+          id: string,
+          options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
+          deviceId?: string,
+        ) => {
+          calls.push(`launch:${deviceId}:${id}:${JSON.stringify(options)}`);
+          return opts.launchSuccess === false
             ? { success: false, error: "simctl launch failed" }
-            : { success: true, pid: 123 },
-        terminateApp: async () => {},
+            : { success: true, pid: 123 };
+        },
+        terminateApp: async (id: string, deviceId?: string) => {
+          calls.push(`terminate:${deviceId}:${id}`);
+        },
       };
 
       const iosLaunchApp = new LaunchApp(
@@ -2966,7 +2980,18 @@ describe("LaunchApp", () => {
         fakeAdb as unknown as any,
         fakeSimctl as any,
         fakeTimer,
-        { installedAppsProvider: installedApps },
+        {
+          installedAppsProvider: installedApps,
+          clearAppDataFactory: () => {
+            calls.push("clearFactory");
+            return {
+              execute: async (id) => {
+                calls.push(`clear:${id}`);
+                return { success: true, packageName: id };
+              },
+            };
+          },
+        },
       );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
@@ -2977,6 +3002,7 @@ describe("LaunchApp", () => {
         iosLaunchApp,
         fakeCtrlProxy,
         installedApps,
+        calls,
         targetBundleIdCalls,
         cleanup: () => {
           ctrlProxySpy.mockRestore();
@@ -2984,6 +3010,131 @@ describe("LaunchApp", () => {
         },
       };
     }
+
+    const launchPaths = [
+      { name: "warm", clear: false, cold: false, args: undefined },
+      { name: "coldBoot", clear: false, cold: true, args: undefined },
+      { name: "launchArguments", clear: false, cold: false, args: ["-x"] },
+      { name: "clearAppData", clear: true, cold: false, args: undefined },
+    ];
+    const simulatorId = "22222222-2222-2222-2222-222222222222";
+
+    test.each(launchPaths.slice(1))(
+      "rejects a missing simulator app before $name work",
+      async (path) => {
+        fakeTimer.enableAutoAdvance();
+        const harness = createIOSTestHarness({
+          bundleId: userBundleId,
+          launchSuccess: false,
+          installedApps: [],
+        });
+        try {
+          const warmResult = await harness.iosLaunchApp.execute(userBundleId, false, false);
+          expect(warmResult).toMatchObject({
+            success: false,
+            packageName: userBundleId,
+            error: "App is not installed",
+          });
+          harness.calls.length = 0;
+          harness.targetBundleIdCalls.length = 0;
+          const result = await harness.iosLaunchApp.execute(
+            userBundleId,
+            path.clear,
+            path.cold,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            path.args,
+          );
+          expect(result).toEqual(warmResult);
+          expect(harness.calls).toEqual(["listapps"]);
+          expect(harness.installedApps.getCallCount()).toBe(2);
+          expect(harness.targetBundleIdCalls).toEqual([]);
+          expect(harness.fakeCtrlProxy.getLaunchAppHistory()).toEqual([]);
+          expect(harness.fakeCtrlProxy.clearCacheCallCount).toBe(0);
+        } finally {
+          harness.cleanup();
+        }
+      },
+    );
+
+    test.each(launchPaths)("preserves installed simulator app calls on $name", async (path) => {
+      fakeTimer.enableAutoAdvance();
+      const harness = createIOSTestHarness({ bundleId: userBundleId });
+      try {
+        const result = await harness.iosLaunchApp.execute(
+          userBundleId,
+          path.clear,
+          path.cold,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          path.args,
+        );
+        expect(result.success).toBe(true);
+        const cold = path.name !== "warm";
+        expect(harness.calls).toEqual([
+          ...(cold ? ["listapps", `terminate:${simulatorId}:${userBundleId}`] : []),
+          ...(path.clear ? ["clearFactory", `clear:${userBundleId}`] : []),
+          `launch:${simulatorId}:${userBundleId}:${JSON.stringify({
+            ...(cold ? { foregroundIfRunning: false } : {}),
+            launchArguments: path.args,
+          })}`,
+        ]);
+        expect(harness.installedApps.getCallCount()).toBe(cold ? 1 : 0);
+        expect(harness.fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
+        expect(harness.targetBundleIdCalls).toEqual([userBundleId]);
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    test("skips the cold installed check for simulator system bundles", async () => {
+      fakeTimer.enableAutoAdvance();
+      const harness = createIOSTestHarness({ bundleId: systemBundleId, installedApps: [] });
+      try {
+        const result = await harness.iosLaunchApp.execute(systemBundleId, false, true);
+        expect(result.success).toBe(true);
+        expect(harness.calls).toEqual([
+          `terminate:${simulatorId}:${systemBundleId}`,
+          `launch:${simulatorId}:${systemBundleId}:{"foregroundIfRunning":false}`,
+        ]);
+        expect(harness.installedApps.getCallCount()).toBe(0);
+        expect(harness.targetBundleIdCalls).toEqual([]);
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    test.each([true, false])(
+      "proceeds after an unsuccessful cold listing (launch success: %s)",
+      async (launchSuccess) => {
+        fakeTimer.enableAutoAdvance();
+        const harness = createIOSTestHarness({
+          bundleId: userBundleId,
+          installedApps: [],
+          listingSuccessful: false,
+          launchSuccess,
+        });
+        try {
+          const result = await harness.iosLaunchApp.execute(userBundleId, false, true);
+          expect(result.success).toBe(launchSuccess);
+          if (!launchSuccess) {
+            expect(result.error).toBe("simctl launch failed");
+          }
+          expect(harness.calls).toEqual([
+            "listapps",
+            `terminate:${simulatorId}:${userBundleId}`,
+            `launch:${simulatorId}:${userBundleId}:{"foregroundIfRunning":false}`,
+          ]);
+          expect(harness.installedApps.getCallCount()).toBe(1);
+        } finally {
+          harness.cleanup();
+        }
+      },
+    );
 
     test("sets targetBundleId BEFORE simctl launch so CtrlProxy targets the app, not SpringBoard", async () => {
       fakeTimer.enableAutoAdvance();
@@ -3887,6 +4038,7 @@ describe("LaunchApp", () => {
       return {
         iosLaunchApp,
         fakeCtrlProxy,
+        installedApps,
         calls,
         cleanup: () => {
           ctrlProxySpy.mockRestore();
@@ -3901,9 +4053,12 @@ describe("LaunchApp", () => {
         nodePath.join(os.tmpdir(), "automobile-launch-clear-"),
       );
       tempDirs.push(containerPath);
-      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId, {
-        containerPath,
-      });
+      const { iosLaunchApp, fakeCtrlProxy, installedApps, calls, cleanup } = createClearDataHarness(
+        userBundleId,
+        {
+          containerPath,
+        },
+      );
       try {
         const result = await iosLaunchApp.execute(
           userBundleId,
@@ -3911,6 +4066,13 @@ describe("LaunchApp", () => {
           /* coldBoot */ false,
         );
         expect(result.success).toBe(true);
+        expect(installedApps.getCallCount()).toBe(1);
+        expect(calls).toEqual([
+          `terminate:${userBundleId}`,
+          `terminate:${userBundleId}`,
+          `exec:get_app_container AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE ${userBundleId} data`,
+          `launch:${userBundleId}`,
+        ]);
         // Data container resolved via get_app_container (the fast clear path)
         expect(
           calls.some((c) => c.startsWith("exec:get_app_container") && c.includes(userBundleId)),

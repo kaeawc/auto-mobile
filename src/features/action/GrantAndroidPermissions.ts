@@ -5,7 +5,9 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { isPackageInstalledForUser } from "../../utils/android-cmdline-tools/isPackageInstalledForUser";
 import {
+  ActionableError,
   BootedDevice,
   GrantAndroidPermissionItemResult,
   GrantAndroidPermissionsResult,
@@ -96,11 +98,22 @@ export class GrantAndroidPermissions {
       targetUserId = await perf.track("detectTargetUser", async () => {
         return (
           await new AndroidUserTargetResolver(this.adb).resolve({
-            packageName,
             explicitUserId: userId,
+            packageName,
+            installedOnly: true,
           })
         ).userId;
       });
+
+      // The resolver preserves the default user when no running user has the app.
+      if (
+        userId === undefined &&
+        !(await isPackageInstalledForUser(this.adb, packageName, targetUserId))
+      ) {
+        throw new ActionableError(
+          `App ${packageName} is not installed for Android user ${targetUserId}; install the app or specify userId for the user where it is installed`,
+        );
+      }
 
       for (const permission of permissions) {
         const trimmed = permission.trim();

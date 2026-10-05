@@ -5,6 +5,39 @@ import type { SwipeOnOptions } from "../../../src/models";
 import { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 import { FakeElementParser } from "../../fakes/FakeElementParser";
+import homeCapture from "../../fixtures/observe/android-home.json";
+
+describe("UIStateExtractor state characterization", () => {
+  test("returns undefined for absent hierarchy and for a captured screen with no useful state", () => {
+    const extractor = new UIStateExtractor();
+    expect(extractor.extract(undefined)).toBeUndefined();
+    expect(extractor.extract(homeCapture.viewHierarchy as ViewHierarchyResult)).toBeUndefined();
+  });
+
+  test.each([
+    { attrs: { selected: "true", "content-desc": "Tab" }, expected: [{ contentDesc: "Tab" }] },
+    { attrs: { selected: "true", resourceId: "tab" }, expected: [{ resourceId: "tab" }] },
+    { attrs: { selected: "true" }, expected: [] },
+    { attrs: { selected: "false", text: "Tab" }, expected: [] },
+  ])(
+    "retains only identified selections from fake parser attributes: $attrs",
+    ({ attrs, expected }) => {
+      const parser = new FakeElementParser();
+      parser.nextNodeProperties = attrs;
+      const traverse = spyOn(parser, "traverseNode").mockImplementation((node, callback) =>
+        callback(node, 0),
+      );
+      try {
+        expect(
+          new UIStateExtractor(parser).extract(homeCapture.viewHierarchy as ViewHierarchyResult)
+            ?.selectedElements ?? [],
+        ).toEqual(expected);
+      } finally {
+        traverse.mockRestore();
+      }
+    },
+  );
+});
 
 describe("UIStateExtractor (iOS hierarchy)", () => {
   test("extracts selected elements from $ attributes", () => {

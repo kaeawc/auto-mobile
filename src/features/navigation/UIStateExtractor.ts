@@ -51,31 +51,8 @@ export class UIStateExtractor {
 
       // Check for selected elements (tabs, menu items, etc.)
       if (this.getAttribute(attrs, ["selected"]) === "true") {
-        const element: SelectedElement = {};
-
-        // Try to get identifying information
-        const text = this.getAttribute(attrs, ["text"]);
-        const contentDesc = this.getAttribute(attrs, ["content-desc", "contentDesc"]);
-        if (text) {
-          element.text = text;
-        }
-        if (resourceId) {
-          element.resourceId = resourceId;
-        }
-        if (contentDesc) {
-          element.contentDesc = contentDesc;
-        }
-
-        // Also check child nodes for text (common in Compose where text is nested)
-        if (!element.text && node.node) {
-          const childText = this.findTextInChildren(node.node);
-          if (childText) {
-            element.text = childText;
-          }
-        }
-
-        // Only add if we have at least one identifier
-        if (element.text || element.resourceId || element.contentDesc) {
+        const element = this.extractSelectedElement(node, attrs, resourceId);
+        if (element) {
           selectedElements.push(element);
         }
       }
@@ -86,15 +63,7 @@ export class UIStateExtractor {
     });
 
     if (windowsWithHierarchy.length > 0) {
-      for (const [index, window] of windowsWithHierarchy.entries()) {
-        const windowId = window.id ?? undefined;
-        const windowType = window.type !== undefined ? String(window.type) : undefined;
-        const windowLayer = window.windowLayer ?? index;
-        this.parser.traverseNode(window.hierarchy as Record<string, any>, (node, depth) => {
-          const attrs = this.parser.extractNodeProperties(node);
-          this.collectModalStack(modalStack, attrs, windowLayer + depth, { windowId, windowType });
-        });
-      }
+      this.collectWindowModals(modalStack, windowsWithHierarchy);
     }
 
     const normalizedModalStack = this.normalizeModalStack(modalStack);
@@ -109,6 +78,53 @@ export class UIStateExtractor {
       destinationId,
       modalStack: normalizedModalStack.length > 0 ? normalizedModalStack : undefined,
     };
+  }
+
+  private extractSelectedElement(
+    node: Record<string, any>,
+    attrs: Record<string, any>,
+    resourceId: string | undefined,
+  ): SelectedElement | undefined {
+    const element: SelectedElement = {};
+
+    // Try to get identifying information
+    const text = this.getAttribute(attrs, ["text"]);
+    const contentDesc = this.getAttribute(attrs, ["content-desc", "contentDesc"]);
+    if (text) {
+      element.text = text;
+    }
+    if (resourceId) {
+      element.resourceId = resourceId;
+    }
+    if (contentDesc) {
+      element.contentDesc = contentDesc;
+    }
+
+    // Also check child nodes for text (common in Compose where text is nested)
+    if (!element.text && node.node) {
+      const childText = this.findTextInChildren(node.node);
+      if (childText) {
+        element.text = childText;
+      }
+    }
+
+    // Only add if we have at least one identifier
+    return element.text || element.resourceId || element.contentDesc ? element : undefined;
+  }
+
+  private collectWindowModals(
+    modalStack: ModalState[],
+    windowsWithHierarchy: NonNullable<ViewHierarchyResult["windows"]>,
+  ): void {
+    for (const [index, window] of windowsWithHierarchy.entries()) {
+      const windowId = window.id ?? undefined;
+      const windowType = window.type !== undefined ? String(window.type) : undefined;
+      const windowLayer = window.windowLayer ?? index;
+      this.parser.traverseNode(window.hierarchy as Record<string, any>, (node, depth) => {
+        const attrs = this.parser.extractNodeProperties(node);
+        this.collectModalStack(modalStack, attrs, windowLayer + depth, { windowId, windowType });
+      });
+    }
   }
 
   /**

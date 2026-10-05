@@ -129,6 +129,16 @@ function resolvePerformanceSamplingCoordinator(
   return dependencies.performanceSamplingCoordinator ?? getPerformanceMonitor();
 }
 
+interface AndroidLaunchOptions {
+  packageName: string;
+  clearAppData: boolean;
+  coldBoot: boolean;
+  activityName?: string;
+  userId?: number;
+  skipUiStability?: boolean;
+  signal?: AbortSignal;
+}
+
 export class LaunchApp extends BaseVisualChange {
   private simctl: SimCtlClient;
   private deviceAppLauncher: DeviceAppLauncher;
@@ -379,7 +389,7 @@ export class LaunchApp extends BaseVisualChange {
             "launchArguments are supported on iOS only. Android launch intent extras require a separate interface.",
           );
         }
-        return this.executeAndroidWithSamplingPriority(
+        return this.executeAndroidWithSamplingPriority({
           packageName,
           clearAppData,
           coldBoot,
@@ -387,25 +397,21 @@ export class LaunchApp extends BaseVisualChange {
           userId,
           skipUiStability,
           signal,
-        );
+        });
       default:
         throw unsupportedPlatformError(this.device.platform, "launch apps");
     }
   }
 
   private async executeAndroidWithSamplingPriority(
-    packageName: string,
-    clearAppData: boolean,
-    coldBoot: boolean,
-    activityName?: string,
-    userId?: number,
-    skipUiStability?: boolean,
-    signal?: AbortSignal,
+    options: AndroidLaunchOptions,
   ): Promise<LaunchAppResult> {
+    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
+      options;
     return await this.performanceSamplingCoordinator.withDeviceSamplingPaused(
       this.device.deviceId,
       async () =>
-        await this.executeAndroid(
+        await this.executeAndroid({
           packageName,
           clearAppData,
           coldBoot,
@@ -413,8 +419,24 @@ export class LaunchApp extends BaseVisualChange {
           userId,
           skipUiStability,
           signal,
-        ),
+        }),
     );
+  }
+
+  private async checkIosAppNotInstalled(
+    bundleId: string,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<LaunchAppResult | undefined> {
+    const installedAppsResult = await perf.track("checkInstalled", () =>
+      this.installedAppsProvider.listInstalledApps(signal),
+    );
+    this.assertLaunchNotAborted(signal);
+    if (installedAppsResult.successful && !installedAppsResult.apps.includes(bundleId)) {
+      logger.info("App is not installed");
+      return { success: false, packageName: bundleId, error: "App is not installed" };
+    }
+    return undefined;
   }
 
   /**
@@ -441,14 +463,6 @@ export class LaunchApp extends BaseVisualChange {
       const result = await this.observedInteraction(
         async () => {
           this.assertLaunchNotAborted(signal);
-          // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
-          if (!isSystemBundleId) {
-            IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
-          }
-          const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
-
-          let launchResult: { success: boolean; pid?: number; error?: string };
-
           // Clearing app data always implies a fresh process: the app is
           // terminated, its sandbox wiped, then relaunched. Treat it as a cold
           // boot so we go through the terminate → clearCache → launch path.
@@ -463,6 +477,24 @@ export class LaunchApp extends BaseVisualChange {
             deviceAppLauncher: this.deviceAppLauncher,
           });
           const simulator = backend.kind === "simulator";
+
+          // Reject missing simulator apps before termination, data clearing, or
+          // CtrlProxy targeting. An unsuccessful listing is inconclusive.
+          if (needsColdStart && !isSystemBundleId && simulator) {
+            const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal);
+            if (missingApp) {
+              perf.end();
+              return missingApp;
+            }
+          }
+
+          // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
+          if (!isSystemBundleId) {
+            IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
+          }
+          const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
+
+          let launchResult: { success: boolean; pid?: number; error?: string };
 
           if (needsColdStart) {
             // Cold boot: use simctl (simulator) / devicectl (device) directly.
@@ -547,18 +579,10 @@ export class LaunchApp extends BaseVisualChange {
             // simulators — simctl listapps is slow (~2s) and returns nothing for
             // a physical device, where devicectl's launch error is authoritative.
             if (!launchResult.success && !isSystemBundleId && simulator) {
-              const installedAppsResult = await perf.track("checkInstalled", () =>
-                this.installedAppsProvider.listInstalledApps(signal),
-              );
-              this.assertLaunchNotAborted(signal);
-              if (installedAppsResult.successful && !installedAppsResult.apps.includes(bundleId)) {
-                logger.info("App is not installed");
+              const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal);
+              if (missingApp) {
                 perf.end();
-                return {
-                  success: false,
-                  packageName: bundleId,
-                  error: "App is not installed",
-                };
+                return missingApp;
               }
             }
           }
@@ -786,15 +810,9 @@ export class LaunchApp extends BaseVisualChange {
    * @param userId - Optional Android user ID (auto-detected if not provided)
    * @param skipUiStability - Whether to skip UI stability checks
    */
-  private async executeAndroid(
-    packageName: string,
-    clearAppData: boolean,
-    coldBoot: boolean,
-    activityName?: string,
-    userId?: number,
-    skipUiStability?: boolean,
-    signal?: AbortSignal,
-  ): Promise<LaunchAppResult> {
+  private async executeAndroid(options: AndroidLaunchOptions): Promise<LaunchAppResult> {
+    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
+      options;
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
 

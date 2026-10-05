@@ -38,6 +38,88 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executeTap", () => {
+    test.each([null, undefined, 5])(
+      "requests current focus when traversal focus is %s",
+      async (focusedIndex) => {
+        const element = { "resource-id": "test:id/button" };
+        driver.setElements([element], 0);
+        driver.queueTraversalResult({
+          elements: [element],
+          focusedIndex,
+          totalCount: 1,
+          totalTimeMs: 1,
+        });
+        const focus = spyOn(driver, "requestCurrentFocus");
+        const path = spyOn(mockPathCalculator, "calculatePath");
+        spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
+        const result = await strategy.executeTap("device-1", element, driver);
+        expect(path.mock.calls[0][0]).toBe(element);
+        expect(focus).toHaveBeenCalled();
+        expect(result).toEqual({
+          success: true,
+          method: "accessibility-action",
+          screenReaderNavigation: {
+            reachable: true,
+            traversalOrder: [element],
+            focusTrapDetected: false,
+          },
+        });
+      },
+    );
+
+    test("ignores a failed focus reply even if it contains a focused element", async () => {
+      const element = { "resource-id": "test:id/button" };
+      driver.queueTraversalResult({
+        elements: [element],
+        focusedIndex: null,
+        totalCount: 1,
+        totalTimeMs: 1,
+      });
+      driver.queueCurrentFocusResult({
+        error: "unavailable",
+        focusedElement: element,
+        totalTimeMs: 1,
+      });
+      const path = spyOn(mockPathCalculator, "calculatePath").mockReturnValue(null);
+      expect(await strategy.executeTap("device-1", element, driver)).toEqual({
+        success: false,
+        method: "focus-navigation",
+        error: "Could not calculate navigation path to target element",
+        screenReaderNavigation: { reachable: false, traversalOrder: [], focusTrapDetected: false },
+      });
+      expect(path.mock.calls[0][0]).toBeNull();
+      expect(driver.getActionCount()).toBe(0);
+    });
+
+    test("returns a navigation failure without activation when the executor returns false", async () => {
+      const element = { "resource-id": "test:id/button" };
+      driver.setElements([element], 0);
+      spyOn(mockExecutor, "navigateToElement").mockResolvedValue(false);
+      expect(await strategy.executeTap("device-1", element, driver)).toEqual({
+        success: false,
+        method: "focus-navigation",
+        error: "Focus navigation did not reach target element",
+        screenReaderNavigation: {
+          reachable: false,
+          traversalOrder: [element],
+          focusTrapDetected: false,
+        },
+      });
+      expect(driver.getTapCount()).toBe(0);
+      expect(driver.getActionCount()).toBe(0);
+    });
+
+    test("preserves typed failure before traversal evidence exists", async () => {
+      const element = { text: "Button" };
+      spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("Service failed"));
+      expect(await strategy.executeTap("device-1", element, driver)).toEqual({
+        success: false,
+        method: "focus-navigation",
+        error: "Service failed",
+        screenReaderNavigation: { reachable: false, traversalOrder: [], focusTrapDetected: false },
+      });
+    });
+
     test("opt-in activation retains uncertainty after its ACTION_CLICK fallback", async () => {
       const element = { "resource-id": "test:id/button" };
       driver.setElements([element], 0);
@@ -642,6 +724,16 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executePreciseTap", () => {
+    test("unsupported activation keeps the completed focus and settle wait without dispatching a double tap", async () => {
+      driver.doubleTapCapabilitySupported = false;
+      const result = await strategy.executePreciseTap(20, 30, driver);
+      expect(result.success).toBe(false);
+      expect(result.unsupportedCapability).toBe("tap_double_v1");
+      expect(result.focusCompleted).toBe(true);
+      expect(driver.tapHistory).toEqual([{ x: 20, y: 30, durationMs: 50 }]);
+      expect(fakeTimer.getSleepHistory()).toEqual([500]);
+      expect(driver.doubleTapHistory).toEqual([]);
+    });
     test("activation is one request despite 400ms tap replies", async () => {
       const tap = driver.requestTapCoordinates.bind(driver);
       const doubleTap = driver.requestDoubleTapCoordinates.bind(driver);

@@ -13,7 +13,11 @@ import {
 } from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { getPerfWindowBuffer, PerfWindowBuffer } from "./PerfWindowBuffer";
-import { getSdkFrameMetricsStore, SdkFrameMetricsStore } from "./SdkFrameMetricsStore";
+import {
+  getSdkFrameMetricsStore,
+  SdkFrameMetricsStore,
+  type SdkFrameSample,
+} from "./SdkFrameMetricsStore";
 import type {
   FrameTimePercentiles,
   MemoryBreakdownMb,
@@ -100,6 +104,16 @@ interface RawJankCounters {
    * counters above, which overlap (one frame can trip several).
    */
   jankyFrames: number | null;
+}
+
+interface AndroidFrameMetrics {
+  fps: number | null;
+  frameTimeMs: number | null;
+  jankFrames: number | null;
+  touchLatencyMs: number;
+  rawFps: number | null;
+  rawFrameTimeMs: number | null;
+  rawTouchLatencyMs: number | null;
 }
 
 interface PreviousCpuSample {
@@ -584,6 +598,60 @@ export class PerformanceMonitor {
     // active this tick. `rawFps`/`rawFrameTimeMs`/`rawTouchLatencyMs` feed the
     // windowed buffer (null when there is genuinely no in-window reading); the
     // stream values use cached fallbacks to avoid flicker to 0.
+    const frameMetrics = this.resolveAndroidFrameMetrics(device, sdkFrame, gfx);
+    const { fps, frameTimeMs, jankFrames, touchLatencyMs } = frameMetrics;
+
+    // The first gfxinfo read is cumulative since app launch rather than since
+    // monitoring started. Keep it for the live stream, but do not let it seed
+    // the windowed snapshot. SDK samples are already interval-scoped.
+    const recordGfxWindowSample = this.consumeGfxPriming(
+      device,
+      sdkFrame,
+      gfx?.resetSucceeded ?? false,
+    );
+
+    // Get TTI from the global store if available
+    const ttiMs = getLastTtiMs(device.deviceId, device.packageName);
+
+    const metrics = {
+      fps,
+      frameTimeMs,
+      jankFrames,
+      touchLatencyMs,
+      ttffMs: null,
+      ttiMs,
+      cpuUsagePercent: cpu,
+      memoryUsageMb: memory,
+    };
+
+    // Raw per-interval frame readings (null when no frames rendered this tick)
+    // for the windowed buffer. The stream uses the cached fps/frameTime to avoid
+    // flicker to 0, but the buffer must NOT re-record a stale reading every idle
+    // tick — that would keep an old fps dominating the percentiles.
+    this.pushMetrics(
+      device,
+      now,
+      metrics,
+      jankFrames,
+      server,
+      this.createAndroidWindowSample({
+        recordGfxWindowSample,
+        frameMetrics,
+        gfx,
+        shouldCollectCpu,
+        cpu,
+        shouldCollectMemory,
+        memory,
+        memoryBreakdown,
+      }),
+    );
+  }
+
+  private resolveAndroidFrameMetrics(
+    device: MonitoredDevice,
+    sdkFrame: SdkFrameSample | null,
+    gfx: (GfxMetrics & { rawJankCounters: RawJankCounters | null }) | null,
+  ): AndroidFrameMetrics {
     let fps: number | null;
     let frameTimeMs: number | null;
     let jankFrames: number | null;
@@ -637,35 +705,38 @@ export class PerformanceMonitor {
       rawFps = gfxData.fps;
       rawFrameTimeMs = gfxData.frameTimeMs;
     }
-
-    // The first gfxinfo read is cumulative since app launch rather than since
-    // monitoring started. Keep it for the live stream, but do not let it seed
-    // the windowed snapshot. SDK samples are already interval-scoped.
-    const recordGfxWindowSample = this.consumeGfxPriming(
-      device,
-      sdkFrame,
-      gfx?.resetSucceeded ?? false,
-    );
-
-    // Get TTI from the global store if available
-    const ttiMs = getLastTtiMs(device.deviceId, device.packageName);
-
-    const metrics = {
+    return {
       fps,
       frameTimeMs,
       jankFrames,
       touchLatencyMs,
-      ttffMs: null,
-      ttiMs,
-      cpuUsagePercent: cpu,
-      memoryUsageMb: memory,
+      rawFps,
+      rawFrameTimeMs,
+      rawTouchLatencyMs,
     };
+  }
 
-    // Raw per-interval frame readings (null when no frames rendered this tick)
-    // for the windowed buffer. The stream uses the cached fps/frameTime to avoid
-    // flicker to 0, but the buffer must NOT re-record a stale reading every idle
-    // tick — that would keep an old fps dominating the percentiles.
-    this.pushMetrics(device, now, metrics, jankFrames, server, {
+  private createAndroidWindowSample({
+    recordGfxWindowSample,
+    frameMetrics,
+    gfx,
+    shouldCollectCpu,
+    cpu,
+    shouldCollectMemory,
+    memory,
+    memoryBreakdown,
+  }: {
+    recordGfxWindowSample: boolean;
+    frameMetrics: AndroidFrameMetrics;
+    gfx: GfxMetrics | null;
+    shouldCollectCpu: boolean;
+    cpu: number | null;
+    shouldCollectMemory: boolean;
+    memory: number | null;
+    memoryBreakdown: MemoryBreakdownMb | null;
+  }): Parameters<PerformanceMonitor["pushMetrics"]>[5] {
+    const { rawFps, rawFrameTimeMs, jankFrames, rawTouchLatencyMs } = frameMetrics;
+    return {
       fps: recordGfxWindowSample ? rawFps : null,
       frameTimeMs: recordGfxWindowSample ? rawFrameTimeMs : null,
       jankFrames: recordGfxWindowSample ? jankFrames : null,
@@ -678,7 +749,7 @@ export class PerformanceMonitor {
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,
       memoryBreakdownMb: shouldCollectMemory ? memoryBreakdown : null,
-    });
+    };
   }
 
   /**
@@ -922,49 +993,8 @@ export class PerformanceMonitor {
     },
     overallHealth: string,
   ): void {
-    const th = DEFAULT_THRESHOLDS;
-    const currentHealth: Record<string, string> = {};
+    const currentHealth = this.classifyMetricHealth(metrics);
     const changedMetrics: string[] = [];
-
-    // Classify each metric
-    if (metrics.fps !== null) {
-      currentHealth.fps =
-        metrics.fps < th.fpsCritical
-          ? "critical"
-          : metrics.fps < th.fpsWarning
-            ? "warning"
-            : "healthy";
-    }
-    if (metrics.frameTimeMs !== null) {
-      currentHealth.frameTime =
-        metrics.frameTimeMs > th.frameTimeCritical
-          ? "critical"
-          : metrics.frameTimeMs > th.frameTimeWarning
-            ? "warning"
-            : "healthy";
-    }
-    if (metrics.jankFrames !== null) {
-      currentHealth.jank =
-        metrics.jankFrames > th.jankCritical
-          ? "critical"
-          : metrics.jankFrames > th.jankWarning
-            ? "warning"
-            : "healthy";
-    }
-    if (metrics.touchLatencyMs !== null) {
-      currentHealth.touchLatency =
-        metrics.touchLatencyMs > th.touchLatencyCritical
-          ? "critical"
-          : metrics.touchLatencyMs > th.touchLatencyWarning
-            ? "warning"
-            : "healthy";
-    }
-    if (metrics.memoryUsageMb !== null) {
-      // Classify memory into bands — emit telemetry when band changes.
-      // Thresholds based on typical Android app memory budgets.
-      const mb = metrics.memoryUsageMb;
-      currentHealth.memory = mb > 300 ? "critical" : mb > 200 ? "warning" : "healthy";
-    }
 
     // Compare against previous health — emit when any metric crosses a threshold
     const isFirstSample = Object.keys(device.previousMetricHealth).length === 0;
@@ -999,6 +1029,55 @@ export class PerformanceMonitor {
         changedMetrics: effectiveChanged,
       });
     }
+  }
+
+  private classifyMetricHealth(
+    metrics: Parameters<PerformanceMonitor["emitPerformanceTelemetry"]>[2],
+  ): Record<string, string> {
+    const th = DEFAULT_THRESHOLDS;
+    const currentHealth: Record<string, string> = {};
+
+    // Classify each metric
+    if (metrics.fps !== null) {
+      currentHealth.fps =
+        metrics.fps < th.fpsCritical
+          ? "critical"
+          : metrics.fps < th.fpsWarning
+            ? "warning"
+            : "healthy";
+    }
+    if (metrics.frameTimeMs !== null) {
+      currentHealth.frameTime = this.classifyHighMetricHealth(
+        metrics.frameTimeMs,
+        th.frameTimeCritical,
+        th.frameTimeWarning,
+      );
+    }
+    if (metrics.jankFrames !== null) {
+      currentHealth.jank = this.classifyHighMetricHealth(
+        metrics.jankFrames,
+        th.jankCritical,
+        th.jankWarning,
+      );
+    }
+    if (metrics.touchLatencyMs !== null) {
+      currentHealth.touchLatency = this.classifyHighMetricHealth(
+        metrics.touchLatencyMs,
+        th.touchLatencyCritical,
+        th.touchLatencyWarning,
+      );
+    }
+    if (metrics.memoryUsageMb !== null) {
+      // Classify memory into bands — emit telemetry when band changes.
+      // Thresholds based on typical Android app memory budgets.
+      const mb = metrics.memoryUsageMb;
+      currentHealth.memory = this.classifyHighMetricHealth(mb, 300, 200);
+    }
+    return currentHealth;
+  }
+
+  private classifyHighMetricHealth(value: number, critical: number, warning: number): string {
+    return value > critical ? "critical" : value > warning ? "warning" : "healthy";
   }
 
   /**

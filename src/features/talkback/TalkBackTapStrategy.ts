@@ -1,5 +1,5 @@
 import { indeterminateTapError } from "../action/coordinateTapDispatch";
-import { ActionableError } from "../../models";
+import { ActionableError, type TraversalOrderResult } from "../../models";
 import type { DisplayFence, DisplayFenceOption } from "../action/BaseVisualChange";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -13,6 +13,7 @@ import {
   type FocusNavigationDriverFactory,
 } from "./FocusNavigationExecutor";
 import { FocusPathCalculator } from "./FocusPathCalculator";
+import type { ElementSelector } from "./ElementSelector";
 import type { TalkBackNavigationDriver } from "./TalkBackNavigationDriver";
 
 export interface TalkBackTapResult {
@@ -174,109 +175,18 @@ export class TalkBackTapStrategy {
     }
 
     try {
-      logger.debug(
-        `[TalkBackTapStrategy] Attempting focus navigation to element (resourceId: ${resourceId}, text: ${elementText})`,
-      );
-
-      // Build selector from available fields (include bounds for disambiguation in list views)
-      const targetSelector = {
-        ...(resourceId ? { resourceId } : {}),
-        ...(elementText ? { text: elementText } : {}),
-        ...(elementContentDesc ? { contentDesc: elementContentDesc } : {}),
-        bounds: element.bounds,
-      };
-
-      // Get traversal order and current focus
-      const traversalResult = await driver.requestTraversalOrder();
-      if (traversalResult.error || !traversalResult.elements) {
-        return {
-          success: false,
-          method: "focus-navigation",
-          error: `Failed to get traversal order: ${traversalResult.error}`,
-          screenReaderNavigation: {
-            reachable: false,
-            traversalOrder: [],
-            focusTrapDetected: false,
-          },
-        };
-      }
-
-      const orderedElements = traversalResult.elements;
-      let currentFocus: Element | null = null;
-
-      // Try to get current focus from traversal result first
-      if (traversalResult.focusedIndex !== null && traversalResult.focusedIndex !== undefined) {
-        currentFocus = orderedElements[traversalResult.focusedIndex] ?? null;
-      }
-
-      // If not available, request current focus separately
-      if (!currentFocus) {
-        const focusResult = await driver.requestCurrentFocus();
-        if (!focusResult.error && focusResult.focusedElement) {
-          currentFocus = focusResult.focusedElement;
-        }
-      }
-
-      const navigationResult: ScreenReaderNavigationResult = {
-        reachable: false,
-        traversalOrder: currentFocus ? [currentFocus] : [],
-        focusTrapDetected: false,
-      };
-      screenReaderNavigation = navigationResult;
-
-      // Calculate navigation path
-      const navigationPath = this.pathCalculator.calculatePath(
-        currentFocus,
-        targetSelector,
-        orderedElements,
-      );
-
-      if (!navigationPath) {
-        return {
-          success: false,
-          method: "focus-navigation",
-          error: traversalResult.truncationReasons?.includes("max_children")
-            ? "Could not calculate navigation path to target element: the accessibility traversal was truncated (max_children); the target may be beyond the cap"
-            : "Could not calculate navigation path to target element",
-          screenReaderNavigation: navigationResult,
-        };
-      }
-
-      logger.debug(
-        `[TalkBackTapStrategy] Calculated path: ${navigationPath.swipeCount} swipes ${navigationPath.direction}`,
-      );
-
-      // Navigate to element
-      const navigationSuccess = await this.executor.navigateToElement(
+      return await this.prepareFocusNavigation({
         deviceId,
-        targetSelector,
-        navigationPath,
-        {
-          displayFence: fence,
-          maxSwipes: 100,
-          // Fidelity assertions need every focused node, not periodic samples.
-          verificationInterval: 1,
-          swipeDelay: 100,
-          onFocusObserved: (focus) => this.appendTraversalFocus(navigationResult, focus),
+        element,
+        driver,
+        fence,
+        resourceId,
+        elementText,
+        elementContentDesc,
+        onNavigationResult: (result) => {
+          screenReaderNavigation = result;
         },
-      );
-
-      if (!navigationSuccess) {
-        return {
-          success: false,
-          method: "focus-navigation",
-          error: "Focus navigation did not reach target element",
-          screenReaderNavigation: navigationResult,
-        };
-      }
-
-      navigationResult.reachable = true;
-
-      logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
-
-      // Activate the focused element with double-tap gesture
-      const activationResult = await this.activateElement(element, driver, fence);
-      return { ...activationResult, screenReaderNavigation: navigationResult };
+      });
     } catch (error) {
       if (error instanceof StaleDisplayError || error instanceof ActionableError) {
         throw error;
@@ -296,6 +206,183 @@ export class TalkBackTapStrategy {
             },
       };
     }
+  }
+
+  private createFocusSelector({
+    resourceId,
+    elementText,
+    elementContentDesc,
+    bounds,
+  }: {
+    resourceId?: string;
+    elementText?: string;
+    elementContentDesc?: string;
+    bounds: Element["bounds"];
+  }): ElementSelector {
+    return {
+      ...(resourceId ? { resourceId } : {}),
+      ...(elementText ? { text: elementText } : {}),
+      ...(elementContentDesc ? { contentDesc: elementContentDesc } : {}),
+      bounds,
+    };
+  }
+
+  private async prepareFocusNavigation({
+    deviceId,
+    element,
+    driver,
+    fence,
+    resourceId,
+    elementText,
+    elementContentDesc,
+    onNavigationResult,
+  }: {
+    deviceId: string;
+    element: Element;
+    driver: TalkBackNavigationDriver;
+    fence?: DisplayFence;
+    resourceId?: string;
+    elementText?: string;
+    elementContentDesc?: string;
+    onNavigationResult: (result: ScreenReaderNavigationResult) => void;
+  }): Promise<TalkBackTapResult> {
+    logger.debug(
+      `[TalkBackTapStrategy] Attempting focus navigation to element (resourceId: ${resourceId}, text: ${elementText})`,
+    );
+
+    // Build selector from available fields (include bounds for disambiguation in list views)
+    const targetSelector = this.createFocusSelector({
+      resourceId,
+      elementText,
+      elementContentDesc,
+      bounds: element.bounds,
+    });
+
+    // Get traversal order and current focus
+    const traversalResult = await driver.requestTraversalOrder();
+    if (traversalResult.error || !traversalResult.elements) {
+      return {
+        success: false,
+        method: "focus-navigation",
+        error: `Failed to get traversal order: ${traversalResult.error}`,
+        screenReaderNavigation: {
+          reachable: false,
+          traversalOrder: [],
+          focusTrapDetected: false,
+        },
+      };
+    }
+
+    const orderedElements = traversalResult.elements;
+    let currentFocus: Element | null = null;
+
+    // Try to get current focus from traversal result first
+    if (traversalResult.focusedIndex !== null && traversalResult.focusedIndex !== undefined) {
+      currentFocus = orderedElements[traversalResult.focusedIndex] ?? null;
+    }
+
+    // If not available, request current focus separately
+    if (!currentFocus) {
+      const focusResult = await driver.requestCurrentFocus();
+      if (!focusResult.error && focusResult.focusedElement) {
+        currentFocus = focusResult.focusedElement;
+      }
+    }
+
+    const navigationResult: ScreenReaderNavigationResult = {
+      reachable: false,
+      traversalOrder: currentFocus ? [currentFocus] : [],
+      focusTrapDetected: false,
+    };
+    onNavigationResult(navigationResult);
+
+    return await this.navigateAndActivate({
+      deviceId,
+      element,
+      driver,
+      fence,
+      targetSelector,
+      currentFocus,
+      orderedElements,
+      traversalResult,
+      navigationResult,
+    });
+  }
+
+  private async navigateAndActivate({
+    deviceId,
+    element,
+    driver,
+    fence,
+    targetSelector,
+    currentFocus,
+    orderedElements,
+    traversalResult,
+    navigationResult,
+  }: {
+    deviceId: string;
+    element: Element;
+    driver: TalkBackNavigationDriver;
+    fence?: DisplayFence;
+    targetSelector: ElementSelector;
+    currentFocus: Element | null;
+    orderedElements: Element[];
+    traversalResult: TraversalOrderResult;
+    navigationResult: ScreenReaderNavigationResult;
+  }): Promise<TalkBackTapResult> {
+    // Calculate navigation path
+    const navigationPath = this.pathCalculator.calculatePath(
+      currentFocus,
+      targetSelector,
+      orderedElements,
+    );
+
+    if (!navigationPath) {
+      return {
+        success: false,
+        method: "focus-navigation",
+        error: traversalResult.truncationReasons?.includes("max_children")
+          ? "Could not calculate navigation path to target element: the accessibility traversal was truncated (max_children); the target may be beyond the cap"
+          : "Could not calculate navigation path to target element",
+        screenReaderNavigation: navigationResult,
+      };
+    }
+
+    logger.debug(
+      `[TalkBackTapStrategy] Calculated path: ${navigationPath.swipeCount} swipes ${navigationPath.direction}`,
+    );
+
+    // Navigate to element
+    const navigationSuccess = await this.executor.navigateToElement(
+      deviceId,
+      targetSelector,
+      navigationPath,
+      {
+        displayFence: fence,
+        maxSwipes: 100,
+        // Fidelity assertions need every focused node, not periodic samples.
+        verificationInterval: 1,
+        swipeDelay: 100,
+        onFocusObserved: (focus) => this.appendTraversalFocus(navigationResult, focus),
+      },
+    );
+
+    if (!navigationSuccess) {
+      return {
+        success: false,
+        method: "focus-navigation",
+        error: "Focus navigation did not reach target element",
+        screenReaderNavigation: navigationResult,
+      };
+    }
+
+    navigationResult.reachable = true;
+
+    logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
+
+    // Activate the focused element with double-tap gesture
+    const activationResult = await this.activateElement(element, driver, fence);
+    return { ...activationResult, screenReaderNavigation: navigationResult };
   }
 
   private appendTraversalFocus(result: ScreenReaderNavigationResult, focus: Element | null): void {

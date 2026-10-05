@@ -193,14 +193,7 @@ export class PerformanceAudit {
     }
 
     const result: PerformanceMetrics = {
-      p50Ms: gfxMetrics.p50Ms ?? null,
-      p90Ms: gfxMetrics.p90Ms ?? null,
-      p95Ms: gfxMetrics.p95Ms ?? null,
-      p99Ms: gfxMetrics.p99Ms ?? null,
-      jankCount: gfxMetrics.jankCount ?? null,
-      missedVsyncCount: gfxMetrics.missedVsyncCount ?? null,
-      slowUiThreadCount: gfxMetrics.slowUiThreadCount ?? null,
-      frameDeadlineMissedCount: gfxMetrics.frameDeadlineMissedCount ?? null,
+      ...this.normalizeGfxMetrics(gfxMetrics),
       cpuUsagePercent: cpuMetrics.cpuUsagePercent ?? null,
       threadCount: cpuMetrics.threadCount ?? null,
       touchLatencyMs: touchLatency,
@@ -214,6 +207,31 @@ export class PerformanceAudit {
     };
 
     return result;
+  }
+
+  private normalizeGfxMetrics(
+    gfxMetrics: Partial<PerformanceMetrics>,
+  ): Pick<
+    PerformanceMetrics,
+    | "p50Ms"
+    | "p90Ms"
+    | "p95Ms"
+    | "p99Ms"
+    | "jankCount"
+    | "missedVsyncCount"
+    | "slowUiThreadCount"
+    | "frameDeadlineMissedCount"
+  > {
+    return {
+      p50Ms: gfxMetrics.p50Ms ?? null,
+      p90Ms: gfxMetrics.p90Ms ?? null,
+      p95Ms: gfxMetrics.p95Ms ?? null,
+      p99Ms: gfxMetrics.p99Ms ?? null,
+      jankCount: gfxMetrics.jankCount ?? null,
+      missedVsyncCount: gfxMetrics.missedVsyncCount ?? null,
+      slowUiThreadCount: gfxMetrics.slowUiThreadCount ?? null,
+      frameDeadlineMissedCount: gfxMetrics.frameDeadlineMissedCount ?? null,
+    };
   }
 
   /**
@@ -639,46 +657,7 @@ export class PerformanceAudit {
   ): PerformanceViolation[] {
     const violations: PerformanceViolation[] = [];
 
-    // Check percentile thresholds
-    if (metrics.p50Ms !== null && metrics.p50Ms > thresholds.p50ThresholdMs) {
-      violations.push({
-        metric: "p50",
-        threshold: thresholds.p50ThresholdMs,
-        actual: metrics.p50Ms,
-        severity: "warning",
-        contributionWeight: 0.6, // p50 is very important
-      });
-    }
-
-    if (metrics.p90Ms !== null && metrics.p90Ms > thresholds.p90ThresholdMs) {
-      violations.push({
-        metric: "p90",
-        threshold: thresholds.p90ThresholdMs,
-        actual: metrics.p90Ms,
-        severity: "warning",
-        contributionWeight: 0.7,
-      });
-    }
-
-    if (metrics.p95Ms !== null && metrics.p95Ms > thresholds.p95ThresholdMs) {
-      violations.push({
-        metric: "p95",
-        threshold: thresholds.p95ThresholdMs,
-        actual: metrics.p95Ms,
-        severity: "critical",
-        contributionWeight: 0.8,
-      });
-    }
-
-    if (metrics.p99Ms !== null && metrics.p99Ms > thresholds.p99ThresholdMs) {
-      violations.push({
-        metric: "p99",
-        threshold: thresholds.p99ThresholdMs,
-        actual: metrics.p99Ms,
-        severity: "warning",
-        contributionWeight: 0.4, // p99 is less critical as it's outliers
-      });
-    }
+    this.appendPercentileViolations(violations, metrics, thresholds);
 
     // Check jank count
     if (metrics.jankCount !== null && metrics.jankCount > thresholds.jankCountThreshold) {
@@ -731,6 +710,53 @@ export class PerformanceAudit {
     }
 
     return violations;
+  }
+
+  private appendPercentileViolations(
+    violations: PerformanceViolation[],
+    metrics: PerformanceMetrics,
+    thresholds: Parameters<PerformanceAudit["validateMetrics"]>[1],
+  ): void {
+    // Check percentile thresholds
+    if (metrics.p50Ms !== null && metrics.p50Ms > thresholds.p50ThresholdMs) {
+      violations.push({
+        metric: "p50",
+        threshold: thresholds.p50ThresholdMs,
+        actual: metrics.p50Ms,
+        severity: "warning",
+        contributionWeight: 0.6, // p50 is very important
+      });
+    }
+
+    if (metrics.p90Ms !== null && metrics.p90Ms > thresholds.p90ThresholdMs) {
+      violations.push({
+        metric: "p90",
+        threshold: thresholds.p90ThresholdMs,
+        actual: metrics.p90Ms,
+        severity: "warning",
+        contributionWeight: 0.7,
+      });
+    }
+
+    if (metrics.p95Ms !== null && metrics.p95Ms > thresholds.p95ThresholdMs) {
+      violations.push({
+        metric: "p95",
+        threshold: thresholds.p95ThresholdMs,
+        actual: metrics.p95Ms,
+        severity: "critical",
+        contributionWeight: 0.8,
+      });
+    }
+
+    if (metrics.p99Ms !== null && metrics.p99Ms > thresholds.p99ThresholdMs) {
+      violations.push({
+        metric: "p99",
+        threshold: thresholds.p99ThresholdMs,
+        actual: metrics.p99Ms,
+        severity: "warning",
+        contributionWeight: 0.4, // p99 is less critical as it's outliers
+      });
+    }
   }
 
   /**

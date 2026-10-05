@@ -69,7 +69,7 @@ async function setup() {
     await proxy.close();
     await daemonClient.close();
   };
-  return { client, proxy, socket, messages, respond, close };
+  return { client, proxy, socket, messages, respond, close, timer, daemonClient };
 }
 
 describe("MCP proxy cancellation", () => {
@@ -208,4 +208,38 @@ describe("MCP proxy cancellation", () => {
       await proxy.close();
     }
   });
+});
+
+test("stdio MCP caller receives the daemon queue marker at its deadline", async () => {
+  const { client, socket, timer, daemonClient, close } = await setup();
+  try {
+    const result = client.callTool({ name: "tapOn", arguments: {} });
+    await flush();
+    const request = socket.getWrittenMessages<DaemonRequest>()[0];
+    timer.advanceTime(request.timeoutMs!);
+    const message = "timed out in queue before admission";
+    daemonClient.simulateIncomingDataForTesting(
+      Buffer.from(
+        JSON.stringify({
+          id: request.id,
+          type: "mcp_response",
+          success: false,
+          error: message,
+          code: "daemon_queue_timeout",
+        }) + "\n",
+      ),
+    );
+    const response = await result;
+    expect(response.isError).toBe(true);
+    const content = response.content as Array<{ type: string; text: string }>;
+    expect(JSON.parse(content[0].text)).toEqual({
+      success: false,
+      error: message,
+      code: "daemon_queue_timeout",
+      retryable: true,
+    });
+    expect(socket.getWrittenMessages()).toHaveLength(1);
+  } finally {
+    await close();
+  }
 });

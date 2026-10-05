@@ -6,7 +6,7 @@ import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { DaemonClient } from "../../src/daemon/client";
+import { DAEMON_RESPONSE_GRACE_MS, DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -127,7 +127,7 @@ describe("DaemonClient cancel frame (issue #6384)", () => {
       const call = client.callDaemonMethod("daemon/availableDevices", {}, { timeoutMs: 50 });
       await arrived.until(() => frames.length === 1, "the daemon request frame");
 
-      timer.advanceTime(50);
+      timer.advanceTime(50 + DAEMON_RESPONSE_GRACE_MS);
       await expect(call).rejects.toBeInstanceOf(McpTimeoutError);
 
       await arrived.until(() => frames.length === 2, "the cancel frame");
@@ -146,7 +146,7 @@ describe("DaemonClient cancel frame (issue #6384)", () => {
     try {
       const abandoned = client.callDaemonMethod("daemon/availableDevices", {}, { timeoutMs: 50 });
       await arrived.until(() => frames.length === 1, "the daemon request frame");
-      timer.advanceTime(50);
+      timer.advanceTime(50 + DAEMON_RESPONSE_GRACE_MS);
       await expect(abandoned).rejects.toBeInstanceOf(McpTimeoutError);
       await arrived.until(() => frames.length === 2, "the cancel frame");
 

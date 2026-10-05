@@ -5,7 +5,7 @@ import {
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { BootedDevice } from "../models";
+import { ActionableError, BootedDevice } from "../models";
 import { NavigateTo, NavigateToOptions } from "../features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { DefaultPathOptimizer } from "../features/navigation/DefaultPathOptimizer";
@@ -14,6 +14,9 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { throwIfAborted, createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+
+import { ListInstalledApps } from "../features/observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
 
 // Schema definitions
 // #6712: `.strict()` on each of these — the advertised schemas already said
@@ -180,7 +183,16 @@ export const navigateToHandler = async (
 };
 
 // Register navigation tools
-export function registerNavigationTools() {
+interface NavigationToolDependencies {
+  installedAppsFactory?: (
+    device: BootedDevice,
+  ) => Pick<ListInstalledApps, "executeDetailedResult" | "executeIosDetailedResult">;
+}
+
+export function registerNavigationTools({
+  installedAppsFactory = (device) =>
+    new ListInstalledApps(device, undefined, null, { cacheEnabled: false }),
+}: NavigationToolDependencies = {}) {
   // Get navigation graph handler (for debugging)
   const getNavigationGraphHandler = async (device: BootedDevice, args: GetNavigationGraphArgs) => {
     try {
@@ -250,6 +262,34 @@ export function registerNavigationTools() {
     signal?: AbortSignal,
   ) => {
     try {
+      const packageName = args.packageName?.trim();
+      // Dry runs inspect the current screen without interacting with a target app.
+      if (packageName && !args.dryRun) {
+        throwIfAborted(signal);
+        const list = installedAppsFactory(device);
+        const result =
+          device.platform === "ios"
+            ? await list.executeIosDetailedResult()
+            : await list.executeDetailedResult(signal, { namesOnly: true });
+        throwIfAborted(signal);
+        if (!result.successful) {
+          throw new ActionableError(
+            `Could not determine whether ${packageName} is installed. Retry the installed-app listing.`,
+            { cause: result.error },
+          );
+        }
+        const apps = Array.isArray(result.apps)
+          ? result.apps.map(getIosInstalledAppBundleId)
+          : [...Object.values(result.apps.profiles).flat(), ...result.apps.system].map(
+              (app) => app.packageName,
+            );
+        const installed = apps.includes(packageName);
+        if (!installed) {
+          throw new ActionableError(
+            `Package not installed: ${packageName}. Install the app before exploring it.`,
+          );
+        }
+      }
       const explore = new Explore(
         device,
         null,

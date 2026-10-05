@@ -60,9 +60,60 @@ describe("recordSteps connection scope and direct transport teardown", () => {
     expect(getStructuredField(statusB, "stepCount")).toBe(0);
     const endB = await tool.handler({ action: "end", __mcpSessionId: "B" });
     expect(getStructuredField(endB, "success")).toBe(false);
+    expect(endB.isError).toBe(true);
+    expect(endB.structuredContent).toEqual(JSON.parse(endB.content[0].text));
     const endA = await tool.handler({ action: "end", __mcpSessionId: "A" });
     expect(getStructuredField(endA, "success")).toBe(true);
+    expect(endA.isError).toBeUndefined();
     expect(getStructuredField(endA, "planContent")).toContain("Only A");
+  });
+
+  test("disabled recording and ending without a recording are errors", async () => {
+    const tool = ToolRegistry.getTool("recordSteps")!;
+    serverConfig.setMcpRecordingEnabled(false);
+    for (const action of ["begin", "end"]) {
+      const response = await tool.handler({ action });
+      const payload = {
+        success: false,
+        error: "MCP recording is disabled. Enable the 'mcp-recording' feature flag first.",
+      };
+      expect(response.isError).toBe(true);
+      expect(response.structuredContent).toEqual(payload);
+      expect(JSON.parse(response.content[0].text)).toEqual(payload);
+    }
+    serverConfig.setMcpRecordingEnabled(true);
+    const response = await tool.handler({ action: "end" });
+    expect(response.isError).toBe(true);
+    expect(getStructuredField(response, "success")).toBe(false);
+    expect(response.structuredContent).toEqual(JSON.parse(response.content[0].text));
+  });
+
+  test("a caught begin failure marks the original payload", async () => {
+    serverConfig.setMcpRecordingEnabled(true);
+    clockSpy.mockImplementationOnce(() => {
+      throw new Error("Fake recorder clock failure");
+    });
+    const response = await ToolRegistry.getTool("recordSteps")!.handler({ action: "begin" });
+    const payload = { success: false, action: "begin", error: "Fake recorder clock failure" };
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual(payload);
+    expect(JSON.parse(response.content[0].text)).toEqual(payload);
+  });
+
+  test("inactive status and already-active begin remain successful", async () => {
+    const tool = ToolRegistry.getTool("recordSteps")!;
+    serverConfig.setMcpRecordingEnabled(false);
+    const status = await tool.handler({ action: "status" });
+    expect(status.isError).toBeUndefined();
+    expect(status.structuredContent).toEqual({ success: true, action: "status", recording: false });
+    serverConfig.setMcpRecordingEnabled(true);
+    const first = await tool.handler({ action: "begin" });
+    const second = await tool.handler({ action: "begin" });
+    expect(first.isError).toBeUndefined();
+    expect(second.isError).toBeUndefined();
+    expect(getStructuredField(second, "success")).toBe(true);
+    expect(getStructuredField(second, "alreadyActive")).toBe(true);
+    expect(second.structuredContent).toEqual(JSON.parse(second.content[0].text));
   });
 
   test("recordSteps end exports launchApp without transport metadata", async () => {

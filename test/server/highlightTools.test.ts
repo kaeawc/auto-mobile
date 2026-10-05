@@ -15,6 +15,42 @@ describe("Highlight Tools Registration", () => {
     (ToolRegistry as any).tools.clear();
   });
 
+  test.each(["failure", "throw", "success"])(
+    "highlight %s preserves its payload",
+    async (outcome) => {
+      registerHighlightTools({
+        generateHighlightId: () => "fake-highlight",
+        highlightClientFactory: () =>
+          Object.assign(new VisualHighlightClient(), {
+            addHighlight: async () => {
+              if (outcome === "throw") {
+                throw new Error("Highlight unavailable");
+              }
+              return outcome === "failure"
+                ? { success: false, error: "Highlight unavailable" }
+                : { success: true };
+            },
+          }),
+      });
+      const tool = ToolRegistry.getTool("highlight")!;
+      const response = await tool.deviceAwareHandler!(
+        { deviceId: "fake", platform: "android", name: "Fake" },
+        tool.schema.parse({
+          shape: { type: "circle", bounds: { x: 0, y: 0, width: 10, height: 10 } },
+        }),
+      );
+      expect(response.isError).toBe(outcome === "success" ? undefined : true);
+      expect(JSON.parse(response.content[0].text)).toEqual(
+        outcome === "success"
+          ? { success: true }
+          : {
+              success: false,
+              error: outcome === "throw" ? "Error: Highlight unavailable" : "Highlight unavailable",
+            },
+      );
+    },
+  );
+
   test("registers highlight tool", () => {
     registerHighlightTools();
 
@@ -60,6 +96,7 @@ describe("Highlight Tools Registration", () => {
       tool.schema.parse({ platform: "android", text: "Target", containerOf }),
     );
     expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(response.isError).toBeUndefined();
     expect(shapes[0]).toEqual({ type: "circle", bounds });
   });
 
@@ -91,6 +128,7 @@ describe("Highlight Tools Registration", () => {
       tool.schema.parse({ text: "Wi-Fi" }),
     );
     expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(response.isError).toBeUndefined();
     expect(shape).toEqual({
       type: "circle",
       bounds: {
@@ -141,6 +179,7 @@ describe("Highlight Tools Registration", () => {
       tool.schema.parse({ elementId: "app:id/label" }),
     );
     expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(response.isError).toBeUndefined();
     expect(shape).toEqual({
       type: "circle",
       bounds: { x: 20, y: 30, width: 100, height: 30 },
@@ -287,6 +326,7 @@ describe("Highlight Tools Registration", () => {
       tool.schema.parse({ text: "Offscreen" }),
     );
     expect(JSON.parse(response.content[0].text).success).toBe(false);
+    expect(response.isError).toBe(true);
     expect(highlighted).toBe(false);
   });
 
@@ -329,6 +369,7 @@ describe("Highlight Tools Registration", () => {
       tool.schema.parse({ text: "X" }),
     );
     expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(response.isError).toBeUndefined();
     expect(shape?.bounds.y).toBe(10);
   });
 

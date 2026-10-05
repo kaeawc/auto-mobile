@@ -3,6 +3,7 @@ import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
 } from "../../src/daemon/constants";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -19,10 +20,10 @@ import {
   resetNavigateToFactory,
   setNavigateToFactory,
 } from "../../src/server/navigationTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { PortManager } from "../../src/utils/PortManager";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -34,17 +35,174 @@ describe("navigation tool session graph selection", () => {
     platform: "ios",
   };
 
+  let adbFactorySpy: ReturnType<typeof spyOn>;
   beforeEach(() => {
+    const fakeAdbFactory = new FakeAdbClientFactory();
+    adbFactorySpy = spyOn(defaultAdbClientFactory, "create").mockImplementation((selectedDevice) =>
+      fakeAdbFactory.create(selectedDevice),
+    );
     ToolRegistry.clearTools();
     setDebugModeEnabled(true);
     registerNavigationTools();
   });
 
   afterEach(() => {
+    adbFactorySpy.mockRestore();
     ToolRegistry.clearTools();
     setDebugModeEnabled(false);
     resetNavigateToFactory();
   });
+
+  test.each(["android", "ios"] as const)(
+    "explore rejects missing %s packages before executing",
+    async (platform) => {
+      const list = {
+        executeDetailedResult: async () => ({
+          successful: true,
+          apps: { profiles: {}, system: [] },
+        }),
+        executeIosDetailedResult: async () => ({ successful: true, apps: [] }),
+      };
+      registerNavigationTools({ installedAppsFactory: () => list });
+      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+      );
+      const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
+        new Error("must not start exploration"),
+      );
+      try {
+        const handler = (
+          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
+        ).tools.get("explore")!.deviceAwareHandler!;
+        await expect(
+          handler({ ...device, platform }, { packageName: "com.nope.missing" }),
+        ).rejects.toThrow("Package not installed: com.nope.missing");
+        expect(execute).not.toHaveBeenCalled();
+        expect(graphSpy).not.toHaveBeenCalled();
+      } finally {
+        execute.mockRestore();
+        graphSpy.mockRestore();
+      }
+    },
+  );
+
+  test.each(["android", "ios"] as const)(
+    "explore rejects an inconclusive %s inventory",
+    async (platform) => {
+      registerNavigationTools({
+        installedAppsFactory: () => ({
+          executeDetailedResult: async () => ({
+            successful: false,
+            apps: { profiles: {}, system: [] },
+          }),
+          executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
+        }),
+      });
+      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+      );
+      const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
+        new Error("must not start exploration"),
+      );
+      try {
+        const handler = (
+          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
+        ).tools.get("explore")!.deviceAwareHandler!;
+        await expect(
+          handler({ ...device, platform }, { packageName: "com.test.app" }),
+        ).rejects.toBeInstanceOf(ActionableError);
+        await expect(
+          handler({ ...device, platform }, { packageName: "com.test.app" }),
+        ).rejects.toThrow("Could not determine whether com.test.app is installed");
+        expect(execute).not.toHaveBeenCalled();
+      } finally {
+        execute.mockRestore();
+        graphSpy.mockRestore();
+      }
+    },
+  );
+
+  test.each(["android", "ios"] as const)(
+    "explore preserves %s completion and bypasses inventory for dryRun",
+    async (platform) => {
+      let listings = 0;
+      registerNavigationTools({
+        installedAppsFactory: () => {
+          listings++;
+          return {
+            executeDetailedResult: async () => ({
+              successful: true,
+              apps: {
+                profiles: {},
+                system: [
+                  { packageName: "com.test.app", userIds: [0], foreground: false, recent: false },
+                ],
+              },
+            }),
+            executeIosDetailedResult: async () => ({
+              successful: true,
+              apps: [{ CFBundleIdentifier: "com.test.app" }],
+            }),
+          };
+        },
+      });
+      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+      );
+      const normal = {
+        success: true as const,
+        cancelled: false,
+        interactionsPerformed: 0,
+        screensDiscovered: 0,
+        edgesAdded: 0,
+        navigationGraph: { nodes: [], edges: [], appId: "com.test.app", currentScreen: null },
+        explorationPath: [],
+        elementSelections: [],
+        coverage: { totalScreens: 0, exploredScreens: 0, percentage: 0 },
+        durationMs: 0,
+        stopReason: "Left target app (com.test.app)",
+      };
+      const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(normal);
+      try {
+        const handler = (
+          ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }
+        ).tools.get("explore")!.deviceAwareHandler!;
+        const response = await handler({ ...device, platform }, { packageName: " com.test.app " });
+        expect(response.isError).toBeUndefined();
+        expect(JSON.parse(response.content[0].text)).toMatchObject(normal);
+        expect(listings).toBe(1);
+        execute.mockResolvedValue({ ...normal, stopReason: "Exploration completed successfully" });
+        const completed = await handler({ ...device, platform }, {});
+        expect(completed.isError).toBeUndefined();
+        expect(JSON.parse(completed.content[0].text).success).toBe(true);
+        expect(listings).toBe(1);
+        const dryRun = {
+          success: true as const,
+          dryRun: true as const,
+          plannedInteractions: [],
+          currentScreen: { name: "Home", interactableElements: 0 },
+          estimatedCoverage: {
+            screensToVisit: [],
+            newScreensExpected: 0,
+            existingScreensToRevisit: 0,
+          },
+          warnings: [],
+          durationMs: 0,
+        };
+        execute.mockResolvedValue(dryRun);
+        const dryResponse = await handler(
+          { ...device, platform },
+          { packageName: "com.nope.missing", dryRun: true },
+        );
+        expect(dryResponse.isError).toBeUndefined();
+        expect(JSON.parse(dryResponse.content[0].text)).toMatchObject(dryRun);
+        expect(listings).toBe(1);
+      } finally {
+        execute.mockRestore();
+        graphSpy.mockRestore();
+      }
+    },
+  );
 
   test("forwards the running request budget through NavigateTo into edge replay", async () => {
     const graph = new FakeNavigationGraphManager();

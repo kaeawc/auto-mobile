@@ -39,6 +39,7 @@ test.each([false, true])(
       { platform: "ios", deviceId: "fake-device", name: "Fake" },
       { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
     );
+    expect(response.isError).toBeUndefined();
     expect(response.structuredContent).toEqual(result);
     expect(JSON.parse(response.content[0].text!)).toEqual(result);
     expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
@@ -75,6 +76,7 @@ test("executePlan advertises optional typed skippedSteps", () => {
 test("executePlan structured content preserves skippedSteps", async () => {
   const result: ExecutePlanResult = {
     ...base,
+    executedSteps: 0,
     skippedSteps: [{ stepIndex: 0, tool: "tapOn", error: "missing", device: "A" }],
   };
   execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);
@@ -83,7 +85,50 @@ test("executePlan structured content preserves skippedSteps", async () => {
     { platform: "ios", deviceId: "fake-device", name: "Fake" },
     { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
   );
+  expect(response.isError).toBeUndefined();
   expect(response.structuredContent).toEqual(result);
   expect(JSON.parse(response.content[0].text!)).toEqual(result);
   expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+});
+
+// Results from the orchestrator, rather than hand-written YAML/parser fixtures.
+test.each([
+  {
+    success: false,
+    executedSteps: 0,
+    totalSteps: 2,
+    failedStep: { stepIndex: 0, tool: "tapOn", error: "missing" },
+  },
+  { success: false, executedSteps: 0, totalSteps: 0, error: "Plan YAML validation failed" },
+  { success: false, executedSteps: 0, totalSteps: 0, error: "Caught orchestrator failure" },
+  {
+    success: false,
+    executedSteps: 1,
+    totalSteps: 2,
+    deviceMapping: { A: "fake-A", B: "fake-B" },
+    failedStep: { stepIndex: 1, tool: "tapOn", error: "B failed" },
+  },
+])("executePlan failure keeps its structured and text payload: %j", async (result) => {
+  execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);
+  const tool = ToolRegistry.getTool("executePlan")!;
+  const response = await tool.deviceAwareHandler!(
+    { platform: "ios", deviceId: "fake-device", name: "Fake" },
+    { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
+  );
+  expect(response.isError).toBe(true);
+  expect(response.structuredContent).toEqual(result);
+  expect(JSON.parse(response.content[0].text!)).toEqual(result);
+  expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+});
+
+test("executePlan with nothing to execute remains successful", async () => {
+  const result: ExecutePlanResult = { success: true, executedSteps: 0, totalSteps: 0 };
+  execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);
+  const response = await ToolRegistry.getTool("executePlan")!.deviceAwareHandler!(
+    { platform: "ios", deviceId: "fake-device", name: "Fake" },
+    { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
+  );
+  expect(response.isError).toBeUndefined();
+  expect(response.structuredContent).toEqual(result);
+  expect(JSON.parse(response.content[0].text!)).toEqual(result);
 });

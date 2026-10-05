@@ -67,6 +67,8 @@ describe("exportPlan tool", () => {
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
     expect(payload.success).toBe(true);
+    expect(response.isError).toBeUndefined();
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.recordingId).toBe("rec-123");
     expect(payload.planName).toBe("test-plan");
     expect(payload.planContent).toContain("name: test-plan");
@@ -86,6 +88,8 @@ describe("exportPlan tool", () => {
     const response = await tool.handler({});
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
     expect(payload.success).toBe(true);
+    expect(response.isError).toBeUndefined();
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.error).toBe(error);
     expect(payload.planContent).toBe(partialResult.planContent);
     expect(tool.outputSchema.parse(payload)).toEqual(payload);
@@ -105,8 +109,24 @@ describe("exportPlan tool", () => {
     const response = await tool.handler({});
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
     expect(payload.success).toBe(false);
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.error).toContain("Touch track (getevent) spawn failed");
     expect(tool.outputSchema.parse(payload)).toEqual(payload);
+  });
+
+  test("nothing captured is an error with the original payload", async () => {
+    mock.module("../../src/server/testRecordingManager", () => ({
+      stopTestRecording: mock(() =>
+        Promise.reject(new Error("No recorded interactions were captured.")),
+      ),
+      getTestRecordingStatus: mockGetTestRecordingStatus,
+    }));
+    const response = await ToolRegistry.getTool("exportPlan")!.handler({});
+    const payload = { success: false, error: "No recorded interactions were captured." };
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual(payload);
+    expect(JSON.parse(response.content[0].text)).toEqual(payload);
   });
 
   test("returns error when no active recording", async () => {
@@ -122,6 +142,8 @@ describe("exportPlan tool", () => {
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
     expect(payload.success).toBe(false);
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.error).toContain("No active recording");
   });
 
@@ -138,6 +160,8 @@ describe("exportPlan tool", () => {
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
     expect(payload.success).toBe(false);
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.error).toContain("does not match active recording");
   });
 
@@ -169,6 +193,8 @@ describe("exportPlan tool", () => {
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
     expect(payload.success).toBe(true);
+    expect(response.isError).toBeUndefined();
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.planName).toBe(customPlanName);
   });
 
@@ -185,6 +211,8 @@ describe("exportPlan tool", () => {
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
     expect(payload.success).toBe(true);
+    expect(response.isError).toBeUndefined();
+    expect(response.structuredContent).toEqual(payload);
     expect(payload.recordingId).toBe("rec-123");
   });
 });

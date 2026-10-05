@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import {
   ActionableError,
   BootedDevice,
@@ -31,6 +31,7 @@ import {
   elementSelectionStrategySchema,
   validateElementIdTextSelector,
 } from "./elementSelectorSchemas";
+import { logger } from "../utils/logger";
 import { boundsEqual } from "../utils/bounds";
 
 const highlightBaseSchema = z
@@ -102,17 +103,17 @@ export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).s
 export type HighlightArgs = z.infer<typeof highlightSchema>;
 
 const toHighlightResponse = (result: HighlightOperationResult) =>
-  createJSONToolResponse({
-    success: result.success,
-    error: result.error ?? undefined,
-  });
+  withIsErrorOnFailure(
+    createJSONToolResponse({
+      success: result.success,
+      error: result.error ?? undefined,
+    }),
+    result.success,
+  );
 
 const toHighlightErrorResponse = (error: unknown) => {
   const message = error instanceof ActionableError ? error.message : String(error);
-  return createJSONToolResponse({
-    success: false,
-    error: message,
-  });
+  return withIsErrorOnFailure(createJSONToolResponse({ success: false, error: message }), false);
 };
 
 const DEFAULT_HIERARCHY_TIMEOUT_MS = 10000;
@@ -327,6 +328,7 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
       });
       return toHighlightResponse(result);
     } catch (error) {
+      logger.warn("[highlight] Failed to highlight element", error);
       return toHighlightErrorResponse(error);
     }
   };

@@ -222,15 +222,15 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       };
       reportedScaleMetadata: unknown;
       pushHierarchyToObservationStream(hierarchy: { hierarchy: object }, source: object): void;
-      pushScreenshotToObservationStream(
-        screenshot: string,
-        width: number,
-        height: number,
-        rotation: undefined,
-        captureSequence: number,
-        coordinateSpace?: "px",
-        nativeScale?: number,
-      ): void;
+      pushScreenshotToObservationStream(options: {
+        screenshotBase64: string;
+        screenWidth: number;
+        screenHeight: number;
+        metadata?: undefined;
+        captureSequence: number;
+        coordinateSpace?: "px";
+        nativeScale?: number;
+      }): void;
     };
 
     client.pushHierarchyToObservationStream(
@@ -250,15 +250,15 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
 
     client.reportedScaleMetadata = null;
     socket.reset();
-    client.pushScreenshotToObservationStream(
-      "c2hvdA==",
-      boundPx.width,
-      boundPx.height,
-      undefined,
-      boundPx.captureSequence,
-      boundPx.coordinateSpace,
-      boundPx.nativeScale,
-    );
+    client.pushScreenshotToObservationStream({
+      screenshotBase64: "c2hvdA==",
+      screenWidth: boundPx.width,
+      screenHeight: boundPx.height,
+      metadata: undefined,
+      captureSequence: boundPx.captureSequence,
+      coordinateSpace: boundPx.coordinateSpace,
+      nativeScale: boundPx.nativeScale,
+    });
     const pxShot = socket
       .getWrittenMessages<{ type: string; coordinateSpace?: string; nativeScale?: number }>()
       .find((message) => message.type === "screenshot_update");
@@ -279,15 +279,15 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       pixelHeight: 2079,
     };
     socket.reset();
-    client.pushScreenshotToObservationStream(
-      "c2hvdA==",
-      boundLegacy.width,
-      boundLegacy.height,
-      undefined,
-      boundLegacy.captureSequence,
-      boundLegacy.coordinateSpace,
-      boundLegacy.nativeScale,
-    );
+    client.pushScreenshotToObservationStream({
+      screenshotBase64: "c2hvdA==",
+      screenWidth: boundLegacy.width,
+      screenHeight: boundLegacy.height,
+      metadata: undefined,
+      captureSequence: boundLegacy.captureSequence,
+      coordinateSpace: boundLegacy.coordinateSpace,
+      nativeScale: boundLegacy.nativeScale,
+    });
     const legacyShot = socket
       .getWrittenMessages<{ type: string; coordinateSpace?: string; nativeScale?: number }>()
       .find((message) => message.type === "screenshot_update");

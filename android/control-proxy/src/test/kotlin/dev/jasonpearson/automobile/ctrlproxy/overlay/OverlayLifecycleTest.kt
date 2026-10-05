@@ -344,6 +344,78 @@ class OverlayLifecycleTest {
     assertFalse(overlayHostChrome(InteractiveOverlayRequest()).dismissVisible)
   }
 
+  @Test
+  fun `failed ttl removal re-arms a bounded retry and then dismisses once as ttl`() = runTest {
+    show()
+    host.accept = false
+    timer.advance(TTL)
+    assertTrue(events.isEmpty())
+    assertTrue(host.isShowing)
+    assertEquals(2, timer.tasks.size)
+    assertEquals(timer.now + OVERLAY_DISMISS_RETRY_MILLIS, timer.tasks.last().deadline)
+    host.accept = true
+    timer.advance(OVERLAY_DISMISS_RETRY_MILLIS)
+    assertDismiss("ttl")
+    assertEquals(1, events.size)
+    assertFalse(host.isShowing)
+    timer.advance(OVERLAY_DISMISS_RETRY_MILLIS * 2)
+    assertEquals(1, events.size)
+  }
+
+  @Test
+  fun `ttl retries stop after the bound when removal keeps failing`() = runTest {
+    show()
+    host.accept = false
+    timer.advance(TTL)
+    repeat(OVERLAY_DISMISS_MAX_RETRIES + 2) { timer.advance(OVERLAY_DISMISS_RETRY_MILLIS) }
+    assertEquals(1 + OVERLAY_DISMISS_MAX_RETRIES, timer.tasks.size)
+    assertTrue(events.isEmpty())
+    assertTrue(host.isShowing)
+  }
+
+  @Test
+  fun `failed disconnect removal is retried by the next lifecycle signal exactly once`() = runTest {
+    show()
+    host.accept = false
+    controller.onClientCountChanged(0)
+    assertTrue(events.isEmpty())
+    assertTrue(host.isShowing)
+    host.accept = true
+    controller.onConfigurationChanged()
+    assertDismiss("disconnect")
+    assertEquals(1, events.size)
+    assertFalse(host.isShowing)
+    controller.onConfigurationChanged()
+    controller.onClientCountChanged(0)
+    assertEquals(1, events.size)
+  }
+
+  @Test
+  fun `a show after its disconnect edge dismisses as disconnect instead of waiting for ttl`() =
+    runTest {
+      var clients = 0
+      val gone =
+        OverlayController(
+          host,
+          OverlayResultSink { _, success, error -> check(success) { error.orEmpty() } },
+          eventSink = OverlayEventSink { events += it },
+          clock = { timer.now },
+          lifecycle =
+            OverlayLifecycle(timer, TTL, observerSession = { session }, clientCount = { clients }),
+        )
+      gone.show(null, spec())
+      assertDismiss("disconnect")
+      assertEquals(1, events.size)
+      assertFalse(host.isShowing)
+      assertNull(gone.activeRuntime)
+      timer.advance(TTL)
+      assertEquals(1, events.size)
+      clients = 1
+      gone.show(null, spec())
+      assertTrue(host.isShowing)
+      assertEquals(1, events.size)
+    }
+
   companion object {
     private const val TTL = 10L
 

@@ -33,6 +33,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
@@ -338,6 +339,54 @@ internal data class AccessibilityEventWork(
   companion object {
     /** Nothing to do — no interaction recording and no hierarchy refresh (the expensive work). */
     val NONE = AccessibilityEventWork(interaction = null, refreshesHierarchy = false)
+  }
+}
+
+/**
+ * True only for an event from CtrlProxy's own accessibility-overlay window (the highlight overlay
+ * or the interactive overlay). CtrlProxy's package also owns the CtrlProxy keyboard
+ * (`TYPE_INPUT_METHOD`) and `MainActivity` (`TYPE_APPLICATION`), whose events must still advance
+ * `frameContext` and refresh the hierarchy, so they are never skipped. Fails open: an unknown
+ * window type ([windowType] null) is processed, because handling one extra event is safe while
+ * dropping a keyboard event leaves stale key coordinates passing the staleness check.
+ */
+internal fun shouldSkipOwnOverlayEvent(
+  eventPackage: String?,
+  ownPackage: String,
+  windowType: Int?,
+): Boolean =
+  eventPackage == ownPackage && windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+
+/**
+ * Window type of the window [event] came from, or null when it cannot be determined (no source
+ * node, window not retrievable, or the node call throws). Reads the source node's window rather
+ * than enumerating `windows`, so no window list is allocated per event.
+ */
+private fun ownEventWindowType(event: AccessibilityEvent): Int? {
+  val source =
+    try {
+      event.source
+    } catch (_: Exception) {
+      // Fail open: a source that cannot be read leaves the type unknown, so the event is processed.
+      return null
+    }
+  if (source == null) return null
+  return try {
+    val window = source.window
+    try {
+      window?.type
+    } finally {
+      window?.recycle()
+    }
+  } catch (_: Exception) {
+    // Fail open: a window that cannot be read leaves the type unknown, so the event is processed.
+    null
+  } finally {
+    try {
+      source.recycle()
+    } catch (_: Exception) {
+      /* already recycled */
+    }
   }
 }
 
@@ -1545,6 +1594,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             DefaultInteractiveOverlayHost(
               context = this,
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
+              onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
             ),
             OverlayResultSink { requestId, success, error ->
@@ -1568,6 +1618,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 observerSession = {
                   if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
                   else 0
+                },
+                clientCount = {
+                  // Unknown (server not up yet) counts as connected: never drop an overlay on a
+                  // guess.
+                  if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 1
                 },
               ),
             eventSink =
@@ -3124,8 +3179,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
-    // Overlay animations must not feed the hierarchy debouncer or navigation tracking.
-    if (event.packageName?.toString() == packageName) return
+    // Overlay animations must not feed the hierarchy debouncer or navigation tracking. Only the
+    // overlay's OWN accessibility-overlay windows are dropped: this package also owns the CtrlProxy
+    // keyboard (input-method window) and MainActivity, whose events must keep advancing
+    // frameContext
+    // and feeding the hierarchy push. The window type is resolved only for own-package events.
+    val eventPackage = event.packageName?.toString()
+    val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
+    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED

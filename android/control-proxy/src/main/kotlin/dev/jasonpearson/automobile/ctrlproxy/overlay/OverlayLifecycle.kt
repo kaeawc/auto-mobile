@@ -2,6 +2,10 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 const val DEFAULT_OVERLAY_IDLE_TTL_MILLIS = 300_000L
 
+/** Delay before retrying an expiry whose window removal failed, and how many retries are made. */
+const val OVERLAY_DISMISS_RETRY_MILLIS = 5_000L
+const val OVERLAY_DISMISS_MAX_RETRIES = 3
+
 /** A cancellable one-shot task. Unlike OverlaySettleTimer, it does not block a gesture caller. */
 fun interface OverlayScheduledTask {
   fun cancel()
@@ -39,6 +43,8 @@ class OverlayLifecycle(
   ttlMillis: Long = DEFAULT_OVERLAY_IDLE_TTL_MILLIS,
   val isBlocked: () -> Boolean = { false },
   val observerSession: () -> Int = { 0 },
+  /** Connected observers right now; the default reports "unknown" as one so nothing is dropped. */
+  val clientCount: () -> Int = { 1 },
 ) {
   var ttlMillis: Long = ttlMillis
     set(value) {
@@ -53,10 +59,10 @@ class OverlayLifecycle(
     require(ttlMillis > 0) { "Overlay idle TTL must be positive" }
   }
 
-  fun arm(onExpired: suspend (Long) -> Unit) {
+  fun arm(delayMillis: Long = ttlMillis, onExpired: suspend (Long) -> Unit) {
     cancel()
     val token = generation
-    task = scheduler.schedule(ttlMillis) { onExpired(token) }
+    task = scheduler.schedule(delayMillis) { onExpired(token) }
   }
 
   fun isCurrent(token: Long): Boolean = token == generation

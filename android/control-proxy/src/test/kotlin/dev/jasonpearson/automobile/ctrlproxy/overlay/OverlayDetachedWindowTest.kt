@@ -25,6 +25,7 @@ class OverlayDetachedWindowTest {
   private var blocked = false
   private val blockedScript = ArrayDeque<Boolean>()
   private var detached = 0
+  private var lost = 0
   private lateinit var main: FakeOverlayMainThread
   private lateinit var manager: RecordingOverlayWindowManager
   private lateinit var host: DefaultInteractiveOverlayHost
@@ -45,6 +46,7 @@ class OverlayDetachedWindowTest {
         mainThread = main,
         settleTimer = FakeOverlaySettleTimer(history),
         densityProvider = { 2.5f },
+        onWindowLost = { lost++ },
         isBlocked = ::isBlocked,
       )
     controller =
@@ -103,6 +105,25 @@ class OverlayDetachedWindowTest {
     controller.dismiss("agent", "panel", null)
     assertSingleDismiss("agent")
   }
+
+  @Test
+  fun `a gesture finding the window detached reports it so the controller can restore promptly`() =
+    runTest {
+      controller.show(null, spec())
+      val runtime = checkNotNull(controller.activeRuntime)
+      manager.failUpdate = true
+      manager.updateFailure = IllegalArgumentException("View not attached to window manager")
+      assertTrue(runCatching { host.withTouchThrough {} }.isFailure)
+      assertEquals(1, lost)
+      assertFalse(host.isShowing)
+      // The service wires onWindowLost to this signal: the runtime comes back, not stays
+      // windowless.
+      manager.failUpdate = false
+      controller.onConfigurationChanged()
+      assertTrue(host.isShowing)
+      assertSame(runtime, controller.activeRuntime)
+      assertTrue(events.isEmpty())
+    }
 
   @Test
   fun `relayout of a detached window that cannot return ends once as teardown`() = runTest {

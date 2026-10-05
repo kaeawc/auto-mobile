@@ -40,6 +40,8 @@ class OverlayController(
   private val sequences = mutableMapOf<String, Long>()
   private var destroyed = false
   private var activeObserverSession = 0
+  // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
+  private var disconnectPending = false
   private var activeRequest: InteractiveOverlayRequest? = null
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
@@ -133,7 +135,10 @@ class OverlayController(
     activeRuntime = runtime
     activeRequest = interactive
     activeObserverSession = observerSession
+    disconnectPending = false
     armIdle(runtime)
+    // The session's last client can leave before this queued show runs; nothing would remove it.
+    if (lifecycle.clientCount() == 0) dismissForDisconnect(runtime)
   }
 
   /** Shared by dismiss_overlay and the dismiss action, under the controller mutex. */
@@ -189,12 +194,39 @@ class OverlayController(
     sink.send(requestId, error == null, error)
   }
 
-  private fun armIdle(runtime: OverlayRuntime) {
-    lifecycle.arm { token ->
+  private fun armIdle(
+    runtime: OverlayRuntime,
+    delayMillis: Long = lifecycle.ttlMillis,
+    retriesLeft: Int = OVERLAY_DISMISS_MAX_RETRIES,
+  ) {
+    lifecycle.arm(delayMillis) { token ->
       signal {
-        if (runtime === activeRuntime && lifecycle.isCurrent(token))
-          runtime.dismiss(OverlayDismissReason.TTL)
+        if (runtime === activeRuntime && lifecycle.isCurrent(token)) {
+          try {
+            runtime.dismiss(OverlayDismissReason.TTL)
+          } catch (error: CancellationException) {
+            throw error
+          } catch (error: Exception) {
+            // The one-shot expiry is spent; re-arm (bounded) so a failed removal is not final.
+            if (retriesLeft > 0 && runtime === activeRuntime)
+              armIdle(runtime, OVERLAY_DISMISS_RETRY_MILLIS, retriesLeft - 1)
+            throw error
+          }
+        }
       }
+    }
+  }
+
+  /** Ends [runtime] for a gone session; a failed removal is logged and retried by [signal]. */
+  private suspend fun dismissForDisconnect(runtime: OverlayRuntime) {
+    try {
+      runtime.dismiss(OverlayDismissReason.DISCONNECT)
+      disconnectPending = false
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      disconnectPending = runtime === activeRuntime
+      Log.w("OverlayController", "Overlay disconnect dismissal failed", error)
     }
   }
 
@@ -204,12 +236,13 @@ class OverlayController(
     activeRuntime?.let { armIdle(it) }
   }
 
-  suspend fun onClientCountChanged(count: Int, observerSession: Int? = null) = signal {
-    require(count >= 0) { "Client count must be nonnegative" }
-    // A delayed disconnect from a previous observer session cannot dismiss a newly shown overlay.
-    if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
-      activeRuntime?.dismiss(OverlayDismissReason.DISCONNECT)
-  }
+  suspend fun onClientCountChanged(count: Int, observerSession: Int? = null) =
+    signal(retryDisconnect = false) {
+      require(count >= 0) { "Client count must be nonnegative" }
+      // A delayed disconnect from a previous observer session cannot dismiss a newly shown overlay.
+      if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
+        activeRuntime?.let { dismissForDisconnect(it) }
+    }
 
   /**
    * Rotation/density changes keep the same runtime and Compose tree; hiding retains authored state.
@@ -268,16 +301,18 @@ class OverlayController(
     }
   }
 
-  private suspend fun signal(action: suspend () -> Unit) = mutex.withLock {
-    if (destroyed) return@withLock
-    try {
-      action()
-    } catch (error: CancellationException) {
-      throw error
-    } catch (error: Exception) {
-      Log.w("OverlayController", "Overlay lifecycle signal failed", error)
+  private suspend fun signal(retryDisconnect: Boolean = true, action: suspend () -> Unit) =
+    mutex.withLock {
+      if (destroyed) return@withLock
+      try {
+        if (retryDisconnect && disconnectPending) activeRuntime?.let { dismissForDisconnect(it) }
+        action()
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w("OverlayController", "Overlay lifecycle signal failed", error)
+      }
     }
-  }
 
   /** Run from a teardown scope independent of the cancelled service scope; no blocking join. */
   suspend fun destroy() = mutex.withLock {

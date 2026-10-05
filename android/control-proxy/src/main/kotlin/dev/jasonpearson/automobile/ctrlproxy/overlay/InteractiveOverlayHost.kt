@@ -105,6 +105,10 @@ interface InteractiveOverlayHost {
  * their normal permission-based type. Highlight touch/focus flags stay unchanged. The callback must
  * not throw or re-enter the host.
  *
+ * [onWindowLost] runs after an update found the window already detached and cleared it, from any
+ * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
+ * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
+ *
  * [context] must be the service/display context used for this window; [densityProvider] defaults to
  * its resources. All other platform access is constructor-injected. No permission probe occurs.
  */
@@ -117,6 +121,7 @@ class DefaultInteractiveOverlayHost(
   private val settleTimer: OverlaySettleTimer = CoroutineOverlaySettleTimer,
   private val densityProvider: () -> Float = { context.resources.displayMetrics.density },
   private val onWindowAttached: () -> Unit = {},
+  private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
 ) : InteractiveOverlayHost {
   private class Window(
@@ -302,7 +307,10 @@ class DefaultInteractiveOverlayHost(
       windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update interactive overlay", error)
-      if (isNotAttached(error)) clearWindow(current)
+      if (isNotAttached(error)) {
+        clearWindow(current)
+        onWindowLost()
+      }
       return false
     }
     current.params = params

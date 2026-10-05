@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { loadJobSteps, stepNamed } from "../helpers/workflowSteps";
@@ -12,17 +12,15 @@ const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
   lychee:
     "merge.yml validate-documentation-links: online links; PR fast-validation runs lychee-offline",
   "debug-tags": "PR bats-tests serial pass: validate-no-debug-log-tags.bats scans src/",
-  "host-shell-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
+  "host-shell-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh (diff ratchet)",
   "git-metadata-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
   "ffmpeg-execution-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
   "sdkmanager-execution-boundary":
     "PR node-host-integration-tests: sdkManagerExecutionBoundary.integration.test.ts scans src/",
   "archive-extraction-boundary": "PR node-unit-tests: archiveExtractionBoundary.test.ts scans src/",
-  "xcodebuild-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
+  "xcodebuild-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh (diff ratchet)",
   "daemon-launcher-boundary": "PR ts-code-coverage: lint -> check-boundaries.sh",
   "process-safety": "PR ts-code-coverage: lint -> check-boundaries.sh",
-  "lfs-pointers":
-    "CircleCI detect-ios-changes / continue-swift-coverage-main: checkout asserts LFS pointers",
   "datetime-now-literal":
     "PR bats-tests serial pass: validate-no-datetime-now-literal.bats scans migrations",
 };
@@ -47,38 +45,57 @@ function coverageGaps(
 }
 
 describe("Fast Validation registry coverage", () => {
-  test("every registered check is selected in PR CI or has a documented covering job", () => {
+  let header: string;
+  let registered: string[];
+  let selected: string[];
+  let mainRun: string;
+  let mainSelected: string[];
+  let offlineSelected: string[];
+
+  beforeAll(() => {
+    if (process.platform === "win32") {
+      return;
+    }
+
     const listing = execFileSync("bash", ["scripts/all_fast_validate_checks.sh", "--list"], {
       cwd: join(import.meta.dir, "../.."),
       encoding: "utf8",
     });
-    const [header, ...lines] = listing.trimEnd().split("\n");
-    expect(header).toBe("Available checks:");
-    const registered = lines.map((line) => line.trim().split(/\s+/)[0]);
-    expect(registered.length).toBeGreaterThan(0);
-    expect(new Set(registered).size).toBe(registered.length);
+    const lines = listing.trimEnd().split("\n");
+    header = lines[0];
+    registered = lines.slice(1).map((line) => line.trim().split(/\s+/)[0]);
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "fast-validation");
     const mainStep = stepNamed(steps, "Run fast validation checks");
-    expect(mainStep?.run).toContain("all_fast_validate_checks.sh");
-    const selected = steps
+    mainRun = mainStep?.run ?? "";
+    selected = steps
       .filter((step) => step.run?.includes("all_fast_validate_checks.sh"))
       .flatMap((step) => selectedChecks(step.run ?? ""));
-    expect(coverageGaps(registered, selected, EXCLUDED_WITH_REASON)).toEqual({
-      missing: [],
-      stale: [],
-      overlapping: [],
-      unknown: [],
-      undocumented: [],
-    });
-    // Neighbouring contract: offline links remain a separate step, and the
-    // existing docs guards stay in the main fan-out.
-    expect(selectedChecks(mainStep?.run ?? "")).toEqual(
-      expect.arrayContaining(["docs-assets", "env-var-docs"]),
-    );
-    expect(selectedChecks(stepNamed(steps, "Run offline lychee link check")?.run ?? "")).toEqual([
-      "lychee-offline",
-    ]);
+    mainSelected = selectedChecks(mainRun);
+    offlineSelected = selectedChecks(stepNamed(steps, "Run offline lychee link check")?.run ?? "");
   });
+
+  test.skipIf(process.platform === "win32")(
+    "every registered check is selected in PR CI or has a documented covering job",
+    () => {
+      expect(header).toBe("Available checks:");
+      expect(registered.length).toBeGreaterThan(0);
+      expect(new Set(registered).size).toBe(registered.length);
+      expect(mainRun).toContain("all_fast_validate_checks.sh");
+      expect(coverageGaps(registered, selected, EXCLUDED_WITH_REASON)).toEqual({
+        missing: [],
+        stale: [],
+        overlapping: [],
+        unknown: [],
+        undocumented: [],
+      });
+      // Neighbouring contract: offline links remain a separate step, and the
+      // existing docs guards stay in the main fan-out.
+      expect(mainSelected).toEqual(
+        expect.arrayContaining(["docs-assets", "env-var-docs", "lfs-pointers"]),
+      );
+      expect(offlineSelected).toEqual(["lychee-offline"]);
+    },
+  );
 
   test("the guard rejects new, stale, overlapping and unknown check names", () => {
     expect(

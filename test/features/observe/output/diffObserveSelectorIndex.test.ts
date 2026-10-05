@@ -11,6 +11,7 @@ import * as skeletonProjection from "../../../../src/features/observe/output/Ske
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
 import { observeDiffSelectorSchema } from "../../../../src/server/toolOutputSchemas";
 import { parseBounds } from "../../../../src/utils/bounds";
+import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 
 // Real iOS capture: the Discover button precedes its smaller Search image;
 // both are clickable and have resource-id="magnifyingglass". No invented tree.
@@ -71,6 +72,140 @@ function expectReplay(baseline: ObserveResult, expectedIndex: number | undefined
     expect(resolved.indexInMatches).toBe(selector.index);
   }
 }
+
+// Structural counting regression: use the existing captured-node builder, then
+// mirror CtrlProxy's separately serialized merged root and window root.
+function mirroredAndroidPair(labelOnly: boolean, count = 1) {
+  const baseline = androidControlObservation();
+  delete baseline.elements;
+  const original = parser.extractRootNodes(baseline.viewHierarchy!)[0];
+  const nodes: ViewHierarchyNode[] = [];
+  for (let index = 0; index < count; index++) {
+    const node = structuredClone(original);
+    delete node.node;
+    delete node["view-id"];
+    node.text = "Mirrored control";
+    node["resource-id"] = "mirrored-control";
+    node.bounds = { left: 10, top: 100 + index * 100, right: 60, bottom: 150 + index * 100 };
+    if (labelOnly) {
+      delete node["resource-id"];
+      delete node["view-id"];
+    }
+    nodes.push(node);
+  }
+  const root: ViewHierarchyNode = { node: nodes };
+  baseline.viewHierarchy!.hierarchy = { node: root };
+  const windowRoot = structuredClone(root);
+  if (!labelOnly) {
+    for (const node of windowRoot.node!) {
+      node["view-id"] = node["resource-id"];
+    }
+  }
+  baseline.viewHierarchy!.windows = [{ id: 1, type: 1, hierarchy: windowRoot }];
+  const next = structuredClone(baseline);
+  for (const entry of new SearchableHierarchy().project(next.viewHierarchy!)) {
+    if (entry.properties.text === "Mirrored control") {
+      entry.source.selected = true;
+    }
+  }
+  return { baseline, next };
+}
+
+describe("merged Android roots and window copies (#9804)", () => {
+  for (const labelOnly of [false, true]) {
+    const kind = labelOnly ? "label-only" : "elementId";
+    test(`a unique ${kind} match carries neither replay field and skips skeleton projection`, () => {
+      const { baseline, next } = mirroredAndroidPair(labelOnly);
+      const matches = new SearchableHierarchy()
+        .project(next.viewHierarchy!)
+        .filter((entry) => entry.properties.text === "Mirrored control");
+      expect(matches).toHaveLength(2);
+      expect(matches[0].source).not.toBe(matches[1].source);
+      const spy = spyOn(skeletonProjection, "projectSkeleton");
+      try {
+        const diff = diffObserveResult(baseline, next);
+        expect(diff.changed).toHaveLength(1);
+        for (const { selector } of diff.changed) {
+          expect(selector).toBeDefined();
+          expect(selector).not.toHaveProperty("index");
+          expect(selector).not.toHaveProperty("ambiguous");
+        }
+        expect(spy).toHaveBeenCalledTimes(0);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test(`six distinct ${kind} matches retain skeleton indexes across window copies`, () => {
+      const { baseline, next } = mirroredAndroidPair(labelOnly, 6);
+      const elements = new DefaultObserveElementCollector().collect(next.viewHierarchy!, "android");
+      const rows = projectSkeleton(elements!, next.screenSize).skeleton;
+      expect(rows).toHaveLength(6);
+      const diff = diffObserveResult(baseline, next);
+      expect(diff.changed).toHaveLength(6);
+      for (const [position, { selector }] of diff.changed.entries()) {
+        expect(selector!.index).toBe(rows[position % 6].index);
+        expect(selector!.index).toBe(position % 6);
+        expect(selector).not.toHaveProperty("ambiguous");
+      }
+    });
+
+    test(`identical ${kind} siblings remain genuinely ambiguous across window copies`, () => {
+      const { baseline, next } = mirroredAndroidPair(labelOnly, 2);
+      for (const observation of [baseline, next]) {
+        const nodes = parser.extractRootNodes(observation.viewHierarchy!)[0].node!;
+        nodes[1].bounds = structuredClone(nodes[0].bounds);
+        const windowNodes = observation.viewHierarchy!.windows![0].hierarchy!.node!;
+        windowNodes[1].bounds = structuredClone(windowNodes[0].bounds);
+      }
+      const selectors = diffObserveResult(baseline, next).changed.map(({ selector }) => selector);
+      expect(selectors).toHaveLength(2);
+      for (const selector of selectors) {
+        expect(selector).not.toHaveProperty("index");
+        expect(selector).toHaveProperty("ambiguous", true);
+      }
+    });
+  }
+
+  test("a shared source does not absorb a distinct identical node in another window", () => {
+    const { baseline, next } = mirroredAndroidPair(false);
+    for (const observation of [baseline, next]) {
+      const hierarchy = observation.viewHierarchy!;
+      const root = parser.extractRootNodes(hierarchy)[0];
+      hierarchy.windows = [
+        { id: 1, type: 1, hierarchy: root },
+        { id: 2, type: 1, hierarchy: structuredClone(root) },
+      ];
+    }
+    const selector = diffObserveResult(baseline, next).changed[0].selector;
+    expect(selector).not.toHaveProperty("index");
+    expect(selector).toHaveProperty("ambiguous", true);
+  });
+
+  test("mirrored inert descendants preserve tap-ancestor ambiguity", () => {
+    const { baseline, next } = mirroredAndroidPair(false, 2);
+    for (const observation of [baseline, next]) {
+      const hierarchy = observation.viewHierarchy!;
+      for (const root of [
+        parser.extractRootNodes(hierarchy)[0],
+        hierarchy.windows![0].hierarchy!,
+      ]) {
+        const [parent, child] = root.node!;
+        parent.clickable = true;
+        child.clickable = false;
+        delete child.actions;
+        root.node = [parent];
+        parent.node = [child];
+      }
+    }
+    const selectors = diffObserveResult(baseline, next).changed.map(({ selector }) => selector);
+    expect(selectors).toHaveLength(2);
+    for (const selector of selectors) {
+      expect(selector).not.toHaveProperty("index");
+      expect(selector).toHaveProperty("ambiguous", true);
+    }
+  });
+});
 
 describe("diff selector replay indexes (#9693)", () => {
   test("captured larger-first duplicates agree with skeleton and resolver", () => {

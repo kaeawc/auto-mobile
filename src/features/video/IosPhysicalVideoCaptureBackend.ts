@@ -4,6 +4,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import {
   getFileSize,
   PROCESS_EXIT_TIMEOUT_MS,
+  ProcessTeardownUnconfirmedError,
   waitForExit,
   type ProcessTracker,
 } from "../../utils/ChildProcessTracker";
@@ -30,6 +31,7 @@ import {
   resolveIosScreenCaptureHelperPath,
 } from "../screen-stream/screenCaptureHelperPath";
 import {
+  VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -193,6 +195,8 @@ interface CaptureState {
   helperExit?: { code: number | null; signal: NodeJS.Signals | null };
   /** First error emitted by the helper process (spawn ENOENT/EACCES, etc.). */
   helperError?: Error;
+  /** Structured spawn failure proves the helper never became a process. */
+  helperSpawnError?: Error;
   /** True once we asked the helper to stop, so its exit is expected. */
   stopRequested: boolean;
   /** Whether the observed exit happened after we asked the helper to stop. */
@@ -322,6 +326,17 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       // cause instead of a misleading "connect and trust the device" message. An
       // unhandled 'error' listener would also crash the daemon.
       state.helperError ??= error instanceof Error ? error : new Error(String(error));
+      const spawnError = error as NodeJS.ErrnoException;
+      // Node and Bun label deferred spawn failures with `spawn <executable>`.
+      // kill/send/abort errors do not prove exit; never infer it from message text.
+      if (
+        spawnError.syscall?.startsWith("spawn ") &&
+        ["ENOENT", "EACCES", "EAGAIN", "EMFILE", "ENFILE"].includes(spawnError.code ?? "") &&
+        !state.encoder &&
+        !state.helperExit
+      ) {
+        state.helperSpawnError ??= error;
+      }
       logger.warn(`[IosPhysicalVideo] capture helper error: ${errorMessage(error)}`);
     });
     helper.on("frame", (frame) => this.onFrame(frame, state, captureConfig));
@@ -379,15 +394,69 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     if (!backendHandle || backendHandle.kind !== "ios-physical") {
       throw new Error("Missing backend handle for physical iOS video recording.");
     }
-    const { helper, state, config } = backendHandle;
+    const { helper, state } = backendHandle;
 
     state.stopRequested = true;
     // Sample the clock BEFORE the helper shutdown: it SIGTERMs the capture
     // process and waits out a grace period, and padding to a post-shutdown
     // clock would encode that latency as trailing video the user never saw.
     const stopRequestedAtMs = this.now();
-    await helper.stop();
+    try {
+      await helper.stop();
+      if (state.helperSpawnError) {
+        throw new ActionableError(this.buildNoFramesMessage(state), {
+          cause: state.helperSpawnError,
+        });
+      }
+      if (!state.helperExit) {
+        throw new ProcessTeardownUnconfirmedError(
+          "Physical iOS capture helper exit was not observed; it may still be running.",
+        );
+      }
 
+      return await this.finalizeStoppedRecording(handle, backendHandle, stopRequestedAtMs);
+    } catch (error) {
+      // helper.stop() can return after signaling without observing exit. An
+      // observed exit or a structured failed spawn authorizes owner release.
+      if (!state.helperExit && !state.helperSpawnError) {
+        throw error;
+      }
+      throw await this.buildFinalizationError(state, error);
+    }
+  }
+
+  private async buildFinalizationError(
+    state: CaptureState,
+    error: unknown,
+  ): Promise<VideoCaptureFinalizationError> {
+    try {
+      if (state.encoder && state.encoderTracker) {
+        await waitForExit(state.encoder, state.encoderTracker.exitPromise, {
+          timeoutMs: 0,
+          signal: "SIGKILL",
+          timer: this.timer,
+        });
+      }
+    } catch (cleanupError) {
+      logger.warn(
+        `[IosPhysicalVideo] Failed to clean up recording encoder: ${errorMessage(cleanupError)}`,
+        cleanupError,
+      );
+    }
+    return new VideoCaptureFinalizationError(
+      state.helperSpawnError
+        ? `Physical iOS capture never started. Start a new recording. ${this.buildNoFramesMessage(state)}`
+        : `Physical iOS capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
+      { cause: state.helperSpawnError ?? error },
+    );
+  }
+
+  private async finalizeStoppedRecording(
+    handle: RecordingHandle,
+    backendHandle: IosPhysicalBackendHandle,
+    stopRequestedAtMs: number,
+  ): Promise<RecordingResult> {
+    const { state, config } = backendHandle;
     const encoder = state.encoder;
     if (!encoder) {
       throw new ActionableError(this.buildNoFramesMessage(state));
@@ -412,6 +481,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       await waitForExit(encoder, state.encoderTracker.exitPromise, {
         timeoutMs: this.encoderFinalizeTimeoutMs,
         signal: null,
+        timer: this.timer,
       });
     }
 
@@ -419,6 +489,11 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     this.assertHelperSucceeded(state, handle.outputPath);
 
     const sizeBytes = await this.fileSize(handle.outputPath);
+    if (!sizeBytes) {
+      throw new ActionableError(
+        "The finalized physical iOS recording is missing or contains zero bytes.",
+      );
+    }
     this.logCaptureAccounting(state, config, handle);
 
     return {

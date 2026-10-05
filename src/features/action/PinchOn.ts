@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
@@ -86,6 +87,7 @@ type PinchExecutionContext = {
 
 type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPinch"]>> & {
   observation?: ObserveResult;
+  staleDisplay?: PinchOnResult["staleDisplay"];
   pinchPath?: string;
 };
 
@@ -208,36 +210,50 @@ export class PinchOn extends BaseVisualChange {
       return await this.performPinch(options, { perf, progress, signal, displayTarget });
     } catch (error) {
       perf.end();
-      throwIfAborted(signal);
-      logger.warn(`Pinch failed: ${errorMessage(error)}`, error);
-      if (error instanceof StaleDisplayError) {
-        return withStaleDisplay(this.createErrorResult(error.message, options), error);
-      }
-      const baseErrorMessage = errorMessage(error);
-      let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
-
-      if (this.visionConfig.enabled && options.container) {
-        throwIfAborted(signal);
-        const searchCriteria = {
-          text: options.container.text,
-          resourceId: options.container.elementId,
-          description: "Container element for pinching",
-        };
-        const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
-        const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
-        finalErrorMessage = await getVisionEnrichedError(
-          this.screenshotCapturer,
-          viewHierarchy,
-          searchCriteria,
-          this.visionConfig,
-          finalErrorMessage,
-          undefined,
-          this.visionAnalyzer,
-        );
-      }
-
-      return this.createErrorResult(finalErrorMessage, options);
+      return this.pinchFailure(error, options, signal);
     }
+  }
+
+  private async pinchFailure(
+    error: unknown,
+    options: PinchOnOptions,
+    signal?: AbortSignal,
+  ): Promise<PinchOnResult> {
+    throwIfAborted(signal);
+    if (options.display !== undefined && error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    logger.warn(`Pinch failed: ${errorMessage(error)}`, error);
+    if (error instanceof DispatchedObservationError) {
+      return withStaleDisplay(this.createErrorResult(error.message, options), error);
+    }
+    if (error instanceof StaleDisplayError) {
+      return withStaleDisplay(this.createErrorResult(error.message, options), error);
+    }
+    const baseErrorMessage = errorMessage(error);
+    let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
+
+    if (this.visionConfig.enabled && options.container) {
+      throwIfAborted(signal);
+      const searchCriteria = {
+        text: options.container.text,
+        resourceId: options.container.elementId,
+        description: "Container element for pinching",
+      };
+      const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
+      const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
+      finalErrorMessage = await getVisionEnrichedError(
+        this.screenshotCapturer,
+        viewHierarchy,
+        searchCriteria,
+        this.visionConfig,
+        finalErrorMessage,
+        undefined,
+        this.visionAnalyzer,
+      );
+    }
+
+    return this.createErrorResult(finalErrorMessage, options);
   }
 
   private validateDuration(duration: PinchOnOptions["duration"]): void {
@@ -358,10 +374,14 @@ export class PinchOn extends BaseVisualChange {
         signal,
       );
       throwIfAborted(signal);
-      displayTarget?.assertCurrent();
+      if (result.success) {
+        this.checkPostActionDisplay({}, displayTarget?.assertCurrent, signal);
+      } else {
+        displayTarget?.assertCurrent();
+      }
       return result;
     };
-    return this.observedInteraction(
+    const result = await this.observedInteraction(
       async () => {
         throwIfAborted(signal);
         if (this.device.platform === "ios") {
@@ -412,6 +432,10 @@ export class PinchOn extends BaseVisualChange {
         },
       },
     );
+    if (result.success) {
+      this.checkPostActionDisplay(result, displayTarget?.assertCurrent, signal);
+    }
+    return result;
   }
 
   private formatPinchResult(
@@ -437,6 +461,7 @@ export class PinchOn extends BaseVisualChange {
         container: target.container,
         warning: target.warning,
         observation: pinchResult.observation,
+        ...(pinchResult.staleDisplay ? { staleDisplay: pinchResult.staleDisplay } : {}),
         // sendCommand's timeout result means dispatch completed without a confirmed reply.
         error: pinchResult.error?.startsWith("Pinch timed out after ")
           ? `Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (${pinchResult.error}). Do not retry automatically.`
@@ -468,6 +493,7 @@ export class PinchOn extends BaseVisualChange {
       container: target.container,
       warning,
       observation: pinchResult.observation,
+      ...(pinchResult.staleDisplay ? { staleDisplay: pinchResult.staleDisplay } : {}),
       a11yTotalTimeMs: pinchResult.totalTimeMs,
       a11yGestureTimeMs: pinchResult.gestureTimeMs,
     };

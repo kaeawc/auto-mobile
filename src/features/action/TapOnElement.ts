@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
@@ -3632,6 +3633,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: {
       target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
       signal?: AbortSignal;
+      onDispatchCompleted: () => void;
     },
   ): Promise<TapOnElementResult> {
     const { target, signal } = context;
@@ -3660,15 +3662,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let tapTimestamp: number | undefined;
     const result: Awaited<ReturnType<TapOnElement["executeOnAndroidDisplay"]>> =
       await this.observedInteraction(
-        () =>
-          this.executeOnAndroidDisplay(verificationOptions, {
+        async () => {
+          const dispatchedResult = await this.executeOnAndroidDisplay(verificationOptions, {
             target,
             selection,
             signal,
             onDispatched: () => {
               tapTimestamp = this.timer.now();
             },
-          }),
+          });
+          if (tapTimestamp !== undefined) {
+            context.onDispatchCompleted();
+          }
+          return dispatchedResult;
+        },
         {
           changeExpected: false,
           display: target.observation.display.key,
@@ -3680,10 +3687,42 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         },
       );
     result.searchUntil = stats;
-    target.assertCurrent();
+    if (tapTimestamp === undefined) {
+      target.assertCurrent();
+    } else {
+      this.checkPostActionDisplay(result, target.assertCurrent, signal);
+      if (result.staleDisplay) {
+        return this.unverifiableDisplayPostState(result, options);
+      }
+    }
     if (result.success && result.skipped !== "already-checked") {
       await this.applyEnsureCheckedResult(result, verificationOptions, signal);
     }
+    return this.finalizeDisplayFocusResult(result, options, selection, target.observation);
+  }
+
+  private unverifiableDisplayPostState(
+    result: TapOnElementResult,
+    options: Pick<TapOnElementOptions, "action" | "ensureChecked">,
+  ): TapOnElementResult {
+    if (
+      !result.staleDisplay ||
+      (options.action !== "focus" && options.ensureChecked === undefined)
+    ) {
+      return result;
+    }
+    return withStaleDisplay(
+      { ...result, success: false, error: undefined },
+      new DispatchedObservationError(new StaleDisplayError(result.staleDisplay)),
+    );
+  }
+
+  private finalizeDisplayFocusResult(
+    result: TapOnElementResult & { wasAlreadyFocused?: boolean },
+    options: TapOnElementOptions,
+    selection: ElementSelectionResult,
+    previousObservation: ObserveResult,
+  ): TapOnElementResult {
     if (options.action !== "focus" || !result.success || result.wasAlreadyFocused) {
       return result;
     }
@@ -3695,7 +3734,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       result.observation,
       labelText,
       result.selectedElement?.indexInMatches,
-      target.observation.viewHierarchy,
+      previousObservation.viewHierarchy,
     );
     if (!result.focusVerified) {
       result.success = false;
@@ -3710,6 +3749,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     recovery?: { throwOnKeyboardOcclusion?: boolean },
   ): Promise<TapOnElementResult | undefined> {
     const display = options.display;
+    let dispatchCompleted = false;
     if (display !== undefined) {
       try {
         const unsupported = (
@@ -3744,18 +3784,41 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           this.displayTransitionReader,
         );
         if (this.device.platform === "android") {
-          return await this.observedAndroidDisplayInteraction(options, { target, signal });
+          return await this.observedAndroidDisplayInteraction(options, {
+            target,
+            signal,
+            onDispatchCompleted: () => {
+              dispatchCompleted = true;
+            },
+          });
         }
       } catch (error) {
+        this.rethrowObservationAbort(error, signal, dispatchCompleted);
         this.rethrowKeyboardOcclusion(error, options.action, recovery);
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
+        const failure = this.completedDisplayFailure(error, dispatchCompleted);
         return withStaleDisplay(
-          this.createErrorResult(options.action, errorMessage(error), error),
-          error,
+          this.createErrorResult(options.action, errorMessage(failure), failure),
+          failure,
         );
       }
     }
     return undefined;
+  }
+
+  private didCompleteDisplayGesture(
+    result: TapOnElementResult & { wasAlreadyFocused?: boolean },
+    display?: string,
+  ): boolean {
+    return display !== undefined && result.success && !result.skipped && !result.wasAlreadyFocused;
+  }
+
+  private completedDisplayFailure(error: unknown, dispatchCompleted: boolean): unknown {
+    // Verification runs after the complete gesture block; in-block refusals and
+    // partial multi-stroke failures keep their existing dispatch semantics.
+    return dispatchCompleted && error instanceof StaleDisplayError
+      ? new DispatchedObservationError(error)
+      : error;
   }
 
   private rethrowKeyboardOcclusion(
@@ -3827,6 +3890,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let focusTarget: Element | undefined;
     let focusLabelText: string | undefined;
     let ensureCheckedTapTimestamp: number | undefined;
+    let completedDisplayGesture = false;
 
     try {
       throwIfAborted(signal);
@@ -4218,6 +4282,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         },
       );
 
+      completedDisplayGesture = this.didCompleteDisplayGesture(result, options.display);
+      if (options.display !== undefined && result.staleDisplay) {
+        // Legacy/iOS display gestures must not finalize optional post-state
+        // metadata or confirm focus/checked state from an invalidated capture.
+        return this.unverifiableDisplayPostState(result, { ...options, action: requestedAction });
+      }
+
       if (result.success && result.observation && result.element) {
         const postTap = await this.deriveTapEffectAfterPostTapObservation(
           previousObserveResult,
@@ -4275,8 +4346,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Only opted-in Android form orchestration receives the typed recovery signal.
       this.rethrowKeyboardOcclusion(error, requestedAction, recovery);
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
-      if (error instanceof StaleDisplayError) {
-        return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
+      const failure = this.completedDisplayFailure(error, completedDisplayGesture);
+      if (failure instanceof StaleDisplayError || failure instanceof DispatchedObservationError) {
+        return withStaleDisplay(this.createErrorResult(options.action, failure.message), failure);
       }
 
       // Build debug context if debug mode is enabled

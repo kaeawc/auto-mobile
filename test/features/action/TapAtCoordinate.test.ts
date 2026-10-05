@@ -1527,6 +1527,64 @@ describe("TapAtCoordinate", () => {
     expect(iosCacheInvalidations()).toBe(1);
   });
 
+  for (const action of ["tap", "doubleTap"] as const) {
+    test.each(["settle-throws", "throws"] as const)(
+      `display iOS ${action} preserves delivered count after %s`,
+      async (outcome) => {
+        const display = {
+          key: "main",
+          role: "unknown" as const,
+          posture: "unknown" as const,
+          generation: 0,
+        };
+        const before = { ...observation(10, 10), display };
+        const after = { ...observation(10, 10, "after", 0, { text: "Destination" }), display };
+        const h = createTapAt(
+          {
+            ...iosDevice,
+            displays: {
+              panels: [{ key: "main", role: "unknown", sizePx: { width: 10, height: 10 } }],
+              postures: [],
+            },
+          },
+          10,
+          10,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () => before,
+        );
+        let postReads = 0;
+        h.observeScreen.setObserveResult(() => {
+          if (!h.iosDispatches.length) {
+            return before;
+          }
+          postReads++;
+          if (outcome === "throws" || postReads > 1) {
+            throw new Error("display post-read unavailable");
+          }
+          return after;
+        });
+        const result = await h.tapAt.execute({ x: 1, y: 2, display: "main", action });
+        const count = action === "tap" ? 1 : 2;
+        expect(h.iosDispatches).toHaveLength(count);
+        if (outcome === "throws") {
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("Do not retry automatically");
+          expect(result.error).toContain(
+            `${count} ${count === 1 ? "tap was" : "taps were"} delivered`,
+          );
+          expect(result.observation).toBeUndefined();
+        } else {
+          expect(result.success).toBe(true);
+          expect(result.observation?.viewHierarchy).toEqual(after.viewHierarchy);
+          expect(result.observation?.freshness?.warning).toContain("display settle");
+        }
+      },
+    );
+  }
+
   test("explicit-display iOS gestures invalidate after dispatch", async () => {
     const displayDevice: BootedDevice = {
       ...iosDevice,

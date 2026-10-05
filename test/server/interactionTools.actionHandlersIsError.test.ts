@@ -2,7 +2,7 @@ import type { RotateOptions } from "../../src/features/action/Rotate";
 import { TapAnyElement } from "../../src/features/action/TapAnyElement";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { warmedTests } from "../helpers/interactionCancellation";
+import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
 import { afterEach, describe, expect } from "bun:test";
 import {
   dragAndDropHandler,
@@ -23,6 +23,10 @@ import {
   setSelectAllTextFactory,
   setTapAnyElementFactory,
   tapAnyHandler,
+  setClipboardFactory,
+  resetClipboardFactory,
+  setRecentAppsFactory,
+  resetRecentAppsFactory,
 } from "../../src/server/interactionTools";
 import type {
   DragAndDropArgs,
@@ -47,6 +51,61 @@ const test = warmedTests(() => {
   resetPressButtonFactory();
   resetRotateFactory();
   resetSetPostureFactory();
+  resetClipboardFactory();
+  resetRecentAppsFactory();
+});
+
+const handler = cancellationHandlers(["clipboard", "recentApps"]);
+
+describe("clipboard and recentApps failure envelopes", () => {
+  const device: BootedDevice = { name: "Test Android", deviceId: "fake", platform: "android" };
+
+  test.each([false, true])(
+    "clipboard success=%s preserves the text payload and gates isError",
+    async (success) => {
+      const result = {
+        success,
+        action: "paste" as const,
+        method: "adb" as const,
+        ...(success ? {} : { error: "cmd clipboard unsupported" }),
+      };
+      setClipboardFactory(() => ({ execute: async () => result }));
+      const response = await handler("clipboard")(device, { action: "paste" });
+      const message = success
+        ? "Pasted clipboard content into focused field (via adb)"
+        : "Failed to execute clipboard paste: cmd clipboard unsupported (via adb)";
+      expect(response).toEqual({
+        content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
+        ...(success ? {} : { isError: true }),
+      });
+      if (success) {
+        expect(response).not.toHaveProperty("isError");
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "recentApps success=%s preserves the text payload and gates isError",
+    async (success) => {
+      const result = {
+        success,
+        method: "hardware" as const,
+        ...(success ? {} : { error: "App Switcher did not appear" }),
+      };
+      setRecentAppsFactory(() => ({ execute: async () => result }));
+      const response = await handler("recentApps")(device, {});
+      const message = success
+        ? "Opened recent apps"
+        : "Failed to open recent apps: App Switcher did not appear";
+      expect(response).toEqual({
+        content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
+        ...(success ? {} : { isError: true }),
+      });
+      if (success) {
+        expect(response).not.toHaveProperty("isError");
+      }
+    },
+  );
 });
 
 // #6163: the tapOn (#6152) fix — gate the message on

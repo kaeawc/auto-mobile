@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -1034,6 +1035,77 @@ class WebSocketServerTest {
 
       // Cleanup
       customServer.stop()
+    }
+
+  @Test
+  fun `known overlay nested decode failures return correlated overlay results`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val cases =
+        listOf(
+          "root" to
+            """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"unknown_node"}}""",
+          "onTap" to
+            """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi","onTap":[{"type":"unknown_action"}]}}""",
+          "placement" to
+            """{"id":"panel","window":{"placement":{"type":"unknown_placement"}},"root":{"type":"text","text":"Hi"}}""",
+          "root" to
+            """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"text":"Missing type"}}""",
+        )
+      for (command in listOf("show_overlay", "update_overlay")) {
+        for ((index, case) in cases.withIndex()) {
+          val (field, spec) = case
+          val requestId = "$command-$index"
+          val raw = """{"type":"$command","requestId":"$requestId","id":"panel","spec":$spec}"""
+          server.handleClientMessage(raw, owner)
+          runCurrent()
+          val response = Json.decodeFromString<WebSocketResponse>(transport.messages.last())
+          assertTrue("Expected overlay_result: $response", response is OverlayResult)
+          val result = response as OverlayResult
+          assertEquals(requestId, result.requestId)
+          assertFalse(result.success)
+          assertTrue(
+            "Expected field $field: ${result.error}",
+            result.error?.contains(field) == true,
+          )
+          assertTrue(result.error?.startsWith("Malformed request:") == true)
+        }
+      }
+    }
+
+  @Test
+  fun `dismiss payload failure is an overlay result while other known commands keep error frames`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      server.handleClientMessage(
+        """{"type":"dismiss_overlay","requestId":"dismiss-bad","all":{}}""",
+        owner,
+      )
+      runCurrent()
+      val overlay =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as OverlayResult
+      assertEquals("dismiss-bad", overlay.requestId)
+      assertFalse(overlay.success)
+      assertTrue(overlay.error?.contains("all") == true)
+      server.handleClientMessage(
+        """{"type":"request_screenshot","requestId":"known-bad","displayId":{}}""",
+        owner,
+      )
+      runCurrent()
+      val known =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as ErrorResponse
+      assertEquals("known-bad", known.requestId)
+      assertTrue(known.error.startsWith("Malformed request:"))
+      server.handleClientMessage("""{"type":"truly_unknown","requestId":"unknown"}""", owner)
+      runCurrent()
+      val unknown =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as ErrorResponse
+      assertEquals("unknown", unknown.requestId)
+      assertEquals("Unknown command type: truly_unknown", unknown.error)
     }
 
   @Test

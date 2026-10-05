@@ -724,6 +724,10 @@ enum class OverlayEventKind {
 data class OverlayEvent(
   override val timestamp: Long,
   val id: String,
+  /**
+   * Future emitter contract: per overlay id, monotonic starting at 1. Reconnects must not reset it;
+   * hosts should treat lower-or-equal sequences for the same id as duplicates.
+   */
   val sequence: Long,
   val kind: OverlayEventKind,
   val name: String?,

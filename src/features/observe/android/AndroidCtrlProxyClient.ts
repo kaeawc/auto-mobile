@@ -5093,10 +5093,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (rejectedCommand) {
         this.rejectedCommands.add(rejectedCommand);
       }
-      const errorText = rewriteUnknownCommandError(
-        message.error || "Runner reported an unstructured protocol error",
-        "android",
-      );
+      const deviceError = message.error || "Runner reported an unstructured protocol error";
+      // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
+      const errorText =
+        rejectedCommand &&
+        ["show_overlay", "update_overlay", "dismiss_overlay"].includes(rejectedCommand)
+          ? deviceError
+          : rewriteUnknownCommandError(deviceError, "android");
       logger.warn(
         `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
       );

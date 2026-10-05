@@ -425,6 +425,7 @@ export interface ShowOverlayMessage {
   requestId: string;
   spec: OverlaySpec;
 }
+/** Replacement spec.id must equal the top-level id; hosts reject mismatches before sending. */
 export type OverlayUpdate = { id: string } & (
   | { spec: OverlaySpec; state?: never }
   | { state: OverlayState; spec?: never }
@@ -435,6 +436,7 @@ export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string
 
 export interface OverlayResult {
   success: boolean;
+  totalTimeMs?: number;
   error?: string | null;
   requestId?: string;
   timestamp?: number;
@@ -445,6 +447,10 @@ export interface OverlayEvent {
   type: "overlay_event";
   timestamp: number;
   id: string;
+  /**
+   * Emitter contract: per overlay id, monotonic starting at 1; reconnects must not reset it.
+   * Hosts should treat lower-or-equal sequences for the same id as duplicates.
+   */
   sequence: number;
   kind: "emit" | "page_changed" | "dismissed";
   name: string | null;

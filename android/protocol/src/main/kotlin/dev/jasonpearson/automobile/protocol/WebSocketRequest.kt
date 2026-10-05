@@ -435,6 +435,7 @@ data class ShowOverlay(
   val spec: OverlaySpec,
 ) : WebSocketRequest()
 
+/** Replacement spec.id must equal id; the host rejects mismatches before sending. */
 @Serializable
 @SerialName("update_overlay")
 data class UpdateOverlay(

@@ -41,6 +41,7 @@ import {
   ActionableError,
   BootedDevice,
   Element,
+  isFalsy,
   ElementBounds,
   ElementSelectionResult,
   ObserveResult,
@@ -336,6 +337,16 @@ function markFocusFailure(
     Object.defineProperty(result, tapFocusFailure, { value: error.reason });
   }
   return result;
+}
+
+function appendDisabledElementWarning(
+  platform: string,
+  element: Element,
+  warnings: string[],
+): void {
+  if (platform === "android" && isFalsy(element.enabled)) {
+    warnings.push("The matched element is disabled; the tap may have no effect.");
+  }
 }
 
 /**
@@ -4140,7 +4151,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               return ensureCheckedResult;
             }
           }
-
+          appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
           const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
             observationScreenSize: observeResult.screenSize,

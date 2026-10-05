@@ -196,6 +196,7 @@ unverified_list="$recheck_dir/unverified-files.txt"
 changed_test_list="$recheck_dir/changed-test-files.txt"
 recheck_summary="$recheck_dir/summary.txt"
 recheck_verdict_file="$recheck_dir/verdict.txt"
+budget_summary="$recheck_dir/unit-timing-budget-summary.md"
 
 : > "$changed_test_list"
 for file in ${changed_test_files[@]+"${changed_test_files[@]}"}; do
@@ -400,11 +401,29 @@ awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
   -v limit_budget="$recheck_budget_seconds" \
   -v verdict_file="$recheck_verdict_file" \
+  -v summary_file="$budget_summary" \
   -v identity_counts_file="$identity_counts" \
   -v recheck_file="$recheck_rows" \
   -v rechecked_file="$rechecked_list" \
   -v unverified_file="$unverified_list" \
   -v recheck_runs="$recheck_runs" '
+BEGIN {
+  printf "# Unit timing budget summary\n\nBudget: %dms; configured re-runs: %d\n", limit_ms, recheck_runs > summary_file
+}
+function record(verdict, measured_median,    values, count, sample_index, label_text) {
+  # HTML-escape the label so testcase text cannot become Markdown structure.
+  label_text = label
+  gsub(/&/, "\\&amp;", label_text)
+  gsub(/</, "\\&lt;", label_text)
+  gsub(/>/, "\\&gt;", label_text)
+  printf "\n<pre>%s</pre>\n\n- First sample: %.2fms\n- Re-run samples: ", label_text, $4 > summary_file
+  count = (key in samples) ? split(samples[key], values, ",") : 0
+  for (sample_index = 1; sample_index <= count; sample_index += 1) {
+    printf "%s%.2fms", (sample_index > 1 ? " / " : ""), values[sample_index] > summary_file
+  }
+  if (!count) printf "none" > summary_file
+  printf "\n- Completed samples: %d of %d\n- Median: %s\n- Verdict: %s\n", runs[key] + 0, recheck_runs, measured_median, verdict > summary_file
+}
 function median(key,    values, count, outer, inner, swap) {
   count = split(samples[key], values, ",")
   for (outer = 1; outer <= count; outer += 1) {
@@ -439,13 +458,18 @@ FILENAME == recheck_file {
   if (!(runkey in seen_run) || $4 + 0 > seen_run[runkey]) {
     seen_run[runkey] = $4 + 0
   }
+  if (!(runkey in runkey_identity)) {
+    run_order[++run_count] = runkey
+  }
   run_rows[runkey] += 1
   runkey_identity[runkey] = key
   next
 }
 {
   if (!recheck_finalized) {
-    for (aggregated_runkey in seen_run) {
+    # Retain report encounter order for diagnostics; median still sorts a copy.
+    for (run_index = 1; run_index <= run_count; run_index += 1) {
+      aggregated_runkey = run_order[run_index]
       aggregated_key = runkey_identity[aggregated_runkey]
       expected_rows = (aggregated_key in identity_count) ? identity_count[aggregated_key] : 1
       if (run_rows[aggregated_runkey] >= expected_rows) {
@@ -463,6 +487,7 @@ FILENAME == recheck_file {
     label = label " #" $5
   }
   if ($1 in unverified) {
+    record("FAIL (could not verify within the recheck budget)", "not computed")
     printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms; file %s). Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.\n", limit_budget, label, $4, $1 > "/dev/stderr"
     fail = 1
     next
@@ -473,28 +498,34 @@ FILENAME == recheck_file {
     # sample would clear a real breach. Fewer samples than configured means the
     # recheck did not happen, so the first measurement stands.
     if (runs[key] < recheck_runs + 0) {
+      record("FAIL (fewer samples than configured)", "not computed")
       printf "Test exceeded %dms: %s (%.2fms; recheck produced %d of %d isolated samples)\n", limit_ms, label, $4, runs[key], recheck_runs > "/dev/stderr"
       fail = 1
       next
     }
     effective = median(key)
     if (effective > limit_ms) {
+      record("FAIL (median over budget)", sprintf("%.2fms", effective))
       printf "Test exceeded %dms: %s (median %.2fms of %d isolated runs)\n", limit_ms, label, effective, runs[key] > "/dev/stderr"
       fail = 1
     } else {
+      record("PASS (cleared)", sprintf("%.2fms", effective))
       printf "Recheck cleared %s: median %.2fms over %d isolated runs (first sample %.2fms).\n", label, effective, runs[key], $4
     }
     next
   }
   if ($1 in rechecked) {
+    record("FAIL (no samples)", "not computed")
     printf "Test exceeded %dms: %s (%.2fms; recheck produced 0 of %d isolated samples)\n", limit_ms, label, $4, recheck_runs > "/dev/stderr"
     fail = 1
     next
   }
+  record("FAIL (not re-runnable; first sample stands)", "not computed")
   printf "Test exceeded %dms: %s (%.2fms)\n", limit_ms, label, $4 > "/dev/stderr"
   fail = 1
 }
 END {
+  printf "\nOverall verdict: %s\n", (fail ? "FAIL" : "PASS") > summary_file
   print (fail ? 1 : 0) > verdict_file
 }
 ' "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
@@ -503,4 +534,15 @@ IFS= read -r recheck_verdict < "$recheck_verdict_file"
 # cat handles partial writes/EAGAIN; losing diagnostic stdout must not change
 # the budget verdict. Keep stderr diagnostics and processing failures visible.
 cat "$recheck_summary" || true
+cat "$budget_summary" || true
+if [[ -n "${BUN_TEST_TIMING_REPORT_DIR:-}" && -d "$BUN_TEST_TIMING_REPORT_DIR" ]]; then
+  cp "$budget_summary" "$BUN_TEST_TIMING_REPORT_DIR/unit-timing-budget-summary.md" || {
+    echo "Could not copy unit timing summary to $BUN_TEST_TIMING_REPORT_DIR." >&2
+  }
+fi
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  cat "$budget_summary" >> "$GITHUB_STEP_SUMMARY" || {
+    echo "Could not append unit timing summary to $GITHUB_STEP_SUMMARY." >&2
+  }
+fi
 exit "$recheck_verdict"

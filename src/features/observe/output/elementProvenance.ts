@@ -1,3 +1,4 @@
+import type { ElementBounds } from "../../../models/ElementBounds";
 import type { Element } from "../../../models/Element";
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
@@ -71,6 +72,8 @@ export interface ElementProvenance {
   exit: number;
   /** Android IME root identity inherited by descendants; never inferred from key labels. */
   keyboardPackage?: string;
+  /** Android accessibility window frame, including the IME navigation strip. */
+  keyboardWindowBounds?: ElementBounds;
 }
 
 /**

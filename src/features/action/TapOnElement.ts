@@ -661,14 +661,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     hierarchy: ViewHierarchyResult,
     { options, screenSize }: TapPointContext,
+    bounds: ElementBounds = element.bounds,
   ): { x: number; y: number } {
     const ime = this.getImeOccluderForTap(element, hierarchy, screenSize);
     if (!ime) {
       return this.resolveTapPoint(element);
     }
-    const { left, top, right, bottom } = element.bounds;
+    const { left, top, right, bottom } = bounds;
     const point = tapPointOutsideIme([left, top, right, bottom], ime.bounds);
-    if (point) {
+    // Check the candidate before dispatch, even if the safe-point helper regresses.
+    // HierarchyHitTest estimates accessible nodes, whose root bounds can extend
+    // above the touch-owning frame; use the captured window rectangle here.
+    const imeBounds = {
+      left: ime.bounds[0],
+      top: ime.bounds[1],
+      right: ime.bounds[2],
+      bottom: ime.bounds[3],
+    };
+    if (point && !pointInTapBounds(point, imeBounds)) {
       return point;
     }
     const elementLabel = element.text ?? element["content-desc"] ?? element["resource-id"];
@@ -1286,10 +1296,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
-    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     if (this.device.platform !== "ios") {
-      return ime ? exposedImePoint : this.geometry.getElementCenter({ bounds: visibleBounds });
+      return ime
+        ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
+        : this.geometry.getElementCenter({ bounds: visibleBounds });
     }
+    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
     const chromeElements = context.chromeElements ?? [target];
     const navClipped = this.navigationTapBounds(

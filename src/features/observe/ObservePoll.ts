@@ -52,6 +52,11 @@ export interface ObservePollOptions {
   /** Embedded gate only: re-extract unverified Android cache hits with a positive floor. */
   requireFreshExtraction?: boolean;
   /**
+   * Resume polling when a finishing capture invalidates a match and budget remains.
+   * Embedded settle opts in; default false preserves standalone terminal behaviour.
+   */
+  resumeOnTerminalMismatch?: boolean;
+  /**
    * Skip the performance audit on every poll (issue #6890 review).
    *
    * Polls already skip the screenshot and the accessibility audit because they
@@ -303,14 +308,71 @@ interface PollFinalizationContext {
   onObservation: Parameters<typeof pollObserveUntil>[3];
 }
 
+type PollFinalizationResult =
+  | { kind: "terminal"; outcome: ObservePollOutcome }
+  | {
+      kind: "resume";
+      outcome: ObservePollOutcome;
+      capture: PollCapture;
+      isAdmissibleEvidence: boolean;
+    };
+
+/** Keep rejected finishing reads out of both the baseline and timeout evidence. */
+function adoptResumedCapture(
+  result: Extract<PollFinalizationResult, { kind: "resume" }>,
+  original: ObserveResult,
+  newestTrustworthyCapture: PollCapture | undefined,
+) {
+  if (result.isAdmissibleEvidence) {
+    return { previous: result.capture.observation, newestTrustworthyCapture: result.capture };
+  }
+  return { previous: original, newestTrustworthyCapture };
+}
+
+function revalidateTerminalMatch(
+  context: PollFinalizationContext,
+  freshnessState: PollFreshnessState,
+  outcome: ObservePollOutcome,
+  original: ObserveResult,
+  capture: PollCapture,
+): PollFinalizationResult | undefined {
+  if (!outcome.stopped) {
+    return undefined;
+  }
+  const { options, timer, start, onObservation } = context;
+  const evidence = options.resumeOnTerminalMismatch
+    ? recordPollFreshness(capture.observation, freshnessState)
+    : { isAdmissibleEvidence: true, isPostInvocation: true };
+  const stillMatched =
+    evidence.isAdmissibleEvidence &&
+    evidence.isPostInvocation &&
+    onObservation(capture.observation, original, outcome.polls);
+  if (stillMatched) {
+    return undefined;
+  }
+  outcome.stopped = false;
+  outcome.terminalReason = "timeout";
+  // Publish the newest full-pipeline capture only on a terminal outcome.
+  // Embedded settle instead resumes with admissible evidence while time remains.
+  if (options.resumeOnTerminalMismatch && timer.now() - start < options.timeoutMs) {
+    return {
+      kind: "resume",
+      outcome,
+      capture,
+      isAdmissibleEvidence: evidence.isAdmissibleEvidence,
+    };
+  }
+  return undefined;
+}
+
 function createPollFinalizer(context: PollFinalizationContext, freshnessState: PollFreshnessState) {
-  const { observeScreen, timer, options, start, onObservation } = context;
+  const { observeScreen, timer, options, start } = context;
   return async (
     outcome: ObservePollOutcome,
     canProcessRecomposition: boolean = true,
     generation?: number,
     cachedAt?: number,
-  ): Promise<ObservePollOutcome> => {
+  ): Promise<PollFinalizationResult> => {
     const refreshed = await reconcileTerminalCapture(
       observeScreen,
       timer,
@@ -330,11 +392,9 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
       generation = refreshed.generation;
       cachedAt = refreshed.cachedAt;
       canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
-      // Return the newest full-pipeline capture even when the stop predicate
-      // ceased to hold; the existing timeout outcome reports that uncertainty.
-      if (outcome.stopped && !onObservation(refreshed.observation, original, outcome.polls)) {
-        outcome.stopped = false;
-        outcome.terminalReason = "timeout";
+      const resume = revalidateTerminalMatch(context, freshnessState, outcome, original, refreshed);
+      if (resume) {
+        return resume;
       }
     }
     throwIfAborted(options.signal);
@@ -356,7 +416,7 @@ function createPollFinalizer(context: PollFinalizationContext, freshnessState: P
     } else {
       await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
     }
-    return outcome;
+    return { kind: "terminal", outcome };
   };
 }
 
@@ -498,18 +558,20 @@ export async function pollObserveUntil(
         lastCapture,
         newestTrustworthyCapture,
       );
-      return finalize(
-        {
-          observation: capture.observation,
-          polls,
-          waitMs: timer.now() - start,
-          stopped: false,
-          terminalReason: "timeout",
-        },
-        canProcessRecomposition,
-        capture.generation,
-        capture.cachedAt,
-      );
+      return (
+        await finalize(
+          {
+            observation: capture.observation,
+            polls,
+            waitMs: timer.now() - start,
+            stopped: false,
+            terminalReason: "timeout",
+          },
+          canProcessRecomposition,
+          capture.generation,
+          capture.cachedAt,
+        )
+      ).outcome;
     }
 
     const minTimestamp = nextPollMinTimestamp(
@@ -546,18 +608,20 @@ export async function pollObserveUntil(
     // wakefulness is independently sampled on this poll and remains terminal
     // immediately, including when no hierarchy is available.
     if (isTerminalScreenOff(observation, isAdmissibleEvidence, isPostInvocation)) {
-      return finalize(
-        {
-          observation,
-          polls,
-          waitMs: timer.now() - start,
-          stopped: false,
-          terminalReason: "screen_off",
-        },
-        isAdmissibleEvidence,
-        cacheGeneration,
-        cacheStartedAt,
-      );
+      return (
+        await finalize(
+          {
+            observation,
+            polls,
+            waitMs: timer.now() - start,
+            stopped: false,
+            terminalReason: "screen_off",
+          },
+          isAdmissibleEvidence,
+          cacheGeneration,
+          cacheStartedAt,
+        )
+      ).outcome;
     }
 
     // Rejected observations are deliberately invisible to stateful predicates:
@@ -565,7 +629,7 @@ export async function pollObserveUntil(
     // could manufacture a two-sample settle from regressed evidence.
     const matched = isAdmissibleEvidence && onObservation(observation, previous, polls);
     if (matched && isPostInvocation) {
-      return finalize(
+      const result = await finalize(
         {
           observation,
           polls,
@@ -577,6 +641,28 @@ export async function pollObserveUntil(
         cacheGeneration,
         cacheStartedAt,
       );
+      if (result.kind === "terminal") {
+        return result.outcome;
+      }
+      polls = result.outcome.polls;
+      lastCapture = result.capture;
+      ({ previous, newestTrustworthyCapture } = adoptResumedCapture(
+        result,
+        observation,
+        newestTrustworthyCapture,
+      ));
+      // Yield at least one timer tick on retries, even with pollMs: 0, so
+      // repeated terminal contradictions cannot spin without spending budget.
+      await awaitWhileRequestIsLive(
+        timer.sleep(
+          Math.min(
+            Math.max(1, options.pollMs),
+            Math.max(0, options.timeoutMs - (timer.now() - start)),
+          ),
+        ),
+        options.signal,
+      );
+      continue;
     }
 
     if (isAdmissibleEvidence) {
@@ -588,18 +674,20 @@ export async function pollObserveUntil(
         capture,
         newestTrustworthyCapture,
       );
-      return finalize(
-        {
-          observation: timeoutCapture.observation,
-          polls,
-          waitMs: timer.now() - start,
-          stopped: false,
-          terminalReason: "timeout",
-        },
-        canProcessRecomposition,
-        timeoutCapture.generation,
-        timeoutCapture.cachedAt,
-      );
+      return (
+        await finalize(
+          {
+            observation: timeoutCapture.observation,
+            polls,
+            waitMs: timer.now() - start,
+            stopped: false,
+            terminalReason: "timeout",
+          },
+          canProcessRecomposition,
+          timeoutCapture.generation,
+          timeoutCapture.cachedAt,
+        )
+      ).outcome;
     }
 
     await awaitWhileRequestIsLive(

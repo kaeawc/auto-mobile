@@ -51,6 +51,24 @@ function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): 
 }
 
 describe("RealSettleObserve", () => {
+  test("standalone finishing mismatch preserves the early timeout and finishing capture", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const node = { "resource-id": "screen", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const a = obs({ ...node, text: "A" }, { updatedAt: 20 });
+    const b = obs({ ...node, text: "B" }, { updatedAt: 30 });
+    fake.setObserveSequence([obs({ ...node, text: "A" }, { updatedAt: 10 }), a, b]);
+    fake.setDeferredBackStackDisagreement(true);
+    const result = await new RealSettleObserve(fake, timer).execute({ timeoutMs: 100, pollMs: 10 });
+    expect(result.settled).toBe(false);
+    expect(result.observation).toBe(b);
+    expect(result.polls).toBe(3);
+    expect(result.waitMs).toBe(10);
+    expect(timer.now()).toBe(10);
+    expect(fake.getCacheObserveResultObservations()).toEqual([b]);
+  });
+
   test("converges and returns only the final stable snapshot (never the transitions)", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

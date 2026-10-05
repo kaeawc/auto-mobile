@@ -92,6 +92,8 @@ export async function settleEmbeddedObservation(
       skipWaitForFresh: true,
       // Each stable read must be independent, even inside the cache serve window (#9579).
       requireFreshExtraction: true,
+      // A finishing read can catch another transition; use the remaining settle budget (#9591).
+      resumeOnTerminalMismatch: true,
       // The poll already drops the screenshot and the accessibility audit as
       // intermediate state; the performance audit has to go too. It drives up
       // to three synthetic touches plus ADB/database work that honours neither

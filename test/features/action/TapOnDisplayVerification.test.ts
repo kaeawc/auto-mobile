@@ -209,6 +209,38 @@ const stabilityError =
   "Android tap aborted: could not re-find the target in the accessibility hierarchy with stable bounds after repeated refreshes (refusing tap using pre-observe coordinates). The UI may still be updating (list, keyboard, loading overlay, or animation).";
 
 describe("tapOn display verification", () => {
+  test.each(["settle-throws", "throws", "settle-transition"] as const)(
+    "confirmed CtrlProxy tap preserves delivery after %s",
+    async (outcome) => {
+      const h = harness(true);
+      let postReads = 0;
+      h.observe.setObserveResult(() => {
+        if (h.dispatches.length > 0) {
+          postReads++;
+          if (outcome === "throws" || postReads > 1) {
+            if (outcome === "settle-transition") {
+              h.transitions.transition();
+            }
+            throw new Error("display post-read unavailable");
+          }
+        }
+        return h.observation();
+      });
+      const result = await h.execute({});
+      expect(h.dispatches).toHaveLength(1);
+      if (outcome === "throws") {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Do not retry automatically");
+        expect(result.observation).toBeUndefined();
+      } else {
+        expect(result.success).toBe(true);
+        expect(result.observation?.viewHierarchy?.hierarchy).toEqual(hierarchy().hierarchy);
+        expect(result.observation?.settled).toBe(false);
+        expect(result.observation?.freshness?.warning).toContain("display settle");
+      }
+    },
+  );
+
   for (const ctrlProxy of [true, false]) {
     const route = ctrlProxy ? "CtrlProxy" : "adb input -d";
     for (const option of ["retryIfNoChange", "ensureTap"] as const) {

@@ -1674,10 +1674,11 @@ export class TapAnyElement extends BaseVisualChange {
         },
       );
 
-      targetDisplay?.assertCurrent();
+      this.checkPostActionDisplay(result, targetDisplay?.assertCurrent, signal);
       return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
+      this.rethrowObservationAbort(error, signal, options.display !== undefined);
       const errorMsg = errorMessage(error);
       logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
       if (error instanceof StaleDisplayError) {

@@ -12,7 +12,12 @@ import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { staleDisplayError } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
-import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../observe/interfaces/ObserveScreen";
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
+import { isAdoptableCapture } from "../observe/isAdoptableCapture";
 import { Window } from "../observe/Window";
 import {
   clearResolvedHomePackageCache,
@@ -684,6 +689,178 @@ export class BaseVisualChange {
     return results[0] ?? { screenChanged: false, basis: "insufficient observation data" };
   }
 
+  private async capturePostActionObservation(
+    observeScreen: ObserveScreen,
+    options: ObserveScreenExecuteOptions,
+    shouldRetry: (observation: ObserveResult) => boolean,
+    blockResult: { success?: boolean; skipped?: unknown; wasAlreadyFocused?: boolean },
+  ): Promise<{ observation: ObserveResult; readFailed: boolean }> {
+    const perf = options.perf ?? new NoOpPerformanceTracker();
+    const retryBackoff = sequenceBackoff(FINAL_OBSERVATION_RETRY_BACKOFF_MS);
+    let latestObservation: ObserveResult | undefined;
+    let trustworthyObservation: ObserveResult | undefined;
+    const read = async () => {
+      const observation = await observeScreen.execute(options);
+      if (options.display !== undefined) {
+        throwIfAborted(options.signal);
+      }
+      if (
+        options.display !== undefined &&
+        isAdoptableCapture(trustworthyObservation ?? observation, observation, true)
+      ) {
+        trustworthyObservation = observation;
+      }
+      return observation;
+    };
+    try {
+      perf.serial("finalObserve");
+      latestObservation = await read();
+      perf.end();
+      for (
+        let attempt = 0;
+        attempt < FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS && shouldRetry(latestObservation);
+        attempt++
+      ) {
+        const delayMs = retryBackoff.delayForAttempt(attempt + 1);
+        logger.info(
+          `[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS})`,
+        );
+        await this.timer.sleep(delayMs);
+        perf.serial(`finalObserve_retry_${attempt + 1}`);
+        latestObservation = await read();
+        perf.end();
+      }
+    } catch (error) {
+      return this.recoverPostActionObservation(
+        error,
+        trustworthyObservation ?? latestObservation,
+        options,
+        blockResult,
+      );
+    }
+    return { observation: latestObservation, readFailed: false };
+  }
+
+  private recoverPostActionObservation(
+    error: unknown,
+    observation: ObserveResult | undefined,
+    options: ObserveScreenExecuteOptions,
+    blockResult: { success?: boolean; skipped?: unknown; wasAlreadyFocused?: boolean },
+  ): { observation: ObserveResult; readFailed: boolean } {
+    if (options.display === undefined) {
+      throw error;
+    }
+    throwIfAborted(options.signal);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    if (observation && isAdoptableCapture(observation, observation, true)) {
+      return {
+        observation: this.notePostActionReadFailure(
+          observation,
+          "observation retry",
+          errorMessage(error),
+          error,
+        ),
+        readFailed: true,
+      };
+    }
+    // A refused or skipped block never delivered a gesture.
+    if (blockResult.success === false || blockResult.skipped || blockResult.wasAlreadyFocused) {
+      throw error;
+    }
+    throw new DispatchedObservationError(error);
+  }
+
+  private notePostActionReadFailure(
+    observation: ObserveResult,
+    phase: string,
+    reason: string,
+    error?: unknown,
+  ): ObserveResult {
+    const warning = `Post-action ${phase} failed: ${reason}; retaining the earlier observation`;
+    logger.warn(`[BaseVisualChange] ${warning}`, error);
+    return {
+      ...observation,
+      settled: false,
+      freshness: {
+        ...observation.freshness,
+        isFresh: observation.freshness?.isFresh ?? true,
+        warning: [observation.freshness?.warning, warning].filter(Boolean).join("; "),
+      },
+    };
+  }
+
+  protected rethrowObservationAbort(error: unknown, signal?: AbortSignal, enabled = true): void {
+    if (!enabled) {
+      return;
+    }
+    throwIfAborted(signal);
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+  }
+
+  /** Validate a completed gesture without turning its capture into a retryable refusal. */
+  protected checkPostActionDisplay(
+    result: { observation?: ObserveResult },
+    assertCurrent: (() => void) | undefined,
+    signal?: AbortSignal,
+  ): boolean {
+    try {
+      assertCurrent?.();
+      return true;
+    } catch (error) {
+      throwIfAborted(signal);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      if (
+        !result.observation ||
+        !isAdoptableCapture(result.observation, result.observation, true)
+      ) {
+        throw new DispatchedObservationError(error);
+      }
+      result.observation = this.notePostActionReadFailure(
+        result.observation,
+        "display settle validation",
+        errorMessage(error),
+        error,
+      );
+      return false;
+    }
+  }
+
+  private async settleDisplayObservation(
+    observation: ObserveResult,
+    observeScreen: ObserveScreen,
+    options: { display: string; signal?: AbortSignal },
+  ): Promise<ObserveResult> {
+    try {
+      const settled = await new RealSettleObserve(observeScreen, this.timer).execute({
+        ...options,
+        initialMinTimestampMs: hierarchyUpdatedAtToMillis(observation.viewHierarchy),
+        skipPerformanceAudit: true,
+        skipRecompositionTracking: true,
+      });
+      throwIfAborted(options.signal);
+      return isAdoptableCapture(observation, settled.observation, true)
+        ? settled.observation
+        : this.notePostActionReadFailure(observation, "display settle", "unusable settle capture");
+    } catch (error) {
+      throwIfAborted(options.signal);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      return this.notePostActionReadFailure(
+        observation,
+        "display settle",
+        errorMessage(error),
+        error,
+      );
+    }
+  }
+
   private async takeObservation(
     blockResult: any,
     previousObserveResult: ObserveResult | null,
@@ -707,25 +884,7 @@ export class BaseVisualChange {
     // Use actionStartTime as minTimestamp to ensure we get data captured after the action
     // This prevents returning stale cached data from before the action was executed
     const minTimestamp = options.actionStartTime ?? 0;
-    const retryBackoff = sequenceBackoff(FINAL_OBSERVATION_RETRY_BACKOFF_MS);
-    const maxRetryAttempts = FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS;
     const previousHash = hierarchyFingerprint(previousObserveResult?.viewHierarchy);
-
-    perf.serial("finalObserve");
-    // Capture fresh data that reflects the action that just completed.
-    let latestObservation = await observeScreen.execute({
-      freshness: "fresh",
-      display: options.display,
-      queryOptions: options.queryOptions,
-      perf,
-      minTimestamp,
-      signal: options.signal,
-      // Retries collect hierarchy only. If enabled, visual evidence is captured
-      // once from the final observation below.
-      skipScreenshot: true,
-      skipAccessibilityAudit: true,
-    });
-    perf.end();
 
     const shouldRetry = (observation: ObserveResult): boolean => {
       // Don't retry if the observation has an error (service unavailable, connection failed, etc.)
@@ -745,14 +904,9 @@ export class BaseVisualChange {
       return !!previousHash && !!currentHash && previousHash === currentHash;
     };
 
-    for (let attempt = 0; attempt < maxRetryAttempts && shouldRetry(latestObservation); attempt++) {
-      const delayMs = retryBackoff.delayForAttempt(attempt + 1);
-      logger.info(
-        `[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetryAttempts})`,
-      );
-      await this.timer.sleep(delayMs);
-      perf.serial(`finalObserve_retry_${attempt + 1}`);
-      latestObservation = await observeScreen.execute({
+    const captured = await this.capturePostActionObservation(
+      observeScreen,
+      {
         freshness: "fresh",
         display: options.display,
         queryOptions: options.queryOptions,
@@ -761,11 +915,13 @@ export class BaseVisualChange {
         signal: options.signal,
         skipScreenshot: true,
         skipAccessibilityAudit: true,
-      });
-      perf.end();
-    }
+      },
+      shouldRetry,
+      blockResult,
+    );
+    let latestObservation = captured.observation;
 
-    if (shouldRetry(latestObservation)) {
+    if (!captured.readFailed && shouldRetry(latestObservation)) {
       const warning =
         minTimestamp > 0
           ? "Observation may be stale after interaction"
@@ -782,17 +938,14 @@ export class BaseVisualChange {
 
     if (
       options.display !== undefined &&
+      !captured.readFailed &&
       latestObservation.viewHierarchy &&
       !latestObservation.viewHierarchy.hierarchy.error
     ) {
-      const settled = await new RealSettleObserve(observeScreen, this.timer).execute({
+      latestObservation = await this.settleDisplayObservation(latestObservation, observeScreen, {
         display: options.display,
         signal: options.signal,
-        initialMinTimestampMs: hierarchyUpdatedAtToMillis(latestObservation.viewHierarchy),
-        skipPerformanceAudit: true,
-        skipRecompositionTracking: true,
       });
-      latestObservation = settled.observation;
     }
 
     if (!options.deferPostActionScreenshot) {

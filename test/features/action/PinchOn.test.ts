@@ -115,6 +115,67 @@ describe("PinchOn", () => {
     managerSpy?.mockRestore();
   });
 
+  test.each(["settle-throws", "throws"] as const)(
+    "confirmed display pinch preserves delivery after %s",
+    async (outcome) => {
+      const display = {
+        key: "inner",
+        role: "inner" as const,
+        posture: "unknown" as const,
+        generation: 0,
+      };
+      const before = { ...createObserveResult(), display, displayRevision: 0 };
+      before.viewHierarchy!.displayId = 0;
+      const destination = {
+        ...before,
+        viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 0 },
+      };
+      fakeAdb.setCommandResponse("cmd display get-displays", {
+        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 1080 x 1920}',
+        stderr: "",
+      });
+      fakeA11yService.setSupportedCommands(["gesture_display_id_v1"]);
+      const action = new PinchOn(
+        {
+          ...device,
+          displays: {
+            panels: [{ key: "inner", role: "inner", sizePx: before.screenSize }],
+            postures: [],
+          },
+        },
+        fakeAdb,
+        {
+          timer: fakeTimer,
+          capture: new FakeHierarchyCapture(() => before.viewHierarchy!),
+          lastRenderedObservation: () => before,
+        },
+      );
+      action.observeScreen = fakeObserveScreen;
+      let postReads = 0;
+      fakeObserveScreen.setObserveResult(() => {
+        if (!fakeA11yService.getPinchHistory().length) {
+          return before;
+        }
+        postReads++;
+        if (outcome === "throws" || postReads > 1) {
+          throw new Error("display post-read unavailable");
+        }
+        return destination;
+      });
+      const result = await action.execute({ direction: "in", display: "inner", autoTarget: false });
+      expect(fakeA11yService.getPinchHistory()).toHaveLength(1);
+      if (outcome === "throws") {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Do not retry automatically");
+        expect(result.observation).toBeUndefined();
+      } else {
+        expect(result.success).toBe(true);
+        expect(result.observation?.viewHierarchy).toEqual(destination.viewHierarchy);
+        expect(result.observation?.freshness?.warning).toContain("display settle");
+      }
+    },
+  );
+
   test.each([0, -1, 1.5, 10001])(
     "rejects invalid duration %s before dispatch",
     async (duration) => {

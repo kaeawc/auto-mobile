@@ -1,3 +1,4 @@
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
@@ -208,36 +209,50 @@ export class PinchOn extends BaseVisualChange {
       return await this.performPinch(options, { perf, progress, signal, displayTarget });
     } catch (error) {
       perf.end();
-      throwIfAborted(signal);
-      logger.warn(`Pinch failed: ${errorMessage(error)}`, error);
-      if (error instanceof StaleDisplayError) {
-        return withStaleDisplay(this.createErrorResult(error.message, options), error);
-      }
-      const baseErrorMessage = errorMessage(error);
-      let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
-
-      if (this.visionConfig.enabled && options.container) {
-        throwIfAborted(signal);
-        const searchCriteria = {
-          text: options.container.text,
-          resourceId: options.container.elementId,
-          description: "Container element for pinching",
-        };
-        const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
-        const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
-        finalErrorMessage = await getVisionEnrichedError(
-          this.screenshotCapturer,
-          viewHierarchy,
-          searchCriteria,
-          this.visionConfig,
-          finalErrorMessage,
-          undefined,
-          this.visionAnalyzer,
-        );
-      }
-
-      return this.createErrorResult(finalErrorMessage, options);
+      return this.pinchFailure(error, options, signal);
     }
+  }
+
+  private async pinchFailure(
+    error: unknown,
+    options: PinchOnOptions,
+    signal?: AbortSignal,
+  ): Promise<PinchOnResult> {
+    throwIfAborted(signal);
+    if (options.display !== undefined && error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    logger.warn(`Pinch failed: ${errorMessage(error)}`, error);
+    if (error instanceof DispatchedObservationError) {
+      return withStaleDisplay(this.createErrorResult(error.message, options), error);
+    }
+    if (error instanceof StaleDisplayError) {
+      return withStaleDisplay(this.createErrorResult(error.message, options), error);
+    }
+    const baseErrorMessage = errorMessage(error);
+    let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
+
+    if (this.visionConfig.enabled && options.container) {
+      throwIfAborted(signal);
+      const searchCriteria = {
+        text: options.container.text,
+        resourceId: options.container.elementId,
+        description: "Container element for pinching",
+      };
+      const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
+      const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
+      finalErrorMessage = await getVisionEnrichedError(
+        this.screenshotCapturer,
+        viewHierarchy,
+        searchCriteria,
+        this.visionConfig,
+        finalErrorMessage,
+        undefined,
+        this.visionAnalyzer,
+      );
+    }
+
+    return this.createErrorResult(finalErrorMessage, options);
   }
 
   private validateDuration(duration: PinchOnOptions["duration"]): void {

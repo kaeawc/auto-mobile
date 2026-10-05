@@ -302,17 +302,30 @@ for (const route of ["ctrlproxy", "adb"] as const) {
 }
 for (const route of ["ctrlproxy", "adb"] as const) {
   for (const capture of [3, 4, 5]) {
-    test(`real post-action pipeline refuses wrong panel at capture ${capture} via ${route}`, async () => {
-      const h = harness({ route, foundAfter: Infinity });
+    test(`real post-action pipeline preserves delivery after wrong panel at capture ${capture} via ${route}`, async () => {
+      const h = harness({ route, foundAfter: 1 });
       h.useRealObservedInteraction();
       h.onObserve((count) => {
         h.wrongPanel(count === capture);
       });
       const result = await h.action.execute(search);
-      expect(result.success).toBe(false);
-      expect(result.staleDisplay?.retry).toBe("observe");
+      if (capture === 3) {
+        // The first post-dispatch read failed: this is delivery, not a safe refusal.
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("gesture was dispatched");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(result.observation).toBeUndefined();
+        expect(result.staleDisplay?.retry).toBe("observe");
+        expect(h.observe.getExecuteCallCount()).toBe(capture);
+      } else {
+        // A later settle read cannot erase the good selected-panel capture.
+        expect(result).toMatchObject({
+          success: true,
+          found: true,
+          observation: { display: { key: "external" } },
+        });
+      }
       expect(h.legs()).toHaveLength(1);
-      expect(h.observe.getExecuteCallCount()).toBe(capture);
     });
   }
 }

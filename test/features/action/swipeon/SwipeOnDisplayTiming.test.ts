@@ -1,3 +1,4 @@
+import { BaseVisualChange } from "../../../../src/features/action/BaseVisualChange";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
 import {
@@ -454,3 +455,37 @@ test("action preflight uses the injected geometry preset duration", async () => 
   expect(h.commands()).toEqual([]);
   expect(h.gesture.getSwipeCalls()).toEqual([]);
 });
+
+test.each(["settle-throws", "throws"] as const)(
+  "confirmed display swipe preserves delivery after %s",
+  async (outcome) => {
+    const h = harness();
+    h.action.observedInteraction = BaseVisualChange.prototype.observedInteraction;
+    const destination = {
+      ...observation,
+      viewHierarchy: { hierarchy: { node: { text: "Destination" } }, displayId: 2 },
+    };
+    let postReads = 0;
+    h.observe.setObserveResult(() => {
+      if (!h.legs().length) {
+        return observation;
+      }
+      postReads++;
+      if (outcome === "throws" || postReads > 1) {
+        throw new Error("display post-read unavailable");
+      }
+      return destination;
+    });
+    const result = await h.action.execute({ direction: "up", display: "external" });
+    expect(h.legs()).toHaveLength(1);
+    if (outcome === "throws") {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Do not retry automatically");
+      expect(result.observation).toBeUndefined();
+    } else {
+      expect(result.success).toBe(true);
+      expect(result.observation?.viewHierarchy).toEqual(destination.viewHierarchy);
+      expect(result.observation?.freshness?.warning).toContain("display settle");
+    }
+  },
+);

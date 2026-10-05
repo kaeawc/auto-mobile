@@ -717,6 +717,9 @@ export class SwipeOn extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
+        if (error instanceof Error && error.name === "AbortError") {
+          throw error;
+        }
         logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
         return withStaleDisplay(this.createErrorResult(errorMessage(error)), error);
       }

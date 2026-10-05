@@ -271,6 +271,9 @@ export class DragAndDrop extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
+        if (error instanceof Error && error.name === "AbortError") {
+          throw error;
+        }
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
         return withStaleDisplay(
           { success: false, duration: 0, distance: 0, error: errorMessage(error) },

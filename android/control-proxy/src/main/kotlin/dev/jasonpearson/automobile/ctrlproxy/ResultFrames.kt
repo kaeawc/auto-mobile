@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.OverlayEvent
 import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
@@ -141,3 +142,6 @@ internal fun overlayResultFrame(requestId: String?, success: Boolean, error: Str
       error = error,
     )
   )
+
+internal fun overlayEventFrame(event: OverlayEvent): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(event)

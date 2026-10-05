@@ -30,15 +30,25 @@ data class OverlayRenderNode(
   val safeArea: OverlaySafeAreaPadding?,
   val iconName: String? = null,
   val children: List<OverlayRenderNode> = emptyList(),
+  val source: OverlayNode? = null,
+  val identity: String = "root",
+  val page: Int = 0,
+  val selection: Int = 0,
+  val sheetOpen: Boolean = false,
 )
 
 data class OverlayRenderModel(
   val placement: OverlayPlacement,
   val opacityPercent: Int,
   val root: OverlayRenderNode,
+  val hasTextField: Boolean = false,
 ) {
   fun request() =
-    InteractiveOverlayRequest(placement = placement, opacityPercent = opacityPercent) {
+    InteractiveOverlayRequest(
+      placement = placement,
+      opacityPercent = opacityPercent,
+      hasTextField = hasTextField,
+    ) {
       OverlaySpecContent(root)
     }
 }
@@ -70,20 +80,33 @@ private fun overlayChildren(node: OverlayNode): List<OverlayNode> =
     else -> emptyList()
   }
 
-fun mapOverlaySpec(spec: OverlaySpec): OverlayRenderModel {
+fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): OverlayRenderModel {
   guardOverlayTree(spec.root)
   return OverlayRenderModel(
     mapOverlayPlacement(spec.window.placement),
     spec.window.opacity,
-    mapOverlayNode(spec.root, spec.state.orEmpty(), "root"),
+    mapOverlayNode(spec.root, spec.state.orEmpty(), pages, "root"),
+    hasOverlayTextField(spec.root),
   )
 }
 
 private fun mapOverlayNode(
   node: OverlayNode,
   state: Map<String, OverlayScalar>,
+  pages: Map<String, Int>,
   path: String,
+  pagerContext: Pair<Int, Int>? = null,
 ): OverlayRenderNode {
+  val context =
+    if (node is OverlayPagerNode) (pages[node.id] ?: 0) to node.children.size else pagerContext
+  val localState =
+    if (context == null) state
+    else
+      state +
+        mapOf(
+          "page" to OverlayScalar.Numeric((context.first + 1).toDouble()),
+          "pageCount" to OverlayScalar.Numeric(context.second.toDouble()),
+        )
   requireOverlayRenderSizes(node.style, path)
   val role =
     when (node) {
@@ -103,38 +126,70 @@ private fun mapOverlayNode(
     }
   val text =
     when (node) {
-      is OverlayTextNode -> interpolateOverlayText(node.text, state)
+      is OverlayTextNode -> interpolateOverlayText(node.text, localState, context != null)
+      is OverlayTextFieldNode -> (state[node.stateKey] as? OverlayScalar.Text)?.value.orEmpty()
       is OverlayIconNode -> node.name
       else -> ""
     }
-  // Interactive nodes are empty semantic placeholders; their descendants/actions belong to #9300.
   val children =
-    if (node is OverlayBoxNode || node is OverlayRowNode || node is OverlayColumnNode)
-      overlayChildren(node).mapIndexed { index, child ->
-        mapOverlayNode(child, state, "$path.children[$index]")
-      }
-    else emptyList()
+    overlayDescendants(node).mapIndexed { index, child ->
+      val childPath =
+        if (node is OverlayScrollNode || node is OverlayBottomSheetNode) "$path.child"
+        else "$path.children[$index]"
+      mapOverlayNode(child, state, pages, childPath, context)
+    }
+  val pager =
+    when (node) {
+      is OverlayTabBarNode -> node.pager
+      is OverlayBottomNavNode -> node.pager
+      else -> null
+    }
+  val stateKey =
+    when (node) {
+      is OverlayTabBarNode -> node.stateKey
+      is OverlayBottomNavNode -> node.stateKey
+      else -> null
+    }
+  val items =
+    when (node) {
+      is OverlayTabBarNode -> node.items
+      is OverlayBottomNavNode -> node.items
+      else -> emptyList()
+    }
+  val selected =
+    pager?.let { pages[it] } ?: (state[stateKey] as? OverlayScalar.Numeric)?.value?.toInt() ?: 0
   return OverlayRenderNode(
     role,
     text,
     node.testTag,
-    node.visibleWhen?.let { state[it.key] == it.equals } ?: true,
+    node.visibleWhen?.let { localState[it.key] == it.equals } ?: true,
     mapOverlayStyle(node.style ?: OverlayStyle()),
     node.safeAreaPadding,
     (node as? OverlayIconNode)?.name,
     children,
+    node,
+    path,
+    (node as? OverlayPagerNode)?.let { pages[it.id] } ?: 0,
+    selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
+    (node as? OverlayBottomSheetNode)?.let {
+      state[it.openWhen.key] == OverlayScalar.BooleanValue(it.openWhen.equals)
+    } ?: false,
   )
 }
 
 private val interpolationToken = Regex("\\{([A-Za-z_][A-Za-z0-9_]*)}")
 
 /**
- * Unknown tokens and pager-owned page/pageCount remain literal, even if present in static state.
+ * Pager placeholders use one-based page labels in the nearest pager; outside it they stay literal.
  */
-fun interpolateOverlayText(text: String, state: Map<String, OverlayScalar>): String =
+fun interpolateOverlayText(
+  text: String,
+  state: Map<String, OverlayScalar>,
+  inPager: Boolean = false,
+): String =
   interpolationToken.replace(text) { match ->
     val key = match.groupValues[1]
-    if (key == "page" || key == "pageCount") match.value
+    if (!inPager && (key == "page" || key == "pageCount")) match.value
     else
       when (val value = state[key]) {
         is OverlayScalar.Text -> value.value
@@ -231,4 +286,17 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "$path.style.$key: Size cannot be represented in Compose dp"
     }
   }
+}
+
+private fun hasOverlayTextField(node: OverlayNode): Boolean =
+  node is OverlayTextFieldNode || overlayDescendants(node).any(::hasOverlayTextField)
+
+/** Open sheet nodes are rendered last so their modal scrim covers the entire overlay window. */
+fun modalOverlaySheets(node: OverlayRenderNode): List<OverlayRenderNode> {
+  if (!node.visible) return emptyList()
+  if (node.role == "bottomSheet" && !node.sheetOpen) return emptyList()
+  val children =
+    if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
+  return (if (node.role == "bottomSheet") listOf(node) else emptyList()) +
+    children.flatMap(::modalOverlaySheets)
 }

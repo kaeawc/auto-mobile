@@ -229,7 +229,7 @@ class OverlayRenderModelTest {
   }
 
   @Test
-  fun `interactive nodes are empty semantic placeholders and still count toward limits`() {
+  fun `interactive nodes retain typed configuration actions and children`() {
     val nodes =
       listOf(
         OverlayTextFieldNode(stateKey = "name"),
@@ -243,7 +243,24 @@ class OverlayRenderModelTest {
           detents = listOf(OverlayDetent.Full),
         ),
       )
-    for (node in nodes) assertTrue(mapOverlaySpec(spec(node)).root.children.isEmpty())
+    for (node in nodes) {
+      val model = mapOverlaySpec(spec(node))
+      assertEquals(node, model.root.source)
+      assertEquals(overlayDescendants(node).size, model.root.children.size)
+      assertEquals(node is OverlayTextFieldNode, model.hasTextField)
+      assertEquals(model.hasTextField, model.request().hasTextField)
+    }
+    val actions = listOf(OverlayEmitAction("tap"))
+    val scroll =
+      OverlayScrollNode(
+        axis = "horizontal",
+        onTap = actions,
+        child = OverlayTextFieldNode(stateKey = "name"),
+      )
+    val model = mapOverlaySpec(spec(scroll))
+    assertTrue(model.request().hasTextField)
+    assertEquals(actions, model.root.source?.onTap)
+    assertEquals("horizontal", (model.root.source as OverlayScrollNode).axis)
   }
 
   @Test

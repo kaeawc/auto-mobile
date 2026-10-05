@@ -24,13 +24,19 @@ class OverlayController(
   private val host: InteractiveOverlayHost,
   private val sink: OverlayResultSink,
   private val onDismissed: suspend () -> Unit = {},
+  private val eventSink: OverlayEventSink = OverlayEventSink {},
+  private val clock: () -> Long = System::currentTimeMillis,
   private val render: (OverlaySpec) -> InteractiveOverlayRequest = { mapOverlaySpec(it).request() },
 ) {
   val isShowing: Boolean
     get() = host.isShowing
 
   private val mutex = Mutex()
-  private var active: OverlaySpec? = null
+  internal var activeRuntime: OverlayRuntime? = null
+    private set
+
+  // Controller lifetime ledger: same-id show/dismiss/re-show and reconnect never rewind sequences.
+  private val sequences = mutableMapOf<String, Long>()
   private var destroyed = false
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
@@ -41,7 +47,7 @@ class OverlayController(
 
   suspend fun show(requestId: String?, spec: OverlaySpec) =
     execute(requestId) {
-      display(spec, replace = active != null)
+      display(spec, replace = activeRuntime != null)
     }
 
   suspend fun update(
@@ -51,40 +57,90 @@ class OverlayController(
     state: Map<String, OverlayScalar>?,
   ) =
     execute(requestId) {
-      val current = active
+      val current = activeRuntime?.current?.spec
       require(current?.id == id) { "Unknown overlay id: $id" }
       require((spec == null) != (state == null)) { "Exactly one of spec or state is required" }
       require(spec == null || spec.id == id) { "spec.id: Must match overlay id $id" }
-      display(
-        spec ?: checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()),
-        replace = true,
-      )
+      if (spec != null) display(spec, replace = true, preservePages = true)
+      else {
+        val patched =
+          validate(checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()))
+        render(patched) // Validate Compose sizes too, before mutating the live runtime.
+        activeRuntime?.replace(patched)
+      }
     }
 
   suspend fun dismiss(requestId: String?, id: String?, all: Boolean?) =
     execute(requestId) {
-      require(all == true || (id != null && active?.id == id)) { "Unknown overlay id: $id" }
-      check(host.dismiss()) { "Overlay host failed to dismiss window" }
-      active = null
-      onDismissed()
-    }
-
-  private suspend fun display(spec: OverlaySpec, replace: Boolean) {
-    // Guard before serialization too: programmatically constructed trees cannot overflow the
-    // encoder.
-    guardOverlayTree(spec.root)
-    when (val validation = OverlaySpecValidator.validate(json.encodeToString(spec))) {
-      is OverlaySpecValidation.Failure ->
-        error("${validation.error.path}: ${validation.error.message}")
-      is OverlaySpecValidation.Success -> {
-        val request = render(validation.spec)
-        check(if (replace) host.replace(request) else host.show(request)) {
-          "Overlay host failed to render window"
-        }
-        active = validation.spec
+      require(all == true || (id != null && activeRuntime?.current?.spec?.id == id)) {
+        "Unknown overlay id: $id"
+      }
+      val runtime = activeRuntime
+      if (runtime != null) runtime.dismiss()
+      else {
+        check(host.dismiss()) { "Overlay host failed to dismiss window" }
+        onDismissed()
       }
     }
+
+  private fun validate(spec: OverlaySpec): OverlaySpec {
+    guardOverlayTree(spec.root)
+    return when (val validation = OverlaySpecValidator.validate(json.encodeToString(spec))) {
+      is OverlaySpecValidation.Failure ->
+        error("${validation.error.path}: ${validation.error.message}")
+      is OverlaySpecValidation.Success -> validation.spec
+    }
   }
+
+  private suspend fun display(spec: OverlaySpec, replace: Boolean, preservePages: Boolean = false) {
+    val validated = validate(spec)
+    val request = render(validated)
+    val previous = activeRuntime
+    val runtime =
+      OverlayRuntime(
+        validated,
+        eventSink,
+        clock,
+        nextSequence = {
+          val next = (sequences[validated.id] ?: 0L) + 1
+          sequences[validated.id] = next
+          next
+        },
+        requestDismiss = { removeActive() },
+        previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
+      )
+    val interactive =
+      request.copy(
+        content = {
+          OverlayRuntimeContent(runtime) { interaction -> interact(runtime, interaction) }
+        }
+      )
+    check(if (replace) host.replace(interactive) else host.show(interactive)) {
+      "Overlay host failed to render window"
+    }
+    previous?.close()
+    activeRuntime = runtime
+  }
+
+  /** Shared by dismiss_overlay and the dismiss action, under the controller mutex. */
+  private suspend fun removeActive(): Boolean {
+    if (!host.dismiss()) return false
+    activeRuntime = null
+    onDismissed()
+    return true
+  }
+
+  internal suspend fun interact(runtime: OverlayRuntime, interaction: OverlayInteraction) =
+    mutex.withLock {
+      if (destroyed || runtime !== activeRuntime) return@withLock
+      try {
+        runtime.handle(interaction)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w("OverlayController", "Overlay interaction failed", error)
+      }
+    }
 
   private suspend fun execute(requestId: String?, action: suspend () -> Unit) = mutex.withLock {
     val error =
@@ -104,9 +160,10 @@ class OverlayController(
   /** Run from a teardown scope independent of the cancelled service scope; no blocking join. */
   suspend fun destroy() = mutex.withLock {
     destroyed = true
+    activeRuntime?.close()
     try {
       if (host.destroy()) {
-        active = null
+        activeRuntime = null
         onDismissed()
       } else Log.w("OverlayController", "Overlay host failed to destroy window")
     } catch (error: CancellationException) {

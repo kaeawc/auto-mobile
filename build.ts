@@ -11,7 +11,7 @@ import { copyDatabaseRuntimeFiles } from "./scripts/build/copy-db-runtime-files"
 import {
   optimizeSourceMap,
   selectSourceMaps,
-  STRIP_SOURCES_ENV,
+  shouldStripSources,
   type SourceMap,
 } from "./scripts/build/optimize-sourcemap";
 import { stripToolOutputSchemas } from "./scripts/build/strip-tool-output-schemas";
@@ -73,7 +73,7 @@ console.log(`✓ Built ${result.outputs.length} files`);
 
 const sourcemapOptions = {
   includeDependencySources: process.env.AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS === "true",
-  stripSources: process.env[STRIP_SOURCES_ENV] === "true",
+  stripSources: shouldStripSources(process.env),
 };
 for (const { path: sourcemapPath, options } of selectSourceMaps(
   result.outputs.map((output) => output.path),

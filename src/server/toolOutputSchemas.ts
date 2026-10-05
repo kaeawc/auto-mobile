@@ -560,9 +560,10 @@ export const freshnessSchema = z
   })
   .passthrough();
 
+// Unavailable Android status reads return service + reason without asserting enabled.
 export const accessibilityStateSchema = z
   .object({
-    enabled: z.boolean(),
+    enabled: z.boolean().optional(),
     service: z.enum(["talkback", "voiceover", "unknown"]),
     warning: z.string().optional(),
     blockingPrompt: z

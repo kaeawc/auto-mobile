@@ -1,4 +1,5 @@
 import { extname } from "node:path";
+import { logger } from "../utils/logger";
 import { z } from "zod/v4";
 import {
   addDeviceTargetingToSchema,
@@ -360,6 +361,8 @@ const putAppFileInputSchema = z
           throw new Error("empty payload");
         }
       } catch {
+        // Invalid client base64 is expected here and is rejected by the validation issue below.
+        logger.debug("App-file base64 validation failed");
         ctx.addIssue({
           code: "custom",
           message: "contentBase64 must be valid, non-empty base64.",

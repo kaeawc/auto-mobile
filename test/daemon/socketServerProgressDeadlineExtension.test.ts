@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -91,6 +92,122 @@ function callHandleIdeRequest(
 }
 
 describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6222)", () => {
+  test.each(["timeout", "abort"] as const)(
+    "resources/read honours the forwarded %s using the SDK's two-argument signature",
+    async (termination) => {
+      const timer = new FakeTimer();
+      const server = createServer(timer);
+      const controller = new AbortController();
+      const started = Promise.withResolvers<void>();
+      const completed = Promise.withResolvers<unknown>();
+      const timeoutError = new Error("resource read timed out");
+      const abortError = new Error("client cancelled resource read");
+      const readResource = mock((_params: { uri: string }, options?: CapturedCallToolOptions) => {
+        // Match the installed SDK: only the second argument supplies options;
+        // missing options mean its default timeout and no abort listener.
+        const timeout = timer.setTimeout(
+          () => completed.reject(timeoutError),
+          options?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC,
+        );
+        const onAbort = () => completed.reject(options?.signal?.reason);
+        options?.signal?.addEventListener("abort", onAbort, { once: true });
+        started.resolve();
+        return completed.promise.finally(() => {
+          timer.clearTimeout(timeout);
+          options?.signal?.removeEventListener("abort", onAbort);
+        });
+      });
+      const uri = "automobile:devices/booted/android";
+      const forwarded = callHandleIdeRequest(
+        server,
+        { readResource },
+        { id: "resource-options", type: "mcp_request", method: "resources/read", params: { uri } },
+        1_000,
+        "socket-resource-options",
+        new ProgressExtendableDeadline(timer.now(), 1_000),
+        1_000,
+        controller.signal,
+      ).then(
+        (result: unknown) => result,
+        (error: unknown) => error,
+      );
+      await started.promise;
+      const armedTimeouts = timer.getPendingTimeouts();
+      if (termination === "timeout") {
+        timer.advanceTime(999);
+        expect(timer.getPendingTimeoutCount()).toBe(1);
+        timer.advanceTime(1);
+      } else {
+        controller.abort(abortError);
+      }
+      // Settle an ignored-options fake too, so the pre-fix failure never waits
+      // for a real timer or leaves a pending request behind.
+      completed.resolve({ contents: [] });
+      expect(await forwarded).toBe(termination === "timeout" ? timeoutError : abortError);
+      expect(armedTimeouts).toEqual([1_000]);
+      expect(readResource.mock.calls).toEqual([
+        [{ uri }, { timeout: 1_000, signal: controller.signal }],
+      ]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("list/read options stay second and callTool options stay third", async () => {
+    const timer = new FakeTimer();
+    const server = createServer(timer);
+    const controller = new AbortController();
+    const options = { timeout: 1_000, signal: controller.signal };
+    const listTools = mock(async (_params?: unknown, _options?: CapturedCallToolOptions) => ({
+      tools: [],
+    }));
+    const listResources = mock(async (_params?: unknown, _options?: CapturedCallToolOptions) => ({
+      resources: [],
+    }));
+    const listResourceTemplates = mock(
+      async (_params?: unknown, _options?: CapturedCallToolOptions) => ({ resourceTemplates: [] }),
+    );
+    const readResource = mock(
+      async (_params: { uri: string }, _options?: CapturedCallToolOptions) => ({ contents: [] }),
+    );
+    const callTool = mock(
+      async (_params: unknown, _schema?: unknown, _options?: CapturedCallToolOptions) => ({
+        content: [],
+      }),
+    );
+    const client = { listTools, listResources, listResourceTemplates, readResource, callTool };
+    const uri = "automobile:devices/booted/android";
+    for (const method of [
+      "tools/list",
+      "resources/list",
+      "resources/list-templates",
+      "resources/read",
+      "tools/call",
+    ]) {
+      await callHandleIdeRequest(
+        server,
+        client,
+        {
+          id: method,
+          type: "mcp_request",
+          method,
+          params: { uri, name: "observe", arguments: {} },
+        },
+        1_000,
+        "socket-option-positions",
+        new ProgressExtendableDeadline(timer.now(), 1_000),
+        1_000,
+        controller.signal,
+      );
+    }
+    expect(listTools.mock.calls).toEqual([[undefined, options]]);
+    expect(listResources.mock.calls).toEqual([[undefined, options]]);
+    expect(listResourceTemplates.mock.calls).toEqual([[undefined, options]]);
+    expect(readResource.mock.calls).toEqual([[{ uri }, options]]);
+    expect(callTool.mock.calls).toEqual([
+      [expect.objectContaining({ name: "observe" }), undefined, options],
+    ]);
+  });
+
   test("device-control recovery reconnects after the original budget when progress extends the live deadline", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);

@@ -418,13 +418,13 @@ describe("default-display dispatch fences", () => {
   });
 });
 
-// Strategy internals await between coordinate steps, so an entry-only fence is insufficient.
+// Strategy internals await before activation, so an entry-only fence is insufficient.
 describe("TalkBack waits retain the action fence", () => {
   for (const tool of ["tapOn", "tapAny"] as const) {
     for (const site of [
       "direct-fallback",
       "precise-activation",
-      "double-second",
+      "double-dispatch",
       "longPress-fallback",
     ] as const) {
       test.each(modes)(`${tool} ${site}: %s`, async (mode: Mode) => {
@@ -445,20 +445,24 @@ describe("TalkBack waits retain the action fence", () => {
             return { success: false, action: "long_click" };
           });
         }
-        if (site === "precise-activation" || site === "double-second") {
+        if (site === "precise-activation") {
           const sleep = h.timer.sleep.bind(h.timer);
           watch(h.timer, "sleep").mockImplementation(async (ms: number) => {
-            if (
-              ms === (site === "precise-activation" ? 500 : 200) &&
-              driver.tapHistory.length === 1
-            ) {
+            if (ms === 500 && driver.tapHistory.length === 1) {
               await h.bump();
             }
             return sleep(ms);
           });
         }
+        if (site === "double-dispatch") {
+          const fallback = strategy.executeCoordinateFallback.bind(strategy);
+          watch(strategy, "executeCoordinateFallback").mockImplementation(async (...args) => {
+            await h.bump();
+            return fallback(...args);
+          });
+        }
         const actionName =
-          site === "double-second"
+          site === "double-dispatch"
             ? "doubleTap"
             : site === "longPress-fallback"
               ? "longPress"
@@ -513,18 +517,18 @@ describe("TalkBack waits retain the action fence", () => {
         } else {
           expect(result).toMatchObject({ success: true });
         }
-        const partial = site === "precise-activation" || site === "double-second";
         const count =
           mode === "transition"
-            ? partial
+            ? site === "precise-activation"
               ? 1
               : 0
-            : site === "double-second"
-              ? 2
-              : site === "longPress-fallback"
-                ? 1
-                : 3;
+            : site === "double-dispatch"
+              ? 0
+              : 1;
         expect(driver.tapHistory).toHaveLength(count);
+        expect(driver.doubleTapHistory).toHaveLength(
+          mode === "transition" || site === "longPress-fallback" ? 0 : 1,
+        );
         expect(h.inputs()).toEqual([]);
         expect(h.taps()).toEqual([]);
       });

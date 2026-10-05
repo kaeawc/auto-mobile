@@ -57,6 +57,16 @@ interface CtrlProxyActions {
     frameContext: String?,
   ) = requestSwipe(requestId, x1, y1, x2, y2, duration)
 
+  fun requestDoubleTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    frameContext: String?,
+    displayId: Int?,
+  ) {
+    throw UnsupportedOperationException("Atomic double tap is not supported")
+  }
+
   fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long)
 
   fun requestTapCoordinates(

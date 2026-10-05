@@ -305,6 +305,16 @@ describe("tapOnHandler (registered handler wiring)", () => {
     expect(getStructuredField(response, "success")).toBe(false);
   });
 
+  test("unconfirmed activation warning appears in tapOn message and structured result", async () => {
+    const warning = "TalkBack activation is unconfirmed";
+    setTapOnElementFactory(() => ({
+      execute: async () => fakeResult({ success: true, warnings: [warning] }),
+    }));
+    const response = await tapOnHandler(fakeDevice, args);
+    expect(parseMessage(response)).toContain(`Warning: ${warning}`);
+    expect(getStructuredField(response, "warnings")).toEqual([warning]);
+  });
+
   test("a failure without search stats carries no empty summary parenthetical", async () => {
     setTapOnElementFactory(() => ({
       execute: async () => fakeResult({ error: "Element not found with provided text 'Missing'" }),

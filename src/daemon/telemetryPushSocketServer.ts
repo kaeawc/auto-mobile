@@ -254,190 +254,204 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       shouldInclude("log") ? getLogEvents({ deviceId, sessionId, limit }) : [],
       shouldInclude("os") ? getOsEvents({ deviceId, sessionId, limit }) : [],
     ]);
-    for (const r of networkRows) {
-      events.push({
-        category: "network",
-        timestamp: r.timestamp,
-        deviceId: r.deviceId,
-        sessionId: r.sessionId ?? null,
-        data: r,
-      });
-    }
-    for (const r of logRows) {
-      events.push({
-        category: "log",
-        timestamp: r.timestamp,
-        deviceId: r.deviceId,
-        sessionId: r.sessionId ?? null,
-        data: r,
-      });
-    }
-    for (const r of osRows) {
-      events.push({
-        category: "os",
-        timestamp: r.timestamp,
-        deviceId: r.deviceId,
-        sessionId: r.sessionId ?? null,
-        data: r,
-      });
-    }
+    this.appendBackfillRows(events, "network", networkRows);
+    this.appendBackfillRows(events, "log", logRows);
+    this.appendBackfillRows(events, "os", osRows);
 
     if (shouldInclude("navigation")) {
-      const rows = await getNavigationEvents({ deviceId, sessionId, limit });
-      // Look up screenshot node IDs for navigation events
-      const screenshotUris: Map<string, string> = new Map();
-      if (rows.length > 0) {
-        try {
-          const db = getDatabase();
-          const destinations = [...new Set(rows.map((r) => r.destination))];
-          const nodes = await db
-            .selectFrom("navigation_nodes")
-            .select(["id", "screen_name", "app_id"])
-            .where("screen_name", "in", destinations)
-            .execute();
-          for (const node of nodes) {
-            const key = `${node.app_id}:${node.screen_name}`;
-            // Scope by the node's app_id (already selected) so a telemetry client
-            // following this URI resolves the screenshot under the named app, not
-            // the daemon's current foreground app (#5851 / #5534).
-            screenshotUris.set(key, buildNavigationNodeScreenshotUri(node.id, node.app_id));
-          }
-        } catch (error) {
-          logger.warn(`Telemetry screenshot URI lookup failed: ${errorMessage(error)}`);
-        }
-      }
-      for (const r of rows) {
-        const screenshotUri = screenshotUris.get(`${r.applicationId}:${r.destination}`) ?? null;
-        events.push({
-          category: "navigation",
-          timestamp: r.timestamp,
-          deviceId: r.deviceId,
-          sessionId: r.sessionId ?? null,
-          data: { ...r, screenshotUri },
-        });
-      }
+      await this.appendNavigationBackfillEvents(events, { deviceId, sessionId, limit });
     }
 
     // Backfill failures (crash/anr/nonfatal) in parallel
     const failureTypes = ["crash", "anr", "nonfatal"] as const;
-    const failureBackfillFn = async (failureType: (typeof failureTypes)[number]) => {
-      if (!shouldInclude(failureType)) {
-        return;
-      }
-      try {
-        const db = getDatabase();
-        let q = db
-          .selectFrom("failure_occurrences")
-          .innerJoin("failure_groups", "failure_groups.id", "failure_occurrences.group_id")
-          .select([
-            "failure_occurrences.id as occurrenceId",
-            "failure_occurrences.group_id as groupId",
-            "failure_occurrences.timestamp",
-            "failure_occurrences.device_id as deviceId",
-            // Selected so the crash/ANR/tool-failure backfill can report the
-            // originating session like every sibling projection does (#4209).
-            // Without it `r.sessionId` is a type error AND always undefined at
-            // runtime, so these events shipped with `sessionId: null` and were
-            // invisible to session-filtered subscribers.
-            "failure_occurrences.session_id as sessionId",
-            "failure_occurrences.screen_at_failure as screen",
-            "failure_groups.type",
-            "failure_groups.severity",
-            "failure_groups.title",
-            "failure_groups.stack_trace_json",
-          ])
-          .where("failure_groups.type", "=", failureType);
-
-        // Always filter by device — never send failures with empty/null device_id
-        if (deviceId) {
-          q = q.where("failure_occurrences.device_id", "=", deviceId);
-        } else {
-          // Even without a device filter, exclude failures with no device_id
-          q = q
-            .where("failure_occurrences.device_id", "is not", null)
-            .where("failure_occurrences.device_id", "!=", "");
-        }
-        if (sessionId) {
-          q = q.where("failure_occurrences.session_id", "=", sessionId);
-        }
-
-        const rows = await q
-          .orderBy("failure_occurrences.timestamp", "desc")
-          .limit(limit)
-          .execute();
-
-        for (const r of rows) {
-          let exceptionType: string | undefined;
-          let stackTrace: unknown[] | null = null;
-          if (r.stack_trace_json) {
-            try {
-              const frames = JSON.parse(r.stack_trace_json);
-              if (Array.isArray(frames)) {
-                stackTrace = frames;
-                if (frames.length > 0) {
-                  exceptionType = frames[0].className ?? frames[0].declaringClass;
-                }
-              }
-            } catch (error) {
-              logger.warn(`Telemetry stored stack trace parse failed: ${errorMessage(error)}`);
-            }
-          }
-
-          // Bound the parsed stack trace by serialized size so a multi-hundred-KB
-          // frame array does not ship raw ×100 (#3182). exceptionType is read
-          // above before bounding, so the marker never loses that summary.
-          const boundedStackTrace = boundStructuredField(stackTrace, false);
-
-          events.push({
-            category: failureType,
-            timestamp: r.timestamp,
-            deviceId: r.deviceId,
-            sessionId: r.sessionId ?? null,
-            data: {
-              type: r.type,
-              occurrenceId: r.occurrenceId,
-              groupId: r.groupId,
-              severity: r.severity,
-              title: r.title,
-              exceptionType,
-              screen: r.screen,
-              timestamp: r.timestamp,
-              stackTrace: boundedStackTrace,
-            },
-          });
-        }
-      } catch (e) {
-        logger.warn(`[TelemetryPush] Failed to backfill ${failureType} events: ${e}`);
-      }
-    };
+    const failureBackfillFn = (failureType: (typeof failureTypes)[number]) =>
+      this.appendFailureBackfillEvents(
+        failureType,
+        shouldInclude,
+        { deviceId, sessionId, limit },
+        events,
+      );
     await Promise.all(failureTypes.map(failureBackfillFn));
 
     const [storageRows, layoutRows] = await Promise.all([
       shouldInclude("storage") ? getStorageEvents({ deviceId, sessionId, limit }) : [],
       shouldInclude("layout") ? getLayoutEvents({ deviceId, sessionId, limit }) : [],
     ]);
-    for (const r of storageRows) {
-      events.push({
-        category: "storage",
-        timestamp: r.timestamp,
-        deviceId: r.deviceId,
-        sessionId: r.sessionId ?? null,
-        data: r,
-      });
-    }
-    for (const r of layoutRows) {
-      events.push({
-        category: "layout",
-        timestamp: r.timestamp,
-        deviceId: r.deviceId,
-        sessionId: r.sessionId ?? null,
-        data: r,
-      });
-    }
+    this.appendBackfillRows(events, "storage", storageRows);
+    this.appendBackfillRows(events, "layout", layoutRows);
 
     // Sort oldest-first so dashboard shows them in correct order
     events.sort((a, b) => a.timestamp - b.timestamp);
 
+    await this.writeBackfillEvents(subscriptionId, filter, socket, events);
+  }
+
+  private appendBackfillRows(
+    events: TelemetryEvent[],
+    category: TelemetryEvent["category"],
+    rows: readonly (Pick<TelemetryEvent, "timestamp" | "deviceId"> & {
+      sessionId?: string | null;
+    })[],
+  ): void {
+    for (const r of rows) {
+      events.push({
+        category,
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: r,
+      });
+    }
+  }
+
+  private async appendNavigationBackfillEvents(
+    events: TelemetryEvent[],
+    query: { deviceId?: string; sessionId?: string; limit: number },
+  ): Promise<void> {
+    const rows = await getNavigationEvents(query);
+    // Look up screenshot node IDs for navigation events
+    const screenshotUris: Map<string, string> = new Map();
+    if (rows.length > 0) {
+      try {
+        const db = getDatabase();
+        const destinations = [...new Set(rows.map((r) => r.destination))];
+        const nodes = await db
+          .selectFrom("navigation_nodes")
+          .select(["id", "screen_name", "app_id"])
+          .where("screen_name", "in", destinations)
+          .execute();
+        for (const node of nodes) {
+          const key = `${node.app_id}:${node.screen_name}`;
+          // Scope by the node's app_id (already selected) so a telemetry client
+          // following this URI resolves the screenshot under the named app, not
+          // the daemon's current foreground app (#5851 / #5534).
+          screenshotUris.set(key, buildNavigationNodeScreenshotUri(node.id, node.app_id));
+        }
+      } catch (error) {
+        logger.warn(`Telemetry screenshot URI lookup failed: ${errorMessage(error)}`);
+      }
+    }
+    for (const r of rows) {
+      const screenshotUri = screenshotUris.get(`${r.applicationId}:${r.destination}`) ?? null;
+      events.push({
+        category: "navigation",
+        timestamp: r.timestamp,
+        deviceId: r.deviceId,
+        sessionId: r.sessionId ?? null,
+        data: { ...r, screenshotUri },
+      });
+    }
+  }
+
+  private async appendFailureBackfillEvents(
+    failureType: "crash" | "anr" | "nonfatal",
+    shouldInclude: (category: string) => boolean,
+    query: { deviceId?: string; sessionId?: string; limit: number },
+    events: TelemetryEvent[],
+  ): Promise<void> {
+    const { deviceId, sessionId, limit } = query;
+    if (!shouldInclude(failureType)) {
+      return;
+    }
+    try {
+      const db = getDatabase();
+      let q = db
+        .selectFrom("failure_occurrences")
+        .innerJoin("failure_groups", "failure_groups.id", "failure_occurrences.group_id")
+        .select([
+          "failure_occurrences.id as occurrenceId",
+          "failure_occurrences.group_id as groupId",
+          "failure_occurrences.timestamp",
+          "failure_occurrences.device_id as deviceId",
+          // Selected so the crash/ANR/tool-failure backfill can report the
+          // originating session like every sibling projection does (#4209).
+          // Without it `r.sessionId` is a type error AND always undefined at
+          // runtime, so these events shipped with `sessionId: null` and were
+          // invisible to session-filtered subscribers.
+          "failure_occurrences.session_id as sessionId",
+          "failure_occurrences.screen_at_failure as screen",
+          "failure_groups.type",
+          "failure_groups.severity",
+          "failure_groups.title",
+          "failure_groups.stack_trace_json",
+        ])
+        .where("failure_groups.type", "=", failureType);
+
+      // Always filter by device — never send failures with empty/null device_id
+      if (deviceId) {
+        q = q.where("failure_occurrences.device_id", "=", deviceId);
+      } else {
+        // Even without a device filter, exclude failures with no device_id
+        q = q
+          .where("failure_occurrences.device_id", "is not", null)
+          .where("failure_occurrences.device_id", "!=", "");
+      }
+      if (sessionId) {
+        q = q.where("failure_occurrences.session_id", "=", sessionId);
+      }
+
+      const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();
+
+      for (const r of rows) {
+        const { exceptionType, stackTrace } = this.parseFailureStackTrace(r.stack_trace_json);
+
+        // Bound the parsed stack trace by serialized size so a multi-hundred-KB
+        // frame array does not ship raw ×100 (#3182). exceptionType is read
+        // above before bounding, so the marker never loses that summary.
+        const boundedStackTrace = boundStructuredField(stackTrace, false);
+
+        events.push({
+          category: failureType,
+          timestamp: r.timestamp,
+          deviceId: r.deviceId,
+          sessionId: r.sessionId ?? null,
+          data: {
+            type: r.type,
+            occurrenceId: r.occurrenceId,
+            groupId: r.groupId,
+            severity: r.severity,
+            title: r.title,
+            exceptionType,
+            screen: r.screen,
+            timestamp: r.timestamp,
+            stackTrace: boundedStackTrace,
+          },
+        });
+      }
+    } catch (e) {
+      logger.warn(`[TelemetryPush] Failed to backfill ${failureType} events: ${e}`);
+    }
+  }
+
+  private parseFailureStackTrace(stackTraceJson: string | null): {
+    exceptionType: string | undefined;
+    stackTrace: unknown[] | null;
+  } {
+    let exceptionType: string | undefined;
+    let stackTrace: unknown[] | null = null;
+    if (!stackTraceJson) {
+      return { exceptionType, stackTrace };
+    }
+    try {
+      const frames = JSON.parse(stackTraceJson);
+      if (Array.isArray(frames)) {
+        stackTrace = frames;
+        if (frames.length > 0) {
+          exceptionType = frames[0].className ?? frames[0].declaringClass;
+        }
+      }
+    } catch (error) {
+      logger.warn(`Telemetry stored stack trace parse failed: ${errorMessage(error)}`);
+    }
+    return { exceptionType, stackTrace };
+  }
+
+  private async writeBackfillEvents(
+    subscriptionId: string,
+    filter: TelemetryFilter,
+    socket: Socket,
+    events: TelemetryEvent[],
+  ): Promise<void> {
     let written = 0;
     for (const event of events) {
       const subscriber = this.subscribers.get(subscriptionId);

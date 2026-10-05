@@ -599,14 +599,16 @@ export class PerformanceAudit {
 
         if (hasJank) {
           stableStartTime = null;
-        } else {
-          if (stableStartTime === null) {
-            stableStartTime = elapsedMs;
-          } else if (elapsedMs - stableStartTime >= stabilityThresholdMs) {
-            // UI has been stable for threshold duration
-            logger.info(`[PerformanceAudit] TTI reached: ${ttffMs + stableStartTime}ms`);
-            return ttffMs + stableStartTime;
-          }
+          continue;
+        }
+        if (stableStartTime === null) {
+          stableStartTime = elapsedMs;
+          continue;
+        }
+        if (elapsedMs - stableStartTime >= stabilityThresholdMs) {
+          // UI has been stable for threshold duration
+          logger.info(`[PerformanceAudit] TTI reached: ${ttffMs + stableStartTime}ms`);
+          return ttffMs + stableStartTime;
         }
       }
 

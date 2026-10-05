@@ -1,4 +1,5 @@
 import { BootedDevice } from "../models";
+import { logger } from "../utils/logger";
 
 /**
  * Runtime shape guard for singleton factories keyed on `device.deviceId`.
@@ -29,6 +30,8 @@ function describeInvalidDevice(device: unknown): string {
   try {
     return JSON.stringify(device) ?? String(device);
   } catch {
+    // Invalid inputs can be cyclic or contain bigint; the caller still throws its shape error.
+    logger.debug("Invalid device description could not be serialized; using object tag");
     return Object.prototype.toString.call(device);
   }
 }

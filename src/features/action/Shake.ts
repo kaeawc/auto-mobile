@@ -79,6 +79,7 @@ export class Shake extends BaseVisualChange {
           }
         },
         {
+          usesObservationForResolution: false,
           changeExpected: false,
           timeoutMs: duration + 2000,
           tolerancePercent: 0.0,
@@ -135,6 +136,7 @@ export class Shake extends BaseVisualChange {
         }
       },
       {
+        usesObservationForResolution: false,
         changeExpected: false, // Shake typically doesn't change UI directly
         timeoutMs: duration + 2000, // Give extra time beyond shake duration
         tolerancePercent: 0.0,

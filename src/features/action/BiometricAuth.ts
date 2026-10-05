@@ -160,6 +160,7 @@ export class BiometricAuth extends BaseVisualChange {
         return result;
       },
       {
+        usesObservationForResolution: false,
         changeExpected: false,
         timeoutMs: 5000,
         progress,

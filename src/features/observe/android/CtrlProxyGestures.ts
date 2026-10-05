@@ -59,6 +59,12 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       requiredCapability: "tap_double_v1",
       timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
       errorLabel: "Double tap",
+      timeoutError: (timeoutMs) => ({
+        success: false,
+        totalTimeMs: timeoutMs,
+        error: `Double tap timed out after ${timeoutMs}ms`,
+        acknowledged: false,
+      }),
       abortSignal: options.signal,
       beforeSend: options.beforeSend,
       onDispatch,

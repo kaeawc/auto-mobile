@@ -2,7 +2,7 @@ import { ActionableError } from "../../models";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { DOUBLE_TAP_GAP_MS } from "./tapAtGesture";
+import { DOUBLE_TAP_GAP_MS, isStaleFrameContextRejection } from "./tapAtGesture";
 
 /** `ViewConfiguration.getDoubleTapTimeout()`: the longest start-to-start gap a double-tap handler accepts. */
 export const ANDROID_DOUBLE_TAP_TIMEOUT_MS = 300;
@@ -30,7 +30,7 @@ export interface AtomicDoubleTapClient {
     y: number,
     onDispatch?: () => void,
     options?: AtomicDoubleTapRequestOptions,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<{ success: boolean; error?: string; acknowledged?: boolean }>;
 }
 
 export function lateSecondTapWarning(startToStartMs: number): string {
@@ -109,21 +109,35 @@ export async function tryAtomicAndroidDoubleTap(
   if (result.success) {
     return true;
   }
-  return rejectOrFallBack(result.error, { dispatched, frameContext: request.frameContext });
+  return rejectOrFallBack(result, { dispatched, frameContext: request.frameContext });
 }
 
-/** Classify a failed single-gesture request: throw when sequential taps are unsafe, else fall back. */
+/**
+ * Classify a failed single-gesture request: throw when sequential taps are unsafe, else fall back.
+ * Order matches the single-tap path: a device stale-frame verdict first (it always arrives after
+ * the send, and proves nothing was tapped), then dispatched-without-reply, then fall back.
+ */
 function rejectOrFallBack(
-  error: string | undefined,
+  result: { error?: string; acknowledged?: boolean },
   context: { dispatched: boolean; frameContext?: string },
 ): false {
+  const { error } = result;
+  if (context.frameContext !== undefined && isStaleFrameContextRejection(error)) {
+    throw new ActionableError(
+      error ?? "Stale frame context; observe a fresh frame before retrying",
+    );
+  }
   if (context.dispatched) {
+    // Only a reply proves the device refused the gesture; a timeout, closed socket or missing flag
+    // leaves the outcome unknown.
+    if (result.acknowledged === true) {
+      throw new ActionableError(
+        `Double tap was rejected by CtrlProxy: ${error ?? "unknown error"}`,
+      );
+    }
     throw new ActionableError(
       `Double tap outcome is indeterminate: the gesture was dispatched but no result was confirmed (${error ?? "unknown error"}). Do not retry automatically.`,
     );
-  }
-  if (context.frameContext !== undefined && error?.toLowerCase().includes("stale frame context")) {
-    throw new ActionableError(error);
   }
   // Nothing reached the device (older runner without tap_double_v1, or not connected), so the
   // sequential path is safe and keeps its own ADB fallback rules.

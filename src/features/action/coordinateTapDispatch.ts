@@ -12,7 +12,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TapAnyElementOptions } from "../../models/TapAnyElementOptions";
 import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { isStaleFrameContextRejection, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
@@ -31,9 +31,7 @@ export interface CoordinateTapClient<Dispatch = never> {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
-export function isStaleFrameContextRejection(error: string | undefined): boolean {
-  return typeof error === "string" && error.toLowerCase().includes("stale frame context");
-}
+export { isStaleFrameContextRejection };
 
 export function indeterminateTapError(error: string | undefined): ActionableError {
   return new ActionableError(

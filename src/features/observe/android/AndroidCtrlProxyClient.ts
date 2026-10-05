@@ -5292,6 +5292,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: message.totalTimeMs,
           error: message.error,
           perfTiming: message.perfTiming,
+          acknowledged: true,
         });
       }
     },

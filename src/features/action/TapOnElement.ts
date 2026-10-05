@@ -4590,6 +4590,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (element["hierarchy-source"] === "uiautomator") {
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
         displayFence: fence,
+        onActivationWarning,
       });
       return undefined;
     }
@@ -4664,6 +4665,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
         displayFence: fence,
+        onActivationWarning: context.onActivationWarning,
       });
       this.reportTalkBackActivationWarning(result, context, action);
       return;

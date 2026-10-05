@@ -933,6 +933,23 @@ describe("CtrlProxyGestures atomic double tap", () => {
     await promise;
   });
 
+  it("a lost reply (timeout) is reported unacknowledged so it is never mistaken for a refusal", async () => {
+    const { context, timer, requestManager } = createFakeContext({
+      isCommandSupported: () => true,
+    });
+    const onDispatch = spyOn({ sent: () => {} }, "sent");
+    const promise = new CtrlProxyGestures(context).requestDoubleTapCoordinates(10, 20, onDispatch);
+    await flush();
+    timer.advanceTime(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+    expect(await promise).toMatchObject({
+      success: false,
+      error: `Double tap timed out after ${DEFAULT_GESTURE_REQUEST_TIMEOUT_MS}ms`,
+      acknowledged: false,
+    });
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
   it("never degrades to a single tap when an older runner lacks the capability", async () => {
     const { context, sent, requestManager } = createFakeContext({
       isCommandSupported: (name) => name !== "tap_double_v1",

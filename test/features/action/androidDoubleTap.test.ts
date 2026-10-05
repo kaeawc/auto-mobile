@@ -7,6 +7,7 @@ import {
 } from "../../../src/features/action/androidDoubleTap";
 import {
   androidDisplayTapDispatch,
+  isStaleFrameContextRejection,
   type CoordinateTapClient,
 } from "../../../src/features/action/coordinateTapDispatch";
 import { DOUBLE_TAP_GAP_MS } from "../../../src/features/action/tapAtGesture";
@@ -41,13 +42,16 @@ const androidDevice = {
   deviceId: "emulator-5554",
 } as BootedDevice;
 
-type TapResult = { success: boolean; error?: string };
+type TapResult = { success: boolean; error?: string; acknowledged?: boolean };
 
 /**
  * A CtrlProxy fake whose requests take `roundTripMs` of fake time (gesture duration plus reply),
  * recording the fake time each request STARTED.
  */
-function timedClient(timer: FakeTimer, options: { roundTripMs: number; atomic?: () => TapResult }) {
+function timedClient(
+  timer: FakeTimer,
+  options: { roundTripMs: number; atomic?: (requestNumber: number) => TapResult },
+) {
   const tapStarts: number[] = [];
   const doubleRequests: Array<{
     x: number;
@@ -79,8 +83,10 @@ function timedClient(timer: FakeTimer, options: { roundTripMs: number; atomic?: 
             requestOptions?: AtomicDoubleTapRequestOptions,
           ): Promise<TapResult> => {
             doubleRequests.push({ x, y, startedAt: timer.now(), options: requestOptions });
-            const result = options.atomic?.() ?? { success: true };
-            if (result.success) {
+            const result = options.atomic?.(doubleRequests.length) ?? { success: true };
+            // A reply carrying `acknowledged` (true: device answered, false: reply lost) exists
+            // only once the request was written to the socket.
+            if (result.success || result.acknowledged !== undefined) {
               onDispatch?.();
             }
             await timer.sleep(options.roundTripMs);
@@ -160,7 +166,7 @@ describe("dispatchAndroidDoubleTap", () => {
         onDispatch?: () => void,
       ): Promise<TapResult> => {
         onDispatch?.();
-        return { success: false, error: "Double tap timed out after 5000ms" };
+        return { success: false, error: "Double tap timed out after 5000ms", acknowledged: false };
       },
     };
     await expect(
@@ -169,18 +175,72 @@ describe("dispatchAndroidDoubleTap", () => {
     expect(tap).not.toHaveBeenCalled();
   });
 
-  test("a stale frame rejection is surfaced instead of falling back", async () => {
+  const STALE_FRAME_ERROR = "Stale frame context for input/tap; observe again";
+
+  /** A fake whose request reaches the device (onDispatch fires) before `reply` comes back. */
+  function dispatchedThenReply(reply: TapResult) {
+    return {
+      requestDoubleTapCoordinates: async (
+        _x: number,
+        _y: number,
+        onDispatch?: () => void,
+      ): Promise<TapResult> => {
+        onDispatch?.();
+        return reply;
+      },
+    };
+  }
+
+  test("a device stale-frame rejection of a dispatched request is a plain stale error", async () => {
     const timer = newTimer();
     const tap = mock(async () => {});
-    const client = {
-      requestDoubleTapCoordinates: async (): Promise<TapResult> => ({
-        success: false,
-        error: "Stale frame context for input/tap",
-      }),
-    };
+    const client = dispatchedThenReply({
+      success: false,
+      error: STALE_FRAME_ERROR,
+      acknowledged: true,
+    });
+    const failure = await dispatchAndroidDoubleTap({
+      client,
+      point,
+      frameContext: "old",
+      timer,
+      tap,
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as Error).message).toBe(STALE_FRAME_ERROR);
+    expect((failure as Error).message).not.toMatch(/indeterminate|Do not retry/i);
+    expect(isStaleFrameContextRejection((failure as Error).message)).toBe(true);
+    expect(tap).not.toHaveBeenCalled();
+  });
+
+  test("any other acknowledged device refusal is a failure, not indeterminate, and not replayed", async () => {
+    const timer = newTimer();
+    const tap = mock(async () => {});
+    const client = dispatchedThenReply({
+      success: false,
+      error: "Gesture dispatch rejected",
+      acknowledged: true,
+    });
+    const failure = await dispatchAndroidDoubleTap({ client, point, timer, tap }).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(ActionableError);
+    expect((failure as Error).message).toContain("Gesture dispatch rejected");
+    expect((failure as Error).message).not.toMatch(/indeterminate|Do not retry/i);
+    expect(tap).not.toHaveBeenCalled();
+  });
+
+  test("dispatched with no reply is indeterminate: no retry and no fallback taps", async () => {
+    const timer = newTimer();
+    const tap = mock(async () => {});
+    const client = dispatchedThenReply({
+      success: false,
+      error: "Double tap timed out after 5000ms",
+      acknowledged: false,
+    });
     await expect(
       dispatchAndroidDoubleTap({ client, point, frameContext: "old", timer, tap }),
-    ).rejects.toThrow("Stale frame context");
+    ).rejects.toThrow(/outcome is indeterminate.*Do not retry automatically/i);
     expect(tap).not.toHaveBeenCalled();
   });
 
@@ -381,12 +441,18 @@ describe("explicit-display dispatcher (tapOn / tapAny display)", () => {
 });
 
 describe("tapAt (Android)", () => {
-  function createTapAt(client: ReturnType<typeof timedClient>["client"], timer: FakeTimer) {
+  function createTapAt(
+    client: ReturnType<typeof timedClient>["client"],
+    timer: FakeTimer,
+    frames: string[] = ["epoch:7"],
+  ) {
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult({
-      ...observation(100, 200, "epoch:7"),
-      display: { key: "0", role: "unknown", generation: 0 },
-    });
+    observeScreen.setObserveSequence(
+      frames.map((frame) => ({
+        ...observation(100, 200, frame),
+        display: { key: "0", role: "unknown", generation: 0 },
+      })),
+    );
     const tapAt = new TapAtCoordinate(androidDevice, new FakeAdbExecutor(), {
       timer,
       androidClient: client,
@@ -463,13 +529,69 @@ describe("tapAt (Android)", () => {
     },
   );
 
+  test("a device stale-frame rejection refreshes the frame once, then performs the double tap", async () => {
+    const timer = newTimer();
+    const { client, tapStarts, doubleRequests } = timedClient(timer, {
+      roundTripMs: FAST_ROUND_TRIP_MS,
+      atomic: (requestNumber) =>
+        requestNumber === 1
+          ? { success: false, error: "Stale frame context for input/tap", acknowledged: true }
+          : { success: true },
+    });
+    const tapAt = createTapAt(client, timer, ["epoch:1", "epoch:2"]);
+    const result = await tapAt.execute({ x: 10, y: 20, action: "doubleTap" });
+    expect(result).toMatchObject({ success: true, action: "doubleTap" });
+    expect(result.error).toBeUndefined();
+    // Exactly one fresh-frame retry: the stale frame, then the refreshed one; never two plain taps.
+    expect(doubleRequests.map((request) => request.options?.frameContext)).toEqual([
+      "epoch:1",
+      "epoch:2",
+    ]);
+    expect(tapStarts).toEqual([]);
+  });
+
+  test("a stale-frame rejection of the retry is reported once, not as indeterminate", async () => {
+    const timer = newTimer();
+    const { client, tapStarts, doubleRequests } = timedClient(timer, {
+      roundTripMs: FAST_ROUND_TRIP_MS,
+      atomic: () => ({ success: false, error: "Stale frame context", acknowledged: true }),
+    });
+    const result = await createTapAt(client, timer, ["epoch:1", "epoch:2"]).execute({
+      x: 10,
+      y: 20,
+      action: "doubleTap",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Stale frame context");
+    expect(result.error).not.toMatch(/indeterminate|Do not retry/i);
+    expect(doubleRequests).toHaveLength(2);
+    expect(tapStarts).toEqual([]);
+  });
+
+  test("a dispatched double tap with no reply is never retried at a fresh frame", async () => {
+    const timer = newTimer();
+    const { client, tapStarts, doubleRequests } = timedClient(timer, {
+      roundTripMs: FAST_ROUND_TRIP_MS,
+      atomic: () => ({ success: false, error: "Double tap timed out", acknowledged: false }),
+    });
+    const result = await createTapAt(client, timer, ["epoch:1", "epoch:2"]).execute({
+      x: 10,
+      y: 20,
+      action: "doubleTap",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/indeterminate.*Do not retry automatically/i);
+    expect(doubleRequests).toHaveLength(1);
+    expect(tapStarts).toEqual([]);
+  });
+
   test("a dispatched unconfirmed double tap is reported as indeterminate", async () => {
     const timer = newTimer();
     const client = {
       requestTapCoordinates: async () => ({ success: true }),
       requestDoubleTapCoordinates: async (_x: number, _y: number, onDispatch?: () => void) => {
         onDispatch?.();
-        return { success: false, error: "Double tap timed out after 5000ms" };
+        return { success: false, error: "Double tap timed out after 5000ms", acknowledged: false };
       },
     };
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -603,6 +725,28 @@ describe("tapOn (Android default display)", () => {
     const { client, tapStarts } = timedClient(timer, { roundTripMs: FAST_ROUND_TRIP_MS });
     await doubleTap(createTap(timer, client));
     expectStartToStart(tapStarts);
+  });
+
+  test("a slow first tap on a uiautomator-source element is returned as a warning", async () => {
+    const timer = newTimer();
+    const { client } = timedClient(timer, { roundTripMs: SLOW_ROUND_TRIP_MS });
+    const warnings: string[] = [];
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await createTap(timer, client).executeAndroidTap(
+        "doubleTap",
+        540,
+        380,
+        0,
+        { ...plainElement, "hierarchy-source": "uiautomator" },
+        undefined,
+        { onActivationWarning: (warning) => warnings.push(warning) },
+        false,
+      );
+      expect(warnings.join("\n")).toContain("double-tap timeout");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("a slow first tap is followed immediately and logged", async () => {

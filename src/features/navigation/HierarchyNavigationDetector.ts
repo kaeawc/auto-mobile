@@ -92,7 +92,7 @@ export class HierarchyNavigationDetector {
    * This is the main entry point called when new hierarchy data arrives.
    */
   public onHierarchyUpdate(
-    hierarchy: AccessibilityHierarchy,
+    hierarchy: Omit<AccessibilityHierarchy, "packageName"> & { packageName?: string },
     metrics?: HierarchyNavigationUpdateMetrics,
   ): void {
     if (!hierarchy.packageName?.trim()) {
@@ -103,7 +103,10 @@ export class HierarchyNavigationDetector {
     }
     const fingerprintStart = this.timer.now();
     // Compute fingerprint for this hierarchy
-    const fingerprint = ScreenFingerprint.compute(hierarchy);
+    const fingerprint = ScreenFingerprint.compute({
+      ...hierarchy,
+      packageName: hierarchy.packageName,
+    });
     const fingerprintMs = this.timer.now() - fingerprintStart;
 
     const updateMetrics: HierarchyNavigationUpdateMetrics = {

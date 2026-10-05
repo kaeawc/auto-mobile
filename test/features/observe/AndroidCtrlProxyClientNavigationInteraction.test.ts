@@ -233,6 +233,49 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
     }
   });
 
+  test.each(["focused-window", "unknown"])(
+    "%s identity is navigation-only and leaves the cached/returned capture unchanged",
+    async (source) => {
+      const payload = observePayload();
+      delete payload.packageName;
+      const navigationPackage = source === "focused-window" ? "com.android.settings" : undefined;
+      if (navigationPackage) {
+        payload.windows!.find((window) => window.isFocused)!.packageName = navigationPackage;
+      }
+      const before = structuredClone(payload);
+      const navigation = client.getHierarchyNavigationDetector();
+      // Unknown frames must reset an existing pending fingerprint, not bypass the detector.
+      navigation.onHierarchyUpdate({ ...payload, packageName: "com.example.pending" });
+      expect(navigation.hasPendingFingerprint()).toBe(true);
+      const detector = spyOn(navigation, "onHierarchyUpdate");
+      const build = spyOn(navHarness.manager, "clearBuildContext");
+      const packages = spyOn(client, "requestPackageInfo").mockRejectedValue(
+        new Error("fake package lookup unavailable"),
+      );
+      try {
+        client.handleHierarchyUpdate(payload);
+        const cached = (await client.getLatestHierarchy()).hierarchy;
+        expect(cached).toBe(payload);
+        expect(cached).toEqual(before);
+        expect(Object.hasOwn(cached!, "packageName")).toBe(false);
+        expect(cached?.packageName).toBeUndefined();
+        expect(detector).toHaveBeenCalledWith({ ...payload, packageName: navigationPackage });
+        expect(detector.mock.calls[0][0]).not.toBe(payload);
+        if (navigationPackage) {
+          expect(build).toHaveBeenCalledWith(navigationPackage);
+          expect(navigation.hasPendingFingerprint()).toBe(true);
+        } else {
+          expect(build).not.toHaveBeenCalled();
+          expect(navigation.hasPendingFingerprint()).toBe(false);
+        }
+      } finally {
+        detector.mockRestore();
+        build.mockRestore();
+        packages.mockRestore();
+      }
+    },
+  );
+
   test("does not attach another app's interaction", async () => {
     const timestamp = timer.now();
     sendInteraction("com.example.app.a", "tap", timestamp);

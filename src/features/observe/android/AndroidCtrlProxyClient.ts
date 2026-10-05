@@ -5809,8 +5809,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     frameContext?: string,
     requestId?: string | null,
   ): void {
-    // Resolve identity from this capture before caching, SDK filtering or build attribution.
-    data = { ...data, packageName: this.resolveHierarchyPackage(data) ?? "" };
     const now = this.timer.now();
     logger.debug(
       `[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`,
@@ -5946,20 +5944,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     // Notify hierarchy navigation detector
+    const navigationPackage = this.resolveHierarchyPackage(data);
     if (!data.hierarchy) {
       logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
     } else if (data.error) {
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
-    } else if (!this.shouldUseHierarchyNavigation(data.packageName)) {
-      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${data.packageName}`);
+    } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
+      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
     } else {
       // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
       // non-SDK apps never emit navigation_event, so this is the only path that gives
       // them a real build key instead of the default/legacy one.
-      if (data.packageName) {
-        this.ensureBuildContext(data.packageName);
+      if (navigationPackage) {
+        this.ensureBuildContext(navigationPackage);
       }
-      this.getHierarchyNavigationDetector().onHierarchyUpdate(data);
+      this.getHierarchyNavigationDetector().onHierarchyUpdate({
+        ...data,
+        packageName: navigationPackage,
+      });
     }
   }
 

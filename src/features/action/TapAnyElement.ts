@@ -16,7 +16,10 @@ import {
   sessionRenderedObservation,
   type RenderedObservationReader,
 } from "./TargetDisplayAction";
-import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import {
+  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+  createDeviceHierarchyCapture,
+} from "../observe/DeviceHierarchyCapture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   resolveDisplayFence,
@@ -1488,6 +1491,7 @@ export class TapAnyElement extends BaseVisualChange {
     onActivationWarnings,
     perf,
     signal,
+    requestDeadlineMs,
   }: {
     options: TapAnyElementOptions;
     observeResult: ObserveResult;
@@ -1497,6 +1501,7 @@ export class TapAnyElement extends BaseVisualChange {
     onActivationWarnings: (messages?: string[]) => void;
     perf: PerformanceTracker;
     signal?: AbortSignal;
+    requestDeadlineMs?: number;
   }) {
     throwIfAborted(signal);
 
@@ -1536,7 +1541,7 @@ export class TapAnyElement extends BaseVisualChange {
       { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
     );
     const searchDurationMs = this.getSearchUntilDuration(options);
-    const startTime = this.timer.now();
+    let startTime = this.timer.now();
     let requestCount = 0;
     let changeCount = 0;
     const lastHash = this.hashViewHierarchy(viewHierarchy);
@@ -1566,8 +1571,18 @@ export class TapAnyElement extends BaseVisualChange {
         (timeout) => refresh(timeout, observeResult.screenSize, signal),
         this.timer,
         signal,
+        {
+          timeoutMs: Math.min(
+            DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+            requestDeadlineMs === undefined
+              ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
+              : requestDeadlineMs - this.timer.now(),
+          ),
+          context: "while revalidating a cached observation",
+        },
       );
       observeResult.viewHierarchy = viewHierarchy;
+      startTime = this.timer.now();
       selectedCapture = identifyObservedHierarchy(
         this.device.platform,
         viewHierarchy,
@@ -1578,10 +1593,21 @@ export class TapAnyElement extends BaseVisualChange {
         observationScreenSize: observeResult.screenSize,
         display: viewHierarchy,
       });
-      if (!current.element) {
-        this.throwMissingClickableElement(options, current.containerFound);
-      }
       element = current.element;
+      if (!element) {
+        // Start the same search window as a cache miss, from the fresh tree.
+        ({ element, selectedCapture, requestCount, changeCount } = await this.pollClickableTarget({
+          options,
+          observeResult,
+          refresh,
+          signal,
+          selectedCapture,
+          searchDurationMs,
+          startTime,
+          lastHash: this.hashViewHierarchy(viewHierarchy),
+          containerFoundEver: current.containerFound,
+        }));
+      }
     }
     const tapPoint = this.geometry.getElementCenter(element);
     const target = {
@@ -1786,6 +1812,7 @@ export class TapAnyElement extends BaseVisualChange {
             onActivationWarnings,
             perf,
             signal,
+            requestDeadlineMs: request?.requestDeadlineMs,
           }),
         {
           changeExpected: false,

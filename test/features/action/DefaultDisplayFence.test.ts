@@ -1105,3 +1105,54 @@ test("review: explicit adb search preserves the default-display dispatch fence",
   expect(h.android.getDragHistory()).toEqual([]);
   expect(checks).toBeGreaterThan(0);
 });
+
+for (const tool of ["tapOn", "tapAny"] as const) {
+  test.each(["unchanged", "transition"] as const)(
+    `review cache-hit ${tool} revalidation preserves default-display fence: %s`,
+    async (mode) => {
+      const h = harness("android", mode);
+      watch(h.observe, "getMostRecentCachedObserveResult").mockResolvedValue({
+        ...h.screen,
+        freshness: { isFresh: true },
+      });
+      const timeouts: number[] = [];
+      const refresh = async (timeout: number) => {
+        timeouts.push(timeout);
+        h.timer.advanceTime(1200);
+        await h.bump();
+        return h.screen.viewHierarchy!;
+      };
+      const on = h.attach(
+        new TapOnElement(h.device, h.adb, {
+          ...h.deps,
+          tapStrategy: new FakeTapStrategy(),
+          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+        }),
+      );
+      on.refreshViewHierarchy = refresh;
+      const any = h.attach(new TapAnyElement(h.device, h.adb, h.deps));
+      any.setRefreshViewHierarchyForTesting(async (_defaultRefresh, timeout) => refresh(timeout));
+      const options = {
+        text: "Target",
+        action: "longPress" as const,
+        duration: 100,
+        retryIfNoChange: false,
+        selectionStrategy: "first" as const,
+      };
+      const result = tool === "tapOn" ? await on.execute(options) : await any.execute(options);
+      expect(timeouts).toEqual([15000]);
+      if (mode === "transition") {
+        assertResult(result);
+        expect(h.inputs()).toEqual([]);
+      } else {
+        expect(result.success).toBe(true);
+        expect(h.inputs()).toEqual([
+          tool === "tapOn"
+            ? "shell input touchscreen swipe 60 80 60 80 100"
+            : "shell input touchscreen swipe 20 30 20 30 100",
+        ]);
+      }
+      expect(h.taps()).toEqual([]);
+    },
+  );
+}

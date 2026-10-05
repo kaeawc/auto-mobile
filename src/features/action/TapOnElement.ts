@@ -153,7 +153,10 @@ import {
   prepareTargetDisplayAction,
   type RenderedObservationReader,
 } from "./TargetDisplayAction";
-import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import {
+  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+  createDeviceHierarchyCapture,
+} from "../observe/DeviceHierarchyCapture";
 import {
   checkAndroidTapHierarchyChange,
   POST_TAP_REFRESH_TIMEOUT_MS,
@@ -2868,7 +2871,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapVerificationOptions,
     observeResult: ObserveResult,
     signal?: AbortSignal,
-    poll = true,
   ): Promise<{
     selection: ElementSelectionResult;
     viewHierarchy: ViewHierarchyResult;
@@ -2936,7 +2938,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Keep an independent request ceiling even if the wall clock moves backward.
       const maxRequests = Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS);
       let nextPollAt = startTime;
-      while (poll && this.timer.now() < deadline && requestCount < maxRequests) {
+      while (this.timer.now() < deadline && requestCount < maxRequests) {
         throwIfAborted(signal);
         const delayMs = Math.min(nextPollAt, deadline) - this.timer.now();
         if (delayMs > 0) {
@@ -4037,11 +4039,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               this.tapVerificationRefresh({ screenSize: observeResult.screenSize, signal }),
               this.timer,
               signal,
+              {
+                timeoutMs: Math.min(
+                  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+                  request?.requestDeadlineMs === undefined
+                    ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
+                    : request.requestDeadlineMs - this.timer.now(),
+                ),
+                context: "while revalidating a cached observation",
+              },
             );
             this.replaceObservationHierarchy(observeResult, freshHierarchy, true);
-            // Revalidation is one capture, not another search-until loop. A gone
-            // selector must fail rather than dispatch the cached coordinates.
-            searchOutcome = await this.searchForElement(options, observeResult, signal, false);
+            // Discard cached coordinates and use the ordinary search-until loop
+            // when the current screen is still transitioning.
+            searchOutcome = await this.searchForElement(options, observeResult, signal);
           }
           searchUntilStats = searchOutcome.stats;
           this.replaceObservationHierarchy(

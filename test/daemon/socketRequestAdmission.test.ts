@@ -8,6 +8,10 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
 } from "../../src/daemon/constants";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import type { DaemonResponse } from "../../src/daemon/types";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -177,3 +181,57 @@ describe("resolveSocketAdmissionLane", () => {
     }
   });
 });
+
+test.each([undefined, "device:a"])(
+  "daemon shapes expired admission in lane %s as never started",
+  async (lane) => {
+    const timer = new FakeTimer();
+    const socket = new FakeSocket();
+    const server = new UnixSocketServer(
+      "unused",
+      "http://localhost:0/mcp",
+      {} as DaemonStateAccess,
+      timer,
+    );
+    const internals = server as unknown as {
+      acceptingRequests: boolean;
+      handleConnection(socket: FakeSocket): void;
+      handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
+    };
+    internals.acceptingRequests = true;
+    const first = Promise.withResolvers<unknown>();
+    const started = Promise.withResolvers<void>();
+    let secondStarted = false;
+    internals.handleLocalSocketRequest = async (request) => {
+      if (request.id === "first") {
+        started.resolve();
+        return first.promise;
+      }
+      secondStarted = true;
+      return {};
+    };
+    internals.handleConnection(socket);
+    const request = (id: string): DaemonRequest => ({
+      id,
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "tapOn", arguments: lane ? { deviceId: "a" } : {} },
+      timeoutMs: 500,
+    });
+    socket.simulateData(JSON.stringify(request("first")) + "\n");
+    await started.promise;
+    socket.simulateData(JSON.stringify(request("second")) + "\n");
+    timer.advanceTime(500);
+    await flush();
+    first.resolve({});
+    await flush();
+    expect(secondStarted).toBe(false);
+    expect(
+      socket.getWrittenMessages<DaemonResponse>().find((response) => response.id === "second"),
+    ).toMatchObject({
+      success: false,
+      code: "daemon_queue_timeout",
+      error: expect.stringContaining("timed out in queue"),
+    });
+  },
+);

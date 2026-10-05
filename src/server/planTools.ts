@@ -98,6 +98,12 @@ const executePlanResultSchema = z
     deviceId: z.string().optional(),
     deviceMapping: z.record(z.string(), z.string()).optional(),
     debug: executePlanDebugSchema.optional(),
+    videoFilePaths: z.array(z.string()).optional(),
+    videoRecordingIds: z.array(z.string()).optional(),
+    videoWarnings: z
+      .array(z.string())
+      .optional()
+      .describe("Video capture gaps, truncation or failures"),
     warnings: z
       .array(
         z.object({

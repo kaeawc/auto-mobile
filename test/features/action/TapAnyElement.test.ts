@@ -324,6 +324,21 @@ describe("TapAnyElement Android gesture dispatch", () => {
     expect(result.warnings?.join(" ")).toContain("could not determine");
   });
 
+  test("unconfirmed enabled TalkBack attaches a warning while fresh evidence does not", async () => {
+    const { tapAny, detector } = setup({ success: true }, true);
+    let unconfirmed = true;
+    Object.assign(detector, {
+      resolveTalkBackStateWithConfirmation: async () => ({ talkBack: true, unconfirmed }),
+    });
+    const stale = await tapAny.execute({ action: "tap" });
+    expect(stale.success).toBe(true);
+    expect(stale.warnings?.join(" ")).toContain("could not determine");
+    unconfirmed = false;
+    const fresh = await tapAny.execute({ action: "tap" });
+    expect(fresh.success).toBe(true);
+    expect(fresh.warnings?.join(" ") ?? "").not.toContain("could not determine");
+  });
+
   test("tap uses CtrlProxy first and skips ADB when it succeeds", async () => {
     const { tapAny, adb, calls } = setup();
     const result = await tapAny.execute({ action: "tap" });

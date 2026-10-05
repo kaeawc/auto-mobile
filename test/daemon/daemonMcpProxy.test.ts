@@ -3748,6 +3748,33 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("recognises a structured queue rejection as provably undispatched during recovery", async () => {
+      const staleClient = new ScriptedDaemonClient({
+        toolError: Object.assign(
+          new DaemonUnavailableError("timed out in queue before admission"),
+          { code: "daemon_queue_timeout" },
+        ),
+      });
+      const result = { content: [{ type: "text", text: "tapped" }] };
+      const freshClient = new ScriptedDaemonClient({ toolResult: result });
+      const clients = [staleClient, freshClient];
+      const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer: new FakeTimer(),
+      });
+      try {
+        await expect(proxy.callTool("tapOn", {})).resolves.toEqual(result);
+        expect(staleClient.callToolCalls).toHaveLength(1);
+        expect(freshClient.callToolCalls).toHaveLength(1);
+      } finally {
+        available.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("replays a mutating tool whose request frame was never written (#6382)", async () => {
       const staleClient = new ScriptedDaemonClient({
         toolError: new DaemonRequestNotDeliveredError("Socket connection lost"),

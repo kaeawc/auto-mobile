@@ -1024,10 +1024,18 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       "shell pm list packages --user 0",
       "package:com.example.app\npackage:com.android.settings",
     );
-    fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    fakeAdb.setCommandResultSequence("shell dumpsys activity processes", [
+      "3220:com.example.app/u0a123",
+      "",
+    ]);
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+      timer: fakeTimer,
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
+        fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+      }),
+    });
     wireDeps(terminateApp);
     // skipUiStability keeps the Android gfxinfo path out of the test; the perf
     // ownership under observedInteraction is what we are covering here.
@@ -1036,7 +1044,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     expect(result.success).toBe(true);
     expect(result.wasRunning).toBe(true);
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(true);
-    assertWellFormedPerfTree(result);
+    const timings = assertWellFormedPerfTree(result);
+    expect(allNames(findEntry(timings, "terminateApp")!.children!)).toContain("awaitTerminated");
   });
 });
 

@@ -4,6 +4,7 @@ import type {
   AccessibilityDetector as IAccessibilityDetector,
   AccessibilityService,
   AndroidAccessibilityState,
+  TalkBackStateConfirmation,
 } from "./interfaces/AccessibilityDetector";
 import { SystemTimer, type Timer } from "../../utils/SystemTimer";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -61,13 +62,17 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   private readonly timer: Timer;
   // On failed refresh, retain a successful read only while its age is <90s:
   // the normal 60s TTL plus at most 30s grace. Never renew either TTL on failure.
-  // No negative cache: the next call always probes again. Explicit invalidation
-  // discards both caches so toggle confirmation cannot reuse pre-toggle state.
+  // Failed probes back off briefly; explicit invalidation discards all caches
+  // so toggle confirmation cannot reuse pre-toggle state.
   private readonly lastKnownGood: TTLCache<string, AndroidAccessibilityState>;
+
+  private readonly FAILED_PROBE_BACKOFF_MS = 3000;
+  private readonly failedProbes: TTLCache<string, true>;
 
   constructor(timer: Timer = new SystemTimer()) {
     this.timer = timer;
     this.cache = new TTLCache(timer, { ttlMs: this.DEFAULT_TTL_MS });
+    this.failedProbes = new TTLCache(timer, { ttlMs: this.FAILED_PROBE_BACKOFF_MS });
     this.lastKnownGood = new TTLCache(timer, { ttlMs: 90000 });
   }
 
@@ -114,10 +119,21 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     adb: AdbExecutor,
     featureFlags?: FeatureFlagService,
   ): Promise<boolean | null> {
+    return (await this.resolveTalkBackStateWithConfirmation(deviceId, adb, featureFlags)).talkBack;
+  }
+
+  async resolveTalkBackStateWithConfirmation(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<TalkBackStateConfirmation> {
     const state =
       (await this.resolveState(deviceId, adb, featureFlags)) ??
       (await this.resolveState(deviceId, adb, featureFlags));
-    return state === null ? null : state.service === "talkback";
+    return {
+      talkBack: state === null ? null : state.service === "talkback",
+      unconfirmed: state === null || state.unconfirmed === true,
+    };
   }
 
   private async readState(
@@ -128,6 +144,10 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     if (cached) {
       return cached;
     }
+    if (this.failedProbes.has(deviceId)) {
+      const fallback = this.lastKnownGood.get(deviceId);
+      return fallback ? { ...fallback, unconfirmed: true } : null;
+    }
     const startTime = this.timer.now();
     const state = await this.detectAccessibilityState(deviceId, adb);
     const detectionTime = this.timer.now() - startTime;
@@ -137,11 +157,14 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
       );
     }
     if (state !== null) {
+      this.failedProbes.delete(deviceId);
       this.cache.set(deviceId, state);
       this.lastKnownGood.set(deviceId, state);
       return state;
     }
-    return this.lastKnownGood.get(deviceId) ?? null;
+    this.failedProbes.set(deviceId, true);
+    const fallback = this.lastKnownGood.get(deviceId);
+    return fallback ? { ...fallback, unconfirmed: true } : null;
   }
 
   async isCtrlProxyServiceEnabled(
@@ -167,6 +190,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     logger.debug(`[AccessibilityDetector] Invalidating cache for device ${deviceId}`);
     this.cache.delete(deviceId);
     this.lastKnownGood.delete(deviceId);
+    this.failedProbes.delete(deviceId);
   }
 
   /**
@@ -176,6 +200,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     logger.debug(`[AccessibilityDetector] Clearing all cached entries`);
     this.cache.clear();
     this.lastKnownGood.clear();
+    this.failedProbes.clear();
   }
 
   /**

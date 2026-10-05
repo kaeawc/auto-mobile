@@ -421,11 +421,9 @@ export class NavigationGraphManager implements NavigationGraphService {
   // Active navigation window: fingerprints seen within this window of an SDK event are correlated
   private readonly ACTIVE_NAVIGATION_WINDOW_MS = 1000;
 
-  // Track active navigation from SDK events for fingerprint correlation
+  // Track app-scoped SDK navigation for fingerprint correlation; build context may resolve later.
   private activeNavigation: {
     appId: string;
-    versionCode: number;
-    contentHash: string;
     nodeId: number;
     screenName: string;
     startTime: number;
@@ -1048,11 +1046,9 @@ export class NavigationGraphManager implements NavigationGraphService {
     this.toolCallHistory = this.toolCallHistory.filter((tc) => tc !== edgeInteraction);
 
     // Set active navigation state for fingerprint correlation. Fingerprints seen
-    // within ACTIVE_NAVIGATION_WINDOW_MS will be correlated to this node.
+    // within ACTIVE_NAVIGATION_WINDOW_MS in the same app will be correlated to this node.
     this.activeNavigation = {
       appId,
-      versionCode: provenance.versionCode,
-      contentHash: provenance.contentHash,
       nodeId: node.id,
       screenName: screenName,
       startTime: timestamp,
@@ -1238,7 +1234,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     }
 
     // Case 2: Check if within active navigation window - correlate fingerprint to active node
-    if (await this.correlateActiveNavigation(appId, provenance, event, epoch)) {
+    if (await this.correlateActiveNavigation(appId, event, epoch)) {
       return;
     }
 
@@ -1283,17 +1279,11 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   private async correlateActiveNavigation(
     appId: string,
-    provenance: ResolvedProvenance,
     event: HierarchyNavigationEvent,
     epoch: number,
   ): Promise<boolean> {
     const navigation = this.activeNavigation;
-    if (
-      !navigation ||
-      navigation.appId !== appId ||
-      navigation.versionCode !== provenance.versionCode ||
-      navigation.contentHash !== provenance.contentHash
-    ) {
+    if (!navigation || navigation.appId !== appId) {
       return false;
     }
 

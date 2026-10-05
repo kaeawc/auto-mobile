@@ -139,7 +139,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     { versionCode: 1, contentHash: "" },
     { versionCode: 0, contentHash: "new-build" },
   ]) {
-    test(`does not correlate across a change in ${change.versionCode ? "versionCode" : "contentHash"}`, async () => {
+    test(`correlates the same app across a change in ${change.versionCode ? "versionCode" : "contentHash"}`, async () => {
       manager.setBuildContext({ appId, deviceId: "test-device", ...change });
       await manager.recordHierarchyNavigation({
         packageName: appId,
@@ -147,9 +147,60 @@ describe("NavigationGraphManager navigation write ordering", () => {
         toFingerprint: "fp_new_build",
         timestamp: 3200,
       });
-      expect(await repository.getNodeByFingerprint(appId, "fp_new_build")).toBeUndefined();
+      expect(await repository.getNodeByFingerprint(appId, "fp_new_build")).toEqual(
+        await repository.getNode(appId, "Other"),
+      );
+      expect(manager.getCurrentScreen()).toBe("Other");
     });
   }
+
+  test("correlates a cold-start SDK navigation after its build context resolves", async () => {
+    const coldApp = `${appId}.cold`;
+    expect(manager.getBuildContexts()).toEqual([]);
+    await manager.recordNavigationEvent({
+      applicationId: coldApp,
+      destination: "Welcome",
+      timestamp: 4000,
+    });
+    const node = await repository.getNode(coldApp, "Welcome");
+    expect(node).toBeDefined();
+    manager.setBuildContext({
+      appId: coldApp,
+      deviceId: "test-device",
+      versionCode: 42,
+      contentHash: "resolved-bundle-hash",
+    });
+    await manager.recordHierarchyNavigation({
+      packageName: coldApp,
+      fromFingerprint: null,
+      toFingerprint: "fp_cold_start",
+      timestamp: 4200,
+    });
+    expect(await repository.getNodeByFingerprint(coldApp, "fp_cold_start")).toEqual(node);
+    expect(manager.getCurrentScreen()).toBe("Welcome");
+  });
+
+  test("correlates the same app after its build context is cleared", async () => {
+    manager.setBuildContext({
+      appId,
+      deviceId: "test-device",
+      versionCode: 42,
+      contentHash: "resolved-bundle-hash",
+    });
+    await manager.recordNavigationEvent({ destination: "Checkout", timestamp: 4000 });
+    const node = await repository.getNode(appId, "Checkout");
+    expect(node).toBeDefined();
+    manager.clearBuildContext(appId);
+    expect(manager.getBuildContexts()).toEqual([]);
+    await manager.recordHierarchyNavigation({
+      packageName: appId,
+      fromFingerprint: null,
+      toFingerprint: "fp_cleared_build",
+      timestamp: 4200,
+    });
+    expect(await repository.getNodeByFingerprint(appId, "fp_cleared_build")).toEqual(node);
+    expect(manager.getCurrentScreen()).toBe("Checkout");
+  });
 
   test("same app and build still correlate at the inclusive one-second boundary", async () => {
     const context = { appId, versionCode: 3, contentHash: "build", deviceId: "device-one" };

@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "bun:test";
 import Ajv from "ajv";
 import { dump } from "js-yaml";
-import { PlanSchemaValidator } from "../../src/utils/plan/PlanSchemaValidator";
+import path from "path";
+import type { FileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
+import {
+  PlanSchemaValidator,
+  resetPlanSchemaCacheForTests,
+} from "../../src/utils/plan/PlanSchemaValidator";
 
 describe("PlanSchemaValidator", () => {
   let validator: PlanSchemaValidator;
@@ -2010,5 +2015,145 @@ describe("PlanSchemaValidator.validateFile", () => {
       valid: false,
       errors: [{ field: "schema", message: "Schema not loaded. Call loadSchema() first." }],
     });
+  });
+});
+
+describe("PlanSchemaValidator process cache", () => {
+  const plan = "name: cached plan\nsteps:\n  - tool: observe\n";
+  const schemaContent = JSON.stringify({
+    type: "object",
+    required: ["name", "steps"],
+    properties: { name: { type: "string" }, steps: { type: "array" } },
+  });
+
+  class FakeSchemaFileSystem implements Pick<FileSystem, "readFile"> {
+    readonly attempts: string[] = [];
+    content = schemaContent;
+    missing = false;
+
+    async readFile(filePath: string): Promise<string> {
+      this.attempts.push(filePath);
+      if (this.missing) {
+        throw Object.assign(new Error("missing schema"), { code: "ENOENT" });
+      }
+      return this.content;
+    }
+  }
+
+  let restoreCache: () => void;
+
+  beforeAll(async () => {
+    const populated = new PlanSchemaValidator();
+    await populated.loadSchema();
+    populated.validateYaml(plan);
+  });
+
+  beforeEach(() => {
+    restoreCache = resetPlanSchemaCacheForTests();
+  });
+
+  afterEach(() => {
+    restoreCache();
+  });
+
+  for (const concurrent of [false, true]) {
+    describe(concurrent ? "concurrent first loads" : "sequential loads", () => {
+      let fileSystem: FakeSchemaFileSystem;
+      let validators: PlanSchemaValidator[];
+
+      beforeEach(async () => {
+        fileSystem = new FakeSchemaFileSystem();
+        validators = Array.from({ length: 5 }, () => new PlanSchemaValidator(fileSystem));
+        if (concurrent) {
+          await Promise.all(validators.map((candidate) => candidate.loadSchema()));
+        } else {
+          for (const candidate of validators) {
+            await candidate.loadSchema();
+          }
+        }
+        // Warm compilation in setup, outside the per-test timing budget.
+        validators[0].validateYaml(plan);
+      });
+
+      it("reads once and shares Ajv/schema while keeping instance validation lazy", async () => {
+        expect(fileSystem.attempts).toHaveLength(1);
+        const first = validators[0];
+        for (const candidate of validators.slice(1)) {
+          expect(candidate.isSchemaLoaded()).toBe(true);
+          expect(Reflect.get(candidate, "ajv")).toBe(Reflect.get(first, "ajv"));
+          expect(Reflect.get(candidate, "schema")).toBe(Reflect.get(first, "schema"));
+          expect(Reflect.get(candidate, "validateFn")).toBeUndefined();
+          expect(candidate.validateYaml(plan)).toEqual({ valid: true });
+        }
+        expect(first.validateYaml(plan)).toEqual({ valid: true });
+        await first.loadSchema();
+        const unusedFileSystem = new FakeSchemaFileSystem();
+        await new PlanSchemaValidator(unusedFileSystem).loadSchema();
+        expect(unusedFileSystem.attempts).toHaveLength(0);
+        expect(fileSystem.attempts).toHaveLength(1);
+      });
+    });
+  }
+
+  it("does not cache missing-schema failures and reports only distinct attempted paths", async () => {
+    const fileSystem = new FakeSchemaFileSystem();
+    fileSystem.missing = true;
+    const failed = new PlanSchemaValidator(fileSystem);
+    const results = await Promise.allSettled([
+      failed.loadSchema(),
+      new PlanSchemaValidator(fileSystem).loadSchema(),
+    ]);
+    const result = results[0];
+    expect(result.status).toBe("rejected");
+    if (result.status !== "rejected") {
+      throw new Error("Expected missing-schema rejection");
+    }
+    const message = String(result.reason.message);
+    expect(message).toStartWith(
+      "Could not find test-plan.schema.json.\nCurrent working directory:",
+    );
+    expect(message).toContain("\nModule directory:");
+    expect(message).toContain("\nGITHUB_WORKSPACE:");
+    const attemptedPaths = message
+      .split("Tried paths:\n")[1]
+      .split("\n")
+      .map((line) => line.slice(4));
+    expect(attemptedPaths).toEqual(fileSystem.attempts);
+    expect(attemptedPaths.length).toBeGreaterThan(0);
+    expect(new Set(attemptedPaths.map((candidate) => path.resolve(candidate))).size).toBe(
+      attemptedPaths.length,
+    );
+    expect(failed.isSchemaLoaded()).toBe(false);
+    expect(results[1]).toEqual(result);
+
+    fileSystem.missing = false;
+    const recovered = new PlanSchemaValidator(fileSystem);
+    await recovered.loadSchema();
+    expect(recovered.isSchemaLoaded()).toBe(true);
+    expect(fileSystem.attempts).toHaveLength(attemptedPaths.length + 1);
+    await failed.loadSchema();
+    expect(failed.isSchemaLoaded()).toBe(true);
+    expect(fileSystem.attempts).toHaveLength(attemptedPaths.length + 1);
+  });
+
+  it("does not cache JSON parse failures", async () => {
+    const fileSystem = new FakeSchemaFileSystem();
+    fileSystem.content = "{";
+    const failed = new PlanSchemaValidator(fileSystem);
+    await expect(failed.loadSchema()).rejects.toBeInstanceOf(SyntaxError);
+    expect(failed.isSchemaLoaded()).toBe(false);
+    fileSystem.content = schemaContent;
+    await failed.loadSchema();
+    expect(failed.isSchemaLoaded()).toBe(true);
+    expect(fileSystem.attempts).toHaveLength(2);
+  });
+
+  it("requires each instance to load even when the process cache is populated", async () => {
+    await new PlanSchemaValidator(new FakeSchemaFileSystem()).loadSchema();
+    const unloaded = new PlanSchemaValidator();
+    expect(unloaded.isSchemaLoaded()).toBe(false);
+    expect(() => unloaded.validateYaml(plan)).toThrow(
+      "Schema not loaded. Call loadSchema() first.",
+    );
   });
 });

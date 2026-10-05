@@ -384,7 +384,10 @@ function auditHandler(
       ts.isIdentifier(node) &&
       (node === handler ||
         (ts.isCallExpression(node.parent) && node.parent.expression === node) ||
-        (ts.isVariableDeclaration(node.parent) && node.parent.initializer === node))
+        (ts.isVariableDeclaration(node.parent) && node.parent.initializer === node) ||
+        (ts.isShorthandPropertyAssignment(node.parent) &&
+          ts.isObjectLiteralExpression(node.parent.parent) &&
+          ts.isReturnStatement(node.parent.parent.parent)))
     ) {
       const binding = index.bindings.get(node.text);
       if (binding) {
@@ -466,6 +469,45 @@ test("source guard detects helper and raw text envelopes while exempting error e
     offenders: [],
   });
   expect(auditHandler(indexes, file, index.bindings.get("error")!).offenders).toEqual([]);
+});
+
+test("source guard follows factory helpers returned through object shorthand", () => {
+  const registrationFile = path.join(serverDirectory, "registrations.ts");
+  const handlerFile = path.join(serverDirectory, "handlers.ts");
+  const registrationIndex = indexSource(
+    registrationFile,
+    `import { createGoodHandlers, createBadHandlers, createMixedHandlers } from "./handlers";
+const { structured } = createGoodHandlers();
+const { textOnly } = createBadHandlers();
+const { mixed } = createMixedHandlers();
+ToolRegistry.register("good", "", schema, structured, { outputSchema: schema });
+ToolRegistry.register("bad", "", schema, textOnly, { outputSchema: schema });
+ToolRegistry.register("mixed", "", schema, mixed, { outputSchema: schema });`,
+  );
+  const handlerIndex = indexSource(
+    handlerFile,
+    `function structured() { return createStructuredToolResponse({ success: true }); }
+function textOnly() { return createJSONToolResponse({ success: true }); }
+function mixed() { textOnly(); return structured(); }
+export function createGoodHandlers() { return { structured }; }
+export function createBadHandlers() { return { textOnly }; }
+export function createMixedHandlers() { return { mixed }; }`,
+  );
+  const indexes = new Map([
+    [sourceKey(registrationFile), registrationIndex],
+    [sourceKey(handlerFile), handlerIndex],
+  ]);
+  expect(registrationIndex.registrations).toHaveLength(3);
+  expect(
+    registrationIndex.registrations.map(({ name, handler }) => ({
+      name,
+      ...auditHandler(indexes, registrationFile, handler),
+    })),
+  ).toEqual([
+    { name: "good", structured: true, offenders: [] },
+    { name: "bad", structured: false, offenders: [`${handlerFile}:2`] },
+    { name: "mixed", structured: true, offenders: [`${handlerFile}:2`] },
+  ]);
 });
 
 test("source paths use Windows containment and canonical keys", () => {

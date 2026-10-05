@@ -8,7 +8,11 @@ import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
+import {
+  DeviceLostError,
+  isDeviceLostError,
+  rememberDeviceLossAbort,
+} from "../../src/models/DeviceLostError";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
@@ -67,6 +71,50 @@ describe("barrier tool", () => {
       restoreCoordinator = undefined;
     }
   });
+
+  for (const recoverLoss of [true, false]) {
+    for (const alreadyAborted of [false, true]) {
+      test(`hidden ${recoverLoss ? "device loss" : "cancellation"} is an Error (${alreadyAborted ? "before arrival" : "parked handler"})`, async () => {
+        const timer = new FakeTimer();
+        const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+        const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+        const controller = new AbortController();
+        const loss = new DeviceLostError("A", "disconnected");
+        Object.defineProperty(controller.signal, "reason", { get: () => undefined });
+        if (recoverLoss) {
+          rememberDeviceLossAbort(controller.signal, loss);
+        }
+        if (alreadyAborted) {
+          controller.abort(loss);
+        }
+        try {
+          const pending = ToolRegistry.getToolForPlan("barrier")!.deviceAwareHandler!(
+            { platform: "android", deviceId: "A", name: "A" },
+            { lock: "hidden-abort", device: "A", deviceCount: 2 },
+            undefined,
+            controller.signal,
+          ).then(
+            () => "unexpected success",
+            (error: unknown) => error,
+          );
+          if (!alreadyAborted) {
+            controller.abort(loss);
+          }
+          const error = await pending;
+          expect(error).toBeInstanceOf(Error);
+          if (recoverLoss) {
+            expect(error).toBe(loss);
+          } else {
+            expect(error).toEqual(new Error("Operation cancelled"));
+          }
+          expect(timer.getPendingTimeouts()).toEqual([]);
+        } finally {
+          coordinator.forceCleanup("hidden-abort");
+          restore();
+        }
+      });
+    }
+  }
 
   test("preserves an already-aborted handler reason without creating timers", async () => {
     const timer = new FakeTimer();

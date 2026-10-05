@@ -221,13 +221,15 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
   return undefined;
 };
 
-export const throwIfAborted = (signal?: AbortSignal): void => {
+/** Resolve runtime-hidden device loss before falling back to ordinary cancellation. */
+export const abortErrorFromSignal = (signal: AbortSignal, preserveReason = true): unknown =>
+  deviceLostErrorFromAbortSignal(signal) ??
+  (preserveReason ? signal.reason : undefined) ??
+  new Error(OPERATION_CANCELLED_MESSAGE);
+
+export const throwIfAborted = (signal?: AbortSignal, preserveReason = false): void => {
   if (signal?.aborted) {
-    const deviceLoss = deviceLostErrorFromAbortSignal(signal);
-    if (deviceLoss) {
-      throw deviceLoss;
-    }
-    throw new Error(OPERATION_CANCELLED_MESSAGE);
+    throw abortErrorFromSignal(signal, preserveReason);
   }
 };
 

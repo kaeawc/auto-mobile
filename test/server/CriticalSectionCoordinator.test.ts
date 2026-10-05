@@ -1,6 +1,7 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
+import { DeviceLostError, rememberDeviceLossAbort } from "../../src/models/DeviceLostError";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -29,6 +30,39 @@ describe("CriticalSectionCoordinator", () => {
           ? coordinator.awaitBarrier("abort-lock", device, 2, 120000, undefined, signal)
           : coordinator.enterCriticalSection("abort-lock", device, 120000, undefined, signal);
       };
+
+      for (const reasonMode of ["visible loss", "hidden loss", "hidden cancellation"] as const) {
+        for (const alreadyAborted of [false, true]) {
+          test(`${kind} resolves ${reasonMode} (${alreadyAborted ? "before arrival" : "parked waiter"})`, async () => {
+            const controller = new AbortController();
+            const loss = new DeviceLostError("A", "disconnected");
+            if (reasonMode !== "visible loss") {
+              Object.defineProperty(controller.signal, "reason", { get: () => undefined });
+            }
+            if (reasonMode !== "hidden cancellation") {
+              rememberDeviceLossAbort(controller.signal, loss);
+            }
+            if (alreadyAborted) {
+              controller.abort(loss);
+            }
+            const pending = start(controller.signal).then(
+              () => "unexpected success",
+              (error: unknown) => error,
+            );
+            if (!alreadyAborted) {
+              controller.abort(loss);
+            }
+            const error = await pending;
+            expect(error).toBeInstanceOf(Error);
+            if (reasonMode === "hidden cancellation") {
+              expect(error).toEqual(new Error("Operation cancelled"));
+            } else {
+              expect(error).toBe(loss);
+            }
+            expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+          });
+        }
+      }
 
       test(`${kind} abort removes only its waiter, arrival, timer and listener`, async () => {
         const controller = new AbortController();
@@ -128,6 +162,28 @@ describe("CriticalSectionCoordinator", () => {
       const release = await b;
       release();
       expect(await a).toBe(reason);
+    });
+
+    test("hidden device loss while acquiring a mutex preserves the typed error", async () => {
+      coordinator.registerExpectedDevices("hidden-mutex", 1);
+      const releaseOwner = await coordinator.enterCriticalSection("hidden-mutex", "owner");
+      const controller = new AbortController();
+      const loss = new DeviceLostError("A", "disconnected");
+      Object.defineProperty(controller.signal, "reason", { get: () => undefined });
+      rememberDeviceLossAbort(controller.signal, loss);
+      const pending = coordinator
+        .enterCriticalSection("hidden-mutex", "A", 120000, undefined, controller.signal)
+        .then(
+          () => "unexpected success",
+          (error: unknown) => error,
+        );
+      await drainMicrotasks(40);
+      controller.abort(loss);
+      const error = await pending;
+      releaseOwner();
+      expect(error).toBe(loss);
+      const releaseNext = await coordinator.enterCriticalSection("hidden-mutex", "next");
+      releaseNext();
     });
 
     test("abort while acquiring a mutex settles promptly and releases late acquisition", async () => {

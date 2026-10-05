@@ -5,7 +5,12 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse, getStructuredPayload, throwIfAborted } from "../utils/toolUtils";
+import {
+  abortErrorFromSignal,
+  createJSONToolResponse,
+  getStructuredPayload,
+  throwIfAborted,
+} from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
@@ -289,9 +294,7 @@ const criticalSectionHandler = async (
   );
 
   // Preserve the caller's abort reason before entering coordination.
-  signal?.throwIfAborted();
-
-  validateCriticalSectionSteps(normalizedSteps, lock, params.device);
+  throwIfAborted(signal, true);
 
   // Register expected device count
   try {
@@ -303,6 +306,8 @@ const criticalSectionHandler = async (
   let release: (() => void) | undefined;
 
   try {
+    validateCriticalSectionSteps(normalizedSteps, lock, params.device);
+
     // Wait at barrier and acquire lock
     release = await coordinator.enterCriticalSection(
       lock,
@@ -341,7 +346,13 @@ const criticalSectionHandler = async (
     const errorMsg = errorMessage(error);
     logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMsg}`);
 
-    if (isDeviceLostError(error) || (signal?.aborted && error === signal.reason)) {
+    if (
+      isDeviceLostError(error) ||
+      (signal?.aborted &&
+        (signal.reason === undefined ||
+          signal.reason === null ||
+          error === abortErrorFromSignal(signal)))
+    ) {
       throw error;
     }
     const message = `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`;

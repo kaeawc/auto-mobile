@@ -89,4 +89,6 @@ export interface SettleResult {
  */
 export interface SettleObserve {
   execute(options?: SettleOptions): Promise<SettleResult>;
+  /** Capture evidence only after the caller accepts the terminal observation. */
+  captureScreenshot?(observation: ObserveResult, signal?: AbortSignal): Promise<void>;
 }

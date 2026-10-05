@@ -255,6 +255,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let currentSessionId = sdkSessionId
         let currentSessionEpoch = sdkSessionEpoch
         let currentTrackingGeneration = trackingGeneration
+        let buffer = eventBuffer
         lock.unlock()
 
         for listener in currentListeners {
@@ -277,16 +278,17 @@ public final class AutoMobileSDK: @unchecked Sendable {
             transitionIdentifier: event.transitionIdentifier,
             transitionCompleted: event.transitionCompleted
         )
-        eventBuffer?.add(sdkEvent)
+        buffer?.add(sdkEvent)
         // Navigation is control-plane state for observe/diff, not bulk telemetry.
         // Flush it immediately so a post-action observation can fetch the current
         // screen identity instead of waiting for the regular telemetry cadence.
-        eventBuffer?.flush()
+        buffer?.flush()
     }
 
     public func recordWebViewEvent(_ event: SdkWebViewEvent) {
         guard isEnabled else { return }
-        eventBuffer?.add(event)
+        let buffer = getEventBuffer()
+        buffer?.add(event)
     }
 
     /// Number of registered listeners.
@@ -300,7 +302,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     /// Returns the current session ID, or nil if no session is active.
     public func currentSessionId() -> String? {
-        return sessionTracker?.currentSessionId()
+        lock.lock()
+        let tracker = sessionTracker
+        lock.unlock()
+        return tracker?.currentSessionId()
     }
 
     // MARK: - Breadcrumbs

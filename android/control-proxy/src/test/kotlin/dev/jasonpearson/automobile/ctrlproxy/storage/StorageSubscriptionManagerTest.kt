@@ -1,10 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy.storage
 
+import android.content.ContentProvider
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Context
 import android.database.ContentObserver
+import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
+import android.os.Looper
 import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
@@ -12,16 +16,32 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowContentResolver
 
 @RunWith(RobolectricTestRunner::class)
 class StorageSubscriptionManagerTest {
@@ -29,13 +49,51 @@ class StorageSubscriptionManagerTest {
   private lateinit var context: Context
   private lateinit var contentResolver: ContentResolver
   private lateinit var manager: StorageSubscriptionManager
+  private val dispatcher = StandardTestDispatcher()
+  private val scope = TestScope(dispatcher)
 
   @Before
   fun setUp() {
     contentResolver = mockk(relaxed = true)
     context = mockk(relaxed = true)
     every { context.contentResolver } returns contentResolver
-    manager = StorageSubscriptionManager(context)
+    manager = StorageSubscriptionManager(context, dispatcher, scope)
+  }
+
+  @After
+  fun tearDown() {
+    manager.destroy()
+    scope.testScheduler.advanceUntilIdle()
+    scope.cancel()
+  }
+
+  @Test
+  fun `observer only signals instead of calling provider on main looper`() {
+    val observer = slot<ContentObserver>()
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply { putBoolean("success", true) }
+    every { contentResolver.registerContentObserver(any(), any(), capture(observer)) } returns Unit
+    manager.subscribe("com.example.app", "auth")
+
+    observer.captured.dispatchChange(false)
+    shadowOf(Looper.getMainLooper()).idle()
+
+    verify(exactly = 0) { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) }
+  }
+
+  @Test
+  fun `destroy clears local state without synchronously calling provider`() {
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply { putBoolean("success", true) }
+    manager.subscribe("com.example.app", "auth")
+
+    manager.destroy()
+
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+    verify { contentResolver.unregisterContentObserver(any()) }
+    verify(exactly = 0) {
+      contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any())
+    }
   }
 
   // ================= SDK Availability Tests =================
@@ -378,7 +436,7 @@ class StorageSubscriptionManagerTest {
 
   @Test
   fun `storage event bursts retain a bounded latest sequence for gap reconciliation`() =
-    runBlocking {
+    runTest(dispatcher) {
       val observerSlot = slot<ContentObserver>()
       val subscribeBundle =
         Bundle().apply {
@@ -413,67 +471,70 @@ class StorageSubscriptionManagerTest {
 
       assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
       observerSlot.captured.onChange(false)
+      advanceUntilIdle()
 
       val received = withTimeout(1_000) { manager.changeEvents.take(64).toList() }
       assertEquals((37L..100L).toList(), received.map { it.sequenceNumber })
     }
 
   @Test
-  fun `one file cannot evict another files latest event`() = runBlocking {
-    val observers = mutableMapOf<String, ContentObserver>()
-    val subscribeBundle =
-      Bundle().apply {
-        putBoolean("success", true)
-        putString("result", """{"fileName":"auth","subscribed":true}""")
-      }
-    fun changesBundle(fileName: String, count: Long) =
-      Bundle().apply {
-        putBoolean("success", true)
-        putString(
-          "result",
-          StorageProtocolSerializer.responseToJson(
-            StorageResponse.Changes(
-              fileName,
-              (1L..count).map { sequence ->
-                StorageChangeEvent(
-                  fileName = fileName,
-                  key = "key-$sequence",
-                  value = sequence.toString(),
-                  type = "LONG",
-                  timestamp = sequence,
-                  sequenceNumber = sequence,
-                )
-              },
-            )
-          ),
-        )
-      }
-    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-      subscribeBundle
-    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
-      {
-        val fileName = arg<Bundle>(3).getString("fileName").orEmpty()
-        changesBundle(fileName, if (fileName == "target") 1 else 100)
-      }
-    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
-      {
-        observers[firstArg<Uri>().authority.orEmpty()] = thirdArg()
-      }
+  fun `one file cannot evict another files latest event`() =
+    runTest(dispatcher) {
+      val observers = mutableMapOf<String, ContentObserver>()
+      val subscribeBundle =
+        Bundle().apply {
+          putBoolean("success", true)
+          putString("result", """{"fileName":"auth","subscribed":true}""")
+        }
+      fun changesBundle(fileName: String, count: Long) =
+        Bundle().apply {
+          putBoolean("success", true)
+          putString(
+            "result",
+            StorageProtocolSerializer.responseToJson(
+              StorageResponse.Changes(
+                fileName,
+                (1L..count).map { sequence ->
+                  StorageChangeEvent(
+                    fileName = fileName,
+                    key = "key-$sequence",
+                    value = sequence.toString(),
+                    type = "LONG",
+                    timestamp = sequence,
+                    sequenceNumber = sequence,
+                  )
+                },
+              )
+            ),
+          )
+        }
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        subscribeBundle
+      every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+        {
+          val fileName = arg<Bundle>(3).getString("fileName").orEmpty()
+          changesBundle(fileName, if (fileName == "target") 1 else 100)
+        }
+      every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+        {
+          observers[firstArg<Uri>().authority.orEmpty()] = thirdArg()
+        }
 
-    assertTrue(manager.subscribe("com.example.app", "target").isSuccess)
-    assertTrue(manager.subscribe("com.example.app", "noisy").isSuccess)
-    observers.getValue("com.example.app.automobile.sharedprefs").onChange(false)
+      assertTrue(manager.subscribe("com.example.app", "target").isSuccess)
+      assertTrue(manager.subscribe("com.example.app", "noisy").isSuccess)
+      observers.getValue("com.example.app.automobile.sharedprefs").onChange(false)
+      advanceUntilIdle()
 
-    val received = withTimeout(1_000) { manager.changeEvents.take(65).toList() }
-    assertEquals(
-      listOf(1L),
-      received.filter { it.fileName == "target" }.map { it.sequenceNumber },
-    )
-    assertEquals(
-      (37L..100L).toList(),
-      received.filter { it.fileName == "noisy" }.map { it.sequenceNumber },
-    )
-  }
+      val received = withTimeout(1_000) { manager.changeEvents.take(65).toList() }
+      assertEquals(
+        listOf(1L),
+        received.filter { it.fileName == "target" }.map { it.sequenceNumber },
+      )
+      assertEquals(
+        (37L..100L).toList(),
+        received.filter { it.fileName == "noisy" }.map { it.sequenceNumber },
+      )
+    }
 
   // ================= Unsubscribe Tests =================
 
@@ -521,70 +582,48 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
-  fun `unsubscribe waits for in-flight fetch and clears its buffered events`() = runBlocking {
-    val observerSlot = slot<ContentObserver>()
-    val subscribeBundle =
-      Bundle().apply {
-        putBoolean("success", true)
-        putString("result", """{"fileName":"auth","subscribed":true}""")
+  fun `unsubscribe drops an in-flight fetch even after resubscribe`() =
+    runTest(dispatcher) {
+      val observer = slot<ContentObserver>()
+      val releaseFetch = CompletableDeferred<Unit>()
+      val fetchEntered = CompletableDeferred<Unit>()
+      var calls = 0
+      val provider = StorageSubscriptionManager.BackgroundCalls { _, method, extras ->
+        if (method == "getChanges" && extras.getString("fileName") == "auth") {
+          calls++
+          if (calls == 1) {
+            fetchEntered.complete(Unit)
+            // Model Binder ignoring interruption, then release it explicitly without a real thread.
+            withContext(NonCancellable) { releaseFetch.await() }
+          }
+          changesBundle("auth", listOf(calls.toLong()))
+        } else Bundle()
       }
-    fun changesBundle(sequence: Long) =
-      Bundle().apply {
-        putBoolean("success", true)
-        putString(
-          "result",
-          StorageProtocolSerializer.responseToJson(
-            StorageResponse.Changes(
-              "auth",
-              listOf(
-                StorageChangeEvent(
-                  fileName = "auth",
-                  key = "key-$sequence",
-                  value = sequence.toString(),
-                  type = "LONG",
-                  timestamp = sequence,
-                  sequenceNumber = sequence,
-                )
-              ),
-            )
-          ),
-        )
-      }
-    val fetchEntered = java.util.concurrent.CountDownLatch(1)
-    val releaseFetch = java.util.concurrent.CountDownLatch(1)
-    val fetchCalls = java.util.concurrent.atomic.AtomicInteger()
-    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-      subscribeBundle
-    every { contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any()) } returns
-      Bundle()
-    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
-      {
-        val call = fetchCalls.incrementAndGet()
-        if (call == 1) {
-          fetchEntered.countDown()
-          assertTrue(releaseFetch.await(1, java.util.concurrent.TimeUnit.SECONDS))
-        }
-        changesBundle(call.toLong())
-      }
-    every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
-      Unit
+      manager.destroy()
+      manager = StorageSubscriptionManager(context, dispatcher, this, provider)
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        Bundle().apply { putBoolean("success", true) }
+      every { contentResolver.registerContentObserver(any(), any(), capture(observer)) } returns
+        Unit
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      // Keep the package worker alive: dropping the old result must use subscription identity.
+      assertTrue(manager.subscribe("com.example.app", "settings").isSuccess)
+      observer.captured.onChange(false)
+      runCurrent()
+      fetchEntered.await()
 
-    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
-    val fetchThread = Thread { observerSlot.captured.onChange(false) }
-    fetchThread.start()
-    assertTrue(fetchEntered.await(1, java.util.concurrent.TimeUnit.SECONDS))
+      assertTrue(manager.unsubscribe("com.example.app", "auth"))
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      releaseFetch.complete(Unit)
+      advanceUntilIdle()
+      observer.captured.onChange(false)
+      advanceUntilIdle()
 
-    val unsubscribeThread = Thread { manager.unsubscribe("com.example.app", "auth") }
-    unsubscribeThread.start()
-    releaseFetch.countDown()
-    fetchThread.join(1_000)
-    unsubscribeThread.join(1_000)
-    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
-    observerSlot.captured.onChange(false)
-
-    val received = withTimeout(1_000) { manager.changeEvents.take(1).toList() }
-    assertEquals(listOf(2L), received.map { it.sequenceNumber })
-  }
+      val received = withTimeout(1_000) { manager.changeEvents.take(1).toList() }
+      assertEquals(listOf(2L), received.map { it.sequenceNumber })
+      manager.destroy()
+      advanceUntilIdle()
+    }
 
   // ================= Active Subscriptions Tests =================
 
@@ -634,6 +673,265 @@ class StorageSubscriptionManagerTest {
     manager.destroy()
 
     assertTrue(manager.getActiveSubscriptions().isEmpty())
+  }
+
+  @Test
+  fun `notifyChange fetches on IO rather than the service main looper`() =
+    runTest(dispatcher) {
+      val provider = RecordingProvider()
+      val app = RuntimeEnvironment.getApplication()
+      ShadowContentResolver.registerProviderInternal(
+        "com.example.app.automobile.sharedprefs",
+        provider,
+      )
+      provider.attachInfo(app, null)
+      manager.destroy()
+      manager = StorageSubscriptionManager(app, Dispatchers.IO, this)
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      assertEquals(Looper.getMainLooper(), Looper.myLooper())
+      val event = async { manager.changeEvents.first() }
+
+      app.contentResolver.notifyChange(
+        Uri.parse("content://com.example.app.automobile.sharedprefs/changes"),
+        null,
+      )
+      shadowOf(Looper.getMainLooper()).idle()
+
+      assertEquals(1L, event.await().sequenceNumber)
+      assertTrue(provider.fetchLooper.await() !== Looper.getMainLooper())
+      manager.destroy()
+      assertTrue(provider.unsubscribeLooper.await() !== Looper.getMainLooper())
+    }
+
+  @Test
+  fun `destroy unsubscribes on IO even after the owning scope is cancelled`() =
+    runTest(dispatcher) {
+      val provider = RecordingProvider()
+      val app = RuntimeEnvironment.getApplication()
+      ShadowContentResolver.registerProviderInternal(
+        "com.example.app.automobile.sharedprefs",
+        provider,
+      )
+      provider.attachInfo(app, null)
+      val owner = TestScope(dispatcher)
+      manager.destroy()
+      manager = StorageSubscriptionManager(app, Dispatchers.IO, owner)
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      owner.cancel()
+
+      manager.destroy()
+
+      assertTrue(manager.getActiveSubscriptions().isEmpty())
+      assertTrue(provider.unsubscribeLooper.await() !== Looper.getMainLooper())
+    }
+
+  @Test
+  fun `destroy bounds cleanup and clears local state even when provider ignores cancellation`() =
+    runTest(dispatcher) {
+      val release = CompletableDeferred<Unit>()
+      val entered = CompletableDeferred<Unit>()
+      val returned = CompletableDeferred<Unit>()
+      var calls = 0
+      val provider = StorageSubscriptionManager.BackgroundCalls { _, method, _ ->
+        assertEquals("unsubscribeFromFile", method)
+        calls++
+        entered.complete(Unit)
+        // NonCancellable models a Binder call ignoring interruption, but the test always releases
+        // it.
+        withContext(NonCancellable) { release.await() }
+        returned.complete(Unit)
+        Bundle()
+      }
+      manager.destroy()
+      manager =
+        StorageSubscriptionManager(context, dispatcher, this, provider, cleanupTimeoutMs = 100)
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        Bundle().apply { putBoolean("success", true) }
+      manager.subscribe("com.example.app", "auth")
+      manager.subscribe("com.example.app", "settings")
+
+      manager.destroy()
+      assertTrue(manager.getActiveSubscriptions().isEmpty())
+      verify { contentResolver.unregisterContentObserver(any()) }
+      val initialTime = testScheduler.currentTime
+      runCurrent()
+      entered.await()
+      advanceUntilIdle()
+      assertEquals(100L, testScheduler.currentTime - initialTime)
+      assertEquals(1, calls)
+      assertTrue(!returned.isCompleted)
+      manager.destroy() // No duplicate cleanup.
+      release.complete(Unit)
+      advanceUntilIdle()
+      assertTrue(returned.isCompleted)
+      assertEquals(1, calls)
+    }
+
+  @Test
+  fun `destroy drops a fetch that returns after cancellation and closes the event flow`() =
+    runTest(dispatcher) {
+      val observer = slot<ContentObserver>()
+      val release = CompletableDeferred<Unit>()
+      var fetchCalls = 0
+      val provider = StorageSubscriptionManager.BackgroundCalls { _, method, _ ->
+        if (method == "getChanges") {
+          fetchCalls++
+          withContext(NonCancellable) { release.await() }
+          changesBundle("auth", listOf(1L))
+        } else Bundle()
+      }
+      manager.destroy()
+      manager = StorageSubscriptionManager(context, dispatcher, this, provider)
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        Bundle().apply { putBoolean("success", true) }
+      every { contentResolver.registerContentObserver(any(), any(), capture(observer)) } returns
+        Unit
+      manager.subscribe("com.example.app", "auth")
+      observer.captured.onChange(false)
+      runCurrent()
+      assertEquals(1, fetchCalls)
+
+      manager.destroy()
+      assertTrue(manager.getActiveSubscriptions().isEmpty())
+      assertTrue(withTimeout(1_000) { manager.changeEvents.toList() }.isEmpty())
+      observer.captured.onChange(false)
+      release.complete(Unit)
+      advanceUntilIdle()
+      assertEquals(1, fetchCalls)
+      assertTrue(withTimeout(1_000) { manager.changeEvents.toList() }.isEmpty())
+    }
+
+  @Test
+  fun `notifications are coalesced and sequence cursors stay ordered`() =
+    runTest(dispatcher) {
+      val observer = slot<ContentObserver>()
+      val release = CompletableDeferred<Unit>()
+      val cursors = mutableListOf<Long>()
+      val provider = StorageSubscriptionManager.BackgroundCalls { _, method, extras ->
+        if (method == "getChanges") {
+          cursors += extras.getLong("sinceSequence")
+          if (cursors.size == 1) release.await()
+          changesBundle("auth", if (cursors.size == 1) listOf(1L, 2L) else listOf(3L))
+        } else Bundle()
+      }
+      manager.destroy()
+      manager = StorageSubscriptionManager(context, dispatcher, this, provider)
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        Bundle().apply { putBoolean("success", true) }
+      every { contentResolver.registerContentObserver(any(), any(), capture(observer)) } returns
+        Unit
+      manager.subscribe("com.example.app", "auth")
+      observer.captured.onChange(false)
+      runCurrent()
+      repeat(100) { observer.captured.onChange(false) }
+      runCurrent()
+      assertEquals(listOf(0L), cursors)
+      release.complete(Unit)
+      advanceUntilIdle()
+
+      val events = withTimeout(1_000) { manager.changeEvents.take(3).toList() }
+      assertEquals(listOf(1L, 2L, 3L), events.map { it.sequenceNumber })
+      assertEquals(listOf(0L, 2L), cursors)
+      manager.destroy()
+      advanceUntilIdle()
+    }
+
+  @Test
+  fun `late and queued notifications after unsubscribe or destroy make no calls or events`() =
+    runTest(dispatcher) {
+      val observer = slot<ContentObserver>()
+      val events = mutableListOf<PreferenceChangeEvent>()
+      val collector = backgroundScope.launch { manager.changeEvents.toList(events) }
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        Bundle().apply { putBoolean("success", true) }
+      every { contentResolver.registerContentObserver(any(), any(), capture(observer)) } returns
+        Unit
+      manager.subscribe("com.example.app", "auth")
+      val oldObserver = observer.captured
+      oldObserver.onChange(false) // Work queued but not fetched yet.
+      assertTrue(manager.unsubscribe("com.example.app", "auth"))
+      oldObserver.onChange(false)
+      advanceUntilIdle()
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      oldObserver.onChange(false) // Obsolete observer cannot signal the replacement worker.
+      advanceUntilIdle()
+      observer.captured.onChange(false)
+      manager.destroy()
+      observer.captured.onChange(false)
+      advanceUntilIdle()
+
+      verify(exactly = 0) { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) }
+      assertTrue(events.isEmpty())
+      collector.cancel()
+    }
+
+  private fun changesBundle(fileName: String, sequences: List<Long>): Bundle =
+    Bundle().apply {
+      putBoolean("success", true)
+      putString(
+        "result",
+        StorageProtocolSerializer.responseToJson(
+          StorageResponse.Changes(
+            fileName,
+            sequences.map { sequence ->
+              StorageChangeEvent(fileName, "key-$sequence", "$sequence", "LONG", sequence, sequence)
+            },
+          )
+        ),
+      )
+    }
+
+  private class RecordingProvider : ContentProvider() {
+    val fetchLooper = CompletableDeferred<Looper?>()
+    val unsubscribeLooper = CompletableDeferred<Looper?>()
+
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+      return when (method) {
+        "getChanges" -> {
+          fetchLooper.complete(Looper.myLooper())
+          Bundle().apply {
+            putBoolean("success", true)
+            putString(
+              "result",
+              StorageProtocolSerializer.responseToJson(
+                StorageResponse.Changes(
+                  "auth",
+                  listOf(StorageChangeEvent("auth", "key", "value", "STRING", 1L, 1L)),
+                )
+              ),
+            )
+          }
+        }
+        "unsubscribeFromFile" -> {
+          unsubscribeLooper.complete(Looper.myLooper())
+          Bundle()
+        }
+        else -> Bundle().apply { putBoolean("success", true) }
+      }
+    }
+
+    override fun onCreate() = true
+
+    override fun query(
+      uri: Uri,
+      projection: Array<out String>?,
+      selection: String?,
+      selectionArgs: Array<out String>?,
+      sortOrder: String?,
+    ): Cursor? = null
+
+    override fun getType(uri: Uri): String? = null
+
+    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
+
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
+
+    override fun update(
+      uri: Uri,
+      values: ContentValues?,
+      selection: String?,
+      selectionArgs: Array<out String>?,
+    ) = 0
   }
 
   // ================= Concurrency (#3600) =================

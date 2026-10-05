@@ -1,3 +1,4 @@
+import { androidEnabledObservation } from "../../../helpers/androidEnabledCapture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import {
@@ -3075,4 +3076,21 @@ test("iOS stable identity ignores lower- and upper-case generated UUID view-ids"
   }
   expect(upper.added[0].attributes.text).toBe(lower.added[0].attributes.text);
   expect(upper.removed[0].attributes.text).toBe(lower.removed[0].attributes.text);
+});
+
+test("captured Android enabled flip is exactly one changed node in either direction", () => {
+  const captures = [androidEnabledObservation(), androidEnabledObservation("false")].map(
+    (observation) =>
+      sanitizeObserveResult(observation, { dropElements: false, project: "full", compact: true }),
+  );
+  for (const [before, after] of [
+    [captures[0], captures[1]],
+    [captures[1], captures[0]],
+  ]) {
+    const diff = diffObserveResult(before, after);
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    expect(diff.changed).toHaveLength(1);
+    expect(diff.fields).toBeUndefined();
+  }
 });

@@ -78,6 +78,8 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -2805,6 +2807,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     handleAddHighlight(requestId, highlightId, shape)
+
+  override fun showOverlay(requestId: String?, spec: OverlaySpec) = refuseOverlayRequest(requestId)
+
+  override fun updateOverlay(
+    requestId: String?,
+    id: String,
+    spec: OverlaySpec?,
+    state: Map<String, OverlayScalar>?,
+  ) = refuseOverlayRequest(requestId)
+
+  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
+    refuseOverlayRequest(requestId)
+
+  private fun refuseOverlayRequest(requestId: String?) {
+    launchRequestScope(requestId) {
+      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+        Log.d(TAG, "WebSocket server not running, skipping overlay result broadcast")
+        return@launchRequestScope
+      }
+      resultBroadcaster.guard(requestId, "overlay_result") {
+        webSocketServer.broadcastWithPerf { _ -> overlayNotWiredResultFrame(requestId) }
+      }
+    }
+  }
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
     handleListPreferenceFiles(requestId, packageName)

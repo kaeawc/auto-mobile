@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlaySpec
 
 /**
  * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
@@ -328,6 +330,17 @@ interface CtrlProxyActions {
   fun getTraversalOrder(requestId: String?)
 
   fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
+
+  fun showOverlay(requestId: String?, spec: OverlaySpec)
+
+  fun updateOverlay(
+    requestId: String?,
+    id: String,
+    spec: OverlaySpec?,
+    state: Map<String, OverlayScalar>?,
+  )
+
+  fun dismissOverlay(requestId: String?, id: String?, all: Boolean?)
 
   fun listPreferenceFiles(requestId: String?, packageName: String)
 

@@ -131,6 +131,27 @@ describe("Android CtrlProxyHierarchy recapture skips the fresh wait (issue #6099
     h = null;
   });
 
+  test("requireFreshExtraction with an inclusive floor bypasses a fresh cache hit through the same reader", async () => {
+    const device = await deviceLikeAndroidHierarchy();
+    try {
+      const result = await device.viewHierarchy.getViewHierarchy(
+        {},
+        undefined,
+        true,
+        DEVICE_CAPTURE_TIME,
+        undefined,
+        { timeoutMs: 500, requireFreshExtraction: true },
+      );
+      expect(device.extractions()).toBe(1);
+      expect(device.reads).toHaveLength(1);
+      expect(result.fresh).toBe(true);
+      expect(result.updatedAt).toBe(DEVICE_CAPTURE_TIME + 1);
+      expect(device.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      device.restore();
+    }
+  });
+
   test("requireFreshExtraction polls extract independently even when the prior sync is inside the cache serve window", async () => {
     const device = await deviceLikeAndroidHierarchy();
     try {

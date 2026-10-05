@@ -5,7 +5,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 /** Internal hierarchy read policy; numeric budgets remain supported for existing callers. */
 export interface HierarchyReadOptions {
   timeoutMs?: number;
-  /** Re-extract an unverified Android cache hit when a positive device timestamp floor is set. */
+  /** Re-extract an Android cache hit; a positive floor also requires independent freshness evidence. */
   requireFreshExtraction?: boolean;
 }
 

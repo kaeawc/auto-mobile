@@ -1,3 +1,7 @@
+import {
+  hasWrongWindowEvidence,
+  recordWrongWindowEvidence,
+} from "../../../../src/features/observe/observationFreshness";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import os from "os";
@@ -47,6 +51,19 @@ describe("getRecentInMemoryEntry same-tick tie-break parity", function () {
     if (existsSync(cacheDir)) {
       rmSync(cacheDir, { recursive: true, force: true });
     }
+  });
+
+  test("wrong-window provenance survives production memory-cache clones without output fields", async () => {
+    const result = makeResult("wrong-window");
+    recordWrongWindowEvidence(result);
+    const store = stores[0].store;
+    await store.put("device", result);
+    const fromMemory = store.getRecentInMemoryForDevice("device")!;
+    const fromAsyncRead = (await store.getMostRecent("device"))!;
+    expect(fromMemory).not.toBe(result);
+    expect(hasWrongWindowEvidence(fromMemory)).toBe(true);
+    expect(hasWrongWindowEvidence(fromAsyncRead)).toBe(true);
+    expect(fromMemory).toEqual(result);
   });
 
   test("both stores return the LAST device cached on a shared timestamp", async function () {

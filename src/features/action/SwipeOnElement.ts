@@ -102,6 +102,7 @@ export class SwipeOnElement extends BaseVisualChange {
         }
       },
       {
+        usesObservationForResolution: false,
         changeExpected: false,
         timeoutMs: 500,
         progress,

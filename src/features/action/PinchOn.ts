@@ -411,6 +411,7 @@ export class PinchOn extends BaseVisualChange {
         return dispatchAndroidPinch();
       },
       {
+        usesObservationForResolution: Boolean(options.container || options.autoTarget),
         changeExpected: false,
         display: options.display,
         timeoutMs: 8000,

@@ -53,7 +53,15 @@ export class HomeScreen extends BaseVisualChange {
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("homeScreen");
-    const options = { changeExpected: true, timeoutMs: 5000, progress, perf, signal };
+    const options = {
+      changeExpected: true,
+      foregroundAppMayChange: true,
+      usesObservationForResolution: false,
+      timeoutMs: 5000,
+      progress,
+      perf,
+      signal,
+    };
 
     return await this.observedInteraction(async (previousObservation) => {
       const previousHierarchy = previousObservation?.viewHierarchy;

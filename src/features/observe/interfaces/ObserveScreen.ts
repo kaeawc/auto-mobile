@@ -23,7 +23,7 @@ export interface ObserveScreenExecuteOptions {
   /** Bounds an explicitly requested hierarchy capture. */
   timeoutMs?: number;
   skipWaitForFresh?: boolean;
-  /** Re-extract unverified Android cache hits with a positive timestamp floor. Off by default. */
+  /** Re-extract Android cache hits (including known wrong-window trees). Off by default. */
   requireFreshExtraction?: boolean;
   minTimestamp?: number;
   signal?: AbortSignal;
@@ -46,6 +46,8 @@ export interface ObserveScreenExecuteOptions {
   skipPerformanceAudit?: boolean;
   /** Skip recomposition processing for an intermediate observation. */
   skipRecompositionTracking?: boolean;
+  /** Poll callers own retries; do not add a second hierarchy read inside their poll. */
+  skipStaleWindowRecovery?: boolean;
 }
 
 /**

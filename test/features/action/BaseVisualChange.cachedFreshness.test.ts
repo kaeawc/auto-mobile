@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { recordWrongWindowEvidence } from "../../../src/features/observe/observationFreshness";
+import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { ActionableError, type ObserveResult } from "../../../src/models";
 import type { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
@@ -62,7 +64,15 @@ describe("BaseVisualChange cached freshness", () => {
           dispatched++;
           expect(received).toBe(fresh);
           expect(observe.getExecuteOptions()).toEqual([
-            { freshness: "fresh", display: undefined, queryOptions, perf, signal },
+            {
+              freshness: "fresh",
+              timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+              skipStaleWindowRecovery: true,
+              display: undefined,
+              queryOptions,
+              perf,
+              signal,
+            },
           ]);
           return { success: true };
         },
@@ -94,6 +104,7 @@ describe("BaseVisualChange cached freshness", () => {
   for (const failure of ["throws", "missing hierarchy", "errored hierarchy"]) {
     test(`failed stale refetch ${failure} stops dispatch without fallback`, async () => {
       const cached = observation({ isFresh: false });
+      recordWrongWindowEvidence(cached);
       const unavailable = observation();
       unavailable.viewHierarchy =
         failure === "errored hierarchy" ? { hierarchy: { error: "capture failed" } } : null;
@@ -116,6 +127,87 @@ describe("BaseVisualChange cached freshness", () => {
       expect(observe.getExecuteOptions().map((options) => options.freshness)).toEqual(["fresh"]);
     });
   }
+
+  test("a never-settling current screen remains tappable without an extra pre-read", async () => {
+    const cached = { ...observation({ isFresh: true }), settled: false };
+    observe.setObserveResult(cached);
+    let dispatched = 0;
+    await instance.observedInteraction(
+      async (received) => {
+        dispatched++;
+        expect(received).toBe(cached);
+        expect(observe.getExecuteCallCount()).toBe(0);
+        return { success: true };
+      },
+      { changeExpected: false },
+    );
+    expect(dispatched).toBe(1);
+  });
+
+  test("missing or errored cache retains unavailable-hierarchy dispatch fallback", async () => {
+    const unavailable = observation({ isFresh: false, category: "unavailable" });
+    unavailable.viewHierarchy = null;
+    observe.setObserveResult(unavailable);
+    let dispatched = 0;
+    await instance.observedInteraction(
+      async () => {
+        dispatched++;
+        return { success: true };
+      },
+      { changeExpected: false },
+    );
+    expect(dispatched).toBe(1);
+    expect(observe.getExecuteOptions()[0].freshness).toBe("cached-ok");
+  });
+
+  test("pre-action extraction uses its own bound rather than the 500ms post-action bound", async () => {
+    observe.setObserveSequence([observation({ isFresh: false }), observation({ isFresh: true })]);
+    await instance.observedInteraction(
+      async () => {
+        expect(observe.getExecuteOptions()[0].timeoutMs).toBe(DEFAULT_HIERARCHY_READ_TIMEOUT_MS);
+        return { success: true };
+      },
+      { changeExpected: false, timeoutMs: 500 },
+    );
+  });
+
+  test("a still-stale fresh read stops dispatch with the freshness warning", async () => {
+    const stale = observation({
+      isFresh: false,
+      category: "window_identity",
+      warning: "Wrong foreground app",
+    });
+    recordWrongWindowEvidence(stale);
+    observe.setObserveResult(stale);
+    let dispatched = 0;
+    const result = instance.observedInteraction(
+      async () => {
+        dispatched++;
+        return { success: true };
+      },
+      { changeExpected: false },
+    );
+    await expect(result).rejects.toThrow("Wrong foreground app");
+    expect(dispatched).toBe(0);
+    expect(observe.getExecuteCallCount()).toBe(1);
+    expect(stale.freshness?.isFresh).toBe(false);
+  });
+
+  test("hardware navigation can recover a stale window without resolving coordinates", async () => {
+    const stale = observation({ isFresh: false, warning: "Wrong foreground app" });
+    observe.setObserveResult(stale);
+    let dispatched = 0;
+    const result = await instance.observedInteraction(
+      async () => {
+        dispatched++;
+        return { success: true };
+      },
+      { changeExpected: false, usesObservationForResolution: false },
+    );
+    expect(dispatched).toBe(1);
+    expect(result.observation.freshness?.isFresh).toBe(false);
+    expect(result.observation.freshness?.warning).toContain("Wrong foreground app");
+  });
 
   test("supplied previous observation bypasses cache even when stale", async () => {
     const supplied = observation({ isFresh: false });

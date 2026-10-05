@@ -50,6 +50,7 @@ export class PressButton extends BaseVisualChange {
       },
       {
         changeExpected: isNavigationButton,
+        usesObservationForResolution: false,
         timeoutMs: 2000,
         progress,
         signal,
@@ -100,6 +101,10 @@ export class PressButton extends BaseVisualChange {
         keyCode: -1,
         error: `Failed to press button: ${errorMessage(error)}`,
       };
+    } finally {
+      if (isNavigationPressButton(button)) {
+        this.windowCacheInvalidator.invalidate(this.device, true);
+      }
     }
   }
 

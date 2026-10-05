@@ -54,6 +54,8 @@ internal class RecordingOverlayWindowManager(
   var failAdd = false
   var failUpdate = false
   var failRemove = false
+  var updateFailure: Exception = IllegalStateException("fake update failure")
+  var removeFailure: Exception = IllegalStateException("fake remove failure")
 
   override fun addView(view: View, params: ViewGroup.LayoutParams) {
     check(mainThread.isMainThread())
@@ -65,7 +67,7 @@ internal class RecordingOverlayWindowManager(
 
   override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
     check(mainThread.isMainThread())
-    if (failUpdate) throw IllegalStateException("fake update failure")
+    if (failUpdate) throw updateFailure
     val copy = snapshot(params)
     updated += copy
     history +=
@@ -75,7 +77,7 @@ internal class RecordingOverlayWindowManager(
 
   override fun removeViewImmediate(view: View) {
     check(mainThread.isMainThread())
-    if (failRemove) throw IllegalStateException("fake remove failure")
+    if (failRemove) throw removeFailure
     removals++
     history += "remove"
   }

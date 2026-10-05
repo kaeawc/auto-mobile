@@ -896,9 +896,8 @@ describe("DevicePool autolock", () => {
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
 
       // BEFORE advancing time: the stale lock still holds the only device busy, so
-      // a new session cannot acquire it. timeoutMs === the 1s wait interval yields
-      // maxAttempts 1, so allocation fails fast (no retry sleep, no hang).
-      await expect(pool.assignMultipleDevices(["new-session"], 1000, "android")).rejects.toThrow(
+      // a new session cannot acquire it with a zero wait budget.
+      await expect(pool.assignMultipleDevices(["new-session"], 0, "android")).rejects.toThrow(
         ActionableError,
       );
       expect(pool.getDevice("emulator-5554")!.sessionId).not.toBe("new-session");

@@ -5284,6 +5284,7 @@ describe("DevicePool", () => {
     });
 
     test("rolls back the completed assignment when platform allocation exhausts retries", async () => {
+      fakeTimer.enableAutoAdvance();
       await initializeLiveDevices([createBootedDevice("device-a"), createBootedDevice("device-b")]);
       configureAfterFirstSession(() => {
         const unavailable = devicePool.getDevice("device-b");
@@ -6379,10 +6380,10 @@ describe("DevicePool", () => {
 
         // The allocation has completed its launch decision and is waiting while
         // recovery readiness is still gated, so this launch count is meaningful.
-        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+        await drainUntil(() => fakeTimer.getPendingTimeouts().includes(1_000), {
           description: "allocation retry while recovery owns boot",
         });
-        expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
+        expect(fakeTimer.getPendingTimeouts()).toContain(1_000);
         expect(devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35")).toBe(true);
         expect(manager.childProcesses).toHaveLength(2);
         manager.releaseRecovery();
@@ -6391,12 +6392,15 @@ describe("DevicePool", () => {
           { description: "owned AVD recovery settlement" },
         );
 
-        for (let step = 0; step < 4; step++) {
-          expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
+        for (let step = 0; step < 4 && !allocationSettled; step++) {
+          expect(fakeTimer.getPendingTimeouts()).toContain(1_000);
           fakeTimer.advanceTime(1_000);
-          await drainUntil(() => allocationSettled || fakeTimer.getPendingSleepCount() > 0, {
-            description: "allocation settlement or next retry sleep",
-          });
+          await drainUntil(
+            () => allocationSettled || fakeTimer.getPendingTimeouts().includes(1_000),
+            {
+              description: "allocation settlement or next retry sleep",
+            },
+          );
         }
         expect(allocationSettled).toBe(true);
         await expect(allocation).rejects.toThrow("Timed out allocating devices");

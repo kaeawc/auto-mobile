@@ -69,7 +69,7 @@ describe("criteria allocation rollback on thrown errors", () => {
     ]);
   };
 
-  test("third label abort releases the first two allocations before rejection", async () => {
+  test("third label abort releases partial allocations before rejection", async () => {
     await pool.bindOrReuseDeviceSession("other-owner", "device-c", "android");
     const controller = new AbortController();
     const originalError = new Error("client cancelled criteria allocation");
@@ -82,11 +82,10 @@ describe("criteria allocation rollback on thrown errors", () => {
       },
       (error: unknown) => error,
     );
-    await drainUntil(() => timer.getPendingSleepCount() === 1, {
-      description: "third label waiting after the first two claims",
+    await drainUntil(() => timer.getPendingTimeoutCount() === 1, {
+      description: "third label waiting after releasing the first two claims",
     });
-    expect(pool.getDevice("device-a")?.sessionId).toBe("plan:a");
-    expect(pool.getDevice("device-b")?.sessionId).toBe("plan:b");
+    expectReleased(["a", "b"]);
     controller.abort(originalError);
     timer.advanceTime(1_000);
     await expect(outcome).resolves.toBe(originalError);

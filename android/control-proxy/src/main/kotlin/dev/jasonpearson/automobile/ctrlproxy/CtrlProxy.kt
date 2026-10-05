@@ -52,6 +52,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -1549,6 +1550,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 overlayManager.setInteractiveOverlayAttached(false)
               }
             },
+            eventSink =
+              OverlayEventSink { event ->
+                if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+                  resultBroadcaster.guard(null, "overlay_event") {
+                    webSocketServer.broadcastWithPerf { _ -> overlayEventFrame(event) }
+                  }
+                }
+              },
           )
       }
       overlayManager.setInteractiveOverlayAttached(overlayController.isShowing)
@@ -1843,6 +1852,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun onUnbind(intent: Intent?): Boolean {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
+    if (::overlayController.isInitialized) {
+      // Dismiss without terminal destruction so a same-process rebind can show overlays again.
+      CoroutineScope(Dispatchers.Main.immediate).launch {
+        overlayController.dismiss(requestId = null, id = null, all = true)
+      }
+    }
     return super.onUnbind(intent)
   }
 

@@ -1,3 +1,7 @@
+import {
+  MCP_ARGUMENT_BUDGET_CASES,
+  MALFORMED_MCP_BUDGETS,
+} from "../helpers/mcpArgumentBudgetCases";
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
 import {
@@ -768,3 +772,100 @@ test.each(["timeout", "reply", "abort"])(
     }
   },
 );
+
+async function checkArgumentBudgetClientTimeout(
+  tool: string,
+  args: Record<string, unknown>,
+  resolvedMs: number,
+  connectionTimeout = 1000,
+): Promise<void> {
+  const timer = new FakeTimer();
+  const sent: DaemonRequest[] = [];
+  const socket = new Duplex({
+    read() {},
+    write(chunk, _encoding, callback) {
+      sent.push(JSON.parse(chunk.toString()) as DaemonRequest);
+      callback();
+    },
+  });
+  const client = new DaemonClient("/fake/socket", connectionTimeout, timer);
+  client.attachSocketForTesting(socket);
+  const outcome = client.callTool(tool, args).catch((error: unknown) => error);
+  const expectedMs = Math.max(resolvedMs, connectionTimeout);
+  try {
+    expect(sent[0]?.timeoutMs).toBe(expectedMs);
+    timer.advanceTime(expectedMs + DAEMON_RESPONSE_GRACE_MS);
+    const error = await outcome;
+    expect(error).toBeInstanceOf(McpTimeoutError);
+    expect((error as McpTimeoutError).timeoutMs).toBe(expectedMs);
+  } finally {
+    await client.close();
+    await outcome;
+  }
+}
+
+describe("DaemonClient argument budget deadline gaps", () => {
+  for (const budget of MCP_ARGUMENT_BUDGET_CASES) {
+    test(`${budget.tool} sends its default-derived floor`, async () => {
+      await checkArgumentBudgetClientTimeout(budget.tool, {}, budget.defaultFloor);
+      await checkArgumentBudgetClientTimeout(budget.tool, {}, budget.defaultFloor, 120_000);
+    });
+    test(`${budget.tool} sends supplied work budget plus headroom`, async () => {
+      await checkArgumentBudgetClientTimeout(
+        budget.tool,
+        budget.argumentsFor(budget.supplied),
+        budget.suppliedFloor,
+      );
+    });
+    test(`${budget.tool} larger configured request timeout wins`, async () => {
+      await checkArgumentBudgetClientTimeout(budget.tool, {}, budget.defaultFloor, 1_000_000);
+      await checkArgumentBudgetClientTimeout(
+        budget.tool,
+        budget.argumentsFor(budget.supplied),
+        budget.suppliedFloor,
+        1_000_000,
+      );
+    });
+    test(`${budget.tool} malformed budgets are safe and capped on the wire`, async () => {
+      for (const value of MALFORMED_MCP_BUDGETS) {
+        const capped =
+          value === Number.MAX_SAFE_INTEGER &&
+          !["stageSharedStorage", "stageSharedStorageFixtures", "putAppFile"].includes(budget.tool);
+        await checkArgumentBudgetClientTimeout(
+          budget.tool,
+          budget.argumentsFor(value),
+          capped ? MAX_CALLER_MCP_REQUEST_TIMEOUT_MS : budget.defaultFloor,
+        );
+      }
+      await checkArgumentBudgetClientTimeout(
+        budget.tool,
+        budget.argumentsFor(budget.oversized),
+        MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+      );
+      await checkArgumentBudgetClientTimeout(
+        budget.tool,
+        { waitFor: [], files: { length: Number.MAX_SAFE_INTEGER } },
+        budget.defaultFloor,
+      );
+    });
+  }
+});
+
+test.each(["tapOn", "listDevices", "observe"])(
+  "client keeps %s's unrelated argument deadline",
+  async (tool) => {
+    await checkArgumentBudgetClientTimeout(
+      tool,
+      { timeoutMs: 600_000, timeout: 600_000 },
+      tool === "observe" ? 90_000 : DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+    );
+  },
+);
+
+test("client sends observe's legacy nested alias budget", async () => {
+  await checkArgumentBudgetClientTimeout(
+    "observe",
+    { waitFor: { elementId: "missing", timeoutMs: 600_000 } },
+    630_000,
+  );
+});

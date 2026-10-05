@@ -1,4 +1,26 @@
 import {
+  DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+  MAX_VM_SNAPSHOT_TIMEOUT_MS,
+  SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+} from "../features/snapshot/deviceSnapshotTimeout";
+import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../features/navigation/exploreTimeout";
+import {
+  DEFAULT_WAIT_FOR_TIMEOUT_MS,
+  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+  WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+} from "../features/observe/waitForTimeout";
+import {
+  SHARED_STORAGE_PUSH_TIMEOUT_MS,
+  APP_FILE_PUSH_TIMEOUT_MS,
+  FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+} from "../features/storage/fileTransferTimeout";
+export {
+  SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+  WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+};
+import {
   resolveTextCtrlProxyTimeoutMs,
   TEXT_MCP_REQUEST_HEADROOM_MS,
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
@@ -192,14 +214,26 @@ const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS = Math.max(
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
 );
 
-const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
-  setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
-  uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
-  crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
-  getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
-  setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
-  setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
-};
+// A Map, not a plain object: the tool name is client-supplied, and an index such
+// as `table["constructor"]` would reach inherited `Object.prototype` members.
+const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
+  Object.entries({
+    deviceSnapshot: DEFAULT_VM_SNAPSHOT_TIMEOUT_MS + SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+    barrier: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    criticalSection: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    stageSharedStorage: SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    stageSharedStorageFixtures:
+      SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+    crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
+    getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
+  }),
+);
 
 /**
  * Floor for `openLink` — deep links can trigger sign-in, onboarding, data sync,
@@ -242,8 +276,8 @@ function resolveEnvTimeoutFloorMs(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
-function resolveFixedToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
-  return TOOL_TIMEOUT_FLOORS[toolName ?? ""];
+function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
+  return typeof toolName === "string" ? TOOL_TIMEOUT_FLOORS.get(toolName) : undefined;
 }
 
 function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
@@ -289,6 +323,115 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function positiveFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Invalid/non-positive/non-finite budgets use the tool default, matching device
+ * preparation. Oversized finite values (including budget + headroom) saturate at
+ * the caller cap; no transport headroom can be guaranteed at that ceiling.
+ */
+function resolveArgumentTimeoutBudgetMs(
+  raw: unknown,
+  defaultMs: number,
+  headroomMs: number,
+): number {
+  return Math.min(
+    (positiveFiniteNumber(raw) ?? defaultMs) + headroomMs,
+    MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    MAX_SETTIMEOUT_DELAY_MS,
+  );
+}
+
+function resolveObserveWaitBudgetMs(args: Record<string, unknown>): number {
+  const waitFor = asRecord(args.waitFor);
+  if (!waitFor) {
+    return 0;
+  }
+  const defaultMs =
+    waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS;
+  // Both legacy predicates and the `for` DSL read these nested aliases in this
+  // order. Top-level timeoutMs is not a wait budget; schema validation owns it.
+  return resolveArgumentTimeoutBudgetMs(
+    waitFor.timeout ?? waitFor.timeoutMs,
+    defaultMs,
+    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
+function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: number): number {
+  // stageSharedStorage AND stageSharedStorageFixtures share files[], not a
+  // fixtures[] field. Canonical putAppFile also uses files[]; its legacy flat
+  // single-file shape, missing/invalid arrays, and empty arrays get one push.
+  // Count without visiting entries, so even an enormous sparse array is cheap.
+  const count = Array.isArray(args.files) ? Math.max(1, args.files.length) : 1;
+  return resolveArgumentTimeoutBudgetMs(
+    count * pushMs,
+    pushMs,
+    FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
+const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unknown>) => number> =
+  new Map([
+    [
+      "deviceSnapshot",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          Math.min(
+            positiveFiniteNumber(args.vmSnapshotTimeoutMs) ?? DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+            MAX_VM_SNAPSHOT_TIMEOUT_MS,
+          ),
+          DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+          SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    ["observe", resolveObserveWaitBudgetMs],
+    [
+      "barrier",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeout,
+          BARRIER_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    [
+      "criticalSection",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeout,
+          BARRIER_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    [
+      "explore",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeoutMs,
+          DEFAULT_EXPLORE_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    [
+      "stageSharedStorage",
+      (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
+    ],
+    [
+      "stageSharedStorageFixtures",
+      (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
+    ],
+    ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
+  ]);
+
+function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {
+  if (request.method !== "tools/call") {
+    return 0;
+  }
+  const toolName: unknown = request.params?.name;
+  const resolver =
+    typeof toolName === "string" ? ARGUMENT_BUDGET_RESOLVERS.get(toolName) : undefined;
+  return typeof resolver === "function" ? resolver(asRecord(request.params?.arguments) ?? {}) : 0;
 }
 
 function resolveNamedDevicePreparationBudgetMs(argumentsRecord: Record<string, unknown>): number {
@@ -531,6 +674,7 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
   return Math.max(
     base,
+    resolveArgumentBudgetToolBudgetMs(request),
     resolveTextToolBudgetMs(request, floor),
     floor ?? 0,
     devicePreparationBudget ?? 0,

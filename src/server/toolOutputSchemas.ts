@@ -1141,6 +1141,10 @@ export const skeletonElementSchema = z
       .optional()
       .describe("Fully covered by the Android IME window; this row has no actionable affordance."),
     checked: z.boolean().optional(),
+    enabled: z
+      .literal(false)
+      .optional()
+      .describe("Explicit disabled state on Android and iOS; omitted means enabled."),
     index: z
       .number()
       .int()

@@ -1,3 +1,4 @@
+import { capturedAndroidControl } from "../../../helpers/androidEnabledCapture";
 import { describe, expect, test } from "bun:test";
 import {
   assignStableViewIds,
@@ -731,4 +732,14 @@ test("assignStableViewIds rewrites lower- and upper-case generated UUIDs identic
 
   expect(lower["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
   expect(upper["view-id"]).toBe(lower["view-id"]);
+});
+
+test("captured Android control keeps its stable id across an enabled flip", () => {
+  const enabled = capturedAndroidControl();
+  const disabled = capturedAndroidControl("false");
+  assignStableViewIds(enabled);
+  assignStableViewIds(disabled);
+  expect(enabled["view-id"]).toStartWith(STABLE_VIEW_ID_PREFIX);
+  expect(disabled["view-id"]).toBe(enabled["view-id"]);
+  expect(disabled.enabled).toBe("false");
 });

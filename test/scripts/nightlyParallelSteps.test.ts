@@ -126,12 +126,12 @@ describe("nightly unit diagnostics", () => {
     expect(upload?.with?.["retention-days"]).toBe(7);
   });
 
-  test("uses all three macOS cores for the complete unit lane", () => {
+  test("leaves one macOS core available for the complete unit lane", () => {
     const step = stepNamed(
       loadJobSteps(WORKFLOW, "macos-node-unit-tests"),
       "Run complete unit lane",
     );
-    expect(step?.env?.AUTOMOBILE_UNIT_TEST_WORKERS).toBe("3");
+    expect(step?.env?.AUTOMOBILE_UNIT_TEST_WORKERS).toBe("2");
     expect(step?.run).toContain("bash scripts/test-ts.sh unit");
   });
 
@@ -193,5 +193,29 @@ describe("nightly randomized unit diagnostic", () => {
     expect(Number(run?.env?.AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS)).toBeLessThan(
       (job?.["timeout-minutes"] ?? 0) * 60,
     );
+  });
+});
+
+describe("nightly macOS unit process recycling", () => {
+  const workflow = loadWorkflow(WORKFLOW);
+  const steps = loadJobSteps(WORKFLOW, "macos-node-unit-tests");
+
+  test("uses two workers and 100-file chunks within the existing 720s budget", () => {
+    const run = stepNamed(steps, "Run complete unit lane");
+    expect(run).toBeDefined();
+    expect(run?.env?.AUTOMOBILE_UNIT_TEST_CHUNK_FILES).toBe("100");
+    expect(run?.env?.AUTOMOBILE_UNIT_TEST_WORKERS).toBe("2");
+    expect(run?.env?.AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS).toBe("720");
+  });
+
+  test("other nightly jobs do not opt into chunking", () => {
+    for (const [id, job] of Object.entries(workflow.jobs ?? {})) {
+      expect(job?.env?.AUTOMOBILE_UNIT_TEST_CHUNK_FILES).toBeUndefined();
+      if (id !== "macos-node-unit-tests") {
+        for (const step of job?.steps ?? []) {
+          expect(step.env?.AUTOMOBILE_UNIT_TEST_CHUNK_FILES).toBeUndefined();
+        }
+      }
+    }
   });
 });

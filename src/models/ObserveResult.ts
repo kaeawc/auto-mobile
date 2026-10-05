@@ -113,6 +113,8 @@ export interface SkeletonElement {
   occluded?: true;
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;
+  /** Explicit disabled state on either platform; omitted means enabled. */
+  enabled?: false;
   /**
    * Disambiguator (issue #6221 item 2), present when a replay-eligible row's
    * `elementId`, or id-less `label`, repeats among other replay-eligible rows.

@@ -120,6 +120,9 @@ export class Explore extends BaseVisualChange {
   private previousScreen: string | null = null;
   private targetPackageName: string | null = null;
   private consecutiveOutOfAppCount: number = 0;
+  private readonly rootScreens: Set<string> = new Set();
+  private pendingBackScreen: string | null = null;
+  private awaitingRelaunchScreen: boolean = false;
   /** @internal Exposed for focused traversal report tests. */
   graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
@@ -235,6 +238,9 @@ export class Explore extends BaseVisualChange {
     // Reset exploration state for fresh run
     this.exploredElements.clear();
     this.loopDetection.clear();
+    this.rootScreens.clear();
+    this.pendingBackScreen = null;
+    this.awaitingRelaunchScreen = false;
     this.elementSelections = [];
     this.explorationPath = [];
     this.interactionCount = 0;
@@ -272,8 +278,6 @@ export class Explore extends BaseVisualChange {
         continue;
       }
 
-      this.recordCurrentScreenInPath();
-
       // Select next element to interact with
       const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
 
@@ -282,11 +286,18 @@ export class Explore extends BaseVisualChange {
       }
 
       if (!nextElement) {
-        logger.info("[Explore] No suitable element found, attempting back navigation");
+        logger.info("[Explore] No suitable element found, checking dead-end recovery");
         await this.handleDeadEnd(progress);
         continue;
       }
 
+      // Only a new successful in-app interaction resets recovery accounting.
+      const tracked = this.exploredElements.get(
+        getElementKey(nextElement, observation.viewHierarchy),
+      );
+      const isNewInteraction =
+        !tracked ||
+        tracked.lastInteractionScreen !== (this.navigationManager.getCurrentScreen() ?? "unknown");
       // Perform interaction
       throwIfAborted(signal);
       const interactionSuccess = await this.performInteraction(
@@ -297,7 +308,7 @@ export class Explore extends BaseVisualChange {
         signal,
       );
 
-      if (!(await this.recordInteractionResult(interactionSuccess, mode))) {
+      if (!(await this.recordInteractionResult(interactionSuccess, mode, isNewInteraction))) {
         break;
       }
 
@@ -340,6 +351,12 @@ export class Explore extends BaseVisualChange {
       }
     }
 
+    this.recordCurrentScreenInPath();
+    if (this.shouldBreakForSafety(observation)) {
+      logger.warn("[Explore] Safety condition triggered, stopping exploration");
+      return "break";
+    }
+
     // Check for blocker screens (auth, permissions, etc.) and handle them
     const blockerHandled = await detectAndHandleBlockers(
       observation,
@@ -355,12 +372,6 @@ export class Explore extends BaseVisualChange {
       return "continue";
     }
 
-    // Check for safety conditions
-    if (this.shouldBreakForSafety(observation)) {
-      logger.warn("[Explore] Safety condition triggered, stopping exploration");
-      return "break";
-    }
-
     return "none";
   }
 
@@ -369,12 +380,14 @@ export class Explore extends BaseVisualChange {
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && !this.explorationPath.includes(currentScreen)) {
       this.explorationPath.push(currentScreen);
+      this.consecutiveOutOfAppCount = 0;
     }
   }
 
   private async recordInteractionResult(
     interactionSuccess: boolean,
     mode: ExplorationMode,
+    isNewInteraction: boolean = false,
   ): Promise<boolean> {
     if (!interactionSuccess) {
       this.consecutiveNoChangeCount++;
@@ -382,6 +395,9 @@ export class Explore extends BaseVisualChange {
     }
     this.interactionCount++;
     this.consecutiveNoChangeCount = 0;
+    if (isNewInteraction) {
+      this.consecutiveOutOfAppCount = 0;
+    }
 
     // Validate navigation in validate mode
     if (mode === "validate" && this.currentTargetEdge && this.graphTraversalState) {
@@ -862,11 +878,23 @@ export class Explore extends BaseVisualChange {
   ): Promise<"ok" | "handled" | "stop"> {
     const currentPackage = this.getObservationPackageName(observation);
 
-    if (!currentPackage || currentPackage === targetPackageName) {
-      this.consecutiveOutOfAppCount = 0;
+    if (currentPackage === targetPackageName) {
+      if (this.awaitingRelaunchScreen) {
+        this.rootScreens.add(this.navigationManager.getCurrentScreen() ?? "unknown");
+        this.awaitingRelaunchScreen = false;
+      }
+      this.pendingBackScreen = null;
+      return "ok";
+    }
+    if (!currentPackage) {
       return "ok";
     }
 
+    // The first observation after Back tells us whether that screen exits the app.
+    if (this.pendingBackScreen !== null) {
+      this.rootScreens.add(this.pendingBackScreen);
+      this.pendingBackScreen = null;
+    }
     this.consecutiveOutOfAppCount++;
     logger.warn(
       `[Explore] Foreground package '${currentPackage}' is outside target '${targetPackageName}', attempting to return`,
@@ -888,8 +916,8 @@ export class Explore extends BaseVisualChange {
 
     if (this.consecutiveOutOfAppCount >= Explore.MAX_OUT_OF_APP_ATTEMPTS) {
       this.stopReason =
-        `Left target app (${targetPackageName}) and could not return after ` +
-        `${Explore.MAX_OUT_OF_APP_ATTEMPTS} attempts`;
+        `Left target app (${targetPackageName}) without exploration progress after ` +
+        `${Explore.MAX_OUT_OF_APP_ATTEMPTS} return attempts`;
       logger.warn(`[Explore] ${this.stopReason}`);
       return "stop";
     }
@@ -986,6 +1014,12 @@ export class Explore extends BaseVisualChange {
    * Handle dead-end situation by going back
    */
   private async handleDeadEnd(progress?: ProgressCallback): Promise<void> {
+    const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
+    if (this.rootScreens.has(currentScreen)) {
+      this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
+      logger.info(`[Explore] ${this.stopReason}`);
+      return;
+    }
     try {
       if (progress) {
         await progress(
@@ -1014,6 +1048,7 @@ export class Explore extends BaseVisualChange {
         });
         throwIfInternalToolFailed(response, "pressButton", this.device.platform);
       }
+      this.pendingBackScreen = currentScreen;
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
@@ -1132,6 +1167,7 @@ export class Explore extends BaseVisualChange {
       );
       throwIfInternalToolFailed(response, "launchApp", this.device.platform);
     }
+    this.awaitingRelaunchScreen = true;
   }
 
   private traversalStopReason(): string {

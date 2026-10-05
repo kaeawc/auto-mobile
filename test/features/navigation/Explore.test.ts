@@ -42,6 +42,8 @@ import { registerNavigationTools } from "../../../src/server/navigationTools";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../../src/utils/logger";
+import { FakeElementParser } from "../../fakes/FakeElementParser";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -296,6 +298,215 @@ describe("Explore", () => {
     }
   });
 
+  describe("root screen recovery", () => {
+    const target = "com.test.app";
+    const launcher = "com.android.launcher3";
+    const rootStop = "No unexplored interactions on the root screen: Login";
+
+    function rootRun(button?: string, initialScreen = "Login", initialForeground = target) {
+      fakeGraph.setCurrentAppId(target);
+      fakeGraph.addNode({
+        screenName: initialScreen,
+        firstSeenAt: 0,
+        lastSeenAt: 0,
+        visitCount: 1,
+      });
+      fakeGraph.setCurrentScreenValue(initialScreen);
+      explore = new Explore(device, null, fakeTimer, fakeGraph);
+      const parser = new FakeElementParser();
+      const fields = ["Email", "Password"].map((text) =>
+        createMockElement({
+          text,
+          class: "android.widget.EditText",
+          "resource-id": `field:${text}`,
+        }),
+      );
+      parser.nextFlattenedElements = fields.map((element, index) => ({ element, index, depth: 0 }));
+      if (button) {
+        parser.nextFlattenedElements.push({
+          element: createMockElement({ text: button, "resource-id": "guest" }),
+          index: 2,
+          depth: 0,
+        });
+      }
+      Reflect.set(explore, "elementParser", parser);
+      let foreground = initialForeground;
+      let screen = initialScreen;
+      const actions: string[] = [];
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(() => {
+        fakeGraph.setCurrentScreenValue(foreground === target ? screen : null);
+        // Only element lists are faked; no synthetic view-hierarchy tree.
+        return { viewHierarchy: { hierarchy: {}, packageName: foreground } } as ObserveResult;
+      });
+      explore.observeScreen = observe;
+      const back = spyOn(PressButton.prototype, "press").mockImplementation(async () => {
+        actions.push("back");
+        foreground = launcher;
+        return { success: true };
+      });
+      const launch = spyOn(LaunchApp.prototype, "execute").mockImplementation(async () => {
+        actions.push("launch");
+        foreground = target;
+        screen = "Login";
+        return { success: true, packageName: target };
+      });
+      const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async (options) => {
+        actions.push(`tap:${options.elementId}`);
+        return { success: true };
+      });
+      return {
+        parser,
+        actions,
+        back,
+        launch,
+        tap,
+        setScreen: (value: string) => {
+          screen = value;
+        },
+        restore: () => {
+          back.mockRestore();
+          launch.mockRestore();
+          tap.mockRestore();
+        },
+      };
+    }
+
+    test("root login with only inputs stops after one Back and relaunch", async () => {
+      const run = rootRun();
+      try {
+        const result = await explore.execute({ packageName: target, timeoutMs: 90000 });
+        expect(result.stopReason).toBe(rootStop);
+        expect(result.success).toBe(true);
+        expect(result.interactionsPerformed).toBe(0);
+        expect(result.screensDiscovered).toBe(0);
+        expect(result.edgesAdded).toBe(0);
+        expect(result.explorationPath).toEqual(["Login"]);
+        expect(run.actions).toEqual(["back", "launch"]);
+        expect(result.durationMs).toBe(2000);
+        expect(fakeTimer.now()).toBe(2000);
+        expect(Reflect.get(explore, "consecutiveOutOfAppCount")).toBe(1);
+      } finally {
+        run.restore();
+      }
+    });
+
+    for (const button of ["Continue as Guest", "Skip", "Sign up"]) {
+      test(`login tries ${button} before any Back and never taps inputs`, async () => {
+        const run = rootRun(button);
+        try {
+          const result = await explore.execute({
+            packageName: target,
+            maxInteractions: 1,
+            timeoutMs: 90000,
+          });
+          expect(run.actions).toEqual(["tap:guest"]);
+          expect(result.interactionsPerformed).toBe(1);
+          expect(result.elementSelections?.[0]?.text).toBe(button);
+          expect(result.stopReason).toBe("Reached max interactions limit (1)");
+          expect(fakeTimer.now()).toBe(0);
+        } finally {
+          run.restore();
+        }
+      });
+    }
+
+    test("a relaunched root tries its buttons then stops without Back", async () => {
+      const run = rootRun("Continue as Guest", "Login", launcher);
+      try {
+        const result = await explore.execute({ packageName: target, timeoutMs: 90000 });
+        expect(run.actions).toEqual(["launch", "tap:guest", "tap:guest"]);
+        expect(result.interactionsPerformed).toBe(2);
+        expect(result.stopReason).toBe(rootStop);
+        expect(result.durationMs).toBe(1000);
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("Back leaving a non-root screen recovers once and explores another candidate", async () => {
+      const run = rootRun(undefined, "Detail");
+      const launch = run.launch.getMockImplementation()!;
+      run.launch.mockImplementation(async (...args) => {
+        const result = await launch(...args);
+        run.parser.nextFlattenedElements!.push({
+          element: createMockElement({ text: "Continue as Guest", "resource-id": "guest" }),
+          index: 2,
+          depth: 0,
+        });
+        return result;
+      });
+      try {
+        const result = await explore.execute({
+          packageName: target,
+          maxInteractions: 1,
+          timeoutMs: 90000,
+        });
+        expect(run.actions).toEqual(["back", "launch", "tap:guest"]);
+        expect(result.interactionsPerformed).toBe(1);
+        expect(result.explorationPath).toEqual(["Detail", "Login"]);
+        expect(result.durationMs).toBe(2000);
+        expect(Reflect.get(explore, "consecutiveOutOfAppCount")).toBe(0);
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("remembers the exiting screen even when relaunch lands elsewhere", async () => {
+      const run = rootRun(undefined, "Detail");
+      const launch = run.launch.getMockImplementation()!;
+      run.launch.mockImplementation(async (...args) => {
+        const result = await launch(...args);
+        run.parser.nextFlattenedElements!.push({
+          element: createMockElement({ text: "Continue as Guest", "resource-id": "guest" }),
+          index: 2,
+          depth: 0,
+        });
+        return result;
+      });
+      const tap = run.tap.getMockImplementation()!;
+      run.tap.mockImplementation(async (...args) => {
+        const result = await tap(...args);
+        run.setScreen("Detail");
+        run.parser.nextFlattenedElements!.pop();
+        return result;
+      });
+      try {
+        const result = await explore.execute({ packageName: target, timeoutMs: 90000 });
+        expect(run.actions).toEqual(["back", "launch", "tap:guest"]);
+        expect(result.stopReason).toBe("No unexplored interactions on the root screen: Detail");
+        expect(result.interactionsPerformed).toBe(1);
+        expect(result.durationMs).toBe(2000);
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("target returns alone do not reset the five-attempt recovery bound", async () => {
+      const run = rootRun();
+      const seams = explore as unknown as {
+        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
+      };
+      const observation = (packageName: string) =>
+        ({ activeWindow: { appId: packageName } }) as ObserveResult;
+      try {
+        for (let attempt = 1; attempt < 5; attempt++) {
+          expect(await seams.enforceTargetApp(observation(launcher), target)).toBe("handled");
+          expect(await seams.enforceTargetApp(observation(target), target)).toBe("ok");
+          expect(Reflect.get(explore, "consecutiveOutOfAppCount")).toBe(attempt);
+        }
+        expect(await seams.enforceTargetApp(observation(launcher), target)).toBe("stop");
+        expect(run.launch).toHaveBeenCalledTimes(5);
+        expect(Reflect.get(explore, "stopReason")).toBe(
+          "Left target app (com.test.app) without exploration progress after 5 return attempts",
+        );
+        expect(fakeTimer.now()).toBe(5000);
+      } finally {
+        run.restore();
+      }
+    });
+  });
+
   describe("target app recovery and reports", () => {
     function recoverySeams() {
       return explore as unknown as {
@@ -360,7 +571,7 @@ describe("Explore", () => {
         expect(result.success).toBe(true);
         expect(result.cancelled).toBe(false);
         expect(result.stopReason).toBe(
-          "Left target app (com.test.app) and could not return after 5 attempts",
+          "Left target app (com.test.app) without exploration progress after 5 return attempts",
         );
         expect(targetExport).toHaveBeenCalledWith(targetGraph.appId);
         expect(launch).toHaveBeenCalledTimes(5);
@@ -426,7 +637,9 @@ describe("Explore", () => {
           const result = await explore.execute({ packageName: "com.test.app" });
           expect(launch).toHaveBeenCalledTimes(5);
           expect(back).not.toHaveBeenCalled();
-          expect(result.stopReason).toContain("could not return after 5 attempts");
+          expect(result.stopReason).toContain(
+            "without exploration progress after 5 return attempts",
+          );
           expect(recoverySeams().consecutiveOutOfAppCount).toBe(5);
           expect(
             warn.mock.calls.filter(([message]) =>
@@ -498,7 +711,7 @@ describe("Explore", () => {
     for (const leftTarget of [true, false]) {
       test(`tool message ${leftTarget ? "discloses leaving the target app" : "preserves normal completion"}`, async () => {
         const stopReason = leftTarget
-          ? "Left target app (com.test.app) and could not return after 5 attempts"
+          ? "Left target app (com.test.app) without exploration progress after 5 return attempts"
           : "Reached max interactions limit (1)";
         const result: ExploreResult = {
           success: true,

@@ -128,71 +128,31 @@ export function evaluateDeviceDisconnects(
     deviceDisconnectMissIncarnations.delete(deviceId);
   };
 
-  for (const deviceId of input.confirmedDisconnectedDeviceIds) {
-    if (!input.candidateDeviceIds.has(deviceId)) {
-      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+  const clearStaleCandidates = (): void => {
+    for (const deviceId of input.confirmedDisconnectedDeviceIds) {
+      if (!input.candidateDeviceIds.has(deviceId)) {
+        input.confirmedDisconnectedDeviceIds.delete(deviceId);
+      }
     }
-  }
 
-  for (const deviceId of input.deviceDisconnectMisses.keys()) {
-    if (!input.candidateDeviceIds.has(deviceId)) {
-      clearMiss(deviceId);
-      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+    for (const deviceId of input.deviceDisconnectMisses.keys()) {
+      if (!input.candidateDeviceIds.has(deviceId)) {
+        clearMiss(deviceId);
+        input.confirmedDisconnectedDeviceIds.delete(deviceId);
+      }
     }
-  }
 
-  for (const deviceId of input.candidateDeviceIds) {
-    if (input.bootedDeviceIds.has(deviceId)) {
-      clearMiss(deviceId);
-      input.confirmedDisconnectedDeviceIds.delete(deviceId);
-      forceDisconnectedDeviceIds.delete(deviceId);
-      continue;
-    }
-  }
-
-  if (
-    input.bootedDeviceIds.size === 0 &&
-    input.candidateDeviceIds.size > 0 &&
-    input.succeededPlatforms.size === 0 &&
-    (input.succeededSources?.size ?? 0) === 0
-  ) {
     for (const deviceId of input.candidateDeviceIds) {
-      clearMiss(deviceId);
+      if (input.bootedDeviceIds.has(deviceId)) {
+        clearMiss(deviceId);
+        input.confirmedDisconnectedDeviceIds.delete(deviceId);
+        forceDisconnectedDeviceIds.delete(deviceId);
+        continue;
+      }
     }
-    return { disconnected, missed, skippedAllDiscoveryFailed: true };
-  }
+  };
 
-  for (const deviceId of input.candidateDeviceIds) {
-    if (input.bootedDeviceIds.has(deviceId)) {
-      clearMiss(deviceId);
-      input.confirmedDisconnectedDeviceIds.delete(deviceId);
-      continue;
-    }
-
-    if (candidateIncarnations.has(deviceId)) {
-      input.confirmedDisconnectedDeviceIds.delete(deviceId);
-    }
-
-    if (input.confirmedDisconnectedDeviceIds.has(deviceId)) {
-      clearMiss(deviceId);
-      continue;
-    }
-
-    // Only the source that would have listed this device can call it missing:
-    // a failed simctl sweep must not age out a devicectl-confirmed iPhone, and
-    // a failed devicectl sweep must not age out a booted simulator (#5683).
-    //
-    // Forced detached sessions originate from Android ADB recovery. Unknown
-    // candidates without that evidence still cannot be attributed to a source.
-    const platform =
-      input.candidatePlatforms.get(deviceId) ??
-      (forceDisconnectedDeviceIds.has(deviceId) ? "android" : undefined);
-    if (!platform || !didSourceSucceedForDevice(input, platform, deviceId)) {
-      observeMissingDevice(input.deviceDisconnectMisses, deviceId, "source-unavailable");
-      deviceDisconnectMissIncarnations.delete(deviceId);
-      continue;
-    }
-
+  const recordMiss = (deviceId: string): void => {
     const candidateIncarnation = candidateIncarnations.get(deviceId);
     const countedIncarnation = deviceDisconnectMissIncarnations.get(deviceId);
     const priorMisses =
@@ -216,6 +176,57 @@ export function evaluateDeviceDisconnects(
     if (confirmedGone) {
       disconnected.push(deviceId);
     }
+  };
+
+  const evaluateCandidate = (deviceId: string): void => {
+    if (input.bootedDeviceIds.has(deviceId)) {
+      clearMiss(deviceId);
+      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+      return;
+    }
+
+    if (candidateIncarnations.has(deviceId)) {
+      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+    }
+
+    if (input.confirmedDisconnectedDeviceIds.has(deviceId)) {
+      clearMiss(deviceId);
+      return;
+    }
+
+    // Only the source that would have listed this device can call it missing:
+    // a failed simctl sweep must not age out a devicectl-confirmed iPhone, and
+    // a failed devicectl sweep must not age out a booted simulator (#5683).
+    //
+    // Forced detached sessions originate from Android ADB recovery. Unknown
+    // candidates without that evidence still cannot be attributed to a source.
+    const platform =
+      input.candidatePlatforms.get(deviceId) ??
+      (forceDisconnectedDeviceIds.has(deviceId) ? "android" : undefined);
+    if (!platform || !didSourceSucceedForDevice(input, platform, deviceId)) {
+      observeMissingDevice(input.deviceDisconnectMisses, deviceId, "source-unavailable");
+      deviceDisconnectMissIncarnations.delete(deviceId);
+      return;
+    }
+
+    recordMiss(deviceId);
+  };
+
+  clearStaleCandidates();
+  if (
+    input.bootedDeviceIds.size === 0 &&
+    input.candidateDeviceIds.size > 0 &&
+    input.succeededPlatforms.size === 0 &&
+    (input.succeededSources?.size ?? 0) === 0
+  ) {
+    for (const deviceId of input.candidateDeviceIds) {
+      clearMiss(deviceId);
+    }
+    return { disconnected, missed, skippedAllDiscoveryFailed: true };
+  }
+
+  for (const deviceId of input.candidateDeviceIds) {
+    evaluateCandidate(deviceId);
   }
 
   return { disconnected, missed, skippedAllDiscoveryFailed: false };

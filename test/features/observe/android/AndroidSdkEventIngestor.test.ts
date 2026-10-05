@@ -198,6 +198,254 @@ describe("AndroidSdkEventIngestor.recordSdkEvent", () => {
   });
 });
 
+describe("AndroidSdkEventIngestor event inputs", () => {
+  it("preserves every supplied network field and sets context first", async () => {
+    const { ingestor, telemetry } = makeIngestor();
+    const event = {
+      applicationId: "com.x",
+      url: "https://x/path",
+      method: "POST",
+      statusCode: 201,
+      durationMs: 8,
+      requestBodySize: 2,
+      responseBodySize: 3,
+      protocol: "h2",
+      host: "x",
+      path: "/path",
+      error: "err",
+      requestHeaders: { request: "header" },
+      responseHeaders: { response: "header" },
+      requestBody: "in",
+      responseBody: "out",
+      contentType: "text/plain",
+    };
+    const order: string[] = [];
+    const setContext = telemetry.setContext.bind(telemetry);
+    telemetry.setContext = (deviceId, sessionId) => {
+      order.push("context");
+      setContext(deviceId, sessionId);
+    };
+    const record = telemetry.recordNetworkEvent.bind(telemetry);
+    telemetry.recordNetworkEvent = async (input) => {
+      order.push("record");
+      return record(input);
+    };
+    await ingestor.recordSdkEvent(
+      { type: "network_event", timestamp: 42, payload: { event } },
+      "ignored",
+    );
+    expect(telemetry.network).toEqual([{ timestamp: 42, ...event }]);
+    expect(order).toEqual(["context", "record"]);
+  });
+
+  for (const absent of [undefined, null]) {
+    it(`defaults all missing network fields supplied as ${String(absent)}`, async () => {
+      const { ingestor, telemetry } = makeIngestor();
+      const event = Object.fromEntries(
+        [
+          "applicationId",
+          "statusCode",
+          "durationMs",
+          "requestBodySize",
+          "responseBodySize",
+          "protocol",
+          "host",
+          "path",
+          "error",
+          "requestHeaders",
+          "responseHeaders",
+          "requestBody",
+          "responseBody",
+          "contentType",
+        ].map((key) => [key, absent]),
+      );
+      await ingestor.recordSdkEvent(
+        { type: "network_event", timestamp: 0, payload: { event } },
+        "ignored",
+      );
+      expect(telemetry.network).toEqual([
+        {
+          timestamp: 0,
+          applicationId: null,
+          url: undefined,
+          method: undefined,
+          statusCode: 0,
+          durationMs: 0,
+          requestBodySize: -1,
+          responseBodySize: -1,
+          protocol: null,
+          host: null,
+          path: null,
+          error: null,
+          requestHeaders: null,
+          responseHeaders: null,
+          requestBody: null,
+          responseBody: null,
+          contentType: null,
+        },
+      ]);
+    });
+  }
+
+  for (const [type, event, expected] of [
+    [
+      "websocket_frame_event",
+      {},
+      {
+        timestamp: 0,
+        applicationId: null,
+        category: "websocket_frame",
+        kind: "unknown",
+        details: { connectionId: "", url: "", direction: "", payloadSize: "0", success: "true" },
+      },
+    ],
+    [
+      "websocket_frame_event",
+      {
+        applicationId: "com.x",
+        frameType: "binary",
+        connectionId: "id",
+        url: "wss://x",
+        direction: "out",
+        payloadSize: 0,
+        success: false,
+      },
+      {
+        timestamp: 0,
+        applicationId: "com.x",
+        category: "websocket_frame",
+        kind: "binary",
+        details: {
+          connectionId: "id",
+          url: "wss://x",
+          direction: "out",
+          payloadSize: "0",
+          success: "false",
+        },
+      },
+    ],
+    [
+      "broadcast_event",
+      {},
+      { timestamp: 0, applicationId: null, category: "broadcast", kind: "unknown", details: null },
+    ],
+    [
+      "broadcast_event",
+      { applicationId: "com.x", action: "", extraKeys: {} },
+      { timestamp: 0, applicationId: "com.x", category: "broadcast", kind: "", details: {} },
+    ],
+    [
+      "lifecycle_event",
+      {},
+      { timestamp: 0, applicationId: null, category: "lifecycle", kind: "unknown", details: null },
+    ],
+    [
+      "lifecycle_event",
+      { applicationId: "com.x", kind: "resumed", details: { key: "value" } },
+      {
+        timestamp: 0,
+        applicationId: "com.x",
+        category: "lifecycle",
+        kind: "resumed",
+        details: { key: "value" },
+      },
+    ],
+  ] as const) {
+    it(`preserves ${type} input ${JSON.stringify(event)}`, async () => {
+      const { ingestor, telemetry } = makeIngestor();
+      await ingestor.recordSdkEvent({ type, timestamp: 0, payload: { event } }, "ignored");
+      expect(telemetry.os).toEqual([expected]);
+    });
+  }
+
+  for (const [type, event, expected] of [
+    [
+      "log_event",
+      {},
+      { timestamp: 0, applicationId: null, level: 0, tag: "", message: "", filterName: "" },
+    ],
+    [
+      "log_event",
+      { applicationId: "com.x", level: 0, tag: "tag", message: "msg", filterName: "filter" },
+      {
+        timestamp: 0,
+        applicationId: "com.x",
+        level: 0,
+        tag: "tag",
+        message: "msg",
+        filterName: "filter",
+      },
+    ],
+    [
+      "custom_event",
+      {},
+      {
+        timestamp: 0,
+        applicationId: null,
+        level: 4,
+        tag: "CustomEvent",
+        message: "",
+        filterName: "custom",
+      },
+    ],
+    [
+      "custom_event",
+      { name: "event", properties: {} },
+      {
+        timestamp: 0,
+        applicationId: null,
+        level: 4,
+        tag: "CustomEvent",
+        message: "event",
+        filterName: "custom",
+      },
+    ],
+    [
+      "custom_event",
+      { applicationId: "com.x", name: "event", properties: { zero: 0 } },
+      {
+        timestamp: 0,
+        applicationId: "com.x",
+        level: 4,
+        tag: "CustomEvent",
+        message: 'event {"zero":0}',
+        filterName: "custom",
+      },
+    ],
+  ] as const) {
+    it(`preserves ${type} input ${JSON.stringify(event)}`, async () => {
+      const { ingestor, telemetry } = makeIngestor();
+      await ingestor.recordSdkEvent({ type, timestamp: 0, payload: { event } }, "ignored");
+      expect(telemetry.logs).toEqual([expected]);
+    });
+  }
+
+  it("does not read the event if setting context fails", async () => {
+    const { ingestor, telemetry } = makeIngestor();
+    telemetry.setContext = () => {
+      throw new Error("context failed");
+    };
+    let reads = 0;
+    await expect(
+      ingestor.recordSdkEvent(
+        {
+          type: "network_event",
+          timestamp: 0,
+          payload: {
+            get event() {
+              reads++;
+              return {};
+            },
+          },
+        },
+        null,
+      ),
+    ).resolves.toBeUndefined();
+    expect(reads).toBe(0);
+    expect(telemetry.network).toEqual([]);
+  });
+});
+
 describe("AndroidSdkEventIngestor.recordStorageEvent", () => {
   it("sets context and forwards the prebuilt input", () => {
     const { ingestor, telemetry } = makeIngestor();

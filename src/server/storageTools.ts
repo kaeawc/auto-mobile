@@ -373,6 +373,234 @@ export function preferenceSetWarning(
   );
 }
 
+// setKeyValue handler
+async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
+  try {
+    const storageName = resolveStorageName(args);
+    const value = args.value === null ? null : String(args.value);
+    if (value !== null) {
+      validateTypeForPlatform(device.platform, args.type);
+    }
+
+    let usedDirectFileFallback = false;
+    let resolvedStore: string | undefined;
+    let effectiveValueDiffers: boolean | undefined;
+    if (device.platform === "android") {
+      const client = getStorageToolsDependencies().androidClientFactory(device);
+      ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
+        device,
+        args.appId,
+        storageName,
+        () =>
+          value === null
+            ? client.removePreference(args.appId, storageName, args.key)
+            : client.setPreference(args.appId, storageName, args.key, value, args.type),
+        (adb) =>
+          value === null
+            ? removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key)
+            : setAndroidKeyValueDirect(
+                adb,
+                device.deviceId,
+                args.appId,
+                storageName,
+                args.key,
+                value,
+                args.type,
+              ),
+      ));
+    } else if (device.platform === "ios") {
+      const client = getStorageToolsDependencies().iosClientFactory(device);
+      if (value === null) {
+        resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
+          ?.resolvedStore;
+      } else {
+        const result = await client.setPreference(
+          args.appId,
+          storageName,
+          args.key,
+          value,
+          args.type,
+        );
+        resolvedStore = result?.resolvedStore;
+        effectiveValueDiffers = result?.effectiveValueDiffers;
+      }
+    } else {
+      throw new ActionableError(`Unsupported platform: ${device.platform}`);
+    }
+
+    // Notify subscribers that entries changed so they re-read fresh data
+    void ResourceRegistry.notifyResourceUpdated(
+      buildEntriesUri(device.deviceId, args.appId, storageName),
+    );
+
+    const warning = preferenceSetWarning(
+      usedDirectFileFallback
+        ? directFileFallbackRelaunchWarning(args.appId, storageName)
+        : undefined,
+      effectiveValueDiffers,
+    );
+    return createJSONToolResponse({
+      success: true,
+      appId: args.appId,
+      name: storageName,
+      resolvedStore,
+      key: args.key,
+      type: args.type,
+      effectiveValueDiffers,
+      warning,
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    throw actionableStorageWriteError(error, `Failed to set key-value entry`);
+  }
+}
+
+// removeKeyValue handler
+async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueArgs) {
+  try {
+    const storageName = resolveStorageName(args);
+    let usedDirectFileFallback = false;
+    let resolvedStore: string | undefined;
+    if (device.platform === "android") {
+      const client = getStorageToolsDependencies().androidClientFactory(device);
+      ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
+        device,
+        args.appId,
+        storageName,
+        () => client.removePreference(args.appId, storageName, args.key),
+        (adb) =>
+          removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key),
+      ));
+    } else if (device.platform === "ios") {
+      const client = getStorageToolsDependencies().iosClientFactory(device);
+      resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
+        ?.resolvedStore;
+    } else {
+      throw new ActionableError(`Unsupported platform: ${device.platform}`);
+    }
+
+    void ResourceRegistry.notifyResourceUpdated(
+      buildEntriesUri(device.deviceId, args.appId, storageName),
+    );
+
+    return createJSONToolResponse({
+      success: true,
+      appId: args.appId,
+      name: storageName,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      key: args.key,
+      ...(usedDirectFileFallback
+        ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
+        : {}),
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    throw actionableStorageWriteError(error, `Failed to remove key-value entry`);
+  }
+}
+
+// clearKeyValueFile handler
+async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValueFileArgs) {
+  try {
+    const storageName = resolveStorageName(args);
+    let usedDirectFileFallback = false;
+    let resolvedStore: string | undefined;
+    if (device.platform === "android") {
+      const client = getStorageToolsDependencies().androidClientFactory(device);
+      ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
+        device,
+        args.appId,
+        storageName,
+        () => client.clearPreferenceStore(args.appId, storageName),
+        (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, args.appId, storageName),
+      ));
+    } else if (device.platform === "ios") {
+      const client = getStorageToolsDependencies().iosClientFactory(device);
+      resolvedStore = (await client.clearPreferenceStore(args.appId, storageName))?.resolvedStore;
+    } else {
+      throw new ActionableError(`Unsupported platform: ${device.platform}`);
+    }
+
+    void ResourceRegistry.notifyResourceUpdated(
+      buildEntriesUri(device.deviceId, args.appId, storageName),
+    );
+
+    return createJSONToolResponse({
+      success: true,
+      appId: args.appId,
+      name: storageName,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(usedDirectFileFallback
+        ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
+        : {}),
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to clear key-value file`);
+  }
+}
+
+// listDataStores handler — Android-only (Jetpack DataStore has no iOS analog).
+async function listDataStoresHandler(device: BootedDevice, args: ListDataStoresArgs) {
+  if (device.platform !== "android") {
+    throw new ActionableError(
+      `listDataStores is Android-only; DataStore is not available on ${device.platform}.`,
+    );
+  }
+  try {
+    const client = getStorageToolsDependencies().androidClientFactory(device);
+    const stores = await client.listDataStores(args.appId, args.adapterName);
+    return createJSONToolResponse({
+      success: true,
+      appId: args.appId,
+      adapterName: args.adapterName,
+      stores,
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    if (isSharedPreferencesInspectionDisabledError(error)) {
+      throw dataStoreInspectionDisabledError(args.appId);
+    }
+    throw toActionableError(error, `Failed to list data stores`);
+  }
+}
+
+// getDataStore handler — Android-only.
+async function getDataStoreHandler(device: BootedDevice, args: GetDataStoreArgs) {
+  if (device.platform !== "android") {
+    throw new ActionableError(
+      `getDataStore is Android-only; DataStore is not available on ${device.platform}.`,
+    );
+  }
+  try {
+    const client = getStorageToolsDependencies().androidClientFactory(device);
+    const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
+    return createJSONToolResponse({
+      success: true,
+      appId: args.appId,
+      adapterName: args.adapterName,
+      name: args.name,
+      entries,
+    });
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      throw error;
+    }
+    if (isSharedPreferencesInspectionDisabledError(error)) {
+      throw dataStoreInspectionDisabledError(args.appId);
+    }
+    throw toActionableError(error, `Failed to get data store`);
+  }
+}
+
 /**
  * Register storage write tools.
  *
@@ -380,234 +608,6 @@ export function preferenceSetWarning(
  * MCP resources in storageResources.ts. Only write operations are tools.
  */
 export function registerStorageTools(): void {
-  // setKeyValue handler
-  const setKeyValueHandler = async (device: BootedDevice, args: SetKeyValueArgs) => {
-    try {
-      const storageName = resolveStorageName(args);
-      const value = args.value === null ? null : String(args.value);
-      if (value !== null) {
-        validateTypeForPlatform(device.platform, args.type);
-      }
-
-      let usedDirectFileFallback = false;
-      let resolvedStore: string | undefined;
-      let effectiveValueDiffers: boolean | undefined;
-      if (device.platform === "android") {
-        const client = getStorageToolsDependencies().androidClientFactory(device);
-        ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
-          device,
-          args.appId,
-          storageName,
-          () =>
-            value === null
-              ? client.removePreference(args.appId, storageName, args.key)
-              : client.setPreference(args.appId, storageName, args.key, value, args.type),
-          (adb) =>
-            value === null
-              ? removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key)
-              : setAndroidKeyValueDirect(
-                  adb,
-                  device.deviceId,
-                  args.appId,
-                  storageName,
-                  args.key,
-                  value,
-                  args.type,
-                ),
-        ));
-      } else if (device.platform === "ios") {
-        const client = getStorageToolsDependencies().iosClientFactory(device);
-        if (value === null) {
-          resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
-            ?.resolvedStore;
-        } else {
-          const result = await client.setPreference(
-            args.appId,
-            storageName,
-            args.key,
-            value,
-            args.type,
-          );
-          resolvedStore = result?.resolvedStore;
-          effectiveValueDiffers = result?.effectiveValueDiffers;
-        }
-      } else {
-        throw new ActionableError(`Unsupported platform: ${device.platform}`);
-      }
-
-      // Notify subscribers that entries changed so they re-read fresh data
-      void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, storageName),
-      );
-
-      const warning = preferenceSetWarning(
-        usedDirectFileFallback
-          ? directFileFallbackRelaunchWarning(args.appId, storageName)
-          : undefined,
-        effectiveValueDiffers,
-      );
-      return createJSONToolResponse({
-        success: true,
-        appId: args.appId,
-        name: storageName,
-        resolvedStore,
-        key: args.key,
-        type: args.type,
-        effectiveValueDiffers,
-        warning,
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw actionableStorageWriteError(error, `Failed to set key-value entry`);
-    }
-  };
-
-  // removeKeyValue handler
-  const removeKeyValueHandler = async (device: BootedDevice, args: RemoveKeyValueArgs) => {
-    try {
-      const storageName = resolveStorageName(args);
-      let usedDirectFileFallback = false;
-      let resolvedStore: string | undefined;
-      if (device.platform === "android") {
-        const client = getStorageToolsDependencies().androidClientFactory(device);
-        ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
-          device,
-          args.appId,
-          storageName,
-          () => client.removePreference(args.appId, storageName, args.key),
-          (adb) =>
-            removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key),
-        ));
-      } else if (device.platform === "ios") {
-        const client = getStorageToolsDependencies().iosClientFactory(device);
-        resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
-          ?.resolvedStore;
-      } else {
-        throw new ActionableError(`Unsupported platform: ${device.platform}`);
-      }
-
-      void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, storageName),
-      );
-
-      return createJSONToolResponse({
-        success: true,
-        appId: args.appId,
-        name: storageName,
-        ...(resolvedStore ? { resolvedStore } : {}),
-        key: args.key,
-        ...(usedDirectFileFallback
-          ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-          : {}),
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw actionableStorageWriteError(error, `Failed to remove key-value entry`);
-    }
-  };
-
-  // clearKeyValueFile handler
-  const clearKeyValueFileHandler = async (device: BootedDevice, args: ClearKeyValueFileArgs) => {
-    try {
-      const storageName = resolveStorageName(args);
-      let usedDirectFileFallback = false;
-      let resolvedStore: string | undefined;
-      if (device.platform === "android") {
-        const client = getStorageToolsDependencies().androidClientFactory(device);
-        ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
-          device,
-          args.appId,
-          storageName,
-          () => client.clearPreferenceStore(args.appId, storageName),
-          (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, args.appId, storageName),
-        ));
-      } else if (device.platform === "ios") {
-        const client = getStorageToolsDependencies().iosClientFactory(device);
-        resolvedStore = (await client.clearPreferenceStore(args.appId, storageName))?.resolvedStore;
-      } else {
-        throw new ActionableError(`Unsupported platform: ${device.platform}`);
-      }
-
-      void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, storageName),
-      );
-
-      return createJSONToolResponse({
-        success: true,
-        appId: args.appId,
-        name: storageName,
-        ...(resolvedStore ? { resolvedStore } : {}),
-        ...(usedDirectFileFallback
-          ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-          : {}),
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, `Failed to clear key-value file`);
-    }
-  };
-
-  // listDataStores handler — Android-only (Jetpack DataStore has no iOS analog).
-  const listDataStoresHandler = async (device: BootedDevice, args: ListDataStoresArgs) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        `listDataStores is Android-only; DataStore is not available on ${device.platform}.`,
-      );
-    }
-    try {
-      const client = getStorageToolsDependencies().androidClientFactory(device);
-      const stores = await client.listDataStores(args.appId, args.adapterName);
-      return createJSONToolResponse({
-        success: true,
-        appId: args.appId,
-        adapterName: args.adapterName,
-        stores,
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      if (isSharedPreferencesInspectionDisabledError(error)) {
-        throw dataStoreInspectionDisabledError(args.appId);
-      }
-      throw toActionableError(error, `Failed to list data stores`);
-    }
-  };
-
-  // getDataStore handler — Android-only.
-  const getDataStoreHandler = async (device: BootedDevice, args: GetDataStoreArgs) => {
-    if (device.platform !== "android") {
-      throw new ActionableError(
-        `getDataStore is Android-only; DataStore is not available on ${device.platform}.`,
-      );
-    }
-    try {
-      const client = getStorageToolsDependencies().androidClientFactory(device);
-      const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
-      return createJSONToolResponse({
-        success: true,
-        appId: args.appId,
-        adapterName: args.adapterName,
-        name: args.name,
-        entries,
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      if (isSharedPreferencesInspectionDisabledError(error)) {
-        throw dataStoreInspectionDisabledError(args.appId);
-      }
-      throw toActionableError(error, `Failed to get data store`);
-    }
-  };
-
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
     "Set app key-value storage entry.",

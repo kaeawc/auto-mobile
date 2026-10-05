@@ -174,6 +174,16 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
       return undefined;
     }
 
+    return this.buildPredictions(interactables, actionableEdges, navGraph, currentScreen, appId);
+  }
+
+  private async buildPredictions(
+    interactables: InteractableElement[],
+    actionableEdges: NavigationEdge[],
+    navGraph: NavigationGraphManager,
+    currentScreen: string,
+    appId: string | null,
+  ): Promise<Predictions | undefined> {
     const likelyActions: PredictedAction[] = [];
     const interactableElements: InteractablePrediction[] = [];
     const matchedEdges = new Set<string>();
@@ -292,50 +302,73 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     const toolName = edge.interaction?.toolName;
 
     if (toolName === "tapOn") {
-      const text = args?.text ?? interactable.text;
-      const elementId = args?.elementId ?? args?.id ?? interactable.resourceId;
-      const contentDesc = interactable.contentDesc;
-
-      if (!text && !elementId && !contentDesc) {
-        return null;
-      }
-
-      return {
-        text,
-        elementId,
-        contentDesc,
-      };
+      return this.buildTapTarget(args, interactable);
     }
 
     if (toolName === "swipeOn") {
-      const container = args?.container || uiState?.scrollPosition?.container;
-      const lookFor = args?.lookFor || uiState?.scrollPosition?.targetElement;
-      const target: PredictionTarget = {};
-
-      if (container) {
-        target.container = {
-          text: container.text,
-          elementId: container.elementId || container.resourceId,
-          contentDesc: container.contentDesc,
-        };
-      }
-
-      if (lookFor) {
-        target.lookFor = {
-          text: lookFor.text,
-          elementId: lookFor.elementId || lookFor.resourceId,
-          contentDesc: lookFor.contentDesc,
-        };
-      }
-
-      if (!target.container && !target.lookFor) {
-        return null;
-      }
-
-      return target;
+      return this.buildSwipeTarget(args, uiState);
     }
 
     return null;
+  }
+
+  private buildTapTarget(
+    args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
+    interactable: InteractableElement,
+  ): PredictionTarget | null {
+    const text = args?.text ?? interactable.text;
+    const elementId = args?.elementId ?? args?.id ?? interactable.resourceId;
+    const contentDesc = interactable.contentDesc;
+
+    if (!text && !elementId && !contentDesc) {
+      return null;
+    }
+
+    return { text, elementId, contentDesc };
+  }
+
+  private buildSwipeTarget(
+    args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
+    uiState: NonNullable<NavigationEdge["interaction"]>["uiState"],
+  ): PredictionTarget | null {
+    const { container, lookFor } = this.getSwipeTargets(args, uiState);
+    const target: PredictionTarget = {};
+
+    if (container) {
+      target.container = this.buildSwipeSelector(container);
+    }
+
+    if (lookFor) {
+      target.lookFor = this.buildSwipeSelector(lookFor);
+    }
+
+    if (!target.container && !target.lookFor) {
+      return null;
+    }
+
+    return target;
+  }
+
+  private getSwipeTargets(
+    args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
+    uiState: NonNullable<NavigationEdge["interaction"]>["uiState"],
+  ): {
+    container: (NonNullable<PredictionTarget["container"]> & { resourceId?: string }) | undefined;
+    lookFor: (NonNullable<PredictionTarget["lookFor"]> & { resourceId?: string }) | undefined;
+  } {
+    const container = args?.container || uiState?.scrollPosition?.container;
+    const lookFor = args?.lookFor || uiState?.scrollPosition?.targetElement;
+    return { container, lookFor };
+  }
+
+  private buildSwipeSelector(
+    selector: NonNullable<PredictionTarget["container"]> & { resourceId?: string },
+  ): NonNullable<PredictionTarget["container"]> {
+    return {
+      text: selector.text,
+      elementId: selector.elementId || selector.resourceId,
+      contentDesc: selector.contentDesc,
+    };
   }
 
   private buildEdgeKey(edge: NavigationEdge): string {

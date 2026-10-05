@@ -4,6 +4,7 @@ import {
   ExecutePlanResult,
   Platform,
   PlanExecutionResult,
+  type VideoRecordingMetadata,
 } from "../models";
 import {
   ExecutePlanStepDebugInfo,
@@ -104,6 +105,7 @@ export interface PlanExecutionDependencies {
 }
 
 interface VideoState {
+  warnings?: string[];
   androidSession?: AndroidSegmentedPlanVideoSession;
   iosRecordingId?: string;
 }
@@ -123,6 +125,8 @@ type ExecutionContext = {
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS = 300;
+// Allow small timestamp skew between backend completion and the orchestrator stop attempt.
+const IOS_VIDEO_PLAN_END_TOLERANCE_MS = 100;
 
 const getDeviceType = (device: BootedDevice): "emulator" | "simulator" | "device" => {
   if (device.platform === "android") {
@@ -670,9 +674,9 @@ export class PlanExecutionOrchestrator {
         this.perfLog(`Video recording started: ${recording.recordingId}`);
       }
     } catch (videoError) {
-      logger.warn(
-        `[PERF +${this.timer.now() - this.perfStart}ms] Failed to start automatic video recording: ${videoError}`,
-      );
+      const warning = `Failed to start automatic video recording: ${errorMessage(videoError)}`;
+      logger.warn(`[PERF +${this.timer.now() - this.perfStart}ms] ${warning}`, videoError);
+      state.warnings = [warning];
     }
 
     return state;
@@ -754,6 +758,7 @@ export class PlanExecutionOrchestrator {
             ...(videoWarnings.length ? { videoWarnings } : {}),
           };
         },
+        video.warnings,
       );
     }
     if (video.iosRecordingId) {
@@ -763,11 +768,12 @@ export class PlanExecutionOrchestrator {
         "Failed to stop automatic video recording",
         async () => {
           let stopResult: Awaited<ReturnType<VideoRecorder["stopVideoRecording"]>>;
+          const planEndMs = this.timer.now();
           try {
             stopResult = await this.videoRecorder.stopVideoRecording(recordingId);
           } catch (error) {
             logger.warn(`Plan video stop failed for ${recordingId}: ${errorMessage(error)}`);
-            const recovered = await this.recoverCompletedIosVideo(recordingId);
+            const recovered = await this.recoverCompletedIosVideo(recordingId, planEndMs);
             if (recovered) {
               return recovered;
             }
@@ -779,12 +785,20 @@ export class PlanExecutionOrchestrator {
             videoRecordingIds: [recordingId],
           };
         },
+        video.warnings,
       );
     }
-    return { videoFilePaths: [], videoRecordingIds: [] };
+    return {
+      videoFilePaths: [],
+      videoRecordingIds: [],
+      ...(video.warnings?.length ? { videoWarnings: [...new Set(video.warnings)] } : {}),
+    };
   }
 
-  private async recoverCompletedIosVideo(recordingId: string): Promise<FinalizedVideo | undefined> {
+  private async recoverCompletedIosVideo(
+    recordingId: string,
+    planEndMs: number,
+  ): Promise<FinalizedVideo | undefined> {
     const { getVideoRecordingStatus, getVideoRecordingMetadata } = this.videoRecorder;
     if (!getVideoRecordingStatus || !getVideoRecordingMetadata) {
       return undefined;
@@ -797,15 +811,17 @@ export class PlanExecutionOrchestrator {
       if (!metadata?.filePath) {
         return undefined;
       }
-      const warning =
-        metadata.durationMs !== undefined &&
-        metadata.durationMs >= DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS * 1000
-          ? `Video recording ${recordingId} stopped at the ${DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS}s cap; the remainder of the plan was not recorded`
-          : `Video recording ${recordingId} ended before the plan finished; the remainder of the plan was not recorded`;
+      if (!(metadata.sizeBytes > 0)) {
+        logger.warn(
+          `Cannot recover archived plan video ${recordingId}: completed metadata must prove host bytes exist`,
+        );
+        return undefined;
+      }
+      const videoWarnings = this.recoveredIosVideoWarnings(metadata, planEndMs);
       return {
         videoFilePaths: [metadata.filePath],
         videoRecordingIds: [recordingId],
-        videoWarnings: [...new Set([...(metadata.warnings ?? []), warning])],
+        ...(videoWarnings.length ? { videoWarnings } : {}),
       };
     } catch (error) {
       logger.warn(`Failed to recover archived plan video ${recordingId}: ${errorMessage(error)}`);
@@ -813,14 +829,34 @@ export class PlanExecutionOrchestrator {
     }
   }
 
+  private recoveredIosVideoWarnings(metadata: VideoRecordingMetadata, planEndMs: number): string[] {
+    const recordingId = metadata.recordingId;
+    const endedWithPlan =
+      Date.parse(metadata.endedAt ?? "") >= planEndMs - IOS_VIDEO_PLAN_END_TOLERANCE_MS;
+    const warning =
+      metadata.durationMs !== undefined &&
+      metadata.durationMs >= DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS * 1000
+        ? `Video recording ${recordingId} stopped at the ${DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS}s cap; the remainder of the plan was not recorded`
+        : endedWithPlan
+          ? undefined
+          : `Video recording ${recordingId} ended before the plan finished; the remainder of the plan was not recorded`;
+    const videoWarnings = [
+      ...new Set([...(metadata.warnings ?? []), ...(warning ? [warning] : [])]),
+    ];
+    return videoWarnings;
+  }
+
   private async finalizeWithFallback(
     startMessage: string,
     failureMessage: string,
     finalize: () => Promise<FinalizedVideo>,
+    warnings: string[] = [],
   ): Promise<FinalizedVideo> {
     try {
       this.perfLog(startMessage);
-      return await finalize();
+      const result = await finalize();
+      const videoWarnings = [...new Set([...warnings, ...(result.videoWarnings ?? [])])];
+      return { ...result, ...(videoWarnings.length ? { videoWarnings } : {}) };
     } catch (videoError) {
       logger.warn(
         `[PERF +${this.timer.now() - this.perfStart}ms] ${failureMessage}: ${videoError}`,
@@ -828,7 +864,9 @@ export class PlanExecutionOrchestrator {
       return {
         videoFilePaths: [],
         videoRecordingIds: [],
-        videoWarnings: [`${failureMessage}: ${errorMessage(videoError)}`],
+        videoWarnings: [
+          ...new Set([...warnings, `${failureMessage}: ${errorMessage(videoError)}`]),
+        ],
       };
     }
   }

@@ -1,3 +1,4 @@
+import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
@@ -284,7 +285,10 @@ export class ClearText extends BaseVisualChange {
     this.parser = parser;
   }
 
-  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<ClearTextResult> {
+  async execute(
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<ClearTextResult & { retryable?: false }> {
     signal?.throwIfAborted();
     const perf = createGlobalPerformanceTracker();
     perf.serial("clearText");
@@ -454,14 +458,20 @@ export class ClearText extends BaseVisualChange {
   private async executeiOSClearText(
     observeResult: ObserveResult,
     signal?: AbortSignal,
-  ): Promise<ClearTextResult> {
+  ): Promise<ClearTextResult & { retryable?: false }> {
     const startMs = Date.now();
     logger.debug(`[ClearText] iOS begin`);
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       signal?.throwIfAborted();
-      const result = await client.requestClearText();
-      signal?.throwIfAborted();
+      const deadlineMs = getTextRequestDeadlineMs();
+      const result = await client.requestClearText(undefined, 5000, undefined, {
+        abortSignal: signal,
+        ...(deadlineMs === undefined ? {} : { deadlineMs }),
+      });
+      if (result.retryable !== false) {
+        signal?.throwIfAborted();
+      }
 
       if (result.success) {
         logger.info(`[ClearText] Cleared text via CtrlProxy iOS totalMs=${Date.now() - startMs}`);
@@ -471,7 +481,11 @@ export class ClearText extends BaseVisualChange {
       logger.warn(
         `[ClearText] CtrlProxy iOS clear failed: ${result.error} totalMs=${Date.now() - startMs}`,
       );
-      return { success: false, error: result.error };
+      return {
+        success: false,
+        error: result.error,
+        ...(result.retryable === false ? { retryable: false as const } : {}),
+      };
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(

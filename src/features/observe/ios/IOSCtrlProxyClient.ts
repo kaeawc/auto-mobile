@@ -435,12 +435,14 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    options?: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch">,
   ): Promise<CtrlProxySetTextResult>;
 
   requestClearText(
     resourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch">,
   ): Promise<CtrlProxySetTextResult>;
 
   requestImeAction(
@@ -3729,16 +3731,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    options?: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch">,
   ): Promise<CtrlProxySetTextResult> {
-    return this.text.requestAppendText(text, timeoutMs, perf, frameContext);
+    return this.text.requestAppendText(text, timeoutMs, perf, frameContext, options);
   }
 
   async requestClearText(
     resourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch">,
   ): Promise<CtrlProxySetTextResult> {
-    return this.text.requestClearText(resourceId, timeoutMs, perf);
+    return this.text.requestClearText(resourceId, timeoutMs, perf, options);
   }
 
   async requestImeAction(

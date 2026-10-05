@@ -1217,3 +1217,150 @@ describe("tapOn long press outer budget", () => {
     },
   );
 });
+
+describe("text request floors", () => {
+  for (const length of [300, 1000, 5000]) {
+    test(`sendKeys covers ${length} characters`, () => {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "text",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name: "sendKeys",
+            arguments: { commands: [{ action: "type", text: "a".repeat(length) }] },
+          },
+        }),
+      ).toBeGreaterThan(Math.min(120_000, length * 100 + 2000));
+    });
+    test(`setUIState covers ${length} characters`, () => {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "text",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name: "setUIState",
+            arguments: {
+              fields: [{ selector: { elementId: "field" }, value: "a".repeat(length) }],
+            },
+          },
+        }),
+      ).toBeGreaterThan(Math.min(120_000, length * 100 + 2000));
+    });
+  }
+  test.each(["sendKeys", "setUIState"])("short %s keeps its existing timeout", (name) => {
+    expect(
+      resolveMcpRequestTimeoutMs({
+        id: "text",
+        type: "mcp_request",
+        method: "tools/call",
+        params: {
+          name,
+          arguments: {
+            commands: [{ action: "type", text: "hello" }],
+            fields: [{ value: "hello" }],
+          },
+        },
+      }),
+    ).toBe(name === "sendKeys" ? 30_000 : 60_000);
+  });
+});
+
+test("short sendKeys keeps a caller timeout that already fits", () => {
+  expect(
+    resolveMcpRequestTimeoutMs({
+      id: "short",
+      type: "mcp_request",
+      method: "tools/call",
+      timeoutMs: 10_000,
+      params: { name: "sendKeys", arguments: { commands: [{ action: "type", text: "hello" }] } },
+    }),
+  ).toBe(10_000);
+});
+
+test("text request floor budgets sequential commands independently", () => {
+  expect(
+    resolveMcpRequestTimeoutMs({
+      id: "batch",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "sendKeys",
+        arguments: {
+          commands: [
+            { action: "type", text: "a".repeat(1000) },
+            { action: "clear" },
+            { action: "type", text: "hello" },
+          ],
+        },
+      },
+    }),
+  ).toBe(147_000);
+});
+
+describe("bounded excess text request floors", () => {
+  const resolve = (name: string, texts: string[], timeoutMs?: number): number =>
+    resolveMcpRequestTimeoutMs({
+      id: "text-excess",
+      type: "mcp_request",
+      method: "tools/call",
+      timeoutMs,
+      params: {
+        name,
+        arguments:
+          name === "sendKeys"
+            ? { commands: texts.map((text) => ({ action: "type", text })) }
+            : { fields: texts.map((value) => ({ value })) },
+      },
+    });
+
+  test.each([
+    [300, 77_000],
+    [1000, 147_000],
+    [5000, 165_000],
+  ])("single sendKeys length %s has floor %s", (length, expected) => {
+    expect(resolve("sendKeys", ["a".repeat(length)])).toBe(expected);
+  });
+
+  test("twenty short fields preserve the existing floor and caller precedence", () => {
+    const texts = Array.from({ length: 20 }, () => "a".repeat(30));
+    expect(resolve("setUIState", texts)).toBe(60_000);
+    expect(resolve("setUIState", texts, 90_000)).toBe(90_000);
+    expect(resolve("sendKeys", texts, 10_000)).toBe(10_000);
+  });
+
+  test("crossing the short-text boundary adds one margin and only the excess", () => {
+    const texts = Array.from({ length: 20 }, () => "a".repeat(30));
+    texts[0] += "a";
+    expect(resolve("setUIState", texts)).toBe(80_100);
+    texts[0] += "a";
+    expect(resolve("setUIState", texts)).toBe(80_200);
+  });
+
+  test("two long entries share one margin", () => {
+    expect(resolve("setUIState", ["a".repeat(300), "a".repeat(1000)])).toBe(204_000);
+  });
+
+  test("a larger caller timeout retains precedence over the text floor", () => {
+    expect(resolve("sendKeys", ["a".repeat(1000)], 200_000)).toBe(200_000);
+  });
+
+  test("twenty 500-character fields budget excesses", () => {
+    expect(
+      resolve(
+        "setUIState",
+        Array.from({ length: 20 }, () => "a".repeat(500)),
+      ),
+    ).toBe(1_020_000);
+  });
+
+  test.each(["sendKeys", "setUIState"])("%s text floor cannot exceed the caller cap", (name) => {
+    expect(
+      resolve(
+        name,
+        Array.from({ length: 100 }, () => "a".repeat(1000)),
+      ),
+    ).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+  });
+});

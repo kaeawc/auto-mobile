@@ -400,6 +400,17 @@ export class BaseVisualChange {
       return block(previousObserveResult!, fence);
     });
 
+    // Unconfirmed iOS text must return before post-action reads consume the
+    // response margin or replace its non-retryable result with cancellation.
+    if (
+      this.device.platform === "ios" &&
+      blockResult?.success === false &&
+      blockResult.retryable === false
+    ) {
+      perf.end();
+      return blockResult;
+    }
+
     if (options.display !== undefined) {
       // ADB input bypasses CtrlProxy's gesture debouncer. Clear its tree before
       // the shared post-action capture; this also works with CtrlProxy dispatch.

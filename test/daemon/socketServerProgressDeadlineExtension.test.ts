@@ -1,3 +1,5 @@
+import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
+import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { describe, expect, mock, test } from "bun:test";
 import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { randomUUID } from "node:crypto";
@@ -771,4 +773,74 @@ describe("pushProgressNotification is independent of the general notification su
 
     expect(writes.length).toBe(0);
   });
+});
+
+describe("request timeout preserves iOS text dispatch evidence", () => {
+  for (const progress of [false, true]) {
+    test.each([false, true])(
+      `request expiry after dispatch=%s, progress=${progress}`,
+      async (dispatched) => {
+        const timer = new FakeTimer();
+        const server = createServer(timer);
+        const started = Promise.withResolvers<void>();
+        let key: string | undefined;
+        const timeout = new Error("Request timed out after 4000ms");
+        const callTool = (
+          _params: { arguments: Record<string, unknown> },
+          _schema: unknown,
+          options: CapturedCallToolOptions,
+        ) => {
+          key = _params.arguments[INTERNAL_LIVE_DEADLINE_KEY_PARAM] as string;
+          if (dispatched) {
+            getLiveTextRequestState(key)?.dispatched();
+          }
+          return new Promise<never>((_resolve, reject) => {
+            const handle = timer.setTimeout(() => reject(timeout), options.timeout ?? 4000);
+            options.signal?.addEventListener(
+              "abort",
+              () => {
+                timer.clearTimeout(handle);
+                reject(options.signal?.reason);
+              },
+              { once: true },
+            );
+            started.resolve();
+          });
+        };
+        const pending = callHandleIdeRequest(
+          server,
+          { callTool },
+          {
+            id: "text-expiry",
+            type: "mcp_request",
+            method: "tools/call",
+            params: { name: "sendKeys", arguments: {} },
+            ...(progress ? { progressToken: "text" } : {}),
+          },
+          4000,
+          "text-expiry-session",
+          new ProgressExtendableDeadline(timer.now(), 4000),
+        ).then(
+          (result: unknown) => result,
+          (error: unknown) => error,
+        );
+        await started.promise;
+        timer.advanceTime(4000);
+        const result = await pending;
+        if (dispatched) {
+          const response = result as { isError: boolean; content: [{ text: string }] };
+          const failure = JSON.parse(response.content[0].text);
+          expect(response.isError).toBe(true);
+          expect(failure.retryable).toBe(false);
+          expect(failure.error).toContain("Do not retry automatically.");
+        } else if (progress) {
+          expect(result).toBe(timeout.message);
+        } else {
+          expect(result).toBe(timeout);
+        }
+        expect(key).toBeDefined();
+        expect(getLiveTextRequestState(key!)).toBeUndefined();
+      },
+    );
+  }
 });

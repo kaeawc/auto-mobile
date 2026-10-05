@@ -37,14 +37,55 @@ describe("clearTextWithKeyEvents", () => {
     },
   );
 
-  test("uses exact Ctrl+End before batched deletes when supported", async () => {
-    const adb = new FakeAdbExecutor();
-    await clearTextWithKeyEvents(adb, 51, undefined, undefined, true);
-    expect(adb.getExecutedCommands()).toEqual([
-      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
-      ...deleteCommands(51),
-    ]);
-  });
+  test.each([1, DELETE_KEYEVENT_CHUNK_SIZE + 1, DELETE_KEYEVENT_CHUNK_SIZE * 2 + 1])(
+    "selects all then deletes once when supported, regardless of count %i",
+    async (count) => {
+      const adb = new FakeAdbExecutor();
+      let completedDeletes = 0;
+      await clearTextWithKeyEvents(adb, count, undefined, () => completedDeletes++, true);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+        "shell input keyevent KEYCODE_DEL",
+      ]);
+      expect(completedDeletes).toBe(1);
+    },
+  );
+
+  test.each(["select", "delete"] as const)(
+    "stops after an abort during the supported %s command",
+    async (step) => {
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const select = "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A";
+      const del = "shell input keyevent KEYCODE_DEL";
+      adb.abortAfterCommand(step === "select" ? select : del, controller);
+      let completedDeletes = 0;
+
+      await expect(
+        clearTextWithKeyEvents(adb, 51, controller.signal, () => completedDeletes++, true),
+      ).rejects.toMatchObject({ name: "AbortError" });
+      expect(adb.getExecutedCommands()).toEqual(step === "select" ? [select] : [select, del]);
+      expect(completedDeletes).toBe(step === "select" ? 0 : 1);
+    },
+  );
+
+  test.each(["select", "delete"] as const)(
+    "does not report a completed delete when the supported %s command fails",
+    async (step) => {
+      const adb = new FakeAdbExecutor();
+      const select = "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A";
+      const del = "shell input keyevent KEYCODE_DEL";
+      const error = new Error("key event failed");
+      adb.setCommandError(step === "select" ? select : del, error);
+      let completedDeletes = 0;
+
+      await expect(
+        clearTextWithKeyEvents(adb, 51, undefined, () => completedDeletes++, true),
+      ).rejects.toBe(error);
+      expect(adb.getExecutedCommands()).toEqual(step === "select" ? [select] : [select, del]);
+      expect(completedDeletes).toBe(0);
+    },
+  );
 
   test("keeps MOVE_END as the only call for zero or negative counts", async () => {
     const adb = new FakeAdbExecutor();
@@ -227,18 +268,40 @@ describe("ClearText Android ADB fallback", () => {
       );
       expect(result.success).toBe(true);
       expect((await instance!.execute(undefined, controller.signal)).success).toBe(true);
-      const move =
+      const sequence =
         apiLevel !== null && apiLevel >= 31
-          ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END"
-          : "shell input keyevent KEYCODE_MOVE_END";
+          ? [
+              "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+              "shell input keyevent KEYCODE_DEL",
+            ]
+          : ["shell input keyevent KEYCODE_MOVE_END", ...deleteCommands(51)];
       expect(fakeAdb.getExecutedCommands()).toEqual([
         ...(apiLevel === null ? ["shell getprop ro.build.version.sdk"] : []),
-        move,
-        ...deleteCommands(51),
-        move,
-        ...deleteCommands(51),
+        ...sequence,
+        ...sequence,
       ]);
       expect(fakeAdb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+    },
+  );
+
+  test.each(["android.widget.EditText", "android.view.View"])(
+    "selects the entire multi-line %s even with an existing selection",
+    async (className) => {
+      fakeAdb.setAndroidApiLevel(36);
+      fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+      const observation = focusedFieldObserve("aaa\nbbb\nccc");
+      Object.assign(observation.viewHierarchy!.hierarchy.node!.$!, {
+        class: className,
+        editable: "true",
+        selectionStart: 1,
+        selectionEnd: 2,
+      });
+
+      expect((await runClearText(observation)).success).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+        "shell input keyevent KEYCODE_DEL",
+      ]);
     },
   );
 
@@ -278,8 +341,8 @@ describe("ClearText Android ADB fallback", () => {
     expect(await second).toMatchObject([{ status: "fulfilled", value: { success: true } }]);
     expect(fakeAdb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
     expect(fakeAdb.getExecutedCommands()).toEqual([
-      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
-      deleteCommand(3),
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+      "shell input keyevent KEYCODE_DEL",
     ]);
   });
 
@@ -503,8 +566,8 @@ describe("ClearText Android ADB fallback", () => {
       expect(result.error).toContain("Cannot verify");
     }
     expect(fakeAdb.getExecutedCommands()).toEqual([
-      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
-      deleteCommand(17),
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+      "shell input keyevent KEYCODE_DEL",
     ]);
   });
 

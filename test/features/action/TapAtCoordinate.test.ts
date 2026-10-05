@@ -2472,6 +2472,162 @@ describe("TapAtCoordinate TalkBack", () => {
     expect(h.driver.doubleTapHistory).toHaveLength(1);
   });
 
+  test.each([undefined, "active"])(
+    "contextual TalkBack focus on display %s retries one rejected frame on the same panel",
+    async (display) => {
+      const h = setup(true, androidDevice, true);
+      const primary = { key: "0", role: "unknown" as const, generation: 7 };
+      h.observeScreen.setObserveSequence([
+        { ...observation(10, 10, "epoch:1"), display: primary },
+        { ...observation(10, 10, "epoch:2"), display: primary },
+        { ...observation(10, 10, "epoch:3"), display: primary },
+      ]);
+      const controller = new AbortController();
+      const frames: (string | undefined)[] = [];
+      const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
+        async (
+          x,
+          y,
+          duration,
+          _timeout,
+          _perf,
+          frame,
+          onDispatch,
+          signal,
+          _displayId,
+          beforeSend,
+        ) => {
+          expect([x, y, duration]).toEqual([1, 2, 50]);
+          expect(signal).toBe(controller.signal);
+          expect(beforeSend).toBeFunction();
+          beforeSend?.();
+          frames.push(frame);
+          expect(h.observeScreen.getExecuteCallCount()).toBe(frames.length);
+          onDispatch?.();
+          return frames.length === 1
+            ? { success: false, error: "Stale frame context: epoch:1" }
+            : { success: true };
+        },
+      );
+      const activation = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestDoubleTapCoordinates",
+      ).mockImplementation(async () => {
+        expect(h.observeScreen.getExecuteCallCount()).toBe(2);
+        return { success: true, totalTimeMs: 1 };
+      });
+      try {
+        const result = await h.tapAt.execute({ x: 1, y: 2, display }, undefined, controller.signal);
+        expect(result.success).toBe(true);
+        expect(frames).toEqual(["epoch:1", "epoch:2"]);
+        expect(focus).toHaveBeenCalledTimes(2);
+        expect(activation).toHaveBeenCalledTimes(1);
+        // Only two captures precede activation; later captures belong to post-action settling.
+        expect(h.observeScreen.getExecuteOptions()[1]).toMatchObject({
+          ...(display ? { display: "0" } : {}),
+          freshness: "cached-ok",
+          signal: controller.signal,
+        });
+      } finally {
+        activation.mockRestore();
+      }
+    },
+  );
+
+  test.each(["delivered", "dispatched"] as const)(
+    "explicit contextual TalkBack stale failure after focus was %s never retries",
+    async (phase) => {
+      const h = setup(true, androidDevice, true);
+      h.observeScreen.setObserveResult({
+        ...observation(10, 10, "epoch:1"),
+        display: { key: "0", role: "unknown", generation: 7 },
+      });
+      const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
+        async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+          onDispatch?.();
+          if (phase === "dispatched") {
+            throw new Error("Stale frame context in a lost reply");
+          }
+          return { success: true };
+        },
+      );
+      const activation = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestDoubleTapCoordinates",
+      ).mockResolvedValue({ success: false, totalTimeMs: 0, error: "Stale frame context" });
+      try {
+        const result = await h.tapAt.execute({ x: 1, y: 2, display: "active" });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Stale frame context");
+        expect(result.error).toContain(
+          phase === "delivered" ? "Focus touch was delivered" : "indeterminate",
+        );
+        expect(focus).toHaveBeenCalledTimes(1);
+        expect(activation).toHaveBeenCalledTimes(phase === "delivered" ? 1 : 0);
+        expect(h.observeScreen.getExecuteCallCount()).toBe(1);
+      } finally {
+        activation.mockRestore();
+      }
+    },
+  );
+
+  test.each(["unchanged frame", "changed layout", "second rejection"])(
+    "explicit contextual TalkBack retry fails closed for %s",
+    async (scenario) => {
+      const h = setup(true, androidDevice, true);
+      const primary = { key: "0", role: "unknown" as const, generation: 7 };
+      h.observeScreen.setObserveSequence([
+        { ...observation(10, 10, "epoch:1"), display: primary },
+        {
+          ...observation(
+            10,
+            10,
+            scenario === "unchanged frame" ? "epoch:1" : "epoch:2",
+            0,
+            scenario === "changed layout" ? { text: "Changed target" } : {},
+          ),
+          display: primary,
+        },
+      ]);
+      const frames: (string | undefined)[] = [];
+      const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
+        async (_x, _y, _duration, _timeout, _perf, frame, onDispatch) => {
+          frames.push(frame);
+          onDispatch?.();
+          return { success: false, error: `Stale frame context: ${frame}` };
+        },
+      );
+      const activation = spyOn(AndroidCtrlProxyClient.prototype, "requestDoubleTapCoordinates");
+      try {
+        const result = await h.tapAt.execute({ x: 1, y: 2, display: "active" });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(
+          `TalkBack coordinate tap failed: Focus tap failed: Stale frame context: ${scenario === "second rejection" ? "epoch:2" : "epoch:1"}`,
+        );
+        expect(frames).toEqual(
+          scenario === "second rejection" ? ["epoch:1", "epoch:2"] : ["epoch:1"],
+        );
+        expect(focus).toHaveBeenCalledTimes(scenario === "second rejection" ? 2 : 1);
+        expect(activation).not.toHaveBeenCalled();
+        expect(h.observeScreen.getExecuteCallCount()).toBe(2);
+      } finally {
+        activation.mockRestore();
+      }
+    },
+  );
+
+  test("TalkBack-off explicit display keeps the plain dispatch route", async () => {
+    const h = setup(false);
+    h.observeScreen.setObserveResult({
+      ...observation(10, 10),
+      display: { key: "0", role: "unknown", generation: 7 },
+    });
+    expect((await h.tapAt.execute({ x: 1, y: 2, display: "active" })).success).toBe(true);
+    expect(h.plainCalls).toEqual([[1, 2, 10]]);
+    expect(h.driver.tapHistory).toEqual([]);
+    expect(h.driver.doubleTapHistory).toEqual([]);
+  });
+
   test("explicit primary display uses the TalkBack route", async () => {
     const h = setup();
     h.observeScreen.setObserveResult({

@@ -10,6 +10,8 @@ import {
 } from "../../src/server/utilityTools";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 
 isolateToolRegistry();
 
@@ -108,6 +110,33 @@ describe("displayConfig handler", () => {
     supported: { fontScale: true, density: true, theme: true },
     current: { fontScale: 1, density: 320, theme: "light" as const },
   };
+  test("Android font-scale success carries the handler's applied message", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const client = adbFactory.getFakeClient();
+    client.setCommandResult("shell settings get system font_scale", "1.3\n");
+    client.setCommandResult("shell wm density", "Physical density: 440\n");
+    client.setCommandResult("shell cmd uimode night", "Night mode: no\n");
+    const create = spyOn(defaultAdbClientFactory, "create").mockImplementation((target) =>
+      adbFactory.create(target),
+    );
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
+        fontScale: 1.3,
+      });
+      expect(response.isError).not.toBe(true);
+      expect(JSON.parse(response.content[0].text!)).toMatchObject({
+        success: true,
+        applied: { fontScale: 1.3 },
+        message: "Applied display configuration",
+      });
+      expect(client.getCommandCalls().map((call) => call.command)).toContain(
+        "shell settings put system font_scale 1.3",
+      );
+    } finally {
+      create.mockRestore();
+    }
+  });
   test.each([{}, { reset: false }])("reads configuration without a set field: %j", async (args) => {
     const get = spyOn(DisplayConfig.prototype, "getConfig").mockResolvedValue(result);
     const set = spyOn(DisplayConfig.prototype, "setConfig").mockResolvedValue(result);
@@ -169,7 +198,7 @@ describe("displayConfig handler", () => {
     const resetResult = {
       ...result,
       message:
-        "Reset font scale and density to device defaults; night mode left unchanged (displayConfig did not change it).",
+        "Reset font scale and density to device defaults; night mode restored to dark (changed earlier by displayConfig).",
     };
     const set = spyOn(DisplayConfig.prototype, "setConfig").mockResolvedValue(resetResult);
     try {

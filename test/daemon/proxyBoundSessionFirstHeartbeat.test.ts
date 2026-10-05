@@ -14,6 +14,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { ActionableError } from "../../src/models";
+import { logger } from "../../src/utils/logger";
 
 // Reproduces issue #5637: a proxy-bound MCP session allocated shortly before the
 // proxy starts up must not be reaped with `missing-first-heartbeat` before its
@@ -609,6 +610,86 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();
+    }
+  });
+
+  test("superseded keeper ticks remain informational without fencing, reconnecting or repeated logs", async () => {
+    let superseded = false;
+    let stalledHeartbeat: Promise<void> | undefined;
+    let finishHeartbeat = () => {};
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "daemon/heartbeat" && stalledHeartbeat) {
+          return stalledHeartbeat;
+        }
+        if (method === "daemon/heartbeat" && superseded) {
+          throw Object.assign(new ActionableError("Liveness ownership displaced"), {
+            code: "liveness_owner_superseded",
+          });
+        }
+      },
+    });
+    const connect = spyOn(fakeClient, "connect");
+    const close = spyOn(fakeClient, "close");
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      heartbeatIntervalMs: 2_000,
+      timer,
+    });
+    try {
+      await proxy.ensureConnected();
+      const pendingBefore = timer.getPendingIntervalCount();
+      superseded = true;
+      // More than the heartbeat leash: every received no-op must retain the
+      // old proxy's local acknowledgement bookkeeping, without daemon activity.
+      for (let tick = 0; tick < 8; tick++) {
+        await timer.advanceTimeAsync(2_000);
+      }
+      await proxy.callTool("observe", {});
+      expect(proxy.isConnected()).toBe(true);
+      expect(connect).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalled();
+      expect(
+        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/releaseSession"),
+      ).toEqual([]);
+      expect(
+        fakeClient.callDaemonMethodCalls
+          .filter((call) => call.method === "daemon/heartbeat")
+          .map((call) => call.params.claimLivenessOwnership),
+      ).toEqual([true, ...Array(8).fill(undefined)]);
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore);
+      expect(warn.mock.calls.filter(([message]) => String(message).includes("heartbeat"))).toEqual(
+        [],
+      );
+      expect(
+        debug.mock.calls.filter(([message]) =>
+          String(message).includes("liveness ownership superseded"),
+        ),
+      ).toHaveLength(1);
+      // A later stalled RPC is still inside the local retry window. Without
+      // acknowledging superseded ticks locally, this would fence after 1ms.
+      stalledHeartbeat = new Promise((resolve) => {
+        finishHeartbeat = resolve;
+      });
+      await timer.advanceTimeAsync(2_000);
+      await timer.advanceTimeAsync(1_000);
+      await proxy.callTool("observe", {});
+      expect(proxy.isConnected()).toBe(true);
+      expect(connect).toHaveBeenCalledTimes(1);
+    } finally {
+      finishHeartbeat();
+      await proxy.close();
+      isAvailableSpy.mockRestore();
+      warn.mockRestore();
+      debug.mockRestore();
+      close.mockRestore();
+      connect.mockRestore();
     }
   });
 

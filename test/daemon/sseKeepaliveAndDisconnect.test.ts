@@ -15,6 +15,10 @@ import {
 } from "../../src/daemon/disconnectMonitor";
 import { notifyAdbMissingDevice } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { executionTracker } from "../../src/server/executionTracker";
+import { waitForObservation, type WaitForWithSettled } from "../../src/server/observeTools";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
@@ -771,6 +775,140 @@ describe("disconnect monitor miss counting", () => {
       expect(misses.has("emulator-5554")).toBe(false);
     } finally {
       daemon.unsubscribeAdbMissingDevice?.();
+    }
+  });
+
+  for (const waitFor of [
+    { text: "Ready", timeout: 40_000 },
+    { for: "appear", text: "Ready", timeout: 40_000 },
+  ] satisfies WaitForWithSettled[]) {
+    test(`raw ADB missing during a plan leaves ${"for" in waitFor ? "DSL" : "legacy"} waitFor running after fresh presence`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const planActive = spyOn(serverConfig, "isPlanExecutionActive").mockReturnValue(true);
+      const tracked = executionTracker.startExecution("executePlan");
+      executionTracker.bindDeviceExecution(tracked.id, "emulator-5554");
+      const pooledDevice = { incarnation: 1 };
+      const daemon = {
+        devicePool: {
+          getDevice: () => pooledDevice,
+          isShutdownReserved: async () => false,
+        },
+        sessionManager: { getSessionForDevice: () => null },
+        forceDisconnectedDeviceIds: new Set<string>(),
+        forceDisconnectedDeviceGenerations: new Map<string, number>(),
+        unsubscribeAdbMissingDevice: null as (() => void) | null,
+      };
+      const start = (Daemon.prototype as unknown as { startAdbMissingDeviceListener(): void })
+        .startAdbMissingDeviceListener;
+      start.call(daemon);
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult((index) => {
+        if (index === 1) {
+          notifyAdbMissingDevice(
+            "emulator-5554",
+            new Error("adb: device 'emulator-5554' not found"),
+          );
+          const confirmation = evaluateDeviceDisconnects({
+            deviceDisconnectMisses: new Map(),
+            confirmedDisconnectedDeviceIds: new Set(),
+            forceDisconnectedDeviceIds: daemon.forceDisconnectedDeviceIds,
+            bootedDeviceIds: new Set(["emulator-5554"]),
+            candidateDeviceIds: new Set(["emulator-5554"]),
+            succeededPlatforms: new Set(["android"]),
+            candidatePlatforms: new Map([["emulator-5554", "android"]]),
+          });
+          expect(confirmation.disconnected).toEqual([]);
+        }
+        return {
+          updatedAt: timer.now() + 1,
+          screenSize: { width: 200, height: 200 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          viewHierarchy: {
+            updatedAt: timer.now() + 1,
+            hierarchy: {
+              node: {
+                "resource-id": "root",
+                bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+                node: [
+                  {
+                    text: index >= 2 ? "Ready" : "Waiting",
+                    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+                  },
+                ],
+              },
+            },
+            screenWidth: 200,
+            screenHeight: 200,
+          },
+        };
+      });
+      try {
+        const outcome = await waitForObservation(
+          screen,
+          waitFor,
+          tracked.abortController.signal,
+          false,
+          timer,
+        );
+        expect(outcome.matched).toBe(true);
+        expect(outcome.timedOut).toBe(false);
+        expect(screen.getExecuteCallCount()).toBe(3);
+        expect(tracked.abortController.signal.aborted).toBe(false);
+        expect(tracked.cancelReason).toBeUndefined();
+        expect(daemon.forceDisconnectedDeviceIds.size).toBe(0);
+      } finally {
+        daemon.unsubscribeAdbMissingDevice?.();
+        executionTracker.endExecution(tracked.id);
+        planActive.mockRestore();
+      }
+    });
+  }
+
+  test("raw ADB event burst during an unreserved plan restart queues no cancellation or reservation work", async () => {
+    const planActive = spyOn(serverConfig, "isPlanExecutionActive").mockReturnValue(true);
+    const tracked = executionTracker.startExecution("executePlan");
+    executionTracker.bindDeviceExecution(tracked.id, "emulator-5554");
+    const recovery = executionTracker.startExecution("startDevice");
+    executionTracker.bindDeviceExecution(recovery.id, "emulator-5554");
+    const otherClient = executionTracker.startExecution("observe", "other-client");
+    executionTracker.bindDeviceExecution(otherClient.id, "emulator-5554");
+    const otherDevice = executionTracker.startExecution("executePlan");
+    executionTracker.bindDeviceExecution(otherDevice.id, "emulator-5556");
+    const shutdownCheck = spyOn({ check: async () => false }, "check");
+    const cancel = spyOn(executionTracker, "cancelDeviceExecutions");
+    const daemon = {
+      devicePool: {
+        getDevice: () => ({ incarnation: 1, status: "booting" }),
+        isShutdownReserved: shutdownCheck,
+      },
+      sessionManager: { getSessionForDevice: () => "plan-session" },
+      forceDisconnectedDeviceIds: new Set<string>(),
+      forceDisconnectedDeviceGenerations: new Map<string, number>(),
+      unsubscribeAdbMissingDevice: null as (() => void) | null,
+    };
+    const start = (Daemon.prototype as unknown as { startAdbMissingDeviceListener(): void })
+      .startAdbMissingDeviceListener;
+    start.call(daemon);
+    try {
+      for (let i = 0; i < 710; i++) {
+        notifyAdbMissingDevice("emulator-5554", new Error("device 'emulator-5554' not found"));
+      }
+      await drainMicrotasks(20);
+      expect(cancel).not.toHaveBeenCalled();
+      expect(shutdownCheck).not.toHaveBeenCalled();
+      for (const execution of [tracked, recovery, otherClient, otherDevice]) {
+        expect(execution.abortController.signal.aborted).toBe(false);
+        expect(execution.cancelReason).toBeUndefined();
+      }
+      expect(daemon.forceDisconnectedDeviceIds).toEqual(new Set(["emulator-5554"]));
+    } finally {
+      daemon.unsubscribeAdbMissingDevice?.();
+      for (const execution of [tracked, recovery, otherClient, otherDevice]) {
+        executionTracker.endExecution(execution.id);
+      }
+      cancel.mockRestore();
+      planActive.mockRestore();
     }
   });
 

@@ -47,7 +47,7 @@ import { storeSetupTiming } from "../server/ToolExecutionContext";
 import {
   applyAppearanceOnConnect,
   type AppearanceOnConnectDependencies,
-} from "../utils/appearance/applyAppearanceOnConnect";
+} from "../server/applyAppearanceOnConnect";
 import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";

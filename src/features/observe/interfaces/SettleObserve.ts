@@ -29,6 +29,8 @@ export interface SettleOptions {
    * would reject every genuinely fresh capture and burn the whole budget.
    */
   initialMinTimestampMs?: number;
+  /** Skip the push wait when the cache misses the floor; synchronously re-extract instead. */
+  skipWaitForFresh?: boolean;
   /**
    * Skip the performance audit on every settle poll, forwarded verbatim to
    * {@link pollObserveUntil} (issue #6890 review). Off by default: the

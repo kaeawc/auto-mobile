@@ -1193,6 +1193,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     async (operation) => {
       for (const after of ["later\nlines", "", undefined]) {
         const adb = new FakeAdbExecutor();
+        adb.setAndroidApiLevel(34);
         const { client, calls } = createTextClient();
         client.clear = async () => ({ success: false, error: "accessibility unavailable" });
         let reads = 0;
@@ -1210,7 +1211,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
           androidDevice,
           createAdbFactory(adb),
           observer,
-          { textClient: client },
+          { textClient: client, timer: new FakeTimer() },
         );
         const result =
           operation === "clear"
@@ -1236,13 +1237,112 @@ describe("DefaultSendKeysCommandExecutor", () => {
         expect(adb.getExecutedCommands().includes("shell input keyevent KEYCODE_A")).toBe(
           operation === "replace" && after === "",
         );
+        expect(adb.getExecutedCommands()).toEqual([
+          "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
+          `shell input keyevent ${Array<string>(17).fill("KEYCODE_DEL").join(" ")}`,
+          ...(operation === "replace" && after === "" ? ["shell input keyevent KEYCODE_A"] : []),
+        ]);
         expect(calls).toEqual([]);
       }
     },
   );
 
+  test.each([31, 34, 30, null])(
+    "eventOnly replace resolves API %s once across repeated clears",
+    async (apiLevel) => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(apiLevel);
+      let reads = 0;
+      const observer: SendKeysObserver = {
+        execute: async () => focusedAndroidObservation(++reads % 2 === 1 ? "old\ntext" : "", {}, 0),
+      };
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: createTextClient().client, timer: new FakeTimer() },
+      );
+      const controller = new AbortController();
+      for (let clear = 0; clear < 2; clear++) {
+        expect(
+          await executor.type(
+            { action: "type", text: "a", operation: "replace", mode: "eventOnly" },
+            controller.signal,
+          ),
+        ).toMatchObject({ success: true });
+      }
+      const move =
+        apiLevel !== null && apiLevel >= 31
+          ? "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END"
+          : "shell input keyevent KEYCODE_MOVE_END";
+      const sequence = [
+        move,
+        `shell input keyevent ${Array<string>(8).fill("KEYCODE_DEL").join(" ")}`,
+        "shell input keyevent KEYCODE_A",
+      ];
+      expect(adb.getExecutedCommands()).toEqual([
+        ...(apiLevel === null ? ["shell getprop ro.build.version.sdk"] : []),
+        ...sequence,
+        ...sequence,
+      ]);
+      expect(adb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+    },
+  );
+
+  test("first caller abort does not cancel a concurrent clear's shared capability probe", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(34);
+    let releaseProbe!: () => void;
+    const probePending = new Promise<void>((resolve) => {
+      releaseProbe = resolve;
+    });
+    let probeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      probeStarted = resolve;
+    });
+    const readApiLevel = adb.getAndroidApiLevel.bind(adb);
+    adb.getAndroidApiLevel = async (...options) => {
+      const level = await readApiLevel(...options);
+      probeStarted();
+      await probePending;
+      return level;
+    };
+    const textClient = createTextClient().client;
+    textClient.clear = async () => ({ success: false, error: "accessibility unavailable" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      {
+        execute: async () =>
+          focusedAndroidObservation(
+            adb.getExecutedCommands().some((command) => command.includes("KEYCODE_DEL"))
+              ? ""
+              : "old",
+            {},
+            0,
+          ),
+      },
+      { textClient, timer: new FakeTimer() },
+    );
+    const controller = new AbortController();
+    const first = executor.clear(controller.signal);
+    const second = Promise.allSettled([executor.clear(new AbortController().signal)]);
+    await started;
+    controller.abort();
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    expect(adb.getExecutedCommands()).toEqual([]);
+    releaseProbe();
+    expect(await second).toMatchObject([{ status: "fulfilled", value: { success: true } }]);
+    expect(adb.getApiLevelCalls()).toEqual([{ timeoutMs: 1000, signal: undefined }]);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
+    ]);
+  });
+
   test("standalone Android clear falls back to ADB deletes after accessibility failure", async () => {
     const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(30);
     const textClient = createTextClient().client;
     textClient.clear = async () => ({ success: false, error: "accessibility unavailable" });
     const executor = new DefaultSendKeysCommandExecutor(
@@ -2713,6 +2813,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test("marks a replacement clear failure after a delete as partially applied", async () => {
     const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(30);
     const executeCommand = adb.executeCommand.bind(adb);
     let deleteChunkCount = 0;
     adb.executeCommand = async (command, ...options) => {

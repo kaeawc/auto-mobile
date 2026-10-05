@@ -66,6 +66,8 @@ export interface ViewHierarchyResult {
   fresh?: boolean;
   /** Package name of the foreground app (from accessibility service) */
   packageName?: string;
+  /** Internal iOS diagnostic: SpringBoard was used because foreground detection failed. */
+  fallbackToSpringboard?: boolean;
   /** Optional window metadata from the accessibility service */
   windows?: ViewHierarchyWindowInfo[];
   /** Regions where platform accessibility APIs likely hide rendered content. */

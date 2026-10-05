@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";
 import { harness } from "./displaySwipeHarness";
+import type { BootedDevice } from "../../../../src/models";
+import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
+import { createStructuredToolResponse } from "../../../../src/utils/toolUtils";
+import { encodeIosDollar } from "../../../fixtures/hierarchyArbitraries";
 
 const search: SwipeOnOptions = {
   direction: "up",
@@ -8,6 +12,98 @@ const search: SwipeOnOptions = {
   lookFor: { text: "Found", maxTime: 3000 },
 };
 afterEach(() => mock.restore());
+for (const route of ["sole pin", "other panel pin", "explicit display", "no pin"] as const) {
+  test(`session pin options: iOS swipeOn lookFor with ${route}`, async () => {
+    const target: BootedDevice = {
+      name: "Search fake",
+      deviceId: "swipe-display-search",
+      platform: "ios",
+      displays: {
+        panels: [
+          ...(route === "sole pin"
+            ? []
+            : [{ key: "internal", role: "inner" as const, sizePx: { width: 100, height: 100 } }]),
+          { key: "external", role: "external", sizePx: { width: 200, height: 200 } },
+        ],
+        postures: [],
+      },
+    };
+    const h = harness({
+      platform: "ios",
+      observationFor: ({ observation }) => ({
+        ...observation,
+        display: { ...observation.display, key: "external" },
+        screenSize: { width: 400, height: 800 },
+        systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+        viewHierarchy: {
+          screenWidth: 400,
+          screenHeight: 800,
+          hierarchy: {
+            node: encodeIosDollar({
+              attrs: { class: "XCUIElementTypeApplication" },
+              bounds: { left: 0, top: 0, right: 400, bottom: 800 },
+              children: [
+                {
+                  attrs: { text: "Found", "resource-id": "found", visible: true },
+                  bounds: { left: 80, top: 80, right: 120, bottom: 120 },
+                  children: [],
+                },
+              ],
+            }),
+          },
+        },
+      }),
+    });
+    const response = await runSessionDisplayPin({
+      name: "swipeOn",
+      acceptsDisplay: true,
+      device: target,
+      sessionUuid: "s1",
+      store: {
+        getDeviceForSession: () => target.deviceId,
+        getDisplayPin: () => (route === "no pin" ? undefined : "external"),
+      },
+      args: route === "explicit display" ? { display: "external" } : {},
+      invoke: async (args) =>
+        createStructuredToolResponse(
+          await h.action.execute({
+            direction: "up",
+            lookFor: { text: "Found" },
+            display: typeof args.display === "string" ? args.display : undefined,
+          }),
+        ),
+    });
+    if (route === "sole pin" || route === "no pin") {
+      expect(response).toMatchObject({ structuredContent: { success: true, found: true } });
+      expect(h.observe.getExecuteCallCount()).toBeGreaterThan(0);
+      expect(h.observe.getExecuteOptions().every((options) => options.display === undefined)).toBe(
+        true,
+      );
+      expect(response).toMatchObject({
+        structuredContent: {
+          observation: {
+            display: {
+              key: "external",
+              ...(route === "sole pin" ? { pinned: true } : {}),
+            },
+          },
+        },
+      });
+    } else {
+      expect(response).toMatchObject({
+        structuredContent: {
+          success: false,
+          error:
+            route === "explicit display"
+              ? "lookFor is not supported with `display` yet"
+              : 'lookFor is not supported while the session is pinned to display "external". Clear the pin with setActiveDevice {display: null} (include deviceId and sessionUuid), then retry.',
+        },
+      });
+      expect(h.observe.getExecuteCallCount()).toBe(0);
+    }
+  });
+}
+
 for (const route of ["ctrlproxy", "adb"] as const) {
   describe(`display search via ${route}`, () => {
     for (const n of [0, 1, 3]) {

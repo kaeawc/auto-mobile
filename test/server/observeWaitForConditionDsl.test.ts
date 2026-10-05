@@ -12,6 +12,8 @@ import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 import { observedIosDisplay } from "../../src/features/observe/ObservationDisplay";
 import { loadDuoEnumerate } from "../fixtures/loadDuoEnumerate";
@@ -585,6 +587,126 @@ describe("display stamp waitFor conditions", () => {
 // Back-compat: the legacy element-appear waitFor form is untouched (AC4)
 // ---------------------------------------------------------------------------
 describe("waitFor back-compat", () => {
+  test("device-loss cancellation interrupts a settle sleep without another poll", async () => {
+    const timer = new FakeTimer();
+    const caller = new AbortController();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(makeObservation([node({ text: "Ready" })], 10));
+    const loss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+    const wait = waitForObservation(
+      screen,
+      { text: "Ready", timeout: 40_000, settled: { quietPeriodMs: 200 } },
+      caller.signal,
+      false,
+      timer,
+    );
+    await drainUntil(() => timer.getPendingSleepCount() === 1, {
+      description: "settle poll sleep",
+    });
+    caller.abort(loss);
+    await expect(wait).rejects.toBe(loss);
+    expect(screen.getExecuteCallCount()).toBe(1);
+    expect(timer.now()).toBe(0);
+  });
+
+  test("waitFor keeps device-loss cancellation when the poll throws a transport error", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const caller = new AbortController();
+    const screen = new FakeObserveScreen();
+    const loss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+    screen.setObserveResult((index) => {
+      if (index === 1) {
+        caller.abort(loss);
+        throw new Error("adb: device 'emulator-5554' not found");
+      }
+      return makeObservation([], 10 + index);
+    });
+    await expect(
+      waitForObservation(
+        screen,
+        { text: "NeverAppears", timeout: 40_000 },
+        caller.signal,
+        false,
+        timer,
+      ),
+    ).rejects.toBe(loss);
+    expect(screen.getExecuteCallCount()).toBe(2);
+    expect(timer.now()).toBe(100);
+  });
+
+  test("posture polling propagates device loss instead of retrying to timeout", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    const loss = new DeviceLostError("emulator-5554", "device-disconnected:emulator-5554");
+    screen.setObserveResult((index) => {
+      if (index === 1) {
+        throw loss;
+      }
+      return makeObservation([], 10 + index);
+    });
+
+    await expect(
+      waitForObservation(screen, { posture: "closed", timeout: 40_000 }, undefined, false, timer),
+    ).rejects.toBe(loss);
+    expect(screen.getExecuteCallCount()).toBe(2);
+    expect(timer.now()).toBe(100);
+  });
+
+  test("posture polling still retries a transient capture error", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult((index) => {
+      if (index === 1) {
+        throw new Error("capture interrupted during fold");
+      }
+      return {
+        ...makeObservation([], 10 + index),
+        display: {
+          key: "0",
+          role: "inner",
+          posture: index === 2 ? "closed" : "opened",
+          generation: 1,
+        },
+      };
+    });
+    const result = await waitForObservation(
+      screen,
+      { posture: "closed", timeout: 40_000 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(result.matched).toBe(true);
+    expect(result.timedOut).toBe(false);
+    expect(result.polls).toBe(3);
+    expect(timer.now()).toBe(200);
+  });
+
+  test("a condition that never appears retains the ordinary timeout", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult((index) => makeObservation([], 10 + index));
+    const result = await waitForObservation(
+      screen,
+      { text: "NeverAppears", timeout: 300 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(result).toMatchObject({
+      matched: false,
+      timedOut: true,
+      awaitTimeout: true,
+      awaitDuration: 300,
+      waitMs: 300,
+      polls: 4,
+    });
+  });
+
   test("legacy waitFor retains a first-poll match when settling exceeds the deadline", async () => {
     const timer = new FakeTimer();
     const observeScreen = new FakeObserveScreen();

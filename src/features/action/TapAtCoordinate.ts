@@ -64,6 +64,22 @@ const VOLATILE_TAP_LAYOUT_FIELDS = new Set([
 type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
 
+function partialDoubleTapNote(action: TapAtResult["action"], tapsDelivered: number): string {
+  return action === "doubleTap" && tapsDelivered === 1
+    ? " Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically."
+    : "";
+}
+
+function tapDeliveryReporter(onTapDelivered: () => void): () => void {
+  let delivered = false;
+  return () => {
+    if (!delivered) {
+      delivered = true;
+      onTapDelivered();
+    }
+  };
+}
+
 function tapDurationMs(options: TapAtOptions, platform: BootedDevice["platform"]): number {
   if (options.action === "longPress") {
     return options.durationMs ?? LONG_PRESS_DEFAULT_MS;
@@ -471,13 +487,12 @@ export class TapAtCoordinate extends BaseVisualChange {
                 observeResult,
                 transitionRevision,
                 perf,
-                signal,
+                { signal, onTapDelivered },
               );
-              onTapDelivered();
-              await this.dispatchSecondAndroidTap(options, resolved, transitionRevision, signal);
-              if (action === "doubleTap") {
-                onTapDelivered();
-              }
+              await this.dispatchSecondAndroidTap(options, resolved, transitionRevision, {
+                signal,
+                onTapDelivered,
+              });
               break;
             case "ios":
               iosDispatchTimestamp = await this.dispatchIosTaps(
@@ -527,9 +542,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         },
         error,
       );
-      if (action === "doubleTap" && tapsDelivered === 1) {
-        result.error = `${result.error} Double tap partially applied: one tap was delivered; the second tap was not confirmed. Do not retry automatically.`;
-      }
+      result.error += partialDoubleTapNote(action, tapsDelivered);
       return result;
     } finally {
       perf.end();
@@ -553,10 +566,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     );
     onTapDelivered();
     try {
+      throwIfAborted(signal);
       await this.dispatchSecondIosTap(options, point, transitionRevision, signal);
       if (options.action === "doubleTap") {
         onTapDelivered();
       }
+      throwIfAborted(signal);
       return this.timer.now();
     } finally {
       this.invalidateIosCacheSafely();
@@ -577,22 +592,25 @@ export class TapAtCoordinate extends BaseVisualChange {
     observeResult: ObserveResult,
     transitionRevision: { revision: number; observedGeneration: number },
     perf: PerformanceTracker,
-    signal?: AbortSignal,
+    context: { signal?: AbortSignal; onTapDelivered: () => void },
   ): Promise<void> {
+    const { signal } = context;
     const frameContext = observeResult.viewHierarchy?.frameContext;
     try {
-      await this.androidCoordinateTap(
-        this.androidClient,
-        this.adb,
-        resolved.x,
-        resolved.y,
+      await this.dispatchAndroidTap(
+        resolved,
         tapDurationMs(options, "android"),
         frameContext,
         signal,
-        () => this.assertDisplayRevisionCurrent(transitionRevision),
+        {
+          assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+          onTapDelivered: context.onTapDelivered,
+        },
       );
       return;
     } catch (error) {
+      // Cancellation must escape before stale-frame classification or retry.
+      throwIfAborted(signal);
       const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
       if (frameContext === undefined || !isStaleFrameContextRejection(actionable.message)) {
         throw actionable;
@@ -623,15 +641,15 @@ export class TapAtCoordinate extends BaseVisualChange {
 
       // Deliberately no loop: if this single retry also races a frame advance, its actionable stale
       // rejection escapes and the caller can choose a new point from another explicit observation.
-      await this.androidCoordinateTap(
-        this.androidClient,
-        this.adb,
-        refreshed.x,
-        refreshed.y,
+      await this.dispatchAndroidTap(
+        refreshed,
         tapDurationMs(options, "android"),
         refreshedFrameContext,
         signal,
-        () => this.assertDisplayRevisionCurrent(transitionRevision),
+        {
+          assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+          onTapDelivered: context.onTapDelivered,
+        },
       );
     }
   }
@@ -693,25 +711,50 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     revision: { revision: number; observedGeneration: number },
-    signal?: AbortSignal,
+    context: { signal?: AbortSignal; onTapDelivered: () => void },
   ): Promise<void> {
+    const { signal } = context;
     if (options.action !== "doubleTap") {
       return;
     }
     await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
     throwIfAborted(signal);
     this.assertDisplayRevisionCurrent(revision);
+    await this.dispatchAndroidTap(
+      point,
+      tapDurationMs(options, "android"),
+      // The accepted first tap fixed the point for this gesture; it may have advanced the frame.
+      undefined,
+      signal,
+      {
+        assertCurrent: () => this.assertDisplayRevisionCurrent(revision),
+        onTapDelivered: context.onTapDelivered,
+      },
+    );
+  }
+
+  private async dispatchAndroidTap(
+    point: { x: number; y: number },
+    duration: number,
+    frameContext: string | undefined,
+    signal: AbortSignal | undefined,
+    context: { assertCurrent: () => void; onTapDelivered: () => void },
+  ): Promise<void> {
+    const reportDelivery = tapDeliveryReporter(context.onTapDelivered);
     await this.androidCoordinateTap(
       this.androidClient,
       this.adb,
       point.x,
       point.y,
-      tapDurationMs(options, "android"),
-      // The accepted first tap fixed the point for this gesture; it may have advanced the frame.
-      undefined,
+      duration,
+      frameContext,
       signal,
-      () => this.assertDisplayRevisionCurrent(revision),
+      context.assertCurrent,
+      reportDelivery,
     );
+    // Legacy injected dispatchers confirm delivery by returning, without invoking the new hook.
+    reportDelivery();
+    throwIfAborted(signal);
   }
 
   private async dispatchSecondIosTap(
@@ -751,13 +794,13 @@ export class TapAtCoordinate extends BaseVisualChange {
     point: { x: number; y: number },
     duration: number,
     command: string,
-    displayId?: number,
-    signal?: AbortSignal,
-    assertCurrent?: () => void,
+    displayId: number | undefined,
+    signal: AbortSignal | undefined,
+    context: { assertCurrent: () => void; onTapDelivered: () => void },
   ): Promise<void> {
     if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
       throwIfAborted(signal);
-      assertCurrent?.();
+      context.assertCurrent();
       let dispatched = false;
       const onDispatch = () => {
         dispatched = true;
@@ -772,8 +815,11 @@ export class TapAtCoordinate extends BaseVisualChange {
         onDispatch,
         signal,
         displayId === 0 ? undefined : displayId,
-        assertCurrent,
+        context.assertCurrent,
       );
+      if (result.success) {
+        context.onTapDelivered();
+      }
       throwIfAborted(signal);
       if (!result.success) {
         if (dispatched) {
@@ -783,11 +829,13 @@ export class TapAtCoordinate extends BaseVisualChange {
       }
     } else {
       throwIfAborted(signal);
-      assertCurrent?.();
-      await executeTouchscreenInput(this.adb, command, displayId, signal, assertCurrent, {
+      context.assertCurrent();
+      await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
         timeoutMs:
           duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
       });
+      context.onTapDelivered();
+      throwIfAborted(signal);
     }
   }
 
@@ -815,7 +863,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           command,
           displayId,
           signal,
-          context.assertCurrent,
+          context,
         );
       } else if (this.device.platform === "ios") {
         await this.iosCoordinateTap(
@@ -826,18 +874,20 @@ export class TapAtCoordinate extends BaseVisualChange {
           second ? undefined : observation.viewHierarchy?.frameContext,
           second ? "second tap" : "tap",
         );
+        context.onTapDelivered();
       } else {
         throw unsupportedPlatformError(this.device.platform, "tapAt gesture");
       }
-      context.onTapDelivered();
     };
     await dispatch(false);
     if (this.device.platform === "ios") {
       try {
+        throwIfAborted(signal);
         if (action === "doubleTap") {
           await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
           await dispatch(true);
         }
+        throwIfAborted(signal);
       } finally {
         this.invalidateIosCacheSafely();
       }

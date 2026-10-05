@@ -5,7 +5,7 @@ import {
 } from "../../src/features/action/androidImeLock";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { z } from "zod/v4";
 import type { ChildProcess } from "node:child_process";
@@ -13,6 +13,7 @@ import { Daemon } from "../../src/daemon/daemon";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   defaultResolveRunningAndroidAvdName,
@@ -3777,8 +3778,44 @@ describe("killDevice handler", () => {
     expect(pool.getAvailableDeviceCount()).toBe(1);
   });
 
-  test.each(["abort", "deadline", "late-exit"] as const)(
-    "unfences an accepted Android kill after wait %s and a fresh observation",
+  test("clears an Android shutdown marker when the deadline prevents kill invocation", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const repository = new FakeDeviceSessionRepository();
+    sessionManager = new SessionManager(timer, repository);
+    manager.setBootedDevices("android", [device]);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: manager,
+        deviceSessionRepository: repository,
+      }),
+    );
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    const mark = pool.markIntentionalShutdown.bind(pool);
+    pool.markIntentionalShutdown = (serial) => {
+      mark(serial);
+      timer.advanceTime(30_000);
+    };
+    setDeviceToolsDependencies({ timer });
+
+    await expect(ToolRegistry.getTool("killDevice")!.handler({ device })).rejects.toThrow(
+      "platform shutdown command did not complete",
+    );
+    expect(manager.killedDeviceIds).toEqual([]);
+    expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+    expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+    await pool.refreshDevices();
+    expect(pool.getAvailableDeviceCount()).toBe(1);
+  });
+
+  test.each(["abort", "deadline"] as const)(
+    "keeps an accepted Android kill fenced after wait %s through a fresh refresh before exit",
     async (failure) => {
       const timer = new FakeTimer();
       const controller = new AbortController();
@@ -3788,6 +3825,13 @@ describe("killDevice handler", () => {
         deviceId: "emulator-5554",
       };
       const repository = new FakeDeviceSessionRepository();
+      const incidents = new InMemoryEmulatorLossIncidentStore(timer);
+      const cancelExecutions = Object.assign(
+        mock(async () => 0),
+        {
+          cancelDeviceExecutions: mock(async () => 0),
+        },
+      );
       sessionManager = new SessionManager(timer, repository);
       manager.setBootedDevices("android", [device]);
       const pool = new DevicePool(
@@ -3795,19 +3839,12 @@ describe("killDevice handler", () => {
           timer,
           deviceManager: manager,
           deviceSessionRepository: repository,
+          emulatorLossIncidentStore: incidents,
+          cancelDeviceSessionExecutions: cancelExecutions,
         }),
       );
       await pool.initializeWithDevices([device]);
-      if (failure === "late-exit") {
-        await pool.bindOrReuseDeviceSession(
-          "exit-owner",
-          device.deviceId,
-          "android",
-          undefined,
-          manager.childProcess,
-        );
-        await pool.releaseDevice(device.deviceId, "exit-owner");
-      }
+      const incarnation = pool.getDevice(device.deviceId);
       DaemonState.getInstance().initialize(sessionManager, pool);
       const noteSettled = spyOn(pool, "noteLatePlatformShutdownSettled");
       let accepted = false;
@@ -3848,15 +3885,7 @@ describe("killDevice handler", () => {
       expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
       expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
       expect(pool.getAvailableDeviceCount()).toBe(0);
-      expect(noteSettled).toHaveBeenCalledWith(pool.getDevice(device.deviceId));
       manager.getBootedDevicesDetailed = discover;
-      if (failure === "late-exit") {
-        // The accepted command's late exit remains intentional until newer
-        // discovery can see the same serial's quick reboot (no absence scan).
-        manager.childProcess.emit("exit", 0, null);
-        expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
-        manager.setBootedDevices("android", [device]);
-      }
       manager.getBootedDevicesDetailed = async (platform, options) => ({
         ...(await discover(platform, options)),
         freshDeviceIds: new Set(),
@@ -3864,11 +3893,26 @@ describe("killDevice handler", () => {
       await pool.refreshDevices();
       expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
       manager.getBootedDevicesDetailed = discover;
-      // Uncached, resolved evidence in a later refresh is the existing lift;
-      // command acceptance alone must not expose this incarnation to allocation.
+      // A fresh same-incarnation observation cannot make a dying emulator usable.
       await pool.refreshDevices();
+      expect(pool.getDevice(device.deviceId)).toBe(incarnation);
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+      expect(pool.getAvailableDeviceCount()).toBe(0);
+      await expect(pool.assignMultipleDevices(["new-owner"], 1_000, "android")).rejects.toThrow(
+        "Timed out allocating devices",
+      );
+      expect(sessionManager.getSessionForDevice(device.deviceId)).toBeNull();
+
+      expect(noteSettled).not.toHaveBeenCalled();
+
+      // The emulator disappears; the monitor consumes its disconnect as intentional.
+      manager.childProcess.emit("exit", 0, null);
+      await pool.removeDisconnectedDevice(device.deviceId);
+      expect(pool.getDevice(device.deviceId)).toBeNull();
       expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
-      expect(pool.getAvailableDeviceCount()).toBe(1);
+      expect(await incidents.list()).toEqual([]);
+      expect(cancelExecutions).not.toHaveBeenCalled();
+      expect(cancelExecutions.cancelDeviceExecutions).not.toHaveBeenCalled();
       noteSettled.mockRestore();
     },
   );

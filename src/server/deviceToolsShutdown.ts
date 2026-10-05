@@ -374,7 +374,7 @@ function resumeCtrlProxyWhenPreparationSettles(
   );
 }
 
-export function shouldKeepIntentionalShutdownAfterCommandError(
+function shouldKeepIntentionalShutdownAfterCommandError(
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
 ): boolean {
@@ -608,9 +608,8 @@ async function recoverAfterShutdownFailure(
   requestAbortSignal: AbortSignal | undefined,
   devicePool: DevicePool | undefined,
   releaseShutdownReservation: () => Promise<void>,
-  options: { shutdownWasConfirmed: boolean; expectedPooledDevice: PooledDevice | null },
+  shutdownWasConfirmed: boolean,
 ): Promise<void> {
-  const { shutdownWasConfirmed, expectedPooledDevice } = options;
   // Only a definitive failure may reopen CtrlProxy after our fence clears;
   // the shared shutdown accessor still blocks a concurrent kill. Timeout or
   // cancellation keeps the marker and the client retired for late shutdown.
@@ -620,10 +619,6 @@ async function recoverAfterShutdownFailure(
     !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
   ) {
     devicePool?.clearIntentionalShutdown(device.deviceId);
-  } else if (!shutdownWasConfirmed && expectedPooledDevice) {
-    // The kill command returned before this wait began. A later fresh
-    // observation may lift its fence even if disappearance was never confirmed.
-    devicePool?.noteLatePlatformShutdownSettled(expectedPooledDevice);
   }
   if (
     !shutdownWasConfirmed &&
@@ -1402,10 +1397,10 @@ async function handleUnconfirmedKillCommandError(
     deadlineMs,
     timeoutMs,
   } = context;
-  const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(
-    error,
-    requestAbortSignal,
-  );
+  // A command that was never invoked cannot produce a late platform exit.
+  const keepIntentionalShutdown =
+    platformShutdown !== undefined &&
+    shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal);
   retainLatePlatformShutdown(
     platformShutdown,
     platformShutdownSettled,
@@ -1569,13 +1564,13 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
       devicePool,
       releaseShutdownReservation,
-      { shutdownWasConfirmed, expectedPooledDevice },
+      shutdownWasConfirmed,
     );
     throw error;
   }
 }
 
-export function retainLatePlatformShutdown(
+function retainLatePlatformShutdown(
   platformShutdown: Promise<BootedDevice | void> | undefined,
   platformShutdownSettled: boolean,
   retainReservationUntil: (

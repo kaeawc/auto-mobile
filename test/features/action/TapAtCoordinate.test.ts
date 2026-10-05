@@ -1110,37 +1110,56 @@ describe("TapAtCoordinate", () => {
           return { success: false, error: "Tap timed out after 5000ms" };
         },
       };
-      const { tapAt, observeScreen, adb } = createAndroidTapAtWithClient(
+      const { tapAt, observeScreen, adb, timer } = createAndroidTapAtWithClient(
         [observation(100, 100)],
         client,
         undefined,
         () => ({ display: { key: "0" } }),
       );
+      timer.enableAutoAdvance();
       observeScreen.setObserveResult({
         ...observation(100, 100),
         display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
       } as ObserveResult);
       const result = await tapAt.execute({ x: 10, y: 20, display: "0" });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Tap timed out after 5000ms");
       if (dispatched) {
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Tap timed out after 5000ms");
         expect(result.error).toMatch(/outcome is indeterminate.*Do not retry automatically/i);
+        expect(adb.getExecutedCommands()).toEqual([]);
       } else {
-        expect(result.error).not.toMatch(/indeterminate/i);
+        expect(result.success).toBe(true);
+        expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen -d 0 tap 10 20"]);
       }
-      expect(adb.getExecutedCommands()).toEqual([]);
     },
   );
 
-  test.each(["tap", "longPress"] as const)(
-    "preserves explicit-display ADB %s timeout",
-    async (action) => {
+  test.each(
+    (["tap", "longPress"] as const).flatMap((action) =>
+      [false, true].map((ctrlProxy) => ({ action, ctrlProxy })),
+    ),
+  )(
+    "preserves explicit-display ADB $action timeout (CtrlProxy $ctrlProxy)",
+    async ({ action, ctrlProxy }) => {
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const client = {
-        supportsCommand: async () => false,
-        requestTapCoordinates: async () => ({ success: true }),
+        supportsCommand: async () => ctrlProxy,
+        requestTapCoordinates: async (
+          _x: number,
+          _y: number,
+          _duration?: number,
+          _timeout?: number,
+          _perf?: unknown,
+          _frame?: string,
+          _onDispatch?: () => void,
+          _signal?: AbortSignal,
+          displayId?: number,
+        ) => {
+          expect(displayId).toBe(2);
+          return { success: false, error: "Not connected" };
+        },
       };
       const observeScreen = new FakeObserveScreen();
       observeScreen.setObserveResult({
@@ -1187,6 +1206,61 @@ describe("TapAtCoordinate", () => {
       } finally {
         displayId.mockRestore();
       }
+    },
+  );
+
+  test.each(["abort", "beforeSend fence", "fallback fence", "stale frame"] as const)(
+    "explicit display does not fall back after %s failure",
+    async (failure) => {
+      const controller = new AbortController();
+      const client: CoordinateTapClient<() => void> = {
+        requestTapCoordinates: async (
+          _x,
+          _y,
+          _duration,
+          _timeout,
+          _perf,
+          _frame,
+          _onDispatch,
+          _signal,
+          _display,
+          beforeSend,
+        ) => {
+          if (failure === "abort") {
+            controller.abort();
+          } else if (failure !== "stale frame") {
+            displayTransitions.notifyTransition(androidDevice.deviceId, "changed before send");
+            if (failure === "beforeSend fence") {
+              beforeSend?.();
+            }
+          }
+          return {
+            success: false,
+            error: failure === "stale frame" ? "Stale frame context" : "Not connected",
+          };
+        },
+      };
+      const current = {
+        ...observation(100, 100),
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      } as ObserveResult;
+      const { tapAt, adb } = createAndroidTapAtWithClient([current], client, undefined, () => ({
+        display: { key: "0" },
+      }));
+      const result = await tapAt.execute(
+        { x: 10, y: 20, display: "0" },
+        undefined,
+        controller.signal,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        failure === "abort"
+          ? OPERATION_CANCELLED_MESSAGE
+          : failure === "stale frame"
+            ? "Stale frame context"
+            : "changed",
+      );
+      expect(adb.getExecutedCommands()).toEqual([]);
     },
   );
 

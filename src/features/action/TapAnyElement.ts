@@ -1622,7 +1622,7 @@ export class TapAnyElement extends BaseVisualChange {
               this.accessibilityService,
               this.adb,
               { action, duration: longPressDuration },
-              { target: targetDisplay, signal, onDispatched: () => {} },
+              { target: targetDisplay, signal, onDispatched: () => {}, timer: this.timer },
             )
           : undefined;
         if (dispatch) {

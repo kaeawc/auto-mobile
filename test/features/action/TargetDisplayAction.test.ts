@@ -1897,11 +1897,20 @@ describe("CtrlProxy display-targeted action routing", () => {
                 .getExecutedCommands()
                 .filter((command) => command.startsWith("shell input"));
               if (flag || panel === "internal") {
-                expect(result.success).toBe(!failure);
-                if (failure) {
+                const fallsBack =
+                  failure &&
+                  (gesture === "tapAt" ||
+                    gesture === "longPressAt" ||
+                    gesture === "tapOn" ||
+                    gesture === "longPressOn" ||
+                    gesture === "doubleTapOn");
+                expect(result.success).toBe(!failure || fallsBack);
+                if (failure && !fallsBack) {
                   expect(result.error).toContain(response.error!);
                 }
-                expect(calls).toHaveLength(gesture === "doubleTapOn" && !failure ? 2 : 1);
+                expect(calls).toHaveLength(
+                  gesture === "doubleTapOn" && (!failure || fallsBack) ? 2 : 1,
+                );
                 expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
                   panel === "external" ? 2 : undefined,
                 );
@@ -1909,7 +1918,18 @@ describe("CtrlProxy display-targeted action routing", () => {
                 if (panel === "external") {
                   expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
                 }
-                expect(inputs).toEqual([]);
+                expect(inputs).toEqual(
+                  fallsBack
+                    ? tap.mock.calls.map(
+                        ([x, y, duration]) =>
+                          `shell input touchscreen -d 2 ${
+                            gesture === "longPressAt" || gesture === "longPressOn"
+                              ? `swipe ${x} ${y} ${x} ${y} ${duration}`
+                              : `tap ${x} ${y}`
+                          }`,
+                      )
+                    : [],
+                );
                 if (gesture === "longPressAt") {
                   expect(tap.mock.calls[0][2]).toBe(1000);
                   expect(tap.mock.calls[0][3]).toBe(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);

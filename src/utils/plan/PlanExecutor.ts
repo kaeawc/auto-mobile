@@ -338,6 +338,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform: string,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
+    deviceLabel?: string,
   ): Promise<FailureObservationSummary | undefined> {
     const observeTool = ToolRegistry.getTool("observe");
     if (!observeTool) {
@@ -351,6 +352,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
       if (sessionUuid) {
         enhancedParams.sessionUuid = sessionUuid;
+      }
+      // Use the failed step's label so ToolRegistry selects the same derived
+      // session, rather than observing the plan's base-session device (#9828).
+      if (deviceLabel) {
+        enhancedParams.device = deviceLabel;
       }
       // Internal failure-recovery observe (#3053): the callInternal seam (#3108)
       // marks it internal so it does not overwrite the agent-facing diff baseline
@@ -420,6 +426,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform: string | undefined,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
+    deviceLabel?: string,
   ): Promise<FailureObservationSummary | undefined> {
     try {
       if (failedTool === "observe" && failureToolResponse !== undefined) {
@@ -435,7 +442,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (!platform) {
         return undefined;
       }
-      return await this.captureFailureObservation(platform, deviceId, sessionUuid);
+      return await this.captureFailureObservation(platform, deviceId, sessionUuid, deviceLabel);
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
@@ -499,6 +506,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     step: PlanStep,
     context: StepExecutionContext,
   ): Promise<StepExecutionResult> {
+    const deviceLabel = typeof step.params?.device === "string" ? step.params.device : undefined;
     const tool = ToolRegistry.getToolForPlan(step.tool);
     if (!tool) {
       const error = `Unknown tool: ${step.tool}`;
@@ -583,6 +591,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           context.platform,
           context.deviceId,
           context.sessionUuid,
+          deviceLabel,
         );
         const details: Record<string, unknown> = {
           params: step.params,
@@ -674,6 +683,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             context.platform,
             context.deviceId,
             context.sessionUuid,
+            deviceLabel,
           );
       this.logger.warn(
         `${context.logPrefix} step ${step.tool} threw; returning failed status`,

@@ -12,6 +12,8 @@ import {
   MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_INSTALL_APP_MCP_TIMEOUT_MS,
+  INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
   MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
@@ -51,7 +53,17 @@ import {
   MAX_DEVICE_READY_TIMEOUT_MS,
 } from "../../src/utils/deviceTimeouts";
 
+import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "../../src/features/action/InstallApp";
+
 describe("resolveMcpRequestTimeoutMs", () => {
+  test("installApp floor covers the downgrade transfer chain plus headroom", () => {
+    expect(MIN_INSTALL_APP_MCP_TIMEOUT_MS).toBeGreaterThanOrEqual(
+      ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+    );
+    expect(MIN_INSTALL_APP_MCP_TIMEOUT_MS).toBe(
+      3 * ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+    );
+  });
   const timeoutEnvVars = [
     OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
     LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
@@ -94,6 +106,26 @@ describe("resolveMcpRequestTimeoutMs", () => {
   }
 
   const cases: TimeoutCase[] = [
+    {
+      name: "installApp preserves timeout above floor",
+      tool: "installApp",
+      timeoutMs: MIN_INSTALL_APP_MCP_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+      expected: MIN_INSTALL_APP_MCP_TIMEOUT_MS + INSTALL_APP_MCP_TIMEOUT_HEADROOM_MS,
+    },
+
+    {
+      name: "installApp raises short timeout to floor",
+      tool: "installApp",
+      timeoutMs: DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+      expected: MIN_INSTALL_APP_MCP_TIMEOUT_MS,
+    },
+
+    {
+      name: "installApp floor when timeoutMs omitted",
+      tool: "installApp",
+      expected: MIN_INSTALL_APP_MCP_TIMEOUT_MS,
+    },
+
     {
       name: "setDeviceResources floor when timeoutMs omitted",
       tool: "setDeviceResources",

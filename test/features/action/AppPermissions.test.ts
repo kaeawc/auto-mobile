@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { SetAndroidScheduleExactAlarmAppOp } from "../../../src/features/action/SetAndroidScheduleExactAlarmAppOp";
+import { SetAndroidNotificationPolicyAccess } from "../../../src/features/action/SetAndroidNotificationPolicyAccess";
 import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -87,6 +89,127 @@ describe("AppPermissions", () => {
         "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow",
       ),
     ).toBe(true);
+  });
+
+  test.each([
+    { permissions: ["all"], userId: 0 },
+    { permissions: ["camera"] },
+    { permissions: [] },
+  ])("invalid Android reset suppresses every additional option: %j", async (input) => {
+    const adbFactory = new FakeAdbClientFactory();
+    const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
+      "com.example.app",
+      {
+        ...input,
+        action: "reset",
+        notificationsEnabled: true,
+        notificationPolicyAccess: true,
+        scheduleExactAlarm: "allow",
+      },
+    );
+    expect(result.success).toBe(false);
+    expect(result.changedCount).toBe(0);
+    expect(result.failedCount).toBe(1);
+    expect(result.operations.map((operation) => operation.operationId)).toEqual([
+      "android_runtime_permissions:reset",
+    ]);
+    expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+  });
+
+  test("valid Android reset precedes additional permission commands", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
+      "com.example.app",
+      { action: "reset", permissions: ["all"], notificationPolicyAccess: false },
+    );
+    expect(result.success).toBe(true);
+    expect(result.changedCount).toBe(2);
+    expect(result.failedCount).toBe(0);
+    expect(adbFactory.getFakeClient().getAllCommands()).toEqual([
+      "shell pm reset-permissions",
+      "shell cmd notification disallow_dnd 'com.example.app'",
+    ]);
+  });
+
+  test("aggregates a policy failure and a skipped alarm operation", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const policy = spyOn(SetAndroidNotificationPolicyAccess.prototype, "execute").mockResolvedValue(
+      {
+        success: false,
+        appId: "com.example.app",
+        error: "policy denied",
+      },
+    );
+    const alarm = spyOn(SetAndroidScheduleExactAlarmAppOp.prototype, "execute").mockResolvedValue({
+      success: true,
+      appId: "com.example.app",
+      skipped: true,
+    });
+    try {
+      const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
+        "com.example.app",
+        { notificationPolicyAccess: false, scheduleExactAlarm: "deny" },
+      );
+      expect(result).toMatchObject({
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+        error: "policy denied",
+      });
+      expect(result.operations).toMatchObject([
+        {
+          operationId: "android_notification_policy_access",
+          success: false,
+          changedCount: 0,
+          failedCount: 1,
+          error: "policy denied",
+        },
+        {
+          operationId: "android_schedule_exact_alarm_appop",
+          success: true,
+          changedCount: 0,
+          failedCount: 0,
+          skipped: true,
+        },
+      ]);
+      expect(policy.mock.calls).toEqual([["com.example.app", { allowed: false }]]);
+      expect(alarm.mock.calls).toEqual([["com.example.app", { mode: "deny" }]]);
+    } finally {
+      policy.mockRestore();
+      alarm.mockRestore();
+    }
+  });
+
+  test("aggregates an alarm failure after a successful policy operation", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const alarm = spyOn(SetAndroidScheduleExactAlarmAppOp.prototype, "execute").mockResolvedValue({
+      success: false,
+      appId: "com.example.app",
+      error: "alarm denied",
+    });
+    try {
+      const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
+        "com.example.app",
+        { notificationPolicyAccess: true, scheduleExactAlarm: "allow" },
+      );
+      expect(result).toMatchObject({
+        success: false,
+        changedCount: 1,
+        failedCount: 1,
+        error: "alarm denied",
+      });
+      expect(result.operations[1]).toMatchObject({
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+        error: "alarm denied",
+      });
+      expect(adbFactory.getFakeClient().getAllCommands()).toEqual([
+        "shell cmd notification allow_dnd 'com.example.app'",
+      ]);
+    } finally {
+      alarm.mockRestore();
+    }
   });
 
   test("aggregates Android revoke and notification command failures", async () => {

@@ -5,7 +5,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice } from "../../models";
+import type { BootedDevice, AndroidDeviceShellToolResult } from "../../models";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationsEnabled } from "./SetAndroidNotificationsEnabled";
@@ -315,56 +315,8 @@ export class AppPermissions {
       });
     }
 
-    if (!invalidResetRequest && input.notificationsEnabled !== undefined) {
-      const result = await new SetAndroidNotificationsEnabled(this.device, this.adbFactory).execute(
-        appId,
-        {
-          enabled: input.notificationsEnabled,
-        },
-      );
-      operations.push({
-        operationId: "android_notifications_enabled",
-        success: result.success,
-        changedCount: result.success ? 1 : 0,
-        failedCount: result.success ? 0 : 1,
-        result,
-        ...(result.error ? { error: result.error } : {}),
-      });
-    }
-
-    if (!invalidResetRequest && input.notificationPolicyAccess !== undefined) {
-      const result = await new SetAndroidNotificationPolicyAccess(
-        this.device,
-        this.adbFactory,
-      ).execute(appId, {
-        allowed: input.notificationPolicyAccess,
-      });
-      operations.push({
-        operationId: "android_notification_policy_access",
-        success: result.success,
-        changedCount: result.success ? 1 : 0,
-        failedCount: result.success ? 0 : 1,
-        result,
-        ...(result.error ? { error: result.error } : {}),
-      });
-    }
-
-    if (!invalidResetRequest && input.scheduleExactAlarm !== undefined) {
-      const result = await new SetAndroidScheduleExactAlarmAppOp(
-        this.device,
-        this.adbFactory,
-      ).execute(appId, {
-        mode: input.scheduleExactAlarm,
-      });
-      operations.push({
-        operationId: "android_schedule_exact_alarm_appop",
-        success: result.success,
-        changedCount: result.success && !result.skipped ? 1 : 0,
-        failedCount: result.success ? 0 : 1,
-        skipped: result.skipped,
-        result,
-        ...(result.error ? { error: result.error } : {}),
-      });
+    if (!invalidResetRequest) {
+      await this.setAndroidSpecificPermissions(appId, input, operations);
     }
 
     if (operations.length === 0) {
@@ -395,6 +347,70 @@ export class AppPermissions {
               .join("; "),
           }
         : {}),
+    };
+  }
+
+  private async setAndroidSpecificPermissions(
+    appId: string,
+    input: SetAppPermissionsInput,
+    operations: AppPermissionOperationResult[],
+  ): Promise<void> {
+    if (input.notificationsEnabled !== undefined) {
+      const result = await new SetAndroidNotificationsEnabled(this.device, this.adbFactory).execute(
+        appId,
+        {
+          enabled: input.notificationsEnabled,
+        },
+      );
+      operations.push({
+        operationId: "android_notifications_enabled",
+        success: result.success,
+        changedCount: result.success ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        result,
+        ...(result.error ? { error: result.error } : {}),
+      });
+    }
+
+    if (input.notificationPolicyAccess !== undefined) {
+      const result = await new SetAndroidNotificationPolicyAccess(
+        this.device,
+        this.adbFactory,
+      ).execute(appId, {
+        allowed: input.notificationPolicyAccess,
+      });
+      operations.push({
+        operationId: "android_notification_policy_access",
+        success: result.success,
+        changedCount: result.success ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        result,
+        ...(result.error ? { error: result.error } : {}),
+      });
+    }
+
+    if (input.scheduleExactAlarm !== undefined) {
+      const result = await new SetAndroidScheduleExactAlarmAppOp(
+        this.device,
+        this.adbFactory,
+      ).execute(appId, {
+        mode: input.scheduleExactAlarm,
+      });
+      operations.push(this.androidScheduleExactAlarmOperation(result));
+    }
+  }
+
+  private androidScheduleExactAlarmOperation(
+    result: AndroidDeviceShellToolResult,
+  ): AppPermissionOperationResult {
+    return {
+      operationId: "android_schedule_exact_alarm_appop",
+      success: result.success,
+      changedCount: result.success && !result.skipped ? 1 : 0,
+      failedCount: result.success ? 0 : 1,
+      skipped: result.skipped,
+      result,
+      ...(result.error ? { error: result.error } : {}),
     };
   }
 

@@ -68,7 +68,7 @@ export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
 /** Bounded settled re-reads used by the clear, eventLast caret and eventAll case read-backs. */
 const ANDROID_READ_BACK_ATTEMPTS = 3;
 /** CtrlProxy's caret-unknown warning (InsertTextPlanner.kt), removed once the caret is proven. */
-const CARET_UNKNOWN_WARNING =
+export const CARET_UNKNOWN_WARNING =
   /Text was inserted, but the caret could not be placed after it \([^)]*\); the caret position is unknown, so insert any further text with request_insert_text rather than key events/;
 
 class ImeRestorationError extends Error {}
@@ -346,6 +346,17 @@ export interface SendKeysTextClient {
   ): Promise<TextActionResult>;
 }
 
+type AndroidClearState =
+  | { kind: "applied" }
+  | { kind: "pending"; remaining: number }
+  | { kind: "unreadable" };
+
+/** Field text and collapsed caret expected after the eventLast prefix insert (UTF-16 units). */
+interface EventLastCaretExpectation {
+  text: string;
+  caret: number;
+}
+
 interface AndroidEventAllProgress {
   mutated: boolean;
   committedGraphemes: number;
@@ -595,6 +606,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   async clear(signal?: AbortSignal, display?: string): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
+    // The pre-clear text is what an unapplied clear still shows (#9884).
+    const preClearText =
+      this.device.platform === "android"
+        ? await this.readTextBeforeClear(signal, display)
+        : undefined;
     const clearResult = await this.textClient.clear(
       this.device.platform === "ios" ? signal : undefined,
     );
@@ -604,7 +620,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (clearResult.success) {
       // set_text("") is acknowledged before the app applies it; a following a11y insert
       // plans from a fresh node snapshot and would otherwise write old + new text (#9884).
-      return (await this.verifyAndroidClearApplied(signal, display)) ?? clearResult;
+      return (await this.verifyAndroidClearApplied(preClearText, signal, display)) ?? clearResult;
     }
     logger.warn(`[SendKeys] Android accessibility clear failed: ${clearResult.error}`);
     const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
@@ -621,31 +637,83 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.clearEventOnlyForReplace(textLength, signal, display);
   }
 
-  /** Poll the focused field until the acknowledged clear is visible; unreadable fields pass. */
+  /**
+   * Focused text before a clear, or undefined when there is nothing to verify (empty field, or an
+   * unreadable one, which is logged). Hint-aware: placeholder text counts as empty.
+   */
+  private async readTextBeforeClear(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<string | undefined> {
+    try {
+      const snapshot = this.readFocusedTextSnapshot(
+        await this.readFreshObservation(signal, display),
+      );
+      if (snapshot === undefined) {
+        logger.warn(
+          "[SendKeys] Focused text is unreadable before the clear; it will not be verified",
+        );
+      }
+      return snapshot && snapshot.length > 0 ? snapshot.text : undefined;
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] Pre-clear read unavailable: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Poll until the acknowledged clear is visible, i.e. the field no longer shows the pre-clear
+   * text. Any other content (empty, hint, a mask or permanent prefix) counts as applied. An
+   * unreadable field is retried, then passes with a warning.
+   */
   private async verifyAndroidClearApplied(
+    preClearText: string | undefined,
     signal?: AbortSignal,
     display?: string,
   ): Promise<TextActionResult | undefined> {
-    try {
-      let remaining: number | undefined;
-      for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
-        if (attempt > 0) {
-          await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
-        }
-        const observation = await this.readFreshObservation(signal, display);
-        remaining = this.readFocusedTextLength(observation);
-        if (!remaining) {
-          return undefined;
-        }
+    if (preClearText === undefined) {
+      return undefined;
+    }
+    let state: AndroidClearState = { kind: "unreadable" };
+    for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
       }
+      state = await this.readClearState(preClearText, signal, display);
+      if (state.kind === "applied") {
+        return undefined;
+      }
+    }
+    if (state.kind === "pending") {
       return {
         success: false,
-        error: `Field was not fully cleared: ${remaining} UTF-16 units remain`,
+        error: `Field was not fully cleared: ${state.remaining} UTF-16 units remain`,
       };
+    }
+    logger.warn("[SendKeys] The clear could not be verified: the focused field stayed unreadable");
+    return undefined;
+  }
+
+  private async readClearState(
+    preClearText: string,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<AndroidClearState> {
+    try {
+      const snapshot = this.readFocusedTextSnapshot(
+        await this.readFreshObservation(signal, display),
+      );
+      if (snapshot === undefined) {
+        return { kind: "unreadable" };
+      }
+      return snapshot.length === 0 || snapshot.text !== preClearText
+        ? { kind: "applied" }
+        : { kind: "pending", remaining: snapshot.length };
     } catch (error) {
       this.checkAbort(signal, error);
       logger.warn(`[SendKeys] Clear read-back unavailable: ${errorMessage(error)}`, error);
-      return undefined;
+      return { kind: "unreadable" };
     }
   }
 
@@ -664,13 +732,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return observation;
   }
 
-  private readFocusedTextLength(observation: ObserveResult): number | undefined {
+  /** Hint-aware length plus the text; undefined when the field cannot be read. */
+  private readFocusedTextSnapshot(
+    observation: ObserveResult,
+  ): { text: string; length: number } | undefined {
     const hierarchy = observation.viewHierarchy;
     if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
       return undefined;
     }
     // Hint-aware, like ClearText.verifyKeyEventClear: placeholder text counts as empty.
-    return getFocusedTextLength(hierarchy);
+    const length = getFocusedTextLength(hierarchy);
+    if (length === undefined) {
+      return undefined;
+    }
+    const text = this.readFocusedText(observation);
+    if (length === 0) {
+      return { text: text ?? "", length };
+    }
+    return text === undefined ? undefined : { text, length };
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -1497,11 +1576,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     const prefix = chars.slice(0, split.index).join("");
     const suffix = chars.slice(split.index + 1).join("");
-    const initialResult = await this.confirmEventLastCaret(
-      await this.prepareEventLastPrefix(prefix, operation, signal),
-      prefix,
-      signal,
-    );
+    const initialResult = await this.insertEventLastPrefix(prefix, operation, signal);
     if (!initialResult.success) {
       return initialResult;
     }
@@ -1535,17 +1610,63 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
+  private async insertEventLastPrefix(
+    prefix: string,
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult> {
+    // The expectation needs the field as it was BEFORE the insert, so it is read up front.
+    const expected = await this.expectEventLastCaret(prefix, operation, signal);
+    return this.confirmEventLastCaret(
+      await this.prepareEventLastPrefix(prefix, operation, signal),
+      expected,
+      signal,
+    );
+  }
+
+  private async expectEventLastCaret(
+    prefix: string,
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+  ): Promise<EventLastCaretExpectation | undefined> {
+    if (operation === "replace") {
+      return { text: prefix, caret: prefix.length };
+    }
+    if (!prefix || !this.textClient.readInsertTextState) {
+      return undefined;
+    }
+    try {
+      const before = await this.readInsertTextStateWhileLive(signal);
+      return before && expectedStateAfterInsert(before, prefix);
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(
+        `[SendKeys] eventLast pre-insert read unavailable: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
+  /** The client read takes no signal; stop waiting on a cancelled call (the read may finish later). */
+  private async readInsertTextStateWhileLive(
+    signal?: AbortSignal,
+  ): Promise<InsertTextState | undefined> {
+    const read = this.textClient.readInsertTextState?.();
+    return read && (await awaitWhileRequestIsLive(read, signal));
+  }
+
   /** Turn a `caretPlaced: false` prefix result into a failure unless the caret is proven (#9887). */
   private async confirmEventLastCaret(
     result: TextActionResult,
-    prefix: string,
+    expected: EventLastCaretExpectation | undefined,
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
     if (!result.success || result.caretPlaced !== false) {
       return result;
     }
     // Compose fields report "not placed" even when the caret sits after the prefix.
-    if (!(await this.isCaretProvenAfterPrefix(prefix, signal))) {
+    if (!expected || !(await this.isCaretProvenAfterPrefix(expected, signal))) {
       return markPartialAfterMutation({
         ...result,
         success: false,
@@ -1557,19 +1678,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.withoutCaretUnknownWarning(result);
   }
 
-  /** Read the insert state back (bounded) and prove a collapsed caret right after the prefix. */
-  private async isCaretProvenAfterPrefix(prefix: string, signal?: AbortSignal): Promise<boolean> {
-    if (!this.textClient.readInsertTextState) {
-      return false;
-    }
+  /** Read the insert state back (bounded) and require exactly the expected text and caret. */
+  private async isCaretProvenAfterPrefix(
+    expected: EventLastCaretExpectation,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
       if (attempt > 0) {
         await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
       }
       this.checkAbort(signal);
       try {
-        const state = await this.textClient.readInsertTextState();
-        if (state && caretIsAfterPrefix(state, prefix)) {
+        const state = await this.readInsertTextStateWhileLive(signal);
+        if (state && stateMatchesExpectation(state, expected)) {
           return true;
         }
       } catch (error) {
@@ -1659,7 +1780,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   /**
-   * Some keyboards/fields change letter case after key events (#9888). Report only the
+   * Some keyboards/fields change letter case after key events (#9888). Warn only on the
    * case-insensitive match; any other mismatch or an unreadable field is left alone.
    */
   private async verifyEventAllLetterCase(
@@ -1684,14 +1805,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return typed;
         }
         if (attempt === ANDROID_READ_BACK_ATTEMPTS - 1) {
-          return this.withTextWarnings(
-            {
-              success: false,
-              partialApplication: true,
-              error: `eventAll typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case. Use mode "ime" or "a11y" for exact case.`,
-            },
-            [typed.warning],
-          );
+          // The app may intend the other case (all-caps, auto-capitalise). The text was typed,
+          // so stay successful: a failed result invites a retry that would duplicate it.
+          const warning = `eventAll typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case (possibly intended). Use mode "ime" or "a11y" for exact case.`;
+          logger.warn(`[SendKeys] ${warning}`);
+          return this.withTextWarnings(typed, [warning]);
         }
       }
     } catch (error) {
@@ -2823,12 +2941,30 @@ function isSemanticKey(key: SendKeysKey): key is SendKeysSemanticKey {
   return (SEND_KEYS_SEMANTIC_KEYS as readonly string[]).includes(key);
 }
 
-function caretIsAfterPrefix(state: InsertTextState, prefix: string): boolean {
+/** Where the prefix insert leaves the field, from the state read before it; undefined if unprovable. */
+function expectedStateAfterInsert(
+  before: InsertTextState,
+  prefix: string,
+): EventLastCaretExpectation | undefined {
+  // A hint is placeholder text, not content: the field is empty with the caret at 0.
+  const text = before.isShowingHintText ? "" : before.text;
+  const start = before.isShowingHintText ? 0 : Math.min(before.selectionStart, before.selectionEnd);
+  const end = before.isShowingHintText ? 0 : Math.max(before.selectionStart, before.selectionEnd);
+  if (typeof text !== "string" || start < 0 || end > text.length) {
+    return undefined;
+  }
+  return { text: text.slice(0, start) + prefix + text.slice(end), caret: start + prefix.length };
+}
+
+function stateMatchesExpectation(
+  state: InsertTextState,
+  expected: EventLastCaretExpectation,
+): boolean {
   return (
     !state.isShowingHintText &&
-    typeof state.text === "string" &&
-    state.selectionStart === state.selectionEnd &&
-    state.text.slice(0, state.selectionStart).endsWith(prefix)
+    state.text === expected.text &&
+    state.selectionStart === expected.caret &&
+    state.selectionEnd === expected.caret
   );
 }
 

@@ -9,6 +9,8 @@ import { DefaultElementParser } from "../../../src/features/utility/ElementParse
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   android,
   createSendKeysHarness,
@@ -22,6 +24,7 @@ import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
+  CARET_UNKNOWN_WARNING,
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
   DefaultSendKeysCommandExecutor,
@@ -693,7 +696,8 @@ describe("SendKeys", () => {
       error: "Android event delivery requires a focused editable field",
     });
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(observer.calls).toBe(1);
+    // One pre-clear read (the #9884 baseline) plus the focus read of the fallback.
+    expect(observer.calls).toBe(2);
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
@@ -1668,7 +1672,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
         const observer: SendKeysObserver = {
           execute: async (request) => {
             options.push(request);
-            if (++reads === 1) {
+            // standalone clear reads the pre-clear text first, then the fallback focus read.
+            if (++reads <= (operation === "clear" ? 2 : 1)) {
               return focusedAndroidObservation("first\nlater\nlines", {}, 0);
             }
             return after === undefined ? { timestamp: 0 } : focusedAndroidObservation(after, {}, 0);
@@ -1699,8 +1704,9 @@ describe("DefaultSendKeysCommandExecutor", () => {
           expect(result).toMatchObject({ success: false, partialApplication: true });
           expect(result.error).toContain("Cannot verify");
         }
-        expect(options).toHaveLength(2);
-        expect(options[1]).toMatchObject({ freshness: "fresh" });
+        const expectedReads = operation === "clear" ? 3 : 2;
+        expect(options).toHaveLength(expectedReads);
+        expect(options[expectedReads - 1]).toMatchObject({ freshness: "fresh" });
         expect(adb.getExecutedCommands().includes("shell input keyevent KEYCODE_A")).toBe(
           operation === "replace" && after === "",
         );
@@ -4268,7 +4274,15 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     return { observer, options, reads: () => options.length };
   }
 
-  function harness(texts: Array<string | undefined>, state?: () => unknown) {
+  type InsertState = {
+    text?: string | null;
+    isShowingHintText: boolean;
+    selectionStart: number;
+    selectionEnd: number;
+  };
+
+  /** `states[n]` answers the n-th readInsertTextState call; the last entry repeats. */
+  function harness(texts: Array<string | undefined>, states?: Array<InsertState | undefined>) {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(34);
     const timer = new FakeTimer();
@@ -4276,6 +4290,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     const order: string[] = [];
     const { client, calls } = createTextClient();
     const baseInsert = client.insert;
+    let stateReads = 0;
     client.clear = async () => {
       order.push("clear");
       return { success: true };
@@ -4284,8 +4299,11 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       order.push("insert");
       return baseInsert(text, options);
     };
-    if (state) {
-      client.readInsertTextState = async () => state() as never;
+    if (states) {
+      client.readInsertTextState = async () => {
+        stateReads++;
+        return states[Math.min(stateReads - 1, states.length - 1)];
+      };
     }
     const seq = sequencedObserver(texts, order);
     const executor = new DefaultSendKeysCommandExecutor(
@@ -4294,27 +4312,28 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       seq.observer,
       { textClient: client, timer },
     );
-    return { adb, timer, order, client, calls, seq, executor };
+    return { adb, timer, order, client, calls, seq, executor, stateReads: () => stateReads };
   }
 
   const keyCommands = (adb: FakeAdbExecutor) =>
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input"));
 
-  describe("#9884 clear waits for the field to empty", () => {
-    test("polls until empty before the a11y insert is dispatched", async () => {
-      const h = harness(["old z", "old z", ""]);
+  describe("#9884 clear waits for the field to stop showing the pre-clear text", () => {
+    test("polls until the old text is gone before the a11y insert is dispatched", async () => {
+      // Reads: pre-clear, then the settled polls.
+      const h = harness(["old z", "old z", "old z", ""]);
       expect(await h.executor.clear(undefined, "2")).toEqual({ success: true });
       expect(await h.executor.type({ action: "type", text: "Na1 k", mode: "a11y" })).toMatchObject({
         success: true,
       });
-      expect(h.order).toEqual(["clear", "read", "read", "read", "insert"]);
+      expect(h.order).toEqual(["read", "clear", "read", "read", "read", "insert"]);
       expect(h.timer.getSleepHistory()).toEqual([150, 150]);
       expect(h.seq.options.every((o) => o?.skipScreenshot === true && o.display === "2")).toBe(
         true,
       );
     });
 
-    test("an already-empty field needs one read and no sleep", async () => {
+    test("an already-empty field needs only the pre-clear read and no sleep", async () => {
       const h = harness([""]);
       expect(await h.executor.clear()).toEqual({ success: true });
       expect(h.seq.reads()).toBe(1);
@@ -4322,7 +4341,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.seq.options[0]).not.toHaveProperty("display");
     });
 
-    test("a field that never empties fails the clear and stops the batch before the insert", async () => {
+    test("a field that keeps the pre-clear text fails the clear and stops the batch", async () => {
       const h = harness(["old z"]);
       const sendKeys = new SendKeys(androidDevice, createAdbFactory(h.adb), {
         executor: h.executor,
@@ -4343,10 +4362,61 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.timer.getSleepHistory().slice(0, 2)).toEqual([150, 150]);
     });
 
-    test("an unreadable field stays a pass", async () => {
-      const h = harness([undefined]);
+    test("a masked field that re-inserts its skeleton still counts as cleared", async () => {
+      const h = harness(["(555) 123", "(   )    "]);
       expect(await h.executor.clear()).toEqual({ success: true });
-      expect(h.seq.reads()).toBe(1);
+      expect(h.seq.reads()).toBe(2);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    });
+
+    test("a clear applied on the second read succeeds after one settle", async () => {
+      const h = harness(["old z", "old z", "(   )"]);
+      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(h.seq.reads()).toBe(3);
+      expect(h.timer.getSleepHistory()).toEqual([150]);
+    });
+
+    test("an unreadable first read keeps polling and still catches the old text", async () => {
+      const h = harness(["old z", undefined, "old z", "old z"]);
+      expect(await h.executor.clear()).toEqual({
+        success: false,
+        error: "Field was not fully cleared: 5 UTF-16 units remain",
+      });
+      expect(h.seq.reads()).toBe(4);
+    });
+
+    test("an unreadable first read recovers when a later read shows the clear applied", async () => {
+      const h = harness(["old z", undefined, ""]);
+      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(h.seq.reads()).toBe(3);
+    });
+
+    test("a field unreadable throughout passes with a warning", async () => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = harness(["old z", undefined]);
+        expect(await h.executor.clear()).toEqual({ success: true });
+        expect(h.seq.reads()).toBe(4);
+        expect(
+          loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] The clear could not be verified"),
+        ).toHaveLength(1);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test("an unreadable pre-clear field passes after one read with a warning", async () => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = harness([undefined]);
+        expect(await h.executor.clear()).toEqual({ success: true });
+        expect(h.seq.reads()).toBe(1);
+        expect(
+          loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] Focused text is unreadable"),
+        ).toHaveLength(1);
+      } finally {
+        warning.mockRestore();
+      }
     });
 
     test("hint text counts as empty", async () => {
@@ -4357,7 +4427,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     });
   });
 
-  describe("#9887 eventLast proves the caret from the read-back state", () => {
+  describe("#9887 eventLast proves the caret from the pre- and post-insert state", () => {
     const placedFalse = (client: SendKeysTextClient) => {
       client.insert = async () => ({
         success: true,
@@ -4366,29 +4436,77 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           "Text was inserted, but the caret could not be placed after it (selection placement was not attempted); the caret position is unknown, so insert any further text with request_insert_text rather than key events",
       });
     };
+    const state = (text: string, start: number, end = start, isShowingHintText = false) => ({
+      text,
+      isShowingHintText,
+      selectionStart: start,
+      selectionEnd: end,
+    });
+    const empty = state("", 0);
 
     test("sends the tail key event when the caret is collapsed right after the prefix", async () => {
-      const h = harness([""], () => ({
-        text: "abc de",
-        isShowingHintText: false,
-        selectionStart: 6,
-        selectionEnd: 6,
-      }));
+      const h = harness([""], [empty, state("abc de", 6)]);
       placedFalse(h.client);
       const result = await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" });
       expect(result).toMatchObject({ success: true, resolvedMode: "eventLast" });
       expect(result.warning).toBeUndefined();
       expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
+      expect(h.stateReads()).toBe(2);
+    });
+
+    test("an empty field showing a hint counts as empty before the insert", async () => {
+      const h = harness([""], [state("Type here", 0, 0, true), state("abc de", 6)]);
+      placedFalse(h.client);
+      expect(
+        await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" }),
+      ).toMatchObject({ success: true });
+    });
+
+    test("accepts an insert in the middle of the field when the caret follows it", async () => {
+      const h = harness([""], [state("abXYZ", 2), state("abQXYZ", 3)]);
+      placedFalse(h.client);
+      expect(
+        await h.executor.type({ action: "type", text: "Q0", mode: "eventLast" }),
+      ).toMatchObject({ success: true });
+      expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
+    });
+
+    test("replaces the selected range when computing the expectation", async () => {
+      const h = harness([""], [state("abXYZ", 1, 4), state("aQZ", 2)]);
+      placedFalse(h.client);
+      expect(
+        await h.executor.type({ action: "type", text: "Q0", mode: "eventLast" }),
+      ).toMatchObject({ success: true });
+    });
+
+    test("rejects a caret left at the end when the prefix went in at the start", async () => {
+      // Field "ab", caret 0, typing "b!": the device inserts "b" at 0 giving "bab". A caret at the
+      // end satisfies "text before the caret ends with the prefix" but not where it was inserted.
+      const h = harness([""], [state("ab", 0), state("bab", 3)]);
+      placedFalse(h.client);
+      const result = await h.executor.type({ action: "type", text: "b!", mode: "eventLast" });
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        error: expect.stringContaining("prefix insert could not place the caret"),
+      });
+      expect(keyCommands(h.adb)).toEqual([]);
+    });
+
+    test("accepts the same field when the caret sits right after the inserted prefix", async () => {
+      const h = harness([""], [state("ab", 0), state("bab", 1)]);
+      placedFalse(h.client);
+      expect(
+        await h.executor.type({ action: "type", text: "b!", mode: "eventLast" }),
+      ).toMatchObject({ success: true });
+      expect(keyCommands(h.adb)).toHaveLength(1);
     });
 
     test("waits for the state to settle", async () => {
       let reads = 0;
-      const h = harness([""], () => ({
-        text: reads++ === 0 ? "abc" : "abc de",
-        isShowingHintText: false,
-        selectionStart: 6,
-        selectionEnd: 6,
-      }));
+      const h = harness([""], [empty]);
+      h.client.readInsertTextState = async () =>
+        reads++ === 0 ? empty : state(reads === 2 ? "abc" : "abc de", 6);
       placedFalse(h.client);
       expect(
         await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" }),
@@ -4396,22 +4514,29 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.timer.getSleepHistory()).toEqual([150]);
     });
 
+    test("operation replace expects exactly the prefix with the caret after it", async () => {
+      const h = harness([""], [state("abc de", 6)]);
+      placedFalse(h.client);
+      h.client.replace = async () => ({ success: true, caretPlaced: false });
+      expect(
+        await h.executor.type({
+          action: "type",
+          text: "abc de0",
+          mode: "eventLast",
+          operation: "replace",
+        }),
+      ).toMatchObject({ success: true });
+      expect(h.stateReads()).toBe(1);
+    });
+
     test.each([
-      ["unreadable state", () => undefined],
-      [
-        "caret not after the prefix",
-        () => ({ text: "abc de", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 }),
-      ],
-      [
-        "selection range",
-        () => ({ text: "abc de", isShowingHintText: false, selectionStart: 0, selectionEnd: 6 }),
-      ],
-      [
-        "hint text",
-        () => ({ text: "abc de", isShowingHintText: true, selectionStart: 6, selectionEnd: 6 }),
-      ],
-    ])("still fails for %s", async (_name, state) => {
-      const h = harness([""], state);
+      ["unreadable state", [empty, undefined]],
+      ["caret not after the prefix", [empty, state("abc de", 2)]],
+      ["selection range", [empty, state("abc de", 0, 6)]],
+      ["hint text", [empty, state("abc de", 6, 6, true)]],
+      ["a different text", [empty, state("xabc de", 7)]],
+    ])("still fails for %s", async (_name, states) => {
+      const h = harness([""], states);
       placedFalse(h.client);
       const result = await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" });
       expect(result).toMatchObject({
@@ -4421,9 +4546,100 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       });
       expect(keyCommands(h.adb)).toEqual([]);
     });
+
+    test.each([
+      ["an unreadable pre-insert state", [undefined]],
+      ["a null pre-insert text", [{ ...empty, text: null }]],
+      ["an out-of-range pre-insert selection", [state("ab", 0, 9)]],
+    ])("does not attempt the proof with %s", async (_name, states) => {
+      const h = harness([""], states);
+      placedFalse(h.client);
+      const result = await h.executor.type({ action: "type", text: "abc de0", mode: "eventLast" });
+      expect(result).toMatchObject({ success: false, partialApplication: true });
+      expect(h.stateReads()).toBe(1);
+      expect(keyCommands(h.adb)).toEqual([]);
+    });
   });
 
-  describe("#9888 eventAll reports a keyboard letter-case change", () => {
+  describe("cancelling during the insert-state reads", () => {
+    const hang = () => new Promise<undefined>(() => {});
+    const settled = async (call: Promise<unknown>) => {
+      const marker = call.then(
+        () => "settled",
+        () => "settled",
+      );
+      return Promise.race([
+        marker,
+        new Promise<string>((resolve) => setImmediate(() => resolve("pending"))),
+      ]);
+    };
+
+    test("a cancel during the pre-insert read returns promptly", async () => {
+      const h = harness([""]);
+      h.client.readInsertTextState = hang;
+      const controller = new AbortController();
+      const call = h.executor.type(
+        { action: "type", text: "abc de0", mode: "eventLast" },
+        controller.signal,
+      );
+      call.catch(() => {});
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      controller.abort();
+      expect(await settled(call)).toBe("settled");
+      await expect(call).rejects.toThrow();
+      expect(keyCommands(h.adb)).toEqual([]);
+    });
+
+    test("a cancel during the post-insert read returns promptly", async () => {
+      const h = harness([""]);
+      let reads = 0;
+      h.client.readInsertTextState = async () =>
+        reads++ === 0
+          ? { text: "", isShowingHintText: false, selectionStart: 0, selectionEnd: 0 }
+          : hang();
+      h.client.insert = async () => ({ success: true, caretPlaced: false });
+      const controller = new AbortController();
+      const call = h.executor.type(
+        { action: "type", text: "abc de0", mode: "eventLast" },
+        controller.signal,
+      );
+      call.catch(() => {});
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      controller.abort();
+      expect(await settled(call)).toBe("settled");
+      await expect(call).rejects.toThrow();
+      expect(keyCommands(h.adb)).toEqual([]);
+    });
+  });
+
+  describe("#9887 the caret-unknown warning matches the device source", () => {
+    const planner = resolve(
+      import.meta.dir,
+      "../../../android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/InsertTextPlanner.kt",
+    );
+
+    test.skipIf(!existsSync(planner))(
+      "CARET_UNKNOWN_WARNING strips both variants built from InsertTextPlanner.kt",
+      () => {
+        const source = readFileSync(planner, "utf8");
+        const block = source.slice(
+          source.indexOf("val warning ="),
+          source.indexOf("return InsertTextOutcome", source.indexOf("val warning =")),
+        );
+        // head, the two selection variants, then the fixed tail.
+        const [head = "", attempted = "", notAttempted = "", ...tail] = [
+          ...block.matchAll(/"([^"]*)"/g),
+        ].map((match) => match[1] ?? "");
+        expect(head.length).toBeGreaterThan(0);
+        for (const variant of [attempted, notAttempted]) {
+          const warning = head + variant + tail.join("");
+          expect(warning.replace(CARET_UNKNOWN_WARNING, "")).toBe("");
+        }
+      },
+    );
+  });
+
+  describe("#9888 eventAll warns about a keyboard letter-case change", () => {
     test("pins the emitted key events for mixed case with spaces", async () => {
       const h = harness(["Ab cD ef"]);
       expect(
@@ -4441,22 +4657,35 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       ]);
     });
 
-    test("fails when the field holds the text in a different case", async () => {
-      const h = harness(["Ab CD ef"]);
-      const result = await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" });
-      const message = String(result.error);
-      expect(result).toMatchObject({ success: false, partialApplication: true });
-      expect(message).toContain("the keyboard or field changed the letter case");
-      expect(message).toContain('"Ab CD ef"');
-      expect(h.timer.getSleepHistory()).toEqual([150, 150]);
-      expect(h.seq.options.every((o) => o?.skipScreenshot === true)).toBe(true);
+    test("a case-only difference stays successful with a warning and is not a partial application", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = harness(["Ab CD ef"]);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Ab cD ef",
+          mode: "eventAll",
+        });
+        expect(result.success).toBe(true);
+        expect(result.partialApplication).toBeUndefined();
+        expect(result.error).toBeUndefined();
+        expect(result.retryable).toBeUndefined();
+        expect(result.warning).toContain('typed "Ab cD ef"');
+        expect(result.warning).toContain('holds "Ab CD ef"');
+        expect(result.warning).toContain("letter case");
+        expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+        expect(h.seq.options.every((o) => o?.skipScreenshot === true)).toBe(true);
+        expect(loggerCallsWithPrefix(warn.mock.calls, "[SendKeys] eventAll typed")).toHaveLength(1);
+      } finally {
+        warn.mockRestore();
+      }
     });
 
-    test("recovers when the field settles to the exact text", async () => {
+    test("recovers silently when the field settles to the exact text", async () => {
       const h = harness(["Ab CD ef", "Ab cD ef"]);
-      expect(
-        await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
-      ).toMatchObject({ success: true });
+      const result = await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning).toBeUndefined();
     });
 
     test.each([
@@ -4465,9 +4694,9 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     ])("leaves %s alone", async (_name, field) => {
       // The first read is the focus pre-check; later reads are the case read-back.
       const h = harness(["Ab cD ef", field]);
-      expect(
-        await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
-      ).toMatchObject({ success: true });
+      const result = await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning).toBeUndefined();
     });
 
     test("does not read back caseless text", async () => {

@@ -200,6 +200,7 @@ oxlint failure; the ratchet and both boundary gates run only when both stages
 pass. CI therefore checks the committed tree without rewriting it. Turbo hashes
 and forwards `CI` so local fix results cannot satisfy CI's check cache.
 `bun run format:check` remains `oxfmt --check` in every environment.
+Check mode skips `oxfmt --check` on Windows runners because CRLF checkouts would flag every file; formatting is gated by the Linux `format-check` job and Linux/macOS lint.
 `scripts/prepush-node.sh` inherits this mode: local runs fix, and `CI=true`/`1`
 runs check only. `test/bats/lint-format-pipeline.bats` guards this contract.
 

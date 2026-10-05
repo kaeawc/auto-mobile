@@ -17,9 +17,26 @@ case "${CI:-}" in
     ;;
 esac
 
-oxfmt "$oxfmt_mode" "$@"
-oxfmt_status=$?
+runner_os="${RUNNER_OS:-}"
+if [[ "$oxfmt_mode" == --check && -z "$runner_os" ]]; then
+  case "$(uname -s 2> /dev/null || true)" in
+    Darwin) runner_os="macOS" ;;
+    MINGW* | MSYS* | CYGWIN*) runner_os="Windows" ;;
+  esac
+fi
+
+oxfmt_status=0
+if [[ "$oxfmt_mode" == --check && "$runner_os" == Windows ]]; then
+  echo "format is gated on Linux (format-check job); skipped on Windows: CRLF checkout" >&2
+else
+  oxfmt "$oxfmt_mode" "$@"
+  oxfmt_status=$?
+fi
 set -e
+
+if [[ "$oxfmt_mode" == --check ]] && [[ "$oxlint_status" -ne 0 || "$oxfmt_status" -ne 0 ]]; then
+  echo "CI lint check failed: run 'bun run lint' locally (without CI set) to apply fixes, or 'bun run format' for formatting." >&2
+fi
 
 if [[ "$oxlint_status" -ne 0 ]]; then
   # Baseline and boundary checks require an oxlint-clean tree, so skip them on failure.

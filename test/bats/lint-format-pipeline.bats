@@ -142,3 +142,114 @@ teardown() {
   run_lint CI=
   assert_local_autofix
 }
+
+@test "Windows CI skips formatting-only violations without rewriting" {
+  printf 'console.log(  "fixture"  );\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  for ci_value in true 1; do
+    run_lint CI="$ci_value" RUNNER_OS=Windows
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"format is gated on Linux (format-check job); skipped on Windows: CRLF checkout"* ]]
+    [[ "$output" != *"Checking formatting"* ]]
+    assert_follow_on_checks
+    cmp "$FIXTURE" "$TEST_DIR/original.ts"
+  done
+}
+
+@test "Windows CI rejects curly violations without formatting or rewriting" {
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint CI=true RUNNER_OS=Windows
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"curly"* ]]
+  [[ "$output" == *"skipped on Windows: CRLF checkout"* ]]
+  [[ "$output" != *"Checking formatting"* ]]
+  [[ "$output" != *"follow-on:"* ]]
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "Windows CI accepts a clean fixture and runs all follow-on checks" {
+  printf 'console.log("fixture");\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint CI=true RUNNER_OS=Windows
+  [ "$status" -eq 0 ]
+  assert_follow_on_checks
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "Windows CI oxlint accepts CRLF without rewriting" {
+  printf 'console.log("fixture");\r\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint CI=true RUNNER_OS=Windows
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Checking formatting"* ]]
+  assert_follow_on_checks
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "Linux and macOS CI still reject formatting-only violations" {
+  printf 'console.log(  "fixture"  );\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  for runner_os in Linux macOS; do
+    run_lint CI=true RUNNER_OS="$runner_os"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Checking formatting"* ]]
+    [[ "$output" == *"Format issues found"* ]]
+    [[ "$output" != *"skipped on Windows"* ]]
+    [[ "$output" != *"follow-on:"* ]]
+    cmp "$FIXTURE" "$TEST_DIR/original.ts"
+  done
+}
+
+@test "Windows runner detection keeps local autofixing" {
+  run_lint RUNNER_OS=Windows
+  [[ "$output" != *"skipped on Windows"* ]]
+  [[ "$output" != *"Checking formatting"* ]]
+  assert_local_autofix
+}
+
+@test "CI failures print the local fix hint exactly once" {
+  fix_hint="CI lint check failed: run 'bun run lint' locally (without CI set) to apply fixes, or 'bun run format' for formatting."
+  printf 'if (true) console.log(  "fixture"  );\n' >"$FIXTURE"
+  for runner_os in Linux Windows; do
+    run_lint CI=true RUNNER_OS="$runner_os"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"curly"* ]]
+    if [[ "$runner_os" == Linux ]]; then
+      [[ "$output" == *"Format issues found"* ]]
+    fi
+    [ "$(printf '%s\n' "$output" | grep -Fxc "$fix_hint")" -eq 1 ]
+  done
+
+  printf 'console.log(  "fixture"  );\n' >"$FIXTURE"
+  run_lint CI=true RUNNER_OS=Linux
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Format issues found"* ]]
+  [ "$(printf '%s\n' "$output" | grep -Fxc "$fix_hint")" -eq 1 ]
+}
+
+@test "Passing CI and local runs do not print the fix hint" {
+  printf 'console.log("fixture");\n' >"$FIXTURE"
+  for runner_os in Linux Windows; do
+    run_lint CI=true RUNNER_OS="$runner_os"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"CI lint check failed:"* ]]
+  done
+
+  printf 'if (true) console.log("fixture");\n' >"$FIXTURE"
+  run_lint RUNNER_OS=Windows
+  [[ "$output" != *"CI lint check failed:"* ]]
+  assert_local_autofix
+}
+
+@test "CI detects Windows from uname when RUNNER_OS is unset" {
+  printf '#!%s\nprintf "MINGW64_NT-10.0\\n"\n' "$REAL_BASH" >"$TEST_DIR/bin/uname"
+  chmod +x "$TEST_DIR/bin/uname"
+  printf 'console.log(  "fixture"  );\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint -u RUNNER_OS CI=true
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"skipped on Windows: CRLF checkout"* ]]
+  [[ "$output" != *"Checking formatting"* ]]
+  assert_follow_on_checks
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}

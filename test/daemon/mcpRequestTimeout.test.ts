@@ -1,3 +1,23 @@
+import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../../src/features/snapshot/DeviceSnapshotConfig";
+import {
+  DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+  MAX_VM_SNAPSHOT_TIMEOUT_MS,
+} from "../../src/features/snapshot/deviceSnapshotTimeout";
+import { MAX_VM_SNAPSHOT_TIMEOUT_MS as schemaSnapshotMaxMs } from "../../src/server/snapshotTools";
+import { BARRIER_TIMEOUT_MS as coordinatorDefaultMs } from "../../src/server/CriticalSectionCoordinator";
+import { BARRIER_TIMEOUT_MS } from "../../src/features/action/coordinationTimeout";
+import { DEFAULT_EXPLORE_TIMEOUT_MS as explorationDefaultMs } from "../../src/features/navigation/Explore";
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../../src/features/navigation/exploreTimeout";
+import { SHARED_STORAGE_PUSH_TIMEOUT_MS as storagePushMs } from "../../src/server/sharedStorageService";
+import { APP_FILE_PUSH_TIMEOUT_MS as appPushMs } from "../../src/server/appFileService";
+import {
+  SHARED_STORAGE_PUSH_TIMEOUT_MS,
+  APP_FILE_PUSH_TIMEOUT_MS,
+} from "../../src/features/storage/fileTransferTimeout";
+import {
+  MCP_ARGUMENT_BUDGET_CASES,
+  MALFORMED_MCP_BUDGETS,
+} from "../helpers/mcpArgumentBudgetCases";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -1395,4 +1415,125 @@ describe("bounded excess text request floors", () => {
       ),
     ).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
   });
+});
+
+describe("argument budget deadline gaps", () => {
+  for (const budget of MCP_ARGUMENT_BUDGET_CASES) {
+    const resolve = (args: unknown, timeoutMs?: number): number =>
+      resolveMcpRequestTimeoutMs({
+        id: "argument-budget",
+        type: "mcp_request",
+        method: "tools/call",
+        timeoutMs,
+        params: { name: budget.tool, arguments: args },
+      });
+    test(`${budget.tool} omitted arguments use the default floor`, () => {
+      expect(resolve(undefined)).toBe(budget.defaultFloor);
+      expect(resolve({})).toBe(budget.defaultFloor);
+      expect(resolve(budget.argumentsFor(undefined))).toBe(budget.defaultFloor);
+    });
+    test(`${budget.tool} supplied work budget gets headroom`, () => {
+      expect(resolve(budget.argumentsFor(budget.supplied))).toBe(budget.suppliedFloor);
+    });
+    test(`${budget.tool} larger request timeout wins`, () => {
+      expect(resolve({}, 1_000_000)).toBe(1_000_000);
+      expect(resolve(budget.argumentsFor(budget.supplied), 1_000_000)).toBe(1_000_000);
+    });
+    test(`${budget.tool} malformed arguments are safe and bounded`, () => {
+      for (const value of MALFORMED_MCP_BUDGETS) {
+        const result = resolve(budget.argumentsFor(value));
+        expect(result).toBeGreaterThanOrEqual(budget.defaultFloor);
+        expect(result).toBeLessThanOrEqual(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+        if (
+          value !== Number.MAX_SAFE_INTEGER ||
+          budget.tool.includes("Storage") ||
+          budget.tool === "putAppFile"
+        ) {
+          expect(result).toBe(budget.defaultFloor);
+        }
+      }
+      for (const args of [null, "wrong", [], { waitFor: [] }]) {
+        expect(resolve(args)).toBe(budget.defaultFloor);
+      }
+      expect(resolve(budget.argumentsFor(budget.oversized))).toBe(
+        MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+      );
+    });
+  }
+  test("observe uses nested timeout aliases for legacy and DSL waits", () => {
+    const resolve = (args: Record<string, unknown>) =>
+      resolveMcpRequestTimeoutMs({
+        id: "observe-alias",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: args },
+      });
+    for (const selector of [
+      { elementId: "missing" },
+      { for: "appear" },
+      { for: "stable" },
+      { textAny: ["missing"] },
+    ]) {
+      expect(resolve({ waitFor: { ...selector, timeoutMs: 600_000 } })).toBe(630_000);
+      expect(resolve({ waitFor: { ...selector, timeout: 600_000, timeoutMs: 700_000 } })).toBe(
+        630_000,
+      );
+    }
+    expect(resolve({ timeoutMs: 600_000 })).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
+    expect(resolve({ waitFor: { for: "stable" } })).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
+    const previousFloor = process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR];
+    process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = "700000";
+    try {
+      expect(resolve({ waitFor: { timeout: 600_000 } })).toBe(700_000);
+    } finally {
+      if (previousFloor === undefined) {
+        delete process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR];
+      } else {
+        process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = previousFloor;
+      }
+    }
+  });
+  test("putAppFile legacy single-file shape uses one push floor", () => {
+    expect(
+      resolveMcpRequestTimeoutMs({
+        id: "legacy-file",
+        type: "mcp_request",
+        method: "tools/call",
+        params: {
+          name: "putAppFile",
+          arguments: {
+            appId: "example",
+            container: "data",
+            destinationPath: "fixture",
+            contentText: "x",
+          },
+        },
+      }),
+    ).toBe(150_000);
+  });
+  test.each(["tapOn", "listDevices", "observe"])(
+    "%s unrelated arguments keep the existing deadline",
+    (name) => {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "unrelated",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name,
+            arguments: { timeout: 600_000, timeoutMs: 600_000, files: new Array(100) },
+          },
+        }),
+      ).toBe(name === "observe" ? DEFAULT_OBSERVE_MCP_TIMEOUT_MS : DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    },
+  );
+});
+
+test("request budget constants are the tool implementation constants", () => {
+  expect(DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs).toBe(DEFAULT_VM_SNAPSHOT_TIMEOUT_MS);
+  expect(schemaSnapshotMaxMs).toBe(MAX_VM_SNAPSHOT_TIMEOUT_MS);
+  expect(coordinatorDefaultMs).toBe(BARRIER_TIMEOUT_MS);
+  expect(explorationDefaultMs).toBe(DEFAULT_EXPLORE_TIMEOUT_MS);
+  expect(storagePushMs).toBe(SHARED_STORAGE_PUSH_TIMEOUT_MS);
+  expect(appPushMs).toBe(APP_FILE_PUSH_TIMEOUT_MS);
 });

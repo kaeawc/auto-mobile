@@ -1,3 +1,4 @@
+import { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -73,7 +74,7 @@ import { readAndroidPackageProcesses } from "../utils/android-cmdline-tools/andr
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
-const APP_FILE_PUSH_TIMEOUT_MS = 120_000;
+export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {

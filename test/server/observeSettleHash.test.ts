@@ -1,3 +1,4 @@
+import { androidEnabledObservation } from "../helpers/androidEnabledCapture";
 import { describe, expect, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import { hashHierarchyForSettle } from "../../src/server/observeTools";
@@ -118,4 +119,13 @@ describe("hashHierarchyForSettle", () => {
 
     expect(hashHierarchyForSettle(valueChanged)).not.toBe(hashHierarchyForSettle(iosHierarchy));
   });
+});
+
+test("settle hash sees an enabled-only flip after captured Android conversion", () => {
+  const enabled = androidEnabledObservation();
+  const disabled = androidEnabledObservation("false");
+  expect(hashHierarchyForSettle(enabled.viewHierarchy)).not.toBeNull();
+  expect(hashHierarchyForSettle(disabled.viewHierarchy)).not.toBe(
+    hashHierarchyForSettle(enabled.viewHierarchy),
+  );
 });

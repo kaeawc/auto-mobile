@@ -34,6 +34,7 @@ import {
   type StoppableProcess,
 } from "../../utils/ChildProcessTracker";
 import {
+  VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -507,49 +508,76 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for FFmpeg video recording.");
     }
 
-    if (backendHandle.platform === "android") {
-      await waitForExit(
-        backendHandle.captureTracker.process,
-        backendHandle.captureTracker.exitPromise,
-      );
+    // A fulfilled tracked exit promise proves capture teardown; signaling alone
+    // does not. Leave failures from this wait outside the terminal path.
+    await waitForExit(
+      backendHandle.captureTracker.process,
+      backendHandle.captureTracker.exitPromise,
+      {
+        timeoutMs:
+          backendHandle.platform === "ios"
+            ? IOS_RECORDING_STOP_TIMEOUT_MS
+            : PROCESS_EXIT_TIMEOUT_MS,
+        timer: this.timer,
+      },
+    );
 
-      if (backendHandle.ffmpegTracker) {
+    try {
+      if (backendHandle.platform === "ios") {
+        await this.postProcessRecording(backendHandle);
+      } else if (backendHandle.ffmpegTracker) {
         await waitForExit(
           backendHandle.ffmpegTracker.process,
           backendHandle.ffmpegTracker.exitPromise,
+          { timer: this.timer },
         );
       }
-    } else {
-      // iOS: simctl writes the moov atom only after SIGINT, so give it a generous
-      // window to finalize the file before escalating to SIGKILL. A premature
-      // SIGKILL truncates the raw .mov and breaks the ffmpeg `-c copy` remux.
-      await waitForExit(
-        backendHandle.captureTracker.process,
-        backendHandle.captureTracker.exitPromise,
-        { timeoutMs: IOS_RECORDING_STOP_TIMEOUT_MS },
+      const sizeBytes = await getFileSize(handle.outputPath);
+      if (!sizeBytes) {
+        throw new ActionableError("The finalized recording is missing or contains zero bytes.");
+      }
+      // Probe the produced codec: the iOS copy path can preserve HEVC.
+      const codec = await this.codecProbe.codec(handle.outputPath);
+      this.logProcessWarnings("capture", backendHandle.captureTracker);
+      if (backendHandle.ffmpegTracker) {
+        this.logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
+      }
+      return {
+        recordingId: handle.recordingId,
+        outputPath: handle.outputPath,
+        startedAt: handle.startedAt,
+        endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
+        sizeBytes,
+        codec,
+      };
+    } catch (error) {
+      // Capture is gone; a failed encoder cannot make this recording recoverable.
+      const cleanupError = await this.cleanupStartingTrackers(
+        [backendHandle.ffmpegTracker].filter(
+          (tracker): tracker is ProcessTracker => tracker !== undefined,
+        ),
       );
-      await this.postProcessRecording(backendHandle);
+      if (cleanupError) {
+        logger.warn(
+          `[FfmpegVideo] Failed to clean up recording encoder: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      if (backendHandle.capturePath) {
+        try {
+          await this.captureFileRemover.remove(backendHandle.capturePath);
+        } catch (cleanupError) {
+          logger.warn(
+            `[FfmpegVideo] Failed to remove unusable raw recording: ${errorMessage(cleanupError)}`,
+            cleanupError,
+          );
+        }
+      }
+      throw new VideoCaptureFinalizationError(
+        `Capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
+        { cause: error },
+      );
     }
-
-    const sizeBytes = await getFileSize(handle.outputPath);
-    // Report what was actually produced. The iOS `-c copy` fast path preserves
-    // the simctl source (HEVC on modern hardware), while the re-encode branches
-    // emit H.264 — a single constant mislabeled the common case (#4965).
-    const codec = await this.codecProbe.codec(handle.outputPath);
-
-    this.logProcessWarnings("capture", backendHandle.captureTracker);
-    if (backendHandle.ffmpegTracker) {
-      this.logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
-    }
-
-    return {
-      recordingId: handle.recordingId,
-      outputPath: handle.outputPath,
-      startedAt: handle.startedAt,
-      endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
-      sizeBytes,
-      codec,
-    };
   }
 
   async forceStop(handle: RecordingHandle): Promise<void> {
@@ -567,6 +595,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           timeoutMs: 0,
           forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
           signal: "SIGKILL",
+          timer: this.timer,
         });
       }),
     );
@@ -1140,7 +1169,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // can lag behind process exit on a loaded runner. Poll for a stable, non-empty
     // file before failing, so a momentarily-missing file is not a hard error (#2730).
     try {
-      await waitForRecordingFileReady(capturePath);
+      await waitForRecordingFileReady(capturePath, { timer: this.timer });
     } catch (error) {
       const reason = errorMessage(error);
       throw new ActionableError(
@@ -1187,6 +1216,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise, {
       timeoutMs: FFMPEG_POST_PROCESS_TIMEOUT_MS,
       signal: null,
+      timer: this.timer,
     });
 
     if (isFailedExitState(ffmpegTracker.exitState)) {
@@ -1422,7 +1452,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
 
     const sizeBytes = await getFileSize(outputPath);
-    if (!sizeBytes || sizeBytes <= 0) {
+    if (!sizeBytes) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage("FFmpeg output file is empty", args, tracker, outputPath),
       );

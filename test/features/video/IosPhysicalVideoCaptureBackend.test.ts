@@ -14,7 +14,10 @@ import {
   type CaptureDeviceLister,
   type PhysicalIosCaptureHelper,
 } from "../../../src/features/video/IosPhysicalVideoCaptureBackend";
-import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
+import {
+  VideoCaptureFinalizationError,
+  type VideoCaptureConfig,
+} from "../../../src/features/video/VideoRecorderService";
 import type { DecodedFrame } from "../../../src/features/screen-stream/frameProtocol";
 import type {
   FfmpegClient,
@@ -940,6 +943,36 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await expect(harness.backend.start(makeConfig())).rejects.toThrow(
       "Could not match device 00008030-001C2D3E1234567A",
     );
+  });
+
+  test.each(["no frames", "encoder failure", "zero bytes"])(
+    "fails terminally after physical iOS helper exit: %s",
+    async (failure) => {
+      const harness = makeHarness({ sizeBytes: failure === "zero bytes" ? 0 : 4096 });
+      const handle = await harness.backend.start(makeConfig());
+      if (failure !== "no frames") {
+        harness.helper.emitFrame(4, 2);
+      }
+      if (failure === "encoder failure") {
+        harness.ffmpeg.processes[0].exit(1);
+      }
+      const error = await harness.backend.stop(handle).catch((error: unknown) => error);
+      expect(harness.helper.exited).toBe(true);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        message: expect.stringContaining("no usable video"),
+      });
+    },
+  );
+
+  test("does not declare terminal failure when physical iOS helper exit was not observed", async () => {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.stop = async () => ({ code: null, signal: "SIGKILL" });
+    const error = await harness.backend.stop(handle).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(VideoCaptureFinalizationError);
   });
 
   test("stop reports the helper spawn failure rather than a trust hint", async function () {

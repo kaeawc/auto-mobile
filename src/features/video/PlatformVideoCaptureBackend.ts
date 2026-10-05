@@ -213,18 +213,18 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     );
 
     const adb = this.adbFactory.create(backendHandle.device);
-    let deviceFileFinalized = false;
+    let retainDeviceFile = false;
     try {
       try {
         // Give screenrecord extra time to finalize the file on device. Even
         // though the process has exited, file writes may still be in progress.
         logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
         await this.timer.sleep(1000);
-        deviceFileFinalized = await this.waitForDeviceFileToFinalize(
+        retainDeviceFile = !(await this.waitForDeviceFileToFinalize(
           adb,
           backendHandle.deviceTempPath,
-        );
-        if (!deviceFileFinalized) {
+        ));
+        if (retainDeviceFile) {
           throw new ActionableError(
             `Device recording ${handle.recordingId} did not finish writing before the finalization deadline. ` +
               "The device copy was retained; try stopping the recording again before retrying the pull.",
@@ -240,10 +240,13 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
           handle.recordingId,
         );
       } finally {
-        await this.cleanupDeviceRecording(adb, backendHandle, deviceFileFinalized);
+        await this.cleanupDeviceRecording(adb, backendHandle, retainDeviceFile);
       }
 
       const sizeBytes = await getFileSize(handle.outputPath);
+      if (!sizeBytes) {
+        throw new ActionableError("The pulled recording is missing or contains zero bytes.");
+      }
       logger.info(`[VideoCapture] Final file size: ${sizeBytes} bytes`);
       logger.debug(`[VideoCapture] Output file at ${handle.outputPath}`);
       const codec = await this.codecProbe.codec(handle.outputPath);
@@ -262,11 +265,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // Artifact finalization cannot revive that process, so make the proof
       // available to the ownership layer instead of retaining a dead handle.
       throw new VideoCaptureFinalizationError(
-        `Android capture exited but finalization failed: ${errorMessage(error)}`,
-        // An unstable on-device file is deliberately retained above. Keep the
-        // service owner too, so the public stop operation remains a reachable
-        // recovery path instead of orphaning that deviceTempPath.
-        { cause: error, retainOwnership: !deviceFileFinalized },
+        retainDeviceFile
+          ? `Android capture exited but finalization failed: ${errorMessage(error)}`
+          : `Android capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
+        { cause: error, retainOwnership: retainDeviceFile },
       );
     }
   }
@@ -274,13 +276,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
   private async cleanupDeviceRecording(
     adb: AdbExecutor,
     backendHandle: AndroidBackendHandle,
-    deviceFileFinalized: boolean,
+    retainDeviceFile: boolean,
   ): Promise<void> {
-    // A recording that never stabilized might still be open on the device.
-    // Retain it instead of deleting the only potentially completeable copy.
-    // Once it did stabilize, retain the existing cleanup behavior for a
-    // subsequent pull failure.
-    if (!deviceFileFinalized) {
+    // A non-empty file still observed growing may have a device-side writer
+    // even after the host adb exits. Keep that copy and owner recoverable.
+    if (retainDeviceFile) {
       logger.warn(
         `[VideoCapture] Retaining unstable device file ${backendHandle.deviceTempPath} for recovery`,
       );
@@ -290,8 +290,14 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       try {
         const rmProcess = await adb.spawn(rmArgs);
         await new Promise<void>((resolve) => {
-          rmProcess.once("exit", () => {
-            logger.info(`[VideoCapture] Temp file cleaned up`);
+          rmProcess.once("exit", (code) => {
+            if (code === 0) {
+              logger.info(`[VideoCapture] Temp file cleaned up`);
+            } else {
+              logger.warn(
+                `[VideoCapture] Failed to clean up temp file: rm exited with code ${code}`,
+              );
+            }
             resolve();
           });
           rmProcess.once("error", (err) => {
@@ -379,11 +385,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       return false;
     }
     if (observedFile) {
-      logger.warn(
-        `[VideoCapture] Device file ${deviceTempPath} remained empty after ` +
-          `${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks; retaining it for recovery`,
+      throw new ActionableError(
+        `Device recording remained empty (zero bytes) after ${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks with capture exit confirmed.`,
       );
-      return false;
     }
     logger.warn(
       `[VideoCapture] Could not observe device file ${deviceTempPath}; attempting bounded pull recovery`,

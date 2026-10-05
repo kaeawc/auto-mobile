@@ -13,6 +13,11 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
+import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
+import { trackProcess } from "../../src/utils/ChildProcessTracker";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
@@ -691,6 +696,126 @@ describe("videoRecordingManager", () => {
     }
     expect(stopAttempts).toBe(2);
   });
+
+  test.each(["ios", "android"] as const)(
+    "exited %s backend finalization failure is terminal through the manager",
+    async (platform) => {
+      const device = { ...testDevice, platform };
+      const active = await startVideoRecording({ device, maxDurationSeconds: 1 });
+      const captureTimer = new FakeTimer();
+      captureTimer.enableAutoAdvance();
+      const captureProcess = new FakeChildProcess(captureTimer);
+      captureProcess.exitCode = 0;
+      const tracker = trackProcess(captureProcess);
+      const config = fakeBackend.startCalls[0];
+      const factory = new FakeAdbClientFactory();
+      factory
+        .getFakeClient()
+        .setCommandResultSequence("shell stat -c %s /sdcard/empty.mp4", ["0", "0", "0", "0", "0"]);
+      const captureBackend =
+        platform === "ios"
+          ? new FfmpegVideoProcessingBackend(
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              captureTimer,
+              { remove: async () => {} },
+            )
+          : new PlatformVideoCaptureBackend(factory, captureTimer);
+      if (platform === "ios") {
+        Object.defineProperty(captureBackend, "postProcessRecording", {
+          value: async () => {
+            throw new ActionableError("Raw capture stayed empty (zero bytes).");
+          },
+        });
+      }
+      let stopAttempts = 0;
+      fakeBackend.stop = async (handle) => {
+        stopAttempts++;
+        return captureBackend.stop({
+          ...handle,
+          backendHandle:
+            platform === "ios"
+              ? {
+                  platform,
+                  captureTracker: tracker,
+                  config,
+                  capturePath: path.join(config.outputDirectory, "raw.mov"),
+                }
+              : { kind: "android", ...tracker, device, deviceTempPath: "/sdcard/empty.mp4" },
+        });
+      };
+      await expect(stopVideoRecording(active.recordingId)).rejects.toMatchObject({
+        retainOwnership: false,
+        message: expect.stringContaining("no usable video"),
+      });
+      expect(service.listActiveRecordingIds()).toEqual([]);
+      expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("interrupted");
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      fakeTimer.advanceTime(60_000);
+      await Promise.resolve();
+      expect(stopAttempts).toBe(1);
+      await expect(startVideoRecording({ device })).resolves.toBeDefined();
+      if (platform === "android") {
+        expect(factory.getFakeClient().wasSpawned("rm /sdcard/empty.mp4")).toBe(true);
+      }
+    },
+  );
+
+  test.each(["ios", "android"] as const)(
+    "terminal %s finalization failure releases ownership, cancels retries and allows restart",
+    async (platform) => {
+      const device = { ...testDevice, platform };
+      const active = await startVideoRecording({ device, maxDurationSeconds: 1 });
+      let stopAttempts = 0;
+      fakeBackend.stop = async () => {
+        stopAttempts++;
+        throw new VideoCaptureFinalizationError(
+          `${platform} capture exited: recording produced no usable video (zero bytes / finalization failed). Start a new recording.`,
+        );
+      };
+      const error = await stopVideoRecording(active.recordingId).catch((error: unknown) => error);
+      expect(service.listActiveRecordingIds()).toEqual([]);
+      expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("interrupted");
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      // The archive retention sweep remains; per-recording size monitoring is gone.
+      expect(fakeTimer.getPendingIntervalCount()).toBe(1);
+      fakeTimer.advanceTime(60_000);
+      await Promise.resolve();
+      expect(stopAttempts).toBe(1);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toBeInstanceOf(ActionableError);
+      await expect(startVideoRecording({ device })).resolves.toBeDefined();
+    },
+  );
+
+  test.each(["unconfirmed process", "growing device file"])(
+    "keeps retrying while ownership is retained for %s",
+    async (reason) => {
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 1 });
+      let attempts = 0;
+      fakeBackend.stop = async () => {
+        attempts++;
+        throw reason === "unconfirmed process"
+          ? new ProcessTeardownUnconfirmedError("Capture exit was not observed")
+          : new VideoCaptureFinalizationError("Device file is growing", { retainOwnership: true });
+      };
+      await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+      for (let retry = 0; retry < 4; retry++) {
+        fakeTimer.advanceTime(5000);
+        await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(
+          ActionableError,
+        );
+        expect(attempts).toBe(retry + 2);
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+      }
+      expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+      expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("recording");
+      await expect(startVideoRecording({ device: testDevice })).rejects.toThrow("already active");
+    },
+  );
 
   test("interrupts a row after a backend confirms capture exit but finalization fails", async () => {
     const active = await startVideoRecording({ device: testDevice });

@@ -285,6 +285,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
         const outputPath = path.join(tempDir, "cleanup.mp4");
+        await fsPromises.writeFile(outputPath, "fake-video");
         const codecProbe = {
           async codec(filePath: string): Promise<string> {
             expect(filePath).toBe(outputPath);
@@ -345,6 +346,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
             },
           };
 
+          await fsPromises.writeFile(handle.outputPath, "fake-video");
           const result = await new PlatformVideoCaptureBackend(factory, timer, probe).stop(handle);
 
           expect(result.codec).toBe("hevc");
@@ -482,6 +484,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
+      await fsPromises.writeFile(handle.outputPath, "fake-video");
       await backend.stop(handle);
 
       const commands = fakeClient.getAllCommands();
@@ -500,6 +503,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
+      await fsPromises.writeFile(handle.outputPath, "fake-video");
       await backend.stop(handle);
 
       expect(killSignals).toEqual([]);
@@ -573,6 +577,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       (handle.backendHandle as any).exitPromise = exitPromise;
       (handle.backendHandle as any).exitState.exitCode = null;
 
+      await fsPromises.writeFile(handle.outputPath, "fake-video");
       await backend.stop(handle);
 
       expect(killSignals).toContain("SIGINT");
@@ -699,14 +704,14 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "unstable.mp4"), fakeProcess);
 
-      await expect(backend.stop(handle)).rejects.toThrow(/did not finish writing/);
+      await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: true });
 
       expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(5);
       expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
       expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
     });
 
-    test("retains a confirmed zero-byte device file instead of accepting an empty pull", async () => {
+    test("fails terminally and removes a zero-byte device file after capture exit", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeClient = fakeFactory.getFakeClient();
       const fakeTimer = new FakeTimer();
@@ -724,11 +729,80 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "empty.mp4"), fakeProcess);
 
-      await expect(backend.stop(handle)).rejects.toThrow(/did not finish writing/);
-
+      const error = await backend.stop(handle).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        message: expect.stringContaining("no usable video"),
+      });
+      expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(5);
       expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
-      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
+      expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
     });
+
+    test.each(["nonzero", "error", "reject"] as const)(
+      "zero-byte terminal cleanup warns on rm %s and preserves the typed failure",
+      async (outcome) => {
+        const factory = new FakeAdbClientFactory();
+        const adb = factory.getFakeClient();
+        adb.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
+          "0",
+          "0",
+          "0",
+          "0",
+          "0",
+        ]);
+        if (outcome === "nonzero") {
+          adb.setSpawnExit("shell rm ", 1);
+        } else if (outcome === "error") {
+          adb.setSpawnError("shell rm ", new Error("cleanup error"));
+        } else {
+          adb.setSpawnRejection("shell rm ", new Error("cleanup denied"));
+        }
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const captureProcess = new FakeChildProcess(timer);
+        captureProcess.exitCode = 0;
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          await expect(
+            new PlatformVideoCaptureBackend(factory, timer).stop(
+              buildAndroidStopHandle(path.join(tempDir, "cleanup-failure.mp4"), captureProcess),
+            ),
+          ).rejects.toMatchObject({ retainOwnership: false });
+          expect(adb.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining("Failed to clean up temp file"),
+          );
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each(["missing", "empty"] as const)(
+      "rejects a successful pull whose host output is %s",
+      async (output) => {
+        const factory = new FakeAdbClientFactory();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const captureProcess = new FakeChildProcess(timer);
+        captureProcess.exitCode = 0;
+        const outputPath = path.join(tempDir, "unusable.mp4");
+        if (output === "empty") {
+          await fsPromises.writeFile(outputPath, "");
+        }
+        await expect(
+          new PlatformVideoCaptureBackend(factory, timer).stop(
+            buildAndroidStopHandle(outputPath, captureProcess),
+          ),
+        ).rejects.toMatchObject({
+          retainOwnership: false,
+          message: expect.stringContaining("no usable video"),
+        });
+        expect(factory.getFakeClient().wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
+      },
+    );
 
     // issue #6291: a stop-right-after-start pull failure must not leak the raw
     // `adb pull failed with exit code N` — it should retry, then surface a

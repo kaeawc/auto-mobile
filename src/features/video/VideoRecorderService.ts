@@ -12,7 +12,7 @@ import type {
   VideoRecordingPanel,
   VideoRecordingDisplayTransition,
 } from "../../models";
-import { toActionableError } from "../../models";
+import { ActionableError, toActionableError } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -92,7 +92,7 @@ export class VideoCaptureStartCleanupError extends Error {
  * stop error: callers may release the capture owner only when that proof is
  * explicit.
  */
-export class VideoCaptureFinalizationError extends Error {
+export class VideoCaptureFinalizationError extends ActionableError {
   /**
    * `true` means the backend left a recoverable device artifact behind. The
    * service must retain its handle so a later stop can retry finalization.
@@ -383,7 +383,7 @@ export class VideoRecorderService {
     try {
       stopResult = await this.backend.stop(handle);
     } catch (error) {
-      throw this.handleStopFailure(active, error);
+      throw await this.handleStopFailure(active, error);
     }
     if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
@@ -431,7 +431,7 @@ export class VideoRecorderService {
    * {@link stopActiveRecording} to keep that method's branching within the
    * complexity ratchet.
    */
-  private handleStopFailure(active: ActiveRecordingState, error: unknown): unknown {
+  private async handleStopFailure(active: ActiveRecordingState, error: unknown): Promise<unknown> {
     const recordingId = active.recordingId;
     if (error instanceof ProcessTeardownUnconfirmedError) {
       return toActionableError(
@@ -451,10 +451,15 @@ export class VideoRecorderService {
       // failed. Keeping this handle would permanently block a new capture,
       // even though force-stop cannot recover the already-removed source.
       this.activeRecordings.delete(recordingId);
-      return toActionableError(
-        error,
-        `Recording ${recordingId} stopped but could not be finalized`,
-      );
+      try {
+        await this.removeRecordingArtifacts(recordingId, active.outputPath);
+      } catch (cleanupError) {
+        this.log.warn(
+          `[VideoRecorderService] Failed to remove unusable recording artifacts for ${recordingId}: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      return error;
     }
     // A backend may fail before, during, or after its platform teardown. A raw
     // generic error carries no proof that the device capture exited, so it must

@@ -19,6 +19,7 @@ import {
   type StoppableProcess,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import {
+  VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
   type VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
@@ -93,6 +94,59 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       device: mockDevice,
     };
   });
+
+  test.each([null, 0])(
+    "fails terminally after iOS capture exit when the raw file size is %s",
+    async (size) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const removed: string[] = [];
+      backend = new FfmpegVideoProcessingBackend(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        timer,
+        {
+          remove: async (filePath) => {
+            removed.push(filePath);
+          },
+        },
+      );
+      const captureTracker = createProcessTracker();
+      captureTracker.process.exitCode = 0;
+      captureTracker.exitState.exitCode = 0;
+      captureTracker.exitPromise = Promise.resolve();
+      Object.defineProperty(backend, "postProcessRecording", {
+        value: async () => {
+          await waitForRecordingFileReady("/fake/raw.mov", {
+            timer,
+            probe: { size: async () => size },
+          });
+        },
+      });
+      const error = await backend
+        .stop({
+          recordingId: mockConfig.recordingId,
+          outputPath: mockConfig.outputPath,
+          startedAt: mockConfig.startedAt,
+          backendHandle: {
+            platform: "ios",
+            captureTracker,
+            capturePath: "/fake/raw.mov",
+            config: mockConfig,
+          },
+        })
+        .catch((error: unknown) => error);
+      expect(removed).toEqual(["/fake/raw.mov"]);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        message: expect.stringContaining("no usable video"),
+      });
+    },
+  );
 
   test("starts iOS recording through the injected SimCtl argv boundary", async function () {
     const timer = new FakeTimer();

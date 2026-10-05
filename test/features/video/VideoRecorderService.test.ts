@@ -5,6 +5,7 @@ import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../../src/utils/filesystem/DefaultFileSystem";
 import {
   VideoRecorderService,
+  VideoCaptureFinalizationError,
   VideoCaptureStartCleanupError,
   parseVideoRecordingConfig,
   DEFAULT_VIDEO_RECORDING_CONFIG,
@@ -410,6 +411,64 @@ describe("VideoRecorderService", () => {
     await expect(service.stopRecording(recording.recordingId)).resolves.toMatchObject({
       recordingId: recording.recordingId,
     });
+  });
+
+  test("terminal finalization failure cleans recording artifacts and remains typed", async () => {
+    const removed: string[] = [];
+    const recorder = new VideoRecorderService({
+      backend,
+      archiveRoot,
+      securePermissions,
+      idGenerator: new CountingIdGenerator("terminal"),
+      fileSystem: {
+        rm: async (filePath) => {
+          removed.push(String(filePath));
+        },
+      },
+    });
+    const device = { deviceId: "terminal-device", platform: "ios" as const };
+    const recording = await recorder.startRecording({ device });
+    backend.stop = async () => {
+      throw new VideoCaptureFinalizationError(
+        "Recording produced no usable video. Start a new recording.",
+      );
+    };
+    const error = await recorder
+      .stopRecording(recording.recordingId)
+      .catch((error: unknown) => error);
+    expect(recorder.listActiveRecordingIds()).toEqual([]);
+    expect(removed).toEqual([path.dirname(recording.outputPath)]);
+    expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+    expect(error).toBeInstanceOf(ActionableError);
+    await expect(recorder.startRecording({ device })).resolves.toBeDefined();
+  });
+
+  test("terminal cleanup failure warns and still releases ownership with the original typed error", async () => {
+    const warn = mock(() => {});
+    const failure = new VideoCaptureFinalizationError(
+      "Recording produced no usable video. Start a new recording.",
+    );
+    const recorder = new VideoRecorderService({
+      backend,
+      archiveRoot,
+      securePermissions,
+      idGenerator: new CountingIdGenerator("cleanup-failure"),
+      fileSystem: {
+        rm: async () => {
+          throw new Error("cleanup denied");
+        },
+      },
+      logger: { info() {}, debug() {}, error() {}, warn },
+    });
+    const device = { deviceId: "cleanup-device", platform: "android" as const };
+    const recording = await recorder.startRecording({ device });
+    backend.stop = async () => {
+      throw failure;
+    };
+    await expect(recorder.stopRecording(recording.recordingId)).rejects.toBe(failure);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("cleanup denied"), expect.any(Error));
+    expect(recorder.listActiveRecordingIds()).toEqual([]);
+    await expect(recorder.startRecording({ device })).resolves.toBeDefined();
   });
 
   test("retains device ownership when a generic backend stop failure has no exit confirmation", async () => {

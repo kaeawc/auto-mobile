@@ -144,6 +144,26 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
   });
 
+  test("unknown TalkBack retries once and marks the scroll result without setting focus", async () => {
+    detector.setDefaultResult(null);
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    let searches = 0;
+    finder.findElementByText = () => (++searches > 1 ? TARGET_ELEMENT : null);
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult(0), makeObserveResult(1)],
+      talkBackExecutor,
+    });
+    const result = await scroll.execute({ ...BASE_OPTIONS, focusTarget: true });
+    expect(result.success).toBe(true);
+    expect(detector.getDetectionCallCount()).toBe(2);
+    expect(accessibilityService.requestActionCalls).toHaveLength(0);
+    expect(result.warnings?.join(" ")).toContain("could not determine");
+  });
+
   describe("when TalkBack is disabled", () => {
     beforeEach(() => {
       detector.setTalkBackEnabled(false);

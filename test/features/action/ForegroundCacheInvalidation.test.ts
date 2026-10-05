@@ -119,7 +119,13 @@ describe("shared foreground cache invalidation", () => {
       const invalidator = wire(action);
       const execute = action.observeScreen.execute.bind(action.observeScreen);
       action.observeScreen.execute = async (options) => {
-        expect(invalidator.calls).toEqual([device]);
+        if (name === "homeScreen" && options?.skipCache) {
+          // Home's cache revalidation happens before dispatch, without caching this read.
+          expect(invalidator.calls).toEqual([]);
+          expect(options.freshness).toBe("fresh");
+        } else {
+          expect(invalidator.calls).toEqual([device]);
+        }
         return execute(options);
       };
       if (action instanceof OpenURL) {

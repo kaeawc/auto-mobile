@@ -238,8 +238,12 @@ export interface SendKeysCommandExecutor {
     command: SendKeysKeyCommand,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    display?: string,
   ): Promise<SendKeysCommandResult>;
-  clear(signal?: AbortSignal): Promise<{ success: boolean; error?: string; retryable?: boolean }>;
+  clear(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<{ success: boolean; error?: string; retryable?: boolean }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -537,6 +541,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     command: SendKeysKeyCommand,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    display?: string,
   ): Promise<SendKeysCommandResult> {
     signal?.throwIfAborted();
     // Explicit keys can move the caret, mutate the selection, or change focus (including IME
@@ -545,7 +550,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
       if (this.device.platform === "android") {
-        const focusResult = await this.requireFocusedAndroidInput(signal);
+        const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
         if (!focusResult.success) {
           return {
             index: -1,
@@ -582,7 +587,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
   }
 
-  async clear(signal?: AbortSignal): Promise<TextActionResult> {
+  async clear(signal?: AbortSignal, display?: string): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
     const clearResult = await this.textClient.clear(
@@ -592,7 +597,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return clearResult;
     }
     logger.warn(`[SendKeys] Android accessibility clear failed: ${clearResult.error}`);
-    const focusResult = await this.requireFocusedAndroidInput(signal);
+    const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
     if (!focusResult.success) {
       return focusResult;
     }
@@ -603,7 +608,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         error: "Cannot determine focused text length for ADB clear fallback",
       };
     }
-    return this.clearEventOnlyForReplace(textLength, signal);
+    return this.clearEventOnlyForReplace(textLength, signal, display);
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -742,7 +747,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       routing = {},
       focusedInputVerified = false,
     } = options;
-    const { signal } = routing;
+    const { signal, display } = routing;
     if (operation === "replace") {
       this.resetCaretState();
     }
@@ -752,11 +757,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           ? this.textClient.replace(text)
           : this.insertText(text, undefined, signal);
       case "eventLast":
-        return this.executeAndroidEventLast(text, operation, signal);
+        return this.executeAndroidEventLast(text, operation, signal, display);
       case "eventAll":
-        return this.executeAndroidEventAll(text, operation, signal, focusedInputVerified);
+        return this.executeAndroidEventAll(text, operation, signal, focusedInputVerified, display);
       case "eventOnly":
-        return this.executeAndroidEventOnly(text, operation, signal);
+        return this.executeAndroidEventOnly(text, operation, signal, display);
       case "ime":
         return this.executeAndroidImeOrFallback(
           text,
@@ -1400,6 +1405,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const chars = Array.from(text);
     const split = await this.findLastKeyEvent(chars, signal);
@@ -1421,6 +1427,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const focusResult = await this.requireFocusedAndroidInput(
       signal,
       ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      display,
     );
     if (!focusResult.success) {
       return focusResult;
@@ -1504,6 +1511,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     signal?: AbortSignal,
     focusedInputVerified = false,
+    display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const graphemes = segmentGraphemes(text);
     if (this.androidCaretUnsafe || !(await this.hasAndroidKeyEvent(graphemes))) {
@@ -1518,6 +1526,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const focusResult = await this.requireFocusedAndroidInput(
         signal,
         ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+        display,
       );
       if (!focusResult.success) {
         return focusResult;
@@ -1789,6 +1798,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     const plans: KeyEventPlan[] = [];
     const chars = Array.from(text);
@@ -1807,6 +1817,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const focusResult = await this.requireFocusedAndroidInput(
       signal,
       ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      display,
     );
     if (!focusResult.success) {
       return focusResult;
@@ -1821,7 +1832,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             "eventOnly replacement requires a known focused text length; use a11y replacement instead",
         };
       }
-      const clearResult = await this.clearEventOnlyForReplace(textLength, signal);
+      const clearResult = await this.clearEventOnlyForReplace(textLength, signal, display);
       if (!clearResult.success) {
         return clearResult;
       }
@@ -1847,6 +1858,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async clearEventOnlyForReplace(
     count: number,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     let deleted = false;
     try {
@@ -1866,6 +1878,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             signal,
             freshness: "fresh",
             minTimestamp: 0,
+            ...(display === undefined ? {} : { display }),
             skipScreenshot: true,
           }),
         signal,
@@ -1882,6 +1895,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async requireFocusedAndroidInput(
     signal?: AbortSignal,
     error: string = ANDROID_FOCUSED_INPUT_ERROR,
+    display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
     | { success: false; error: string }
@@ -1889,6 +1903,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const observation = await this.observer.execute({
       signal,
       freshness: "fresh",
+      ...(display === undefined ? {} : { display }),
       skipScreenshot: true,
     });
     const hierarchy = observation.viewHierarchy;
@@ -2312,7 +2327,7 @@ export class SendKeys {
       await progress?.(commands.length, commands.length, "Observing final keyboard input state");
       const capture = this.observer.captureScreenshot?.bind(this.observer);
       const observation = await this.observer.execute({
-        display: routing.display,
+        ...(routing.display === undefined ? {} : { display: routing.display }),
         signal,
         freshness: "fresh",
         minTimestamp,
@@ -2635,9 +2650,9 @@ export class SendKeys {
             ...(result.error ? { error: result.error } : {}),
           };
         }
-        return this.executor.key(command, signal, onDispatch);
+        return this.executor.key(command, signal, onDispatch, display);
       case "clear":
-        return this.executor.clear(signal).then((result) => ({
+        return this.executor.clear(signal, display).then((result) => ({
           index: -1,
           action: "clear",
           success: result.success,

@@ -90,6 +90,10 @@ describe("HomeScreen", () => {
     // Create fakes for testing
     fakeAdb = new FakeAdbExecutor();
     fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setFailureMode(
+      "getMostRecentCachedObserveResult",
+      new Error("No cached observation"),
+    );
     fakeWindow = new FakeWindow();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeTimer = new FakeTimer();
@@ -223,6 +227,8 @@ describe("HomeScreen", () => {
       });
 
       test.each([
+        { surface: "folder", deviceId: 5600 },
+        { surface: "folder", deviceId: 5602 },
         { surface: "allapps", deviceId: 5600 },
         { surface: "allapps", deviceId: 5602 },
         { surface: "widgets", deviceId: 5600 },
@@ -241,11 +247,16 @@ describe("HomeScreen", () => {
           expect(result.success).toBe(true);
           expect(result).not.toHaveProperty("message");
           expect(result.error).toBeUndefined();
-          expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+          expect(
+            fakeAdb.getExecutedCommands().filter((command) => command === "shell input keyevent 3"),
+          ).toHaveLength(1);
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
         },
       );
 
       test.each([
+        { surface: "folder", deviceId: 5600 },
+        { surface: "folder", deviceId: 5602 },
         { surface: "allapps", deviceId: 5600 },
         { surface: "allapps", deviceId: 5602 },
         { surface: "widgets", deviceId: 5600 },
@@ -315,8 +326,9 @@ describe("HomeScreen", () => {
       );
 
       test.each([5600, 5602])(
-        "an unchanged home workspace on emulator-%s still reports already-home",
+        "presses Home on an unchanged home workspace on emulator-%s and reports already-home",
         async (deviceId) => {
+          getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
           fakeObserveScreen.setObserveResult(launcherObservation("home", deviceId));
 
           const result = await homeScreen.execute();
@@ -324,8 +336,289 @@ describe("HomeScreen", () => {
           expect(result.success).toBe(true);
           expect(result.message).toBe("Already on the home screen");
           expect(result.error).toBeUndefined();
+          expect(
+            fakeAdb.getExecutedCommands().filter((command) => command === "shell input keyevent 3"),
+          ).toHaveLength(1);
+          expect(getInstanceSpy).toHaveBeenCalledTimes(1);
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
         },
       );
+
+      test.each([5600, 5602])(
+        "revalidates a cached home workspace before dispatching Home from the drawer on emulator-%s",
+        async (deviceId) => {
+          const cached = launcherObservation("home", deviceId);
+          // Even a fresh-looking cache acquired outside execute() has no proof for this call.
+          cached.freshness = { isFresh: true };
+          fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", null);
+          const cache = spyOn(
+            fakeObserveScreen,
+            "getMostRecentCachedObserveResult",
+          ).mockResolvedValue({ ...cached });
+          fakeObserveScreen.setObserveSequence([
+            launcherObservation("allapps", deviceId),
+            launcherObservation("home", deviceId),
+          ]);
+          try {
+            const result = await homeScreen.execute();
+            expect(result.success).toBe(true);
+            expect(result).not.toHaveProperty("message");
+            expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+            expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+            expect(fakeObserveScreen.getExecuteOptions()[0]).toMatchObject({
+              freshness: "fresh",
+              skipScreenshot: true,
+            });
+            // The baseline is refreshed without modifying the stored cache object.
+            expect(cached.viewHierarchy).toBe(launcherObservation("home", deviceId).viewHierarchy);
+          } finally {
+            cache.mockRestore();
+          }
+        },
+      );
+
+      test.each(["home", "allapps"])(
+        "reads a cached %s hierarchy once before deciding, without a redundant read",
+        async (surface) => {
+          const cached = launcherObservation(surface, 5600);
+          fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", null);
+          const cache = spyOn(
+            fakeObserveScreen,
+            "getMostRecentCachedObserveResult",
+          ).mockResolvedValue({ ...cached });
+          fakeObserveScreen.setObserveSequence([
+            launcherObservation(surface, 5600),
+            launcherObservation("home", 5600),
+          ]);
+          try {
+            const result = await homeScreen.execute();
+            expect(result.success).toBe(true);
+            expect(result.message).toBe(
+              surface === "home" ? "Already on the home screen" : undefined,
+            );
+            expect(
+              fakeAdb
+                .getExecutedCommands()
+                .filter((command) => command === "shell input keyevent 3"),
+            ).toHaveLength(1);
+            expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+          } finally {
+            cache.mockRestore();
+          }
+        },
+      );
+
+      test.each(["throws", "critical fallback", "hierarchy error"] as const)(
+        "presses Home with an unknown baseline when the fresh read %s despite cached Home",
+        async (failure) => {
+          const cached = launcherObservation("home", 5600);
+          cached.screenshotPath = "stale.png";
+          const cache = spyOn(
+            fakeObserveScreen,
+            "getMostRecentCachedObserveResult",
+          ).mockResolvedValue({ ...cached });
+          const fresh: ObserveResult = {
+            observationId: "failed-read",
+            updatedAt: fakeTimer.now(),
+            display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+            screenSize: { width: 0, height: 0 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+            error: "Observation failed due to device access error",
+            errors: [
+              { phase: "critical", message: "Observation failed due to device access error" },
+            ],
+          };
+          if (failure === "hierarchy error") {
+            fresh.viewHierarchy = {
+              ...cached.viewHierarchy,
+              hierarchy: { error: "hierarchy unavailable" },
+            };
+          }
+          let baseline: ObserveResult | undefined;
+          const originalInteraction = homeScreen.observedInteraction.bind(homeScreen);
+          const interaction = spyOn(homeScreen, "observedInteraction").mockImplementation(
+            (block, options) =>
+              originalInteraction(async (previous, fence) => {
+                const result = await block(previous, fence);
+                baseline = { ...previous };
+                return result;
+              }, options),
+          );
+          fakeObserveScreen.setObserveSequence([fresh, launcherObservation("home", 5600)]);
+          if (failure === "throws") {
+            fakeObserveScreen.setFailureMode("execute", new Error("fresh read failed"));
+          }
+          // The fake records each execute, including rejection; only the pre-dispatch read fails.
+          const originalExecute = fakeObserveScreen.execute.bind(fakeObserveScreen);
+          const reads: boolean[] = [];
+          const execute = spyOn(fakeObserveScreen, "execute").mockImplementation(
+            async (options) => {
+              reads.push(fakeAdb.getExecutedCommands().includes("shell input keyevent 3"));
+              try {
+                return await originalExecute(options);
+              } finally {
+                if (failure === "throws") {
+                  fakeObserveScreen.setFailureMode("execute", null);
+                  fakeObserveScreen.setObserveResult(launcherObservation("home", 5600));
+                }
+              }
+            },
+          );
+          try {
+            const result = await homeScreen.execute();
+            expect(result.success).toBe(true);
+            expect(result.error).toBeUndefined();
+            expect(result).not.toHaveProperty("message");
+            expect(
+              fakeAdb
+                .getExecutedCommands()
+                .filter((command) => command === "shell input keyevent 3"),
+            ).toHaveLength(1);
+            expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+            expect(reads).toEqual([false, true]);
+            expect(baseline?.viewHierarchy).toBeUndefined();
+            expect(baseline).not.toHaveProperty("screenshotPath");
+            expect(cached.viewHierarchy).toBe(launcherObservation("home", 5600).viewHierarchy);
+          } finally {
+            execute.mockRestore();
+            interaction.mockRestore();
+            cache.mockRestore();
+          }
+        },
+      );
+
+      test.each(["before", "during throw", "during fallback", "ambient"] as const)(
+        "propagates cancellation %s the fresh hierarchy read without pressing Home",
+        async (when) => {
+          const cached = launcherObservation("home", 5600);
+          const cache = spyOn(
+            fakeObserveScreen,
+            "getMostRecentCachedObserveResult",
+          ).mockResolvedValue({ ...cached });
+          const controller = new AbortController();
+          if (when === "before") {
+            controller.abort();
+          }
+          fakeObserveScreen.setObserveResult(() => {
+            controller.abort();
+            if (when === "during fallback") {
+              return {
+                observationId: "cancelled-read",
+                updatedAt: fakeTimer.now(),
+                display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+                screenSize: { width: 0, height: 0 },
+                systemInsets: cached.systemInsets,
+              };
+            }
+            throw new Error(OPERATION_CANCELLED_MESSAGE);
+          });
+          try {
+            const request = () =>
+              homeScreen.execute(undefined, when === "ambient" ? undefined : controller.signal);
+            await expect(
+              when === "ambient" ? runWithAbortSignal(controller.signal, request) : request(),
+            ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+            expect(fakeObserveScreen.getExecuteCallCount()).toBe(when === "before" ? 0 : 1);
+            expect(
+              fakeAdb
+                .getExecutedCommands()
+                .filter((command) => command === "shell input keyevent 3"),
+            ).toHaveLength(0);
+          } finally {
+            cache.mockRestore();
+          }
+        },
+      );
+
+      test("replaces cached-only fields with the successful pre-dispatch observation", async () => {
+        const cached = launcherObservation("home", 5600);
+        cached.screenshotPath = "stale.png";
+        cached.deviceLock = { locked: true, keyguardShowing: true };
+        cached.backStack = { depth: 1, activities: [], tasks: [] };
+        cached.activeWindow = { appId: "stale.app", activityName: "Stale", layoutSeqSum: 1 };
+        const fresh = launcherObservation("folder", 5600);
+        const cache = spyOn(
+          fakeObserveScreen,
+          "getMostRecentCachedObserveResult",
+        ).mockResolvedValue({ ...cached });
+        let baseline: ObserveResult | undefined;
+        const originalInteraction = homeScreen.observedInteraction.bind(homeScreen);
+        const interaction = spyOn(homeScreen, "observedInteraction").mockImplementation(
+          (block, options) =>
+            originalInteraction(async (previous, fence) => {
+              const result = await block(previous, fence);
+              baseline = { ...previous };
+              return result;
+            }, options),
+        );
+        const reads: boolean[] = [];
+        fakeObserveScreen.setObserveResult((index) => {
+          reads.push(fakeAdb.getExecutedCommands().includes("shell input keyevent 3"));
+          return index === 0 ? fresh : launcherObservation("home", 5600);
+        });
+        try {
+          const result = await homeScreen.execute();
+          expect(result.success).toBe(true);
+          expect(result).not.toHaveProperty("message");
+          expect(baseline).toEqual(fresh);
+          expect(cached).toHaveProperty("screenshotPath", "stale.png");
+          expect(cached.viewHierarchy).toBe(launcherObservation("home", 5600).viewHierarchy);
+          expect(reads).toEqual([false, true]);
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+          expect(
+            fakeAdb.getExecutedCommands().filter((command) => command === "shell input keyevent 3"),
+          ).toHaveLength(1);
+        } finally {
+          interaction.mockRestore();
+          cache.mockRestore();
+        }
+      });
+
+      test("reads the foreground app before pressing Home and comparing with the launcher", async () => {
+        const app = createObserveResult();
+        app.viewHierarchy = {
+          packageName: "com.android.settings",
+          hierarchy: { node: { $: { class: "Settings" } } },
+        };
+        const reads: boolean[] = [];
+        fakeObserveScreen.setObserveResult((index) => {
+          reads.push(fakeAdb.getExecutedCommands().includes("shell input keyevent 3"));
+          return index === 0 ? app : launcherObservation("home", 5600);
+        });
+        const result = await homeScreen.execute();
+        expect(result.success).toBe(true);
+        expect(result).not.toHaveProperty("message");
+        expect(reads).toEqual([false, true]);
+        expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+        expect(
+          fakeAdb.getExecutedCommands().filter((command) => command === "shell input keyevent 3"),
+        ).toHaveLength(1);
+      });
+
+      test("reuses a read already acquired in this call when the cache needs refreshing", async () => {
+        const cached = launcherObservation("home", 5600);
+        cached.freshness = { isFresh: false };
+        fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", null);
+        const cache = spyOn(
+          fakeObserveScreen,
+          "getMostRecentCachedObserveResult",
+        ).mockResolvedValue({ ...cached });
+        fakeObserveScreen.setObserveSequence([
+          launcherObservation("allapps", 5600),
+          launcherObservation("home", 5600),
+        ]);
+        try {
+          const result = await homeScreen.execute();
+          expect(result.success).toBe(true);
+          expect(result).not.toHaveProperty("message");
+          expect(
+            fakeAdb.getExecutedCommands().filter((command) => command === "shell input keyevent 3"),
+          ).toHaveLength(1);
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+        } finally {
+          cache.mockRestore();
+        }
+      });
     });
 
     test("reuses the verified configured launcher for a custom Android home package", async () => {

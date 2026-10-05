@@ -681,6 +681,48 @@ function createDeviceShutdownReservations(
   return factory ? factory(port) : new DeviceShutdownReservations(port);
 }
 
+interface StopAndroidEmulatorRecoveryOptions {
+  device: PooledDevice;
+  avdName: string;
+  retainLeaseUntil: (settlement: Promise<unknown>) => void;
+  allowActiveStop: boolean;
+  handoffOwner: symbol;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+}
+
+interface RebindSameAvdReplacementSessionOptions {
+  device: PooledDevice;
+  avdName: string;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+  preservedAutolockSessionId: string | undefined;
+  recoveryImage: DeviceInfo;
+  handoffOwner: symbol;
+}
+
+interface BindRecoveredAndroidDeviceSessionOptions {
+  previousDeviceId: string;
+  avdName: string;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+  ready: BootedDevice;
+  recoveryImage: DeviceInfo;
+  childProcess: ChildProcess | null;
+  preservedAutolockSessionId: string | undefined;
+  handoffOwner: symbol | undefined;
+}
+
+interface StopDiscoveredEmulatorOptions {
+  disconnectedDevice: PooledDevice;
+  avdName: string;
+  retainLeaseUntil: (settlement: Promise<unknown>) => void;
+  adoptOnly: boolean;
+  handoffOwner: symbol;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+}
+
 export class DevicePool {
   private devices: Map<string, PooledDevice> = new Map();
   private deviceSessionStarts: Map<string, number> = new Map();
@@ -1302,15 +1344,15 @@ export class DevicePool {
           sessionId,
           session,
         ) =>
-          this.stopAndroidEmulatorForRecovery(
+          this.stopAndroidEmulatorForRecovery({
             device,
             avdName,
             retainLeaseUntil,
             allowActiveStop,
-            owner,
-            sessionId,
-            session,
-          ),
+            handoffOwner: owner,
+            preservedSessionId: sessionId,
+            preservedSession: session,
+          }),
         rebindSameAvdReplacementSession: (
           device,
           avdName,
@@ -1320,15 +1362,15 @@ export class DevicePool {
           image,
           owner,
         ) =>
-          this.rebindSameAvdReplacementSession(
+          this.rebindSameAvdReplacementSession({
             device,
             avdName,
-            sessionId,
-            session,
-            autolockSessionId,
-            image,
-            owner,
-          ),
+            preservedSessionId: sessionId,
+            preservedSession: session,
+            preservedAutolockSessionId: autolockSessionId,
+            recoveryImage: image,
+            handoffOwner: owner,
+          }),
         detachSessionForAndroidRecovery: (device, sessionId, session) =>
           this.detachSessionForAndroidRecovery(device, sessionId, session),
         removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
@@ -1348,17 +1390,17 @@ export class DevicePool {
           autolockSessionId,
           owner,
         ) =>
-          this.bindRecoveredAndroidDeviceSession(
+          this.bindRecoveredAndroidDeviceSession({
             previousDeviceId,
             avdName,
-            sessionId,
-            session,
+            preservedSessionId: sessionId,
+            preservedSession: session,
             ready,
-            image,
+            recoveryImage: image,
             childProcess,
-            autolockSessionId,
-            owner,
-          ),
+            preservedAutolockSessionId: autolockSessionId,
+            handoffOwner: owner,
+          }),
         stopEmulatorProcess: (childProcess, retainLeaseUntil) =>
           this.stopEmulatorProcess(childProcess, retainLeaseUntil),
         consumeAndroidRecoveryCancellation: (device, recoveryDeviceIds) =>
@@ -3271,14 +3313,17 @@ export class DevicePool {
   }
 
   private async stopAndroidEmulatorForRecovery(
-    device: PooledDevice,
-    avdName: string,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
-    allowActiveStop: boolean,
-    handoffOwner: symbol,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
+    options: StopAndroidEmulatorRecoveryOptions,
   ): Promise<"stopped" | "same-avd" | "declined"> {
+    const {
+      device,
+      avdName,
+      retainLeaseUntil,
+      allowActiveStop,
+      handoffOwner,
+      preservedSessionId,
+      preservedSession,
+    } = options;
     const current = this.devices.get(device.id);
     if (this.sameAvdReplacements(device, avdName).length > 0) {
       return "same-avd";
@@ -3303,28 +3348,31 @@ export class DevicePool {
     const trackedProcessExited = trackedProcess && this.getCompletedProcessExit(trackedProcess);
     await this.stopTrackedEmulatorProcess(device.id, retainLeaseUntil);
     if (!hadTrackedProcess || trackedProcessExited) {
-      return await this.stopDiscoveredEmulatorByAvdName(
-        device,
+      return await this.stopDiscoveredEmulatorByAvdName({
+        disconnectedDevice: device,
         avdName,
         retainLeaseUntil,
-        hadTrackedProcess,
+        adoptOnly: hadTrackedProcess,
         handoffOwner,
         preservedSessionId,
         preservedSession,
-      );
+      });
     }
     return "stopped";
   }
 
   private async rebindSameAvdReplacementSession(
-    device: PooledDevice,
-    avdName: string,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
-    preservedAutolockSessionId: string | undefined,
-    recoveryImage: DeviceInfo,
-    handoffOwner: symbol,
+    options: RebindSameAvdReplacementSessionOptions,
   ): Promise<boolean> {
+    const {
+      device,
+      avdName,
+      preservedSessionId,
+      preservedSession,
+      preservedAutolockSessionId,
+      recoveryImage,
+      handoffOwner,
+    } = options;
     const replacements = this.sameAvdReplacements(device, avdName);
     if (replacements.length !== 1) {
       return false;
@@ -3412,16 +3460,19 @@ export class DevicePool {
   }
 
   private async bindRecoveredAndroidDeviceSession(
-    previousDeviceId: string,
-    avdName: string,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
-    ready: BootedDevice,
-    recoveryImage: DeviceInfo,
-    childProcess: ChildProcess | null,
-    preservedAutolockSessionId: string | undefined,
-    handoffOwner: symbol | undefined,
+    options: BindRecoveredAndroidDeviceSessionOptions,
   ): Promise<void> {
+    const {
+      previousDeviceId,
+      avdName,
+      preservedSessionId,
+      preservedSession,
+      ready,
+      recoveryImage,
+      childProcess,
+      preservedAutolockSessionId,
+      handoffOwner,
+    } = options;
     if (!preservedSessionId) {
       await this.trackStartedDeviceProcess(ready, childProcess);
       return;
@@ -3488,14 +3539,17 @@ export class DevicePool {
   }
 
   private async stopDiscoveredEmulatorByAvdName(
-    disconnectedDevice: PooledDevice,
-    avdName: string,
-    retainLeaseUntil: (settlement: Promise<unknown>) => void,
-    adoptOnly: boolean,
-    handoffOwner: symbol,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
+    options: StopDiscoveredEmulatorOptions,
   ): Promise<"stopped" | "same-avd"> {
+    const {
+      disconnectedDevice,
+      avdName,
+      retainLeaseUntil,
+      adoptOnly,
+      handoffOwner,
+      preservedSessionId,
+      preservedSession,
+    } = options;
     const timeoutMs = 30_000;
     const deadlineMs = this.timer.now() + timeoutMs;
     const deadlineController = new AbortController();

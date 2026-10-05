@@ -7,6 +7,10 @@ XCTestRunner Simulator Tests|*navigation events did not reach getNavigationGraph
 XCTestRunner Simulator Tests|*could not bind iOS SDK events to navigation graph session*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests|*testPressKeyForwardDeleteRemovesFollowingCharacter*arrow key was not sent: runner time budget exhausted at caret probe*|RERUN-DONT-FIX|slow macos-26 simulator UI-test timing flap (caret), non-required, rerun; #9565
 XCTestRunner Simulator Tests|*Failed to launch*via Xcode: Timed out while launching application via Xcode*|RERUN-DONT-FIX|slow macos-26 simulator UI-test timing flap (launch), non-required, rerun; #9565
+Run JUnit Runner Emulator*|*could not connect to TCP port 5554: Connection refused*|RERUN-DONT-FIX|emulator start-up infra failure (emulator never launched, often a corrupt system-image download), non-required, rerun; see the emulator diagnostics step
+Run JUnit Runner Emulator*|*Error on ZipFile unknown archive*|RERUN-DONT-FIX|emulator start-up infra failure (system-image download corruption; emulator never launched), non-required, rerun; see the emulator diagnostics step
+Run Playground Automobile Emulator*|*could not connect to TCP port 5554: Connection refused*|RERUN-DONT-FIX|emulator start-up infra failure (emulator never launched, often a corrupt system-image download), non-required, rerun; see the emulator diagnostics step
+Run Playground Automobile Emulator*|*Error on ZipFile unknown archive*|RERUN-DONT-FIX|emulator start-up infra failure (system-image download corruption; emulator never launched), non-required, rerun; see the emulator diagnostics step
 Run JUnit Runner Emulator*|*startDevice automation runner readiness failed*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run JUnit Runner Emulator*|*readiness phase exceeded the remaining deadline*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun
 Run JUnit Runner Emulator*|*is not available in the device pool*|RERUN-DONT-FIX|Android emulator boot or AVD flake, non-required, rerun

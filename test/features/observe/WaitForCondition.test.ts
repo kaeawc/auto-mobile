@@ -47,6 +47,30 @@ function root(children: Record<string, unknown>[]): Record<string, unknown> {
 }
 
 describe("RealWaitForCondition", () => {
+  test("forwards the opt-in Android extraction policy without changing standalone defaults", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs({}, { updatedAt: 20 }), obs({}, { updatedAt: 30 })]);
+    const wait = new RealWaitForCondition(fake, timer);
+    await wait.execute(() => ({ matched: true }), {
+      initialMinTimestampMs: 10,
+      skipWaitForFresh: true,
+      requireFreshExtraction: true,
+    });
+    expect(
+      fake.getExecuteOptions().map((o) => [o.skipWaitForFresh, o.requireFreshExtraction]),
+    ).toEqual([[true, true]]);
+
+    await wait.execute(() => ({ matched: true }), { initialMinTimestampMs: 20 });
+    expect(
+      fake
+        .getExecuteOptions()
+        .slice(1)
+        .map((o) => [o.skipWaitForFresh, o.requireFreshExtraction]),
+    ).toEqual([[false, undefined]]);
+  });
+
   test("standalone finishing mismatch preserves the early timeout and finishing capture", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

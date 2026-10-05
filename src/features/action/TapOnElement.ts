@@ -121,7 +121,9 @@ import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import type {
+  ConditionPredicate,
   WaitForCondition,
+  WaitForConditionOptions,
   WaitForConditionResult,
 } from "../observe/interfaces/WaitForCondition";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
@@ -829,8 +831,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (immediateEffect?.screenChanged !== true) {
       // A stable source tree can arrive before Android begins the activity
-      // transition. Wait for an actual post-tap difference instead of treating
-      // that transient stability as proof that the tap had no effect.
+      // transition. Keep the full detection window before concluding no change;
+      // a quiet source screen is not proof that the tap had no effect.
       return this.waitForPostTapChange(previousObservation, currentObservation, signal);
     }
 
@@ -852,51 +854,96 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   /**
-   * The first post-tap observation showed no change against the baseline yet.
-   * Poll (via the injected waiter/FakeTimer seam) for an actual post-tap
-   * difference, then route a hierarchy-only result through the same settle step
-   * a first-frame hierarchy change takes (issue #6284) rather than trusting the
-   * first differing poll as terminal.
+   * Detect a first effect throughout the original 2500ms window (#6284), then
+   * require a quiet period after a hierarchy-only change. A change can settle
+   * within that first waiter; otherwise continue the same quiet-period state
+   * with only the remainder of its own 2500ms settle budget (5000ms overall).
    */
   private async waitForPostTapChange(
     previousObservation: ObserveResult,
     currentObservation: ObserveResult,
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
-    const effectObservation = await this.waitForCondition.execute(
-      (observation) => ({
-        matched: this.deriveTapEffect(previousObservation, observation)?.screenChanged === true,
-      }),
-      {
-        // The predicate reads activeWindow, which needs per-poll back-stack reconciliation.
-        readBackStackEachPoll: true,
-        timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
-        pollMs: POST_TAP_EFFECT_POLL_MS,
-        signal,
-        // One clock domain end-to-end (issue #6284): seed the poll floor from
-        // the device-authored `updatedAt` of the capture we already hold, not
-        // the host clock, so a device whose clock trails the daemon still
-        // clears the floor with a genuinely fresh repeat capture.
-        initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
-      },
-    );
-    const effect = this.deriveTapEffect(previousObservation, effectObservation.observation);
-    if (!effectObservation.matched && effect?.screenChanged !== true) {
-      return { effect, observation: currentObservation };
-    }
-    if (effect?.basis === "viewHierarchy changed") {
-      return this.settleHierarchyOnlyChange(
-        previousObservation,
-        effectObservation.observation,
-        signal,
+    const started = this.timer.now();
+    let quietHash: string | null = null;
+    let quietSinceMs = 0;
+    const change: { observation?: ObserveResult; seenAt?: number } = {};
+    const predicate: ConditionPredicate = (observation) => {
+      const effect = this.deriveTapEffect(previousObservation, observation);
+      if (effect?.screenChanged === true && effect.basis !== "viewHierarchy changed") {
+        return { matched: true };
+      }
+      const now = this.timer.now();
+      if (effect?.screenChanged === true && change.seenAt === undefined) {
+        change.observation = observation;
+        change.seenAt = now;
+      }
+      // A still source screen must never end detection early.
+      if (change.seenAt === undefined) {
+        return { matched: false };
+      }
+      const hash = this.hashViewHierarchy(observation.viewHierarchy ?? null);
+      if (hash === null || hash !== quietHash) {
+        quietHash = hash;
+        quietSinceMs = now;
+        return { matched: false };
+      }
+      return { matched: now - quietSinceMs >= POST_TAP_SETTLE_QUIET_PERIOD_MS };
+    };
+    const options: WaitForConditionOptions = {
+      // The predicate reads activeWindow, which needs per-poll back-stack reconciliation.
+      readBackStackEachPoll: true,
+      timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
+      pollMs: POST_TAP_EFFECT_POLL_MS,
+      signal,
+      // Keep the floor in the device-authored timestamp domain (#6284).
+      initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
+      // Still screens push nothing; require independent device reads (#9587).
+      skipWaitForFresh: true,
+      requireFreshExtraction: true,
+    };
+    let settled = await this.waitForCondition.execute(predicate, options);
+    const trustedEnteringObservation = change.observation ?? currentObservation;
+    if (settled.timedOut && !settled.screenOff && change.seenAt !== undefined) {
+      const deadline = Math.min(
+        started + 2 * POST_TAP_EFFECT_TIMEOUT_MS,
+        change.seenAt + POST_TAP_EFFECT_TIMEOUT_MS,
       );
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs > 0) {
+        throwIfAborted(signal);
+        settled = await this.waitForCondition.execute(predicate, {
+          ...options,
+          timeoutMs: remainingMs,
+          initialMinTimestampMs: hierarchyUpdatedAtToMillis(
+            this.resolveSettleTimeoutObservation(
+              previousObservation,
+              trustedEnteringObservation,
+              settled,
+            ).viewHierarchy,
+          ),
+        });
+      }
+    }
+    const effectObservation = this.resolveSettleTimeoutObservation(
+      previousObservation,
+      trustedEnteringObservation,
+      settled,
+    );
+    // Preserve a detected change if the device sleeps during its quiet period (#6284).
+    const effect = this.deriveTapEffect(
+      previousObservation,
+      settled.screenOff ? trustedEnteringObservation : effectObservation,
+    );
+    if (!settled.matched && effect?.screenChanged !== true) {
+      return { effect, observation: currentObservation };
     }
     return {
       effect,
       observation: {
-        ...effectObservation.observation,
-        gfxMetrics: effectObservation.observation.gfxMetrics ?? currentObservation.gfxMetrics,
-        perfTiming: effectObservation.observation.perfTiming ?? currentObservation.perfTiming,
+        ...effectObservation,
+        gfxMetrics: effectObservation.gfxMetrics ?? currentObservation.gfxMetrics,
+        perfTiming: effectObservation.perfTiming ?? currentObservation.perfTiming,
       },
     };
   }
@@ -939,9 +986,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let quietSinceMs = 0;
     const settled = await this.waitForCondition.execute(
       (observation) => {
-        const activeWindowChanged =
-          this.compareActiveWindow(previousObservation, observation)?.screenChanged === true;
-        if (activeWindowChanged) {
+        const effect = this.deriveTapEffect(previousObservation, observation);
+        if (
+          this.compareActiveWindow(previousObservation, observation)?.screenChanged === true ||
+          effect?.basis === "screenIdentity changed"
+        ) {
           return { matched: true };
         }
         const currentHash = this.hashViewHierarchy(observation.viewHierarchy ?? null);
@@ -970,6 +1019,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal,
         // Device-clock-domain floor seed (issue #6284). See method doc.
         initialMinTimestampMs: hierarchyUpdatedAtToMillis(currentObservation.viewHierarchy),
+        // A still screen pushes nothing; cached copies cannot prove a quiet period (#9587).
+        skipWaitForFresh: true,
+        requireFreshExtraction: true,
       },
     );
 

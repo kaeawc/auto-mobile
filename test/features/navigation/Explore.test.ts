@@ -193,6 +193,33 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
+    test("omitting maxInteractions stops after the pinned default of 200", async () => {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      let observed = 0;
+      explore.observeScreen = {
+        execute: async () => {
+          observed++;
+          fakeGraph.setCurrentAppId("com.test.app");
+          fakeGraph.setCurrentScreenValue(`Screen${observed}`);
+          return createMockObservation([
+            createMockViewHierarchyNode({
+              text: `Open screen ${observed}`,
+              "resource-id": `com.test:id/next_${observed}`,
+            }),
+          ]);
+        },
+      } as typeof explore.observeScreen;
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+      try {
+        const result = await explore.execute({});
+        expect(result.interactionsPerformed).toBe(200);
+        expect(result.stopReason).toBe("Reached max interactions limit (200)");
+        expect(tap).toHaveBeenCalledTimes(200);
+      } finally {
+        tap.mockRestore();
+      }
+    });
+
     test("does not include permission-denial controls in dry-run interactions", async () => {
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
       (explore as any).observeScreen = {

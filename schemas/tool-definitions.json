@@ -1685,12 +1685,15 @@
       "type": "object",
       "properties": {
         "maxInteractions": {
-          "description": "Max interactions (default: 50)",
-          "type": "number"
+          "description": "Max interactions (default: 200)",
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
         },
         "timeoutMs": {
           "description": "Timeout ms (default: 300000)",
-          "type": "number"
+          "type": "number",
+          "exclusiveMinimum": 0
         },
         "strategy": {
           "description": "Strategy (default: weighted)",
@@ -1703,7 +1706,9 @@
         },
         "resetInterval": {
           "description": "Reset interval (default: 15)",
-          "type": "number"
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
         },
         "mode": {
           "description": "Mode (default: hybrid)",

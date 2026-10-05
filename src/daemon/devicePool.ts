@@ -2190,78 +2190,85 @@ export class DevicePool {
 
     let attemptCount = 0;
 
-    while (assignments.size < requiredCount) {
-      attemptCount++;
-      const elapsed = this.timer.now() - startTime;
+    const allocate = async (): Promise<void> => {
+      while (assignments.size < requiredCount) {
+        attemptCount++;
+        const elapsed = this.timer.now() - startTime;
 
-      if (elapsed > timeoutMs) {
-        await this.rollbackAssignments(assignmentsToRollback);
-        throw new ActionableError(
-          `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
-            refreshFailureContext(refreshFailure) +
-            `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
-            `Suggestions:\n` +
-            `  - Boot additional simulators or emulators that match the plan requirements\n` +
-            `  - Reduce the number of devices required in the test plan\n` +
-            `  - Increase device allocation timeout`,
-        );
-      }
-
-      let assignedThisRound = 0;
-
-      for (const request of sortedRequests) {
-        if (assignments.has(request.sessionId)) {
-          continue;
-        }
-
-        const result = await this.tryAssignDeviceWithCriteria(request.sessionId, request.criteria);
-        if (result.refreshCompleted) {
-          refreshFailure = result.refreshFailure;
-        }
-
-        if (result.success) {
-          assignments.set(request.sessionId, result.deviceId!);
-          if (result.session) {
-            assignmentsToRollback.set(request.sessionId, {
-              deviceId: result.deviceId!,
-              session: result.session,
-            });
-          }
-          assignedThisRound++;
-          logger.info(
-            `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
-              `(${assignments.size}/${requiredCount})`,
-          );
-        } else if (result.livenessUnknown) {
-          await this.rollbackAssignments(assignmentsToRollback);
+        if (elapsed > timeoutMs) {
           throw new ActionableError(
-            `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
-          );
-        } else if (!result.shouldWait) {
-          await this.rollbackAssignments(assignmentsToRollback);
-          const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
-          throw new ActionableError(
-            `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
-              `No matching devices are currently available.\n` +
+            `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
+              refreshFailureContext(refreshFailure) +
+              `Required: ${requiredCount} devices, allocated: ${assignments.size}\n` +
               `Suggestions:\n` +
-              `  - Boot a simulator or emulator that matches the requested criteria\n` +
-              `  - Wait for a device to become idle\n` +
-              `  - Reduce parallel test count to match available devices`,
+              `  - Boot additional simulators or emulators that match the plan requirements\n` +
+              `  - Reduce the number of devices required in the test plan\n` +
+              `  - Increase device allocation timeout`,
           );
         }
-      }
 
-      if (assignments.size >= requiredCount) {
-        break;
-      }
+        let assignedThisRound = 0;
 
-      if (assignedThisRound === 0) {
-        if (attemptCount === 1) {
-          logger.info(`[DevicePool] Waiting for matching devices to become available...`);
+        for (const request of sortedRequests) {
+          if (assignments.has(request.sessionId)) {
+            continue;
+          }
+
+          const result = await this.tryAssignDeviceWithCriteria(
+            request.sessionId,
+            request.criteria,
+          );
+          if (result.refreshCompleted) {
+            refreshFailure = result.refreshFailure;
+          }
+
+          if (result.success) {
+            assignments.set(request.sessionId, result.deviceId!);
+            if (result.session) {
+              assignmentsToRollback.set(request.sessionId, {
+                deviceId: result.deviceId!,
+                session: result.session,
+              });
+            }
+            assignedThisRound++;
+            logger.info(
+              `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
+                `(${assignments.size}/${requiredCount})`,
+            );
+          } else if (result.livenessUnknown) {
+            throw new ActionableError(
+              `Unable to verify iOS simulator liveness for session ${request.sessionId}; iOS discovery failed.`,
+            );
+          } else if (!result.shouldWait) {
+            const summary = this.criteriaMatcher.formatCriteriaSummary(request.criteria);
+            throw new ActionableError(
+              `Failed to allocate device for session ${request.sessionId}${summary}.\n` +
+                `No matching devices are currently available.\n` +
+                `Suggestions:\n` +
+                `  - Boot a simulator or emulator that matches the requested criteria\n` +
+                `  - Wait for a device to become idle\n` +
+                `  - Reduce parallel test count to match available devices`,
+            );
+          }
         }
-        await this.timer.sleep(this.DEVICE_WAIT_INTERVAL_MS);
+
+        if (assignments.size >= requiredCount) {
+          break;
+        }
+
+        if (assignedThisRound === 0) {
+          if (attemptCount === 1) {
+            logger.info(`[DevicePool] Waiting for matching devices to become available...`);
+          }
+          await this.timer.sleep(this.DEVICE_WAIT_INTERVAL_MS);
+        }
       }
-    }
+    };
+
+    await allocate().catch(async (error: unknown) => {
+      await this.rollbackCriteriaAssignments(assignmentsToRollback);
+      throw error;
+    });
 
     const totalElapsed = this.timer.now() - startTime;
     logger.info(
@@ -2270,6 +2277,21 @@ export class DevicePool {
     );
 
     return assignments;
+  }
+
+  private async rollbackCriteriaAssignments(
+    assignments: ReadonlyMap<string, RollbackAssignment>,
+  ): Promise<void> {
+    for (const [sessionId, allocation] of assignments) {
+      try {
+        await this.rollbackAssignments(new Map([[sessionId, allocation]]));
+      } catch (error) {
+        logger.warn(
+          `[DevicePool] Failed to roll back criteria allocation for ${sessionId} on ${allocation.deviceId}`,
+          error,
+        );
+      }
+    }
   }
 
   private async startAdditionalDevices(

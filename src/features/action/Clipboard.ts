@@ -43,6 +43,24 @@ type ClipboardCtrlProxyFactory = (
   adbFactory: AdbClientFactory,
 ) => ClipboardCtrlProxy;
 
+/** cmd clipboard can reject with an exec error or exit zero with an unsupported message. */
+function isClipboardCommandUnavailable(value: unknown): boolean {
+  // The host exec seam wraps production rejections, retaining execFile's error as its cause.
+  const cause =
+    value !== null && typeof value === "object" && "cause" in value ? value.cause : undefined;
+  return [value, cause].some((result) => {
+    if (result === null || typeof result !== "object") {
+      return false;
+    }
+    const stdout = "stdout" in result ? String(result.stdout) : "";
+    const stderr = "stderr" in result ? String(result.stderr) : "";
+    return (
+      stdout.includes("No shell command implementation") ||
+      stderr.includes("No shell command implementation")
+    );
+  });
+}
+
 export class Clipboard {
   // iOS keyboard minimization animations can lag paste delivery by roughly 1.5 seconds (#9078).
   private static readonly PASTE_VERIFICATION_TIMEOUT_MS = 1_500;
@@ -271,12 +289,7 @@ export class Clipboard {
     const a11yClient = this.getAndroidCtrlProxy();
 
     let dispatched = false;
-    const indeterminateResult = (reason: string | undefined): ClipboardResult => ({
-      success: false,
-      action,
-      method: "a11y",
-      error: `Paste outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The paste may have been applied. Do not retry automatically. Observe before retrying.`,
-    });
+    let ctrlProxyReason: string | undefined;
     try {
       const a11yResult = await awaitWhileRequestIsLive(
         a11yClient.requestClipboard(action, text, undefined, undefined, signal, () => {
@@ -299,26 +312,26 @@ export class Clipboard {
       }
 
       logger.warn(`[Clipboard] Accessibility service ${action} failed: ${a11yResult.error}`);
-      if (dispatched && !a11yResult.acknowledged) {
-        return indeterminateResult(a11yResult.error);
-      }
-      if (action === "get") {
-        // On Android 10+, a background service cannot directly read a target app's clipboard.
-        // Working read strategies require foreground target-app code, the default IME role, or
-        // paste-then-read from a focused editable node. `cmd clipboard get` is not a recovery path
-        // on modern Android builds because the shell command is usually unimplemented.
+      ctrlProxyReason = a11yResult.error;
+      if (a11yResult.acknowledged || action === "get") {
+        // A device refusal is final. get also has no shell recovery on modern Android:
+        // reads require foreground target-app code, the default IME, or paste-then-read.
         return {
           success: false,
           action,
-          error: a11yResult.error ?? "Accessibility clipboard get failed",
+          error: a11yResult.error ?? `Accessibility clipboard ${action} failed`,
           method: "a11y",
         };
+      }
+      if (dispatched) {
+        return this.indeterminatePasteResult(a11yResult.error);
       }
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`[Clipboard] Accessibility service error: ${error}`, error);
+      ctrlProxyReason = errorMessage(error);
       if (dispatched) {
-        return indeterminateResult(errorMessage(error));
+        return this.indeterminatePasteResult(ctrlProxyReason);
       }
       if (action === "get") {
         return {
@@ -332,7 +345,7 @@ export class Clipboard {
 
     // Fall back to ADB cmd clipboard
     try {
-      return await this.executeAdbClipboard(action, text, signal);
+      return await this.executeAdbClipboard(action, text, signal, ctrlProxyReason);
     } catch (error) {
       throwIfAborted(signal);
       logger.warn("[Clipboard] Clipboard operation failed", error);
@@ -358,6 +371,15 @@ export class Clipboard {
     return AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
   }
 
+  private indeterminatePasteResult(reason: string | undefined): ClipboardResult {
+    return {
+      success: false,
+      action: "paste",
+      method: "a11y",
+      error: `Paste outcome is indeterminate: the request was dispatched but no result was confirmed (${reason ?? "unknown error"}). The paste may have been applied. Do not retry automatically. Observe before retrying.`,
+    };
+  }
+
   /**
    * Execute clipboard operation via ADB cmd clipboard
    * @param action - Clipboard action to perform
@@ -368,30 +390,28 @@ export class Clipboard {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     signal?: AbortSignal,
+    ctrlProxyReason?: string,
   ): Promise<ClipboardResult> {
+    const unavailableError = `cmd clipboard is not supported on this device/API level${
+      ctrlProxyReason === undefined ? "" : ` (CtrlProxy: ${ctrlProxyReason})`
+    }`;
     try {
       switch (action) {
         case "copy": {
-          if (!text) {
-            return {
-              success: false,
-              action,
-              error: "Text is required for copy action",
-            };
-          }
           // ADB hands the command to the device shell, so preserve user text as one literal word.
+          // executeAndroidClipboard already validated copy text before selecting this fallback.
           throwIfAborted(signal);
           const result = await awaitWhileRequestIsLive(
-            this.adb.executeCommand(`shell cmd clipboard set ${shellQuote(text)}`),
+            this.adb.executeCommand(`shell cmd clipboard set ${shellQuote(text!)}`),
             signal,
           );
 
           // Check if cmd clipboard is supported
-          if (result.includes("No shell command implementation")) {
+          if (isClipboardCommandUnavailable(result)) {
             return {
               success: false,
               action,
-              error: "cmd clipboard is not supported on this device/API level",
+              error: unavailableError,
               method: "adb",
             };
           }
@@ -412,11 +432,11 @@ export class Clipboard {
           );
 
           // Check if cmd clipboard is supported
-          if (result.includes("No shell command implementation")) {
+          if (isClipboardCommandUnavailable(result)) {
             return {
               success: false,
               action,
-              error: "cmd clipboard is not supported on this device/API level",
+              error: unavailableError,
               method: "adb",
             };
           }
@@ -438,11 +458,11 @@ export class Clipboard {
           );
 
           // Check if cmd clipboard is supported
-          if (result.includes("No shell command implementation")) {
+          if (isClipboardCommandUnavailable(result)) {
             return {
               success: false,
               action,
-              error: "cmd clipboard is not supported on this device/API level",
+              error: unavailableError,
               method: "adb",
             };
           }
@@ -457,22 +477,6 @@ export class Clipboard {
 
         case "paste": {
           // For paste, we need to use key event since cmd clipboard doesn't have a paste command
-          // First, try to get clipboard content to verify it exists
-          throwIfAborted(signal);
-          const clipboardContent = await awaitWhileRequestIsLive(
-            this.adb.executeCommand("shell cmd clipboard get"),
-            signal,
-          );
-
-          if (clipboardContent.includes("No shell command implementation")) {
-            return {
-              success: false,
-              action,
-              error: "cmd clipboard is not supported on this device/API level",
-              method: "adb",
-            };
-          }
-
           // Use KEYCODE_PASTE (279) to paste
           throwIfAborted(signal);
           await awaitWhileRequestIsLive(
@@ -481,11 +485,7 @@ export class Clipboard {
           );
 
           logger.info(`[Clipboard] Pasted clipboard via ADB keyevent`);
-          return {
-            success: true,
-            action,
-            method: "adb",
-          };
+          return { success: true, action, method: "adb" };
         }
 
         default:
@@ -501,7 +501,9 @@ export class Clipboard {
       return {
         success: false,
         action,
-        error: `ADB clipboard operation failed: ${errorMessage(error)}`,
+        error: isClipboardCommandUnavailable(error)
+          ? unavailableError
+          : `ADB clipboard operation failed: ${errorMessage(error)}`,
         method: "adb",
       };
     }

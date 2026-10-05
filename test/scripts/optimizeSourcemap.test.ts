@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   optimizeSourceMap,
   selectSourceMaps,
+  shouldStripSources,
   STRIP_SOURCES_ENV,
   type SourceMap,
 } from "../../scripts/build/optimize-sourcemap";
@@ -16,10 +17,28 @@ const original: SourceMap = {
   file: "index.js",
 };
 
+describe("shouldStripSources", () => {
+  for (const value of [undefined, "true", "1", "", "unexpected"]) {
+    test(`strips sources for ${JSON.stringify(value)}`, () => {
+      expect(shouldStripSources(value === undefined ? {} : { [STRIP_SOURCES_ENV]: value })).toBe(
+        true,
+      );
+    });
+  }
+
+  for (const value of ["false", "0", " FALSE ", " 0 "]) {
+    test(`keeps embedded sources for ${JSON.stringify(value)}`, () => {
+      expect(shouldStripSources({ [STRIP_SOURCES_ENV]: value })).toBe(false);
+    });
+  }
+});
+
 describe("optimizeSourceMap", () => {
   test("default keeps repo sources and every other field, nulling only dependency entries", () => {
     const before = JSON.stringify(original);
-    const { map, trimmedCount } = optimizeSourceMap(original);
+    const { map, trimmedCount } = optimizeSourceMap(original, {
+      stripSources: shouldStripSources({ [STRIP_SOURCES_ENV]: "false" }),
+    });
     expect(JSON.stringify(map)).toBe(
       JSON.stringify({ ...original, sourcesContent: ["own source", null, null] }),
     );
@@ -45,7 +64,7 @@ describe("optimizeSourceMap", () => {
     expect(optimizeSourceMap(map, { stripSources: true }).map).toBe(map);
   });
 
-  test("strip opt-in deletes the key and preserves every other field without mutating input", () => {
+  test("strip deletes the key and preserves every other field without mutating input", () => {
     const before = JSON.stringify(original);
     const expected = { ...original };
     delete expected.sourcesContent;
@@ -93,11 +112,15 @@ describe("selectSourceMaps", () => {
   });
 
   test("strip selects every emitted map, with the same options", () => {
-    const env = { [STRIP_SOURCES_ENV]: "true" };
-    const options = { stripSources: env[STRIP_SOURCES_ENV] === "true" };
+    const options = { stripSources: shouldStripSources({}) };
     expect(selectSourceMaps(emitted, index, options)).toEqual([
       { path: index, options },
       { path: worker, options },
     ]);
+  });
+
+  test("opt-out selects only index.js.map", () => {
+    const options = { stripSources: shouldStripSources({ [STRIP_SOURCES_ENV]: "false" }) };
+    expect(selectSourceMaps(emitted, index, options)).toEqual([{ path: index, options }]);
   });
 });

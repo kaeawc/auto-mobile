@@ -3918,11 +3918,14 @@ export class DaemonMcpProxy {
    * An error result may only ESTABLISH a first binding, never SWITCH one: a call
    * that names some OTHER session and fails leaves the connection on the session
    * it already had, so an unissued UUID cannot steal the binding (issue #2737).
+   * executePlan is excluded before checking for a released forwarded session:
+   * the daemon owns plan-session release, and its notification fences only an
+   * already-bound connection. A failed plan on an unbound connection must leave
+   * it unbound, matching rememberSessionUuid on successful results.
    * Three further answers establish nothing:
    *   - a connection already fenced terminally — its session is gone;
-   *   - a tool that owns its own binding lifecycle (`executePlan`), does not
-   *     route by device session (`setToolEnabled`, `setActiveDevice`), only
-   *     observes inventory, or mints its session in the RESULT
+   *   - a tool that does not route by device session (`setToolEnabled`,
+   *     `setActiveDevice`), only observes inventory, or mints its session in the RESULT
    *     (the acquisition tools, handled above);
    *   - an envelope that declares the named session gone
    *     ({@link declaresDeviceSessionInvalid}) — resurrecting it would heartbeat
@@ -3936,6 +3939,9 @@ export class DaemonMcpProxy {
     result: unknown,
     callReleaseEpoch: number,
   ): void {
+    if (name === "executePlan") {
+      return;
+    }
     const releaseReason = this.forwardedSessionReleaseReasonSince(forwardedArgs, callReleaseEpoch);
     if (releaseReason) {
       this.fenceReleasedForwardedSession(forwardedArgs, releaseReason);

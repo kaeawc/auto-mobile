@@ -3,7 +3,7 @@ import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
-import { createStructuredToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
 import {
@@ -171,7 +171,7 @@ const executePlanTool = async (
     },
     () => orchestrator.execute(),
   );
-  return createStructuredToolResponse(result);
+  return withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
 };
 
 // Start test recording tool schema (empty - uses active device)
@@ -236,18 +236,24 @@ const exportPlanTool = async (params: {
     // Check if there's an active recording
     const status = getTestRecordingStatus();
     if (!status) {
-      return createStructuredToolResponse({
-        success: false,
-        error: "No active recording. Start a recording before exporting.",
-      });
+      return withIsErrorOnFailure(
+        createStructuredToolResponse({
+          success: false,
+          error: "No active recording. Start a recording before exporting.",
+        }),
+        false,
+      );
     }
 
     // Validate recording ID if provided
     if (params.recordingId && params.recordingId !== status.recordingId) {
-      return createStructuredToolResponse({
-        success: false,
-        error: `Recording ID ${params.recordingId} does not match active recording ${status.recordingId}.`,
-      });
+      return withIsErrorOnFailure(
+        createStructuredToolResponse({
+          success: false,
+          error: `Recording ID ${params.recordingId} does not match active recording ${status.recordingId}.`,
+        }),
+        false,
+      );
     }
 
     // Stop the recording and get the plan
@@ -264,10 +270,13 @@ const exportPlanTool = async (params: {
     });
   } catch (error) {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);
-    return createStructuredToolResponse({
-      success: false,
-      error: errorMessage(error),
-    });
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({
+        success: false,
+        error: errorMessage(error),
+      }),
+      false,
+    );
   }
 };
 
@@ -323,10 +332,13 @@ const recordStepsTool = async (params: {
   }
 
   if (!serverConfig.isMcpRecordingEnabled()) {
-    return createStructuredToolResponse({
-      success: false,
-      error: "MCP recording is disabled. Enable the 'mcp-recording' feature flag first.",
-    });
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({
+        success: false,
+        error: "MCP recording is disabled. Enable the 'mcp-recording' feature flag first.",
+      }),
+      false,
+    );
   }
 
   try {
@@ -355,11 +367,14 @@ const recordStepsTool = async (params: {
     });
   } catch (error) {
     logger.error(`[recordSteps] Failed: ${errorMessage(error)}`);
-    return createStructuredToolResponse({
-      success: false,
-      action: params.action,
-      error: errorMessage(error),
-    });
+    return withIsErrorOnFailure(
+      createStructuredToolResponse({
+        success: false,
+        action: params.action,
+        error: errorMessage(error),
+      }),
+      false,
+    );
   }
 };
 

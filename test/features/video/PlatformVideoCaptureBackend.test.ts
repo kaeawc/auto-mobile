@@ -10,7 +10,10 @@ import type {
   RecordingHandle,
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
-import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
+import {
+  VideoCaptureFinalizationError,
+  parseVideoRecordingConfig,
+} from "../../../src/features/video/VideoRecorderService";
 import { type BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
@@ -722,21 +725,47 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       };
     }
 
-    // The throughput cap is `floor(maxThroughputMbps * 1000)` Kbps; a zero cap is
-    // treated as "no cap" and the target passes through untouched.
+    // Positive throughput has a 1 Kbps minimum; invalid non-positive throughput
+    // retains the backend's existing no-cap behaviour.
     test.each([
       [5000, 2, 2000, "caps the target to the lower throughput ceiling"],
       [1000, 10, 1000, "leaves the target alone when the ceiling is higher"],
       [1000, 0, 1000, "treats a zero throughput as no cap"],
       [1000, -5, 1000, "treats a negative throughput as no cap"],
       [5000, 1, 1000, "caps at an exact 1 Mbps ceiling"],
-      // LIVE DEFECT: floor(0.0005 * 1000) = 0 ⇒ falsy ⇒ cap silently disabled,
-      // so the full 10000 Kbps target ships despite a 0.5 Kbps throughput budget.
-      [10000, 0.0005, 10000, "sub-1-Kbps throughput floors to 0 and disables the cap"],
+      [10000, 0.0005, 1, "sub-1-Kbps throughput retains the minimum cap"],
+      [10000, Number.MIN_VALUE, 1, "positive throughput underflow retains the minimum cap"],
+      [10000, 0.001, 1, "preserves an exact 1 Kbps ceiling"],
+      [10000, 0.001999, 1, "preserves flooring above the minimum"],
+      [10000, 0.002, 2, "preserves the neighbouring 2 Kbps ceiling"],
     ])(
       "maps target=%p / maxMbps=%p to %p (%s)",
       (targetBitrateKbps, maxThroughputMbps, expected, _why) => {
         expect(clampBitrateKbps(cfg(targetBitrateKbps, maxThroughputMbps))).toBe(expected);
+      },
+    );
+
+    test.each([false, true])(
+      "spawns a capped screenrecord command (normalized=%p)",
+      async (normalized) => {
+        const factory = new FakeAdbClientFactory();
+        const timer = new FakeTimer();
+        const backend = new PlatformVideoCaptureBackend(factory, timer);
+        const input = cfg(10000, 0.0005);
+        await backend.start({
+          ...input,
+          ...(normalized ? parseVideoRecordingConfig(input) : {}),
+          device: { platform: "android", deviceId: "cap-device", name: "Cap Device" },
+        });
+        expect(factory.getFakeClient().getSpawnCalls()).toContainEqual([
+          "shell",
+          "screenrecord",
+          "--bit-rate",
+          "1000",
+          "--time-limit",
+          "180",
+          "/sdcard/auto-mobile-clamp.mp4",
+        ]);
       },
     );
   });

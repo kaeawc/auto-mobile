@@ -124,6 +124,7 @@ export class SetAccessibilityFocus {
       }
     } catch (error) {
       const message = errorMessage(error);
+      logger.warn(`[accessibilityFocus] Failed to ${action} focus: ${errorMessage(error)}`, error);
       return { success: false, error: message };
     }
 

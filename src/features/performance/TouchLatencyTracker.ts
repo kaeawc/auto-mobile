@@ -499,7 +499,7 @@ export class TouchLatencyTracker {
         obstructedCount,
       );
     } catch (error) {
-      logger.error(`[TouchLatency] Failed to measure touch latency: ${error}`);
+      logger.warn(`[TouchLatency] Failed to measure touch latency: ${errorMessage(error)}`, error);
       return {
         latencyMs: 0,
         touchCoordinates: touchLocation,

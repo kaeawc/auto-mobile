@@ -126,7 +126,8 @@ jobs:
         env:
           AUTOMOBILE_TEST_MODE: "true"
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
-          AUTOMOBILE_UNIT_TEST_WORKERS: "3"
+          AUTOMOBILE_UNIT_TEST_WORKERS: "2"
+          AUTOMOBILE_UNIT_TEST_CHUNK_FILES: "100"
           AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then

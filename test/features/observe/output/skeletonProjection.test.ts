@@ -1,3 +1,6 @@
+import { androidEnabledObservation } from "../../../helpers/androidEnabledCapture";
+import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
+import { skeletonElementSchema } from "../../../../src/server/toolOutputSchemas";
 import { describe, expect, test } from "bun:test";
 import {
   getImeOccluder,
@@ -1844,4 +1847,47 @@ describe("container rows never read as `undefined` (#6871)", () => {
     );
     expect(rows.every((row) => row.label !== "undefined")).toBe(true);
   });
+});
+
+test("captured Android skeleton marks only disabled rows and pins enabled bytes", () => {
+  const enabled = androidEnabledObservation();
+  const enabledRows = projectSkeleton(enabled.elements!).skeleton;
+  expect(JSON.stringify(enabledRows)).toBe(
+    '[{"bounds":[84,1115,996,1262],"affordances":["tap","long-press","input"],"elementId":"s2-ee780752c005afb8","label":"Basic Text Field","sublabel":"Enter some text..."}]',
+  );
+  const disabled = androidEnabledObservation("false");
+  const rows = sanitizeObserveResult(disabled, {
+    dropElements: false,
+    project: "skeleton",
+  }).skeleton!;
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toEqual({ ...enabledRows[0], enabled: false });
+  expect(skeletonElementSchema.parse(rows[0])).toMatchObject({ enabled: false });
+  expect(projectSkeletonElement(disabled.elements!.clickable[0])).toMatchObject({ enabled: false });
+  expect(
+    JSON.stringify(projectSkeleton(androidEnabledObservation("true").elements!).skeleton),
+  ).toBe(JSON.stringify(enabledRows));
+});
+
+test("shared skeleton uses the same disabled state for iOS booleans and Android strings", () => {
+  const element: Element = {
+    class: "XCUIElementTypeButton",
+    clickable: "true",
+    bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+  };
+  const enabled = projectSkeletonElement(element)!;
+  for (const value of [false, "false"] as const) {
+    expect(projectSkeletonElement({ ...element, enabled: value })).toEqual({
+      ...enabled,
+      enabled: false,
+    });
+    expect(
+      projectSkeleton({
+        clickable: [{ ...element, enabled: value }],
+        scrollable: [],
+        text: [],
+        media: [],
+      }).skeleton,
+    ).toEqual([{ ...enabled, enabled: false }]);
+  }
 });

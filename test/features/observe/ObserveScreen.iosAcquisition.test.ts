@@ -88,7 +88,9 @@ function harness(
         send: (data: string) => {
           const command: { type: string; requestId: string } = JSON.parse(data);
           commands.push(command);
-          requestManager.resolve(command.requestId, { hierarchy: raw });
+          requestManager.resolve(command.requestId, {
+            hierarchy: timer.now() === raw.updatedAt ? raw : { ...raw, updatedAt: timer.now() },
+          });
         },
       }) as unknown as WebSocket,
   };
@@ -203,6 +205,27 @@ describe("iOS acquisition through real delegate, normalization and observe proje
       }
     },
   );
+  test("observer sync response carries device acquisition", async () => {
+    const h = harness(null);
+    try {
+      const response = await h.delegate.requestHierarchySync(
+        undefined,
+        false,
+        undefined,
+        100,
+        true,
+        {
+          forceCapture: true,
+          observerMode: true,
+        },
+      );
+      expect(acquisition(response!)).toEqual(["device"]);
+      expect(h.commands.map((command) => command.type)).toEqual(["request_hierarchy"]);
+      expect(h.context.getCachedHierarchy()).toBeNull();
+    } finally {
+      h.restore();
+    }
+  });
   test.each([false, true])(
     "public sync opt-in selects the actual command (forced=%s)",
     async (forceCapture) => {
@@ -216,6 +239,7 @@ describe("iOS acquisition through real delegate, normalization and observe proje
             : IOSCtrlProxyClient.prototype.requestHierarchySync
         ).call(client, undefined, false, undefined, 100);
         expect(response?.hierarchy).toBe(raw);
+        expect(acquisition(response!)).toEqual(["device"]);
         expect(h.commands.map((command) => command.type)).toEqual([
           forceCapture ? "request_hierarchy" : "request_hierarchy_if_stale",
         ]);
@@ -227,7 +251,7 @@ describe("iOS acquisition through real delegate, normalization and observe proje
 });
 
 for (const tool of ["tapOn", "tapAny"] as const) {
-  test.each(["observe->tap", "tap->tap"])(
+  test.each(["observe->tap", "tap->tap", "fresh-in-call", "aged-observe->tap"])(
     `${tool} full-call device reads: %s`,
     async (scenario) => {
       const h = harness(null);
@@ -283,16 +307,44 @@ for (const tool of ["tapOn", "tapAny"] as const) {
             retryIfNoChange: false,
             selectionStrategy: "first",
           });
-        if (scenario === "observe->tap") {
+        if (scenario === "observe->tap" || scenario === "aged-observe->tap") {
           await h.screen.execute();
+          if (scenario === "aged-observe->tap") {
+            h.timer.advanceTime(5001);
+            const cachedResult = await h.screen.getMostRecentCachedObserveResult();
+            expect(cachedResult.freshness?.isFresh).toBe(false);
+            expect(cachedResult.freshness?.category).toBe("cache_age");
+          }
+        } else if (scenario === "fresh-in-call") {
+          h.screen.getMostRecentCachedObserveResult = async () => {
+            const result = await h.screen.execute({ freshness: "fresh" });
+            expect(wasHierarchyReadDuringCall(result.viewHierarchy!)).toBe(true);
+            return result;
+          };
         } else {
           expect((await run()).success).toBe(true);
         }
         h.commands.length = 0;
-        expect((await run()).success).toBe(true);
+        const resolutionReads: string[][] = [];
+        const dispatch = spyOn(h.client, "requestTapCoordinates").mockImplementation(async () => {
+          resolutionReads.push(h.commands.map((command) => command.type));
+          return { success: true };
+        });
+        try {
+          expect((await run()).success).toBe(true);
+        } finally {
+          dispatch.mockRestore();
+        }
+        if (scenario === "fresh-in-call" || scenario === "aged-observe->tap") {
+          expect(resolutionReads).toEqual([["request_hierarchy_if_stale"]]);
+        }
         const kinds = h.commands.map((command) => command.type);
         console.log(`${tool} ${scenario} full-call: ${JSON.stringify(kinds)}`);
-        expect(kinds).toEqual(["request_hierarchy", "request_hierarchy_if_stale"]);
+        expect(kinds).toEqual(
+          scenario === "fresh-in-call" || scenario === "aged-observe->tap"
+            ? ["request_hierarchy_if_stale", "request_hierarchy_if_stale"]
+            : ["request_hierarchy", "request_hierarchy_if_stale"],
+        );
       } finally {
         sync.mockRestore();
         convert.mockRestore();

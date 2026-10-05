@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -2615,6 +2616,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             synced.hierarchy,
           ),
         );
+        const acquisition = synced[iosHierarchyAcquisition];
+        if (acquisition === "device" || acquisition === "client-cache") {
+          Object.assign(rawHierarchy, { [iosHierarchyAcquisition]: acquisition });
+        }
         return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
@@ -4060,6 +4065,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                     : request.requestDeadlineMs - this.timer.now(),
                 ),
                 context: "while revalidating a cached observation",
+                platform: this.device.platform,
               },
             );
             this.replaceObservationHierarchy(observeResult, freshHierarchy, true);

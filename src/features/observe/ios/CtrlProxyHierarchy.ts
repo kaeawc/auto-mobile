@@ -25,6 +25,7 @@ import type {
   CtrlProxyNode,
   XCTestHierarchy,
   CtrlProxyHierarchyResponse,
+  CtrlProxySyncedHierarchy,
   CtrlProxyPerfTiming,
   CachedHierarchy,
 } from "./types";
@@ -541,11 +542,7 @@ export class CtrlProxyHierarchy {
       forceCapture?: boolean;
       observerMode?: boolean;
     },
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
       this.recordHierarchyFailure(requestOptions, failure);
     };
@@ -738,11 +735,12 @@ export class CtrlProxyHierarchy {
   private acceptHierarchyResponse(
     result: { hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string },
     requestOptions: { observerMode?: boolean } | undefined,
-  ) {
+  ): CtrlProxySyncedHierarchy {
     this.observeReceivedHierarchy(result.hierarchy);
     if (this.isObserverRequest(requestOptions)) {
       return {
         hierarchy: result.hierarchy,
+        [iosHierarchyAcquisition]: "device",
         perfTiming: result.perfTiming,
         frameContext: result.frameContext,
       };
@@ -762,6 +760,7 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: result.hierarchy,
+      [iosHierarchyAcquisition]: "device",
       perfTiming: result.perfTiming,
       frameContext: result.frameContext,
     };

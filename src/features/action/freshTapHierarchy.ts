@@ -15,9 +15,11 @@ export async function freshTapHierarchy(
   {
     timeoutMs = ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
     context = "while TalkBack is on",
+    platform = "android",
   }: {
     timeoutMs?: number;
     context?: string;
+    platform?: "android" | "ios";
   } = {},
 ): Promise<ViewHierarchyResult> {
   const deadline = timer.now() + Math.max(0, timeoutMs);
@@ -35,6 +37,8 @@ export async function freshTapHierarchy(
   }
   throwIfAborted(signal);
   throw new ActionableError(
-    `Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service ${context}. Observe again and check that the accessibility service is running.`,
+    platform === "ios"
+      ? `Unable to retrieve a fresh tap hierarchy: iOS runner failed to produce a view hierarchy ${context}. Observe again.`
+      : `Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service ${context}. Observe again and check that the accessibility service is running.`,
   );
 }

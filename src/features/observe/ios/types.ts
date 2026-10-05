@@ -380,6 +380,13 @@ export interface IosHierarchyAcquisition {
   [iosHierarchyAcquisition]?: "device" | "client-cache";
 }
 
+/** A successful synchronous runner response; provenance stays on the host envelope. */
+export interface CtrlProxySyncedHierarchy extends IosHierarchyAcquisition {
+  hierarchy: XCTestHierarchy;
+  perfTiming?: CtrlProxyPerfTiming;
+  frameContext?: string;
+}
+
 export interface CtrlProxyHierarchyResponse extends IosHierarchyAcquisition {
   hierarchy: XCTestHierarchy | null;
   fresh: boolean;

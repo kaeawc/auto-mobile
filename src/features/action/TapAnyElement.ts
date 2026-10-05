@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -1078,6 +1079,10 @@ export class TapAnyElement extends BaseVisualChange {
             synced.hierarchy,
           ),
         );
+        const acquisition = synced[iosHierarchyAcquisition];
+        if (acquisition === "device" || acquisition === "client-cache") {
+          Object.assign(hierarchy, { [iosHierarchyAcquisition]: acquisition });
+        }
         return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
       }
       default:
@@ -1697,6 +1702,7 @@ export class TapAnyElement extends BaseVisualChange {
             : context.requestDeadlineMs - this.timer.now(),
         ),
         context: "while revalidating a cached observation",
+        platform: this.device.platform,
       },
     );
     return { hierarchy: refreshed, accessibilityEnabled };

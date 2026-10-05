@@ -1,4 +1,6 @@
+import { iosHierarchyAcquisition } from "../../../src/features/observe/ios/types";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { freshTapHierarchy } from "../../../src/features/action/freshTapHierarchy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
@@ -174,6 +176,35 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         h.restore();
       }
     });
+    test("forced refresh preserves the sync acquisition marker", async () => {
+      const h = harness(tool);
+      try {
+        h.sync.mockResolvedValue({
+          hierarchy: raw(10),
+          [iosHierarchyAcquisition]: "device",
+        });
+        const markers: unknown[] = [];
+        if (h.tap instanceof TapOnElement) {
+          const refresh = h.tap.refreshViewHierarchy.bind(h.tap);
+          h.tap.refreshViewHierarchy = async (...args) => {
+            const hierarchy = await refresh(...args);
+            markers.push(hierarchy && Reflect.get(hierarchy, iosHierarchyAcquisition));
+            return hierarchy;
+          };
+        } else {
+          h.tap.setRefreshViewHierarchyForTesting(async (refresh, ...args) => {
+            const hierarchy = await refresh(...args);
+            markers.push(hierarchy && Reflect.get(hierarchy, iosHierarchyAcquisition));
+            return hierarchy;
+          });
+        }
+        expect((await h.run()).success).toBe(true);
+        expect(markers).toEqual(["device"]);
+        expect(h.sync).toHaveBeenCalledTimes(1);
+      } finally {
+        h.restore();
+      }
+    });
     test("already read in this call: no extra read", async () => {
       const h = harness(tool);
       try {
@@ -217,6 +248,20 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       try {
         expect((await h.run(100, 1000)).success).toBe(false);
         expect(h.sync).not.toHaveBeenCalled();
+        expect(h.dispatch).not.toHaveBeenCalled();
+      } finally {
+        h.restore();
+      }
+    });
+    test("failed iOS revalidation names the runner", async () => {
+      const h = harness(tool);
+      try {
+        h.sync.mockResolvedValue(null);
+        const result = await h.run(100, 2000);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(
+          "Unable to retrieve a fresh tap hierarchy: iOS runner failed to produce a view hierarchy while revalidating a cached observation. Observe again.",
+        );
         expect(h.dispatch).not.toHaveBeenCalled();
       } finally {
         h.restore();
@@ -280,3 +325,12 @@ for (const tool of ["tapOn", "tapAny"] as const) {
     });
   });
 }
+
+test("Android fresh-tap failure text stays byte-identical", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  await expect(freshTapHierarchy(async () => null, timer)).rejects.toMatchObject({
+    message:
+      "Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service while TalkBack is on. Observe again and check that the accessibility service is running.",
+  });
+});

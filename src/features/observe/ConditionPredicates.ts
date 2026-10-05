@@ -12,15 +12,14 @@ import {
 } from "../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
-import { isAdoptableCapture } from "./isAdoptableCapture";
 import { normalizeQuotes } from "../utility/TextMatcher";
 
 const waitHierarchyProjection = new SearchableHierarchy();
 
 /**
- * Reuse the action/settle admission contract without imposing a new timestamp
- * floor. Empty/withheld roots and explicitly unavailable captures cannot prove
- * a hierarchy condition, even if they carry a host-created timestamp.
+ * Hierarchy waits require a usable tree. Error/empty trees and explicitly
+ * unavailable captures cannot prove a hierarchy condition; freshness and
+ * verification verdicts are deliberately not consulted.
  */
 export function waitCaptureUnavailableReason(observation: ObserveResult): string | undefined {
   const hierarchy = observation.viewHierarchy?.hierarchy ?? {};
@@ -32,7 +31,9 @@ export function waitCaptureUnavailableReason(observation: ObserveResult): string
     [node.bounds, node.className, node.elementId, node.textFields.length].some(Boolean),
   );
   const unavailable = [
-    !isAdoptableCapture(observation, observation, false),
+    !observation.viewHierarchy?.hierarchy ||
+      typeof observation.viewHierarchy.hierarchy !== "object" ||
+      "error" in hierarchy,
     hierarchy.unavailableReason !== undefined,
     freshness.category === "unavailable",
     "unavailable" in freshness && freshness.unavailable === true,

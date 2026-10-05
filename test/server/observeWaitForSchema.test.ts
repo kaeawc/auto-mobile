@@ -2546,6 +2546,70 @@ describe("waitForObservation absent", () => {
     },
   );
 
+  const freshnessCases: Array<[string, NonNullable<ObserveResult["freshness"]>]> = [
+    ["stale", { isFresh: false }],
+    ["unverified", { isFresh: true, verified: false }],
+  ];
+  const positiveSelectors = [
+    { text: "Ready" },
+    { textAny: ["Ready"] },
+    { elementId: "message_list" },
+    { className: "Button" },
+    { contentDescription: "Ready" },
+  ];
+  test.each(
+    freshnessCases.flatMap(([name, freshness]) =>
+      positiveSelectors.map((selector) => [name, selector, freshness] as const),
+    ),
+  )("positive legacy %s %j matches a populated tree", async (_name, selector, freshness) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult({
+      ...makeObservation([
+        { $: { ...list.$, text: "Ready", class: "Button", "content-desc": "Ready" } },
+      ]),
+      freshness,
+    });
+    const outcome = await waitForObservation(
+      screen,
+      { ...selector, timeout: 300 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(screen.getExecuteCallCount()).toBe(1);
+  });
+
+  test.each(
+    freshnessCases.flatMap(([name, freshness]) =>
+      [false, true].map((present) => [name, present, freshness] as const),
+    ),
+  )(
+    "%s absent evaluates target presence (%j) on a populated tree",
+    async (_name, present, freshness) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult({
+        ...makeObservation([list, ...(present ? [{ $: { ...spinner.$, text: "Loading" } }] : [])]),
+        freshness,
+      });
+      const outcome = await waitForObservation(
+        screen,
+        { absent: { text: "Loading" }, timeout: 300 },
+        undefined,
+        false,
+        timer,
+      );
+      expect(outcome.matched).toBe(!present);
+      expect(outcome.timedOut).toBe(present);
+      expect(outcome.timeoutReason ?? "").not.toContain("hierarchy unavailable");
+    },
+  );
+
   test("an unavailable first capture cannot establish the device timestamp floor", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

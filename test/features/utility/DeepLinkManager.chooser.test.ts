@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   DeepLinkManager,
   resolveChooserActivityLabel,
@@ -1581,4 +1583,35 @@ test("restores a clipped middle-page row by rematching each reverse viewport", a
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")).length,
   ).toBe(6);
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 160");
+});
+
+test("chooser warns and preserves its failure result when hierarchy inspection throws", async () => {
+  const manager = new DeepLinkManager(
+    { name: "fake", platform: "android", deviceId: "fake" },
+    new FakeAdbExecutor(),
+  );
+  const error = new Error("chooser hierarchy unavailable");
+  const inspect = spyOn(manager, "detectIntentChooser").mockImplementation(() => {
+    throw error;
+  });
+  const warning = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(await manager.handleIntentChooser(hierarchy([]))).toEqual({
+      success: false,
+      detected: true,
+      error: error.message,
+      packageVerified: undefined,
+    });
+    expect(
+      loggerCallsWithPrefix(
+        warning.mock.calls,
+        "[DeepLinkManager] Failed to handle intent chooser:",
+      ),
+    ).toEqual([
+      ["[DeepLinkManager] Failed to handle intent chooser: chooser hierarchy unavailable", error],
+    ]);
+  } finally {
+    inspect.mockRestore();
+    warning.mockRestore();
+  }
 });

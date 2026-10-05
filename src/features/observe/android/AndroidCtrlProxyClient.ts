@@ -521,14 +521,16 @@ interface WsPermissionResultMessage extends WsRequestBase {
 interface WsCurrentFocusResultMessage extends WsMessageBase {
   type: "current_focus_result";
   requestId: string;
-  totalTimeMs?: number;
+  // Both the success broadcaster and currentFocusErrorFrame always emit this field.
+  totalTimeMs: number;
   focusedElement?: AccessibilityNode | null;
 }
 
 interface WsTraversalOrderResultMessage extends WsMessageBase {
   type: "traversal_order_result";
   requestId: string;
-  totalTimeMs?: number;
+  // Both the success broadcaster and traversalOrderErrorFrame always emit this field.
+  totalTimeMs: number;
   result?: {
     elements: AccessibilityNode[];
     focusedIndex: number | null;
@@ -6052,7 +6054,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private updateCachedScreenDimensions(hierarchy: ViewHierarchyResult): void {
+  private updateCachedScreenDimensions(
+    hierarchy: Pick<
+      AccessibilityHierarchy,
+      "windows" | "nativeScale" | "pixelWidth" | "pixelHeight"
+    >,
+  ): void {
     // Retain the additive #4548 scale metadata alongside — but never instead of — the
     // window-derived geometry below. Same freshness rule as the tracked geometry: a hierarchy
     // without the fields (pre-#4548 runner) resets it to null rather than leaving stale values.
@@ -6578,7 +6585,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         elements.push({
           className: fullClassName,
           methodName,
-          fileName: fileName || undefined,
+          fileName,
           lineNumber,
           isAppCode,
         });

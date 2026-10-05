@@ -246,12 +246,13 @@ export class NavigationRepository {
 
   /**
    * Update back stack information for a node.
+   * An absent task ID leaves the stored ID unchanged (Kysely omits undefined updates).
    */
   async updateNodeBackStack(
     appId: string,
     screenName: string,
     backStackDepth: number,
-    taskId: number,
+    taskId: number | undefined,
   ): Promise<void> {
     const db = this.getDb();
     await db

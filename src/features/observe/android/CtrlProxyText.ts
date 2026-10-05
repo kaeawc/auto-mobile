@@ -4,10 +4,12 @@
  * Thin wrapper over SharedTextDelegate.
  */
 
+import type { SetTextOptions } from "../DeviceService";
 import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { BaseResult } from "../shared/types";
+import type { ImeAction } from "../../../models";
+import type { ActionTimingResult, BaseResult } from "../shared/types";
 import type { A11ySetTextResult, DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
@@ -15,6 +17,7 @@ import {
   type KeyboardProfileCatalog,
 } from "../../action/keyboardProfiles";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { TextIndeterminateError } from "../../action/textTransportTimeout";
 import { logger } from "../../../utils/logger";
 
 export interface SetKeyboardProfileResult {
@@ -152,6 +155,57 @@ export class CtrlProxyText extends SharedTextDelegate {
     super(context);
   }
 
+  override async requestImeAction(
+    action: ImeAction,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<ActionTimingResult> {
+    let dispatched = false;
+    const startMs = this.context.timer.now();
+    const unconfirmed = (reason: string, totalTimeMs: number): ActionTimingResult => ({
+      success: false,
+      action,
+      totalTimeMs,
+      ...(dispatched ? { retryable: false } : {}),
+      error: dispatched
+        ? `IME action '${action}' outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically. Observe before retrying.`
+        : reason,
+    });
+    try {
+      return await sendCommand<ActionTimingResult>(this.context, {
+        idPrefix: "imeAction",
+        responseType: "ime_action",
+        messageType: "request_ime_action",
+        params: { action },
+        timeoutMs,
+        perf,
+        abortSignal,
+        onDispatch: () => {
+          dispatched = true;
+          onDispatch?.();
+        },
+        notConnectedError: () => ({
+          success: false,
+          action,
+          totalTimeMs: 0,
+          error: "Not connected",
+        }),
+        unsupportedCommandError: (_messageType, error) => ({
+          success: false,
+          action,
+          totalTimeMs: 0,
+          error,
+        }),
+        timeoutError: (timeout) => unconfirmed(`IME action timed out after ${timeout}ms`, timeout),
+      });
+    } catch (error) {
+      logger.warn("[CtrlProxyText] IME action transport failed", error);
+      return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
+    }
+  }
+
   async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
     return sendCommand(this.context, {
       idPrefix: "insertTextState",
@@ -172,21 +226,42 @@ export class CtrlProxyText extends SharedTextDelegate {
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
     },
+    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
   ): Promise<A11ySetTextResult> {
-    return sendCommand<A11ySetTextResult>(this.context, {
-      idPrefix: "insertText",
-      responseType: "insert_text",
-      messageType: "request_insert_text",
-      params: {
-        text,
-        acceptsCaretNotPlaced: options?.acceptsCaretNotPlaced ?? true,
-        ...(options?.expectedSuffix ? { expectedSuffix: options.expectedSuffix } : {}),
-        ...(options?.precedingState ? { precedingState: options.precedingState } : {}),
-      },
-      timeoutMs,
-      perf,
-      errorLabel: "Insert text",
+    let dispatched = false;
+    const startMs = this.context.timer.now();
+    const unconfirmed = (reason: string, totalTimeMs: number): A11ySetTextResult => ({
+      success: false,
+      totalTimeMs,
+      ...(dispatched ? { retryable: false, partialApplication: true } : {}),
+      error: dispatched ? new TextIndeterminateError(reason).message : reason,
     });
+    try {
+      return await sendCommand<A11ySetTextResult>(this.context, {
+        idPrefix: "insertText",
+        responseType: "insert_text",
+        messageType: "request_insert_text",
+        params: {
+          text,
+          acceptsCaretNotPlaced: options?.acceptsCaretNotPlaced ?? true,
+          ...(options?.expectedSuffix ? { expectedSuffix: options.expectedSuffix } : {}),
+          ...(options?.precedingState ? { precedingState: options.precedingState } : {}),
+        },
+        timeoutMs,
+        perf,
+        errorLabel: "Insert text",
+        abortSignal: transport.abortSignal,
+        deadlineMs: transport.deadlineMs,
+        onDispatch: () => {
+          dispatched = true;
+          transport.onDispatch?.();
+        },
+        timeoutError: (timeout) => unconfirmed(`Insert text timed out after ${timeout}ms`, timeout),
+      });
+    } catch (error) {
+      logger.warn("[CtrlProxyText] Insert text transport failed", error);
+      return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
+    }
   }
 
   async commitViaIme(

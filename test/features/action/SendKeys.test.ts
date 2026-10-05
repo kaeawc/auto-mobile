@@ -1,12 +1,22 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
+import {
+  runWithTextRequestContext,
+  TextIndeterminateError,
+} from "../../../src/features/action/textTransportTimeout";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { describe, expect, mock, spyOn, test } from "bun:test";
-import { android, createSendKeysHarness, observer as harnessObserver } from "./SendKeysTestHarness";
+import {
+  android,
+  createSendKeysHarness,
+  createSendKeysCaptureHarness,
+  observer as harnessObserver,
+} from "./SendKeysTestHarness";
+import { settleEmbeddedObservationInResponse } from "../../../src/server/embeddedObservationSettle";
+import { createStructuredToolResponse, getStructuredPayload } from "../../../src/utils/toolUtils";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
@@ -36,6 +46,7 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { CtrlProxyText } from "../../../src/features/observe/ios/CtrlProxyText";
+import { CtrlProxyText as AndroidText } from "../../../src/features/observe/android/CtrlProxyText";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
 import {
   clearAndroidImeQuarantine,
@@ -736,8 +747,8 @@ describe("SendKeys", () => {
       await executor.type({ action: "type", text: "123" }, undefined, "external"),
     ).toMatchObject({ success: true });
     expect(observer.options).toEqual([
-      { signal: undefined, freshness: "fresh", display: "external" },
-      { signal: undefined, freshness: "fresh", display: "external" },
+      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
     ]);
   });
 
@@ -781,7 +792,9 @@ describe("SendKeys", () => {
       observer.options.filter(
         (options) => options?.freshness === "fresh" && options.minTimestamp === undefined,
       ),
-    ).toEqual([{ signal: undefined, freshness: "fresh", display: "external" }]);
+    ).toEqual([
+      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+    ]);
   });
 
   test.each(["123", "one *bold* two `code` tail"])(
@@ -2323,7 +2336,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
       }
       // Auto also observes once before typing to choose password-safe delivery.
       expect(observer.calls).toBe((mode === "auto" ? 1 : 0) + (success ? 1 : 3));
-      expect(observer.options.at(-1)).toEqual({ signal: undefined, freshness: "fresh" });
+      expect(observer.options.at(-1)).toEqual({
+        signal: undefined,
+        freshness: "fresh",
+        skipScreenshot: true,
+      });
       expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
       expect(textClient.calls.includes("clear")).toBe(operation === "replace");
       expect(
@@ -2393,7 +2410,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
     if (!success) {
       expect(result.error).toContain("IME partial commit");
     }
-    expect(observer.options).toContainEqual({ signal: undefined, freshness: "fresh" });
+    expect(observer.options).toContainEqual({
+      signal: undefined,
+      freshness: "fresh",
+      skipScreenshot: true,
+    });
     expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -3721,6 +3742,101 @@ describe("SendKeys IME focus regression", () => {
 });
 
 describe("SendKeys post-action capture boundary", () => {
+  test.each(["focused", "imeAction", "fallback", "failure"] as const)(
+    "%s takes one terminal screenshot after the response gate chooses its observation",
+    async (scenario) => {
+      const h = createSendKeysCaptureHarness(scenario);
+      await runWithPostActionCaptureScope(undefined, async () => {
+        const result = await h.action.execute(h.commands);
+        expect(result.success).toBe(scenario !== "failure");
+        expect(h.captures).toHaveLength(0);
+        expect(h.reads.every((read) => read.skipScreenshot === true)).toBe(true);
+        expect(hasPendingTerminalScreenshot(result.observation!)).toBe(true);
+        const beforeGate = structuredClone(result);
+        const response = createStructuredToolResponse(result);
+        await settleEmbeddedObservationInResponse(response, {
+          name: "sendKeys",
+          args: { commands: h.commands },
+          internal: false,
+          createSettleObserve: () => h.settleObserve,
+        });
+        expect(h.captures).toHaveLength(1);
+        const final = getStructuredPayload(response)!;
+        const captured = h.captures[0];
+        const expectedId =
+          scenario === "imeAction" ? "settle-2" : beforeGate.observation!.observationId;
+        expect(captured.observationId).toBe(expectedId);
+        expect(final.observation).toMatchObject({
+          observationId: expectedId,
+          screenshotPath: `${expectedId}.png`,
+          screenshotCapturedAt: 123,
+          settled: scenario === "imeAction",
+        });
+        expect(final.commands).toEqual(beforeGate.commands);
+        expect(final.success).toBe(beforeGate.success);
+        expect(final.error).toBe(beforeGate.error);
+        expect(final.completedCommands).toBe(beforeGate.completedCommands);
+        expect(final.observation?.viewHierarchy?.hierarchy.node).toMatchObject({
+          $: { text: scenario === "failure" ? "" : "shot0" },
+        });
+        if (scenario === "fallback") {
+          expect(final.commands[0].resolvedMode).toBe("eventAll");
+          expect(h.deliveries.map((delivery) => delivery.text).join("")).toBe("shot0");
+        }
+        if (scenario === "imeAction") {
+          expect(h.events.slice(-3)).toEqual([
+            "settle:start",
+            "settle:chosen:settle-2",
+            "capture:settle-2",
+          ]);
+        } else {
+          // In-place and failed actions retain exactly the action's final hierarchy.
+          expect(final.observation).toMatchObject({
+            viewHierarchy: beforeGate.observation!.viewHierarchy,
+            display: beforeGate.observation!.display,
+            updatedAt: beforeGate.observation!.updatedAt,
+          });
+          expect(h.events).not.toContain("settle:start");
+        }
+        expect(h.events.filter((event) => event.startsWith("capture:"))).toEqual([
+          `capture:${expectedId}`,
+        ]);
+      });
+    },
+  );
+
+  test("direct sendKeys captures the final observation immediately without a pipeline scope", async () => {
+    const h = createSendKeysCaptureHarness();
+    const result = await h.action.execute(h.commands);
+    expect(result.success).toBe(true);
+    expect(h.captures).toEqual([result.observation!]);
+    expect(result.observation?.screenshotPath).toBe("read-3.png");
+  });
+
+  test("explicit-display focus preparation captures nothing and preserves its routing", async () => {
+    const h = createSendKeysCaptureHarness();
+    await runWithPostActionCaptureScope(undefined, async () => {
+      const result = await h.action.execute(h.commands, undefined, undefined, undefined, "0");
+      expect(result.success).toBe(true);
+      expect(h.captures).toHaveLength(0);
+      expect(h.reads[0]).toEqual({
+        display: "0",
+        freshness: "cached-ok",
+        signal: undefined,
+        skipScreenshot: true,
+      });
+      expect(h.reads.every((read) => read.skipScreenshot === true)).toBe(true);
+      await settleEmbeddedObservationInResponse(createStructuredToolResponse(result), {
+        name: "sendKeys",
+        args: { commands: h.commands, display: "0" },
+        internal: false,
+        createSettleObserve: () => h.settleObserve,
+      });
+      expect(h.captures).toEqual([result.observation!]);
+      expect(h.captures[0].screenshotPath).toBe("read-4.png");
+    });
+  });
+
   class CapturingFocus extends BaseVisualChange {
     protected override shouldCapturePostActionScreenshot(): boolean {
       return true;
@@ -3839,4 +3955,297 @@ describe("SendKeys post-action capture boundary", () => {
       h.capture.mockRestore();
     }
   });
+});
+
+describe("SendKeys Android non-idempotent outcomes", () => {
+  const modes = ["a11y", "eventLast", "eventAll", "autoPassword", "autoOlder"] as const;
+  for (const mode of modes) {
+    test.each(["timeout", "disconnect", "abort", "refusal", "notConnected", "success", "preAbort"])(
+      `${mode}: insert %s`,
+      async (failure) => {
+        const h = createSendKeysHarness(android);
+        const transport = createIosDelegateHarness({ connected: failure !== "notConnected" });
+        const controller = new AbortController();
+        const text = new AndroidText(transport.context);
+        const attempts: string[] = [];
+        h.client.supportsImeCommit = async () => false;
+        h.client.insert = async (value, options) => {
+          attempts.push(value);
+          const pending = text.requestInsertText(value, 5000, undefined, undefined, {
+            abortSignal: options?.abortSignal,
+          });
+          await Promise.resolve();
+          if (failure === "timeout") {
+            transport.advanceTime(5000);
+          } else if (failure === "disconnect") {
+            transport.requestManager.cancelAll(new Error("WebSocket connection closed"));
+          } else if (failure === "abort") {
+            controller.abort();
+            transport.advanceTime(5000);
+          } else {
+            transport.resolveLast({
+              success: failure === "success",
+              totalTimeMs: 1,
+              error: "Device refused",
+            });
+          }
+          return pending;
+        };
+        const observation = focusedAndroidObservation(
+          "",
+          mode === "autoPassword" ? { password: "true" } : {},
+          1,
+        );
+        const observer = createObserver(observation);
+        const executor = new DefaultSendKeysCommandExecutor(
+          android,
+          createAdbFactory(h.adb),
+          observer,
+          {
+            textClient: h.client,
+            timer: transport.timer,
+            inputKey: {
+              press: async () => {
+                throw new Error("Unexpected input key fallback");
+              },
+            },
+          },
+        );
+        const sendKeys = new SendKeys(android, undefined, {
+          executor,
+          observer,
+          timer: transport.timer,
+          timestampProvider: { now: async () => 1 },
+        });
+        const command = {
+          action: "type" as const,
+          text: "é😀a",
+          mode: mode.startsWith("auto")
+            ? ("auto" as const)
+            : (mode as "a11y" | "eventLast" | "eventAll"),
+        };
+        if (failure === "preAbort") {
+          controller.abort();
+          await expect(
+            sendKeys.execute([command], undefined, undefined, controller.signal),
+          ).rejects.toThrow();
+          expect(attempts).toHaveLength(0);
+        } else {
+          const result = await sendKeys.execute(
+            [command, command],
+            undefined,
+            undefined,
+            controller.signal,
+          );
+          if (["timeout", "disconnect", "abort"].includes(failure)) {
+            expect(result).toMatchObject({ success: false, retryable: false });
+            expect(result.commands[0]).toMatchObject({
+              retryable: false,
+              partialApplication: true,
+            });
+            expect(result.error).toContain("outcome is indeterminate");
+            expect(result.error).toContain("may have been entered");
+            expect(result.commands).toHaveLength(1);
+            expect(attempts).toHaveLength(1);
+            expect(
+              h.adb.getExecutedCommands().filter((value) => value.includes("input keyevent")),
+            ).toEqual([]);
+          } else if (failure === "success") {
+            expect(result.success).toBe(true);
+            expect(attempts).toHaveLength(2);
+          } else {
+            expect(result.success).toBe(false);
+            expect(result.retryable).toBeUndefined();
+            expect(result.commands[0].partialApplication).toBeUndefined();
+            expect(result.error).not.toContain("indeterminate");
+            expect(attempts).toHaveLength(1);
+          }
+        }
+        expect(h.committed).toEqual([]);
+        expect(h.replaced).toEqual([]);
+        expect(transport.requestManager.getPendingCount()).toBe(0);
+      },
+    );
+  }
+
+  test.each(["timeout", "disconnect", "abort", "refusal", "notConnected", "success", "preAbort"])(
+    "semantic IME: %s through Android adapter",
+    async (failure) => {
+      const h = createIosDelegateHarness({ connected: failure !== "notConnected" });
+      const controller = new AbortController();
+      const text = new AndroidText(h.context);
+      let attempts = 0;
+      const ime = spyOn(text, "requestImeAction").mockImplementation(async (...args) => {
+        attempts++;
+        const pending = AndroidText.prototype.requestImeAction.apply(text, args);
+        await Promise.resolve();
+        if (failure === "timeout") {
+          h.advanceTime(5000);
+        } else if (failure === "disconnect") {
+          h.requestManager.cancelAll(new Error("WebSocket connection closed"));
+        } else if (failure === "abort") {
+          controller.abort();
+          h.advanceTime(5000);
+        } else {
+          h.resolveLast({
+            success: failure === "success",
+            action: "send",
+            totalTimeMs: 1,
+            error: "Device refused",
+          });
+        }
+        return pending;
+      });
+      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        text as unknown as AndroidCtrlProxyClient,
+      );
+      const observer = createObserver(focusedAndroidObservation("", {}, 1));
+      const executor = new DefaultSendKeysCommandExecutor(
+        android,
+        createAdbFactory(new FakeAdbExecutor()),
+        observer,
+        { timer: h.timer },
+      );
+      const sendKeys = new SendKeys(android, undefined, {
+        executor,
+        observer,
+        timer: h.timer,
+        timestampProvider: { now: async () => 1 },
+      });
+      try {
+        const commands = [
+          { action: "key" as const, key: "send" as const },
+          { action: "key" as const, key: "send" as const },
+        ];
+        if (failure === "preAbort") {
+          controller.abort();
+          await expect(
+            sendKeys.execute(commands, undefined, undefined, controller.signal),
+          ).rejects.toThrow();
+          expect(attempts).toBe(0);
+        } else {
+          const result = await sendKeys.execute(commands, undefined, undefined, controller.signal);
+          if (["timeout", "disconnect", "abort"].includes(failure)) {
+            expect(result).toMatchObject({ success: false, retryable: false });
+            expect(result.commands[0].retryable).toBe(false);
+            expect(result.error).toContain("outcome is indeterminate");
+            expect(result.error).toContain("Do not retry automatically. Observe before retrying.");
+          } else {
+            expect(result.success).toBe(failure === "success");
+            expect(result.retryable).toBeUndefined();
+            expect(result.error ?? "").not.toContain("indeterminate");
+          }
+          expect(attempts).toBe(failure === "success" ? 2 : 1);
+        }
+      } finally {
+        ime.mockRestore();
+        instance.mockRestore();
+      }
+    },
+  );
+
+  test("preserves indeterminate markers from a fake Android text client", async () => {
+    const h = createSendKeysHarness(android);
+    const error = new TextIndeterminateError("socket lost").message;
+    h.client.ime = async (_action, _signal, onDispatch) => {
+      onDispatch?.();
+      return { success: false, retryable: false, error };
+    };
+    expect(await h.executor.key({ action: "key", key: "send" })).toMatchObject({
+      success: false,
+      retryable: false,
+    });
+  });
+});
+
+describe("Android adapter cancellation fence", () => {
+  test.each(["insert", "ime"])("%s abort while connecting does not dispatch", async (operation) => {
+    const h = createIosDelegateHarness();
+    const text = new AndroidText(h.context);
+    const controller = new AbortController();
+    let connect!: (connected: boolean) => void;
+    h.context.ensureConnected = () =>
+      new Promise<boolean>((resolve) => {
+        connect = resolve;
+      });
+    const facade = {
+      requestInsertText: async (...args: Parameters<AndroidText["requestInsertText"]>) => {
+        const pending = text.requestInsertText(...args);
+        controller.abort();
+        connect(true);
+        await Promise.resolve();
+        h.advanceTime(5000);
+        return pending;
+      },
+      requestImeAction: async (...args: Parameters<AndroidText["requestImeAction"]>) => {
+        const pending = text.requestImeAction(...args);
+        controller.abort();
+        connect(true);
+        await Promise.resolve();
+        h.advanceTime(5000);
+        return pending;
+      },
+    };
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      facade as unknown as AndroidCtrlProxyClient,
+    );
+    const executor = new DefaultSendKeysCommandExecutor(
+      android,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation("", {}, 1)),
+      { timer: h.timer },
+    );
+    try {
+      const result =
+        operation === "insert"
+          ? await executor.type({ action: "type", text: "abc", mode: "a11y" }, controller.signal)
+          : await executor.key({ action: "key", key: "send" }, controller.signal);
+      expect(result.success).toBe(false);
+      expect(result.retryable).toBeUndefined();
+      expect(h.sentMessages).toHaveLength(0);
+      expect(h.requestManager.getPendingCount()).toBe(0);
+    } finally {
+      instance.mockRestore();
+    }
+  });
+});
+
+describe("Android insertion stops mixed typing after an unconfirmed suffix or run", () => {
+  for (const [mode, value] of [
+    ["eventLast", "aé"],
+    ["eventAll", "aé😀b"],
+    ["eventLast", "😀"],
+    ["eventAll", "😀"],
+  ] as const) {
+    test.each(["timeout", "abort"])(`${mode} ${value}: %s`, async (failure) => {
+      const h = createSendKeysHarness(android);
+      const transport = createIosDelegateHarness();
+      const text = new AndroidText(transport.context);
+      const controller = new AbortController();
+      let attempts = 0;
+      h.client.insert = async (inserted, options) => {
+        attempts++;
+        const pending = text.requestInsertText(inserted, 5000, undefined, undefined, {
+          abortSignal: options?.abortSignal,
+        });
+        await Promise.resolve();
+        if (failure === "abort") {
+          controller.abort();
+        }
+        transport.advanceTime(5000);
+        return pending;
+      };
+      const result = await h.executor.type(
+        { action: "type", text: value, mode },
+        controller.signal,
+      );
+      expect(result).toMatchObject({ success: false, retryable: false, partialApplication: true });
+      expect(attempts).toBe(1);
+      expect(h.committed).toEqual([]);
+      const events = h.adb
+        .getExecutedCommands()
+        .filter((command) => command.includes("input keyevent"));
+      expect(events).toEqual(value.startsWith("a") ? ["shell input keyevent KEYCODE_A"] : []);
+    });
+  }
 });

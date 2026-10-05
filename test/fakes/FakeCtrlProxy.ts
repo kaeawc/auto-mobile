@@ -800,6 +800,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
+  async requestInsertText(
+    text: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+    _options?: Parameters<AndroidCtrlProxy["requestInsertText"]>[3],
+    _transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
+  ): Promise<A11ySetTextResult> {
+    return this.requestSetText(text);
+  }
+
   async requestClearText(
     resourceId?: string,
     timeoutMs: number = 5000,
@@ -826,6 +836,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: "done" | "next" | "search" | "send" | "go" | "previous",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _abortSignal?: AbortSignal,
+    _onDispatch?: () => void,
   ): Promise<A11yImeActionResult> {
     await this.applyDelay("imeAction");
 

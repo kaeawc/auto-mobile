@@ -12,6 +12,7 @@ import {
 import { supplementAndroidHierarchy } from "../action/AndroidHierarchyFallback";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
+import { iosHierarchyAcquisition, type IosHierarchyAcquisition } from "./ios/types";
 import { ViewHierarchy } from "./ViewHierarchy";
 import {
   DefaultHierarchyCapture,
@@ -40,6 +41,11 @@ import { logger } from "../../utils/logger";
 export const DEFAULT_HIERARCHY_READ_TIMEOUT_MS = 15000;
 const incompleteHierarchyBackoff = fixedBackoff(100);
 
+type SyncedHierarchy = {
+  hierarchy: unknown;
+  frameContext?: ViewHierarchyResult["frameContext"];
+} & IosHierarchyAcquisition;
+
 /** Dynamic platform bridge: normalizers own the raw response shape. */
 export interface HierarchySyncClient {
   requestHierarchySync(
@@ -49,7 +55,7 @@ export interface HierarchySyncClient {
     timeoutMs: number,
     diagnostics?: HierarchySyncDiagnostics,
     displayId?: number,
-  ): Promise<{ hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] } | null>;
+  ): Promise<SyncedHierarchy | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
   connectForObservationRead?(): Promise<boolean>;
   close?(): Promise<void>;
@@ -59,7 +65,7 @@ export interface HierarchySyncClient {
     signal: AbortSignal | undefined,
     timeoutMs: number,
     display?: number | ObserverHierarchyRequestOptions,
-  ): Promise<{ hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] } | null>;
+  ): Promise<SyncedHierarchy | null>;
 }
 
 export interface DeviceHierarchyCaptureDependencies {
@@ -79,11 +85,15 @@ export interface DeviceHierarchyCaptureDependencies {
 
 function normalizeSyncedIosHierarchy(
   client: HierarchySyncClient,
-  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] },
+  synced: SyncedHierarchy,
   timer: Timer,
 ): ViewHierarchyResult {
+  const acquisition = synced[iosHierarchyAcquisition];
   return {
     ...normalizeIosHierarchy(client.convertToViewHierarchyResult(synced.hierarchy)),
+    ...(acquisition === "device" || acquisition === "client-cache"
+      ? { [iosHierarchyAcquisition]: acquisition }
+      : {}),
     receivedAt: timer.now(),
     fresh: true,
     ...(synced.frameContext !== undefined ? { frameContext: synced.frameContext } : {}),
@@ -260,7 +270,7 @@ async function connectObserverHierarchy(options: ObserverConnectionOptions): Pro
 
 function normalizeSyncedAndroidHierarchy(
   syncClient: HierarchySyncClient,
-  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] },
+  synced: SyncedHierarchy,
   timer: Timer,
 ): ViewHierarchyResult {
   const hierarchy = syncClient.convertToViewHierarchyResult(synced.hierarchy);
@@ -280,7 +290,7 @@ async function normalizeSyncedHierarchy(options: {
   device: BootedDevice;
   dependencies: DeviceHierarchyCaptureDependencies;
   syncClient: HierarchySyncClient;
-  synced: { hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] };
+  synced: SyncedHierarchy;
   deadline: number;
   request: HierarchyCaptureRequest;
   timer: Timer;

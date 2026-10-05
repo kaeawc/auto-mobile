@@ -313,18 +313,34 @@ class InteractiveOverlayHostTest {
   }
 
   @Test
-  fun `replace during gesture invalidates restore and immediately uses new touchable params`() =
-    runTest {
-      host.show()
-      host.withTouchThrough {
-        host.replace(InteractiveOverlayRequest(hasTextField = true))
-        assertFalse(host.isTouchThroughActive)
-      }
-      assertEquals(2, manager.updated.size)
-      assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+  fun `replace during gesture preserves touch through and restores the new params`() = runTest {
+    host.show()
+    host.withTouchThrough {
+      host.replace(InteractiveOverlayRequest(hasTextField = true))
+      assertTrue(host.isTouchThroughActive)
+      assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
       assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
-      assertEquals(1, manager.added.size)
     }
+    assertFalse(host.isTouchThroughActive)
+    assertEquals(3, manager.updated.size)
+    assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+    assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+    assertEquals(1, manager.added.size)
+  }
+
+  @Test
+  fun `show during gesture restores new placement flags after the block`() = runTest {
+    host.show()
+    host.withTouchThrough {
+      assertTrue(host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen())))
+      assertTrue(host.isTouchThroughActive)
+      assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+    }
+    assertFalse(host.isTouchThroughActive)
+    assertFalse(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+    assertEquals(LayoutParams.MATCH_PARENT, manager.updated.last().width)
+    assertEquals(1, manager.added.size)
+  }
 
   @Test
   fun `destroy during gesture invalidates restore and refuses future show`() = runTest {

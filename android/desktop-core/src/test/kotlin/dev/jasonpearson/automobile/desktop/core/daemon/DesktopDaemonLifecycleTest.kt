@@ -591,7 +591,7 @@ class DesktopDaemonLifecycleTest {
     val pidFile = Files.createTempFile("automobile-daemon", ".json").toFile()
     pidFile.writeText(
       """
-      {"version":"0.0.39","options":{"networkMockable":true,"videoFps":30,"eventAllMarkers":["login","save"]}}
+      {"version":"0.0.39","options":{"networkMockable":true,"videoFps":30,"eventAllMarkers":["login","save"],"actionsCompactMetadata":true}}
       """
         .trimIndent()
     )
@@ -602,7 +602,14 @@ class DesktopDaemonLifecycleTest {
 
       assertEquals("0.0.39", state.version)
       assertEquals(
-        listOf("--video-fps", "30", "--network-mockable", "--event-all-markers", "login,save"),
+        listOf(
+          "--video-fps",
+          "30",
+          "--network-mockable",
+          "--event-all-markers",
+          "login,save",
+          "--actions-compact-metadata",
+        ),
         state.launchArguments,
       )
     } finally {

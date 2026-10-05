@@ -132,13 +132,12 @@ internal fun traversalOrderErrorFrame(
     put("error", error ?: "Unknown error")
   }
 
-/** Deliberate refusal until the overlay host is connected to the typed actions. */
-internal fun overlayNotWiredResultFrame(requestId: String?): String =
+internal fun overlayResultFrame(requestId: String?, success: Boolean, error: String?): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     OverlayResult(
       timestamp = System.currentTimeMillis(),
       requestId = requestId,
-      success = false,
-      error = "overlay host not wired",
+      success = success,
+      error = error,
     )
   )

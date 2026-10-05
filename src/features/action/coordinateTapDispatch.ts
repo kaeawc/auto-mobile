@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { inputDurationArgument } from "./touchscreenInput";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
@@ -6,11 +7,12 @@ import {
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TapAnyElementOptions } from "../../models/TapAnyElementOptions";
 import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { DOUBLE_TAP_GAP_MS, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
 export interface CoordinateTapClient<Dispatch = never> {
@@ -157,11 +159,12 @@ export async function androidDisplayTapDispatch(
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
     onDispatched: () => void;
+    timer?: Pick<Timer, "sleep">;
   },
 ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-  const { target, signal } = context;
+  const { target, signal, timer = defaultTimer } = context;
   const useCtrlProxy = await supportsCtrlProxyGestureDisplay(client, target.displayId);
-  const dispatch = async ({ x, y }: { x: number; y: number }) => {
+  const dispatch = async ({ x, y }: { x: number; y: number }, onTapDelivered: () => void) => {
     throwIfAborted(signal);
     target.assertCurrent();
     const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
@@ -182,34 +185,60 @@ export async function androidDisplayTapDispatch(
         target.displayId === 0 ? undefined : target.displayId,
         target.assertCurrent,
       );
-      throwIfAborted(signal);
-      if (!result.success) {
-        if (dispatched) {
-          throw indeterminateTapError(result.error);
-        }
-        throw new ActionableError(result.error ?? "Android tap failed");
+      if (result.success) {
+        onTapDelivered();
       }
-    } else {
-      await executeTouchscreenInput(
-        adb,
-        options.action === "longPress"
-          ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
-          : `tap ${x} ${y}`,
-        target.displayId,
-        signal,
-        target.assertCurrent,
-        {
-          timeoutMs:
-            options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
-        },
+      throwIfAborted(signal);
+      if (result.success) {
+        return;
+      }
+      if (dispatched) {
+        throw indeterminateTapError(result.error);
+      }
+      if (isStaleFrameContextRejection(result.error)) {
+        throw new ActionableError(result.error ?? "Stale frame context");
+      }
+      logger.warn(
+        `[androidDisplayTapDispatch] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
       );
     }
-    context.onDispatched();
+    await executeTouchscreenInput(
+      adb,
+      options.action === "longPress"
+        ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
+        : `tap ${x} ${y}`,
+      target.displayId,
+      signal,
+      target.assertCurrent,
+      {
+        timeoutMs:
+          options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
+      },
+    );
+    onTapDelivered();
+    throwIfAborted(signal);
   };
   return async (point) => {
-    await dispatch(point);
-    if (options.action === "doubleTap") {
-      await dispatch(point);
+    let tapsDelivered = 0;
+    const onTapDelivered = () => {
+      tapsDelivered++;
+      context.onDispatched();
+    };
+    try {
+      await dispatch(point, onTapDelivered);
+      if (options.action === "doubleTap") {
+        await awaitWhileRequestIsLive(timer.sleep(DOUBLE_TAP_GAP_MS), signal);
+        throwIfAborted(signal);
+        target.assertCurrent();
+        await dispatch(point, onTapDelivered);
+      }
+    } catch (error) {
+      if (options.action === "doubleTap" && tapsDelivered === 1) {
+        throw indeterminateTapError(
+          `${errorMessage(error)}. Double tap partially applied: one tap was delivered; the second tap was not confirmed`,
+        );
+      }
+      throw error;
     }
   };
 }

@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
 import type { ElementGeometry } from "../../../../src/utils/interfaces/ElementGeometry";
@@ -87,7 +88,7 @@ function makeScrollUntilVisible({
   const fakeObserveScreen = {
     execute: async (options?: Record<string, unknown>) => {
       observeOptions?.push(options);
-      return observeResults[Math.min(callIdx, observeResults.length - 1)];
+      return recordObservationRead(observeResults[Math.min(callIdx, observeResults.length - 1)]);
     },
     getMostRecentCachedObserveResult: async () =>
       observeResults[Math.min(callIdx, observeResults.length - 1)],

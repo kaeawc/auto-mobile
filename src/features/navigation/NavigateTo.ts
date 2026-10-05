@@ -45,6 +45,12 @@ export interface NavigateToOptions {
   [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
 }
 
+interface NavigationPathResultContext {
+  targetScreen: string;
+  executedPath: string[];
+  startTime: number;
+}
+
 /**
  * NavigateTo feature class that uses the navigation graph to traverse an app
  * to reach a target screen.
@@ -116,26 +122,13 @@ export class NavigateTo {
 
       if (!currentScreen) {
         perf.end();
-        return {
-          success: false,
-          error: "Cannot determine current screen. No navigation events recorded yet.",
-          currentScreen: null,
-          targetScreen,
-          stepsExecuted: 0,
-        };
+        return this.unknownCurrentScreenResult(targetScreen);
       }
 
       // Already on target screen
       if (currentScreen === targetScreen) {
         perf.end();
-        return {
-          success: true,
-          message: "Already on target screen",
-          currentScreen,
-          targetScreen,
-          stepsExecuted: 0,
-          durationMs: this.timer.now() - startTime,
-        };
+        return this.alreadyOnTargetResult(currentScreen, targetScreen, startTime);
       }
 
       // Check if we should use smart back button navigation
@@ -189,20 +182,12 @@ export class NavigateTo {
         perf.end();
         const knownScreens = await this.navigationManager.getKnownScreens();
         throwIfAborted(signal);
-        return {
-          success: false,
-          error:
-            `No known path from "${currentScreen}" to "${targetScreen}". ` +
-            `Known screens: ${knownScreens.join(", ") || "none"}`,
-          currentScreen,
-          targetScreen,
-          stepsExecuted: 0,
-          durationMs: this.timer.now() - startTime,
-        };
+        return this.noKnownPathResult(currentScreen, targetScreen, knownScreens, startTime);
       }
 
       // Execute path
       const executedPath: string[] = [];
+      const resultContext = { targetScreen, executedPath, startTime };
       let reached = false;
       let arrivalScreen: string | undefined;
 
@@ -213,15 +198,7 @@ export class NavigateTo {
         // Check timeout
         if (this.timer.now() - startTime > NavigateTo.MAX_TIMEOUT_MS) {
           perf.end();
-          return {
-            success: false,
-            error: "Navigation timeout (30 seconds)",
-            currentScreen: this.navigationManager.getCurrentScreen(),
-            targetScreen,
-            stepsExecuted: executedPath.length,
-            partialPath: executedPath,
-            durationMs: this.timer.now() - startTime,
-          };
+          return this.navigationTimeoutResult(targetScreen, executedPath, startTime);
         }
 
         // Report progress
@@ -243,15 +220,7 @@ export class NavigateTo {
           throwIfAborted(signal);
           logger.warn(`[NAVIGATE_TO] Error executing step: ${errorMessage(error)}`, error);
           perf.end();
-          return {
-            success: false,
-            error: `Failed to execute step ${i + 1}: ${errorMessage(error)}`,
-            currentScreen: this.navigationManager.getCurrentScreen(),
-            targetScreen,
-            stepsExecuted: executedPath.length,
-            partialPath: executedPath,
-            durationMs: this.timer.now() - startTime,
-          };
+          return this.stepExecutionFailureResult(error, i, resultContext);
         }
 
         // Wait for screen transition
@@ -279,15 +248,7 @@ export class NavigateTo {
           const error = `Navigation step ${i + 1} (${edge.from} → ${edge.to}) did not reach expected screen "${edge.to}"; observed current screen "${observedScreen ?? "unknown"}"; ${i + 1} steps ran (${executedPath.length} actions dispatched)`;
           logger.warn(`[NAVIGATE_TO] ${error}`);
           perf.end();
-          return {
-            success: false,
-            error,
-            currentScreen: observedScreen,
-            targetScreen,
-            stepsExecuted: executedPath.length,
-            partialPath: executedPath,
-            durationMs: this.timer.now() - startTime,
-          };
+          return this.stepArrivalFailureResult(error, observedScreen, resultContext);
         }
       }
 
@@ -305,33 +266,143 @@ export class NavigateTo {
 
       throwIfAborted(signal);
       perf.end();
-      const finalScreen = arrivalScreen ?? this.navigationManager.getCurrentScreen();
-      const message = reached
-        ? `Successfully navigated to "${targetScreen}"`
-        : `Navigation did not reach "${targetScreen}"${finalScreen ? `; currently on "${finalScreen}"` : ""}`;
-      return {
-        success: reached,
-        message,
-        ...(!reached ? { error: message } : {}),
-        currentScreen: finalScreen,
-        targetScreen,
-        stepsExecuted: executedPath.length,
-        path: executedPath,
-        durationMs: this.timer.now() - startTime,
-      };
+      return this.completedNavigationResult(arrivalScreen, reached, resultContext);
     } catch (error) {
       perf.end();
       throwIfAborted(signal);
       logger.warn(`[NAVIGATE_TO] Navigation failed: ${errorMessage(error)}`, error);
-      return {
-        success: false,
-        error: `Navigation failed: ${errorMessage(error)}`,
-        currentScreen: this.navigationManager.getCurrentScreen(),
-        targetScreen,
-        stepsExecuted: 0,
-        durationMs: this.timer.now() - startTime,
-      };
+      return this.navigationFailureResult(error, targetScreen, startTime);
     }
+  }
+
+  private noKnownPathResult(
+    currentScreen: string,
+    targetScreen: string,
+    knownScreens: string[],
+    startTime: number,
+  ): NavigateToResult {
+    return {
+      success: false,
+      error:
+        `No known path from "${currentScreen}" to "${targetScreen}". ` +
+        `Known screens: ${knownScreens.join(", ") || "none"}`,
+      currentScreen,
+      targetScreen,
+      stepsExecuted: 0,
+      durationMs: this.timer.now() - startTime,
+    };
+  }
+
+  private unknownCurrentScreenResult(targetScreen: string): NavigateToResult {
+    return {
+      success: false,
+      error: "Cannot determine current screen. No navigation events recorded yet.",
+      currentScreen: null,
+      targetScreen,
+      stepsExecuted: 0,
+    };
+  }
+
+  private alreadyOnTargetResult(
+    currentScreen: string,
+    targetScreen: string,
+    startTime: number,
+  ): NavigateToResult {
+    return {
+      success: true,
+      message: "Already on target screen",
+      currentScreen,
+      targetScreen,
+      stepsExecuted: 0,
+      durationMs: this.timer.now() - startTime,
+    };
+  }
+
+  private navigationTimeoutResult(
+    targetScreen: string,
+    executedPath: string[],
+    startTime: number,
+  ): NavigateToResult {
+    return {
+      success: false,
+      error: "Navigation timeout (30 seconds)",
+      currentScreen: this.navigationManager.getCurrentScreen(),
+      targetScreen,
+      stepsExecuted: executedPath.length,
+      partialPath: executedPath,
+      durationMs: this.timer.now() - startTime,
+    };
+  }
+
+  private stepExecutionFailureResult(
+    error: unknown,
+    i: number,
+    context: NavigationPathResultContext,
+  ): NavigateToResult {
+    const { targetScreen, executedPath, startTime } = context;
+    return {
+      success: false,
+      error: `Failed to execute step ${i + 1}: ${errorMessage(error)}`,
+      currentScreen: this.navigationManager.getCurrentScreen(),
+      targetScreen,
+      stepsExecuted: executedPath.length,
+      partialPath: executedPath,
+      durationMs: this.timer.now() - startTime,
+    };
+  }
+
+  private stepArrivalFailureResult(
+    error: string,
+    observedScreen: string | null,
+    context: NavigationPathResultContext,
+  ): NavigateToResult {
+    const { targetScreen, executedPath, startTime } = context;
+    return {
+      success: false,
+      error,
+      currentScreen: observedScreen,
+      targetScreen,
+      stepsExecuted: executedPath.length,
+      partialPath: executedPath,
+      durationMs: this.timer.now() - startTime,
+    };
+  }
+
+  private completedNavigationResult(
+    arrivalScreen: string | undefined,
+    reached: boolean,
+    context: NavigationPathResultContext,
+  ): NavigateToResult {
+    const { targetScreen, executedPath, startTime } = context;
+    const finalScreen = arrivalScreen ?? this.navigationManager.getCurrentScreen();
+    const message = reached
+      ? `Successfully navigated to "${targetScreen}"`
+      : `Navigation did not reach "${targetScreen}"${finalScreen ? `; currently on "${finalScreen}"` : ""}`;
+    return {
+      success: reached,
+      message,
+      ...(!reached ? { error: message } : {}),
+      currentScreen: finalScreen,
+      targetScreen,
+      stepsExecuted: executedPath.length,
+      path: executedPath,
+      durationMs: this.timer.now() - startTime,
+    };
+  }
+
+  private navigationFailureResult(
+    error: unknown,
+    targetScreen: string,
+    startTime: number,
+  ): NavigateToResult {
+    return {
+      success: false,
+      error: `Navigation failed: ${errorMessage(error)}`,
+      currentScreen: this.navigationManager.getCurrentScreen(),
+      targetScreen,
+      stepsExecuted: 0,
+      durationMs: this.timer.now() - startTime,
+    };
   }
 
   /**

@@ -624,6 +624,37 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded?.result).toBe(message);
   });
 
+  const unrecognizedTypes = [
+    undefined,
+    null,
+    42,
+    {},
+    "constructor",
+    "__proto__",
+    "toString",
+    "hasOwnProperty",
+    "valueOf",
+  ];
+
+  test.each(unrecognizedTypes)("type %p without an error returns the raw message", (type) => {
+    const message = msg({ type: type as never, value: 7 });
+    const decoded = decodeCtrlProxyMessage(message);
+    expect(decoded).toStrictEqual({ requestId: REQ, result: message });
+    expect(decoded?.result).toBe(message);
+  });
+
+  test.each(unrecognizedTypes)("type %p with an error preserves the rewritten envelope", (type) => {
+    const error = "Unknown command type: request_teleport";
+    const perfTiming = { name: "command", durationMs: 3 };
+    const message = msg({ type: type as never, error, perfTiming, totalTimeMs: 3 });
+    expect(decodeCtrlProxyMessage(message)).toStrictEqual({
+      requestId: REQ,
+      errorMessage: rewriteUnknownCommandError(error),
+      perfTiming,
+      totalTimeMs: 3,
+    });
+  });
+
   test("sdk_capabilities_result reshapes availability, bundleId and capabilities", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({

@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
 import { SOCKET_PATH, PID_FILE_PATH } from "./constants";
@@ -105,12 +106,20 @@ export async function getDaemonHealthReport(
           report.daemonUptime = timer.now() - new Date(pidData.startedAt).getTime();
         }
       } catch (error) {
+        // A stale PID is expected during health checks; the recommendation reports it.
+        logger.debug(`Daemon PID liveness probe failed: ${errorMessage(error)}`);
         report.recommendations.push(
           `PID file references process ${pidData.pid} which is not running. ` +
             `Daemon may have crashed. Stale PID file should be cleaned up.`,
         );
       }
     } catch (error) {
+      if (error instanceof SyntaxError) {
+        // JSON parser errors may quote file contents; keep the log context static.
+        logger.warn("Daemon PID file check failed: invalid JSON");
+      } else {
+        logger.warn(`Daemon PID file check failed: ${errorMessage(error)}`, error);
+      }
       report.recommendations.push(`PID file exists but is invalid or unreadable: ${error}`);
     }
   }

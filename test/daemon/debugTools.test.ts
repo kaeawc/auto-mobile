@@ -4,15 +4,89 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import { getDaemonHealthReport, runSocketDiagnostics } from "../../src/daemon/debugTools";
+import { logger } from "../../src/utils/logger";
 
 describe("getDaemonHealthReport", () => {
   const tempDirs: string[] = [];
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">> | undefined;
+  let isAvailable: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">> | undefined;
 
   afterEach(() => {
+    warn?.mockRestore();
+    warn = undefined;
+    isAvailable?.mockRestore();
+    isAvailable = undefined;
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
     tempDirs.length = 0;
+  });
+
+  test("warns once with static context for invalid PID JSON and preserves the recommendation", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-invalid-json-"));
+    tempDirs.push(tempDir);
+    const socketPath = join(tempDir, "daemon.sock");
+    const pidFilePath = join(tempDir, "daemon.pid");
+    const content = "not-json-SECRET-MARKER";
+    writeFileSync(pidFilePath, content);
+    let expectedRecommendation = "";
+    try {
+      JSON.parse(content);
+    } catch (error) {
+      expectedRecommendation = `PID file exists but is invalid or unreadable: ${error}`;
+    }
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+    const report = await getDaemonHealthReport(undefined, {
+      socketPath,
+      pidFilePath,
+      platform: "win32",
+    });
+
+    expect(isAvailable).toHaveBeenCalledWith(socketPath, expect.anything());
+    const warnings = warn.mock.calls.filter(([message]) =>
+      message.startsWith("Daemon PID file check failed"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][0]).toBe("Daemon PID file check failed: invalid JSON");
+    expect(warnings[0][0]).not.toContain("SECRET-MARKER");
+    expect(warnings[0][0]).not.toContain(content);
+    expect(report.pidFileValid).toBe(false);
+    const recommendations = report.recommendations.filter((recommendation) =>
+      recommendation.startsWith("PID file exists but is invalid or unreadable: "),
+    );
+    expect(recommendations).toEqual([expectedRecommendation]);
+  });
+
+  test("warns once with EISDIR context when the PID file path is a directory", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-read-failure-"));
+    tempDirs.push(tempDir);
+    const socketPath = join(tempDir, "daemon.sock");
+    const pidFilePath = join(tempDir, "daemon.pid");
+    mkdirSync(pidFilePath);
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+    const report = await getDaemonHealthReport(undefined, {
+      socketPath,
+      pidFilePath,
+      platform: "win32",
+    });
+
+    expect(isAvailable).toHaveBeenCalledWith(socketPath, expect.anything());
+    const warnings = warn.mock.calls.filter(([message]) =>
+      message.startsWith("Daemon PID file check failed"),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][0]).toContain("EISDIR");
+    expect(warnings[0][0]).not.toBe("Daemon PID file check failed: invalid JSON");
+    expect(report.pidFileValid).toBe(false);
+    expect(
+      report.recommendations.some((recommendation) =>
+        recommendation.startsWith("PID file exists but is invalid or unreadable: "),
+      ),
+    ).toBe(true);
   });
 
   test("treats a responsive socket as running when PID bookkeeping is missing", async () => {

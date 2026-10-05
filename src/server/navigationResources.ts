@@ -1,4 +1,9 @@
-import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
+import {
+  ResourceRegistry,
+  ResourceContent,
+  ResourceReadContext,
+  getRequestedResourceUri,
+} from "./resourceRegistry";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import {
   diffGraphSummaryByBuild,
@@ -92,10 +97,21 @@ type NavigationGraphResourceProvider = NavigationGraphSummaryProvider &
 
 let navigationGraphProvider: NavigationGraphResourceProvider | null = null;
 
-function resolveUnscopedNavigationGraphManager(): NavigationGraphResourceProvider {
+function resolveUnscopedNavigationGraphManager(
+  context?: ResourceReadContext,
+  requireCurrentApp = true,
+): NavigationGraphResourceProvider {
+  if (requireCurrentApp && context?.sessionUuid) {
+    return NavigationGraphManager.getInstanceForSession(context.sessionUuid);
+  }
   const daemonState = DaemonState.getInstance();
   if (daemonState.isInitialized()) {
     const sessions = daemonState.getSessionManager().getAllSessions();
+    if (requireCurrentApp && sessions.length > 1) {
+      throw new Error(
+        "Multiple device sessions are active. Read from a session-bound connection or use an app-scoped ?appId= URI where supported.",
+      );
+    }
     if (sessions.length === 1) {
       return NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId);
     }
@@ -103,25 +119,39 @@ function resolveUnscopedNavigationGraphManager(): NavigationGraphResourceProvide
   return NavigationGraphManager.getInstance();
 }
 
-function getNavigationGraphProvider(): NavigationGraphResourceProvider {
-  return navigationGraphProvider ?? resolveUnscopedNavigationGraphManager();
+function getNavigationGraphProvider(
+  context?: ResourceReadContext,
+  requireCurrentApp = true,
+): NavigationGraphResourceProvider {
+  return (
+    navigationGraphProvider ?? resolveUnscopedNavigationGraphManager(context, requireCurrentApp)
+  );
 }
 let updateListenerProvider: NavigationGraphSummaryProvider | null = null;
-let updateTimeout: ReturnType<typeof setTimeout> | null = null;
+// Debounce independently: an update on B must neither suppress nor broadcast A's update.
+const updateTimeouts = new Map<string | undefined, ReturnType<typeof setTimeout>>();
 
-function scheduleNavigationGraphUpdate(): void {
-  if (updateTimeout) {
+function scheduleNavigationGraphUpdate(sessionUuid?: string): void {
+  if (updateTimeouts.has(sessionUuid)) {
     return;
   }
 
-  updateTimeout = defaultTimer.setTimeout(() => {
-    updateTimeout = null;
-    void ResourceRegistry.notifyResourcesUpdated([
-      NAVIGATION_RESOURCE_URIS.APPS,
-      NAVIGATION_RESOURCE_URIS.GRAPH,
-      NAVIGATION_RESOURCE_URIS.HISTORY,
-    ]);
-  }, GRAPH_RESOURCE_UPDATE_DEBOUNCE_MS);
+  updateTimeouts.set(
+    sessionUuid,
+    defaultTimer.setTimeout(() => {
+      updateTimeouts.delete(sessionUuid);
+      void ResourceRegistry.notifyResourcesUpdated(
+        [
+          NAVIGATION_RESOURCE_URIS.APPS,
+          NAVIGATION_RESOURCE_URIS.GRAPH,
+          NAVIGATION_RESOURCE_URIS.HISTORY,
+        ],
+        sessionUuid,
+      ).catch((error) => {
+        logger.warn("[NavigationResources] Failed to notify navigation updates", error);
+      });
+    }, GRAPH_RESOURCE_UPDATE_DEBOUNCE_MS),
+  );
 }
 
 function attachGraphUpdateListener(provider: NavigationGraphSummaryProvider): void {
@@ -132,6 +162,13 @@ function attachGraphUpdateListener(provider: NavigationGraphSummaryProvider): vo
   // never saw the device navigate. Fall back to clear-all only for legacy providers that
   // predate removeGraphUpdateListener (their listener list is exclusively ours).
   const previous = updateListenerProvider;
+  if (previous !== provider) {
+    const pendingGlobalUpdate = updateTimeouts.get(undefined);
+    if (pendingGlobalUpdate !== undefined) {
+      defaultTimer.clearTimeout(pendingGlobalUpdate);
+      updateTimeouts.delete(undefined);
+    }
+  }
   if (previous?.removeGraphUpdateListener) {
     previous.removeGraphUpdateListener(scheduleNavigationGraphUpdate);
   } else if (previous?.setGraphUpdateListener) {
@@ -147,7 +184,7 @@ function attachGraphUpdateListener(provider: NavigationGraphSummaryProvider): vo
 
 export function setNavigationGraphProvider(provider: NavigationGraphResourceProvider | null): void {
   navigationGraphProvider = provider;
-  attachGraphUpdateListener(getNavigationGraphProvider());
+  attachGraphUpdateListener(navigationGraphProvider ?? NavigationGraphManager.getInstance());
 }
 
 // Narrow seam over the screenshot manager: only what the screenshot resource
@@ -170,7 +207,10 @@ export function setNavigationScreenshotProvider(
   navigationScreenshotProvider = provider;
 }
 
-async function getNavigationGraphResource(appId?: string): Promise<ResourceContent> {
+async function getNavigationGraphResource(
+  appId?: string,
+  context?: ResourceReadContext,
+): Promise<ResourceContent> {
   const uri = appId
     ? `automobile:navigation/graph?appId=${encodeURIComponent(appId)}`
     : NAVIGATION_RESOURCE_URIS.GRAPH;
@@ -178,7 +218,7 @@ async function getNavigationGraphResource(appId?: string): Promise<ResourceConte
   try {
     // Use exportGraphSummaryForApp if available and appId is provided
     let graph;
-    const provider = getNavigationGraphProvider();
+    const provider = getNavigationGraphProvider(context, !appId);
     if (appId && provider.exportGraphSummaryForApp) {
       graph = await provider.exportGraphSummaryForApp(appId);
     } else {
@@ -232,7 +272,7 @@ async function getNavigationBuildFilterResource(
       versionCode: parseBuildVersionCode(params.versionCode, "versionCode"),
       contentHash: decodeUriParam(params.contentHash) ?? "",
     };
-    const provider = getNavigationGraphProvider();
+    const provider = getNavigationGraphProvider(undefined, false);
     const summary = await (provider.exportGraphSummaryForApp?.(appId) ??
       provider.exportGraphSummary());
     return {
@@ -268,7 +308,7 @@ async function getNavigationBuildDiffResource(
       versionCode: parseBuildVersionCode(params.versionCodeB, "versionCodeB"),
       contentHash: decodeUriParam(params.contentHashB) ?? "",
     };
-    const provider = getNavigationGraphProvider();
+    const provider = getNavigationGraphProvider(undefined, false);
     const summary = await (provider.exportGraphSummaryForApp?.(appId) ??
       provider.exportGraphSummary());
     return {
@@ -289,7 +329,7 @@ async function getNavigationAppsResource(): Promise<ResourceContent> {
   const uri = NAVIGATION_RESOURCE_URIS.APPS;
 
   try {
-    const apps = await getNavigationGraphProvider().listAppsWithGraph();
+    const apps = await getNavigationGraphProvider(undefined, false).listAppsWithGraph();
     const payload: NavigationAppsResourceContent = { apps };
     return {
       uri,
@@ -318,9 +358,10 @@ async function getNavigationGraphHistoryResource(
     cursor?: string;
     limit?: number;
   } = {},
+  context?: ResourceReadContext,
 ): Promise<ResourceContent> {
   try {
-    const history = await getNavigationGraphProvider().exportGraphHistory(options);
+    const history = await getNavigationGraphProvider(context).exportGraphHistory(options);
     return {
       uri,
       mimeType: "application/json",
@@ -353,13 +394,17 @@ function buildNavigationNodeError(uri: string, error: string): ResourceContent {
 async function getNavigationNodeByIdResource(
   nodeId: number,
   appId?: string,
+  context?: ResourceReadContext,
 ): Promise<ResourceContent> {
   const uri = appId
     ? `automobile:navigation/nodes/${nodeId}?appId=${encodeURIComponent(appId)}`
     : `automobile:navigation/nodes/${nodeId}`;
 
   try {
-    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(nodeId, appId);
+    const nodeResource = await getNavigationGraphProvider(context, !appId).getNodeResourceById(
+      nodeId,
+      appId,
+    );
     if (!nodeResource) {
       return buildNavigationNodeError(uri, `Navigation node ${nodeId} not found.`);
     }
@@ -375,11 +420,15 @@ async function getNavigationNodeByIdResource(
   }
 }
 
-async function getNavigationNodeByScreenResource(screenName: string): Promise<ResourceContent> {
+async function getNavigationNodeByScreenResource(
+  screenName: string,
+  context?: ResourceReadContext,
+): Promise<ResourceContent> {
   const uri = `automobile:navigation/nodes?screen=${encodeURIComponent(screenName)}`;
 
   try {
-    const nodeResource = await getNavigationGraphProvider().getNodeResourceByScreen(screenName);
+    const nodeResource =
+      await getNavigationGraphProvider(context).getNodeResourceByScreen(screenName);
     if (!nodeResource) {
       return buildNavigationNodeError(uri, `Navigation node for screen '${screenName}' not found.`);
     }
@@ -424,6 +473,7 @@ function parseHistoryParams(params: Record<string, string>): {
 async function getNavigationNodeScreenshotResource(
   nodeId: number,
   appId?: string,
+  context?: ResourceReadContext,
 ): Promise<ResourceContent> {
   const uri = buildNavigationNodeScreenshotUri(nodeId, appId);
 
@@ -433,7 +483,8 @@ async function getNavigationNodeScreenshotResource(
     // must not return A's colliding screen or an empty result (#4933). An explicit
     // appId short-circuits the current-app read, so offline browse never touches
     // the foreground singleton.
-    const resolvedAppId = appId ?? NavigationGraphManager.getInstance().getCurrentAppId();
+    const provider = getNavigationGraphProvider(context, !appId);
+    const resolvedAppId = appId ?? (await provider.exportGraphSummary()).appId;
     if (!resolvedAppId) {
       return {
         uri,
@@ -443,10 +494,7 @@ async function getNavigationNodeScreenshotResource(
     }
 
     // Get the node (scoped to the resolved app) to find its screen name.
-    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(
-      nodeId,
-      resolvedAppId,
-    );
+    const nodeResource = await provider.getNodeResourceById(nodeId, resolvedAppId);
     if (!nodeResource || !nodeResource.node) {
       return {
         uri,
@@ -510,7 +558,7 @@ function registerNavigationGraphResources(): void {
     "Navigation Graph",
     "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
     "application/json",
-    () => getNavigationGraphResource(),
+    (context) => getNavigationGraphResource(undefined, context),
   );
 
   ResourceRegistry.registerTemplate(
@@ -547,10 +595,10 @@ function registerNavigationHistoryResources(): void {
     "Navigation History",
     "Ordered navigation history for the current app (nodes and edges).",
     "application/json",
-    () => getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY),
+    (context) => getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY, {}, context),
   );
 
-  const historyHandler = async (params: Record<string, string>) => {
+  const historyHandler = async (params: Record<string, string>, context: ResourceReadContext) => {
     try {
       const { cursor, limit } = parseHistoryParams(params);
       const query = new URLSearchParams();
@@ -564,7 +612,7 @@ function registerNavigationHistoryResources(): void {
       const uri = queryString
         ? `${NAVIGATION_RESOURCE_URIS.HISTORY}?${queryString}`
         : NAVIGATION_RESOURCE_URIS.HISTORY;
-      return getNavigationGraphHistoryResource(uri, { cursor, limit });
+      return getNavigationGraphHistoryResource(uri, { cursor, limit }, context);
     } catch (error) {
       // parseHistoryParams throws a plain Error on an invalid `limit`. That throw
       // runs outside getNavigationGraphHistoryResource's try/catch, so without this
@@ -585,7 +633,7 @@ function registerNavigationHistoryResources(): void {
     }
   };
 
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.HISTORY_WITH_CURSOR_AND_LIMIT,
     "Navigation History",
     "Ordered navigation history with pagination support.",
@@ -593,7 +641,7 @@ function registerNavigationHistoryResources(): void {
     historyHandler,
   );
 
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.HISTORY_WITH_CURSOR,
     "Navigation History",
     "Ordered navigation history with pagination support.",
@@ -601,7 +649,7 @@ function registerNavigationHistoryResources(): void {
     historyHandler,
   );
 
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.HISTORY_WITH_LIMIT,
     "Navigation History",
     "Ordered navigation history with pagination support.",
@@ -619,10 +667,10 @@ export function registerNavigationResources(
     navigationGraphProvider = options.navigationGraph;
   }
 
-  attachGraphUpdateListener(getNavigationGraphProvider());
+  attachGraphUpdateListener(navigationGraphProvider ?? NavigationGraphManager.getInstance());
   // Session-scoped managers (getInstanceForSession) keep their own listener list,
   // so the global-instance listener above never fires on session-scoped writes.
-  // Register the same debounced callback for every session instance (#4932).
+  // Pass session identity into the independently debounced notification route (#4932).
   NavigationGraphManager.setSessionGraphUpdateListener(scheduleNavigationGraphUpdate);
 
   registerNavigationGraphResources();
@@ -648,12 +696,12 @@ export function registerNavigationResources(
     },
   );
 
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.NODE_BY_ID,
     "Navigation Graph Node",
     "Detailed navigation graph node by node ID, including relationships.",
     "application/json",
-    async (params) => {
+    async (params, context) => {
       const nodeId = Number(params.nodeId);
       if (!Number.isFinite(nodeId)) {
         return buildNavigationNodeError(
@@ -661,16 +709,16 @@ export function registerNavigationResources(
           `Invalid navigation node id: ${params.nodeId}`,
         );
       }
-      return getNavigationNodeByIdResource(nodeId);
+      return getNavigationNodeByIdResource(nodeId, undefined, context);
     },
   );
 
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.NODE_BY_SCREEN,
     "Navigation Graph Node (Screen)",
     "Detailed navigation graph node by screen name, including relationships.",
     "application/json",
-    async (params) => {
+    async (params, context) => {
       const screenName = decodeUriParam(params.screenName) ?? "";
       if (!screenName) {
         return buildNavigationNodeError(
@@ -678,7 +726,7 @@ export function registerNavigationResources(
           "Screen name is required.",
         );
       }
-      return getNavigationNodeByScreenResource(screenName);
+      return getNavigationNodeByScreenResource(screenName, context);
     },
   );
 
@@ -704,12 +752,12 @@ export function registerNavigationResources(
     },
   );
 
-  ResourceRegistry.registerTemplate(
+  ResourceRegistry.registerTemplateWithReadContext(
     NAVIGATION_RESOURCE_URIS.NODE_SCREENSHOT,
     "Navigation Node Screenshot",
     "Screenshot thumbnail for a navigation graph node (WebP image).",
     "image/webp",
-    async (params) => {
+    async (params, context) => {
       const nodeId = Number(params.nodeId);
       if (!Number.isFinite(nodeId)) {
         return {
@@ -718,7 +766,7 @@ export function registerNavigationResources(
           text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
         };
       }
-      return getNavigationNodeScreenshotResource(nodeId);
+      return getNavigationNodeScreenshotResource(nodeId, undefined, context);
     },
   );
 
@@ -727,10 +775,9 @@ export function registerNavigationResources(
     "Navigation Test Coverage Report",
     "Comprehensive test coverage analysis for the navigation graph, including coverage metrics, critical gaps, and recommendations.",
     "application/json",
-    async () => {
+    async (context) => {
       try {
-        const navManager = NavigationGraphManager.getInstance();
-        const appId = navManager.getCurrentAppId();
+        const appId = (await getNavigationGraphProvider(context).exportGraphSummary()).appId;
 
         if (!appId) {
           return {

@@ -216,6 +216,7 @@ class ResourceRegistryClass {
   // subscriptions are pruned when a session's transport closes.
   private servers: Set<McpServer> = new Set();
   private subscriptions: Map<McpServer, Set<string>> = new Map();
+  private readContexts = new Map<McpServer, (signal: AbortSignal) => ResourceReadContext>();
 
   // Register a new resource
   register(
@@ -345,6 +346,7 @@ class ResourceRegistryClass {
     underlying.onclose = () => {
       this.servers.delete(server);
       this.subscriptions.delete(server);
+      this.readContexts.delete(server);
       existingOnClose?.();
     };
   }
@@ -355,6 +357,7 @@ class ResourceRegistryClass {
     getReadContext: (signal: AbortSignal) => ResourceReadContext = () => ({}),
   ): void {
     this.trackServer(server);
+    this.readContexts.set(server, getReadContext);
 
     // Set handler for listing resources
     server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
@@ -496,19 +499,24 @@ class ResourceRegistryClass {
   }
 
   // Send resource update notification (only if client is subscribed)
-  async notifyResourceUpdated(uri: string): Promise<void> {
+  async notifyResourceUpdated(uri: string, sessionUuid?: string): Promise<void> {
     const resource = this.getResource(uri);
     const templateMatch = resource ? undefined : this.matchTemplate(uri);
     if (!resource && !templateMatch) {
       return;
     }
 
+    // Socket transports currently supply URI subscriptions only. Retain their legacy
+    // fan-out until ResourceUpdateTargets can receive a connection ownership context.
     ResourceUpdatedBroadcaster.emit((subscriptions) =>
       this.resolveNotificationTargets(uri, resource, templateMatch, subscriptions),
     );
 
     // Retain every live session (issue #3223), but resolve its own subscriptions.
     for (const server of this.servers) {
+      if (!this.ownsUpdateSession(server, sessionUuid)) {
+        continue;
+      }
       const subscriptions = this.subscriptions.get(server);
       if (!subscriptions) {
         continue;
@@ -521,6 +529,14 @@ class ResourceRegistryClass {
       );
       await this.notifySubscribedServer(server, targetUris);
     }
+  }
+
+  private ownsUpdateSession(server: McpServer, sessionUuid?: string): boolean {
+    if (!sessionUuid) {
+      return true;
+    }
+    const context = this.readContexts.get(server)?.(new AbortController().signal);
+    return context?.sessionUuid === sessionUuid || context?.ownsSession?.(sessionUuid) === true;
   }
 
   private async notifySubscribedServer(server: McpServer, targetUris: string[]): Promise<void> {
@@ -543,9 +559,9 @@ class ResourceRegistryClass {
   }
 
   // Send notifications for multiple resources
-  async notifyResourcesUpdated(uris: string[]): Promise<void> {
+  async notifyResourcesUpdated(uris: string[], sessionUuid?: string): Promise<void> {
     for (const uri of uris) {
-      await this.notifyResourceUpdated(uri);
+      await this.notifyResourceUpdated(uri, sessionUuid);
     }
   }
 
@@ -573,6 +589,7 @@ class ResourceRegistryClass {
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
+    this.readContexts.clear();
     this.subscriptions.clear();
   }
 

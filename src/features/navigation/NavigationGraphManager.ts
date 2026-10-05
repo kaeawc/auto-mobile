@@ -368,16 +368,10 @@ export class NavigationGraphManager implements NavigationGraphService {
   // growth over a long-lived daemon.
   private static releasedSessions: Set<string> = new Set();
   private static readonly RELEASED_SESSIONS_CAP = 4096;
-  // Graph-update listener attached to every session-scoped instance minted by
-  // getInstanceForSession (#4932). Session managers keep their own listener list
-  // (reset to [] per session), so the resource layer — which attaches its notify
-  // callback only to the global instance via setGraphUpdateListener — never hears
-  // about session-scoped writes. The daemon registers a single (debounced)
-  // callback here at startup; the same callback coalesces notifications across the
-  // global instance and every session. Attached at instance-creation time only:
-  // the daemon registers before any session exists, so retroactive attachment is
-  // unnecessary.
-  private static sessionGraphUpdateListener: (() => void | Promise<void>) | null = null;
+  // Resource notifications need the session identity; ordinary instance listeners stay unchanged.
+  private static sessionGraphUpdateListener: ((sessionId: string) => void | Promise<void>) | null =
+    null;
+  private sessionResourceUpdateListener: (() => void | Promise<void>) | null = null;
 
   private repository: NavigationRepository;
   private testCoverageRepository: TestCoverageRepository;
@@ -549,9 +543,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       instance = new NavigationGraphManager(undefined, undefined, undefined, sessionId);
       // Attach the resource-layer notify callback so session-scoped writes refresh
       // the navigation resources, not only writes on the global instance (#4932).
-      if (NavigationGraphManager.sessionGraphUpdateListener) {
-        instance.setGraphUpdateListener(NavigationGraphManager.sessionGraphUpdateListener);
-      }
+      NavigationGraphManager.attachSessionGraphUpdateListener(sessionId, instance);
       NavigationGraphManager.sessionInstances.set(sessionId, instance);
     }
     return instance;
@@ -639,6 +631,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Installing an instance clears any released-mark so the id resolves to it.
     NavigationGraphManager.releasedSessions.delete(sessionId);
     NavigationGraphManager.sessionInstances.set(sessionId, instance);
+    NavigationGraphManager.attachSessionGraphUpdateListener(sessionId, instance);
   }
 
   /**
@@ -2261,16 +2254,28 @@ export class NavigationGraphManager implements NavigationGraphService {
     this.graphUpdateListeners = this.graphUpdateListeners.filter((entry) => entry !== listener);
   }
 
-  /**
-   * Register a graph-update listener that getInstanceForSession attaches to every
-   * session-scoped instance it mints (#4932). Session managers keep their own
-   * per-session listener list, so without this the resource layer's notify
-   * callback — attached only to the global instance — never fires on session-scoped
-   * writes and subscribers retain stale navigation graph/history/apps data. The
-   * daemon registers this once at startup; passing null clears it.
-   */
-  public static setSessionGraphUpdateListener(listener: (() => void | Promise<void>) | null): void {
+  /** Register resource updates for existing and future session managers without replacing other listeners. */
+  public static setSessionGraphUpdateListener(
+    listener: ((sessionId: string) => void | Promise<void>) | null,
+  ): void {
     NavigationGraphManager.sessionGraphUpdateListener = listener;
+    for (const [sessionId, instance] of NavigationGraphManager.sessionInstances) {
+      NavigationGraphManager.attachSessionGraphUpdateListener(sessionId, instance);
+    }
+  }
+
+  private static attachSessionGraphUpdateListener(
+    sessionId: string,
+    instance: NavigationGraphManager,
+  ): void {
+    if (instance.sessionResourceUpdateListener) {
+      instance.removeGraphUpdateListener(instance.sessionResourceUpdateListener);
+    }
+    const listener = NavigationGraphManager.sessionGraphUpdateListener;
+    instance.sessionResourceUpdateListener = listener ? () => listener(sessionId) : null;
+    if (instance.sessionResourceUpdateListener) {
+      instance.setGraphUpdateListener(instance.sessionResourceUpdateListener);
+    }
   }
 
   private notifyGraphUpdated(): void {

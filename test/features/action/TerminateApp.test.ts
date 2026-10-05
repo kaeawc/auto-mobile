@@ -38,6 +38,7 @@ import {
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
+import { logger } from "../../../src/utils/logger";
 
 describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
@@ -1046,6 +1047,45 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(true);
     const timings = assertWellFormedPerfTree(result);
     expect(allNames(findEntry(timings, "terminateApp")!.children!)).toContain("awaitTerminated");
+  });
+
+  test("Android: retains all target-user baseline pids and ignores another user's pid", async () => {
+    fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    fakeAdb.setCommandResultSequence("shell dumpsys activity processes", [
+      "3220:com.example.app/u0a123\n4471:com.example.app/u0a123\n5582:com.example.app/u10a123",
+      "4471:com.example.app/u0a123\n5582:com.example.app/u0a123",
+      "5582:com.example.app/u0a123",
+    ]);
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, {
+      timer: fakeTimer,
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+    });
+    wireDeps(terminateApp);
+    try {
+      const result = await terminateApp.execute("com.example.app", {
+        userId: 0,
+        skipUiStability: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.wasRunning).toBe(true);
+      expect(result.wasForeground).toBe(false);
+      expect(fakeTimer.getSleepHistory()).toEqual([50]);
+      expect(
+        fakeAdb
+          .getCommandCalls()
+          .filter(({ command }) => command === "shell dumpsys activity processes"),
+      ).toHaveLength(3);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "was killed and restarted with a new pid (old pids: 3220, 4471; new pids: 5582)",
+        ),
+      );
+      assertWellFormedPerfTree(result);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

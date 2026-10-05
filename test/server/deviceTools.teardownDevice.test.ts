@@ -844,6 +844,95 @@ describe("deleteDevice handler", () => {
     expect(pool.getAvailableDeviceCount()).toBe(0);
   });
 
+  test.each(["abort", "deadline", "discovery-error"] as const)(
+    "releases a stopped Android teardown reservation after recheck %s",
+    async (failure) => {
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const device: BootedDevice = {
+        platform: "android",
+        name: "Pixel_8",
+        deviceId: "emulator-5554",
+      };
+      const image: DeviceInfo = { ...device, isRunning: false };
+      const repository = new FakeDeviceSessionRepository();
+      const sessionManager = new SessionManager(timer, repository);
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer,
+          deviceManager: manager,
+          deviceSessionRepository: repository,
+        }),
+      );
+      manager.setBootedDevices("android", [device]);
+      await pool.initializeWithDevices([device]);
+      await pool.bindOrReuseDeviceSession("session-1", device.deviceId, "android", image);
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      manager.setDeviceImages("android", [image]);
+      manager.setBootedDevices("android", []);
+      const discover = manager.getBootedDevicesDetailed.bind(manager);
+      let beginRecheck!: () => void;
+      const rechecking = new Promise<void>((resolve) => {
+        beginRecheck = resolve;
+      });
+      manager.getBootedDevicesDetailed = async (platform, options) => {
+        if (await pool.isShutdownReservationHeld(device.deviceId)) {
+          expect(sessionManager.getSessionForDevice(device.deviceId)).toBeNull();
+          beginRecheck();
+          if (failure === "discovery-error") {
+            throw new Error("post-release discovery unavailable");
+          }
+          return await new Promise<BootedDeviceDiscovery>((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+              once: true,
+            });
+          });
+        }
+        return await discover(platform, options);
+      };
+      setDeviceToolsDependencies({ timer });
+      const args = {
+        ...request("android", image.name),
+        cancellationPolicy: "cancel-on-request-abort",
+      };
+      const outcome = teardownTool().handler(args, undefined, controller.signal);
+      await rechecking;
+      if (failure === "abort") {
+        controller.abort(new Error("cancelled post-release recheck"));
+      } else if (failure === "deadline") {
+        timer.advanceTime(60_000);
+      }
+      const response = await outcome;
+      // A cancelled caller receives its own cancellation; reattach to the
+      // accepted operation to inspect the authoritative stop-phase failure.
+      const acceptedResponse = failure === "abort" ? await teardownTool().handler(args) : response;
+      expect(responseBody(acceptedResponse)).toMatchObject({
+        state: "failed",
+        failure: { phase: "stop" },
+      });
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await Promise.resolve();
+      }
+      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+      expect(pool.getDevice(device.deviceId)).not.toBeNull();
+      manager.getBootedDevicesDetailed = discover;
+      const retry = {
+        ...request("android", image.name),
+        operationId: "a172a14a-fd4d-416e-8c14-ff7c6c065bd2",
+      };
+      expect(responseBody(await teardownTool().handler(retry)).state).toBe("destroyed");
+      expect(manager.destroyRequests).toHaveLength(1);
+      // A new boot on this serial remains usable after the failed recheck and retry.
+      manager.reprovisionDevice(image);
+      manager.setBootedDevices("android", [device]);
+      expect(
+        responseBody(
+          await startDeviceTool().handler({ platform: "android", deviceId: device.deviceId }),
+        ),
+      ).toMatchObject({ runtime: { deviceId: device.deviceId } });
+    },
+  );
+
   test("stops recordings for a pooled simulator that was already stopped", async () => {
     const timer = new FakeTimer();
     const device: DeviceInfo = {

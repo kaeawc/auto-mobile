@@ -2124,8 +2124,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       }
     }
 
-    const nextCursor =
-      hasMore && dbEdges.length > 0 ? this.encodeHistoryCursor(dbEdges[dbEdges.length - 1]) : null;
+    const nextCursor = this.nextHistoryCursor(hasMore, dbEdges);
 
     return {
       appId: this.currentAppId,
@@ -2301,6 +2300,10 @@ export class NavigationGraphManager implements NavigationGraphService {
       throw new Error(`Invalid history cursor: ${cursor}`);
     }
     return { timestamp, id };
+  }
+
+  private nextHistoryCursor(hasMore: boolean, edges: DBNavigationEdge[]): string | null {
+    return hasMore && edges.length > 0 ? this.encodeHistoryCursor(edges[edges.length - 1]) : null;
   }
 
   private encodeHistoryCursor(edge: DBNavigationEdge): string {

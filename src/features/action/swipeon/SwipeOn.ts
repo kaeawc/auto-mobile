@@ -152,11 +152,11 @@ export class SwipeOn extends BaseVisualChange {
   private readonly iosLockScreenSwipe?: boolean;
   private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
-  private executeGesture: GestureExecutor;
-  private finder: ElementFinder;
-  private geometry: ElementGeometry;
-  private accessibilityService: AndroidCtrlProxyClient;
-  private accessibilityDetector: AccessibilityDetector;
+  private executeGesture!: GestureExecutor;
+  private finder!: ElementFinder;
+  private geometry!: ElementGeometry;
+  private accessibilityService!: AndroidCtrlProxyClient;
+  private accessibilityDetector!: AccessibilityDetector;
   private overlayDetector: OverlayDetector;
   private autoTargetSelector: AutoTargetSelectorService;
   private talkBackExecutor: TalkBackSwipeExecutor;
@@ -177,12 +177,7 @@ export class SwipeOn extends BaseVisualChange {
     this.iosLockScreenSwipe = dependencies.iosLockScreenSwipe;
     this.iosGestureTimeoutMs = dependencies.iosGestureTimeoutMs;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
-    this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
-    const parser = dependencies.parser ?? new DefaultElementParser();
-    this.finder = dependencies.finder ?? new DefaultElementFinder();
-    this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
-    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
-    this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
+    const parser = this.initializeGestureDependencies(device, adb, dependencies);
     const featureFlags = dependencies.featureFlags ?? FeatureFlagService.getInstance();
     this.visionConfig = dependencies.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
@@ -235,6 +230,20 @@ export class SwipeOn extends BaseVisualChange {
       captureDisplayFence: () => this.captureDisplayFence(),
       captureTerminalObservationScreenshot: this.captureTerminalObservationScreenshot.bind(this),
     });
+  }
+
+  private initializeGestureDependencies(
+    device: BootedDevice,
+    adb: AdbClient | null,
+    dependencies: SwipeOnDependencies,
+  ) {
+    this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
+    const parser = dependencies.parser ?? new DefaultElementParser();
+    this.finder = dependencies.finder ?? new DefaultElementFinder();
+    this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
+    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
+    return parser;
   }
 
   private createErrorResult(
@@ -968,31 +977,7 @@ export class SwipeOn extends BaseVisualChange {
       `[SwipeOn] execute: direction=${normalizedOptions.direction}, lookFor=${JSON.stringify(normalizedOptions.lookFor)}, container=${JSON.stringify(normalizedOptions.container)}, speed=${normalizedOptions.speed}, autoTarget=${normalizedOptions.autoTarget}`,
     );
     try {
-      // Determine which mode to use
-      if (normalizedOptions.lookFor) {
-        // Scroll-until-visible mode
-        logger.info(`[SwipeOn] Mode: scroll-until-visible`);
-        return await this.scrollUntilVisible.execute(normalizedOptions, progress, perf, signal);
-      } else if (!normalizedOptions.container) {
-        const autoTargetEnabled = normalizedOptions.autoTarget !== false;
-        if (!autoTargetEnabled) {
-          logger.info(`[SwipeOn] Mode: screen swipe (autoTarget disabled)`);
-          return await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
-        }
-
-        return await this.executeAutoTargetSwipe({
-          options: normalizedOptions,
-          progress,
-          perf,
-          signal,
-        });
-      } else {
-        // Container specified = swipe within container
-        logger.info(
-          `[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`,
-        );
-        return await this.executeElementSwipe(normalizedOptions, progress, perf, signal);
-      }
+      return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
     } catch (error) {
       perf.end();
       throwIfAborted(signal);
@@ -1005,12 +990,10 @@ export class SwipeOn extends BaseVisualChange {
       // Build debug context if debug mode is enabled and we have search criteria
       const debugContext =
         normalizedOptions.lookFor || normalizedOptions.container
-          ? await buildElementSearchDebugContext(this.device, {
-              text: normalizedOptions.lookFor?.text,
-              resourceId:
-                normalizedOptions.lookFor?.elementId || normalizedOptions.container?.elementId,
-              container: normalizedOptions.container,
-            })
+          ? await buildElementSearchDebugContext(
+              this.device,
+              SwipeOn.legacyDebugSearchCriteria(normalizedOptions),
+            )
           : undefined;
       throwIfAborted(signal);
 
@@ -1018,52 +1001,112 @@ export class SwipeOn extends BaseVisualChange {
       const baseErrorMessage = errorMessage(error);
       let errorMsg = `Failed to perform swipeOn: ${baseErrorMessage}`;
 
-      if (this.visionConfig.enabled && (normalizedOptions.lookFor || normalizedOptions.container)) {
-        let searchCriteria: import("../../../vision/VisionTypes").ElementSearchCriteria | null =
-          null;
-        if (normalizedOptions.lookFor) {
-          searchCriteria = {
-            text: normalizedOptions.lookFor.text,
-            resourceId: normalizedOptions.lookFor.elementId,
-            description: "Target element to scroll to",
-          };
-        } else if (normalizedOptions.container) {
-          searchCriteria = {
-            text: normalizedOptions.container.text,
-            resourceId: normalizedOptions.container.elementId,
-            description: "Container element for swiping",
-          };
-        }
-
-        if (searchCriteria) {
-          throwIfAborted(signal);
-          const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
-          const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
-          errorMsg = await getVisionEnrichedError(
-            this.screenshotCapturer,
-            viewHierarchy,
-            searchCriteria,
-            this.visionConfig,
-            errorMsg,
-            undefined,
-            this.visionAnalyzer,
-          );
-        }
+      const searchCriteria = SwipeOn.legacyVisionSearchCriteria(this, normalizedOptions);
+      if (searchCriteria) {
+        throwIfAborted(signal);
+        const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
+        const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
+        errorMsg = await getVisionEnrichedError(
+          this.screenshotCapturer,
+          viewHierarchy,
+          searchCriteria,
+          this.visionConfig,
+          errorMsg,
+          undefined,
+          this.visionAnalyzer,
+        );
       }
 
-      const timing = this.device.platform === "ios" ? perf.getTimings() : null;
-      return {
-        success: false,
-        error: errorMsg,
-        ...(timing ? { timing } : {}),
-        targetType: normalizedOptions.container ? "element" : "screen",
-        x1: 0,
-        y1: 0,
-        x2: 0,
-        y2: 0,
-        duration: 0,
-        ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
-      };
+      return SwipeOn.legacyFailureResult(this, normalizedOptions, perf, errorMsg, debugContext);
+    }
+  }
+
+  private static legacyDebugSearchCriteria(normalizedOptions: SwipeOnResolvedOptions) {
+    return {
+      text: normalizedOptions.lookFor?.text,
+      resourceId: normalizedOptions.lookFor?.elementId || normalizedOptions.container?.elementId,
+      container: normalizedOptions.container,
+    };
+  }
+
+  private static legacyVisionSearchCriteria(
+    action: SwipeOn,
+    normalizedOptions: SwipeOnResolvedOptions,
+  ) {
+    if (action.visionConfig.enabled && (normalizedOptions.lookFor || normalizedOptions.container)) {
+      let searchCriteria: import("../../../vision/VisionTypes").ElementSearchCriteria | null = null;
+      if (normalizedOptions.lookFor) {
+        searchCriteria = {
+          text: normalizedOptions.lookFor.text,
+          resourceId: normalizedOptions.lookFor.elementId,
+          description: "Target element to scroll to",
+        };
+      } else if (normalizedOptions.container) {
+        searchCriteria = {
+          text: normalizedOptions.container.text,
+          resourceId: normalizedOptions.container.elementId,
+          description: "Container element for swiping",
+        };
+      }
+
+      return searchCriteria;
+    }
+    return null;
+  }
+
+  private static legacyFailureResult(
+    action: SwipeOn,
+    normalizedOptions: SwipeOnResolvedOptions,
+    perf: PerformanceTracker,
+    errorMsg: string,
+    debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>,
+  ): SwipeOnResult {
+    const timing = action.device.platform === "ios" ? perf.getTimings() : null;
+    return {
+      success: false,
+      error: errorMsg,
+      ...(timing ? { timing } : {}),
+      targetType: normalizedOptions.container ? "element" : "screen",
+      x1: 0,
+      y1: 0,
+      x2: 0,
+      y2: 0,
+      duration: 0,
+      ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
+    };
+  }
+
+  private static dispatchLegacySwipe(
+    action: SwipeOn,
+    normalizedOptions: SwipeOnResolvedOptions,
+    progress: ProgressCallback | undefined,
+    perf: PerformanceTracker,
+    signal: AbortSignal | undefined,
+  ): Promise<SwipeOnResult> {
+    // Determine which mode to use
+    if (normalizedOptions.lookFor) {
+      // Scroll-until-visible mode
+      logger.info(`[SwipeOn] Mode: scroll-until-visible`);
+      return action.scrollUntilVisible.execute(normalizedOptions, progress, perf, signal);
+    } else if (!normalizedOptions.container) {
+      const autoTargetEnabled = normalizedOptions.autoTarget !== false;
+      if (!autoTargetEnabled) {
+        logger.info(`[SwipeOn] Mode: screen swipe (autoTarget disabled)`);
+        return action.executeScreenSwipe(normalizedOptions, progress, perf, signal);
+      }
+
+      return action.executeAutoTargetSwipe({
+        options: normalizedOptions,
+        progress,
+        perf,
+        signal,
+      });
+    } else {
+      // Container specified = swipe within container
+      logger.info(
+        `[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`,
+      );
+      return action.executeElementSwipe(normalizedOptions, progress, perf, signal);
     }
   }
 

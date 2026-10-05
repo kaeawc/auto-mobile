@@ -595,20 +595,8 @@ export class XcodeSigningManager {
         return null;
       }
       const data = plistValueToSigningValue(plist as PlistValue) as Record<string, unknown>;
-      const uuid = String(data.UUID ?? "");
-      const name = String(data.Name ?? "");
-      const teamIds = Array.isArray(data.TeamIdentifier) ? data.TeamIdentifier.map(String) : [];
-      const teamName = typeof data.TeamName === "string" ? data.TeamName : undefined;
-      const expirationDate =
-        data.ExpirationDate instanceof Date
-          ? data.ExpirationDate
-          : new Date(String(data.ExpirationDate ?? ""));
-      const creationDate =
-        data.CreationDate instanceof Date
-          ? data.CreationDate
-          : data.CreationDate
-            ? new Date(String(data.CreationDate))
-            : undefined;
+      const { uuid, name, teamIds, teamName } = this.readProfileIdentity(data);
+      const { expirationDate, creationDate } = this.readProfileDates(data);
       const provisionsAllDevices = data.ProvisionsAllDevices === true;
       const provisionedDevices = Array.isArray(data.ProvisionedDevices)
         ? data.ProvisionedDevices.map(String)
@@ -653,6 +641,32 @@ export class XcodeSigningManager {
       logger.warn(`[XcodeSigning] Failed to parse provisioning profile: ${errorMessage(error)}`);
       return null;
     }
+  }
+
+  private readProfileIdentity(
+    data: Record<string, unknown>,
+  ): Pick<ProvisioningProfile, "uuid" | "name" | "teamIds" | "teamName"> {
+    const uuid = String(data.UUID ?? "");
+    const name = String(data.Name ?? "");
+    const teamIds = Array.isArray(data.TeamIdentifier) ? data.TeamIdentifier.map(String) : [];
+    const teamName = typeof data.TeamName === "string" ? data.TeamName : undefined;
+    return { uuid, name, teamIds, teamName };
+  }
+
+  private readProfileDates(
+    data: Record<string, unknown>,
+  ): Pick<ProvisioningProfile, "expirationDate" | "creationDate"> {
+    const expirationDate =
+      data.ExpirationDate instanceof Date
+        ? data.ExpirationDate
+        : new Date(String(data.ExpirationDate ?? ""));
+    const creationDate =
+      data.CreationDate instanceof Date
+        ? data.CreationDate
+        : data.CreationDate
+          ? new Date(String(data.CreationDate))
+          : undefined;
+    return { expirationDate, creationDate };
   }
 
   private async writeEntitlementsIfNeeded(

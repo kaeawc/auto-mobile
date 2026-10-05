@@ -649,15 +649,14 @@ export class ScrollUntilVisible {
         );
 
         if (unchangedScrollCount >= maxUnchangedScrolls) {
-          if (reverseMode) {
-            // Reverse also exhausted — element truly not found
-            perf.end();
-            const elapsed = this.deps.timer.now() - startTime;
-            throw new ActionableError(
-              `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
-                `${target} not found${scopeDescription} after ${scrollIteration} iterations (${elapsed}ms).`,
-            );
-          }
+          this.checkReverseExhausted(reverseMode, {
+            perf,
+            startTime,
+            maxUnchangedScrolls,
+            target,
+            scopeDescription,
+            scrollIteration,
+          });
           // Switch to reverse half-screen recovery
           reverseMode = true;
           unchangedScrollCount = 0;
@@ -711,6 +710,30 @@ export class ScrollUntilVisible {
       ...(accessibilityWarnings.size ? { warnings: [...accessibilityWarnings] } : {}),
       ...(interruptedDisplay ? { staleDisplay: interruptedDisplay } : {}),
     };
+  }
+
+  private checkReverseExhausted(
+    reverseMode: boolean,
+    context: {
+      perf: PerformanceTracker;
+      startTime: number;
+      maxUnchangedScrolls: number;
+      target: string;
+      scopeDescription: string;
+      scrollIteration: number;
+    },
+  ): void {
+    const { perf, startTime, maxUnchangedScrolls, target, scopeDescription, scrollIteration } =
+      context;
+    if (reverseMode) {
+      // Reverse also exhausted — element truly not found
+      perf.end();
+      const elapsed = this.deps.timer.now() - startTime;
+      throw new ActionableError(
+        `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
+          `${target} not found${scopeDescription} after ${scrollIteration} iterations (${elapsed}ms).`,
+      );
+    }
   }
 
   private resolveLookForOptions(

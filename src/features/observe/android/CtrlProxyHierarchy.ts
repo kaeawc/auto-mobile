@@ -604,7 +604,7 @@ export class CtrlProxyHierarchy {
       const needsSync =
         !hierarchyData ||
         (!isFresh && !response.withinCacheServeWindow) ||
-        (requireFreshExtraction && (minTimestamp === 0 || !isFresh));
+        (!isFresh && requireFreshExtraction && minTimestamp > 0);
       if (needsSync) {
         logger.debug(
           `[CTRL_PROXY] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`,

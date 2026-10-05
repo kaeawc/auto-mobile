@@ -52,6 +52,7 @@ export class RecentApps extends BaseVisualChange {
           return perf.track("iOSRecentApps", () => this.executeIosRecentApps(signal));
         },
         {
+          usesObservationForResolution: false,
           changeExpected: true,
           foregroundAppMayChange: true,
           timeoutMs: 5000,
@@ -86,6 +87,7 @@ export class RecentApps extends BaseVisualChange {
         }
       },
       {
+        usesObservationForResolution: false,
         changeExpected: true,
         foregroundAppMayChange: true,
         timeoutMs: 3000,

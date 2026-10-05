@@ -928,6 +928,7 @@ const runWaitForConditionDsl = async (
         skipBackStack: skipBackStack || undefined,
         skipScreenshot: true,
         skipAccessibilityAudit: true,
+        skipStaleWindowRecovery: true,
       });
       throwIfAborted(signal);
       polls++;
@@ -1722,6 +1723,7 @@ export const waitForObservation = async (
       skipBackStack: skipPollingOverhead || skipBackStack,
       skipScreenshot: true,
       skipAccessibilityAudit: true,
+      skipStaleWindowRecovery: true,
     });
     recordDisplayWaitEvidence(observation, postureEvidence, activeDisplayEvidence);
     return observation;

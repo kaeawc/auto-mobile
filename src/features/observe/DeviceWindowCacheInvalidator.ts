@@ -1,3 +1,4 @@
+import { markWindowResolutionRequired } from "./cache/ObserveCacheRegistry";
 import type { BootedDevice } from "../../models";
 import { AndroidCtrlProxyClient } from "./android";
 import { IOSCtrlProxyClient } from "./ios";
@@ -27,5 +28,8 @@ export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInv
       }
     }
     RealObserveScreen.clearCache(device.deviceId);
+    if (device.platform === "android") {
+      markWindowResolutionRequired(device.deviceId);
+    }
   }
 }

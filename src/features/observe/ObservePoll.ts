@@ -441,6 +441,7 @@ async function capturePoll(
     signal: options.signal,
     // Polls defer evidence and persistence until the selected terminal capture.
     skipScreenshot: true,
+    skipStaleWindowRecovery: true,
     skipCache: true,
     skipBackStack: readBackStackEachPoll === true ? undefined : true,
     skipAccessibilityAudit: true,

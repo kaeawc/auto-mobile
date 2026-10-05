@@ -14,8 +14,31 @@
  * hierarchy cache could serve a tree that was minutes old under that label.
  */
 
-import type { CtrlProxyIncompleteReason } from "../../models";
+import type { ObserveResult, CtrlProxyIncompleteReason } from "../../models";
 import type { HierarchyUnavailableReason } from "../../models/ViewHierarchyResult";
+
+// Internal provenance, deliberately absent from tool output and schemas. The
+// broad window_identity category also includes empty-but-current windows.
+const wrongWindowObservations = new WeakSet<ObserveResult>();
+
+export function recordWrongWindowEvidence(result: ObserveResult): void {
+  wrongWindowObservations.add(result);
+}
+
+export function hasWrongWindowEvidence(result: ObserveResult | undefined): boolean {
+  return result !== undefined && wrongWindowObservations.has(result);
+}
+
+/** Cache copies retain live provenance without adding serialized fields. */
+export function inheritWrongWindowEvidence(
+  source: ObserveResult,
+  copy: ObserveResult,
+): ObserveResult {
+  if (hasWrongWindowEvidence(source)) {
+    recordWrongWindowEvidence(copy);
+  }
+  return copy;
+}
 
 /**
  * How old a captured tree may be before it must be re-verified against the

@@ -62,6 +62,7 @@ export class SelectAllText extends BaseVisualChange {
         }
       },
       {
+        usesObservationForResolution: false,
         changeExpected: false,
         tolerancePercent: 0,
         timeoutMs: 500,

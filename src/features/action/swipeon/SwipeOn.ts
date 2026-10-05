@@ -1,3 +1,9 @@
+import {
+  pendingWindowResolutionGeneration,
+  completeWindowResolutionRead,
+} from "../../observe/cache/ObserveCacheRegistry";
+import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../observe/DeviceHierarchyCapture";
+import { hasWrongWindowEvidence } from "../../observe/observationFreshness";
 import { executeAndroidSearchDrag } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
@@ -256,7 +262,10 @@ export class SwipeOn extends BaseVisualChange {
   }> {
     throwIfAborted(signal);
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
-    const staleCachedRefetch = BaseVisualChange.shouldRefetchCachedObservation(observeResult);
+    const resolutionGeneration = pendingWindowResolutionGeneration(this.device.deviceId);
+    const staleCachedRefetch =
+      resolutionGeneration !== undefined ||
+      BaseVisualChange.shouldRefetchCachedObservation(observeResult);
     if (
       staleCachedRefetch ||
       !observeResult.viewHierarchy ||
@@ -265,31 +274,26 @@ export class SwipeOn extends BaseVisualChange {
       throwIfAborted(signal);
       observeResult = await this.observeScreen.execute({
         freshness: staleCachedRefetch ? "fresh" : "cached-ok",
-        timeoutMs: 2000,
+        timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+        skipStaleWindowRecovery: true,
         signal,
       });
     }
 
-    if (
-      !observeResult.viewHierarchy ||
-      (staleCachedRefetch && observeResult.viewHierarchy.hierarchy?.error)
-    ) {
+    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
       return { scrollables: [], candidates: [], observeResult };
     }
 
-    this.assertFreshScrollableObservation(observeResult);
+    if (hasWrongWindowEvidence(observeResult)) {
+      return { scrollables: [], candidates: [], observeResult };
+    }
 
+    if (resolutionGeneration !== undefined) {
+      completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
+    }
     const scrollables = this.finder.findScrollableElements(observeResult.viewHierarchy);
     const candidates = this.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
-  }
-
-  private assertFreshScrollableObservation(observeResult: ObserveResult): void {
-    if (BaseVisualChange.shouldRefetchCachedObservation(observeResult)) {
-      throw new ActionableError(
-        `Cannot resolve scrollables against a stale or unsettled observation: ${observeResult.freshness?.warning ?? "Refresh did not establish freshness"}`,
-      );
-    }
   }
 
   private buildScrollableCandidates(scrollables: Element[]): ScrollableCandidate[] {
@@ -1248,6 +1252,7 @@ export class SwipeOn extends BaseVisualChange {
         };
       },
       {
+        usesObservationForResolution: false,
         changeExpected: false,
         display: options.display,
         timeoutMs: 500,

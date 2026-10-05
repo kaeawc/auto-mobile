@@ -10,6 +10,8 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import {
   resetObserveCacheStore,
   setObserveCacheStore,
+  pendingWindowResolutionGeneration,
+  completeWindowResolutionRead,
 } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import type { ObserveResult } from "../../../src/models";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
@@ -70,6 +72,14 @@ describe("shared foreground cache invalidation", () => {
       await cache.put(device.deviceId, observation, generation);
       expect(await cache.getMostRecent(device.deviceId)).toBeUndefined();
       expect(await cache.getMostRecent("other-device")).toBe(observation);
+      const pending = pendingWindowResolutionGeneration(device.deviceId);
+      expect(pending).toBe(cache.currentGeneration(device.deviceId));
+      await cache.put(device.deviceId, observation); // a post-action transition frame
+      expect(pendingWindowResolutionGeneration(device.deviceId)).toBe(pending);
+      expect(pendingWindowResolutionGeneration("other-device")).toBeUndefined();
+      new DefaultDeviceWindowCacheInvalidator().invalidate(device, true);
+      completeWindowResolutionRead(device.deviceId, pending!);
+      expect(pendingWindowResolutionGeneration(device.deviceId)).toBe(pending! + 1);
     } finally {
       existing.mockRestore();
     }

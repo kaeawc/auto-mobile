@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
+import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
+import { waitForObservation } from "../../../src/server/observeTools";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { RealWaitForCondition } from "../../../src/features/observe/WaitForCondition";
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { deviceLikeAndroidHierarchy } from "../../helpers/deviceLikeAndroidHierarchy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -22,16 +27,44 @@ async function harness(switched: boolean, answerSync = true) {
     userId: 0,
   });
   h.timer.advanceTime(300);
+  const audits = { performance: 0, accessibility: 0 };
+  const screenshot = new FakeScreenshotRecorder();
   const screen = createObserveScreenForTest(
     h.device,
     new FakeAdbClientFactory(h.adb),
     {
       viewHierarchy: h.viewHierarchy,
+      hierarchyCapture: createDeviceHierarchyCapture(h.device, {
+        viewHierarchy: h.viewHierarchy,
+        timer: h.timer,
+        syncClientFactory: () => ({
+          requestHierarchySync: async (...args) => {
+            const synced = await h.hierarchy.requestHierarchySync(...args);
+            if (synced) {
+              h.reads.push({ floor: 0, fresh: true, updatedAt: synced.hierarchy.updatedAt });
+            }
+            return synced;
+          },
+          convertToViewHierarchyResult: (value) =>
+            h.hierarchy.convertToViewHierarchyResult(value as AccessibilityHierarchy),
+        }),
+      }),
       cacheStore: new FakeObserveCacheStore(h.timer),
+      screenshotRecorder: screenshot,
+      performanceAuditor: {
+        run: async () => {
+          audits.performance++;
+        },
+      },
+      accessibilityAuditor: {
+        run: async () => {
+          audits.accessibility++;
+        },
+      },
     },
     h.timer,
   );
-  return { ...h, screen };
+  return { ...h, screen, audits, screenshot };
 }
 
 const options = { skipScreenshot: true, skipBackStack: true, timeoutMs: 500 };
@@ -42,7 +75,7 @@ describe("observe app-switch cache recovery", () => {
     try {
       const result = await h.screen.execute(options);
       expect(result.activeWindow?.appId).toBe("com.example.new");
-      expect(result.activeWindow?.activityName).toBe("com.example.new.MainActivity");
+      expect(result.activeWindow?.activityName).toBe("");
       expect(result.freshness).toMatchObject({ isFresh: true, verified: true });
       expect(h.extractions()).toBe(1);
       expect(h.reads).toHaveLength(2);
@@ -66,13 +99,69 @@ describe("observe app-switch cache recovery", () => {
     }
   });
 
-  test("an unverified unchanged cache gets one independent extraction", async () => {
+  test("plain observe same-app cache hit within 1s performs only one hierarchy collection", async () => {
     const h = await harness(false);
     try {
       const result = await h.screen.execute(options);
-      expect(result.freshness).toMatchObject({ isFresh: true, verified: true });
-      expect(h.extractions()).toBe(1);
+      expect(result.freshness).toMatchObject({
+        isFresh: false,
+        verified: false,
+        category: "cache_age",
+      });
+      expect(h.extractions()).toBe(0);
+      expect(h.reads).toHaveLength(1);
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("app-switch mismatch re-extracts hierarchy without repeating derived work", async () => {
+    const h = await harness(true);
+    const recomposition = spyOn(h.screen, "processRecomposition").mockResolvedValue();
+    try {
+      h.screenshot.start = () => {
+        expect(h.reads).toHaveLength(2);
+        h.screenshot.startCalls++;
+      };
+      await h.screen.execute({ ...options, skipScreenshot: false, screenshot: "async" });
       expect(h.reads).toHaveLength(2);
+      expect(h.extractions()).toBe(1);
+      expect(recomposition).toHaveBeenCalledTimes(1);
+      expect(h.audits).toEqual({ performance: 1, accessibility: 1 });
+      expect(h.screenshot.startCalls + h.screenshot.captureCalls).toBe(1);
+    } finally {
+      recomposition.mockRestore();
+      h.restore();
+    }
+  });
+
+  test("WaitForCondition poll does not trigger nested recovery", async () => {
+    const h = await harness(true);
+    try {
+      const wait = new RealWaitForCondition(h.screen, h.timer);
+      const result = await wait.execute(() => ({ matched: true }), { timeoutMs: 500 });
+      expect(h.reads).toHaveLength(result.polls);
+      expect(h.extractions()).toBe(1);
+    } finally {
+      h.restore();
+    }
+  });
+
+  test("observe waitFor polling policy does not trigger nested recovery", async () => {
+    const h = await harness(true);
+    try {
+      const result = await waitForObservation(
+        h.screen,
+        { text: "App content", timeoutMs: 500 },
+        undefined,
+        true,
+        h.timer,
+        "android",
+        "none",
+      );
+      expect(result.observation.freshness?.category).toBe("window_identity");
+      expect(h.reads).toHaveLength(1);
+      expect(h.extractions()).toBe(0);
     } finally {
       h.restore();
     }

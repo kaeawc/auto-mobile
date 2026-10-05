@@ -106,6 +106,19 @@ describe("Rotate", () => {
     (rotate as any).window = fakeWindow;
   });
 
+  test("rotate dispatches with a not-fresh pre-read", async () => {
+    fakeObserveScreen.setObserveResult(() => ({
+      ...createObserveResult(),
+      freshness: {
+        isFresh: false,
+        category: "window_identity",
+      },
+    }));
+    fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(mirrorLandscape));
+    const result = await rotate.execute("landscape");
+    expect(result.success).toBe(true);
+  });
+
   describe("live rotation request budget", () => {
     for (const [remainingMs, expectedTimeoutMs] of [
       [3000, 3000],

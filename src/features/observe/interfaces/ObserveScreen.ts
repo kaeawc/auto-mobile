@@ -46,6 +46,8 @@ export interface ObserveScreenExecuteOptions {
   skipPerformanceAudit?: boolean;
   /** Skip recomposition processing for an intermediate observation. */
   skipRecompositionTracking?: boolean;
+  /** Poll callers own retries; do not add a second hierarchy read inside their poll. */
+  skipStaleWindowRecovery?: boolean;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistryClass } from "../../src/server/toolRegistry";
+import { ToolRegistryClass, DefaultAfterToolCallHandler } from "../../src/server/toolRegistry";
+import { createSendKeysCaptureHarness } from "../features/action/SendKeysTestHarness";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import {
@@ -87,6 +88,43 @@ describe("ToolRegistry post-action capture scope", () => {
       screenshotCapturedAt: 123,
     });
   });
+
+  test.each(["focused", "imeAction", "fallback", "failure"] as const)(
+    "real registry sendKeys %s returns only the chosen terminal screenshot",
+    async (scenario) => {
+      const h = createSendKeysCaptureHarness(scenario);
+      const restoreAfter = registry.setPipelineOverridesForTesting({
+        afterToolCall: new DefaultAfterToolCallHandler(undefined, () => h.settleObserve),
+      });
+      registry.registerDeviceAware("sendKeys", "sendKeys capture probe", z.object({}), async () => {
+        const result = await h.action.execute(h.commands);
+        expect(h.captures).toHaveLength(0);
+        return createStructuredToolResponse(result);
+      });
+      try {
+        const response = await registry.getTool("sendKeys")!.handler({
+          raw: true,
+          commands: h.commands,
+        });
+        expect(h.captures).toHaveLength(1);
+        const final = payload(response);
+        expect(final.success).toBe(scenario !== "failure");
+        expect(final.observation).toMatchObject({
+          observationId: h.captures[0].observationId,
+          screenshotPath: `${h.captures[0].observationId}.png`,
+          screenshotCapturedAt: 123,
+          settled: scenario === "imeAction",
+        });
+        const text = (response as { content: Array<{ text: string }> }).content[0].text;
+        expect(JSON.parse(text)).toEqual(final);
+        if (scenario === "imeAction") {
+          expect(h.events.slice(-2)).toEqual(["settle:chosen:settle-2", "capture:settle-2"]);
+        }
+      } finally {
+        restoreAfter();
+      }
+    },
+  );
 
   for (const targetDevice of [false, true]) {
     test(`internal steps capture before returning inside a client scope (targetDevice: ${targetDevice})`, async () => {

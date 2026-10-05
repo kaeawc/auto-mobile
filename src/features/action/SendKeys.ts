@@ -14,7 +14,10 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
+import {
+  beginPostActionCaptureAction,
+  deferTerminalScreenshot,
+} from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
@@ -22,6 +25,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
+import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import {
   imeCommitSegmentCount,
@@ -253,12 +257,14 @@ export interface SendKeysKeyboard {
   execute(action: "close", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
 }
 
-export interface SendKeysObserver {
+export interface SendKeysObserver extends Pick<ObserveScreen, "captureScreenshot"> {
   execute(options?: {
     display?: string;
     signal?: AbortSignal;
     freshness?: HierarchyCaptureRequest["freshness"];
     minTimestamp?: number;
+    skipScreenshot?: boolean;
+    skipAccessibilityAudit?: boolean;
   }): Promise<ObserveResult>;
 }
 
@@ -656,6 +662,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const observation = await this.observer.execute({
       signal,
       freshness: "fresh",
+      skipScreenshot: true,
       ...(display === undefined ? {} : { display }),
     });
     const hierarchy = observation.viewHierarchy;
@@ -1029,6 +1036,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         const observation = await this.observer.execute({
           signal,
           freshness: "fresh",
+          skipScreenshot: true,
           ...(display === undefined ? {} : { display }),
         });
         this.checkAbort(signal);
@@ -1853,7 +1861,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         supportsKeyCombination,
       );
       const verification = await verifyKeyEventClear(
-        () => this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 }),
+        () =>
+          this.observer.execute({
+            signal,
+            freshness: "fresh",
+            minTimestamp: 0,
+            skipScreenshot: true,
+          }),
         signal,
       );
       return deleted ? markPartialAfterMutation(verification) : verification;
@@ -1872,7 +1886,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
     | { success: false; error: string }
   > {
-    const observation = await this.observer.execute({ signal, freshness: "fresh" });
+    const observation = await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      skipScreenshot: true,
+    });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return {
@@ -2154,7 +2172,7 @@ export class SendKeys {
     const target = await prepareTargetDisplayAction(
       this.device,
       display,
-      this.observer,
+      { execute: (options) => this.observer.execute({ ...options, skipScreenshot: true }) },
       this.adbFactory.create(this.device),
       this.lastRenderedObservation,
       signal,
@@ -2292,12 +2310,23 @@ export class SendKeys {
     const preflight = this.preflightCommands(commands);
     const observe = async (minTimestamp?: number) => {
       await progress?.(commands.length, commands.length, "Observing final keyboard input state");
-      return this.observer.execute({
+      const capture = this.observer.captureScreenshot?.bind(this.observer);
+      const observation = await this.observer.execute({
         display: routing.display,
         signal,
         freshness: "fresh",
         minTimestamp,
+        ...(capture ? { skipScreenshot: true, skipAccessibilityAudit: true } : {}),
       });
+      if (
+        capture &&
+        !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
+          capture(undefined, requestSignal ?? signal, chosen),
+        )
+      ) {
+        await capture(undefined, signal, observation);
+      }
+      return observation;
     };
     // Accept hierarchy updates emitted while focus or command delivery is completing.
     const actionStartTimestamp = preflight ? undefined : await this.timestampProvider.now();
@@ -2457,7 +2486,12 @@ export class SendKeys {
     }
     // Mirror SetUIState's fresh observation and verified-focus requirement. Each
     // focus execution re-resolves the selector against the refreshed hierarchy.
-    await this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 });
+    await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      minTimestamp: 0,
+      skipScreenshot: true,
+    });
     signal?.throwIfAborted();
     const retry = await this.focuser.focus(selector, signal, undefined, options);
     signal?.throwIfAborted();

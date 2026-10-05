@@ -418,6 +418,7 @@ export class ClearText extends BaseVisualChange {
       freshness: "fresh",
       minTimestamp,
       signal,
+      skipScreenshot: true,
     });
     signal?.throwIfAborted();
     const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
@@ -447,7 +448,13 @@ export class ClearText extends BaseVisualChange {
     }
     await this.clearWithDeletes(count, signal);
     return verifyKeyEventClear(
-      () => this.observeScreen.execute({ freshness: "fresh", minTimestamp: 0, signal }),
+      () =>
+        this.observeScreen.execute({
+          freshness: "fresh",
+          minTimestamp: 0,
+          signal,
+          skipScreenshot: true,
+        }),
       signal,
       this.parser,
     );

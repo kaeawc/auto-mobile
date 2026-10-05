@@ -445,6 +445,7 @@ describe("ClearText Android ADB fallback", () => {
     expect(refreshSpy).toHaveBeenCalledWith({
       freshness: "fresh",
       minTimestamp: 101,
+      skipScreenshot: true,
     });
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
@@ -562,6 +563,12 @@ describe("ClearText Android ADB fallback", () => {
       );
     });
     expect(result.success).toBe(success);
+    expect(refreshSpy).toHaveBeenCalledWith({
+      freshness: "fresh",
+      minTimestamp: 0,
+      signal: undefined,
+      skipScreenshot: true,
+    });
     if (after !== undefined && !success) {
       expect(result.error).toContain("not fully cleared");
       expect(result.error).toContain("11 UTF-16 units remain");

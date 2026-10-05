@@ -1,3 +1,7 @@
+import {
+  DEFAULT_WAIT_FOR_TIMEOUT_MS,
+  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+} from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
@@ -844,7 +848,9 @@ const runWaitForConditionDsl = async (
 ): Promise<WaitForObservationOutcome> => {
   const startTime = timer.now();
   const timeoutMs =
-    waitFor.timeout ?? waitFor.timeoutMs ?? (waitFor.for === "stable" ? 2500 : 5000);
+    waitFor.timeout ??
+    waitFor.timeoutMs ??
+    (waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS);
   // Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.
   const pollingScreen: ObserveScreen = skipBackStack
     ? {
@@ -2474,7 +2480,7 @@ function hasIosWaitPanels(
 }
 
 function legacyWaitTimeout(waitFor: WaitForWithSettled): number {
-  return waitFor.timeout ?? waitFor.timeoutMs ?? 5000;
+  return waitFor.timeout ?? waitFor.timeoutMs ?? DEFAULT_WAIT_FOR_TIMEOUT_MS;
 }
 
 function waitObservationQuery(waitFor: WaitForWithSettled) {

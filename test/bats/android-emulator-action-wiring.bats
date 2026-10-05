@@ -82,3 +82,34 @@ wiring_requires_yq() {
   artifact_paths="$(yq -r '.jobs."foldable-posture-tests".steps[] | select(.uses == "actions/upload-artifact@v6") | .with.path' "$nightly")"
   [[ "$artifact_paths" == *'scratch/foldable-lane/'* ]]
 }
+
+@test "AVD creation failure immediately collects and prints diagnostics" {
+  wiring_requires_yq
+  local creation_index diagnostics_index condition diagnostics_run
+  creation_index="$(yq -r '.runs.steps | to_entries[] | select(.value.id == "avd-create") | .key' "$ACTION")"
+  diagnostics_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Surface AVD Creation Diagnostics") | .key' "$ACTION")"
+  [ -n "$creation_index" ]
+  [ "$diagnostics_index" -eq "$((creation_index + 1))" ]
+  condition="$(yq -r '.runs.steps[] | select(.name == "Surface AVD Creation Diagnostics") | .if' "$ACTION")"
+  [ "$condition" = "failure() && steps.avd-create.outcome == 'failure'" ]
+  diagnostics_run="$(yq -r '.runs.steps[] | select(.name == "Surface AVD Creation Diagnostics") | .run' "$ACTION")"
+  [[ "$diagnostics_run" == *"collect-emulator-diagnostics.sh"*"print-emulator-diagnostics.sh"* ]]
+  [[ "$diagnostics_run" == *"android-emulator-diagnostics/avd-create"* ]]
+}
+
+@test "retry failure immediately prints diagnostics even after job failure" {
+  wiring_requires_yq
+  local retry_index diagnostics_index diagnostics_run
+  retry_index="$(yq -r '.runs.steps | to_entries[] | select(.value.id == "emulator-attempt-2") | .key' "$ACTION")"
+  diagnostics_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Surface Emulator Diagnostics After Retry") | .key' "$ACTION")"
+  [ "$diagnostics_index" -eq "$((retry_index + 1))" ]
+  [ "$(yq -r '.runs.steps[] | select(.name == "Surface Emulator Diagnostics After Retry") | .if' "$ACTION")" = "always() && steps.emulator-attempt-2.outcome == 'failure'" ]
+  diagnostics_run="$(yq -r '.runs.steps[] | select(.name == "Surface Emulator Diagnostics After Retry") | .run' "$ACTION")"
+  [[ "$diagnostics_run" == *"print-emulator-diagnostics.sh"*"android-emulator-diagnostics/attempt-2"* ]]
+}
+
+@test "diagnostic upload covers AVD creation failure and all attempt directories" {
+  wiring_requires_yq
+  [ "$(yq -r '.runs.steps[] | select(.name == "Upload Emulator Diagnostics") | .if' "$ACTION")" = "always() && (steps.emulator-attempt-1.outcome == 'failure' || steps.avd-create.outcome == 'failure')" ]
+  [ "$(yq -r '.runs.steps[] | select(.name == "Upload Emulator Diagnostics") | .with.path' "$ACTION")" = "android-emulator-diagnostics/" ]
+}

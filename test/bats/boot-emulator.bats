@@ -111,7 +111,7 @@ MOCK
   run env TIMEOUT_COMMANDS_FILE="$timeout_commands_file" bash "$(pwd)/scripts/android/collect-emulator-diagnostics.sh" "$diagnostics_dir" "test failure"
 
   [ "$status" -eq 0 ]
-  [ "$(wc -l < "$timeout_commands_file" | tr -d '[:space:]')" -eq 8 ]
+  [ "$(grep -c '^adb ' "$timeout_commands_file" | tr -d '[:space:]')" -eq 8 ]
   grep -Fqx 'adb devices -l' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 shell getprop' "$timeout_commands_file"
   grep -Fqx 'adb -s emulator-5554 shell ps -A' "$timeout_commands_file"

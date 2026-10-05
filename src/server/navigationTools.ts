@@ -272,12 +272,6 @@ export function registerNavigationTools({
             ? await list.executeIosDetailedResult()
             : await list.executeDetailedResult(signal, { namesOnly: true });
         throwIfAborted(signal);
-        if (!result.successful) {
-          throw new ActionableError(
-            `Could not determine whether ${packageName} is installed. Retry the installed-app listing.`,
-            { cause: result.error },
-          );
-        }
         const apps = Array.isArray(result.apps)
           ? result.apps.map(getIosInstalledAppBundleId)
           : [...Object.values(result.apps.profiles).flat(), ...result.apps.system].map(
@@ -285,9 +279,14 @@ export function registerNavigationTools({
             );
         const installed = apps.includes(packageName);
         if (!installed) {
-          throw new ActionableError(
-            `Package not installed: ${packageName}. Install the app before exploring it.`,
-          );
+          throw result.successful
+            ? new ActionableError(
+                `Package not installed: ${packageName}. Install the app before exploring it.`,
+              )
+            : new ActionableError(
+                `Could not confirm that ${packageName} is installed: the installed-app listing was incomplete. Retry the installed-app listing.`,
+                { cause: result.error },
+              );
         }
       }
       const explore = new Explore(

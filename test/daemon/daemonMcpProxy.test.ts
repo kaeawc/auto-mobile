@@ -3944,6 +3944,56 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test.each(["unbound", "bound"] as const)(
+      "a failed executePlan released mid-call preserves the %s connection's routing",
+      async (binding) => {
+        const failedPlan = {
+          isError: true,
+          content: [{ type: "text", text: "required plan step failed" }],
+        };
+        const client: FakeDaemonClient = new FakeDaemonClient({
+          toolResultFor: (name) => (name === "executePlan" ? failedPlan : undefined),
+          onCallTool: (name) => {
+            if (name === "executePlan") {
+              client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+            }
+          },
+        });
+        const proxy = new DaemonMcpProxy({
+          initialSessionUuid: binding === "bound" ? "session-a" : undefined,
+          clientFactory: () => client,
+          daemonManager: matchingDaemonManager(),
+          daemonAvailabilityProbe: async () => true,
+          autoStartDaemon: false,
+          timer: new FakeTimer(),
+        });
+
+        try {
+          expect(await proxy.callTool("executePlan", { sessionUuid: "session-a" })).toEqual(
+            failedPlan,
+          );
+          if (binding === "bound") {
+            await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
+              DaemonBoundSessionExpiredError,
+            );
+            expect(client.callToolCalls).toEqual([
+              { toolName: "executePlan", params: { sessionUuid: "session-a" } },
+            ]);
+          } else {
+            await expect(proxy.callTool("observe", {})).resolves.toEqual({
+              content: [{ type: "text", text: "success" }],
+            });
+            expect(client.callToolCalls).toEqual([
+              { toolName: "executePlan", params: { sessionUuid: "session-a" } },
+              { toolName: "observe", params: {} },
+            ]);
+          }
+        } finally {
+          await proxy.close();
+        }
+      },
+    );
+
     test("preserves the binding when an executePlan rejects (a pre-handler rejection leaves the session live)", async () => {
       // An executePlan can reject BEFORE the handler runs — capability enforcement
       // or schema parsing in src/server/index.ts — in which case

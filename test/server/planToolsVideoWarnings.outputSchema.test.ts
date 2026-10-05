@@ -147,3 +147,56 @@ test("executePlan describes warnings retained from failed and skipped sections",
     "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
   );
 });
+
+test("executePlan declares optional deviceFailures with required device labels", () => {
+  const schema = ToolRegistry.getTool("executePlan")!.outputSchema!;
+  const json = toJSONSchema(schema);
+  expect(json.properties?.deviceFailures).toMatchObject({
+    type: "array",
+    items: { type: "object", required: ["stepIndex", "tool", "error", "device"] },
+  });
+  expect(json.required ?? []).not.toContain("deviceFailures");
+  const deviceFailures = [
+    {
+      stepIndex: 0,
+      tool: "tapOn",
+      error: "missing",
+      device: "A",
+      failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
+    },
+    { stepIndex: -1, tool: "unknown", error: "track failure", device: "B" },
+  ];
+  expect(schema.parse({ ...base, deviceFailures })).toEqual({ ...base, deviceFailures });
+  for (const entry of [
+    { stepIndex: 0, tool: "tapOn", error: "missing" },
+    { stepIndex: 0.5, tool: "tapOn", error: "missing", device: "A" },
+    { stepIndex: 0, tool: 123, error: "missing", device: "A" },
+    { stepIndex: 0, tool: "tapOn", error: 123, device: "A" },
+    { stepIndex: 0, tool: "tapOn", error: "missing", device: 123 },
+  ]) {
+    expect(schema.safeParse({ ...base, deviceFailures: [entry] }).success).toBe(false);
+  }
+});
+
+test("executePlan failure preserves all device failures in structured and text payloads", async () => {
+  const deviceFailures = [
+    { stepIndex: 0, tool: "tapOn", error: "missing", device: "A" },
+    { stepIndex: 1, tool: "observe", error: "wait failed", device: "B" },
+  ];
+  const result: ExecutePlanResult = {
+    ...base,
+    success: false,
+    deviceFailures,
+    failedStep: deviceFailures[0],
+  };
+  execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);
+  const tool = ToolRegistry.getTool("executePlan")!;
+  const response = await tool.deviceAwareHandler!(
+    { platform: "ios", deviceId: "fake-device", name: "Fake" },
+    { platform: "ios", planContent: "", startStep: 0, deviceAllocationTimeoutMs: 5000 },
+  );
+  expect(response.isError).toBe(true);
+  expect(response.structuredContent).toEqual(result);
+  expect(JSON.parse(response.content[0].text!)).toEqual(result);
+  expect(tool.outputSchema!.parse(response.structuredContent)).toEqual(result);
+});

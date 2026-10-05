@@ -1,3 +1,6 @@
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
+import { freshTalkBackHierarchy } from "./freshTalkBackHierarchy";
+import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
@@ -131,6 +134,7 @@ type RefreshViewHierarchy = (
 
 interface CapturedTapTarget {
   scoped?: boolean;
+  talkBackState?: boolean | null;
   element: Element;
   capture: HierarchySnapshot;
 }
@@ -498,12 +502,15 @@ export class TapAnyElement extends BaseVisualChange {
     this.assertSelectedCapture(capture);
     // UiAutomator captures keep their existing coordinate route, but unavailable
     // TalkBack evidence must still be retried and reported to the caller.
-    const { talkBack: talkBackState, unconfirmed } = await resolveTalkBackStateConfirmation(
-      this.accessibilityDetector,
-      this.device.deviceId,
-      this.adb,
-      this.featureFlags,
-    );
+    const { talkBack: talkBackState, unconfirmed } =
+      target.talkBackState === undefined
+        ? await resolveTalkBackStateConfirmation(
+            this.accessibilityDetector,
+            this.device.deviceId,
+            this.adb,
+            this.featureFlags,
+          )
+        : { talkBack: target.talkBackState, unconfirmed: false };
     if (unconfirmed) {
       fenceOptions.onActivationWarnings?.([TALKBACK_STATE_UNKNOWN_WARNING]);
     }
@@ -513,6 +520,7 @@ export class TapAnyElement extends BaseVisualChange {
       (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
         displayFence: fence,
         scoped: target.scoped,
+        hierarchy: resolveViewHierarchyForSearch(capture.hierarchy),
         onActivationWarnings: fenceOptions.onActivationWarnings,
       }))
     ) {
@@ -669,10 +677,11 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    fenceOptions: DisplayFenceOption & {
-      scoped?: boolean;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    } = {},
+    fenceOptions: DisplayFenceOption &
+      TalkBackTargetContext & {
+        scoped?: boolean;
+        onActivationWarnings?: (warnings?: string[]) => void;
+      } = {},
   ): Promise<boolean> {
     const fence = fenceOptions.displayFence;
     const driver = this.talkBackDriverFactory.createDriver(this.device);
@@ -683,7 +692,7 @@ export class TapAnyElement extends BaseVisualChange {
         durationMs,
         element,
         driver,
-        { displayFence: fence },
+        { ...fenceOptions, displayFence: fence },
       );
       if (!result.success && result.semanticActionFailure) {
         throw new ActionableError(
@@ -693,7 +702,11 @@ export class TapAnyElement extends BaseVisualChange {
       return result.success;
     }
     if (action === "tap" && !fenceOptions.scoped) {
-      const direct = await this.talkBackStrategy.executeDirectActivation(element, driver);
+      const direct = await this.talkBackStrategy.executeDirectActivation(
+        element,
+        driver,
+        fenceOptions,
+      );
       if (direct.success) {
         return true;
       }
@@ -727,6 +740,7 @@ export class TapAnyElement extends BaseVisualChange {
     } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
+    const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
       return;
     }
@@ -765,14 +779,25 @@ export class TapAnyElement extends BaseVisualChange {
       if (!refound.element) {
         return;
       }
-      target = { element: refound.element, capture, scoped: target.scoped };
+      target = { ...target, element: refound.element, capture };
     }
     // The first tap was unobserved. Retry the captured or re-resolved target once after debounce.
-    const retryPoint = this.geometry.getElementCenter(target.element);
+    let retryPoint = this.geometry.getElementCenter(target.element);
     logger.warn(
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
+    await this.refreshTalkBackRetryTarget(
+      target,
+      options,
+      fenceOptions.refresh,
+      screenSize,
+      signal,
+    );
+    if (target.talkBackState) {
+      Object.assign(reportedTarget, target);
+    }
+    retryPoint = this.geometry.getElementCenter(target.element);
     if (fenceOptions.dispatch) {
       this.assertSelectedCapture(target.capture);
       await fenceOptions.dispatch(retryPoint);
@@ -782,6 +807,35 @@ export class TapAnyElement extends BaseVisualChange {
       displayFence: fence,
       onActivationWarnings: fenceOptions.onActivationWarnings,
     });
+  }
+
+  private async refreshTalkBackRetryTarget(
+    target: CapturedTapTarget,
+    options: TapAnyElementOptions | undefined,
+    refresh: RefreshViewHierarchy | undefined,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!target.talkBackState || !options) {
+      return;
+    }
+    // The debounce wait follows the post-tap probe. Capture after that wait,
+    // then use tapAny's existing selector rather than the earlier coordinates.
+    const hierarchy = await freshTalkBackHierarchy(
+      (timeout) => (refresh ?? this.refreshViewHierarchy.bind(this))(timeout, screenSize, signal),
+      this.timer,
+      signal,
+    );
+    const capture = identifyObservedHierarchy(this.device.platform, hierarchy, "fresh", this.timer);
+    const found = this.findClickableElement(options, capture.hierarchy, {
+      observationScreenSize: screenSize,
+    });
+    if (!found.element) {
+      throw new ActionableError(
+        "Selected element moved or is gone and no clickable target remains. Observe again before tapping.",
+      );
+    }
+    Object.assign(target, { element: found.element, capture });
   }
 
   private assertSelectedCapture(selectedCapture: HierarchySnapshot): void {
@@ -1442,12 +1496,33 @@ export class TapAnyElement extends BaseVisualChange {
   }) {
     throwIfAborted(signal);
 
-    const viewHierarchy = observeResult.viewHierarchy;
+    let viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
       perf.end();
       return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
     }
 
+    let talkBackState: boolean | null | undefined;
+    if (this.device.platform === "android") {
+      const confirmation = await resolveTalkBackStateConfirmation(
+        this.accessibilityDetector,
+        this.device.deviceId,
+        this.adb,
+        this.featureFlags,
+      );
+      talkBackState = confirmation.talkBack;
+      if (confirmation.unconfirmed) {
+        onActivationWarnings([TALKBACK_STATE_UNKNOWN_WARNING]);
+      }
+      if (talkBackState) {
+        viewHierarchy = await freshTalkBackHierarchy(
+          (timeout) => refresh(timeout, observeResult.screenSize, signal),
+          this.timer,
+          signal,
+        );
+        observeResult.viewHierarchy = viewHierarchy;
+      }
+    }
     let selectedCapture = identifyObservedHierarchy(
       this.device.platform,
       viewHierarchy,
@@ -1487,6 +1562,7 @@ export class TapAnyElement extends BaseVisualChange {
       element,
       capture: selectedCapture,
       scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+      talkBackState,
     };
     const action = options.action;
     await this.dispatchTapTarget({

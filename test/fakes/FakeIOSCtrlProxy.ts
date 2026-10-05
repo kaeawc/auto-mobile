@@ -636,13 +636,26 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  readonly hierarchySyncRequests: Array<{
+    timeoutMs?: number;
+    kind: "request_hierarchy" | "request_hierarchy_if_stale";
+  }> = [];
+
   async requestHierarchySync(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
+    options?: { forceCapture?: boolean },
   ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     this.hierarchyRequestCount++;
+    this.hierarchySyncRequests.push({
+      timeoutMs,
+      kind:
+        options?.forceCapture || disableAllFiltering
+          ? "request_hierarchy"
+          : "request_hierarchy_if_stale",
+    });
     await this.applyDelay("requestHierarchySync");
     this.checkFailure("requestHierarchySync");
 
@@ -654,6 +667,17 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       hierarchy: this.hierarchyData,
       perfTiming: this.performanceTiming || undefined,
     };
+  }
+
+  requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+    return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, {
+      forceCapture: true,
+    });
   }
 
   requestHierarchySyncWithoutObservationStreamPush(

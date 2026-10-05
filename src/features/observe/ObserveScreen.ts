@@ -1,4 +1,4 @@
-import { recordObservationRead } from "./observationReadScope";
+import { recordObservationRead, wasIosHierarchyAcquiredFromDevice } from "./observationReadScope";
 import { displayPinFailure } from "./SessionDisplayContext";
 import {
   publishScreenshotPaths,
@@ -1947,7 +1947,11 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       // cached-ok may serve CtrlProxy's client cache without a device read.
       // Its fresh=false verdict must not grant this action acquisition authority.
-      return this.device.platform !== "android" || result.viewHierarchy?.fresh === true
+      return (
+        this.device.platform === "ios"
+          ? wasIosHierarchyAcquiredFromDevice(result.viewHierarchy)
+          : this.device.platform !== "android" || result.viewHierarchy?.fresh === true
+      )
         ? recordObservationRead(result)
         : result;
     } catch (err) {

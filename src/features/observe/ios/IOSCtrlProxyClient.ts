@@ -367,6 +367,13 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perfTiming?: CtrlProxyPerfTiming;
     frameContext?: string;
   } | null>;
+  /** Force a real extraction only for cached tap resolution. */
+  requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -3519,6 +3526,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+  }
+
+  async requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+    return this.hierarchy.requestHierarchySync(
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      false,
+      {
+        forceCapture: true,
+      },
+    );
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(

@@ -137,6 +137,7 @@ type RefreshViewHierarchy = (
   timeoutMs: number,
   screenSize?: ObserveResult["screenSize"],
   signal?: AbortSignal,
+  forceCapture?: boolean,
 ) => Promise<ViewHierarchyResult | null>;
 
 interface CapturedTapTarget {
@@ -454,6 +455,7 @@ export class TapAnyElement extends BaseVisualChange {
               request.timeoutMs ?? TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
               undefined,
               request.signal,
+              request.requireFreshExtraction,
             );
             if (!hierarchy) {
               throw new ActionableError("Unable to retrieve a fresh tapAny hierarchy");
@@ -987,23 +989,30 @@ export class TapAnyElement extends BaseVisualChange {
     timeoutMs: number,
     _screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     if (this.refreshViewHierarchyOverrideForTesting) {
       return this.refreshViewHierarchyOverrideForTesting(
         (defaultTimeoutMs, screenSize, defaultSignal) =>
-          this.refreshViewHierarchyDefault(defaultTimeoutMs, screenSize, defaultSignal),
+          this.refreshViewHierarchyDefault(
+            defaultTimeoutMs,
+            screenSize,
+            defaultSignal,
+            forceCapture,
+          ),
         timeoutMs,
         _screenSize,
         signal,
       );
     }
-    return this.refreshViewHierarchyDefault(timeoutMs, _screenSize, signal);
+    return this.refreshViewHierarchyDefault(timeoutMs, _screenSize, signal, forceCapture);
   }
 
   private async refreshViewHierarchyDefault(
     timeoutMs: number,
     _screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     if (timeoutMs <= 0) {
@@ -1012,6 +1021,7 @@ export class TapAnyElement extends BaseVisualChange {
     try {
       const snapshot = await this.hierarchyCapture.capture({
         freshness: "fresh",
+        ...(forceCapture ? { requireFreshExtraction: true } : {}),
         searchRaw: serverConfig.isRawElementSearchEnabled(),
         timeoutMs,
         signal,
@@ -1036,6 +1046,7 @@ export class TapAnyElement extends BaseVisualChange {
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
     switch (this.device.platform) {
@@ -1050,12 +1061,15 @@ export class TapAnyElement extends BaseVisualChange {
       }
       case "ios": {
         // Direct sync bypasses the client TTL while retaining the search deadline.
-        const synced = await IOSCtrlProxyClient.getInstance(this.device).requestHierarchySync(
-          undefined,
-          false,
-          signal,
-          effectiveTimeoutMs,
-        );
+        const client = IOSCtrlProxyClient.getInstance(this.device);
+        const synced = forceCapture
+          ? await client.requestHierarchySyncForTapRevalidation(
+              undefined,
+              false,
+              signal,
+              effectiveTimeoutMs,
+            )
+          : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
         if (!synced?.hierarchy) {
           return null;
         }
@@ -1129,7 +1143,7 @@ export class TapAnyElement extends BaseVisualChange {
     longPressDuration: number,
     element?: Element,
     signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption & { scoped?: boolean } = {},
+    fenceOptions: DisplayFenceOption & { scoped?: boolean; voiceOverEnabled?: boolean } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
@@ -1140,13 +1154,15 @@ export class TapAnyElement extends BaseVisualChange {
     // while `ensureConnected()`/auto-setup was resolving aborts this probe
     // before dispatch, rather than after the caller has given up (issue
     // #6306 review).
-    const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
-      this.device.deviceId,
-      xcTestClient,
-      this.featureFlags,
-      undefined,
-      signal,
-    );
+    const isVoiceOverEnabled =
+      fenceOptions.voiceOverEnabled ??
+      (await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
+        this.device.deviceId,
+        xcTestClient,
+        this.featureFlags,
+        undefined,
+        signal,
+      ));
 
     if (isVoiceOverEnabled && element) {
       await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, {
@@ -1566,21 +1582,20 @@ export class TapAnyElement extends BaseVisualChange {
         containerFoundEver,
       }));
     }
-    if (this.requiresCachedHierarchyRefresh(viewHierarchy, talkBackState, requestCount)) {
-      viewHierarchy = await freshTapHierarchy(
-        (timeout) => refresh(timeout, observeResult.screenSize, signal),
-        this.timer,
+    const cachedRefresh = await this.refreshCachedHierarchy(
+      viewHierarchy,
+      talkBackState,
+      requestCount,
+      {
+        refresh,
+        screenSize: observeResult.screenSize,
         signal,
-        {
-          timeoutMs: Math.min(
-            DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
-            requestDeadlineMs === undefined
-              ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
-              : requestDeadlineMs - this.timer.now(),
-          ),
-          context: "while revalidating a cached observation",
-        },
-      );
+        requestDeadlineMs,
+      },
+    );
+    talkBackState = cachedRefresh.accessibilityEnabled;
+    if (cachedRefresh.hierarchy) {
+      viewHierarchy = cachedRefresh.hierarchy;
       observeResult.viewHierarchy = viewHierarchy;
       startTime = this.timer.now();
       selectedCapture = identifyObservedHierarchy(
@@ -1633,17 +1648,58 @@ export class TapAnyElement extends BaseVisualChange {
     return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
   }
 
-  private requiresCachedHierarchyRefresh(
+  private async refreshCachedHierarchy(
     hierarchy: ViewHierarchyResult,
-    talkBackState: boolean | null | undefined,
+    accessibilityEnabled: boolean | null | undefined,
     requestCount: number,
-  ): boolean {
-    return (
-      this.device.platform === "android" &&
-      !talkBackState &&
-      requestCount === 0 &&
-      !wasHierarchyReadDuringCall(hierarchy)
+    context: {
+      refresh: RefreshViewHierarchy;
+      screenSize: ObserveResult["screenSize"];
+      signal?: AbortSignal;
+      requestDeadlineMs?: number;
+    },
+  ): Promise<{
+    hierarchy?: ViewHierarchyResult;
+    accessibilityEnabled: boolean | null | undefined;
+  }> {
+    if (
+      (this.device.platform !== "android" && this.device.platform !== "ios") ||
+      accessibilityEnabled ||
+      requestCount !== 0 ||
+      wasHierarchyReadDuringCall(hierarchy)
+    ) {
+      return { accessibilityEnabled };
+    }
+    if (this.device.platform === "ios") {
+      accessibilityEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
+        this.device.deviceId,
+        IOSCtrlProxyClient.getInstance(this.device),
+        this.featureFlags,
+        undefined,
+        context.signal,
+      );
+      if (accessibilityEnabled) {
+        return { accessibilityEnabled };
+      }
+    }
+    const refreshed = await freshTapHierarchy(
+      (timeout) =>
+        this.device.platform === "ios"
+          ? context.refresh(timeout, context.screenSize, context.signal, true)
+          : context.refresh(timeout, context.screenSize, context.signal),
+      this.timer,
+      context.signal,
+      {
+        timeoutMs: Math.min(
+          DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+          context.requestDeadlineMs === undefined
+            ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
+            : context.requestDeadlineMs - this.timer.now(),
+        ),
+        context: "while revalidating a cached observation",
+      },
     );
+    return { hierarchy: refreshed, accessibilityEnabled };
   }
 
   private async dispatchTapTarget({
@@ -1725,7 +1781,11 @@ export class TapAnyElement extends BaseVisualChange {
           longPressDuration,
           element,
           signal,
-          { displayFence: fence, scoped: target.scoped },
+          {
+            displayFence: fence,
+            scoped: target.scoped,
+            voiceOverEnabled: target.talkBackState ?? undefined,
+          },
         );
         break;
       default:

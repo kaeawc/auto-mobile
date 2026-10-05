@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition, type IosHierarchyAcquisition } from "./ios/types";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ObserveResult, ViewHierarchyResult } from "../../models";
 
@@ -19,4 +20,9 @@ export function recordObservationRead(result: ObserveResult): ObserveResult {
 
 export function wasHierarchyReadDuringCall(hierarchy: ViewHierarchyResult): boolean {
   return reads.getStore()?.has(hierarchy) ?? false;
+}
+
+/** iOS freshness includes client TTL hits; only synchronous responses prove acquisition. */
+export function wasIosHierarchyAcquiredFromDevice(hierarchy: object | undefined): boolean {
+  return (hierarchy as IosHierarchyAcquisition | undefined)?.[iosHierarchyAcquisition] === "device";
 }

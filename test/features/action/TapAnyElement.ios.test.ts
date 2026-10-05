@@ -76,6 +76,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     fakeTimer.enableAutoAdvance();
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
+    // Gesture tests start with this call's observer read; cached-resolution safety
+    // is covered separately with a real selector and a configured hierarchy fake.
+    spyOn(fakeObserveScreen, "getMostRecentCachedObserveResult").mockImplementation(async () => ({
+      ...createObserveResult(),
+      freshness: { isFresh: false },
+    }));
     fakeWindow.configureCachedActiveWindow(null);
 
     const iosModule = await import("../../../src/features/observe/ios");

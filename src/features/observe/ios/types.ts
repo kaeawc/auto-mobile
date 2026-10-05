@@ -373,7 +373,14 @@ export type CachedHierarchy = CtrlProxyCachedHierarchy;
 /**
  * Interface for hierarchy response with freshness indicator
  */
-export interface CtrlProxyHierarchyResponse {
+// Enumerable symbols survive internal shallow projections but never serialize to JSON.
+export const iosHierarchyAcquisition = Symbol("iosHierarchyAcquisition");
+
+export interface IosHierarchyAcquisition {
+  [iosHierarchyAcquisition]?: "device" | "client-cache";
+}
+
+export interface CtrlProxyHierarchyResponse extends IosHierarchyAcquisition {
   hierarchy: XCTestHierarchy | null;
   fresh: boolean;
   updatedAt?: number;

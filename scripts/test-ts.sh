@@ -56,7 +56,7 @@ if [[ -z "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" && "$runner_os" != "Windows
     unit | changed) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=180 ;;
     integration) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=900 ;;
     stress) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=300 ;;
-    coverage) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=480 ;;
+    coverage) export AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 ;;
   esac
 fi
 

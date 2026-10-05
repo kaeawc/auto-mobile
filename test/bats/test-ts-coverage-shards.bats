@@ -118,7 +118,7 @@ teardown() {
   [ ! -f coverage/junit.xml ]
 }
 
-@test "a timed-out shard retains the 480 second guard and names its index" {
+@test "a timed-out shard retains the 720 second guard and names its index" {
   cat > "$STUB_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
 exit 124
@@ -126,7 +126,7 @@ EOF
   chmod +x "$STUB_BIN/timeout"
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  [[ "$output" == *"Coverage test run exceeded its 480s wall-clock budget (shard 1/2)"* ]]
+  [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 1/2)"* ]]
   [ ! -f coverage/lcov.info ]
 }
 

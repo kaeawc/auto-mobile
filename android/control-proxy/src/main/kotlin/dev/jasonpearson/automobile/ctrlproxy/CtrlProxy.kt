@@ -138,6 +138,82 @@ import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 
+/**
+ * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
+ * original depth-first first match. The caller owns the root and the returned node; children
+ * acquired during either pass are recycled unless returned.
+ */
+internal fun findNodeByResourceId(
+  root: AccessibilityNodeInfo?,
+  resourceId: String,
+  screenDimensions: ScreenDimensions?,
+): AccessibilityNodeInfo? {
+  fun findMatch(node: AccessibilityNodeInfo?, requireOnScreen: Boolean): AccessibilityNodeInfo? {
+    if (node == null) return null
+
+    val nodeResourceId = node.viewIdResourceName
+    if (
+      nodeResourceId != null &&
+        (nodeResourceId == resourceId || nodeResourceId.endsWith(":id/$resourceId"))
+    ) {
+      if (!requireOnScreen) return node
+      val bounds = Rect()
+      node.getBoundsInScreen(bounds)
+      if (!ElementBounds(bounds).isCompletelyOffscreen(screenDimensions)) return node
+    }
+
+    for (i in 0 until node.childCount) {
+      val child = node.getChild(i) ?: continue
+      var found: AccessibilityNodeInfo? = null
+      try {
+        found = findMatch(child, requireOnScreen)
+        if (found != null) return found
+      } finally {
+        if (found !== child) child.recycle()
+      }
+    }
+    return null
+  }
+
+  // Invalid dimensions must retain the original first-match behavior without a bounds check.
+  if (screenDimensions?.isValid() == true) {
+    findMatch(root, requireOnScreen = true)?.let {
+      return it
+    }
+  }
+  return findMatch(root, requireOnScreen = false)
+}
+
+/** Resolve dimensions from the lookup root without querying or selecting other windows. */
+internal fun findNodeByResourceIdOnRootDisplay(
+  root: AccessibilityNodeInfo?,
+  resourceId: String,
+  dimensionsProvider: (Int) -> ScreenDimensions?,
+): AccessibilityNodeInfo? {
+  val dimensions =
+    try {
+      val displayId =
+        if (root == null) {
+          null
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+          Display.DEFAULT_DISPLAY
+        } else {
+          root.window?.let { window ->
+            try {
+              window.displayId
+            } finally {
+              window.recycle()
+            }
+          }
+        }
+      displayId?.let(dimensionsProvider)
+    } catch (e: Exception) {
+      Log.w("CtrlProxy", "Failed to get lookup root screen dimensions", e)
+      null
+    }
+  return findNodeByResourceId(root, resourceId, dimensions)
+}
+
 internal data class NodeSelectorFields(
   val resourceId: String?,
   val testTag: String?,
@@ -4783,7 +4859,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         foundTargetNode =
           if (resourceId != null) {
             // Find node by resource-id
-            findNodeByResourceId(root, resourceId)
+            findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
           } else {
             // Find currently focused input node
             findFocusedEditableNode(root)
@@ -5672,7 +5748,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (effectiveSelector != null) {
           findNodeBySelector(root, effectiveSelector)
         } else if (resourceId != null) {
-          findNodeByResourceId(root, resourceId)
+          findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
         } else {
           null
         }
@@ -6750,38 +6826,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     return bounds1 == bounds2 &&
       node1.viewIdResourceName == node2.viewIdResourceName &&
       node1.text?.toString() == node2.text?.toString()
-  }
-
-  /** Find a node by resource-id, searching recursively through the hierarchy. */
-  private fun findNodeByResourceId(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    resourceId: String,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Check if this node matches
-    val nodeResourceId = root.viewIdResourceName
-    if (
-      nodeResourceId != null &&
-        (nodeResourceId == resourceId || nodeResourceId.endsWith(":id/$resourceId"))
-    ) {
-      return root
-    }
-
-    // Search children
-    for (i in 0 until root.childCount) {
-      val child = root.getChild(i) ?: continue
-      val found = findNodeByResourceId(child, resourceId)
-      if (found != null) {
-        if (found != child) {
-          child.recycle()
-        }
-        return found
-      }
-      child.recycle()
-    }
-
-    return null
   }
 
   private fun findNodeBySelector(

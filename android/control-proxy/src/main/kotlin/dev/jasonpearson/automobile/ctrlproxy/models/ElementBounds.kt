@@ -48,6 +48,11 @@ data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom
       top > screenHeight + margin // Completely below screen
   }
 
+  /** The hierarchy extractor only filters offscreen bounds when screen dimensions are valid. */
+  fun isCompletelyOffscreen(screenDimensions: ScreenDimensions?): Boolean =
+    screenDimensions?.isValid() == true &&
+      isCompletelyOffscreen(screenDimensions.width, screenDimensions.height)
+
   override fun toString(): String = """{"left":$left,"top":$top,"right":$right,"bottom":$bottom}"""
 
   companion object {

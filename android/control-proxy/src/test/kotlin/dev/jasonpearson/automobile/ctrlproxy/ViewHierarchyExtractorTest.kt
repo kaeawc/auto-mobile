@@ -7,6 +7,7 @@ import android.util.SparseArray
 import android.view.View
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
+import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
@@ -299,6 +300,40 @@ class ViewHierarchyExtractorTest {
 
     assertNull(result!!.hierarchy)
     parent.recycle()
+  }
+
+  @Test
+  fun `offscreen filtering requires valid dimensions and ignores visibility flag`() {
+    for (dimensions in listOf(ScreenDimensions(100, 200), null, ScreenDimensions(0, 200))) {
+      val offscreen =
+        fakeNode("example.app", text = "Offscreen row", bounds = Rect(10, 201, 40, 240))
+      val visible =
+        fakeNode(
+          "example.app",
+          text = "Visible row",
+          bounds = Rect(10, 20, 40, 60),
+          visibleToUser = false,
+        )
+      val root =
+        fakeNode(
+          "example.app",
+          bounds = Rect(0, 0, 100, 200),
+          children = listOf(offscreen, visible),
+        )
+      try {
+        val result =
+          extractor.extractFromActiveWindow(
+            root,
+            screenDimensions = dimensions,
+            disableAllFiltering = true,
+          )
+        val hierarchy = result!!.hierarchy!!.node.toString()
+        assertTrue(hierarchy.contains("Visible row"))
+        assertEquals(dimensions?.isValid() != true, hierarchy.contains("Offscreen row"))
+      } finally {
+        root.recycle()
+      }
+    }
   }
 
   @Test

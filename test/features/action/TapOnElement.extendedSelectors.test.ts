@@ -483,15 +483,17 @@ describe("TapOnElement extended selectors", () => {
             options,
             false,
           );
-          expect(read).toHaveBeenCalledTimes(1);
-          expect(read).toHaveBeenCalledWith(
-            undefined,
-            undefined,
-            true,
-            undefined,
-            true,
-            controller.signal,
-          );
+          expect(read).toHaveBeenCalledTimes(raw ? 0 : 1);
+          if (!raw) {
+            expect(read).toHaveBeenCalledWith(
+              undefined,
+              undefined,
+              true,
+              undefined,
+              true,
+              controller.signal,
+            );
+          }
           expect(proxy.getActionHistory()).toHaveLength(1);
         } finally {
           read.mockRestore();

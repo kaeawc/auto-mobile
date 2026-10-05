@@ -473,6 +473,10 @@ for (const action of ["tap", "longPress"] as const) {
   test(`tapAny scoped TalkBack ${action} bypasses global native ID activation`, async () => {
     const h = harness("tapAny", capture());
     h.detector.setDefaultResult(true, "talkback");
+    if (h.action instanceof TapAnyElement) {
+      let captures = 0;
+      h.action.setRefreshViewHierarchyForTesting(async () => (++captures === 1 ? capture() : null));
+    }
     expect((await h.execute({ action })).success).toBe(true);
     expect(h.talkBack.directActivationCalls).toHaveLength(0);
     expect(h.talkBack.longPressCalls).toHaveLength(0);

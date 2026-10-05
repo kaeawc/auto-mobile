@@ -7,6 +7,7 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 
@@ -60,6 +61,12 @@ describe("tapOn semantic link outcomes", () => {
             adb,
             {
               timer,
+              // This suite bypasses BaseVisualChange's acquisition; cached-target
+              // revalidation still needs a device-free hierarchy source.
+              hierarchyCapture: new FakeHierarchyCapture(
+                () => observation.viewHierarchy!,
+                platform,
+              ),
               accessibilityDetector: new FakeAccessibilityDetector(),
               iosVoiceOverDetector: new FakeIosVoiceOverDetector(),
               selectionStateTracker: { prepare: async () => null, finalize: async () => [] },

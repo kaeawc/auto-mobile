@@ -66,6 +66,23 @@ function fixture(
   return { adb, timer, original, run };
 }
 describe("Android hierarchy fallback", () => {
+  test.each(["null_root", "discarded_windows", "extraction_error", undefined] as const)(
+    "logs the incomplete reason when the dump is taken: %s",
+    async (reason) => {
+      const { run, original, adb } = fixture();
+      original.ctrlProxyIncompleteReason = reason;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await run();
+        expect(adb.wasCommandExecuted(`shell uiautomator dump ${path}`)).toBe(true);
+        expect(warn).toHaveBeenCalledWith(
+          `[HierarchyFallback] Supplementing incomplete CtrlProxy hierarchy (ctrlProxyIncompleteReason=${reason ?? "unknown"})`,
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
   test("adds missing app content without native IDs or false frame verification", async () => {
     const { run, original, adb } = fixture();
     const result = await run();

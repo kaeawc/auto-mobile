@@ -3,6 +3,10 @@ import {
   createDeviceHierarchyCapture,
   type HierarchySyncClient,
 } from "../../../src/features/observe/DeviceHierarchyCapture";
+import {
+  iosHierarchyAcquisition,
+  type IosHierarchyAcquisition,
+} from "../../../src/features/observe/ios/types";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -380,5 +384,42 @@ test.each(["android", "ios"] as const)(
     releaseAction?.();
     await action;
     expect(actionCompleted).toBe(true);
+  },
+);
+
+// Provenance belongs to the sync envelope, never an inferred freshness flag.
+test.each(["device", "client-cache", undefined, "unknown"] as const)(
+  "fresh iOS capture preserves only known sync acquisition: %s",
+  async (source) => {
+    const timer = new FakeTimer();
+    const raw: ViewHierarchyResult = {
+      hierarchy: { node: { text: "Target", bounds: { left: 0, top: 0, right: 20, bottom: 20 } } },
+      screenWidth: 20,
+      screenHeight: 20,
+    };
+    const capture = createDeviceHierarchyCapture(
+      { platform: "ios", deviceId: "ios-marker", name: "ios-marker" },
+      {
+        timer,
+        ids: new FakeIdGenerator(["capture"]),
+        syncClientFactory: () => ({
+          requestHierarchySync: async () => {
+            const response = { hierarchy: raw };
+            if (source !== undefined) {
+              Reflect.set(response, iosHierarchyAcquisition, source);
+            }
+            return response;
+          },
+          convertToViewHierarchyResult: () => raw,
+        }),
+      },
+    );
+    const snapshot = await capture.capture({ freshness: "fresh" });
+    const hierarchy = snapshot.hierarchy as ViewHierarchyResult & IosHierarchyAcquisition;
+    const expected = source === "device" || source === "client-cache" ? source : undefined;
+    expect(hierarchy[iosHierarchyAcquisition]).toBe(expected);
+    expect(Object.hasOwn(hierarchy, iosHierarchyAcquisition)).toBe(expected !== undefined);
+    expect(JSON.stringify(hierarchy)).not.toContain("iosHierarchyAcquisition");
+    expect(JSON.stringify(hierarchy)).not.toContain("client-cache");
   },
 );

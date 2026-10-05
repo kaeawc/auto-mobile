@@ -312,6 +312,7 @@ import type {
   CtrlProxyNode,
   XCTestHierarchy,
   CtrlProxyHierarchyResponse,
+  CtrlProxySyncedHierarchy,
   CtrlProxyScreenshotResult,
   CtrlProxySwipeResult,
   CtrlProxyTapResult,
@@ -363,11 +364,14 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null>;
+  ): Promise<CtrlProxySyncedHierarchy | null>;
+  /** Force a real extraction only for cached tap resolution. */
+  requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -386,11 +390,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null>;
+  ): Promise<CtrlProxySyncedHierarchy | null>;
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
 
@@ -1210,11 +1210,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs: number = 5000,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const deadline = this.timer.now() + Math.max(0, timeoutMs);
     return this.readForDiagnostics(
       (client) =>
@@ -3532,8 +3528,26 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+  }
+
+  async requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+    return this.hierarchy.requestHierarchySync(
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      false,
+      {
+        forceCapture: true,
+      },
+    );
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(
@@ -3541,11 +3555,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }
 
@@ -3554,7 +3564,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering = false,
     signal?: AbortSignal,
     timeoutMs = 10000,
-  ): Promise<{ hierarchy: XCTestHierarchy; frameContext?: string } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const deadline = this.timer.now() + timeoutMs;
     await this.waitForPendingRequests(timeoutMs, signal);
     const remaining = deadline - this.timer.now();

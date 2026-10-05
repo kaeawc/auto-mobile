@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "./types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
  *
@@ -24,6 +25,7 @@ import type {
   CtrlProxyNode,
   XCTestHierarchy,
   CtrlProxyHierarchyResponse,
+  CtrlProxySyncedHierarchy,
   CtrlProxyPerfTiming,
   CachedHierarchy,
 } from "./types";
@@ -253,6 +255,7 @@ export class CtrlProxyHierarchy {
         }
         return {
           hierarchy: result.hierarchy,
+          [iosHierarchyAcquisition]: "device",
           fresh: true,
           updatedAt: result.hierarchy.updatedAt,
           perfTiming: result.perfTiming,
@@ -298,6 +301,7 @@ export class CtrlProxyHierarchy {
       this.trackFallbackHierarchy(fallbackHierarchy, fallbackIsFreshPush, requestFailure);
       return {
         hierarchy: fallbackHierarchy.hierarchy,
+        [iosHierarchyAcquisition]: "client-cache",
         // A push with a new capture may have won the race with the synchronous
         // re-verification. It is device-supplied fresh data, not the failed
         // request's stale fallback. Same-capture re-deliveries remain false.
@@ -322,6 +326,7 @@ export class CtrlProxyHierarchy {
     if (reconnectStatus) {
       return {
         hierarchy: null,
+        [iosHierarchyAcquisition]: "client-cache",
         fresh: false,
         reconnectStatus,
         reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds),
@@ -335,6 +340,7 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: null,
+      [iosHierarchyAcquisition]: "client-cache",
       fresh: false,
       unavailableReason: requestFailure.value?.reason ?? "unknown",
       unavailableDetail: requestFailure.value?.detail,
@@ -376,6 +382,7 @@ export class CtrlProxyHierarchy {
         return {
           response: {
             hierarchy: cachedHierarchy.hierarchy,
+            [iosHierarchyAcquisition]: "client-cache" as const,
             fresh: true,
             updatedAt: cachedHierarchy.hierarchy.updatedAt,
             perfTiming: cachedHierarchy.perfTiming,
@@ -535,11 +542,7 @@ export class CtrlProxyHierarchy {
       forceCapture?: boolean;
       observerMode?: boolean;
     },
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
       this.recordHierarchyFailure(requestOptions, failure);
     };
@@ -732,11 +735,12 @@ export class CtrlProxyHierarchy {
   private acceptHierarchyResponse(
     result: { hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string },
     requestOptions: { observerMode?: boolean } | undefined,
-  ) {
+  ): CtrlProxySyncedHierarchy {
     this.observeReceivedHierarchy(result.hierarchy);
     if (this.isObserverRequest(requestOptions)) {
       return {
         hierarchy: result.hierarchy,
+        [iosHierarchyAcquisition]: "device",
         perfTiming: result.perfTiming,
         frameContext: result.frameContext,
       };
@@ -756,6 +760,7 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: result.hierarchy,
+      [iosHierarchyAcquisition]: "device",
       perfTiming: result.perfTiming,
       frameContext: result.frameContext,
     };

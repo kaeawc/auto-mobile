@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -507,6 +508,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               request.timeoutMs ?? TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
               undefined,
               request.signal,
+              request.requireFreshExtraction,
             );
             if (!result) {
               throw new ActionableError("Unable to retrieve a fresh tap hierarchy");
@@ -2494,6 +2496,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     if (timeoutMs <= 0) {
@@ -2507,6 +2510,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       captured = (
         await this.hierarchyCapture.capture({
           freshness: "fresh",
+          ...(forceCapture ? { requireFreshExtraction: true } : {}),
           searchRaw: serverConfig.isRawElementSearchEnabled(),
           timeoutMs,
           signal,
@@ -2595,6 +2599,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
@@ -2616,12 +2621,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         // Match the observe projection exactly. Going through CtrlProxy's
         // alternate conversion here lets a selector observed from one tree be
         // resolved against a differently-pruned tree on refresh.
-        const synced = await IOSCtrlProxyClient.getInstance(this.device).requestHierarchySync(
-          undefined,
-          false,
-          signal,
-          effectiveTimeoutMs,
-        );
+        const client = IOSCtrlProxyClient.getInstance(this.device);
+        const synced = forceCapture
+          ? await client.requestHierarchySyncForTapRevalidation(
+              undefined,
+              false,
+              signal,
+              effectiveTimeoutMs,
+            )
+          : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
         if (!synced?.hierarchy) {
           return null;
         }
@@ -2630,6 +2638,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             synced.hierarchy,
           ),
         );
+        const acquisition = synced[iosHierarchyAcquisition];
+        if (acquisition === "device" || acquisition === "client-cache") {
+          Object.assign(rawHierarchy, { [iosHierarchyAcquisition]: acquisition });
+        }
         return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
@@ -4050,16 +4062,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           // Search polling, ensureChecked, and opt-in stability already acquire a
           // current tree. Only a visible cache hit still needs revalidation.
           if (
-            this.device.platform === "android" &&
+            (this.device.platform === "android" || this.device.platform === "ios") &&
             !isAccessibilityServiceEnabled &&
             searchOutcome.selection.element &&
             !wasHierarchyReadDuringCall(viewHierarchy) &&
             searchOutcome.stats.requestCount === 0 &&
             options.ensureChecked === undefined &&
-            !this.strategy.shouldRunPreTapStability(options)
+            !this.strategy.shouldRunPreTapStability(options) &&
+            (this.device.platform !== "ios" ||
+              !(isAccessibilityServiceEnabled ??=
+                await this.strategy.isAccessibilityServiceEnabled()))
           ) {
             const freshHierarchy = await freshTapHierarchy(
-              this.tapVerificationRefresh({ screenSize: observeResult.screenSize, signal }),
+              this.device.platform === "ios"
+                ? (timeout) =>
+                    this.refreshViewHierarchy(timeout, observeResult.screenSize, signal, true)
+                : this.tapVerificationRefresh({ screenSize: observeResult.screenSize, signal }),
               this.timer,
               signal,
               {
@@ -4070,6 +4088,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                     : request.requestDeadlineMs - this.timer.now(),
                 ),
                 context: "while revalidating a cached observation",
+                platform: this.device.platform,
               },
             );
             this.replaceObservationHierarchy(observeResult, freshHierarchy, true);

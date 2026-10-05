@@ -1,5 +1,6 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import fc from "fast-check";
+import { readFileSync } from "node:fs";
 import { Element, ViewHierarchyResult, ViewHierarchyNode } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
@@ -13,6 +14,7 @@ import {
   filterUnexhaustedElements,
   tapSelectorFor,
 } from "../../../src/features/navigation/ExploreElementExtraction";
+import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 import type { ElementSelector } from "../../../src/utils/interfaces/ElementSelector";
 import type { TrackedElement } from "../../../src/features/navigation/ExploreTypes";
 import { isLoginScreen } from "../../../src/features/navigation/ExploreBlockerDetection";
@@ -67,6 +69,120 @@ describe("ExploreElementExtraction", () => {
   }
 
   describe("tapSelectorFor", () => {
+    for (const nested of [false, true]) {
+      test(`recovers ${nested ? "grandchild" : "child"} text from a flattened clickable parent`, () => {
+        const child = createMockNode({ text: "Skip", clickable: "false", "resource-id": "" });
+        child.bounds = { left: 20, top: 10, right: 80, bottom: 40 };
+        const wrapper = createMockNode({
+          text: "",
+          class: "",
+          clickable: "false",
+          "resource-id": "",
+        });
+        wrapper.node = [child];
+        const parent = createMockNode({ text: "", class: "", "resource-id": "" });
+        parent.node = [nested ? wrapper : child];
+        const hierarchy = createMockViewHierarchy([parent]);
+        const [element] = extractNavigationElements(hierarchy, elementParser);
+
+        expect(element.node).toBeUndefined();
+        expect(tapSelectorFor(element, hierarchy)).toEqual({ text: "Skip" });
+        // DefaultElementSelector matches the non-clickable label. TapOnElement
+        // promotes it to its clickable ancestor (covered in Explore.test.ts).
+        const selected = new DefaultElementSelector().selectByText(hierarchy, "Skip");
+        expect(selected.element?.bounds).toEqual(child.bounds);
+        expect(selected.element?.clickable).toBe("false");
+      });
+    }
+
+    test("recovers selectors from the existing Playground Compose capture", () => {
+      const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+        readFileSync(
+          new URL(
+            "../../fixtures/android-focus/playground-text-field-pre-tap.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      );
+      const elements = extractNavigationElements(capture.viewHierarchy, elementParser);
+      for (const text of ["Tap", "Demos", "Slides", "Settings"]) {
+        const candidate = elements.find((element) => element.text === text);
+        expect(candidate).toBeDefined();
+        const target = tapSelectorFor(candidate!, capture.viewHierarchy);
+        expect(target).toHaveProperty("text", text);
+        const selected = new DefaultElementSelector().selectByText(
+          capture.viewHierarchy,
+          text,
+          target ?? {},
+        );
+        expect(selected.element).toBeDefined();
+        expect(selected.element!.bounds.left).toBeGreaterThanOrEqual(candidate!.bounds.left);
+        expect(selected.element!.bounds.right).toBeLessThanOrEqual(candidate!.bounds.right);
+        expect(selected.element!.bounds.top).toBeGreaterThanOrEqual(candidate!.bounds.top);
+        expect(selected.element!.bounds.bottom).toBeLessThanOrEqual(candidate!.bounds.bottom);
+      }
+    });
+
+    test("indexes repeated descendant labels by subtree identity", () => {
+      const parents = [0, 1].map((index) => {
+        const parent = createMockNode({ text: "", class: "", "resource-id": "" });
+        parent.bounds = { left: 0, top: index * 100, right: 100, bottom: index * 100 + 50 };
+        const child = createMockNode({ text: "Next", clickable: "false", "resource-id": "" });
+        child.bounds = { left: 20, top: index * 100 + 10, right: 80, bottom: index * 100 + 40 };
+        parent.node = [child];
+        return parent;
+      });
+      const hierarchy = createMockViewHierarchy(parents);
+      const elements = extractNavigationElements(hierarchy, elementParser);
+      const selector = new DefaultElementSelector();
+      for (const [index, element] of elements.entries()) {
+        expect(tapSelectorFor(element, hierarchy)).toEqual({ text: "Next", index });
+        expect(selector.selectByText(hierarchy, "Next", { index }).element?.bounds).toEqual(
+          parents[index].node?.[0].bounds,
+        );
+        expect(getElementKey(element, hierarchy)).toBe(`sel-text:Next#${index}`);
+      }
+    });
+
+    test("keeps Skip and Next independently tracked after enrichment", () => {
+      const parents = ["Skip", "Next"].map((text, index) => {
+        const parent = createMockNode({ text: "", class: "", "resource-id": "" });
+        parent.bounds = { left: index * 100, top: 0, right: index * 100 + 100, bottom: 50 };
+        parent.node = [createMockNode({ text, clickable: "false", "resource-id": "" })];
+        return parent;
+      });
+      const hierarchy = createMockViewHierarchy(parents);
+      const elements = extractNavigationElements(hierarchy, elementParser);
+      expect(elements.map((element) => getElementKey(element, hierarchy))).toEqual([
+        "sel-text:Skip",
+        "sel-text:Next",
+      ]);
+      expect(getElementKey(elements[0])).not.toBe(getElementKey(elements[1]));
+    });
+
+    for (const own of [
+      { text: "Own text", "resource-id": "" },
+      { text: "", "resource-id": "own-id" },
+      { text: "", "resource-id": "", "content-desc": "Own description" },
+    ]) {
+      test(`preserves own selector and key for ${JSON.stringify(own)}`, () => {
+        const parent = createMockNode({ ...own, class: "" });
+        const hierarchy = createMockViewHierarchy([parent]);
+        const [before] = extractNavigationElements(hierarchy, elementParser);
+        const originalSelector = tapSelectorFor(before, hierarchy);
+        const originalKey = getElementKey(before, hierarchy);
+        const originalUnscopedKey = getElementKey(before);
+        parent.node = [
+          createMockNode({ text: "Child text", clickable: "false", "resource-id": "" }),
+        ];
+        const [after] = extractNavigationElements(hierarchy, elementParser);
+        expect(tapSelectorFor(after, hierarchy)).toEqual(originalSelector);
+        expect(getElementKey(after, hierarchy)).toBe(originalKey);
+        expect(getElementKey(after)).toBe(originalUnscopedKey);
+      });
+    }
+
     test("keeps a unique occurrence unindexed", () => {
       const element = createMockElement();
       const selector = {
@@ -492,13 +608,20 @@ describe("ExploreElementExtraction", () => {
       expect(getElementKey(element1)).not.toBe(getElementKey(element2));
     });
 
-    test("should return 'unknown' for elements with no identifying properties", () => {
+    test("uses bounds to distinguish elements with no identifying properties", () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         clickable: true,
       } as Element;
 
-      expect(getElementKey(element)).toBe("unknown");
+      expect(getElementKey(element)).toBe("bounds:0,0,100,50");
+      const sibling = createMockElement({
+        text: "",
+        class: "",
+        "resource-id": "",
+        bounds: { left: 100, top: 0, right: 200, bottom: 50 },
+      });
+      expect(getElementKey(element)).not.toBe(getElementKey(sibling));
     });
   });
 

@@ -5,6 +5,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../logger";
+import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
 import { clockInstantTextInWindow } from "../../models/DeviceClock";
 
@@ -27,11 +28,115 @@ interface ValidationError {
   column?: number;
 }
 
+type SchemaFileSystem = Pick<FileSystem, "readFile">;
+const schemaFileSystem: SchemaFileSystem = {
+  readFile: (filePath, encoding = "utf-8") => fs.readFile(filePath, encoding),
+};
+
+interface LoadedPlanSchema {
+  schema: object;
+  ajv: Ajv;
+}
+
+let schemaCache: Promise<LoadedPlanSchema> | undefined;
+
+/** Test-only: isolate fake loads, then restore the previous populated cache. */
+export function resetPlanSchemaCacheForTests(): () => void {
+  const previous = schemaCache;
+  schemaCache = undefined;
+  return () => {
+    schemaCache = previous;
+  };
+}
+
+async function loadPlanSchema(fileSystem: SchemaFileSystem): Promise<LoadedPlanSchema> {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  logger.info(`[PlanSchemaValidator] Loading schema from: ${__dirname}`);
+  logger.info(`[PlanSchemaValidator] Current working directory: ${process.cwd()}`);
+  logger.info(
+    `[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+  );
+
+  // Try multiple paths to support different execution contexts:
+  const possiblePaths = [
+    ...new Set(
+      [
+        // From Bun bundle: dist/src/index.js -> dist/schemas/ (1 level up)
+        path.join(__dirname, "../schemas/test-plan.schema.json"),
+        // From Bun bundle: dist/src/index.js -> package root schemas/ (2 levels up)
+        path.join(__dirname, "../../schemas/test-plan.schema.json"),
+        // From source: src/utils/plan/PlanSchemaValidator.ts -> schemas/
+        path.join(__dirname, "../../../schemas/test-plan.schema.json"),
+        // From dist: dist/src/utils/plan/PlanSchemaValidator.js -> dist/schemas/
+        path.join(__dirname, "../../../../schemas/test-plan.schema.json"),
+        // From cwd (project root)
+        path.join(process.cwd(), "schemas/test-plan.schema.json"),
+        // From cwd/dist
+        path.join(process.cwd(), "dist/schemas/test-plan.schema.json"),
+        // From subdirectory - traverse up to find project root
+        path.join(process.cwd(), "../../schemas/test-plan.schema.json"),
+        path.join(process.cwd(), "../../../schemas/test-plan.schema.json"),
+        path.join(process.cwd(), "../../../../schemas/test-plan.schema.json"),
+        // From GitHub Actions workspace
+        path.join(process.env.GITHUB_WORKSPACE || "", "schemas/test-plan.schema.json"),
+        // From package root (when installed as npm package)
+        path.join(__dirname, "../../../../../schemas/test-plan.schema.json"),
+      ].map((candidate) => path.resolve(candidate)),
+    ),
+  ];
+
+  let schemaContent: string | null = null;
+  let schemaPath: string | null = null;
+  const attemptedPaths: string[] = [];
+
+  for (const tryPath of possiblePaths) {
+    try {
+      const resolvedPath = path.resolve(tryPath);
+      attemptedPaths.push(resolvedPath);
+      schemaContent = await fileSystem.readFile(resolvedPath, "utf-8");
+      schemaPath = resolvedPath;
+      logger.info(`[PlanSchemaValidator] ✓ Schema found at: ${schemaPath}`);
+      break;
+    } catch (error: any) {
+      logger.debug(
+        `[PlanSchemaValidator] ✗ Schema not found at: ${path.resolve(tryPath)} (${error.code})`,
+      );
+      // Missing or unreadable candidates are expected; try the next supported location.
+    }
+  }
+
+  if (!schemaContent || !schemaPath) {
+    const errorMessage = [
+      "Could not find test-plan.schema.json.",
+      `Current working directory: ${process.cwd()}`,
+      `Module directory: ${__dirname}`,
+      `GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+      "Tried paths:",
+      ...attemptedPaths.map((p) => `  - ${p}`),
+    ].join("\n");
+
+    logger.error(`[PlanSchemaValidator] ${errorMessage}`);
+    throw new Error(errorMessage);
+  }
+
+  const schema = JSON.parse(schemaContent);
+  const ajv = new Ajv({ allErrors: true, verbose: true, strict: false });
+  // Bun installs ajv-formats' compatible Ajv v8 dependency separately from
+  // our direct v8 dependency. They share the runtime plugin contract, but
+  // TypeScript treats their class identities as distinct package instances.
+  // eslint-disable-next-line auto-mobile/no-unknown-cast -- ajv-formats bundles a second compatible Ajv v8 type identity.
+  addFormats(ajv as unknown as Parameters<typeof addFormats>[0]);
+  ajv.addSchema(schema);
+  return { schema, ajv };
+}
+
 /**
  * Validates AutoMobile test plan YAML files against JSON schema
  */
 export class PlanSchemaValidator {
-  private ajv: Ajv;
+  private ajv!: Ajv;
   private schema: any;
   private schemaLoaded = false;
   // Ajv schema compilation (walking every $ref in the plan schema) is
@@ -42,18 +147,7 @@ export class PlanSchemaValidator {
   // compile cost once instead of per call.
   private validateFn?: ((data: unknown) => boolean) & { errors?: ErrorObject[] | null };
 
-  constructor() {
-    this.ajv = new Ajv({
-      allErrors: true,
-      verbose: true,
-      strict: false,
-    });
-    // Bun installs ajv-formats' compatible Ajv v8 dependency separately from
-    // our direct v8 dependency. They share the runtime plugin contract, but
-    // TypeScript treats their class identities as distinct package instances.
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- ajv-formats bundles a second compatible Ajv v8 type identity.
-    addFormats(this.ajv as unknown as Parameters<typeof addFormats>[0]);
-  }
+  constructor(private readonly fileSystem: SchemaFileSystem = schemaFileSystem) {}
 
   /**
    * Check if schema has been loaded
@@ -66,81 +160,20 @@ export class PlanSchemaValidator {
    * Load the JSON schema for test plans
    */
   async loadSchema(): Promise<void> {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-
-    logger.info(`[PlanSchemaValidator] Loading schema from: ${__dirname}`);
-    logger.info(`[PlanSchemaValidator] Current working directory: ${process.cwd()}`);
-    logger.info(
-      `[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
-    );
-
-    // Try multiple paths to support different execution contexts:
-    const possiblePaths = [
-      // From Bun bundle: dist/src/index.js -> dist/schemas/ (1 level up)
-      path.join(__dirname, "../schemas/test-plan.schema.json"),
-      // From Bun bundle: dist/src/index.js -> package root schemas/ (2 levels up)
-      path.join(__dirname, "../../schemas/test-plan.schema.json"),
-      // From source: src/utils/plan/PlanSchemaValidator.ts -> schemas/
-      path.join(__dirname, "../../../schemas/test-plan.schema.json"),
-      // From Bun-bundled dist/src/index.js: dist/src/../../ = project root schemas/
-      path.join(__dirname, "../../schemas/test-plan.schema.json"),
-      // From dist/src/: one level up to dist/, then schemas/
-      path.join(__dirname, "../schemas/test-plan.schema.json"),
-      // From dist: dist/src/utils/plan/PlanSchemaValidator.js -> dist/schemas/
-      path.join(__dirname, "../../../../schemas/test-plan.schema.json"),
-      // From cwd (project root)
-      path.join(process.cwd(), "schemas/test-plan.schema.json"),
-      // From cwd/dist
-      path.join(process.cwd(), "dist/schemas/test-plan.schema.json"),
-      // From subdirectory - traverse up to find project root
-      path.join(process.cwd(), "../../schemas/test-plan.schema.json"),
-      path.join(process.cwd(), "../../../schemas/test-plan.schema.json"),
-      path.join(process.cwd(), "../../../../schemas/test-plan.schema.json"),
-      // From GitHub Actions workspace
-      path.join(process.env.GITHUB_WORKSPACE || "", "schemas/test-plan.schema.json"),
-      // From package root (when installed as npm package)
-      path.join(__dirname, "../../../../../schemas/test-plan.schema.json"),
-    ];
-
-    let schemaContent: string | null = null;
-    let schemaPath: string | null = null;
-    const attemptedPaths: string[] = [];
-
-    for (const tryPath of possiblePaths) {
-      try {
-        const resolvedPath = path.resolve(tryPath);
-        attemptedPaths.push(resolvedPath);
-        schemaContent = await fs.readFile(resolvedPath, "utf-8");
-        schemaPath = resolvedPath;
-        logger.info(`[PlanSchemaValidator] ✓ Schema found at: ${schemaPath}`);
-        break;
-      } catch (error: any) {
-        logger.debug(
-          `[PlanSchemaValidator] ✗ Schema not found at: ${path.resolve(tryPath)} (${error.code})`,
-        );
-        // Try next path
-      }
+    if (!schemaCache) {
+      const pending = loadPlanSchema(this.fileSystem);
+      const shared = pending.then(undefined, (error: unknown) => {
+        // Preserve the failure for the caller while allowing the next load to retry.
+        if (schemaCache === shared) {
+          schemaCache = undefined;
+        }
+        throw error;
+      });
+      schemaCache = shared;
     }
-
-    if (!schemaContent || !schemaPath) {
-      const errorMessage = [
-        "Could not find test-plan.schema.json.",
-        `Current working directory: ${process.cwd()}`,
-        `Module directory: ${__dirname}`,
-        `GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
-        "Tried paths:",
-        ...attemptedPaths.map((p) => `  - ${p}`),
-      ].join("\n");
-
-      logger.error(`[PlanSchemaValidator] ${errorMessage}`);
-      throw new Error(errorMessage);
-    }
-
-    this.schema = JSON.parse(schemaContent);
-
-    // Add schema to ajv
-    this.ajv.addSchema(this.schema);
+    const loaded = await schemaCache;
+    this.schema = loaded.schema;
+    this.ajv = loaded.ajv;
     this.schemaLoaded = true;
   }
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { computeStorageCapabilities } from "../../src/features/storage/storageCapabilities";
 import { FakeKeystoreDiscovery } from "../fakes/FakeKeystoreDiscovery";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
@@ -60,6 +62,128 @@ describe("storageCapabilityResources", () => {
     }
     return match.template.handler(match.params);
   }
+
+  const androidPhysical: BootedDevice = { ...androidEmulator, deviceId: "1A2B3C4D" };
+  const captures = [
+    ["dumpsys-package-installed", "supported", true],
+    ["dumpsys-package-system-installed", "unavailable", false],
+    ["dumpsys-package-not-installed", "partial", undefined],
+    ["adb-failure", "partial", undefined],
+  ] as const;
+  test.each(captures)("physical Android app scope: %s => %s", async (capture, state, signal) => {
+    const adb = new FakeAdbExecutor();
+    if (capture === "adb-failure") {
+      adb.setCommandError("dumpsys package", new Error("adb disconnected"));
+    } else {
+      const stdout = readFileSync(
+        new URL(`../fixtures/android-dumpsys-package/${capture}.txt`, import.meta.url),
+        "utf8",
+      );
+      adb.setCommandResponse("dumpsys package", {
+        stdout,
+        stderr: "",
+        toString: () => stdout,
+        trim: () => stdout.trim(),
+        includes: (value) => stdout.includes(value),
+      });
+    }
+    setDevices([androidPhysical], {
+      adbFactory: new FakeAdbClientFactory(adb),
+      createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+      createKeystoreDiscovery: () => new FakeKeystoreDiscovery(),
+    });
+    const content = await readResource(
+      `automobile:devices/${androidPhysical.deviceId}/storage/capabilities?appId=com.example.app`,
+    );
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.context.debuggableBuild).toBe(signal);
+    const appContainers = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "app_containers",
+    );
+    expect(appContainers.operations.map((op: { operation: string }) => op.operation)).toEqual([
+      "list",
+      "read",
+      "write",
+    ]);
+    for (const operation of appContainers.operations) {
+      expect(operation.state).toBe(state);
+      if (state !== "supported") {
+        expect(operation.prerequisites).toContain("debuggable app build");
+      }
+    }
+    expect(adb.getExecutedCommands()).toEqual(["shell dumpsys package 'com.example.app'"]);
+  });
+
+  test("debuggable probe is injected with the device executor and each appId", async () => {
+    const adb = new FakeAdbExecutor();
+    const calls: string[] = [];
+    setDevices([androidPhysical], {
+      adbFactory: new FakeAdbClientFactory(adb),
+      createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+      createKeystoreDiscovery: () => new FakeKeystoreDiscovery(),
+      probeDebuggableBuild: async (executor, appId) => {
+        expect(executor).toBe(adb);
+        calls.push(appId);
+        return appId === "com.example.debug";
+      },
+    });
+    for (const [appId, expected] of [
+      ["com.example.debug", "supported"],
+      ["com.example.release", "unavailable"],
+    ] as const) {
+      const content = await readResource(
+        `automobile:devices/${androidPhysical.deviceId}/storage/capabilities?appId=${appId}`,
+      );
+      const body = JSON.parse(content.text ?? "{}");
+      expect(body.appId).toBe(appId);
+      expect(
+        body.domains.find((domain: { domain: string }) => domain.domain === "app_containers")
+          .operations[0].state,
+      ).toBe(expected);
+    }
+    expect(calls).toEqual(["com.example.debug", "com.example.release"]);
+  });
+
+  test.each([
+    [androidEmulator, "com.example.app"],
+    [iosPhysical, "com.example.app"],
+    [androidPhysical, undefined],
+  ] as const)("skips debug probe and preserves report bytes for %s / %s", async (device, appId) => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(false);
+    try {
+      const adb = new FakeAdbExecutor();
+      let probeCalls = 0;
+      setDevices([device], {
+        adbFactory: new FakeAdbClientFactory(adb),
+        createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+        probeDebuggableBuild: async () => {
+          probeCalls++;
+          return true;
+        },
+        appFileCoverage: { describeProviderCoverage: () => [] },
+        sharedStorageReadCoverage: () => ({ list: true, read: true }),
+      });
+      const context = resolveStorageCapabilityContext(
+        device,
+        appId,
+        device.platform === "android" ? true : undefined,
+      );
+      context.providerCoverage = [];
+      context.sharedStorageReadCoverage = { list: true, read: true };
+      const expected = JSON.stringify(
+        { deviceId: device.deviceId, ...computeStorageCapabilities(context) },
+        null,
+        2,
+      );
+      const uri = `automobile:devices/${device.deviceId}/storage/capabilities${appId ? `?appId=${appId}` : ""}`;
+      expect((await readResource(uri)).text).toBe(expected);
+      expect(probeCalls).toBe(0);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
 
   test.each([
     "ok",

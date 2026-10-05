@@ -28,6 +28,7 @@ import {
   type AndroidBuildToolsLocator,
 } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -495,16 +496,25 @@ export class InstallApp {
     const removedUsers =
       installedUserIds.length > 0 ? ` (removed for users: ${installedUserIds.join(", ")})` : "";
     const failureContext = [
-      `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app${removedUsers}.`,
+      `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app${removedUsers}; the app is not installed.`,
       ...inventory.warnings,
     ].join(" ");
     let installAttempt: AndroidInstallAttempt;
     try {
-      installAttempt = await perf.track("adbReinstall", () =>
-        this.runAndroidInstall(installArgs, signal),
+      // Once removal succeeds, finish reinstalling even if the request is cancelled.
+      // Escape both explicit and ambient aborts while retaining the ADB step deadline.
+      installAttempt = await runWithAbortSignal(undefined, () =>
+        raceWithDeadline(
+          () => perf.track("adbReinstall", () => this.runAndroidInstall(installArgs)),
+          {
+            timer: this.timer ?? defaultTimer,
+            timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+            label: "Android downgrade reinstall",
+          },
+        ),
       );
     } catch (error) {
-      // Cancellation still rejects, but must disclose the already completed uninstall.
+      // A failed must-finish reinstall must disclose the already completed uninstall.
       throw new ActionableError(`${failureContext} ${this.extractErrorText(error)}`, {
         cause: error,
       });
@@ -540,6 +550,8 @@ export class InstallApp {
       warnings: [],
     };
     try {
+      signal?.throwIfAborted();
+      getAbortSignal()?.throwIfAborted();
       for (const userId of installedUserIds.filter((id) => id !== targetUserId)) {
         signal?.throwIfAborted();
         const restoration = await this.restoreAndroidPackageUser(packageName, userId, signal);

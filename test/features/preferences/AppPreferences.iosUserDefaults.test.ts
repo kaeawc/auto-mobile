@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AppPreferences,
   isIosPreferenceSdkUnavailable,
+  isIosPreferenceSdkNotDispatched,
   type IosPreferenceKeyValueClient,
   type PreferenceValueType,
 } from "../../../src/features/preferences/AppPreferences";
@@ -113,6 +114,7 @@ class FakeContainerSimctl {
   readonly calls: Array<{ args: string[]; timeoutMs?: number }> = [];
   containerPath = container;
   containerError?: string;
+  writeError?: string;
   onCommand?: () => void;
   async executeCommand(): Promise<{ stdout: string; stderr: string }> {
     throw new Error("Unexpected string command");
@@ -131,6 +133,9 @@ class FakeContainerSimctl {
     }
     if (args[3] !== "write") {
       throw new Error("Unexpected defaults read");
+    }
+    if (this.writeError) {
+      throw new Error(this.writeError);
     }
     return { stdout: "", stderr: "" };
   }
@@ -186,6 +191,226 @@ const faultMessages = [
   "iOS key-value storage requires the target app to embed the AutoMobile SDK, initialize it, and call UserDefaultsInspector.shared.setEnabled(true): The data couldn’t be read because it isn’t in the correct format.",
   "iOS key-value storage inspection is disabled; call UserDefaultsInspector.shared.setEnabled(true): unknown_server_fault",
 ];
+
+// Exact pre-dispatch messages from CommandHandler+Storage.swift, including the wire wrapper.
+const appSdkRefusal = `Command execution failed: iOS key-value storage requires ${input.appId} to embed and initialize the AutoMobile SDK and call UserDefaultsInspector.shared.setEnabled(true)`;
+const bareSdkRefusal =
+  "Command execution failed: iOS key-value storage requires the target app to embed the AutoMobile SDK";
+const notDispatchedMessages = [
+  `${appSdkRefusal}: sdk_unavailable_not_dispatched`,
+  appSdkRefusal,
+  `${bareSdkRefusal}: sdk_unavailable_not_dispatched`,
+  bareSdkRefusal,
+];
+
+// Pin the existing IOS_PLIST_WRITE_WARNING without changing the public result.
+const containerWriteWarning =
+  "defaults write to an absolute path bypasses the preferences daemon. A running app may not see the change, and cfprefsd may later overwrite it with cached state until the app restarts. verified: true proves only file content, not the running app's state.";
+
+describe("SDK not-dispatched classification", () => {
+  for (const message of [
+    ...notDispatchedMessages,
+    "sdk_unavailable_not_dispatched",
+    "future runner wording: sdk_unavailable_not_dispatched",
+    appSdkRefusal.replace("Command execution failed: ", ""),
+    bareSdkRefusal.replace("Command execution failed: ", ""),
+  ]) {
+    test(`recognizes only a known refusal or trailing code: ${message}`, () => {
+      expect(isIosPreferenceSdkNotDispatched(new Error(message))).toBe(true);
+      expect(isIosPreferenceSdkUnavailable(new Error(message))).toBe(true);
+    });
+  }
+  for (const message of [
+    ...unavailableMessages,
+    ...faultMessages,
+    `${appSdkRefusal}: unexpected_error`,
+    `${bareSdkRefusal}, initialize it, and call UserDefaultsInspector.shared.setEnabled(true): Could not connect to the server.`,
+    `${appSdkRefusal} later failed`,
+    `unrelated prefix: ${appSdkRefusal}`,
+    `${appSdkRefusal}: sdk_unavailable_not_dispatched_suffix`,
+    `${appSdkRefusal}: sdk_unavailable_not_dispatched: network failure`,
+    `Command execution failed: iOS key-value storage requires ${input.appId} to be the foreground app`,
+    "iOS key-value storage app id mismatch",
+  ]) {
+    test(`does not authorize write fallback: ${message}`, () => {
+      expect(isIosPreferenceSdkNotDispatched(new Error(message))).toBe(false);
+    });
+  }
+});
+
+describe("runner SDK refusals before dispatch", () => {
+  for (const message of notDispatchedMessages) {
+    for (const suite of ["Standard", input.suite]) {
+      test(`write falls back once for ${suite}: ${message}`, async () => {
+        const { preferences, sdk, simctl, plist } = harness();
+        sdk.writeError = message;
+        simctl.onCommand = () => {
+          if (simctl.calls.at(-1)?.args[3] === "write") {
+            plist.setValue("container value", "string");
+          }
+        };
+        const result = await preferences.setPreference({
+          ...input,
+          suite,
+          value: "container value",
+          type: "string",
+        });
+        const domain = join(
+          container,
+          "Library",
+          "Preferences",
+          suite === "Standard" ? input.appId : suite,
+        );
+        expect(result).toMatchObject({
+          success: true,
+          found: true,
+          verified: true,
+          value: "container value",
+          type: "string",
+          resolvedStore: suite === "Standard" ? "standard" : suite,
+          storeRoute: "container-plist",
+          warning: containerWriteWarning,
+        });
+        expect(sdk.calls.map((call) => call.operation)).toEqual(["set"]);
+        expect(simctl.calls.map((call) => call.args)).toEqual([
+          ["get_app_container", device.deviceId, input.appId, "data"],
+          [
+            "spawn",
+            device.deviceId,
+            "defaults",
+            "write",
+            domain,
+            input.key,
+            "-string",
+            "container value",
+          ],
+        ]);
+        expect(plist.paths).toEqual([`${domain}.plist`]);
+      });
+    }
+    test(`read falls back: ${message}`, async () => {
+      const { preferences, sdk, simctl, plist } = harness();
+      sdk.readError = message;
+      plist.setValue(42, "int");
+      expect(await preferences.getPreference(input)).toMatchObject({
+        found: true,
+        value: 42,
+        storeRoute: "container-plist",
+        warning: expect.stringContaining("on-disk plist"),
+      });
+      expect(sdk.calls.map((call) => call.operation)).toEqual(["get"]);
+      expect(simctl.calls.map((call) => call.args)).toEqual([
+        ["get_app_container", device.deviceId, input.appId, "data"],
+      ]);
+      expect(plist.paths).toEqual([
+        join(container, "Library", "Preferences", `${input.suite}.plist`),
+      ]);
+    });
+    test(`app-group refusal still requires SDK: ${message}`, async () => {
+      const { preferences, sdk, simctl, plist } = harness();
+      sdk.writeError = message;
+      sdk.readError = message;
+      const group = { ...input, suite: "group.com.example" };
+      await expect(preferences.setPreference({ ...group, value: 42, type: "int" })).rejects.toThrow(
+        "Connect the app's runner before writing.",
+      );
+      expect(await preferences.getPreference(group)).toMatchObject({
+        found: false,
+        value: null,
+        storeRoute: "container-plist",
+        resolvedStore: group.suite,
+        warning: expect.stringContaining("only reachable through the embedded SDK"),
+      });
+      expect(simctl.calls).toEqual([]);
+      expect(plist.paths).toEqual([]);
+    });
+  }
+  for (const message of [
+    "Command execution failed: iOS key-value storage failed: connection lost after dispatch",
+    "iOS key-value storage requires the target app to embed the AutoMobile SDK, initialize it, and call UserDefaultsInspector.shared.setEnabled(true): The network connection was lost.",
+    "iOS key-value storage requires the target app to embed or upgrade the AutoMobile SDK: not_found",
+    `Command execution failed: iOS key-value storage requires ${input.appId} to be the foreground app`,
+    "iOS key-value storage app id mismatch",
+    "app_not_active",
+    "unknown SDK error",
+  ]) {
+    test(`dispatched or unsafe write remains terminal: ${message}`, async () => {
+      const { preferences, sdk, simctl, plist } = harness();
+      sdk.writeError = message;
+      await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
+        `iOS UserDefaults SDK write failed: ${message}. The write may or may not have been applied. Read the value through the SDK before retrying; no container write was attempted.`,
+      );
+      expect(sdk.calls.map((call) => call.operation)).toEqual(["set"]);
+      expect(simctl.calls).toEqual([]);
+      expect(plist.paths).toEqual([]);
+    });
+  }
+  test("mutation authorization takes precedence over the fallback token", async () => {
+    const { preferences, sdk, simctl } = harness();
+    sdk.writeError = "mutation_not_authorized: sdk_unavailable_not_dispatched";
+    await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
+      IOS_STORAGE_MUTATION_AUTHORIZATION_HINT,
+    );
+    expect(simctl.calls).toEqual([]);
+  });
+  test("physical device rejects writes before consulting the SDK", async () => {
+    const sdk = new FakeKeyValueClient();
+    sdk.writeError = notDispatchedMessages[0];
+    const provider = spyOn({ get: () => sdk }, "get");
+    const simctl = new FakeContainerSimctl();
+    const preferences = new AppPreferences(
+      { ...device, deviceId: "physical-device" },
+      {
+        iosKeyValueClientProvider: provider,
+        simctl,
+        timer: new FakeTimer(),
+      },
+    );
+    await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
+      "iOS physical devices are not supported for UserDefaults preferences yet.",
+    );
+    expect(provider).not.toHaveBeenCalled();
+    expect(sdk.calls).toEqual([]);
+    expect(simctl.calls).toEqual([]);
+    provider.mockRestore();
+  });
+  test("SDK read-back refusal after a successful write never retries the write", async () => {
+    const { preferences, sdk, simctl, plist } = harness();
+    sdk.readError = notDispatchedMessages[0];
+    await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
+      "write completed but read-back verification failed",
+    );
+    expect(sdk.calls.map((call) => call.operation)).toEqual(["set", "get"]);
+    expect(simctl.calls).toEqual([]);
+    expect(plist.paths).toEqual([]);
+  });
+  for (const failure of ["missing app", "defaults write", "read-back"] as const) {
+    test(`fallback surfaces its own ${failure} failure`, async () => {
+      const { preferences, sdk, simctl, plist } = harness();
+      sdk.writeError = notDispatchedMessages[0];
+      const expected =
+        failure === "missing app"
+          ? "not installed on this simulator"
+          : failure === "defaults write"
+            ? "defaults permission denied"
+            : "plist permission denied";
+      if (failure === "missing app") {
+        simctl.containerError = "Application not found.";
+      }
+      if (failure === "defaults write") {
+        simctl.writeError = "defaults permission denied";
+      }
+      if (failure === "read-back") {
+        plist.error = "plist permission denied";
+      }
+      await expect(preferences.setPreference({ ...input, value: 42, type: "int" })).rejects.toThrow(
+        expected,
+      );
+      expect(sdk.calls.map((call) => call.operation)).toEqual(["set"]);
+      expect(simctl.calls.some((call) => call.args[3] === "write")).toBe(failure !== "missing app");
+    });
+  }
+});
 
 describe("iOS app UserDefaults resolution", () => {
   test("bool write with a STRING override reports an unverifiable effective type", async () => {

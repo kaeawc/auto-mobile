@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
+  DAEMON_RESPONSE_GRACE_MS,
   DaemonClient,
   DaemonShuttingDownError,
   DaemonUnavailableError,
@@ -288,7 +289,7 @@ describe("proxy server socket-close diagnostics", () => {
     const deadlineError = new Promise<Error>((resolve) => {
       daemonClient["scheduleRequestTimeout"]("request", "observe", 250, resolve);
     });
-    timer.advanceTime(250);
+    timer.advanceTime(250 + DAEMON_RESPONSE_GRACE_MS);
     const cause = await deadlineError;
     expect(cause).toBeInstanceOf(McpTimeoutError);
 

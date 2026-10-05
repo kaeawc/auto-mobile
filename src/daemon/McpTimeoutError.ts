@@ -1,15 +1,33 @@
+/** Deadline expired before dispatch; retry cannot duplicate a device operation. */
+export const MCP_QUEUE_TIMEOUT_ERROR_CODE = "daemon_queue_timeout";
+
+/** The client preserves response.code on its thrown ActionableError. */
+export function isMcpQueueTimeoutError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === MCP_QUEUE_TIMEOUT_ERROR_CODE;
+}
+
 export class McpTimeoutError extends Error {
   readonly toolName: string;
   readonly timeoutMs: number;
   readonly origin: string;
+  readonly code?: typeof MCP_QUEUE_TIMEOUT_ERROR_CODE;
 
-  constructor(opts: { toolName: string; timeoutMs: number; origin: string; detail?: string }) {
+  constructor(opts: {
+    toolName: string;
+    timeoutMs: number;
+    origin: string;
+    detail?: string;
+    code?: typeof MCP_QUEUE_TIMEOUT_ERROR_CODE;
+  }) {
     const detail = opts.detail ? ` (${opts.detail})` : "";
     super(`MCP timeout: ${opts.toolName} exceeded ${opts.timeoutMs}ms at ${opts.origin}${detail}`);
     this.name = "McpTimeoutError";
     this.toolName = opts.toolName;
     this.timeoutMs = opts.timeoutMs;
     this.origin = opts.origin;
+    if (opts.code !== undefined) {
+      this.code = opts.code;
+    }
   }
 }
 

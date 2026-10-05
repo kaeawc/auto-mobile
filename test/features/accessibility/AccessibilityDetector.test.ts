@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { AndroidTapStrategy } from "../../../src/features/action/strategies/AndroidTapStrategy";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 import { DefaultAccessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../src/ctrlProxy/constants";
 import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
@@ -129,13 +131,87 @@ describe("AccessibilityDetector - Unit Tests", () => {
     fakeFeatureFlags.reset();
   });
 
-  test("failed probe re-probes immediately after ADB recovers", async () => {
+  test("persistent failures back off per device for three seconds", async () => {
+    fakeAdb.setError();
+    for (let i = 0; i < 5; i++) {
+      expect(await detector.resolveTalkBackState("a", fakeAdb)).toBeNull();
+      expect(await detector.resolveState("a", fakeAdb)).toBeNull();
+    }
+    expect(fakeAdb.getCallCount()).toBe(1);
+    await detector.resolveTalkBackState("b", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(2);
+    fakeTimer.advanceTime(2999);
+    await detector.resolveTalkBackState("a", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(2);
+    fakeTimer.advanceTime(1);
+    await detector.resolveTalkBackState("a", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(3);
+  });
+
+  test("explicit invalidation and clear immediately clear negative backoff", async () => {
+    fakeAdb.setError();
+    await detector.resolveState("a", fakeAdb);
+    await detector.resolveState("b", fakeAdb);
+    detector.invalidateCache("a");
+    await detector.resolveTalkBackState("a", fakeAdb);
+    await detector.resolveTalkBackState("b", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(3);
+    detector.clearAllCache();
+    await detector.resolveTalkBackState("a", fakeAdb);
+    await detector.resolveTalkBackState("b", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(5);
+  });
+
+  test("failed probe retries after three seconds and success resets the backoff", async () => {
     fakeAdb.setError();
     expect(await detector.detectMethod("recover", fakeAdb)).toBe("unknown");
     fakeAdb.setError(false);
     fakeAdb.setResponse("com.google.android.marvin.talkback/.TalkBackService");
+    fakeTimer.advanceTime(3000);
     expect(await detector.detectMethod("recover", fakeAdb)).toBe("talkback");
     expect(fakeAdb.getCallCount()).toBe(2);
+    fakeTimer.advanceTime(59999);
+    await detector.resolveState("recover", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(2);
+    fakeTimer.advanceTime(1);
+    fakeAdb.setError();
+    await detector.resolveState("recover", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(3);
+    fakeTimer.advanceTime(3000);
+    await detector.resolveState("recover", fakeAdb);
+    expect(fakeAdb.getCallCount()).toBe(4);
+  });
+
+  test("stale enabled evidence warns on failure and backoff; fresh evidence does not", async () => {
+    fakeAdb.setResponse("com.google.android.marvin.talkback/.TalkBackService");
+    const strategy = new AndroidTapStrategy(
+      { name: "android", deviceId: "stale", platform: "android" },
+      fakeAdb,
+      detector,
+    );
+    const warnings: string[] = [];
+    const warn = (warning: string) => warnings.push(warning);
+    expect(await strategy.isAccessibilityServiceEnabled(warn)).toBe(true);
+    expect(warnings).toEqual([]);
+    fakeTimer.advanceTime(60000);
+    fakeAdb.setError();
+    expect(await strategy.isAccessibilityServiceEnabled(warn)).toBe(true);
+    expect(await detector.resolveState("stale", fakeAdb)).toMatchObject({
+      enabled: true,
+      service: "talkback",
+      unconfirmed: true,
+    });
+    expect(await strategy.isAccessibilityServiceEnabled(warn)).toBe(true);
+    expect(warnings).toEqual([TALKBACK_STATE_UNKNOWN_WARNING, TALKBACK_STATE_UNKNOWN_WARNING]);
+    expect(fakeAdb.getCallCount()).toBe(2);
+    fakeTimer.advanceTime(3000);
+    fakeAdb.setError(false);
+    expect(await detector.resolveTalkBackStateWithConfirmation("stale", fakeAdb)).toEqual({
+      talkBack: true,
+      unconfirmed: false,
+    });
+    expect(await strategy.isAccessibilityServiceEnabled(warn)).toBe(true);
+    expect(warnings).toHaveLength(2);
   });
 
   test("failed refresh retains known TalkBack only through 90 seconds from success", async () => {
@@ -151,7 +227,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
     expect(await detector.resolveState("bounded", fakeAdb)).toBeNull();
   });
 
-  test("gesture resolver retries once synchronously and uses recovered TalkBack", async () => {
+  test("gesture resolver retries recovered TalkBack after the backoff", async () => {
     fakeAdb.setResponse("com.google.android.marvin.talkback/.TalkBackService");
     fakeAdb.setError();
     const execute = fakeAdb.executeCommand.bind(fakeAdb);
@@ -162,6 +238,9 @@ describe("AccessibilityDetector - Unit Tests", () => {
         fakeAdb.setError(false);
       }
     };
+    expect(await detector.resolveTalkBackState("retry", fakeAdb)).toBeNull();
+    expect(fakeAdb.getCallCount()).toBe(1);
+    fakeTimer.advanceTime(3000);
     expect(await detector.resolveTalkBackState("retry", fakeAdb)).toBe(true);
     expect(fakeAdb.getCallCount()).toBe(2);
   });

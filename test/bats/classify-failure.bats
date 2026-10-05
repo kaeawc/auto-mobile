@@ -301,7 +301,7 @@ JSON
   [[ "$output" == *"Run JUnit Runner Emulator Tests → Run AutoMobile tests that require emulator → none → RERUN-DONT-FIX"* ]]
 }
 
-@test "classifies XCTestRunner keyboard caret and launch timing as advisory flakes" {
+@test "classifies anchored XCTestRunner caret-probe and Xcode launch timing as advisory flakes" {
   fixture="$BATS_TEST_TMPDIR/xctest-ui-timing-run.json"
   cat > "$fixture" <<'JSON'
 {
@@ -313,15 +313,74 @@ JSON
 JSON
 
   for message in \
-    "runner time budget exhausted at caret probe" \
-    "could not verify the caret position" \
-    "did not gain keyboard focus" \
-    "Timed out while launching application via Xcode"; do
+    "2026-10-05T03:47:22.1307380Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift:278: error: -[CtrlProxyUITests.HierarchyIntegrationTests testPressKeyForwardDeleteRemovesFollowingCharacter] : failed - first arrow_left press failed: arrow key was not sent: runner time budget exhausted at caret probe after 4363ms; retry" \
+    "2026-10-04T15:43:10.4341440Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift:38: error: -[CtrlProxyUITests.HierarchyIntegrationTests testScreenshotMatchesNativeDimensionsOnOddWidthDevice] : Failed to launch <XCUIApplicationImpl: 0x102ba7800 dev.jasonpearson.automobile.ctrlproxy at /private/tmp/automobile-ctrl-proxy/Build/Products/Debug-iphonesimulator/AutoMobileTest.app> via Xcode: Timed out while launching application via Xcode."; do
     run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_XCTEST_LOG="$message" bash "$SCRIPT" 9565
     [ "$status" -eq 0 ]
     [[ "$output" == *"XCTestRunner Simulator Tests → Run CtrlProxy iOS UI tests → none → RERUN-DONT-FIX"* ]]
     [[ "$output" == *"non-required, rerun; #9565"* ]]
   done
+}
+
+@test "does not classify an XCTestRunner session heartbeat failure as a rerun flake" {
+  fixture="$BATS_TEST_TMPDIR/xctest-ui-timing-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/xctest-ui-timing",
+  "jobs": [
+    {"databaseId": 44, "name": "XCTestRunner Simulator Tests", "conclusion": "failure", "steps": [{"name": "Run CtrlProxy iOS UI tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  message="error: session ownership heartbeat failed: The token no longer owns session 5d4881bf-a0e1-4636-b64a-51d1c73f525b's liveness. Re-claim with a fresh token and --claim-liveness-ownership, or stop the keeper."
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_XCTEST_LOG="$message" bash "$SCRIPT" 9565
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"XCTestRunner Simulator Tests → Run CtrlProxy iOS UI tests → none → UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+@test "does not classify XCTestRunner product assertions or unanchored timing text as rerun flakes" {
+  fixture="$BATS_TEST_TMPDIR/xctest-ui-timing-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/xctest-ui-timing",
+  "jobs": [
+    {"databaseId": 44, "name": "XCTestRunner Simulator Tests", "conclusion": "failure", "steps": [{"name": "Run CtrlProxy iOS UI tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  for message in \
+    "2026-10-05T02:44:15.5935830Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift:1792: error: -[CtrlProxyUITests.HierarchyIntegrationTests testPressKeyForwardDeleteRemovesFollowingCharacter] : failed: caught error: \"gestureFailed(\"Forward delete unavailable: could not verify the caret position; use text replacement instead\")\"" \
+    "2026-10-05T03:49:57.4071890Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift:354: error: -[CtrlProxyUITests.HierarchyIntegrationTests testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree] : failed - Element 'secure-field' did not gain keyboard focus" \
+    "runner time budget exhausted at caret probe" \
+    "Timed out while launching application via Xcode"; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_XCTEST_LOG="$message" bash "$SCRIPT" 9565
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"XCTestRunner Simulator Tests → Run CtrlProxy iOS UI tests → none → UNKNOWN"* ]]
+    [[ "$output" != *"RERUN-DONT-FIX"* ]]
+  done
+}
+
+@test "does not let a keyboard-focus assertion mask an XCTestRunner session heartbeat failure" {
+  fixture="$BATS_TEST_TMPDIR/xctest-ui-timing-run.json"
+  cat > "$fixture" <<'JSON'
+{
+  "headBranch": "work/xctest-ui-timing",
+  "jobs": [
+    {"databaseId": 44, "name": "XCTestRunner Simulator Tests", "conclusion": "failure", "steps": [{"name": "Run CtrlProxy iOS UI tests", "conclusion": "failure"}]}
+  ]
+}
+JSON
+
+  message="error: session ownership heartbeat failed: The token no longer owns session 5d4881bf-a0e1-4636-b64a-51d1c73f525b's liveness. Re-claim with a fresh token and --claim-liveness-ownership, or stop the keeper."
+  message+=$'\n'
+  message+="2026-10-05T03:49:57.4071890Z /Users/runner/work/auto-mobile/auto-mobile/ios/control-proxy/Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift:354: error: -[CtrlProxyUITests.HierarchyIntegrationTests testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree] : failed - Element 'secure-field' did not gain keyboard focus"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_XCTEST_LOG="$message" bash "$SCRIPT" 9565
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"XCTestRunner Simulator Tests → Run CtrlProxy iOS UI tests → none → UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
 
 @test "keeps Playground getAndroid runner-connect separate from boot flakes" {

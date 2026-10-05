@@ -49,6 +49,8 @@ export interface ObservePollOptions {
    * Default false preserves standalone settle and waitFor push-wait behaviour.
    */
   skipWaitForFresh?: boolean;
+  /** Embedded gate only: re-extract unverified Android cache hits with a positive floor. */
+  requireFreshExtraction?: boolean;
   /**
    * Skip the performance audit on every poll (issue #6890 review).
    *
@@ -375,6 +377,7 @@ async function capturePoll(
     minTimestamp,
     timeoutMs,
     skipWaitForFresh: options.skipWaitForFresh ?? false,
+    requireFreshExtraction: options.requireFreshExtraction,
     signal: options.signal,
     // Polls defer evidence and persistence until the selected terminal capture.
     skipScreenshot: true,

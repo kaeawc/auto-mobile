@@ -6,7 +6,7 @@ import { IOSCtrlProxyClient } from "../ios";
 import { appendObserveError } from "../ObserveError";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
-import type { ViewHierarchy } from "../interfaces/ViewHierarchy";
+import type { ViewHierarchy, HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -62,7 +62,7 @@ export class HierarchyCollector {
     signal?: AbortSignal,
     readOnly: boolean = false,
     capturedHierarchy?: ViewHierarchyResult,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<void> {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {
@@ -79,7 +79,7 @@ export class HierarchyCollector {
           skipWaitForFresh,
           minTimestamp,
           signal,
-          timeoutMs,
+          readOptions,
         ));
       logger.debug("Accessibility service availability cached as: true");
 

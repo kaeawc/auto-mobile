@@ -31,6 +31,8 @@ export interface SettleOptions {
   initialMinTimestampMs?: number;
   /** Skip the push wait when the cache misses the floor; synchronously re-extract instead. */
   skipWaitForFresh?: boolean;
+  /** Embedded gate only: require independent Android extractions for floor-bearing polls. */
+  requireFreshExtraction?: boolean;
   /**
    * Skip the performance audit on every settle poll, forwarded verbatim to
    * {@link pollObserveUntil} (issue #6890 review). Off by default: the

@@ -1,3 +1,4 @@
+import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 /**
  * AndroidCtrlProxyClient - Main client for Android accessibility service.
  *
@@ -2863,7 +2864,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     minTimestamp?: number,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult | null> {
     return this.hierarchy.getAccessibilityHierarchy(
       queryOptions,
@@ -2872,7 +2873,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       minTimestamp,
       disableAllFiltering,
       signal,
-      timeoutMs,
+      readOptions,
     );
   }
 

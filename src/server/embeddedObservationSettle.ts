@@ -90,6 +90,8 @@ export async function settleEmbeddedObservation(
       // the push wait so a rejected cache triggers sync re-extraction (#6099)
       // with a newer device timestamp, leaving time for the second stable read.
       skipWaitForFresh: true,
+      // Each stable read must be independent, even inside the cache serve window (#9579).
+      requireFreshExtraction: true,
       // The poll already drops the screenshot and the accessibility audit as
       // intermediate state; the performance audit has to go too. It drives up
       // to three synthetic touches plus ADB/database work that honours neither

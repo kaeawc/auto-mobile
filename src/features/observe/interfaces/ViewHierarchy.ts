@@ -2,6 +2,13 @@ import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../../mode
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
+/** Internal hierarchy read policy; numeric budgets remain supported for existing callers. */
+export interface HierarchyReadOptions {
+  timeoutMs?: number;
+  /** Re-extract an unverified Android cache hit when a positive device timestamp floor is set. */
+  requireFreshExtraction?: boolean;
+}
+
 /**
  * Interface for retrieving and managing view hierarchy data.
  */
@@ -21,7 +28,7 @@ export interface ViewHierarchy {
    * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
    * @param minTimestamp - If provided, cached data must have updatedAt >= this value
    * @param signal - Optional abort signal
-   * @param timeoutMs - Optional overall budget for this read; bounds both the fresh-data
+   * @param readOptions - Optional read policy or overall budget; bounds both the fresh-data
    *   wait and the sync fallback so a caller with its own deadline cannot be blocked past it
    * @returns Promise with parsed view hierarchy
    */
@@ -31,7 +38,7 @@ export interface ViewHierarchy {
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     signal?: AbortSignal,
-    timeoutMs?: number,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult>;
 
   /**

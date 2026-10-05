@@ -8,9 +8,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import {
   deriveIosSharedEmitFiles,
   extractImportSpecifiers,
@@ -27,6 +27,19 @@ function typesOf(source: string): string[] {
 }
 
 describe("ctrlProxyWireScan.scanFile — discriminator resolution", () => {
+  test("finds both hierarchy request types in the production source with no unresolved sites", () => {
+    const file = resolve(
+      import.meta.dir,
+      "../../../../src/features/observe/ios/CtrlProxyHierarchy.ts",
+    );
+    const result = scanFile(file, readFileSync(file, "utf8"));
+    expect(result.emitted.map((emit) => emit.type).sort()).toEqual([
+      "request_hierarchy",
+      "request_hierarchy_if_stale",
+    ]);
+    expect(result.unresolved).toEqual([]);
+  });
+
   test("resolves a direct string-literal messageType in a sendCommand object", () => {
     const src = `sendCommand(ctx, { messageType: "request_tap_coordinates", params });`;
     expect(typesOf(src)).toEqual(["request_tap_coordinates"]);

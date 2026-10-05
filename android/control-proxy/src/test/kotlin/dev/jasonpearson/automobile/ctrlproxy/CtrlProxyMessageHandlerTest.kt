@@ -3,6 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.OverlayTextNode
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.RequestDrag
 import dev.jasonpearson.automobile.protocol.RequestPinch
@@ -1054,5 +1058,79 @@ class CtrlProxyMessageHandlerTest {
       assertEquals(null, response)
     }
     assertTrue("recording fake must be untouched by the no-op handler", calls.isEmpty())
+  }
+
+  @Test
+  fun `dispatch typed overlay requests`() = runTest {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec}""")
+    assertEquals("showOverlay", lastCall.first)
+    assertEquals("s", lastCall.second[0])
+    assertEquals("panel", (lastCall.second[1] as OverlaySpec).id)
+    assertEquals(OverlayTextNode(text = "Hello"), (lastCall.second[1] as OverlaySpec).root)
+    dispatch("""{"type":"update_overlay","requestId":"u","id":"panel","spec":$spec}""")
+    assertEquals("updateOverlay", lastCall.first)
+    assertEquals(
+      listOf("u", "panel", json.decodeFromString<OverlaySpec>(spec), null),
+      lastCall.second,
+    )
+    dispatch(
+      """{"type":"update_overlay","requestId":"p","id":"panel","state":{"enabled":true,"count":2.5}}"""
+    )
+    assertEquals("updateOverlay", lastCall.first)
+    assertEquals(
+      listOf(
+        "p",
+        "panel",
+        null,
+        mapOf("enabled" to OverlayScalar.BooleanValue(true), "count" to OverlayScalar.Numeric(2.5)),
+      ),
+      lastCall.second,
+    )
+    dispatch("""{"type":"dismiss_overlay","requestId":"d","id":"panel"}""")
+    assertEquals("dismissOverlay", lastCall.first)
+    assertEquals(listOf("d", "panel", null), lastCall.second)
+    dispatch("""{"type":"dismiss_overlay","requestId":"a","all":true}""")
+    assertEquals(listOf("a", null, true), lastCall.second)
+  }
+
+  @Test
+  fun `invalid overlay combinations return precise correlated failures without actions`() =
+    runTest {
+      val spec =
+        """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
+      val updateError = "update_overlay requires exactly one of spec or state"
+      val dismissError = "dismiss_overlay requires exactly one of id or all:true"
+      val cases =
+        listOf(
+          """{"type":"update_overlay","requestId":"bad","id":"panel"}""" to updateError,
+          """{"type":"update_overlay","requestId":"bad","id":"panel","spec":$spec,"state":{}}""" to
+            updateError,
+          """{"type":"dismiss_overlay","requestId":"bad"}""" to dismissError,
+          """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":true}""" to
+            dismissError,
+          """{"type":"dismiss_overlay","requestId":"bad","all":false}""" to dismissError,
+          """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":false}""" to
+            dismissError,
+        )
+      for ((literal, error) in cases) {
+        val result = dispatchForResponse(literal) as OverlayResult
+        assertEquals("bad", result.requestId)
+        assertFalse(result.success)
+        assertEquals(error, result.error)
+      }
+      assertTrue(calls.isEmpty())
+    }
+
+  @Test
+  fun `overlay stub frame refuses host work with escaped echoed request id`() {
+    val requestId = "quoted" + '"'
+    val result =
+      json.decodeFromString<WebSocketResponse>(overlayNotWiredResultFrame(requestId))
+        as OverlayResult
+    assertEquals(requestId, result.requestId)
+    assertFalse(result.success)
+    assertEquals("overlay host not wired", result.error)
   }
 }

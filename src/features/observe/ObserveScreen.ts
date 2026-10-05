@@ -1771,9 +1771,7 @@ export class RealObserveScreen implements ObserveScreen {
       if (!observerMode && serverConfig.isPredictiveUiEnabled()) {
         try {
           const predictions = await this.predictiveUIState.generate(result);
-          if (predictions) {
-            result.predictions = predictions;
-          }
+          this.attachPredictions(result, predictions);
         } catch (error) {
           logger.warn(`[PredictiveUIState] Failed to generate predictions: ${error}`);
         }
@@ -2512,16 +2510,7 @@ export class RealObserveScreen implements ObserveScreen {
             hierarchy.foregroundActivity &&
             !isAccessibilityViewClass(hierarchy.foregroundActivity)
           ) {
-            const parts = hierarchy.foregroundActivity.split("/");
-            const packageName = parts[0];
-            const activityName = parts[1]?.startsWith(".")
-              ? packageName + parts[1]
-              : parts[1] || "";
-            result.activeWindow = {
-              appId: packageName,
-              activityName,
-              layoutSeqSum: 0,
-            };
+            this.applyAndroidForegroundActivity(result, hierarchy.foregroundActivity);
           }
           const parallelTasks: Promise<void>[] = [];
           if (hierarchy.wakefulness) {
@@ -2639,64 +2628,9 @@ export class RealObserveScreen implements ObserveScreen {
           readOptions,
         );
 
-        // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.
-        const extractedSize = this.hierarchyCollector.extractScreenSize(
-          result.viewHierarchy,
-          (this.device.displays?.panels.length ?? 0) > 1,
-        );
-        if (extractedSize) {
-          result.screenSize = extractedSize;
-          logger.debug(
-            `[iOS] Extracted screen size from hierarchy: ${extractedSize.width}x${extractedSize.height}`,
-          );
-        } else if (result.viewHierarchy?.screenWidth && result.viewHierarchy?.screenHeight) {
-          result.screenSize = {
-            width: result.viewHierarchy.screenWidth,
-            height: result.viewHierarchy.screenHeight,
-          };
-          logger.debug(
-            `[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`,
-          );
-        } else {
-          logger.warn("[iOS] Failed to extract screen size from hierarchy");
-        }
-        if (result.viewHierarchy?.insets) {
-          result.insets = result.viewHierarchy.insets;
-        }
-        if (result.viewHierarchy?.systemInsets) {
-          result.systemInsets = result.viewHierarchy.systemInsets;
-        }
-        result.rotation = resolveIosObserveRotation(
-          result.viewHierarchy?.rotation,
-          result.screenSize,
-        );
-
-        // Use the same iOS visibility projection as action and diagnostic captures.
-        if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
-          // Reconcile the duplicated viewHierarchy.screenWidth/screenHeight fields
-          // with the authoritative screenSize before filtering (which preserves
-          // them). The iOS runner can report a stale 320x480 (legacy compatibility
-          // mode) value; keep the hierarchy fields consistent for consumers that
-          // read them directly (issue #2683).
-          this.hierarchyCollector.reconcileScreenDimensions(
-            result.viewHierarchy,
-            result.screenSize,
-          );
-
-          const rawHierarchy = result.viewHierarchy;
-          const iosMultiPanel = (this.device.displays?.panels.length ?? 0) > 1;
-          result.viewHierarchy = projectActionableHierarchy("ios", rawHierarchy, iosMultiPanel);
-          inheritHierarchySnapshot(rawHierarchy, result.viewHierarchy, iosMultiPanel);
-        }
-
-        // Populate activeWindow from view hierarchy packageName if not already set.
-        if (result.viewHierarchy?.packageName && !result.activeWindow) {
-          result.activeWindow = {
-            appId: result.viewHierarchy.packageName,
-            activityName: "",
-            layoutSeqSum: 0,
-          };
-        }
+        this.applyIosScreenMetadata(result);
+        this.applyIosInsetsAndRotation(result);
+        this.projectIosObservationHierarchy(result);
 
         let sdkScreenIdentity: ScreenIdentity | undefined;
         try {
@@ -2717,6 +2651,86 @@ export class RealObserveScreen implements ObserveScreen {
         perf.end();
         break;
       }
+    }
+  }
+
+  private applyAndroidForegroundActivity(result: ObserveResult, foregroundActivity: string): void {
+    const parts = foregroundActivity.split("/");
+    const packageName = parts[0];
+    const activityName = parts[1]?.startsWith(".") ? packageName + parts[1] : parts[1] || "";
+    result.activeWindow = {
+      appId: packageName,
+      activityName,
+      layoutSeqSum: 0,
+    };
+  }
+
+  private applyIosInsetsAndRotation(result: ObserveResult): void {
+    if (result.viewHierarchy?.insets) {
+      result.insets = result.viewHierarchy.insets;
+    }
+    if (result.viewHierarchy?.systemInsets) {
+      result.systemInsets = result.viewHierarchy.systemInsets;
+    }
+    result.rotation = resolveIosObserveRotation(result.viewHierarchy?.rotation, result.screenSize);
+  }
+
+  private attachPredictions(
+    result: ObserveResult,
+    predictions: ObserveResult["predictions"],
+  ): void {
+    if (predictions) {
+      result.predictions = predictions;
+    }
+  }
+
+  private applyIosScreenMetadata(result: ObserveResult): void {
+    // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.
+    const extractedSize = this.hierarchyCollector.extractScreenSize(
+      result.viewHierarchy,
+      (this.device.displays?.panels.length ?? 0) > 1,
+    );
+    if (extractedSize) {
+      result.screenSize = extractedSize;
+      logger.debug(
+        `[iOS] Extracted screen size from hierarchy: ${extractedSize.width}x${extractedSize.height}`,
+      );
+    } else if (result.viewHierarchy?.screenWidth && result.viewHierarchy?.screenHeight) {
+      result.screenSize = {
+        width: result.viewHierarchy.screenWidth,
+        height: result.viewHierarchy.screenHeight,
+      };
+      logger.debug(
+        `[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`,
+      );
+    } else {
+      logger.warn("[iOS] Failed to extract screen size from hierarchy");
+    }
+  }
+
+  private projectIosObservationHierarchy(result: ObserveResult): void {
+    // Use the same iOS visibility projection as action and diagnostic captures.
+    if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
+      // Reconcile the duplicated viewHierarchy.screenWidth/screenHeight fields
+      // with the authoritative screenSize before filtering (which preserves
+      // them). The iOS runner can report a stale 320x480 (legacy compatibility
+      // mode) value; keep the hierarchy fields consistent for consumers that
+      // read them directly (issue #2683).
+      this.hierarchyCollector.reconcileScreenDimensions(result.viewHierarchy, result.screenSize);
+
+      const rawHierarchy = result.viewHierarchy;
+      const iosMultiPanel = (this.device.displays?.panels.length ?? 0) > 1;
+      result.viewHierarchy = projectActionableHierarchy("ios", rawHierarchy, iosMultiPanel);
+      inheritHierarchySnapshot(rawHierarchy, result.viewHierarchy, iosMultiPanel);
+    }
+
+    // Populate activeWindow from view hierarchy packageName if not already set.
+    if (result.viewHierarchy?.packageName && !result.activeWindow) {
+      result.activeWindow = {
+        appId: result.viewHierarchy.packageName,
+        activityName: "",
+        layoutSeqSum: 0,
+      };
     }
   }
 

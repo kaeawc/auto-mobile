@@ -455,17 +455,12 @@ export class TapAtCoordinate extends BaseVisualChange {
               `TalkBack coordinate activation cannot target display ${displayId}; no gesture was dispatched.`,
             );
           }
-          await this.dispatchAndroidTalkBackTap(
-            options,
-            resolved,
-            observation.viewHierarchy?.frameContext,
+          await this.dispatchDisplayTalkBackTapWithOneFreshRetry(options, resolved, observation, {
             signal,
-            {
-              assertCurrent,
-              onTapDelivered: () => onTapDelivered(true),
-              onActivationWarnings,
-            },
-          );
+            assertCurrent,
+            onTapDelivered: () => onTapDelivered(true),
+            onActivationWarnings,
+          });
         } else {
           await this.dispatchGesture(options, resolved, observation, signal, displayId, {
             assertCurrent,
@@ -712,6 +707,80 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.invalidateIosCache();
     } catch (error) {
       logger.warn(`tapAt iOS cache invalidation failed: ${errorMessage(error)}`, error);
+    }
+  }
+
+  private async dispatchDisplayTalkBackTapWithOneFreshRetry(
+    options: TapAtOptions,
+    resolved: { x: number; y: number },
+    observation: ObserveResult,
+    context: {
+      signal?: AbortSignal;
+      assertCurrent: () => void;
+      onTapDelivered: () => void;
+      onActivationWarnings?: (warnings?: string[]) => void;
+    },
+  ): Promise<void> {
+    const { signal, assertCurrent } = context;
+    const frameContext = observation.viewHierarchy?.frameContext;
+    let delivered = false;
+    let talkBackDispatched = false;
+    const dispatchContext = {
+      assertCurrent,
+      onTapDelivered: () => {
+        delivered = true;
+        context.onTapDelivered();
+      },
+      onDispatched: () => {
+        talkBackDispatched = true;
+      },
+      onActivationWarnings: context.onActivationWarnings,
+    };
+    try {
+      await this.dispatchAndroidTalkBackTap(
+        options,
+        resolved,
+        frameContext,
+        signal,
+        dispatchContext,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
+      if (
+        delivered ||
+        talkBackDispatched ||
+        frameContext === undefined ||
+        !isStaleFrameContextRejection(actionable.message)
+      ) {
+        throw actionable;
+      }
+
+      // Pin the prepared panel instead of resolving an active-display alias again.
+      const refreshedObservation = await this.observeScreen.execute({
+        display: observation.display.key,
+        freshness: this.retryFreshness(options),
+        signal,
+      });
+      assertCurrent();
+      this.assertSnapshotCurrent(options, refreshedObservation);
+      const retry = this.resolveFreshAndroidRetry(
+        options,
+        resolved,
+        observation,
+        refreshedObservation,
+      );
+      if (refreshedObservation.display.key !== observation.display.key || !retry) {
+        throw actionable;
+      }
+      // No loop: a second stale rejection surfaces to the caller.
+      await this.dispatchAndroidTalkBackTap(
+        options,
+        retry.point,
+        retry.frameContext,
+        signal,
+        dispatchContext,
+      );
     }
   }
 

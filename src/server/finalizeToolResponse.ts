@@ -341,7 +341,7 @@ type ObservationDiffReason =
   | "diff_emitted"
   | "missing_baseline"
   | "screen_changed"
-  | "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations"
+  | "missing_session"
   | "unrenderable_hierarchy"
   | "disabled"
   | "stripped_by_actions_no_observe";
@@ -355,6 +355,7 @@ interface ObservationDiffScreenIdentity {
 interface ObservationDiffMetadata {
   mode: ObservationDiffMode;
   reason: ObservationDiffReason;
+  hint?: string;
   fromScreen?: ObservationDiffScreenIdentity;
   toScreen?: ObservationDiffScreenIdentity;
 }
@@ -619,12 +620,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         // Internal envelopes are consumed by in-process tool callers, not agents.
         // Keep them on the pre-diff/pre-strip shape without agent-facing metadata.
       } else if (!diffActive) {
-        observationDiff = { mode: "full", reason: "disabled" };
+        observationDiff = {
+          mode: "full",
+          reason: "disabled",
+          hint: "Set --actions-diff-observe to receive diffs.",
+        };
       } else if (!ctx.sessionUuid || !ctx.baselineStore) {
         observationDiff = {
           mode: "full",
-          reason:
-            "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+          reason: "missing_session",
+          hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
           toScreen: observationScreenIdentity(sanitized),
         };
       } else if (!hasRenderableHierarchy(sanitized)) {

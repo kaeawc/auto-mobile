@@ -6237,6 +6237,9 @@
                 "stripped_by_actions_no_observe"
               ]
             },
+            "hint": {
+              "type": "string"
+            },
             "fromScreen": {
               "type": "object",
               "properties": {
@@ -17293,6 +17296,9 @@
                 "stripped_by_actions_no_observe"
               ]
             },
+            "hint": {
+              "type": "string"
+            },
             "fromScreen": {
               "type": "object",
               "properties": {
@@ -22103,6 +22109,9 @@
                 "disabled",
                 "stripped_by_actions_no_observe"
               ]
+            },
+            "hint": {
+              "type": "string"
             },
             "fromScreen": {
               "type": "object",
@@ -29415,6 +29424,9 @@
                 "stripped_by_actions_no_observe"
               ]
             },
+            "hint": {
+              "type": "string"
+            },
             "fromScreen": {
               "type": "object",
               "properties": {
@@ -33087,6 +33099,9 @@
                 "disabled",
                 "stripped_by_actions_no_observe"
               ]
+            },
+            "hint": {
+              "type": "string"
             },
             "fromScreen": {
               "type": "object",

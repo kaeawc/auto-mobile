@@ -1115,6 +1115,9 @@ describe("finalizeToolResponse", () => {
     ): any {
       const metadata = structuredPayload(finalized).observationDiff;
       expect(metadata).toMatchObject(expected);
+      if (!("hint" in expected)) {
+        expect(metadata).not.toHaveProperty("hint");
+      }
       const parsed = JSON.parse(finalized.content[0].text);
       expect(parsed.observationDiff).toEqual(metadata);
       return metadata;
@@ -1210,8 +1213,41 @@ describe("finalizeToolResponse", () => {
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
-      expectObservationDiff(finalized, { mode: "full", reason: "disabled" });
+      expectObservationDiff(finalized, {
+        mode: "full",
+        reason: "disabled",
+        hint: "Set --actions-diff-observe to receive diffs.",
+      });
       expect(map.size).toBe(0);
+    });
+
+    test("disabled diff hint stays concise while missing-session guidance is preserved", () => {
+      serverConfig.setActionsDiffObserveEnabled(false);
+      const { store } = makeStore();
+      const disabled = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+      const hint: string = JSON.parse(disabled.content[0].text).observationDiff.hint;
+      expect(hint).toContain("--actions-diff-observe");
+      expect(hint.length).toBeLessThan(60);
+      expect(hint).not.toContain(";");
+      expectObservationDiff(disabled, {
+        mode: "full",
+        reason: "disabled",
+        hint: "Set --actions-diff-observe to receive diffs.",
+      });
+
+      serverConfig.setActionsDiffObserveEnabled(true);
+      const missingSession = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", baselineStore: store },
+      );
+      expectObservationDiff(missingSession, {
+        mode: "full",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+      });
     });
 
     test("observe emits the full observation and resets the baseline", () => {
@@ -2264,8 +2300,8 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
     });
 
@@ -2280,8 +2316,8 @@ describe("finalizeToolResponse", () => {
       expect(observation.viewHierarchy).toBeUndefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
     });
 
@@ -2631,8 +2667,8 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.viewHierarchy).toBeDefined();
       expectObservationDiff(finalized, {
         mode: "full",
-        reason:
-          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+        reason: "missing_session",
+        hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
       });
       expect(map.size).toBe(0);
     });

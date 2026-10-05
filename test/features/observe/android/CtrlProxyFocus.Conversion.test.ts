@@ -1,7 +1,7 @@
 import {
   capturedAndroidControl,
-  androidEnabledObservation,
-} from "../../../helpers/androidEnabledCapture";
+  androidControlObservation,
+} from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyFocus } from "../../../../src/features/observe/android/CtrlProxyFocus";
@@ -105,10 +105,10 @@ describe("CtrlProxyFocus typed node conversion", () => {
 });
 
 test("captured Android disabled control survives focused-element conversion and output", () => {
-  const focusedElement = focus().convertAccessibilityNodeToElement(capturedAndroidControl("false"));
+  const focusedElement = focus().convertAccessibilityNodeToElement(capturedAndroidControl());
   expect(focusedElement?.enabled).toBe("false");
   const observation = {
-    ...androidEnabledObservation("false"),
+    ...androidControlObservation(),
     focusedElement: focusedElement ?? undefined,
   };
   expect(

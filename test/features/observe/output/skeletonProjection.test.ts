@@ -1,4 +1,4 @@
-import { androidEnabledObservation } from "../../../helpers/androidEnabledCapture";
+import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { skeletonElementSchema } from "../../../../src/server/toolOutputSchemas";
 import { describe, expect, test } from "bun:test";
@@ -65,6 +65,34 @@ function findById(skeleton: SkeletonElement[], id: string): SkeletonElement | un
 }
 
 describe("Android IME occlusion", () => {
+  test("pins captured enabled text-field bytes", () => {
+    const pending = [(capturedIme as AccessibilityHierarchy).hierarchy];
+    while (pending.length) {
+      const node = pending.pop();
+      if (!node) {
+        continue;
+      }
+      if (node["view-id"] === "6b9279dc-8ced-8c76-7de6-a9d07f621ae5") {
+        const hierarchy = new CtrlProxyHierarchy({
+          timer: new FakeTimer(),
+        } as HierarchyDelegateContext).convertToViewHierarchyResult({
+          updatedAt: 1,
+          packageName: capturedIme.packageName,
+          hierarchy: { node: structuredClone(node) },
+        });
+        const elements = new DefaultObserveElementCollector().collect(hierarchy, "android");
+        expect(JSON.stringify(projectSkeleton(elements!).skeleton)).toBe(
+          '[{"bounds":[84,1115,996,1262],"affordances":["tap","long-press","input"],"elementId":"s2-ee780752c005afb8","label":"Basic Text Field","sublabel":"Enter some text..."}]',
+        );
+        return;
+      }
+      if (node.node) {
+        pending.push(...(Array.isArray(node.node) ? node.node : [node.node]));
+      }
+    }
+    throw new Error("Expected Basic Text Field in captured IME hierarchy");
+  });
+
   test.each([false, true])(
     "captured app bottom navigation is covered by the full IME frame (raw-search=%s)",
     (rawSearch) => {
@@ -1850,12 +1878,14 @@ describe("container rows never read as `undefined` (#6871)", () => {
 });
 
 test("captured Android skeleton marks only disabled rows and pins enabled bytes", () => {
-  const enabled = androidEnabledObservation();
+  const enabled = androidControlObservation("enabled");
   const enabledRows = projectSkeleton(enabled.elements!).skeleton;
   expect(JSON.stringify(enabledRows)).toBe(
-    '[{"bounds":[84,1115,996,1262],"affordances":["tap","long-press","input"],"elementId":"s2-ee780752c005afb8","label":"Basic Text Field","sublabel":"Enter some text..."}]',
+    '[{"bounds":[377,1416,658,1542],"affordances":["tap"],"elementId":"s2-1923c73a8a011664","label":"Disabled"}]',
   );
-  const disabled = androidEnabledObservation("false");
+  expect(enabledRows[0]).not.toHaveProperty("enabled");
+  expect(enabled.elements!.clickable[0]).not.toHaveProperty("enabled");
+  const disabled = androidControlObservation();
   const rows = sanitizeObserveResult(disabled, {
     dropElements: false,
     project: "skeleton",
@@ -1865,7 +1895,12 @@ test("captured Android skeleton marks only disabled rows and pins enabled bytes"
   expect(skeletonElementSchema.parse(rows[0])).toMatchObject({ enabled: false });
   expect(projectSkeletonElement(disabled.elements!.clickable[0])).toMatchObject({ enabled: false });
   expect(
-    JSON.stringify(projectSkeleton(androidEnabledObservation("true").elements!).skeleton),
+    JSON.stringify(
+      projectSkeleton({
+        ...enabled.elements!,
+        clickable: enabled.elements!.clickable.map((element) => ({ ...element, enabled: "true" })),
+      }).skeleton,
+    ),
   ).toBe(JSON.stringify(enabledRows));
 });
 

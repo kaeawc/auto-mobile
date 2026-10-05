@@ -254,6 +254,8 @@ interface SendCommandBaseOptions {
    * immediately when the caller goes away.
    */
   abortSignal?: AbortSignal;
+  /** Absolute caller deadline, re-read after connecting before registering the request. */
+  deadlineMs?: number;
   /** Must be explicitly confirmed on the current connection immediately before sending. */
   requiredCapability?: string;
   /** Synchronous caller fence, checked on the ready connection immediately before dispatch. */
@@ -332,6 +334,17 @@ export async function sendCommand<T>(
     } as T;
   }
 
+  const timeoutMs =
+    options.deadlineMs === undefined
+      ? options.timeoutMs
+      : Math.min(options.timeoutMs, Math.max(0, options.deadlineMs - context.timer.now()));
+  if (options.deadlineMs !== undefined && timeoutMs <= 0) {
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error: "Request deadline expired before dispatch",
+    } as T;
+  }
   const requestId = context.requestManager.generateId(options.idPrefix);
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
@@ -354,7 +367,7 @@ export async function sendCommand<T>(
   const promise = context.requestManager.register<T>(
     requestId,
     options.responseType,
-    options.timeoutMs,
+    timeoutMs,
     timeoutFactory,
     responseErrorFactory,
   );

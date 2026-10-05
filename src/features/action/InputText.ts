@@ -1,3 +1,4 @@
+import { resolveTextCtrlProxyTimeoutMs } from "./textTransportTimeout";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
@@ -1005,7 +1006,10 @@ export class InputText extends BaseVisualChange {
     );
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestSetText(text);
+    const result = await client.requestSetText(text, {
+      timeoutMs: resolveTextCtrlProxyTimeoutMs(text),
+      abortSignal: signal,
+    });
     assertInputNotAborted(signal);
 
     if (!result.success) {

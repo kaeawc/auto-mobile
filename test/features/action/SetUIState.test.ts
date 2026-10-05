@@ -1018,6 +1018,36 @@ describe("SetUIState", () => {
   });
 
   describe("retry logic", () => {
+    test.each(["input", "clear"])("does not retry indeterminate iOS %s", async (operation) => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "field",
+            text: "",
+            class: "android.widget.EditText",
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("field", "text");
+      const error =
+        "Text outcome is indeterminate: the text may have been entered. Do not retry automatically. Observe before retrying.";
+      if (operation === "input") {
+        fakeInput.setResult({ success: false, text: "", error });
+      } else {
+        fakeClear.setResult({ success: false, error });
+      }
+
+      const result = await createSetUIState(undefined, "ios").execute({
+        fields: [{ selector: { elementId: "field" }, value: "test" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0].attempts).toBe(1);
+      expect(result.fields[0].error).toContain("Do not retry automatically");
+      expect(fakeClear.getCallCount()).toBe(1);
+      expect(fakeInput.getCallCount()).toBe(operation === "input" ? 1 : 0);
+    });
+
     test("retries up to maxRetries on failure", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "field",

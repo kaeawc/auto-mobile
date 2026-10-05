@@ -25,10 +25,83 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyText } from "../../../src/features/observe/ios/CtrlProxyText";
+import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
 import {
   clearAndroidImeQuarantine,
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
+
+describe("SendKeys iOS text transport", () => {
+  test.each([5, 1000])("passes a scaled timeout for %s characters", async (length) => {
+    const { client } = createTextClient();
+    const insert = spyOn(client, "insert");
+    const controller = new AbortController();
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: client },
+    );
+    const result = await executor.type(
+      { action: "type", text: "a".repeat(length) },
+      controller.signal,
+    );
+    expect(result.success).toBe(true);
+    expect(insert.mock.calls[0][1]).toMatchObject({
+      timeoutMs: length === 5 ? 5000 : 102000,
+      abortSignal: controller.signal,
+    });
+    insert.mockRestore();
+  });
+
+  test.each(["timeout", "disconnect"])(
+    "preserves indeterminate %s through the real iOS adapter",
+    async (failure) => {
+      const h = createIosDelegateHarness();
+      const text = new CtrlProxyText(h.context);
+      const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        text as unknown as IOSCtrlProxyClient,
+      );
+      try {
+        const observer = createObserver();
+        const executor = new DefaultSendKeysCommandExecutor(
+          iosDevice,
+          createAdbFactory(new FakeAdbExecutor()),
+          observer,
+        );
+        const sendKeys = new SendKeys(iosDevice, undefined, {
+          executor,
+          observer,
+          timer: h.timer,
+          timestampProvider: { now: async () => 0 },
+        });
+        const pending = sendKeys.execute([
+          { action: "type", text: "hello" },
+          { action: "type", text: "again" },
+        ]);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (failure === "timeout") {
+          h.advanceTime(5000);
+        } else {
+          h.requestManager.cancelAll(new Error("runner disconnected"));
+        }
+        const result = await pending;
+        expect(result).toMatchObject({
+          success: false,
+          retryable: false,
+          commands: [{ retryable: false }],
+        });
+        expect(result.error).toContain("outcome is indeterminate");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(h.sentMessages).toHaveLength(1);
+      } finally {
+        getInstance.mockRestore();
+      }
+    },
+  );
+});
 
 describe("SendKeys IME failure after typing", () => {
   const reason = "No element has keyboard focus -- ensure a text field is focused";

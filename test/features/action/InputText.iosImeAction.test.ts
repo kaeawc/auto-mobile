@@ -142,6 +142,52 @@ describe("InputText iOS IME action", () => {
     ]);
   });
 
+  test.each([5, 1000])(
+    "passes scaled text timeout and caller signal for length %s",
+    async (length) => {
+      const setText = spyOn(fakeIosCtrlProxy, "requestSetText");
+      const controller = new AbortController();
+      try {
+        expect(
+          (
+            await inputText.execute(
+              "a".repeat(length),
+              undefined,
+              false,
+              undefined,
+              controller.signal,
+            )
+          ).success,
+        ).toBe(true);
+        expect(setText.mock.calls[0][1]).toEqual({
+          timeoutMs: length === 5 ? 5000 : 102000,
+          abortSignal: controller.signal,
+        });
+      } finally {
+        setText.mockRestore();
+      }
+    },
+  );
+
+  test("preserves indeterminate text guidance and does not send an IME action", async () => {
+    const error =
+      "Text outcome is indeterminate: the text may have been entered. Do not retry automatically. Observe before retrying.";
+    const setText = spyOn(fakeIosCtrlProxy, "requestSetText").mockResolvedValue({
+      success: false,
+      totalTimeMs: 5000,
+      retryable: false,
+      error,
+    });
+    try {
+      const result = await inputText.execute("hello", "done");
+      expect(result).toMatchObject({ success: false, error });
+      expect(setText).toHaveBeenCalledTimes(1);
+      expect(imeActionSpy).not.toHaveBeenCalled();
+    } finally {
+      setText.mockRestore();
+    }
+  });
+
   for (const throws of [false, true]) {
     test(`abort wins over an IME ${throws ? "exception" : "failed reply"}`, async () => {
       const controller = new AbortController();

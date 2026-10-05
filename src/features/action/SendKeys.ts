@@ -1,3 +1,4 @@
+import { resolveTextCtrlProxyTimeoutMs } from "./textTransportTimeout";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { selectablePanels } from "../../models/DisplayPanel";
@@ -231,7 +232,7 @@ export interface SendKeysCommandExecutor {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<SendKeysCommandResult>;
-  clear(signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
+  clear(signal?: AbortSignal): Promise<{ success: boolean; error?: string; retryable?: boolean }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -283,6 +284,7 @@ interface SendKeysRouting extends SendKeysFocusOptions {
 
 export type TextActionResult = {
   success: boolean;
+  retryable?: boolean;
   warning?: string;
   caretPlaced?: boolean;
   resultingTextLength?: number;
@@ -304,9 +306,11 @@ export interface SendKeysTextClient {
       expectedSuffix?: string;
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
+      timeoutMs?: number;
+      abortSignal?: AbortSignal;
     },
   ): Promise<TextActionResult>;
-  clear(): Promise<TextActionResult>;
+  clear(signal?: AbortSignal): Promise<TextActionResult>;
   ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
   supportsImeKeyEvents(): Promise<boolean>;
@@ -432,6 +436,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return {
         ...baseResult,
         success: result.success,
+        ...(result.retryable === false ? { retryable: false } : {}),
         error: result.error,
         ...this.textWarningFields(result),
         ...(result.partialApplication ? { partialApplication: true } : {}),
@@ -545,7 +550,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   async clear(signal?: AbortSignal): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
-    const clearResult = await this.textClient.clear();
+    const clearResult = await this.textClient.clear(
+      this.device.platform === "ios" ? signal : undefined,
+    );
     if (clearResult.success || this.device.platform !== "android") {
       return clearResult;
     }
@@ -656,7 +663,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
     if (operation === "replace") {
-      const clearResult = await this.textClient.clear();
+      const clearResult = await this.textClient.clear(signal);
       if (!clearResult.success) {
         return { ...clearResult, resolvedMode };
       }
@@ -665,7 +672,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
     // requested cross-platform mode in metadata, but report the actual mechanism.
-    const result = await this.textClient.insert(text);
+    const result = await this.textClient.insert(text, {
+      timeoutMs: resolveTextCtrlProxyTimeoutMs(text),
+      abortSignal: signal,
+    });
     if (!result.success) {
       return {
         ...(operation === "replace" ? markPartialAfterMutation(result) : result),
@@ -1869,8 +1879,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         const clearResult = await client.requestClearText();
         return clearResult.success ? client.requestAppendText(text) : clearResult;
       },
-      insert: async (text) => client.requestAppendText(text),
-      clear: async () => client.requestClearText(),
+      insert: async (text, options) =>
+        client.requestAppendText(
+          text,
+          options?.timeoutMs ?? resolveTextCtrlProxyTimeoutMs(text),
+          undefined,
+          undefined,
+          { abortSignal: options?.abortSignal },
+        ),
+      clear: async (signal) =>
+        client.requestClearText(undefined, 5000, undefined, { abortSignal: signal }),
       ime: async (action, signal, onDispatch) =>
         client.requestImeAction(action, 5000, undefined, signal, onDispatch),
       supportsImeCommit: async () => false,
@@ -2441,6 +2459,7 @@ export class SendKeys {
         commands: results,
         observation,
         error: failure.error,
+        ...(results[failure.index]?.retryable === false ? { retryable: false } : {}),
         ...(staleDisplay ? { staleDisplay } : {}),
         ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       };
@@ -2490,6 +2509,7 @@ export class SendKeys {
           index: -1,
           action: "clear",
           success: result.success,
+          ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.error ? { error: result.error } : {}),
         }));
     }

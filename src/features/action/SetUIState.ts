@@ -1498,7 +1498,13 @@ export class SetUIState extends BaseVisualChange {
             `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
           );
           if (!clearResult.success) {
-            return { success: false, error: `Failed to clear text: ${clearResult.error}` };
+            return {
+              success: false,
+              error: `Failed to clear text: ${clearResult.error}`,
+              // InputText/ClearText keep their public result shapes; preserve the
+              // existing indeterminate guidance across this automatic retry boundary.
+              stopRetrying: clearResult.error?.includes("Do not retry automatically."),
+            };
           }
 
           // Input new text. Intentionally passes no mode so the shared
@@ -1523,7 +1529,11 @@ export class SetUIState extends BaseVisualChange {
             `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
           );
           if (!inputResult.success) {
-            return { success: false, error: `Failed to input text: ${inputResult.error}` };
+            return {
+              success: false,
+              error: `Failed to input text: ${inputResult.error}`,
+              stopRetrying: inputResult.error?.includes("Do not retry automatically."),
+            };
           }
 
           return { success: true };

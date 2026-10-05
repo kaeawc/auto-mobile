@@ -10,11 +10,55 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { DelegateContext } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
+import type { SetTextOptions } from "../DeviceService";
+import { resolveTextCtrlProxyTimeoutMs } from "../../action/textTransportTimeout";
+import { combineWithAmbientAbort } from "../../../utils/AbortContext";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { logger } from "../../../utils/logger";
 
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
     super(context);
+  }
+
+  override requestSetText(text: string, options: SetTextOptions = {}): Promise<BaseResult> {
+    return super.requestSetText(text, {
+      ...options,
+      timeoutMs: options.timeoutMs ?? resolveTextCtrlProxyTimeoutMs(text),
+    });
+  }
+
+  protected override async sendTextCommand(
+    options: SendCommandOptions<BaseResult>,
+  ): Promise<BaseResult> {
+    let dispatched = false;
+    const startMs = this.context.timer.now();
+    const unconfirmed = (reason: string, totalTimeMs: number): BaseResult => ({
+      success: false,
+      totalTimeMs,
+      // Reuse executeBoundedIosIme's retryable=false marker in SendKeys.ts
+      // and InputKey.indeterminateError's dispatched-but-unconfirmed guidance.
+      ...(dispatched ? { retryable: false } : {}),
+      error: dispatched
+        ? `Text outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The text may have been entered or cleared. Do not retry automatically. Observe before retrying.`
+        : reason,
+    });
+    try {
+      return await sendCommand<BaseResult>(this.context, {
+        ...options,
+        abortSignal: combineWithAmbientAbort(options.abortSignal),
+        onDispatch: (id) => {
+          dispatched = true;
+          options.onDispatch?.(id);
+        },
+        timeoutError: (timeout) =>
+          unconfirmed(`${options.errorLabel} timed out after ${timeout}ms`, timeout),
+      });
+    } catch (error) {
+      logger.warn("[CtrlProxyText] Text transport failed", error);
+      return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
+    }
   }
 
   /**
@@ -23,9 +67,10 @@ export class CtrlProxyText extends SharedTextDelegate {
    */
   async requestAppendText(
     text: string,
-    timeoutMs: number = 5000,
+    timeoutMs: number = resolveTextCtrlProxyTimeoutMs(text),
     perf?: PerformanceTracker,
     frameContext?: string,
+    options: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch"> = {},
   ): Promise<BaseResult> {
     // Older released runners predate request_append_text, but their untargeted
     // request_set_text path already uses XCUITest typeText at the focused caret.
@@ -37,14 +82,14 @@ export class CtrlProxyText extends SharedTextDelegate {
       (supportedCommands === undefined &&
         this.context.isCommandSupported?.("request_append_text") === false)
     ) {
-      return this.requestSetText(text, { timeoutMs, perf, frameContext });
+      return this.requestSetText(text, { timeoutMs, perf, frameContext, ...options });
     }
 
     const params: Record<string, unknown> = { text };
     if (frameContext !== undefined) {
       params.frameContext = frameContext;
     }
-    return sendCommand<BaseResult>(this.context, {
+    return this.sendTextCommand({
       idPrefix: "appendText",
       responseType: "append_text",
       messageType: "request_append_text",
@@ -52,13 +97,15 @@ export class CtrlProxyText extends SharedTextDelegate {
       timeoutMs,
       perf,
       errorLabel: "Append text",
+      ...options,
     });
   }
 
   /**
    * iOS-specific clearText: sends `request_clear_text` which the iOS CtrlProxy
-   * handles via Cmd+A (select all) + Delete. This is O(1) regardless of text
-   * length and works with any content including emoji/Unicode.
+   * handles via Cmd+A + Delete for native fields. Non-native fields use up to
+   * 20 bursts of 50 deletes (GesturePerformer.swift:1465-1485), with no timing
+   * evidence. Preserve the 5000ms timeout until one simulator measurement.
    *
    * The base class fallback sends `requestSetText("")` which only works on
    * Android where the accessibility service interprets empty text as "clear".
@@ -67,13 +114,14 @@ export class CtrlProxyText extends SharedTextDelegate {
     resourceId?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    options: Pick<SetTextOptions, "abortSignal" | "deadlineMs" | "onDispatch"> = {},
   ): Promise<BaseResult> {
     const params: Record<string, unknown> = {};
     if (resourceId) {
       params.resourceId = resourceId;
     }
 
-    return sendCommand<BaseResult>(this.context, {
+    return this.sendTextCommand({
       idPrefix: "clearText",
       responseType: "clear_text",
       messageType: "request_clear_text",
@@ -81,6 +129,7 @@ export class CtrlProxyText extends SharedTextDelegate {
       timeoutMs,
       perf,
       errorLabel: "Clear text",
+      ...options,
     });
   }
 }

@@ -37,6 +37,8 @@ export interface BaseResult {
   success: boolean;
   totalTimeMs: number;
   error?: string;
+  /** Dispatched but unconfirmed mutations must not be replayed automatically. */
+  retryable?: boolean;
   perfTiming?: PerfTiming | PerfTiming[];
 }
 

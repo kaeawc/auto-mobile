@@ -9,6 +9,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
@@ -711,5 +712,43 @@ test("iOS clear warns and preserves the failure result when CtrlProxy throws", a
   } finally {
     client.mockRestore();
     warning.mockRestore();
+  }
+});
+
+test("iOS clear forwards cancellation and preserves indeterminate guidance without fallback", async () => {
+  const timer = new FakeTimer();
+  const fake = new FakeIOSCtrlProxy(timer);
+  const error =
+    "Text outcome is indeterminate: the text may have been cleared. Do not retry automatically. Observe before retrying.";
+  const clear = spyOn(fake, "requestClearText").mockResolvedValue({
+    success: false,
+    retryable: false,
+    error,
+    totalTimeMs: 5000,
+  });
+  const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+    fake as unknown as IOSCtrlProxyClient,
+  );
+  try {
+    const controller = new AbortController();
+    const adb = new FakeAdbExecutor();
+    const action = new ClearText(
+      { name: "fake", platform: "ios", deviceId: "fake" },
+      adb,
+      undefined,
+      timer,
+    );
+    expect(await action["executeiOSClearText"]({ updatedAt: 0 }, controller.signal)).toEqual({
+      success: false,
+      error,
+    });
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(clear).toHaveBeenCalledWith(undefined, 5000, undefined, {
+      abortSignal: controller.signal,
+    });
+    expect(adb.getExecutedCommands()).toEqual([]);
+  } finally {
+    client.mockRestore();
+    clear.mockRestore();
   }
 });

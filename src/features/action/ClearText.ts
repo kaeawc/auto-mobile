@@ -460,7 +460,9 @@ export class ClearText extends BaseVisualChange {
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       signal?.throwIfAborted();
-      const result = await client.requestClearText();
+      const result = await client.requestClearText(undefined, 5000, undefined, {
+        abortSignal: signal,
+      });
       signal?.throwIfAborted();
 
       if (result.success) {

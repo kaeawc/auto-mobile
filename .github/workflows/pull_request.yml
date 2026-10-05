@@ -1416,6 +1416,8 @@ jobs:
         env:
           BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
           BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+          # 360s rechecks + 180s setup/verdict reserve < 600s job timeout.
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
         run: bash scripts/validate-bun-test-timings.sh
 
   node-host-integration-tests:

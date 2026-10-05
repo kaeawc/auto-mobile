@@ -53,43 +53,58 @@ export class HomeScreen extends BaseVisualChange {
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("homeScreen");
+    const options = { changeExpected: true, timeoutMs: 5000, progress, perf, signal };
 
-    return await this.observedInteraction(
-      async () => {
-        switch (this.device.platform) {
-          case "android":
-            await perf.track("homeNavigation", () => this.executeAndroidHome(signal));
-            break;
-          case "ios":
-            await perf.track("iOSHomeNavigation", () =>
-              this.executeIosHomeNavigation(perf, undefined, undefined, signal),
-            );
-            break;
-          default:
-            throw unsupportedPlatformError(this.device.platform, "return to the home screen");
+    return await this.observedInteraction(async (previousObservation) => {
+      const previousHierarchy = previousObservation?.viewHierarchy;
+      let alreadyOnHome = false;
+      switch (this.device.platform) {
+        case "android": {
+          const launcherPackage = await perf.track("homeNavigation", () =>
+            this.executeAndroidHome(signal),
+          );
+          // The verified foreground package is the device's actual launcher.
+          // Compare it to the pre-action observation without another device read.
+          alreadyOnHome =
+            launcherPackage !== undefined && previousHierarchy?.packageName === launcherPackage;
+          break;
         }
+        case "ios":
+          await perf.track("iOSHomeNavigation", () =>
+            this.executeIosHomeNavigation(perf, undefined, undefined, signal),
+          );
+          alreadyOnHome =
+            previousHierarchy?.packageName === "com.apple.springboard" &&
+            previousHierarchy.fallbackToSpringboard !== true;
+          break;
+        default:
+          throw unsupportedPlatformError(this.device.platform, "return to the home screen");
+      }
 
-        return {
-          success: true,
-          navigationMethod: "hardware",
-        };
-      },
-      {
-        changeExpected: true,
-        timeoutMs: 5000,
-        progress,
-        perf,
-        signal,
-      },
-    );
+      alreadyOnHome = alreadyOnHome && !previousHierarchy?.hierarchy?.error;
+      options.changeExpected = !alreadyOnHome;
+
+      return {
+        success: true,
+        navigationMethod: "hardware",
+        ...(alreadyOnHome ? { message: "Already on the home screen" } : {}),
+      };
+    }, options);
   }
 
-  private async executeAndroidHome(requestSignal?: AbortSignal): Promise<void> {
+  private async executeAndroidHome(requestSignal?: AbortSignal): Promise<string | undefined> {
     // Combine (never replace) with the ambient MCP request signal so a cancelled
     // request aborts the ADB keyevent fallback and the verification reads. Passing
     // only a private signal would drop the ambient one AdbClient would otherwise
     // pick up (issue #6289).
     const signal = combineWithAmbientAbort(requestSignal);
+    let launcherPackage: string | undefined;
+    const verificationOptions = {
+      signal,
+      onVerifiedForeground: (appId: string) => {
+        launcherPackage = appId;
+      },
+    };
 
     let globalActionSucceeded = false;
     try {
@@ -105,9 +120,9 @@ export class HomeScreen extends BaseVisualChange {
     }
 
     if (globalActionSucceeded) {
-      if (await this.verifyAndroidHomeForeground({ signal })) {
+      if (await this.verifyAndroidHomeForeground(verificationOptions)) {
         logger.debug("[HOME] Used accessibility service global action");
-        return;
+        return launcherPackage;
       }
       // The global action self-reported success but the foreground app never
       // became the launcher (issue #6147 -- observed on API 28). Do not trust
@@ -125,11 +140,12 @@ export class HomeScreen extends BaseVisualChange {
       signal,
     );
 
-    if (!(await this.verifyAndroidHomeForeground({ signal }))) {
+    if (!(await this.verifyAndroidHomeForeground(verificationOptions))) {
       throw new ActionableError(
         "Home press did not background the foreground app: neither the accessibility global action nor the ADB KEYCODE_HOME keyevent produced a launcher foreground window",
       );
     }
+    return launcherPackage;
   }
 
   async executeIosHomeNavigation(

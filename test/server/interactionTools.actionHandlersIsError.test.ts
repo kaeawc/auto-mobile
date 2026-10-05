@@ -559,4 +559,21 @@ describe("keyboard failure envelopes", () => {
       execute.mockRestore();
     }
   });
+  test("homeScreen already at home preserves its indication without isError", async () => {
+    const result = {
+      success: true,
+      navigationMethod: "hardware" as const,
+      message: "Already on the home screen",
+    };
+    const execute = spyOn(HomeScreen.prototype, "execute").mockResolvedValue(result);
+    try {
+      const response = await handler("homeScreen")(device, {});
+      expect(response).toEqual({
+        content: [{ type: "text", text: JSON.stringify({ message: result.message, ...result }) }],
+      });
+      expect(response).not.toHaveProperty("isError");
+    } finally {
+      execute.mockRestore();
+    }
+  });
 });

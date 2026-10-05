@@ -14,6 +14,7 @@ import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { clearResolvedHomePackageCache } from "../../../src/features/observe/androidLauncherPackages";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -69,6 +70,7 @@ describe("HomeScreen", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
 
   beforeEach(() => {
+    clearResolvedHomePackageCache("test-device");
     // Create fakes for testing
     fakeAdb = new FakeAdbExecutor();
     fakeObserveScreen = new FakeObserveScreen();
@@ -109,6 +111,7 @@ describe("HomeScreen", () => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
     AndroidCtrlProxyClient.resetInstances();
+    clearResolvedHomePackageCache("test-device");
   });
 
   function createIosHomeScreen(options?: {
@@ -136,6 +139,89 @@ describe("HomeScreen", () => {
   }
 
   describe("execute", () => {
+    test.each(["android", "ios"] as const)(
+      "succeeds when already on the %s home screen with an unchanged hierarchy",
+      async (platform) => {
+        const observation = createObserveResult();
+        observation.viewHierarchy.hierarchy = { node: { $: { class: "Home" } } };
+        observation.viewHierarchy.packageName =
+          platform === "android" ? "com.android.launcher3" : "com.apple.springboard";
+        fakeObserveScreen.setObserveResult(observation);
+        let action = homeScreen;
+        if (platform === "ios") {
+          const ios = createIosHomeScreen();
+          ios.client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+          action = ios.action;
+        }
+
+        const result = await action.execute();
+        expect(result.success).toBe(true);
+        expect(result).toHaveProperty("message", "Already on the home screen");
+        expect(result.error).toBeUndefined();
+        if (platform === "android") {
+          expect(
+            fakeAdb.getExecutedCommands().filter((command) => command.includes("resolve-activity")),
+          ).toHaveLength(1);
+        }
+      },
+    );
+
+    test("an unchanged hierarchy still fails when the previous foreground was not home", async () => {
+      const observation = createObserveResult();
+      observation.viewHierarchy.hierarchy = { node: { $: { class: "Settings" } } };
+      observation.viewHierarchy.packageName = "com.android.settings";
+      fakeObserveScreen.setObserveResult(observation);
+
+      const result = await homeScreen.execute();
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("No visual change observed");
+      expect(result).not.toHaveProperty("message");
+    });
+
+    test("reuses the verified configured launcher for a custom Android home package", async () => {
+      const observation = createObserveResult();
+      observation.viewHierarchy = {
+        packageName: "com.example.home",
+        hierarchy: { node: { $: { class: "Home" } } },
+      };
+      fakeObserveScreen.setObserveResult(observation);
+      fakeWindow.configureActiveWindow({
+        appId: "com.example.home",
+        activityName: "Home",
+        layoutSeqSum: 123,
+      });
+      const resolveCommand =
+        "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN";
+      fakeAdb.setCommandResponse(resolveCommand, {
+        stdout: "com.example.home/.Home",
+        stderr: "",
+      });
+
+      const result = await homeScreen.execute();
+      expect(result.success).toBe(true);
+      expect(result.message).toBe("Already on the home screen");
+      expect(fakeAdb.getExecutedCommands().filter((command) => command === resolveCommand)).toEqual(
+        [resolveCommand],
+      );
+    });
+
+    test("an iOS SpringBoard fallback does not establish that Home was already foreground", async () => {
+      const observation = createObserveResult();
+      observation.viewHierarchy = {
+        packageName: "com.apple.springboard",
+        fallbackToSpringboard: true,
+        hierarchy: { node: { $: { class: "Home" } } },
+      };
+      fakeObserveScreen.setObserveResult(observation);
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+
+      const result = await action.execute();
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("No visual change observed");
+      expect(result.message).toBeUndefined();
+    });
+
     test("should execute hardware navigation using keyevent 3", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 

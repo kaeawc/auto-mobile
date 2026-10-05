@@ -1,10 +1,14 @@
+import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
 import { StaleDisplayError } from "../../../models/StaleDisplayError";
 import type { FencedGestureOptions } from "../ExecuteGesture";
 import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import {
+  TALKBACK_STATE_UNKNOWN_WARNING,
+  type AccessibilityDetector,
+} from "../../accessibility/interfaces/AccessibilityDetector";
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
@@ -92,12 +96,13 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     // a coordinate swipe whenever the 60s detection cache was not warm (#3915).
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
     // apply to swipe detection uniformly with the observe path (#3925).
-    const detectedService = await this.accessibilityDetector.detectMethod(
+    const talkBackState = await this.accessibilityDetector.resolveTalkBackState(
       this.device.deviceId,
       this.adb,
       this.featureFlags,
     );
-    const isTalkBackEnabled = detectedService === "talkback";
+    const isTalkBackEnabled = talkBackState === true;
+    const warning = talkBackState === null ? TALKBACK_STATE_UNKNOWN_WARNING : undefined;
     throwIfAborted(signal);
 
     if (isTalkBackEnabled) {
@@ -136,7 +141,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     } else {
       if (boomerangEnabled) {
         logger.debug("[SwipeOn] TalkBack disabled, using boomerang swipe");
-        return this.executeBoomerangGesture(
+        const result = await this.executeBoomerangGesture(
           x1,
           y1,
           x2,
@@ -146,11 +151,13 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
           perf,
           signal,
         );
+        return withEpilogueWarning(result, warning);
       }
 
       // Standard mode: Use coordinate-based swipes
       logger.debug("[SwipeOn] TalkBack disabled, using standard swipe");
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+      const result = await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+      return withEpilogueWarning(result, warning);
     }
   }
 

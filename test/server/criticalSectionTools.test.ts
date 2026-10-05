@@ -1,7 +1,7 @@
-import { getStructuredPayload } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { isolateToolRegistry, preserveToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
@@ -39,6 +39,43 @@ describe("criticalSection tool", () => {
     success: boolean;
     error?: string;
   }> = [
+    {
+      name: "direct wait timeout",
+      response: { success: true, awaitTimeout: true, awaitDuration: 50 },
+      success: false,
+      error: "envelopeVerdictProbe waitFor timed out after 50ms",
+    },
+    {
+      name: "text wait timeout",
+      response: { content: [{ type: "text", text: '{"awaitTimeout":true,"awaitDuration":50}' }] },
+      success: false,
+      error: "envelopeVerdictProbe waitFor timed out after 50ms",
+    },
+    {
+      name: "hoisted success with structured wait timeout",
+      response: createStructuredToolResponse({
+        success: true,
+        awaitTimeout: true,
+        awaitDuration: 50,
+      }),
+      success: false,
+      error: "envelopeVerdictProbe waitFor timed out after 50ms",
+    },
+    {
+      name: "numeric awaitTimeout input echo",
+      response: createStructuredToolResponse({
+        success: true,
+        awaitTimeout: 5000,
+        timedOut: true,
+        matched: false,
+      }),
+      success: true,
+    },
+    {
+      name: "unrelated timedOut and matched fields",
+      response: { success: true, timedOut: true, matched: false },
+      success: true,
+    },
     {
       name: "non JSON",
       response: { content: [{ type: "text", text: "not json" }] },
@@ -165,6 +202,100 @@ describe("criticalSection tool", () => {
       );
     });
   }
+
+  describe("waitFor verdicts", () => {
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "wait-device",
+      name: "Wait Device",
+    };
+    let coordinator: CriticalSectionCoordinator;
+    let restoreCoordinator: () => void;
+    let restoreTools: () => void;
+    const nextStep = mock(async () => ({ success: true }));
+
+    beforeEach(() => {
+      restoreTools = preserveToolRegistry();
+      coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+      nextStep.mockClear();
+      ToolRegistry.register("afterWait", "next step", z.object({}).passthrough(), nextStep);
+    });
+
+    afterEach(() => {
+      coordinator.reset();
+      restoreCoordinator();
+      restoreTools();
+    });
+
+    const runSteps = (tool: string, optional = false, withNext = false) => {
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      return section.deviceAwareHandler!(
+        device,
+        section.schema.parse({
+          lock: "wait-lock",
+          deviceCount: 1,
+          steps: [
+            { tool, params: { device: "A", waitFor: { text: "Pay" } }, optional },
+            ...(withNext ? [{ tool: "afterWait", params: { device: "A" } }] : []),
+          ],
+        }),
+      );
+    };
+
+    test.each(["observe", "openLink"])("rejects a required %s waitFor timeout", async (tool) => {
+      ToolRegistry.register(tool, "wait timeout", z.object({}).passthrough(), async () =>
+        createStructuredToolResponse({
+          success: true,
+          awaitTimeout: true,
+          timedOut: true,
+          matched: false,
+          awaitDuration: 5000,
+        }),
+      );
+      await expect(runSteps(tool)).rejects.toThrow(
+        `Failed at step 1/1 (${tool}): ${tool} waitFor timed out after 5000ms`,
+      );
+    });
+
+    test.each(["observe", "openLink"])(
+      "skips an optional %s timeout with a warning",
+      async (tool) => {
+        ToolRegistry.register(tool, "wait timeout", z.object({}).passthrough(), async () =>
+          createStructuredToolResponse({ success: true, awaitTimeout: true, awaitDuration: 5000 }),
+        );
+        const result = getStructuredPayload(await runSteps(tool, true, true));
+        expect(result).toMatchObject({
+          success: true,
+          executedSteps: 2,
+          warnings: [
+            `step 1 (${tool}): optional step failed; skipped: ${tool} waitFor timed out after 5000ms`,
+          ],
+        });
+        expect(nextStep).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    for (const tool of ["observe", "openLink"]) {
+      test.each([false, undefined])(
+        "passes satisfied " + tool + " waitFor with awaitTimeout=%s",
+        async (awaitTimeout) => {
+          ToolRegistry.register(tool, "satisfied wait", z.object({}).passthrough(), async () =>
+            createStructuredToolResponse({
+              success: true,
+              awaitTimeout,
+              matched: true,
+              timedOut: false,
+            }),
+          );
+          const result = getStructuredPayload(await runSteps(tool, false, true));
+          expect(result).toMatchObject({ success: true, executedSteps: 2 });
+          expect(result?.warnings).toBeUndefined();
+          expect(nextStep).toHaveBeenCalledTimes(1);
+        },
+      );
+    }
+  });
 
   test("tool is registered with correct schema", () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");

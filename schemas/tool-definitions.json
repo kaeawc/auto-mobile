@@ -64,7 +64,7 @@
           "additionalProperties": false
         }
       },
-      "required": ["enabled", "service"],
+      "required": ["service"],
       "additionalProperties": {}
     }
   },
@@ -13296,7 +13296,7 @@
               "additionalProperties": false
             }
           },
-          "required": ["enabled", "service"],
+          "required": ["service"],
           "additionalProperties": {}
         },
         "deviceLock": {

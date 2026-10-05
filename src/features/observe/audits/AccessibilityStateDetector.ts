@@ -43,17 +43,17 @@ export class AccessibilityStateDetector {
 
         if (this.device.platform === "android") {
           // Detect TalkBack state via ADB
-          const enabled = await this.detector.isAccessibilityEnabled(
+          const state = await this.detector.resolveState(
             this.device.deviceId,
             this.adb,
             featureFlags,
           );
-
-          const service = await this.detector.detectMethod(
-            this.device.deviceId,
-            this.adb,
-            featureFlags,
-          );
+          if (state === null) {
+            // accessibilityState is optional: omit unavailable evidence rather than asserting off.
+            delete result.accessibilityState;
+            return;
+          }
+          const { enabled, service } = state;
 
           const detectionSkipped =
             !featureFlags.isEnabled("force-accessibility-mode") &&

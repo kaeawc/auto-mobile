@@ -1,3 +1,5 @@
+import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, type BootedDevice } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -124,7 +126,12 @@ export interface InputKeyIosClient {
     key: InputKeyName,
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
-  ): Promise<{ success: boolean; error?: string; verified?: boolean; warning?: string }>;
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<
+    IOSDispatchResult<{ success: boolean; error?: string; verified?: boolean; warning?: string }>
+  >;
 }
 
 export type InputKeyIosClientFactory = (device: BootedDevice) => InputKeyIosClient;
@@ -162,7 +169,7 @@ export class InputKey {
     routing: InputKeyRouting = {},
   ): Promise<InputKeyResult> {
     if (this.device.platform === "ios") {
-      return this.pressIos(key, modifiers, timeoutMs);
+      return this.pressIos(key, modifiers, timeoutMs, routing);
     }
     return this.pressAndroid(key, modifiers, timeoutMs, frameContext, routing);
   }
@@ -324,22 +331,21 @@ export class InputKey {
     key: InputKeyName,
     modifiers: readonly InputKeyModifier[],
     timeoutMs?: number,
+    { signal, onDispatch }: InputKeyRouting = {},
   ): Promise<InputKeyResult> {
+    let result: Awaited<ReturnType<InputKeyIosClient["requestPressKey"]>>;
     try {
-      const result = await this.iosClientFactory(this.device).requestPressKey(
+      throwIfAborted(signal);
+      result = await this.iosClientFactory(this.device).requestPressKey(
         key,
         [...new Set(modifiers)],
         timeoutMs,
+        undefined,
+        signal,
+        onDispatch,
       );
-      return {
-        success: result.success,
-        key,
-        keyCode: key,
-        ...(result.verified === undefined ? {} : { verified: result.verified }),
-        ...(result.warning === undefined ? {} : { warning: result.warning }),
-        ...(result.error ? { error: result.error } : {}),
-      };
     } catch (error) {
+      throwIfAborted(signal);
       const message = errorMessage(error);
       logger.warn(`iOS input/key failed for ${key}: ${message}`, error);
       return {
@@ -349,6 +355,17 @@ export class InputKey {
         error: `Failed to press key "${key}" on iOS: ${message}`,
       };
     }
+    if (!result.success && result.dispatched && result.acknowledged === false) {
+      throw InputKey.indeterminateError(result.error ?? "unknown error");
+    }
+    return {
+      success: result.success,
+      key,
+      keyCode: key,
+      ...(result.verified === undefined ? {} : { verified: result.verified }),
+      ...(result.warning === undefined ? {} : { warning: result.warning }),
+      ...(result.error ? { error: result.error } : {}),
+    };
   }
 
   private async validateFrameContext(

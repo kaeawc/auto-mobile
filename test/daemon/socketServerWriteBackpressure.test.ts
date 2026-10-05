@@ -293,28 +293,78 @@ test("a request exactly at the idle limit survives an idle event racing its answ
   expect(socket.destroyed).toBeTrue();
 });
 
-test("terminal flush resets a fresh full native idle window", async () => {
-  const timer = new FakeTimer();
-  const socket = new BackpressuredSocket();
-  socket.backpressure = false;
-  const server = connectedServer(timer, socket);
-  const completed = Promise.withResolvers<unknown>();
-  server.handleLocalSocketRequest = () => completed.promise;
-  sendRequest(socket);
-  await settleHandlers();
-  timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
-  completed.resolve({});
-  await settleHandlers();
-  expect(server.pendingSocketRequests.size).toBe(1);
-  socket.flush();
-  expect(server.pendingSocketRequests.size).toBe(0);
-  expect(socket.timeouts).toEqual([
-    DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
-    DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
-  ]);
-  socket.emit("timeout");
-  expect(socket.destroyed).toBeTrue();
-});
+test.each(["queued", "empty"])(
+  "terminal flush with %s frames preserves the timer-mode idle backpressure rule",
+  async (queueState) => {
+    const timer = new FakeTimer();
+    const socket = new BackpressuredSocket();
+    const server = connectedServer(timer, socket);
+    const completed = Promise.withResolvers<unknown>();
+    server.handleLocalSocketRequest = () => completed.promise;
+    sendRequest(socket);
+    await settleHandlers();
+    completed.resolve({});
+    await settleHandlers();
+    expect(socket.timeouts).toEqual([DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS, 0]);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    expect(server.pendingSocketRequests.size).toBe(1);
+
+    if (queueState === "queued") {
+      server.writeFrameData(socket as unknown as Socket, "session", response);
+    }
+    timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 2);
+    // Flush only the terminal response, without emitting drain for later frames.
+    socket.writableLength -= Buffer.byteLength(socket.writes[0]!);
+    socket.callbacks.shift()!();
+    expect(socket.writableLength > 0).toBe(queueState === "queued");
+    expect(server.pendingSocketRequests.size).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+
+    timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 2 - 1);
+    expect(socket.destroyed).toBeFalse();
+    timer.advanceTime(1);
+    expect(socket.destroyed).toBe(queueState === "queued");
+    if (queueState === "empty") {
+      timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS / 2 - 1);
+      expect(socket.destroyed).toBeFalse();
+      timer.advanceTime(1);
+      expect(socket.destroyed).toBeTrue();
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  },
+);
+
+test.each(["queued", "empty"])(
+  "terminal flush with %s frames resets a fresh full native idle window",
+  async (queueState) => {
+    const timer = new FakeTimer();
+    const socket = new BackpressuredSocket();
+    socket.backpressure = false;
+    const server = connectedServer(timer, socket);
+    const completed = Promise.withResolvers<unknown>();
+    server.handleLocalSocketRequest = () => completed.promise;
+    sendRequest(socket);
+    await settleHandlers();
+    timer.advanceTime(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS - 1);
+    completed.resolve({});
+    await settleHandlers();
+    expect(server.pendingSocketRequests.size).toBe(1);
+    if (queueState === "queued") {
+      server.writeFrameData(socket as unknown as Socket, "session", response);
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    socket.writableLength -= Buffer.byteLength(socket.writes[0]!);
+    socket.callbacks.shift()!();
+    expect(socket.writableLength > 0).toBe(queueState === "queued");
+    expect(server.pendingSocketRequests.size).toBe(0);
+    expect(socket.timeouts).toEqual([
+      DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+      DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS,
+    ]);
+    socket.emit("timeout");
+    expect(socket.destroyed).toBeTrue();
+  },
+);
 
 test("native idle expiry still destroys a socket without in-flight requests", () => {
   const socket = new BackpressuredSocket();

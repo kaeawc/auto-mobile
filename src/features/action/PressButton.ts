@@ -1,3 +1,4 @@
+import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -380,48 +381,46 @@ export class PressButton extends BaseVisualChange {
   ): Promise<PressButtonResult> {
     throwIfAborted(signal);
     const normalizedButton = button.toLowerCase();
-    if (PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)) {
+    if (
+      PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton) ||
+      PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
+    ) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await this.executeiOSNavigationButton(
-        client,
-        normalizedButton,
-        timeoutMs,
-        frameContext,
-        signal,
-      );
-
+      const result = PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)
+        ? await this.executeiOSNavigationButton(
+            client,
+            normalizedButton,
+            timeoutMs,
+            frameContext,
+            signal,
+          )
+        : await client.requestPressButton(
+            normalizedButton,
+            timeoutMs,
+            undefined,
+            frameContext,
+            signal,
+          );
       if (!result.success) {
+        if (normalizedButton !== "home" && result.dispatched && result.acknowledged === false) {
+          return {
+            success: false,
+            button,
+            keyCode: -1,
+            error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
+          };
+        }
         return {
           success: false,
           button,
           keyCode: -1,
-          error: result.error ?? `Failed to press iOS ${normalizedButton} button`,
+          error:
+            result.error ??
+            (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
+              ? `iOS hardware button "${button}" is not supported on this device`
+              : `Failed to press iOS ${normalizedButton} button`),
         };
       }
-
-      return {
-        success: true,
-        button,
-        keyCode: -1,
-      };
-    }
-
-    if (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)) {
-      const client = IOSCtrlProxyClient.getInstance(this.device);
-      const result = await awaitWhileRequestIsLive(
-        client.requestPressButton(normalizedButton, timeoutMs, undefined, frameContext),
-        signal,
-      );
-
-      if (!result.success) {
-        return {
-          success: false,
-          button,
-          keyCode: -1,
-          error: result.error ?? `iOS hardware button "${button}" is not supported on this device`,
-        };
-      }
-
       return { success: true, button, keyCode: -1 };
     }
 
@@ -448,7 +447,7 @@ export class PressButton extends BaseVisualChange {
     timeoutMs?: number,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<IOSDispatchResult<{ success: boolean; error?: string }>> {
     throwIfAborted(signal);
     switch (button) {
       case "home":
@@ -466,20 +465,13 @@ export class PressButton extends BaseVisualChange {
           );
           return { success: true };
         }
-        return await awaitWhileRequestIsLive(
-          client.requestPressHome(timeoutMs, undefined, frameContext),
-          signal,
-        );
+        const result = await client.requestPressHome(timeoutMs, undefined, frameContext, signal);
+        throwIfAborted(signal);
+        return result;
       case "back":
-        return await awaitWhileRequestIsLive(
-          client.requestPressBack(timeoutMs, undefined, frameContext),
-          signal,
-        );
+        return await client.requestPressBack(timeoutMs, undefined, frameContext, signal);
       case "recent":
-        return await awaitWhileRequestIsLive(
-          client.requestRecentApps(timeoutMs, undefined, frameContext),
-          signal,
-        );
+        return await client.requestRecentApps(timeoutMs, undefined, frameContext, signal);
       default:
         return { success: false, error: `Unsupported iOS button: ${button}` };
     }

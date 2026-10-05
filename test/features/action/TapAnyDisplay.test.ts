@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -65,7 +66,7 @@ function harness(ctrlProxy: boolean, targetDevice = device) {
   action.observeScreen = observe;
   // Keep post-observation bookkeeping out of the transport regression test.
   action.observedInteraction = async (block, options) => ({
-    ...(await block(options.previousObservation ?? observation)),
+    ...(await block(recordObservationRead(options.previousObservation ?? observation))),
     observation,
   });
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;

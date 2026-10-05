@@ -7,13 +7,20 @@ export const ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = 800;
 // Shared with tapOn's existing no-hierarchy stability refresh cadence.
 export const ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS = 500;
 
-/** Retry missing accessibility captures without extending the original pre-tap budget. */
-export async function freshTalkBackHierarchy(
+/** Retry missing accessibility captures within the caller's pre-tap budget. */
+export async function freshTapHierarchy(
   refresh: (timeoutMs: number) => Promise<ViewHierarchyResult | null>,
   timer: Timer,
   signal?: AbortSignal,
+  {
+    timeoutMs = ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
+    context = "while TalkBack is on",
+  }: {
+    timeoutMs?: number;
+    context?: string;
+  } = {},
 ): Promise<ViewHierarchyResult> {
-  const deadline = timer.now() + ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS;
+  const deadline = timer.now() + Math.max(0, timeoutMs);
   while (timer.now() < deadline) {
     throwIfAborted(signal);
     const hierarchy = await refresh(deadline - timer.now());
@@ -28,6 +35,6 @@ export async function freshTalkBackHierarchy(
   }
   throwIfAborted(signal);
   throw new ActionableError(
-    "Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service while TalkBack is on. Observe again and check that the accessibility service is running.",
+    `Unable to retrieve a fresh tap hierarchy: hierarchy unavailable from the accessibility service ${context}. Observe again and check that the accessibility service is running.`,
   );
 }

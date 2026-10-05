@@ -50,6 +50,9 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -906,6 +909,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
+  private lateinit var overlayController: OverlayController
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
   private lateinit var overlayDrawer: OverlayDrawer
@@ -1524,6 +1528,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
+      if (!::overlayController.isInitialized) {
+        overlayController =
+          OverlayController(
+            DefaultInteractiveOverlayHost(
+              context = this,
+              onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
+            ),
+            OverlayResultSink { requestId, success, error ->
+              if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+                resultBroadcaster.guard(requestId, "overlay_result") {
+                  webSocketServer.broadcastWithPerf { _ ->
+                    overlayResultFrame(requestId, success, error)
+                  }
+                }
+              }
+            },
+            onDismissed = {
+              withContext(Dispatchers.Main.immediate) {
+                overlayManager.setInteractiveOverlayAttached(false)
+              }
+            },
+          )
+      }
+      overlayManager.setInteractiveOverlayAttached(overlayController.isShowing)
 
       // Register broadcast receiver for commands
       val commandFilter = IntentFilter().apply { addAction(ACTION_EXTRACT_HIERARCHY) }
@@ -1898,6 +1926,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.destroy()
     }
 
+    if (::overlayController.isInitialized) {
+      // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
+      // a pending request releases the controller mutex on cancellation, then cleanup resumes.
+      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.destroy() }
+    }
     if (::overlayManager.isInitialized) {
       overlayManager.destroy()
     }
@@ -2808,28 +2841,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     handleAddHighlight(requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec) = refuseOverlayRequest(requestId)
+  override fun showOverlay(requestId: String?, spec: OverlaySpec) {
+    launchRequestScope(requestId) { overlayController.show(requestId, spec) }
+  }
 
   override fun updateOverlay(
     requestId: String?,
     id: String,
     spec: OverlaySpec?,
     state: Map<String, OverlayScalar>?,
-  ) = refuseOverlayRequest(requestId)
+  ) {
+    launchRequestScope(requestId) { overlayController.update(requestId, id, spec, state) }
+  }
 
-  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
-    refuseOverlayRequest(requestId)
-
-  private fun refuseOverlayRequest(requestId: String?) {
-    launchRequestScope(requestId) {
-      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-        Log.d(TAG, "WebSocket server not running, skipping overlay result broadcast")
-        return@launchRequestScope
-      }
-      resultBroadcaster.guard(requestId, "overlay_result") {
-        webSocketServer.broadcastWithPerf { _ -> overlayNotWiredResultFrame(requestId) }
-      }
-    }
+  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {
+    launchRequestScope(requestId) { overlayController.dismiss(requestId, id, all) }
   }
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =

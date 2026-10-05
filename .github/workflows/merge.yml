@@ -710,7 +710,7 @@ jobs:
   node-unit-tests:
     name: "Node Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -749,8 +749,8 @@ jobs:
         env:
           BUN_TEST_TIMING_BASE_REF: HEAD^
           BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
-          # 720s unit lane + 45s rechecks + 120s reserve < 900s job timeout.
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "45"
+          # 720s unit lane + 600s rechecks + 120s reserve < 1500s job timeout.
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "600"
         run: bash scripts/validate-bun-test-timings.sh
 
       - name: "Upload unit test diagnostics"

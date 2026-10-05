@@ -17,6 +17,7 @@
     "test/fixtures/identify-interactions/*.json",
     "test/fixtures/android-ime-window/*.json",
     "test/fixtures/android-enabled/*.json",
+    "test/fixtures/android-action-compact/*.json",
     "test/fixtures/android-launcher/*.json",
     "test/fixtures/observe-output/ios-keyboard-tabbar/*.json",
     "test/fixtures/observe-output/ios-keyboard-states/*.json",

@@ -4,6 +4,7 @@
  * Thin wrapper over SharedTextDelegate.
  */
 
+import type { SetTextOptions } from "../DeviceService";
 import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -15,6 +16,7 @@ import {
   type KeyboardProfileCatalog,
 } from "../../action/keyboardProfiles";
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { TextIndeterminateError } from "../../action/textTransportTimeout";
 import { logger } from "../../../utils/logger";
 
 export interface SetKeyboardProfileResult {
@@ -172,21 +174,42 @@ export class CtrlProxyText extends SharedTextDelegate {
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
     },
+    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
   ): Promise<A11ySetTextResult> {
-    return sendCommand<A11ySetTextResult>(this.context, {
-      idPrefix: "insertText",
-      responseType: "insert_text",
-      messageType: "request_insert_text",
-      params: {
-        text,
-        acceptsCaretNotPlaced: options?.acceptsCaretNotPlaced ?? true,
-        ...(options?.expectedSuffix ? { expectedSuffix: options.expectedSuffix } : {}),
-        ...(options?.precedingState ? { precedingState: options.precedingState } : {}),
-      },
-      timeoutMs,
-      perf,
-      errorLabel: "Insert text",
+    let dispatched = false;
+    const startMs = this.context.timer.now();
+    const unconfirmed = (reason: string, totalTimeMs: number): A11ySetTextResult => ({
+      success: false,
+      totalTimeMs,
+      ...(dispatched ? { retryable: false, partialApplication: true } : {}),
+      error: dispatched ? new TextIndeterminateError(reason).message : reason,
     });
+    try {
+      return await sendCommand<A11ySetTextResult>(this.context, {
+        idPrefix: "insertText",
+        responseType: "insert_text",
+        messageType: "request_insert_text",
+        params: {
+          text,
+          acceptsCaretNotPlaced: options?.acceptsCaretNotPlaced ?? true,
+          ...(options?.expectedSuffix ? { expectedSuffix: options.expectedSuffix } : {}),
+          ...(options?.precedingState ? { precedingState: options.precedingState } : {}),
+        },
+        timeoutMs,
+        perf,
+        errorLabel: "Insert text",
+        abortSignal: transport.abortSignal,
+        deadlineMs: transport.deadlineMs,
+        onDispatch: () => {
+          dispatched = true;
+          transport.onDispatch?.();
+        },
+        timeoutError: (timeout) => unconfirmed(`Insert text timed out after ${timeout}ms`, timeout),
+      });
+    } catch (error) {
+      logger.warn("[CtrlProxyText] Insert text transport failed", error);
+      return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
+    }
   }
 
   async commitViaIme(

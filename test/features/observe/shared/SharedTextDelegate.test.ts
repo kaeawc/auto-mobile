@@ -251,3 +251,28 @@ describe("SharedTextDelegate", () => {
     });
   });
 });
+
+describe("semantic IME dispatch outcomes", () => {
+  it.each(["send", "go", "search", "done", "next", "previous"] as const)(
+    "%s preserves dispatch evidence on timeout",
+    async (action) => {
+      const h = createIosDelegateHarness();
+      let dispatches = 0;
+      const pending = new SharedTextDelegate(h.context).requestImeAction(
+        action,
+        5000,
+        undefined,
+        undefined,
+        () => {
+          dispatches++;
+        },
+      );
+      await Promise.resolve();
+      h.advanceTime(5000);
+      expect(await pending).toMatchObject({ success: false, action, retryable: false });
+      expect(dispatches).toBe(1);
+      expect(h.sentMessages).toHaveLength(1);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+});

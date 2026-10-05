@@ -3300,8 +3300,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
     },
+    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
   ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf, options);
+    return this.text.requestInsertText(text, timeoutMs, perf, options, transport);
   }
 
   async commitViaIme(
@@ -3347,8 +3348,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yImeActionResult> {
-    return this.text.requestImeAction(action, timeoutMs, perf);
+    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal, onDispatch);
   }
 
   async requestSelectAll(

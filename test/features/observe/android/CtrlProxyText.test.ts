@@ -3,7 +3,7 @@ import {
   runWithTextRequestContext,
   TextRequestState,
 } from "../../../../src/features/action/textTransportTimeout";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import {
@@ -848,4 +848,158 @@ test("Android text keeps its 5000ms transport and plain failure under an iOS req
     error: "Set text timed out after 5000ms",
   });
   expect(state.timeoutError("expired")).toBeUndefined();
+});
+
+describe("Android non-idempotent text outcomes", () => {
+  for (const operation of ["insert", "ime"] as const) {
+    const start = (text: CtrlProxyText, signal?: AbortSignal, onDispatch?: () => void) =>
+      operation === "insert"
+        ? text.requestInsertText("abc", 5000, undefined, undefined, {
+            abortSignal: signal,
+            onDispatch,
+          })
+        : text.requestImeAction("send", 5000, undefined, signal, onDispatch);
+
+    test.each(["timeout", "disconnect", "abort"])(
+      `${operation}: unconfirmed %s stops replay`,
+      async (failure) => {
+        const h = createIosDelegateHarness();
+        const controller = new AbortController();
+        let dispatches = 0;
+        const pending = start(new CtrlProxyText(h.context), controller.signal, () => {
+          dispatches++;
+        });
+        await Promise.resolve();
+        const id = h.lastRequestId()!;
+        if (failure === "timeout") {
+          h.advanceTime(5000);
+        } else if (failure === "disconnect") {
+          h.requestManager.cancelAll(new Error("WebSocket connection closed"));
+        } else {
+          controller.abort();
+          h.advanceTime(5000);
+        }
+        const result = await pending;
+        expect(result).toMatchObject({ success: false, retryable: false });
+        if (operation === "insert") {
+          expect(result).toMatchObject({ partialApplication: true });
+        }
+        expect(result.error).toContain("outcome is indeterminate");
+        expect(result.error).toContain("Do not retry automatically. Observe before retrying.");
+        if (operation === "insert") {
+          expect(result.error).toContain("may have been entered");
+        }
+        expect(dispatches).toBe(1);
+        expect(h.sentMessages).toHaveLength(1);
+        expect(h.resolve(id, { success: true, totalTimeMs: 1 })).toBe(false);
+        expect(h.requestManager.getPendingCount()).toBe(0);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      },
+    );
+
+    test.each(["already", "connecting"])(`${operation}: abort %s sends nothing`, async (when) => {
+      const h = createIosDelegateHarness();
+      const controller = new AbortController();
+      let connect!: (connected: boolean) => void;
+      if (when === "already") {
+        controller.abort();
+      } else {
+        h.context.ensureConnected = () =>
+          new Promise<boolean>((resolve) => {
+            connect = resolve;
+          });
+      }
+      let dispatches = 0;
+      const pending = start(new CtrlProxyText(h.context), controller.signal, () => {
+        dispatches++;
+      });
+      if (when === "connecting") {
+        controller.abort();
+        connect(true);
+      }
+      await Promise.resolve();
+      h.advanceTime(5000);
+      const result = await pending;
+      expect(result.success).toBe(false);
+      expect(result.retryable).toBeUndefined();
+      expect(result).not.toHaveProperty("partialApplication");
+      expect(h.sentMessages).toHaveLength(0);
+      expect(dispatches).toBe(0);
+      expect(h.requestManager.getPendingCount()).toBe(0);
+    });
+
+    test.each([true, false])(`${operation}: confirmed success=%s stays normal`, async (success) => {
+      const h = createIosDelegateHarness();
+      const pending = start(new CtrlProxyText(h.context));
+      await Promise.resolve();
+      const response = { success, totalTimeMs: 1, ...(success ? {} : { error: "Device refused" }) };
+      h.resolveLast(response);
+      expect(await pending).toEqual(response);
+      expect(h.sentMessages).toHaveLength(1);
+    });
+
+    test(`${operation}: disconnected before dispatch stays retryable`, async () => {
+      const h = createIosDelegateHarness({ connected: false });
+      const result = await start(new CtrlProxyText(h.context));
+      expect(result).toMatchObject({ success: false, error: "Not connected" });
+      expect(result.retryable).toBeUndefined();
+      expect(result).not.toHaveProperty("partialApplication");
+      expect(h.sentMessages).toHaveLength(0);
+    });
+  }
+});
+
+test("Android client forwards appended transport controls for insert and IME", async () => {
+  const timer = new FakeTimer();
+  const client = AndroidCtrlProxyClient.createForTesting(
+    { deviceId: "text-transport-controls", platform: "android", name: "Fake" },
+    new FakeAdbExecutor(),
+    (url) => new CapturingWebSocket(url, "none", 0, timer),
+    timer,
+  );
+  const text = (client as unknown as { text: CtrlProxyText }).text;
+  const insert = spyOn(text, "requestInsertText").mockResolvedValue({
+    success: true,
+    totalTimeMs: 1,
+  });
+  const ime = spyOn(text, "requestImeAction").mockResolvedValue({
+    success: true,
+    action: "send",
+    totalTimeMs: 1,
+  });
+  const signal = new AbortController().signal;
+  const onDispatch = () => {};
+  const transport = { abortSignal: signal, onDispatch, deadlineMs: timer.now() + 1234 };
+  try {
+    await client.requestInsertText("abc", 1234, undefined, { expectedSuffix: "x" }, transport);
+    expect(insert.mock.calls).toEqual([
+      ["abc", 1234, undefined, { expectedSuffix: "x" }, transport],
+    ]);
+    await client.requestImeAction("send", 1234, undefined, signal, onDispatch);
+    expect(ime.mock.calls).toEqual([["send", 1234, undefined, signal, onDispatch]]);
+  } finally {
+    insert.mockRestore();
+    ime.mockRestore();
+    await client.close();
+  }
+});
+
+test.each([0, 25])("insert respects caller deadline with %s ms remaining", async (remaining) => {
+  const h = createIosDelegateHarness();
+  const pending = new CtrlProxyText(h.context).requestInsertText(
+    "abc",
+    5000,
+    undefined,
+    undefined,
+    { deadlineMs: h.timer.now() + remaining },
+  );
+  await Promise.resolve();
+  h.advanceTime(remaining);
+  h.advanceTime(5000);
+  const result = await pending;
+  expect(result.success).toBe(false);
+  expect(result.retryable).toBe(remaining ? false : undefined);
+  expect(result.partialApplication).toBe(remaining ? true : undefined);
+  expect(h.sentMessages).toHaveLength(remaining ? 1 : 0);
+  expect(result.totalTimeMs).toBe(remaining);
 });

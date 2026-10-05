@@ -123,6 +123,7 @@ export class Explore extends BaseVisualChange {
   private readonly rootScreens: Set<string> = new Set();
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
+  private hasObservedTargetApp: boolean = false;
   /** @internal Exposed for focused traversal report tests. */
   graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
@@ -241,6 +242,7 @@ export class Explore extends BaseVisualChange {
     this.rootScreens.clear();
     this.pendingBackScreen = null;
     this.awaitingRelaunchScreen = false;
+    this.hasObservedTargetApp = false;
     this.elementSelections = [];
     this.explorationPath = [];
     this.interactionCount = 0;
@@ -880,9 +882,10 @@ export class Explore extends BaseVisualChange {
 
     if (currentPackage === targetPackageName) {
       if (this.awaitingRelaunchScreen) {
-        this.rootScreens.add(this.navigationManager.getCurrentScreen() ?? "unknown");
+        await this.recordInitialRelaunchRoot();
         this.awaitingRelaunchScreen = false;
       }
+      this.hasObservedTargetApp = true;
       this.pendingBackScreen = null;
       return "ok";
     }
@@ -923,6 +926,20 @@ export class Explore extends BaseVisualChange {
     }
 
     return "handled";
+  }
+
+  private async recordInitialRelaunchRoot(): Promise<void> {
+    const currentScreen = this.navigationManager.getCurrentScreen();
+    if (!currentScreen || currentScreen === "unknown") {
+      return;
+    }
+    const incomingEdges = await this.navigationManager.getEdgesTo(currentScreen);
+    const hasInAppParent = incomingEdges.some(
+      (edge) => edge.from !== currentScreen && edge.edgeType !== "back",
+    );
+    if (!hasInAppParent) {
+      this.rootScreens.add(currentScreen);
+    }
   }
 
   /**
@@ -1014,8 +1031,8 @@ export class Explore extends BaseVisualChange {
    * Handle dead-end situation by going back
    */
   private async handleDeadEnd(progress?: ProgressCallback): Promise<void> {
-    const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
-    if (this.rootScreens.has(currentScreen)) {
+    const currentScreen = this.navigationManager.getCurrentScreen();
+    if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
       logger.info(`[Explore] ${this.stopReason}`);
       return;
@@ -1048,7 +1065,7 @@ export class Explore extends BaseVisualChange {
         });
         throwIfInternalToolFailed(response, "pressButton", this.device.platform);
       }
-      this.pendingBackScreen = currentScreen;
+      this.pendingBackScreen = currentScreen === "unknown" ? null : currentScreen;
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
@@ -1167,7 +1184,9 @@ export class Explore extends BaseVisualChange {
       );
       throwIfInternalToolFailed(response, "launchApp", this.device.platform);
     }
-    this.awaitingRelaunchScreen = true;
+    // Only an initial launch with no target-app observation can establish a
+    // fresh-start root. Later warm launches may resume any screen in the task.
+    this.awaitingRelaunchScreen = !this.hasObservedTargetApp;
   }
 
   private traversalStopReason(): string {

@@ -364,6 +364,9 @@ describe("Explore", () => {
         setScreen: (value: string) => {
           screen = value;
         },
+        setForeground: (value: string) => {
+          foreground = value;
+        },
         restore: () => {
           back.mockRestore();
           launch.mockRestore();
@@ -419,6 +422,128 @@ describe("Explore", () => {
         expect(result.interactionsPerformed).toBe(2);
         expect(result.stopReason).toBe(rootStop);
         expect(result.durationMs).toBe(1000);
+      } finally {
+        run.restore();
+      }
+    });
+
+    for (const recovery of ["handoff", "periodic reset"] as const) {
+      test(`a ${recovery} relaunch resuming Detail backs out and explores Home's remaining candidate`, async () => {
+        const run = rootRun(undefined, "Home");
+        const homeElements = ["detail", "remaining"].map((id) =>
+          createMockElement({ text: "Open", "resource-id": id }),
+        );
+        const setElements = (elements: Element[]) => {
+          run.parser.nextFlattenedElements = elements.map((element, index) => ({
+            element,
+            index,
+            depth: 0,
+          }));
+        };
+        setElements(homeElements);
+        run.tap.mockImplementation(async (options) => {
+          run.actions.push(`tap:${options.elementId}`);
+          if (options.elementId === "detail") {
+            run.setScreen("Detail");
+            setElements([createMockElement({ text: "Share", "resource-id": "share" })]);
+          } else if (options.elementId === "share") {
+            setElements([]);
+            if (recovery === "handoff") {
+              run.setForeground("com.android.browser");
+            }
+          }
+          return { success: true };
+        });
+        run.launch.mockImplementation(async () => {
+          run.actions.push("launch");
+          run.setForeground(target);
+          // A warm launch resumes the existing task instead of opening Home.
+          run.setScreen("Detail");
+          return { success: true, packageName: target };
+        });
+        run.back.mockImplementation(async (button) => {
+          run.actions.push(button);
+          if (button === "home") {
+            run.setForeground(launcher);
+          } else {
+            run.setScreen("Home");
+            setElements(homeElements.slice(1));
+          }
+          return { success: true };
+        });
+        try {
+          const result = await explore.execute({
+            packageName: target,
+            strategy: "depth-first",
+            maxInteractions: 3,
+            resetToHome: recovery === "periodic reset",
+            resetInterval: 2,
+          });
+          expect(run.actions).toEqual([
+            "tap:detail",
+            "tap:share",
+            ...(recovery === "periodic reset" ? ["home"] : []),
+            "launch",
+            "back",
+            "tap:remaining",
+          ]);
+          expect(result.stopReason).toBe("Reached max interactions limit (3)");
+          expect(result.interactionsPerformed).toBe(3);
+          expect(result.explorationPath).toEqual(["Home", "Detail"]);
+          expect(Reflect.get(explore, "rootScreens")).toEqual(new Set());
+        } finally {
+          run.restore();
+        }
+      });
+    }
+
+    test("an initial relaunch landing on a screen with an in-app parent does not mark a root", async () => {
+      const run = rootRun(undefined, "Detail", launcher);
+      fakeGraph.addEdge({ from: "Home", to: "Detail", timestamp: 0, edgeType: "tool" });
+      run.launch.mockImplementation(async () => {
+        run.actions.push("launch");
+        run.setForeground(target);
+        run.setScreen("Detail");
+        return { success: true, packageName: target };
+      });
+      const seams = explore as unknown as {
+        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
+        handleDeadEnd: () => Promise<void>;
+      };
+      try {
+        await seams.enforceTargetApp(
+          { activeWindow: { appId: launcher } } as ObserveResult,
+          target,
+        );
+        await seams.enforceTargetApp({ activeWindow: { appId: target } } as ObserveResult, target);
+        await seams.handleDeadEnd();
+        expect(run.actions).toEqual(["launch", "back"]);
+        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set());
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("a null relaunch screen marks no root and unresolved dead ends still press Back", async () => {
+      const run = rootRun(undefined, "Login", launcher);
+      const seams = explore as unknown as {
+        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
+        handleDeadEnd: () => Promise<void>;
+      };
+      const observation = (packageName: string) =>
+        ({ activeWindow: { appId: packageName } }) as ObserveResult;
+      try {
+        await seams.enforceTargetApp(observation(launcher), target);
+        fakeGraph.setCurrentScreenValue(null);
+        await seams.enforceTargetApp(observation(target), target);
+        await seams.handleDeadEnd();
+        // An unresolved Back must not introduce an "unknown" root either.
+        await seams.enforceTargetApp(observation(launcher), target);
+        await seams.enforceTargetApp(observation(target), target);
+        await seams.handleDeadEnd();
+        expect(run.actions).toEqual(["launch", "back", "launch", "back"]);
+        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set());
+        expect(Reflect.get(explore, "stopReason")).toBe("");
       } finally {
         run.restore();
       }

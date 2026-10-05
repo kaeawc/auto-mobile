@@ -17,6 +17,7 @@ import { getFailureRecorder } from "../../failures/FailureRecorder";
 import type { FailureRecorderService } from "../../failures/interfaces/FailureRecorderService";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
@@ -294,11 +295,17 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
           // the daemon's current foreground app (#5851 / #5534).
           screenshotUri = buildNavigationNodeScreenshotUri(nodeId, applicationId);
         }
-      } catch {
-        /* non-fatal */
+      } catch (error) {
+        logger.warn(
+          `[IosSdkEventIngestor] Navigation screenshot lookup failed: ${errorMessage(error)}`,
+          error,
+        );
       }
-    } catch {
-      /* non-fatal */
+    } catch (error) {
+      logger.warn(
+        `[IosSdkEventIngestor] Navigation screenshot update failed: ${errorMessage(error)}`,
+        error,
+      );
     }
     return screenshotUri;
   }
@@ -660,8 +667,11 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
             : JSON.stringify({ nodeCount, truncated: true }),
         screenName: hierarchy.packageName ?? null,
       });
-    } catch {
-      // Non-fatal — telemetry recording should never break observation
+    } catch (error) {
+      logger.warn(
+        `[IosSdkEventIngestor] Layout telemetry recording failed: ${errorMessage(error)}`,
+        error,
+      );
     } finally {
       // Restore previous context so Android events aren't mis-attributed, even
       // when the body threw after setContext (getContext throwing leaves

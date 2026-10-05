@@ -1,5 +1,7 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, spyOn, describe, test, beforeEach, afterEach } from "bun:test";
 import { readFileSync } from "node:fs";
+import { logger } from "../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { DeepLinkManager } from "../../../src/features/utility/DeepLinkManager";
 import { ViewHierarchyResult, BootedDevice } from "../../../src/models";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -614,4 +616,34 @@ Receiver Resolver Table:
       expect(result.intentFilters).toHaveLength(0);
     });
   });
+});
+
+test("deep-link lookup warns and preserves empty links when package dumping throws", async () => {
+  const error = new Error("package dump failed");
+  const adb = new FakeAdbExecutor();
+  adb.setCommandError("dumpsys package", error);
+  const warning = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const manager = new DeepLinkManager(
+      { name: "fake", platform: "android", deviceId: "fake" },
+      adb,
+    );
+    const result = await manager.getDeepLinks("com.example.app");
+    expect(result).toEqual({
+      success: false,
+      appId: "com.example.app",
+      error: error.message,
+      deepLinks: { schemes: [], hosts: [], intentFilters: [], supportedMimeTypes: [] },
+    });
+    expect(
+      loggerCallsWithPrefix(warning.mock.calls, "[DeepLinkManager] Failed to get deep links"),
+    ).toEqual([
+      [
+        "[DeepLinkManager] Failed to get deep links for com.example.app: package dump failed",
+        error,
+      ],
+    ]);
+  } finally {
+    warning.mockRestore();
+  }
 });

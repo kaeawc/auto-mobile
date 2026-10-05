@@ -7,6 +7,7 @@ import { describe, expect, mock, spyOn, test } from "bun:test";
 import { android, createSendKeysHarness, observer as harnessObserver } from "./SendKeysTestHarness";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   SEND_KEYS_MAX_COMMANDS,
@@ -2127,35 +2128,46 @@ describe("DefaultSendKeysCommandExecutor", () => {
   });
 
   test("ime disable failures surface restoration failure after a successful commit", async () => {
-    for (const failure of ["stderr", "throw"] as const) {
-      const adb = new FakeAdbExecutor();
-      adb.setCommandResponseSequence("shell settings get secure default_input_method", [
-        { stdout: `${priorImeId}\n`, stderr: "" },
-        { stdout: `${commitImeId}\n`, stderr: "" },
-      ]);
-      if (failure === "stderr") {
-        adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
-      } else {
-        adb.setCommandError("shell ime disable", new Error("disable failed"));
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      for (const failure of ["stderr", "throw"] as const) {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+          { stdout: `${priorImeId}\n`, stderr: "" },
+          { stdout: `${commitImeId}\n`, stderr: "" },
+        ]);
+        if (failure === "stderr") {
+          adb.setCommandResponse("shell ime disable", { stdout: "", stderr: "disable failed" });
+        } else {
+          adb.setCommandError("shell ime disable", new Error("disable failed"));
+        }
+        const executor = new DefaultSendKeysCommandExecutor(
+          androidDevice,
+          createAdbFactory(adb),
+          createObserver(),
+          { textClient: createTextClient().client },
+        );
+
+        const result = await executor.type({ action: "type", text: "value", mode: "ime" });
+
+        expect(result).toMatchObject({
+          success: false,
+          resolvedMode: "ime",
+          error: expect.stringContaining(
+            `Text commit succeeded, but Could not restore the original keyboard ${priorImeId}`,
+          ),
+        });
+        expect(adb.getExecutedCommands()).toContain(`shell ime disable ${commitImeId}`);
+        clearAndroidImeQuarantine(androidDevice.deviceId);
       }
-      const executor = new DefaultSendKeysCommandExecutor(
-        androidDevice,
-        createAdbFactory(adb),
-        createObserver(),
-        { textClient: createTextClient().client },
-      );
-
-      const result = await executor.type({ action: "type", text: "value", mode: "ime" });
-
-      expect(result).toMatchObject({
-        success: false,
-        resolvedMode: "ime",
-        error: expect.stringContaining(
-          `Text commit succeeded, but Could not restore the original keyboard ${priorImeId}`,
-        ),
-      });
-      expect(adb.getExecutedCommands()).toContain(`shell ime disable ${commitImeId}`);
-      clearAndroidImeQuarantine(androidDevice.deviceId);
+      expect(
+        loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] IME restoration failed:"),
+      ).toEqual([
+        [expect.stringContaining("Could not restore the original keyboard"), expect.any(Error)],
+        [expect.stringContaining("Could not restore the original keyboard"), expect.any(Error)],
+      ]);
+    } finally {
+      warning.mockRestore();
     }
   });
 

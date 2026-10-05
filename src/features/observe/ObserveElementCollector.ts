@@ -1,3 +1,6 @@
+import { boundsArea, intersectBounds, parseBounds } from "../../utils/bounds";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
+import type { ElementBounds } from "../../models/ElementBounds";
 import type { ObserveResult, ViewHierarchyResult } from "../../models";
 import type { Element } from "../../models/Element";
 import {
@@ -27,7 +30,7 @@ export interface ObserveElementCollector {
 export class DefaultObserveElementCollector implements ObserveElementCollector {
   private readonly searchableHierarchy: SearchableHierarchy;
   constructor(
-    parser: ElementParser = new DefaultElementParser(),
+    private readonly parser: ElementParser = new DefaultElementParser(),
     private readonly mediaClassifier: IdentifyMediaViews = new IdentifyMediaViews(parser),
   ) {
     this.searchableHierarchy = new SearchableHierarchy(parser);
@@ -50,14 +53,29 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     // root in a single group while each window root gets its own.
     const rootGroups = new Map<number, SearchableEntry[]>();
     const seen = new Set<SearchableEntry["source"]>();
+    const projected = this.searchableHierarchy.project(viewHierarchy);
+    const windowRanks = new Map<SearchableEntry["source"], number>();
+    for (const entry of projected) {
+      windowRanks.set(
+        entry.source,
+        Math.min(windowRanks.get(entry.source) ?? Infinity, entry.windowRank),
+      );
+    }
+    const keyboardWindows =
+      platform === "android"
+        ? this.keyboardWindowBounds(
+            resolveViewHierarchyForSearch(viewHierarchy) ?? viewHierarchy,
+            windowRanks,
+          )
+        : new Map<number, ElementBounds>();
     // Keep the live selector's main-first order until action consumers migrate.
-    for (const entry of this.searchableHierarchy.project(viewHierarchy)) {
+    for (const entry of projected) {
       if (seen.has(entry.source)) {
         continue;
       }
       seen.add(entry.source);
       const group = rootGroups.get(entry.rootGroup) ?? [];
-      group.push(entry);
+      group.push({ ...entry, windowRank: windowRanks.get(entry.source)! });
       rootGroups.set(entry.rootGroup, group);
     }
 
@@ -67,7 +85,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
 
     for (const [group, entries] of rootGroups) {
       keyboardPackage =
-        this.collectFromRoot(entries, group, platform, provenanceState, {
+        this.collectFromRoot(entries, group, platform, provenanceState, keyboardWindows, {
           clickable,
           scrollable,
           flattenedEntries,
@@ -94,11 +112,46 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     return elements;
   }
 
+  private keyboardWindowBounds(
+    hierarchy: ViewHierarchyResult,
+    windowRanks: ReadonlyMap<SearchableEntry["source"], number>,
+  ): Map<number, ElementBounds> {
+    const frames = new Map<number, ElementBounds>();
+    // AccessibilityWindowInfo.TYPE_INPUT_METHOD owns touches across its full frame.
+    const inputMethodWindows =
+      hierarchy.windows?.filter((window) => window.type === 2 && window.hierarchy) ?? [];
+    for (const window of inputMethodWindows) {
+      let bounds = parseBounds(window.bounds);
+      if (!bounds || !Object.values(bounds).every(Number.isFinite)) {
+        continue;
+      }
+      if (hierarchy.screenWidth && hierarchy.screenHeight) {
+        bounds = intersectBounds(bounds, {
+          left: 0,
+          top: 0,
+          right: hierarchy.screenWidth,
+          bottom: hierarchy.screenHeight,
+        });
+      }
+      if (!bounds || boundsArea(bounds) <= 0) {
+        continue;
+      }
+      const roots =
+        this.parser.extractWindowRootGroups({ hierarchy: {}, windows: [window] })[0] ?? [];
+      const rank = roots.map((root) => windowRanks.get(root)).find((value) => value !== undefined);
+      if (rank !== undefined) {
+        frames.set(rank, bounds);
+      }
+    }
+    return frames;
+  }
+
   private collectFromRoot(
     entries: readonly SearchableEntry[],
     group: number,
     platform: "android" | "ios",
     provenanceState: ProvenanceState,
+    keyboardWindows: ReadonlyMap<number, ElementBounds>,
     collections: {
       clickable: Element[];
       scrollable: Element[];
@@ -150,6 +203,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         enter,
         exit: enter,
         keyboardPackage: keyboardPackageForNode(keyboardRoot, nodeProperties),
+        keyboardWindowBounds: keyboardWindows.get(searchable.windowRank),
       };
       setElementProvenance(parsedNode, provenance);
       provenanceState.records.push({ provenance, parent });

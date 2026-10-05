@@ -36,7 +36,7 @@ export interface TapStrategy {
    * Whether the platform's accessibility service (TalkBack / VoiceOver)
    * is currently active.
    */
-  isAccessibilityServiceEnabled(): Promise<boolean>;
+  isAccessibilityServiceEnabled(onWarning?: (warning: string) => void): Promise<boolean>;
 
   /**
    * Whether `TapOnElement` should run the Android-only pre-tap stability

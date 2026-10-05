@@ -61,11 +61,18 @@ export class TalkBackToggle {
       }
     }
 
-    // Step 2: Idempotency — invalidate stale cache, then check if TalkBack is
-    // already in the requested state.  Use detectMethod rather than
-    // isAccessibilityEnabled so that other active services (e.g. CtrlProxy)
-    // do not cause a false positive.
+    // Step 2: Invalidate stale evidence and check TalkBack specifically. Other
+    // services (e.g. CtrlProxy) and unavailable reads must not match the request.
     const talkBackCurrentlyEnabled = await this.detectTalkBackEnabled();
+    if (talkBackCurrentlyEnabled === null) {
+      // Do not overwrite an unreadable service list: other services must be preserved.
+      return {
+        supported: true,
+        applied: false,
+        reason:
+          "could not determine TalkBack state: device accessibility settings read unavailable",
+      };
+    }
     if (talkBackCurrentlyEnabled === enabled) {
       return {
         supported: true,
@@ -78,6 +85,8 @@ export class TalkBackToggle {
     // path AND the ADB fallback both fail) is wrapped into a typed result rather
     // than propagating raw out of toggle(), matching the graceful contract of the
     // other paths (#3921).
+    // Discard pre-change evidence before writing, including during permission-dialog waits.
+    this.detector.invalidateCache(this.device.deviceId);
     let blockingPrompt: TalkBackBlockingPrompt | undefined;
     let warning: string | undefined;
     try {
@@ -88,12 +97,7 @@ export class TalkBackToggle {
         if (dialogResult === "could-not-confirm") {
           const reason = "TalkBack permission dialog dismissal could not be confirmed";
           logger.warn(`[TalkBackToggle] ${reason}`);
-          return {
-            supported: true,
-            applied: false,
-            currentState: talkBackCurrentlyEnabled,
-            reason,
-          };
+          return await this.failedToggleResult(reason);
         }
         blockingPrompt = await this.readBlockingPrompt();
         if (blockingPrompt) {
@@ -119,12 +123,10 @@ export class TalkBackToggle {
       logger.warn(
         `[TalkBackToggle] Failed to ${enabled ? "enable" : "disable"} TalkBack: ${reason}`,
       );
-      return {
-        supported: true,
-        applied: false,
-        currentState: talkBackCurrentlyEnabled,
-        reason,
-      };
+      return await this.failedToggleResult(reason);
+    } finally {
+      // A partial write or an early dialog failure also invalidates pre-change evidence.
+      this.detector.invalidateCache(this.device.deviceId);
     }
 
     // Step 5: Re-detect immediately, then allow asynchronous state changes a
@@ -132,6 +134,17 @@ export class TalkBackToggle {
     return {
       ...(await this.confirmTalkBackState(enabled)),
       ...(blockingPrompt ? { blockingPrompt, warning } : {}),
+    };
+  }
+
+  private async failedToggleResult(reason: string): Promise<TalkBackResult> {
+    // Partial writes and unconfirmed dialogs can still change the device state.
+    const currentState = await this.detectTalkBackEnabled();
+    return {
+      supported: true,
+      applied: false,
+      ...(currentState !== null ? { currentState } : {}),
+      reason,
     };
   }
 
@@ -149,14 +162,14 @@ export class TalkBackToggle {
     let reason: string | undefined;
     if (confirmedEnabled !== enabled) {
       const waitMs = (TALKBACK_STATE_CONFIRM_ATTEMPTS - 1) * TALKBACK_STATE_CONFIRM_DELAY_MS;
-      reason = `TalkBack requested ${enabled ? "enabled" : "disabled"} but observed ${confirmedEnabled ? "enabled" : "disabled"} after ${waitMs}ms of confirmation waits`;
+      reason = `TalkBack requested ${enabled ? "enabled" : "disabled"} but observed ${confirmedEnabled === null ? "unknown (could not determine)" : confirmedEnabled ? "enabled" : "disabled"} after ${waitMs}ms of confirmation waits`;
       logger.warn(`[TalkBackToggle] ${reason}`);
     }
 
     return {
       supported: true,
       applied: confirmedEnabled === enabled,
-      currentState: confirmedEnabled,
+      ...(confirmedEnabled !== null ? { currentState: confirmedEnabled } : {}),
       ...(reason ? { reason } : {}),
     };
   }
@@ -187,10 +200,10 @@ export class TalkBackToggle {
    * specifically is the active service. Used both for the pre-apply idempotency
    * check and the post-apply confirmation so the two never drift.
    */
-  private async detectTalkBackEnabled(): Promise<boolean> {
+  private async detectTalkBackEnabled(): Promise<boolean | null> {
     this.detector.invalidateCache(this.device.deviceId);
-    const service = await this.detector.detectMethod(this.device.deviceId, this.adb);
-    return service === "talkback";
+    const state = await this.detector.resolveState(this.device.deviceId, this.adb);
+    return state === null ? null : state.service === "talkback";
   }
 
   // Why: try the a11y service first to skip ADB round-trip latency; fall back to ADB

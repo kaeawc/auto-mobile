@@ -20,6 +20,24 @@ function makeResult(): ObserveResult {
 const androidDevice: BootedDevice = { deviceId: "dev-1", name: "android", platform: "android" };
 
 describe("AccessibilityStateDetector", () => {
+  test("omits unreadable Android accessibility state instead of publishing disabled", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("enabled_accessibility_services", new Error("device offline"));
+    const detector = new DefaultAccessibilityDetector(new FakeTimer());
+    detector.clearAllCache();
+    const flags = {
+      isEnabled: (key: string) => key === "accessibility-auto-detect",
+    } as FeatureFlagService;
+    const result = makeResult();
+    await new AccessibilityStateDetector({
+      device: androidDevice,
+      adb,
+      featureFlags: flags,
+      accessibilityDetector: detector,
+    }).run(result, new NoOpPerformanceTracker());
+    expect(result.accessibilityState).toBeUndefined();
+  });
+
   test("marks a disabled auto-detect result synthetic without querying a functioning service", async () => {
     const adb = new FakeAdbExecutor();
     const flags = { isEnabled: () => false } as FeatureFlagService;

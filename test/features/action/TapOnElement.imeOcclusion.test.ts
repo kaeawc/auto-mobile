@@ -29,6 +29,126 @@ import {
   iosKeyboardTabbarHierarchy,
 } from "../../fixtures/observe/iosKeyboardTabbar";
 
+import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
+import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
+import type {
+  AccessibilityHierarchy,
+  HierarchyDelegateContext,
+} from "../../../src/features/observe/android/types";
+import * as skeletonProjection from "../../../src/features/observe/output/SkeletonProjection";
+
+const capturedImeHierarchy = () =>
+  new CtrlProxyHierarchy({
+    timer: new FakeTimer(),
+  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+    structuredClone(capturedIme) as AccessibilityHierarchy,
+  );
+
+test.each(["Demos", "Slides", "Settings", "Password"])(
+  "captured %s under the full IME window refuses without dispatch",
+  async (label) => {
+    const { result, points } = await executeAt(label, {
+      fixture: capturedImeHierarchy(),
+      screenSize: { width: 1080, height: 2400 },
+      realSelector: true,
+      index: label === "Settings" ? 1 : undefined,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      `Failed to perform tap on element: Target "${label}" is covered by the soft keyboard; dismiss the keyboard first.`,
+    );
+    expect(points).toEqual([]);
+  },
+);
+
+test("pre-dispatch window check refuses an unsafe point in the captured IME navigation strip", async () => {
+  const safePoint = spyOn(skeletonProjection, "tapPointOutsideIme").mockReturnValue({
+    x: 403,
+    y: 2305,
+  });
+  try {
+    const { result, points } = await executeAt("Demos", {
+      fixture: capturedImeHierarchy(),
+      screenSize: { width: 1080, height: 2400 },
+      realSelector: true,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      'Target "Demos" is covered by the soft keyboard; dismiss the keyboard first.',
+    );
+    expect(points).toEqual([]);
+  } finally {
+    safePoint.mockRestore();
+  }
+});
+
+test("visible-match fallback also refuses a candidate inside the IME before dispatch", async () => {
+  const safePoint = spyOn(skeletonProjection, "tapPointOutsideIme")
+    .mockReturnValueOnce({ x: 200, y: 140 })
+    .mockReturnValueOnce({ x: 200, y: 175 });
+  try {
+    const { result, points } = await executeAt("Partly Covered", {
+      matchedBounds: { left: 100, top: 145, right: 300, bottom: 170 },
+    });
+    expect(safePoint).toHaveBeenCalledTimes(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      'Target "Partly Covered" is covered by the soft keyboard; dismiss the keyboard first.',
+    );
+    expect(points).toEqual([]);
+  } finally {
+    safePoint.mockRestore();
+  }
+});
+
+test("partial app target uses the exposed rectangle above the full IME frame", async () => {
+  // No captured Playground row straddles y=1517. Extend the existing IME helper's
+  // window metadata so the frame starts above the accessible key at y=150.
+  const hierarchy = imeOcclusionHierarchy();
+  Object.assign(hierarchy.windows![0], {
+    type: 2,
+    bounds: { left: 0, top: 140, right: 400, bottom: 240 },
+  });
+  const { result, points } = await executeAt("Partly Covered", {
+    fixture: hierarchy,
+    realSelector: true,
+  });
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 200, y: 135 }]);
+  expect(points[0].y).toBeGreaterThanOrEqual(130);
+  expect(points[0].y).toBeLessThan(140);
+});
+
+test("tapOn preserves a linked window above the IME even where their rectangles overlap", async () => {
+  const hierarchy = imeOcclusionHierarchy();
+  const app = hierarchy.hierarchy.node!;
+  const keyboard = hierarchy.windows![0].hierarchy!.node!;
+  const upper = {
+    $: {
+      text: "Above IME Window",
+      clickable: true,
+      bounds: { left: 100, top: 160, right: 300, bottom: 190 },
+    },
+  };
+  hierarchy.hierarchy.node = { $: {}, node: [app, keyboard, upper] };
+  hierarchy.windows = [
+    { windowLayer: 0, hierarchy: { node: app } },
+    {
+      windowLayer: 1,
+      type: 2,
+      bounds: { left: 0, top: 150, right: 400, bottom: 240 },
+      hierarchy: { node: keyboard },
+    },
+    { windowLayer: 2, hierarchy: { node: upper } },
+  ];
+  const { result, points } = await executeAt("Above IME Window", {
+    fixture: hierarchy,
+    realSelector: true,
+  });
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 200, y: 175 }]);
+});
+
 async function executeAt(
   label: string,
   {
@@ -48,6 +168,7 @@ async function executeAt(
     editable = true,
     realSelector = false,
     selectionStrategy,
+    index,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -65,6 +186,7 @@ async function executeAt(
     editable?: boolean;
     realSelector?: boolean;
     selectionStrategy?: "unique";
+    index?: number;
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -171,6 +293,7 @@ async function executeAt(
       action,
       display,
       selectionStrategy,
+      index,
       searchUntil: { duration: 100 },
     },
     undefined,

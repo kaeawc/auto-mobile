@@ -88,6 +88,8 @@ import {
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
+import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
+import { getAbortSignal } from "../utils/AbortContext";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -1398,6 +1400,69 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
 // the ToolRegistry constructor; tests instantiate it directly to exercise
 // executePlan cleanup and the auto-release guard without a live daemon session.
 export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
+  private getCleanupDevices(
+    primaryDevice: BootedDevice,
+    baseSessionUuid: string | undefined,
+  ): BootedDevice[] {
+    const signal = getAbortSignal();
+    const lostDeviceId = signal?.aborted
+      ? deviceLostErrorFromAbortSignal(signal)?.deviceId
+      : undefined;
+    const isNotLost = (device: BootedDevice): boolean => {
+      if (device.deviceId === lostDeviceId) {
+        logger.debug(`[PlanLifecycle] Skipping cleanup for lost device ${device.deviceId}`);
+        return false;
+      }
+      return true;
+    };
+    const state = DaemonState.getInstance();
+    if (!baseSessionUuid || !state.isInitialized()) {
+      return [primaryDevice].filter(isNotLost);
+    }
+
+    const sessionManager = state.getSessionManager();
+    const devicePool = state.getDevicePool();
+    const sessions = new Set([
+      baseSessionUuid,
+      ...Object.values(getDeviceLabelMap(baseSessionUuid) ?? {}),
+    ]);
+    const devices = [...sessions].flatMap((sessionUuid): BootedDevice[] => {
+      const session = sessionManager.getSession(sessionUuid);
+      const pooledDevice = session ? devicePool.getDevice(session.assignedDevice) : null;
+      if (!session || !pooledDevice || !sessionManager.isAdmittedForAutomation(session)) {
+        logger.debug(
+          `[PlanLifecycle] Skipping cleanup for unavailable session ${sessionUuid} / device ${session?.assignedDevice ?? "unknown"}`,
+        );
+        return [];
+      }
+      try {
+        // Reuse the admission gate for device loss, recovery, shutdown and
+        // identity quarantine; cleanup must not act on a retired runtime.
+        devicePool.assertSessionReadyForAutomation(sessionUuid);
+      } catch (error) {
+        if (isDeviceLostError(error) || error instanceof ActionableError) {
+          logger.debug(`[PlanLifecycle] Skipping cleanup for fenced session ${sessionUuid}`, error);
+        } else {
+          logger.warn(`[PlanLifecycle] Cleanup admission failed for session ${sessionUuid}`, error);
+        }
+        return [];
+      }
+      return [
+        pooledDevice.id === primaryDevice.deviceId
+          ? primaryDevice
+          : {
+              deviceId: pooledDevice.id,
+              name: pooledDevice.name,
+              platform: pooledDevice.platform,
+              iosVersion: pooledDevice.iosVersion,
+            },
+      ];
+    });
+    return [...new Map(devices.map((device) => [device.deviceId, device])).values()].filter(
+      isNotLost,
+    );
+  }
+
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
     const {
       name,
@@ -1411,10 +1476,24 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionToolSelectionService,
     } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
-      await cleanupService.cleanup(device, {
-        appId: args.cleanupAppId,
-        clearAppData: args.cleanupClearAppData,
-      });
+      const devices = this.getCleanupDevices(device, baseSessionUuid ?? sessionUuid);
+      // Independent devices clean concurrently using the service's existing
+      // action/command bounds. Drain all cleanups before releasing any session.
+      await Promise.allSettled(
+        devices.map(async (cleanupDevice) => {
+          try {
+            await cleanupService.cleanup(cleanupDevice, {
+              appId: args.cleanupAppId,
+              clearAppData: args.cleanupClearAppData,
+            });
+          } catch (error) {
+            logger.warn(
+              `[PlanLifecycle] App cleanup failed for device ${cleanupDevice.deviceId}`,
+              error,
+            );
+          }
+        }),
+      );
     }
 
     if (

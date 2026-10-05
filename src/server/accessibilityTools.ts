@@ -46,7 +46,12 @@ async function toggleTalkBackAccessibility(device: BootedDevice, requestedEnable
         talkback.reason ?? "TalkBack toggle is not supported on this device",
       );
     }
-    const enabled = talkback.currentState ?? false;
+    if (talkback.currentState === undefined) {
+      throw new ActionableError(
+        talkback.reason ?? "could not determine TalkBack state after toggle",
+      );
+    }
+    const enabled = talkback.currentState;
     const service = enabled ? ("talkback" as const) : ("unknown" as const);
     return createStructuredToolResponse({
       enabled,
@@ -74,14 +79,14 @@ async function handleAndroidAccessibility(device: BootedDevice, args: Accessibil
   accessibilityDetector.invalidateCache(device.deviceId);
   const adb = defaultAdbClientFactory.create(device);
   const featureFlags = FeatureFlagService.getInstance();
-  const enabled = await accessibilityDetector.isAccessibilityEnabled(
-    device.deviceId,
-    adb,
-    featureFlags,
-  );
-  const service = await accessibilityDetector.detectMethod(device.deviceId, adb, featureFlags);
-  logger.debug(`[accessibility tool] TalkBack state: enabled=${enabled}, service=${service}`);
-  return createStructuredToolResponse({ enabled, service });
+  const state = await accessibilityDetector.resolveState(device.deviceId, adb, featureFlags);
+  if (state === null) {
+    return createStructuredToolResponse({
+      service: "unknown",
+      reason: "could not determine TalkBack state: device accessibility settings read unavailable",
+    });
+  }
+  return createStructuredToolResponse({ enabled: state.enabled, service: state.service });
 }
 
 async function handleIosAccessibility(device: BootedDevice, args: AccessibilityArgs) {

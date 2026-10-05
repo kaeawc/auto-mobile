@@ -69,6 +69,14 @@ describe("TalkBackSwipeExecutor", () => {
     );
   });
 
+  test("unknown TalkBack is re-probed once then warns on the default swipe", async () => {
+    fakeAccessibilityDetector.setDefaultResult(null, "unknown");
+    const result = await executor.executeSwipeGesture(100, 500, 100, 200, "up", null);
+    expect(fakeAccessibilityDetector.getDetectionCallCount()).toBe(2);
+    expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(1);
+    expect(result.warnings?.join(" ")).toContain("could not determine");
+  });
+
   test("unsafe return duration rejects before either gesture", async () => {
     for (const returnSpeed of [1e-320, 0.02, Infinity, NaN]) {
       await expect(

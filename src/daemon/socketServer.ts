@@ -1205,7 +1205,9 @@ export class UnixSocketServer {
           return;
         }
         if (idleTimeout) {
-          refreshIdle();
+          if (socket.writableLength === 0) {
+            refreshIdle();
+          }
         } else {
           socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
         }

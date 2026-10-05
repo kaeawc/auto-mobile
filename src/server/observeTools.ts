@@ -841,6 +841,7 @@ const runWaitForConditionDsl = async (
   signal: AbortSignal | undefined,
   timer: Timer,
   skipBackStack: boolean = false,
+  platform?: BootedDevice["platform"],
 ): Promise<WaitForObservationOutcome> => {
   const startTime = timer.now();
   const timeoutMs =
@@ -896,6 +897,7 @@ const runWaitForConditionDsl = async (
     signal,
     pollingScreen,
     skipBackStack,
+    platform,
   });
   if (waitFor.for === "stable") {
     const settle = await new RealSettleObserve(pollingScreen, timer).execute({
@@ -1601,7 +1603,7 @@ export const waitForObservation = async (
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
     return complete(
-      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack),
+      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack, platform),
     );
   }
 
@@ -2172,6 +2174,7 @@ function createSettledGate({
   signal,
   pollingScreen,
   skipBackStack,
+  platform,
 }: {
   settled: SettledOptions | undefined;
   timer: Timer;
@@ -2180,6 +2183,7 @@ function createSettledGate({
   signal: AbortSignal | undefined;
   pollingScreen: ObserveScreen;
   skipBackStack: boolean;
+  platform: BootedDevice["platform"] | undefined;
 }) {
   return async (
     outcome: WaitForObservationOutcome,
@@ -2195,8 +2199,11 @@ function createSettledGate({
     // device stamp is inclusive, so it admits that capture (as the host
     // `startTime` floor did with no skew) without rejecting every read of a
     // still screen on a device whose clock trails the host. No device stamp
-    // (unavailable capture) means unfloored, as the #6430 loop does.
-    const minTimestamp = settledGateFloor(observation);
+    // (unavailable capture) means unfloored, as the #6430 loop does. iOS keeps
+    // the host `startTime` floor: the runner stamps `updatedAt` with its own
+    // `Date()`, which is the host clock for simulators but not clearly
+    // comparable for a physical device, so that path is unchanged.
+    const minTimestamp = settledGateFloor(observation, platform, startTime);
     let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
     let quietStart = timer.now();
     let polls = outcome.polls;
@@ -2500,9 +2507,13 @@ function waitTimestampFloor(
     : 0;
 }
 
-/** Device-domain floor for the settled gate: the matched capture's own stamp, else unfloored. */
-function settledGateFloor(observation: ObserveResult): number {
-  return waitBaselineTimestamp(observation) ?? 0;
+/** Settled-gate floor: iOS keeps the host `startTime`; otherwise the matched capture's own device stamp, else unfloored. */
+function settledGateFloor(
+  observation: ObserveResult,
+  platform: BootedDevice["platform"] | undefined,
+  startTime: number,
+): number {
+  return platform === "ios" ? startTime : (waitBaselineTimestamp(observation) ?? 0);
 }
 
 function waitBaselineTimestamp(observation: ObserveResult): number | undefined {

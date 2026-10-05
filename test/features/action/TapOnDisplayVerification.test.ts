@@ -99,9 +99,6 @@ function harness(
   const capture = new PanelCapture();
   const screenshots = new FakeScreenshotCapturer();
   const executor = new FakeAdbExecutor();
-  // The device clock the post-tap observation floor is read from (#9879).
-  const deviceClock = { skewMs: 0 };
-  executor.getDeviceTimestampMs = async () => timer.now() + deviceClock.skewMs;
   executor.setCommandResponse("cmd display get-displays", {
     stdout:
       'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
@@ -179,10 +176,10 @@ function harness(
   );
   return {
     action,
+    executor,
     capture,
     screenshots,
     timer,
-    deviceClock,
     transitions,
     dispatches,
     observe,
@@ -654,7 +651,7 @@ describe("tapOn display verification", () => {
     });
     h.action.observedInteraction = async (run, options) => {
       const result = await run(h.observation());
-      floor = options.observationTimestampProvider?.();
+      floor = options.observationHostTimestampProvider?.();
       expect(options.display).toBe("external");
       return { ...result, observation: h.observation() };
     };
@@ -662,22 +659,41 @@ describe("tapOn display verification", () => {
     expect(floor).toBe(200);
   });
 
-  test("ensureChecked observation floor is in the device clock domain when the device trails the host", async () => {
-    const h = harness(true, { checked: false });
-    h.deviceClock.skewMs = -20_000;
-    let floor: number | undefined;
-    h.onDispatch(() => {
-      h.timer.setCurrentTime(200);
-      h.setCurrent(hierarchy({ checked: true }));
+  for (const skewMs of [0, -20_000, 5_000]) {
+    test(`ensureChecked floor is the tap time in the device clock with one device read (skew ${skewMs}ms, #9879)`, async () => {
+      const h = harness(true, { checked: false });
+      let deviceClockReads = 0;
+      h.executor.getDeviceTimestampMs = async () => {
+        deviceClockReads++;
+        return h.timer.now() + skewMs;
+      };
+      let tapDeviceStamp = 0;
+      h.onDispatch(() => {
+        h.timer.setCurrentTime(200);
+        tapDeviceStamp = h.timer.now() + skewMs;
+        h.setCurrent(hierarchy({ checked: true }));
+      });
+      let floor: number | undefined;
+      const interaction = h.action.observedInteraction.bind(h.action);
+      h.action.observedInteraction = async (run, options) => {
+        const result = await interaction(run, options);
+        floor = options.observationHostTimestampProvider?.();
+        return result;
+      };
+      const floorsBefore = h.observe.getExecuteMinTimestamps().length;
+
+      expect((await h.execute({ ensureChecked: true })).success).toBe(true);
+
+      // Exactly the action-start read: nothing is read from the device after the tap.
+      expect(deviceClockReads).toBe(1);
+      expect(floor).toBe(200);
+      // The first post-action read is floored at the tap time in the device clock
+      // (host tap time plus the skew measured at action start), so a push stamped
+      // right after the tap (tap + 1) is accepted rather than forcing a fresh wait.
+      const [, postActionFloor] = h.observe.getExecuteMinTimestamps().slice(floorsBefore);
+      expect(postActionFloor).toBe(tapDeviceStamp);
     });
-    h.action.observedInteraction = async (run, options) => {
-      const result = await run(h.observation());
-      floor = options.observationTimestampProvider?.();
-      return { ...result, observation: h.observation() };
-    };
-    expect((await h.execute({ ensureChecked: true })).success).toBe(true);
-    expect(floor).toBe(200 - 20_000);
-  });
+  }
 
   test("remaining display options reject before observation or dispatch in original order", async () => {
     const h = harness(false);

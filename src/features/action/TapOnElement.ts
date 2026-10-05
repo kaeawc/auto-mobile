@@ -3530,19 +3530,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return { selection, hierarchy };
   }
 
-  /**
-   * Post-tap observation floor in the clock domain of the hierarchy `updatedAt`
-   * it is compared with: the device clock on Android (as `BaseVisualChange`'s
-   * `actionStartTime`), the host clock on iOS, which shares it (#9879, same
-   * class as #6430). `getDeviceTimestampMs` itself falls back to host time when
-   * the device clock cannot be read, matching `actionStartTime`.
-   */
-  private async postTapObservationFloor(): Promise<number> {
-    return this.device.platform === "android" && typeof this.adb.getDeviceTimestampMs === "function"
-      ? this.adb.getDeviceTimestampMs()
-      : this.timer.now();
-  }
-
   private async executeOnAndroidDisplay(
     options: TapVerificationOptions & { verification: AndroidTapVerification },
     context: {
@@ -3755,7 +3742,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return resolved.result;
     }
     const { selection, stats } = resolved;
-    let tapDispatched = false;
     let tapTimestamp: number | undefined;
     const result: Awaited<ReturnType<TapOnElement["executeOnAndroidDisplay"]>> =
       await this.observedInteraction(
@@ -3765,11 +3751,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             selection,
             signal,
             onDispatched: () => {
-              tapDispatched = true;
+              tapTimestamp = this.timer.now();
             },
           });
-          if (tapDispatched) {
-            tapTimestamp = await this.postTapObservationFloor();
+          if (tapTimestamp !== undefined) {
             context.onDispatchCompleted();
           }
           return dispatchedResult;
@@ -3780,12 +3765,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           previousObservation: target.observation,
           signal,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => tapTimestamp }
+            ? { observationHostTimestampProvider: () => tapTimestamp }
             : {}),
         },
       );
     result.searchUntil = stats;
-    if (!tapDispatched) {
+    if (tapTimestamp === undefined) {
       target.assertCurrent();
     } else {
       this.checkPostActionDisplay(result, target.assertCurrent, signal);
@@ -4407,7 +4392,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             }
           });
           if (options.ensureChecked !== undefined) {
-            ensureCheckedTapTimestamp = await this.postTapObservationFloor();
+            ensureCheckedTapTimestamp = this.timer.now();
           }
 
           if (preTapHash && this.strategy.retryTapIfNoChange) {
@@ -4451,7 +4436,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => ensureCheckedTapTimestamp }
+            ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),
           predictionContext: {
             toolName: "tapOn",

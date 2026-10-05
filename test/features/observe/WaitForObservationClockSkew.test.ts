@@ -173,7 +173,7 @@ describe("waitFor settled gate device clock floor", () => {
     }
   }
 
-  const run = async (deviceSkewMs: number) => {
+  const run = async (deviceSkewMs: number, platform: "android" | "ios" = "android") => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     timer.setCurrentTime(HOST_NOW);
@@ -189,7 +189,7 @@ describe("waitFor settled gate device clock floor", () => {
       undefined,
       false,
       timer,
-      "android",
+      platform,
     );
     return { outcome, screen };
   };
@@ -211,4 +211,12 @@ describe("waitFor settled gate device clock floor", () => {
       }
     });
   }
+
+  test("iOS keeps the host start time as the gate floor", async () => {
+    // A skewed stamp tells the two floors apart: Android would floor at the stamp.
+    const { outcome, screen } = await run(5_000, "ios");
+
+    expect(outcome.settled).toBe(true);
+    expect(screen.floors).toContain(HOST_NOW);
+  });
 });

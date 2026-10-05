@@ -3388,11 +3388,12 @@ export function registerInteractionTools() {
       const recentApps = recentAppsFactory(device);
       const result = await recentApps.execute(progress, signal);
 
-      return createJSONToolResponse({
+      const response = createJSONToolResponse({
         message: formatRecentAppsMessage(result),
         observation: result.observation,
         ...result,
       });
+      return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throw toActionableError(error, `Failed to open recent apps`);
     }
@@ -3438,10 +3439,11 @@ export function registerInteractionTools() {
         message += ` (via ${result.method})`;
       }
 
-      return createJSONToolResponse({
+      const response = createJSONToolResponse({
         message,
         ...result,
       });
+      return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throw toActionableError(error, `Failed to execute clipboard ${args.action}`);
     }

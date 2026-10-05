@@ -108,6 +108,7 @@ for (const success of [true, false]) {
           : "Failed to unlock device: failed",
         ...result,
       },
+      success ? undefined : true,
     );
   });
   for (const name of ["getDeviceState", "setDeviceState"] as const) {

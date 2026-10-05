@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   postNotificationSchema,
   registerNotificationTools,
@@ -130,3 +131,44 @@ describe("notification tools", () => {
     expect(schema.required).not.toContain("appId");
   });
 });
+
+for (const name of ["getNotificationPolicy", "setNotificationPolicy"] as const) {
+  test.each([false, true])(
+    name + " success=%s preserves payload and gates isError",
+    async (success) => {
+      registerNotificationTools();
+      const result = {
+        success,
+        appId: "com.example.app",
+        deviceId: "fake",
+        platform: "android" as const,
+        policyAccess: {
+          supported: true,
+          allowed: false,
+          method: "android_dumpsys_notification" as const,
+        },
+        ...(success ? {} : { error: "Policy lookup failed" }),
+      };
+      const method = name === "getNotificationPolicy" ? "getPolicy" : "setPolicy";
+      const policy = spyOn(NotificationPolicy.prototype, method).mockResolvedValue(result);
+      try {
+        const response = await ToolRegistry.getTool(name)!.deviceAwareHandler!(
+          { name: "Fake", deviceId: "fake", platform: "android" },
+          { appId: result.appId, policyAccess: true },
+        );
+        const message = success
+          ? name === "getNotificationPolicy"
+            ? `Read notification policy for ${result.appId}`
+            : `Allowed notification policy access for ${result.appId}`
+          : result.error;
+        expect(response).toEqual({
+          content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
+          ...(success ? {} : { isError: true }),
+        });
+      } finally {
+        policy.mockRestore();
+        ToolRegistry.clearTools();
+      }
+    },
+  );
+}

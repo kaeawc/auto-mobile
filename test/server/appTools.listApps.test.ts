@@ -1,3 +1,4 @@
+import { AppPermissions } from "../../src/features/action/AppPermissions";
 import { TerminateApp } from "../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
@@ -421,6 +422,8 @@ describe("crashApp tool", () => {
 
     expect(response.structuredContent).toEqual(payload);
     expect(crashAppResultSchema.safeParse(response.structuredContent).success).toBe(true);
+    expect(response.isError).toBe(true);
+    expect(response.content[0].text).toBe(JSON.stringify(response.structuredContent));
     expect(payload).toMatchObject({
       message: "Physical iOS devices are unsupported",
       success: false,
@@ -500,6 +503,34 @@ describe("app permission tools", () => {
     ToolRegistry.clearTools();
     resetListAppsToolDependencies();
   });
+
+  test.each([false, true])(
+    "getAppPermissions success=%s preserves text and gates isError",
+    async (success) => {
+      const result = {
+        success,
+        appId: "com.example.app",
+        permissions: [],
+        ...(success ? {} : { error: "Package lookup failed" }),
+      };
+      const query = spyOn(AppPermissions.prototype, "getPermissions").mockResolvedValue(result);
+      try {
+        const response = await ToolRegistry.getTool("getAppPermissions")!.deviceAwareHandler!(
+          { name: "Fake", deviceId: "fake", platform: "android" },
+          { appId: result.appId },
+        );
+        const message = success
+          ? `Read 0 app permission state row(s) for ${result.appId}`
+          : result.error;
+        expect(response).toEqual({
+          content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
+          ...(success ? {} : { isError: true }),
+        });
+      } finally {
+        query.mockRestore();
+      }
+    },
+  );
 
   test("registers cross-platform set/query permission tools", () => {
     const setAppTool = ToolRegistry.getTool("setAppPermissions");

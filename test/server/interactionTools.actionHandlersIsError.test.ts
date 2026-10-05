@@ -1,9 +1,10 @@
+import { HomeScreen } from "../../src/features/action/HomeScreen";
 import type { RotateOptions } from "../../src/features/action/Rotate";
 import { TapAnyElement } from "../../src/features/action/TapAnyElement";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
-import { afterEach, describe, expect } from "bun:test";
+import { afterEach, describe, expect, spyOn } from "bun:test";
 import {
   dragAndDropHandler,
   pressButtonHandler,
@@ -27,6 +28,10 @@ import {
   resetClipboardFactory,
   setRecentAppsFactory,
   resetRecentAppsFactory,
+  setKeyboardFactory,
+  resetKeyboardFactory,
+  setShakeFactory,
+  resetShakeFactory,
 } from "../../src/server/interactionTools";
 import type {
   DragAndDropArgs,
@@ -53,9 +58,17 @@ const test = warmedTests(() => {
   resetSetPostureFactory();
   resetClipboardFactory();
   resetRecentAppsFactory();
+  resetKeyboardFactory();
+  resetShakeFactory();
 });
 
-const handler = cancellationHandlers(["clipboard", "recentApps"]);
+const handler = cancellationHandlers([
+  "clipboard",
+  "recentApps",
+  "keyboard",
+  "shake",
+  "homeScreen",
+]);
 
 describe("clipboard and recentApps failure envelopes", () => {
   const device: BootedDevice = { name: "Test Android", deviceId: "fake", platform: "android" };
@@ -450,5 +463,117 @@ describe("setPostureHandler structured result", () => {
     await expect(setPostureHandler(fakeDevice, { posture: "opened" })).rejects.toThrow(
       "Failed to set device posture: posture failed",
     );
+  });
+});
+
+describe("keyboard failure envelopes", () => {
+  const device: BootedDevice = { name: "Fake", deviceId: "fake", platform: "android" };
+  for (const action of ["open", "close", "detect"] as const) {
+    test.each([false, true])(
+      "keyboard " + action + " success=%s preserves payload and text",
+      async (success) => {
+        const result = {
+          success,
+          open: action === "close" ? !success : success,
+          message: "unchanged",
+          ...(success ? {} : { error: "operation failed" }),
+        };
+        setKeyboardFactory(() => ({ execute: async () => result }));
+        const response = await handler("keyboard")(device, { action });
+        expect(response.structuredContent).toEqual(result);
+        expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
+        if (success) {
+          expect(response).not.toHaveProperty("isError");
+        } else {
+          expect(response.isError).toBe(true);
+        }
+      },
+    );
+  }
+  test("detect with keyboard not visible is a successful negative detection", async () => {
+    const result = {
+      success: true,
+      open: false,
+      message: "Keyboard is closed (no visible on-screen software keyboard)",
+    };
+    setKeyboardFactory(() => ({ execute: async () => result }));
+    const response = await handler("keyboard")(device, { action: "detect" });
+    expect(response.structuredContent).toEqual(result);
+    expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
+    expect(response).not.toHaveProperty("isError");
+  });
+  test.each(["open", "close"] as const)(
+    "%s unconfirmed state fails even without an error field",
+    async (action) => {
+      const result = {
+        success: false,
+        open: action === "close",
+        message: "Failed to " + action + " keyboard",
+      };
+      setKeyboardFactory(() => ({ execute: async () => result }));
+      const response = await handler("keyboard")(device, { action });
+      expect(response.structuredContent).toEqual(result);
+      expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
+      expect(response.isError).toBe(true);
+    },
+  );
+  test.each([false, true])("shake success=%s preserves its text envelope", async (success) => {
+    const result = {
+      success,
+      duration: 10,
+      intensity: 20,
+      ...(success ? {} : { error: "shake rejected" }),
+    };
+    setShakeFactory(() => ({ execute: async () => result }));
+    const response = await handler("shake")(device, { duration: 10, intensity: 20 });
+    const message = success
+      ? "Shook device for 10ms with intensity 20"
+      : "Failed to shake device: shake rejected";
+    expect(response).toEqual({
+      content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
+      ...(success ? {} : { isError: true }),
+    });
+  });
+  test.each([false, true])("homeScreen success=%s preserves its text envelope", async (success) => {
+    const result = {
+      success,
+      navigationMethod: "hardware" as const,
+      ...(success ? {} : { error: "No visual change observed" }),
+    };
+    const execute = spyOn(HomeScreen.prototype, "execute").mockResolvedValue(result);
+    try {
+      const response = await handler("homeScreen")(device, {});
+      expect(response).toEqual({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              message: "Pressed home button to return to the home screen",
+              ...result,
+            }),
+          },
+        ],
+        ...(success ? {} : { isError: true }),
+      });
+    } finally {
+      execute.mockRestore();
+    }
+  });
+  test("homeScreen already at home preserves its indication without isError", async () => {
+    const result = {
+      success: true,
+      navigationMethod: "hardware" as const,
+      message: "Already on the home screen",
+    };
+    const execute = spyOn(HomeScreen.prototype, "execute").mockResolvedValue(result);
+    try {
+      const response = await handler("homeScreen")(device, {});
+      expect(response).toEqual({
+        content: [{ type: "text", text: JSON.stringify({ message: result.message, ...result }) }],
+      });
+      expect(response).not.toHaveProperty("isError");
+    } finally {
+      execute.mockRestore();
+    }
   });
 });

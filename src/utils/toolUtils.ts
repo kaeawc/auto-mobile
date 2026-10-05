@@ -104,6 +104,14 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
 // Export convenience functions for backward compatibility
 export const createJSONToolResponse = DefaultToolResponseFormatter.createJSONToolResponse;
 export const createImageToolResponse = DefaultToolResponseFormatter.createImageToolResponse;
+
+/** Mark failed operations without changing the response payload or successful envelope. */
+export const withIsErrorOnFailure = <T extends object>(
+  response: T,
+  success: boolean,
+): T & { isError?: true } => {
+  return success ? response : { ...response, isError: true as const };
+};
 /**
  * Typed MCP tool-call envelope produced by `createStructuredToolResponse`.
  *

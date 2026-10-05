@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
+import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
+import { describe, expect, spyOn, test } from "bun:test";
 import fs from "fs/promises";
 import * as yaml from "js-yaml";
 import os from "os";
@@ -16,6 +18,25 @@ describe("YamlPlanSerializer", () => {
   const serializer = new YamlPlanSerializer();
 
   describe("exportPlanFromLogs", () => {
+    test("warns and preserves export failure when log enumeration rejects", async () => {
+      const error = new Error("logs unavailable");
+      const read = spyOn(fs, "readdir").mockRejectedValue(error);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(
+          await serializer.exportPlanFromLogs("/fake/logs", "Failure", "/fake/out.yaml"),
+        ).toEqual({
+          success: false,
+          error: String(error),
+        });
+        expect(loggerCallsWithPrefix(warning.mock.calls, "Failed to export plan:")).toEqual([
+          ["Failed to export plan: logs unavailable", error],
+        ]);
+      } finally {
+        read.mockRestore();
+        warning.mockRestore();
+      }
+    });
     test("preserves step-level optional flag when present in logged tool calls", async () => {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "plan-serializer-"));
       const outputPath = path.join(tempDir, "exported.yaml");

@@ -102,7 +102,7 @@ describe("videoRecordingManager", () => {
     archiveParent = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
   });
 
-  const setup = async () => {
+  const setup = async (createRecordingDirectories = false) => {
     warnings = [];
     warnSpy = spyOn(logger, "warn").mockImplementation((message, ...args) => {
       warnings.push([message, ...args].map(String).join(" "));
@@ -125,7 +125,7 @@ describe("videoRecordingManager", () => {
       backend: fakeBackend,
       idGenerator: new FakeIdGenerator(),
       archiveRoot,
-      securePermissions: new FakeSecurePermissions(false),
+      securePermissions: new FakeSecurePermissions(createRecordingDirectories),
       now: () => new Date(fakeTimer.now()),
     });
 
@@ -1172,7 +1172,9 @@ describe("videoRecordingManager", () => {
   });
 
   test("force-stops backend success and removes ownership when persistence fails", async () => {
-    await fsPromises.mkdir(archiveRoot, { recursive: true });
+    // Create the recording directory so the assertion below proves rollback removes it.
+    cleanup();
+    await setup(true);
     fakeRepository.insertRecording = async () => {
       throw new Error("database unavailable");
     };

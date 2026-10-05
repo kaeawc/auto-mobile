@@ -541,6 +541,8 @@ interface PendingSocketRequest {
   socket: Socket;
   admitted: boolean;
   terminal: boolean;
+  /** Control frames do not earn an idle exemption; ordinary work has a bounded live deadline. */
+  idleDeadline?: ProgressExtendableDeadline;
 }
 
 /**
@@ -802,11 +804,11 @@ export class UnixSocketServer {
   private clientSockets: Map<string, Socket> = new Map();
   private readonly backpressuredSocketIdle = new WeakMap<
     Socket,
-    { start: () => void; refresh: () => void }
+    { start: () => void; refresh: () => void; responseFlushed: () => void }
   >();
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
-  /** Parsed requests awaiting their one terminal response, including queued requests. */
+  /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
   private pendingSocketRequests = new Set<PendingSocketRequest>();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
@@ -1160,19 +1162,27 @@ export class UnixSocketServer {
     // Ordinary idle sockets retain Node's timeout. Once a write backpressures,
     // writes must no longer extend the lifetime of a peer that is not reading.
     socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-    socket.on("timeout", () => {
+    const onIdleTimeout = (): void => {
+      // A silent request may outlive the idle window. Renew only while its
+      // live deadline permits work, never for an unread backpressured write.
+      // A handler that never answers loses this exemption at its deadline and
+      // is disconnected on the next check (at most one further idle window).
+      if (socket.writableLength === 0 && this.hasLiveSocketRequest(socket)) {
+        socket.setTimeout(0);
+        if (idleTimeout) {
+          this.timer.clearTimeout(idleTimeout);
+        }
+        idleTimeout = armIdleTimeout();
+        return;
+      }
       logger.warn(
         `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`,
       );
       socket.destroy();
-    });
+    };
+    socket.on("timeout", onIdleTimeout);
     const armIdleTimeout = (): NodeJS.Timeout =>
-      this.timer.setTimeout(() => {
-        logger.warn(
-          `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`,
-        );
-        socket.destroy();
-      }, DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+      this.timer.setTimeout(onIdleTimeout, DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     let idleTimeout: NodeJS.Timeout | undefined;
     const refreshIdle = (): void => {
       if (!idleTimeout || socket.destroyed) {
@@ -1190,6 +1200,16 @@ export class UnixSocketServer {
         idleTimeout = armIdleTimeout();
       },
       refresh: refreshIdle,
+      responseFlushed: () => {
+        if (socket.destroyed) {
+          return;
+        }
+        if (idleTimeout) {
+          refreshIdle();
+        } else {
+          socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+        }
+      },
     });
     socket.on("drain", refreshIdle);
 
@@ -1250,6 +1270,19 @@ export class UnixSocketServer {
     });
   }
 
+  private hasLiveSocketRequest(socket: Socket): boolean {
+    for (const pending of this.pendingSocketRequests) {
+      if (
+        pending.socket === socket &&
+        pending.idleDeadline &&
+        pending.idleDeadline.value >= this.timer.now()
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private async processSocketRequestLine(
     sessionId: string,
     socket: Socket,
@@ -1274,15 +1307,20 @@ export class UnixSocketServer {
         throw new ActionableError("Invalid daemon socket request");
       }
       const request = parsed;
+      const controlFrame = [
+        DAEMON_HEARTBEAT_METHOD,
+        DAEMON_CANCEL_REQUEST_METHOD,
+        DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+      ].includes(request.method);
       const tracked: PendingSocketRequest = {
         id: request.id,
         sessionId,
         socket,
-        admitted:
-          request.method === DAEMON_HEARTBEAT_METHOD ||
-          request.method === DAEMON_CANCEL_REQUEST_METHOD ||
-          request.method === DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+        admitted: controlFrame,
         terminal: false,
+        idleDeadline: controlFrame
+          ? undefined
+          : new ProgressExtendableDeadline(receivedAtMs, resolveMcpRequestTimeoutMs(request)),
       };
       pending = tracked;
       this.pendingSocketRequests.add(tracked);
@@ -1290,11 +1328,21 @@ export class UnixSocketServer {
       if (this.onFrameTrace) {
         this.traceFrame("frame_parsed", request.id, deviceId);
       }
-      const response = await this.handleRequest(sessionId, socket, request, receivedAtMs, () => {
-        tracked.admitted = true;
-      });
+      const response = await this.handleRequest(
+        sessionId,
+        socket,
+        request,
+        receivedAtMs,
+        (deadline) => {
+          tracked.admitted = true;
+          tracked.idleDeadline = controlFrame ? undefined : deadline;
+        },
+      );
       if (response) {
         this.writeTerminalSocketResponse(tracked, response, deviceId);
+      } else {
+        this.pendingSocketRequests.delete(tracked);
+        this.backpressuredSocketIdle.get(socket)?.responseFlushed();
       }
     } catch (error) {
       if (error instanceof ClientRequestCancellation) {
@@ -1328,8 +1376,16 @@ export class UnixSocketServer {
       return;
     }
     pending.terminal = true;
-    this.pendingSocketRequests.delete(pending);
-    this.writeFrame(pending.socket, pending.sessionId, response, undefined, deviceId);
+    this.writeFrame(
+      pending.socket,
+      pending.sessionId,
+      response,
+      () => {
+        this.pendingSocketRequests.delete(pending);
+        this.backpressuredSocketIdle.get(pending.socket)?.responseFlushed();
+      },
+      deviceId,
+    );
   }
 
   private frameDeviceId(request: DaemonRequest): string | undefined {
@@ -1682,7 +1738,7 @@ export class UnixSocketServer {
     ownerSocket: Socket,
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
-    onAdmitted?: () => void,
+    onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
   ): Promise<DaemonResponse | undefined> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -1902,7 +1958,7 @@ export class UnixSocketServer {
               daemonShuttingDown: daemonShuttingDownFailure(),
             });
           }
-          onAdmitted?.();
+          onAdmitted?.(deadline);
           if (this.onFrameTrace) {
             this.traceFrame("admission_granted", request.id, deviceId);
           }
@@ -6565,10 +6621,10 @@ export class UnixSocketServer {
   }
 
   private textForwardFailure(key: string, toolName: string, error: unknown) {
-    // On request-deadline expiry DaemonClient.scheduleRequestTimeout fires first,
-    // so proxy/CLI callers get a plain McpTimeoutError. The primary text path
-    // clamps transport to deadline - TEXT_REQUEST_RESPONSE_MARGIN_MS and returns
-    // its indeterminate result early.
+    // The daemon's deadline answer precedes DaemonClient.scheduleRequestTimeout,
+    // which waits for budget + grace as a backstop for a silent daemon. The
+    // primary text path clamps transport to deadline - TEXT_REQUEST_RESPONSE_MARGIN_MS
+    // and returns its indeterminate result early.
     const indeterminate = getLiveTextRequestState(key)?.timeoutError(error);
     if (indeterminate) {
       return shapeToolCallError(indeterminate, { toolName, source: "MCP" });

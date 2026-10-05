@@ -1690,6 +1690,31 @@
             "required": ["stepIndex", "tool", "warnings"],
             "additionalProperties": false
           }
+        },
+        "skippedSteps": {
+          "description": "Failed optional steps that were skipped while execution continued",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              }
+            },
+            "required": ["stepIndex", "tool", "error"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],
@@ -3852,6 +3877,11 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
+                      },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
@@ -3942,6 +3972,11 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
                       },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
@@ -9691,6 +9726,11 @@
                     "checked": {
                       "type": "boolean"
                     },
+                    "enabled": {
+                      "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                      "type": "boolean",
+                      "const": false
+                    },
                     "index": {
                       "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                       "type": "integer",
@@ -9780,6 +9820,11 @@
                     },
                     "checked": {
                       "type": "boolean"
+                    },
+                    "enabled": {
+                      "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                      "type": "boolean",
+                      "const": false
                     },
                     "index": {
                       "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
@@ -11466,6 +11511,11 @@
               "checked": {
                 "type": "boolean"
               },
+              "enabled": {
+                "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                "type": "boolean",
+                "const": false
+              },
               "index": {
                 "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                 "type": "integer",
@@ -11556,6 +11606,11 @@
               },
               "checked": {
                 "type": "boolean"
+              },
+              "enabled": {
+                "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                "type": "boolean",
+                "const": false
               },
               "index": {
                 "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
@@ -14874,6 +14929,11 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
+                      },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
@@ -14964,6 +15024,11 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
                       },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
@@ -19671,6 +19736,11 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
+                      },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
@@ -19761,6 +19831,11 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
                       },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
@@ -26968,6 +27043,11 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
+                      },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
@@ -27058,6 +27138,11 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
                       },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
@@ -30627,6 +30712,11 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
+                      },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
                         "type": "integer",
@@ -30717,6 +30807,11 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "enabled": {
+                        "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
+                        "type": "boolean",
+                        "const": false
                       },
                       "index": {
                         "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",

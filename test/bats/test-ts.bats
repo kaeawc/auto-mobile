@@ -89,6 +89,16 @@ if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+if [[ "$1" == test && -n "${STUB_CHUNK_RECORD:-}" ]]; then
+  printf '%s|%s|%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" "${AUTOMOBILE_TEST_TIMING_LOG:-}" "${AUTOMOBILE_WATCHDOG_TIMING_LOG:-}" >> "$STUB_CHUNK_RECORD"
+  for arg in "$@"; do
+    if [[ "$arg" == *.test.ts ]]; then
+      printf '{"event":"end","file":"%s","t":100,"elapsedMs":1,"rss":123}\n' "$arg" >> "$AUTOMOBILE_TEST_TIMING_LOG"
+    fi
+  done
+  count="$(wc -l < "$STUB_CHUNK_RECORD" | tr -d ' ')"
+  if [[ "$count" == "${STUB_CHUNK_FAIL:-}" ]]; then exit 7; fi
+fi
 if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
 fi
@@ -1675,4 +1685,92 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
   grep -q -- '--changed=origin/main' "$BUN_ARGS_FILE"
+}
+
+
+stub_chunk_discovery() {
+  cat > "$STUB_BIN/find" <<'EOF'
+#!/usr/bin/env bash
+for ((i = 0; i < 12; i += 1)); do printf 'test/fixture%02d.test.ts\n' "$i"; done
+EOF
+  chmod +x "$STUB_BIN/find"
+}
+
+@test "unset chunking preserves one canonical invocation per shard and its args" {
+  stub_chunk_discovery
+  run env -u AUTOMOBILE_UNIT_TEST_CHUNK_FILES PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts"
+  for shard in 0 1; do
+    args="$expected"
+    for ((i = shard; i < 12; i += 2)); do args+=" $(printf 'test/fixture%02d.test.ts' "$i")"; done
+    grep -Fxq "$args" "$BUN_ARGS_FILE"
+  done
+}
+
+@test "chunking runs sequential 5 5 2 file lists with shared flags env timing and distinct reports" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  reports="$BATS_TEST_TMPDIR/reports"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  # One summary follows the three test invocations.
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
+  for chunk in 0 1 2; do
+    expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk-$chunk.xml"
+    for ((i = chunk * 5; i < (chunk + 1) * 5 && i < 12; i += 1)); do
+      expected+=" $(printf 'test/fixture%02d.test.ts' "$i")"
+    done
+    [ "$(sed -n "$((chunk + 1))p" "$BUN_ARGS_FILE")" = "$expected" ]
+    [ -s "$reports/shard-0-chunk-$chunk.xml" ]
+  done
+  timing="$PWD/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
+  [ "$(wc -l < "$timing")" -eq 12 ]
+  for ((i = 0; i < 12; i += 1)); do
+    grep -Fq "$(printf 'test/fixture%02d.test.ts' "$i")" "$timing"
+  done
+  # Exercise the same glob the timing validator uses, with the real XML parser.
+  run "$REAL_BUN" run scripts/lib/junit-testcase-timings.ts "$reports"/*.xml
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 3 ]
+}
+
+@test "a failing chunk fails the shard and lane while later chunks still run" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" STUB_CHUNK_FAIL=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [ "$(wc -l < "$record")" -eq 3 ]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+  [ "$(wc -l < scratch/test-ts-unit-shards/timing-shard-0.ndjson)" -eq 12 ]
+}
+
+@test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  # Each invocation fits 1s; their sequence cannot fit a single 1s deadline.
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
+    STUB_BUN_SLEEP_SECONDS=0.7 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [ "$(wc -l < "$record")" -lt 3 ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+}
+
+@test "chunk size rejects invalid values just like worker count before invoking Bun" {
+  for value in '' abc 1.5 0 -1 05; do
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_CHUNK_FILES="$value" \
+      bash "$SCRIPT" unit
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_TEST_CHUNK_FILES must be a positive integer"* ]]
+  done
+  [ ! -s "$BUN_ARGS_FILE" ]
 }

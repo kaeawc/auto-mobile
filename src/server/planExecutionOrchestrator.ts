@@ -9,6 +9,7 @@ import {
   ExecutePlanStepDebugInfo,
   PlanExecutionOptions,
   type PlanStepWarnings,
+  type PlanSkippedStep,
 } from "../models/ExecutePlanResult";
 import {
   TestExecutionRepository,
@@ -146,6 +147,13 @@ function planWarningsField(warnings: PlanStepWarnings[] | undefined): {
   warnings?: PlanStepWarnings[];
 } {
   return warnings?.length ? { warnings } : {};
+}
+
+/** The skippedSteps response field, omitted when no optional steps were skipped. */
+function planSkippedStepsField(skippedSteps: PlanSkippedStep[] | undefined): {
+  skippedSteps?: PlanSkippedStep[];
+} {
+  return skippedSteps?.length ? { skippedSteps } : {};
 }
 
 /**
@@ -359,6 +367,7 @@ export class PlanExecutionOrchestrator {
         // keyboard that would not dismiss changes what every later step saw
         // (#6887 review).
         ...planWarningsField(result.warnings),
+        ...planSkippedStepsField(result.skippedSteps),
         videoWarnings: finalizedVideo.videoWarnings,
         ...(finalizedVideo.videoFilePaths.length > 0
           ? {

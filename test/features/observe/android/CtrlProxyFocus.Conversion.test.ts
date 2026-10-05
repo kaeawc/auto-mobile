@@ -1,3 +1,8 @@
+import {
+  capturedAndroidControl,
+  androidEnabledObservation,
+} from "../../../helpers/androidEnabledCapture";
+import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyFocus } from "../../../../src/features/observe/android/CtrlProxyFocus";
 import type { AccessibilityNode } from "../../../../src/features/observe/android/types";
@@ -54,9 +59,15 @@ describe("CtrlProxyFocus typed node conversion", () => {
     "long-clickable",
   ] as const) {
     for (const value of [undefined, "", "false", "true", "yes"]) {
-      test(`${key}=${String(value)} retains the original string filtering`, () => {
+      test(`${key}=${String(value)} retains supplied enabled values and filters default-false flags`, () => {
         const result = focus()["convertAccessibilityNode"]({ [key]: value });
-        expect(result).toEqual(value && value !== "false" ? { [key]: value } : {});
+        expect(result).toEqual(
+          key === "enabled" && value !== undefined
+            ? { [key]: value }
+            : value && value !== "false"
+              ? { [key]: value }
+              : {},
+        );
       });
     }
   }
@@ -91,4 +102,17 @@ describe("CtrlProxyFocus typed node conversion", () => {
       { text: "Two", node: { text: "Nested" } },
     ]);
   });
+});
+
+test("captured Android disabled control survives focused-element conversion and output", () => {
+  const focusedElement = focus().convertAccessibilityNodeToElement(capturedAndroidControl("false"));
+  expect(focusedElement?.enabled).toBe("false");
+  const observation = {
+    ...androidEnabledObservation("false"),
+    focusedElement: focusedElement ?? undefined,
+  };
+  expect(
+    sanitizeObserveResult(observation, { dropElements: false, project: "full", compact: true })
+      .focusedElement?.enabled,
+  ).toBe("false");
 });

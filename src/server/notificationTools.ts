@@ -2,7 +2,7 @@ import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
@@ -198,12 +198,13 @@ export function registerNotificationTools() {
     const notificationPolicy = new NotificationPolicy(device);
     const result = await notificationPolicy.getPolicy(args.appId);
 
-    return createJSONToolResponse({
+    const response = createJSONToolResponse({
       message: result.success
         ? `Read notification policy for ${args.appId}`
         : (result.error ?? `Failed to read notification policy for ${args.appId}`),
       ...result,
     });
+    return withIsErrorOnFailure(response, result.success);
   };
 
   const setNotificationPolicyHandler = async (
@@ -215,12 +216,13 @@ export function registerNotificationTools() {
       policyAccess: args.policyAccess,
     });
 
-    return createJSONToolResponse({
+    const response = createJSONToolResponse({
       message: result.success
         ? `${args.policyAccess ? "Allowed" : "Revoked"} notification policy access for ${args.appId}`
         : (result.error ?? `Failed to set notification policy for ${args.appId}`),
       ...result,
     });
+    return withIsErrorOnFailure(response, result.success);
   };
 
   ToolRegistry.registerDeviceAware(

@@ -105,6 +105,8 @@ describe("appLifecycle registration and handler", () => {
       });
       const response = await handler()(device, args);
       expect(response.structuredContent).toMatchObject({ success: false, message: failure.error });
+      expect(response.isError).toBe(true);
+      expect(response.content[0].text).toBe(JSON.stringify({ ...failure, message: failure.error }));
       expect(refreshes).toEqual([]);
     });
   }

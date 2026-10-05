@@ -243,6 +243,56 @@
       "file": "src/daemon/videoStreamSocketServer.ts",
       "name": "setVideoStreamSocketServerForTesting",
       "reason": "Test-only dependency injection seam for the video stream socket server."
+    },
+    {
+      "file": "src/daemon/client.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "src/daemon/client.ts",
+      "name": "ZodType",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'ZodType'"
+    },
+    {
+      "file": "src/features/toolSelection/putAppFileTargetPolicy.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "src/features/toolSelection/putAppFileTargetPolicy.ts",
+      "name": "Record",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'Record'"
+    },
+    {
+      "file": "src/server/system-tray/notificationHints.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "test/features/utility/LocationRoutePlayer.typecheck.ts",
+      "name": "LocationRouteCleanupContractCheck",
+      "reason": "Compile-only type assertion included by tsconfig.json; evaluated at type-check time without a runtime importer"
+    },
+    {
+      "file": "test/features/utility/LocationRoutePlayer.typecheck.ts",
+      "name": "MockLocationCleanupOptionsCheck",
+      "reason": "Compile-only type assertion included by tsconfig.json; evaluated at type-check time without a runtime importer"
+    },
+    {
+      "file": "src/features/observe/android/ctrlProxyProtocol.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
+    },
+    {
+      "file": "src/features/observe/android/ctrlProxyProtocol.ts",
+      "name": "readonly",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'readonly'"
+    },
+    {
+      "file": "src/features/observe/ios/iosRunnerFeatureCommands.ts",
+      "name": "satisfies",
+      "reason": "ts-prune parser artifact: misreads the `satisfies` annotation as an export named 'satisfies'"
     }
   ]
 }

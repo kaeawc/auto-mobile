@@ -1605,7 +1605,8 @@ export class CtrlProxyHierarchy {
     if (node.clickable && node.clickable !== "false") {
       converted.clickable = node.clickable;
     }
-    if (node.enabled && node.enabled !== "false") {
+    // Absence (including a wire null) means enabled; preserve explicit disabled state.
+    if (node.enabled !== undefined && node.enabled !== null) {
       converted.enabled = node.enabled;
     }
     if (node.focusable && node.focusable !== "false") {

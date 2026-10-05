@@ -918,8 +918,7 @@ function violationsIn(
   return violations;
 }
 
-export function findViolations(): Violation[] {
-  const files = sourceFiles(SOURCE_ROOT);
+export function findViolations(files: string[] = sourceFiles(SOURCE_ROOT)): Violation[] {
   const program = ts.createProgram(files, { noEmit: true, noLib: true, noResolve: true });
   const checker = program.getTypeChecker();
   return files
@@ -931,7 +930,8 @@ export function findViolations(): Violation[] {
 }
 
 if (import.meta.main) {
-  const violations = findViolations();
+  const targets = process.argv.slice(2);
+  const violations = targets.length > 0 ? findViolations(targets) : findViolations();
   if (violations.length > 0) {
     console.error("error: daemon execution must use DaemonLauncher:");
     for (const violation of violations) {

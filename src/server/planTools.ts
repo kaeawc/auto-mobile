@@ -115,6 +115,17 @@ const executePlanResultSchema = z
       )
       .optional()
       .describe("Best-effort warnings from steps that still succeeded"),
+    skippedSteps: z
+      .array(
+        z.object({
+          stepIndex: z.number().int(),
+          tool: z.string(),
+          error: z.string(),
+          device: z.string().optional(),
+        }),
+      )
+      .optional()
+      .describe("Failed optional steps that were skipped while execution continued"),
   })
   .passthrough();
 

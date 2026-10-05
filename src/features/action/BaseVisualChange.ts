@@ -1177,6 +1177,7 @@ export class BaseVisualChange {
       signal?: AbortSignal;
       timeoutMs?: number;
       retryDelaysMs?: readonly number[];
+      onVerifiedForeground?: (appId: string) => void;
     } = {},
   ): Promise<boolean> {
     const verified = await this.readAndroidHomeForeground(options);
@@ -1204,6 +1205,7 @@ export class BaseVisualChange {
     signal?: AbortSignal;
     timeoutMs?: number;
     retryDelaysMs?: readonly number[];
+    onVerifiedForeground?: (appId: string) => void;
   }): Promise<boolean> {
     // Combine explicit + ambient ONCE so the reads and the abort classification
     // below observe the SAME signal (issue #6289): on the ambient-only route the
@@ -1250,6 +1252,7 @@ export class BaseVisualChange {
         // the caller's deadline; a fast cached lookup must not accept success
         // after a preceding foreground read spent the budget.
         if (isLauncher && (remainingMs() ?? 1) > 0) {
+          options.onVerifiedForeground?.(activeWindow.appId);
           return true;
         }
       } catch (error) {

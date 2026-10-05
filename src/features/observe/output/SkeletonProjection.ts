@@ -7,7 +7,7 @@ import { toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank } from "../../utility/selectionRank";
 import type { Element } from "../../../models/Element";
-import { isTruthy } from "../../../models/Element";
+import { isFalsy, isTruthy } from "../../../models/Element";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
@@ -124,6 +124,13 @@ function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
   return [left, top, right, bottom];
 }
 
+/** Apply the shared disabled-only state marker to a row or its accumulator. */
+function copyDisabledState(element: Element, row: Pick<SkeletonElement, "enabled">): void {
+  if (isFalsy(element.enabled)) {
+    row.enabled = false;
+  }
+}
+
 /**
  * Project one already-flattened diff node into the compact skeleton row shape.
  * Unlike {@link projectSkeleton}, this deliberately has no sibling or ancestry
@@ -148,6 +155,7 @@ export function projectSkeletonElement(element: Element): SkeletonElement | unde
   if (affordances.includes("toggle")) {
     entry.checked = isTruthy(element.checked);
   }
+  copyDisabledState(element, entry);
   return entry;
 }
 
@@ -162,6 +170,7 @@ interface SkeletonAccumulator {
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
+  enabled?: false;
   /** The Android IME covers every coordinate action on this app row. */
   occluded?: true;
   /**
@@ -243,6 +252,7 @@ function accumulateByIdentity(
     if (affordances.includes("toggle")) {
       acc.checked = isTruthy(el.checked);
     }
+    copyDisabledState(el, acc);
     if (acc.testTag === undefined) {
       acc.testTag = nonEmptyString(el["test-tag"]);
     }
@@ -467,6 +477,9 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   }
   if (acc.checked !== undefined) {
     entry.checked = acc.checked;
+  }
+  if (acc.enabled !== undefined) {
+    entry.enabled = acc.enabled;
   }
   if (acc.index !== undefined) {
     entry.index = acc.index;

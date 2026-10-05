@@ -31,6 +31,14 @@ Most action tools include the updated observation automatically. Use standalone
 loading, wait for the target state before acting and prefer stable text,
 resource IDs, content descriptions, or app-defined test tags over coordinates.
 
+The default observe skeleton marks a disabled Android or iOS control with
+`enabled: false`. Enabled rows omit the field. Toggle rows also carry their
+`checked` boolean; selected and focused state remain in full/raw output.
+Full/raw hierarchy and element output preserve the explicit disabled `enabled`
+value. The marker describes state and does not change `tapOn` selection or
+execution. An enabled-state transition appears in hierarchy diffs and prevents
+the settle comparator from treating the two captures as equal.
+
 ## Settled embedded observations
 
 A navigation-class action (`tapOn`, `tapAny`, `openLink`, `homeScreen`,

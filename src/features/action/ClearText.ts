@@ -45,19 +45,37 @@ function extractSearchRootGroups(
   return [...windowGroups, primaryRoots].map(uniqueRoots).filter((roots) => roots.length > 0);
 }
 
+function getEditableTextLength(
+  properties: Record<string, unknown>,
+  includeHintText: boolean,
+): number | undefined {
+  const searchable = toSearchable(properties);
+  const text = searchable.textSources.value ?? searchable.textSources.text;
+  const hint = properties["hint-text"];
+  const android =
+    searchable.className?.startsWith("android.") || searchable.className?.startsWith("androidx.");
+  // Android hierarchy nodes carry no showing-hint flag. Typed text identical to
+  // the hint is indistinguishable and counts as empty for verification/skip-clear.
+  // SendKeys includes the raw hint length for deletes so replace cannot under-delete
+  // that real text; the existing clear sequence runs before verification and typing.
+  if (!includeHintText && android && typeof hint === "string" && hint !== "" && text === hint) {
+    return 0;
+  }
+  return typeof text === "string" ? text.length : searchable.capturedTextLength;
+}
+
+/** Include hint text only when budgeting deletes, rather than checking remaining text. */
 export function getFocusedTextLength(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
+  includeHintText = false,
 ): number | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
     let textLength: number | undefined;
     for (const rootNode of rootGroup) {
       parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = parser.extractNodeProperties(node);
-        const searchable = toSearchable(nodeProperties);
-        const displayText = searchable.textSources;
-        const text = displayText.value ?? displayText.text;
-        const length = typeof text === "string" ? text.length : searchable.capturedTextLength;
+        const length = getEditableTextLength(nodeProperties, includeHintText);
         if (
           (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
           length !== undefined

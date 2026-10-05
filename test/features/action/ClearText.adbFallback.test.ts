@@ -632,6 +632,16 @@ describe("ClearText Android ADB fallback", () => {
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 
+  test("issues no key events when the focused field is already empty and showing its hint", async () => {
+    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "unavailable" });
+    const observation = focusedFieldObserve("Type here");
+    observation.viewHierarchy!.hierarchy.node!.$!["hint-text"] = "Type here";
+
+    expect(await runClearText(observation)).toEqual({ success: true });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    expect(refreshSpy).not.toHaveBeenCalled();
+  });
+
   test("uses the 200-delete default when no view hierarchy is available", async () => {
     fakeA11yService.setClearTextResult({
       success: false,

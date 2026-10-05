@@ -1188,6 +1188,49 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(clearCalls).toBe(0);
   });
 
+  test.each(["abc", "Type here", ""])(
+    "eventOnly replace types after clearing to a hint (before=%j)",
+    async (before) => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(34);
+      const { client, calls } = createTextClient();
+      const hint = "Type here";
+      const beforeObservation = focusedAndroidObservation(before, { "hint-text": hint }, 0);
+      const afterObservation = focusedAndroidObservation(hint, { "hint-text": hint }, 0);
+      const observer: SendKeysObserver = {
+        execute: async (options) =>
+          options?.minTimestamp === 0 ? afterObservation : beforeObservation,
+      };
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: client, timer: new FakeTimer() },
+      );
+      const sendKeys = new SendKeys(androidDevice, undefined, {
+        executor,
+        observer,
+        timer: new FakeTimer(),
+        timestampProvider: { now: async () => 0 },
+      });
+
+      expect(
+        await sendKeys.execute([
+          { action: "type", text: "zz", operation: "replace", mode: "eventOnly" },
+        ]),
+      ).toMatchObject({ success: true });
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
+        ...(before.length > 0
+          ? [`shell input keyevent ${Array<string>(before.length).fill("KEYCODE_DEL").join(" ")}`]
+          : []),
+        "shell input keyevent KEYCODE_Z",
+        "shell input keyevent KEYCODE_Z",
+      ]);
+      expect(calls).toEqual([]);
+    },
+  );
+
   test.each(["replace", "clear"] as const)(
     "verifies Android key-event %s before reporting success or typing",
     async (operation) => {

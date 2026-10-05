@@ -554,7 +554,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!focusResult.success) {
       return focusResult;
     }
-    const textLength = getFocusedTextLength(focusResult.hierarchy);
+    const textLength = getFocusedTextLength(focusResult.hierarchy, undefined, true);
     if (textLength === undefined) {
       return {
         success: false,
@@ -1716,7 +1716,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (operation === "replace") {
-      const textLength = getFocusedTextLength(focusResult.hierarchy);
+      const textLength = getFocusedTextLength(focusResult.hierarchy, undefined, true);
       if (textLength === undefined) {
         return {
           success: false,

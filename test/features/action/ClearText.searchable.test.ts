@@ -1,6 +1,65 @@
 import { expect, test } from "bun:test";
-import { getFocusedTextLength, hasFocusedTextInput } from "../../../src/features/action/ClearText";
+import {
+  getFocusedTextLength,
+  hasFocusedTextInput,
+  verifyKeyEventClear,
+} from "../../../src/features/action/ClearText";
 const capture = (node: object) => ({ hierarchy: { node } });
+
+test.each([
+  { text: "Type here", hint: "Type here", remaining: 0 },
+  { text: "actual", hint: "Type here", remaining: 6 },
+  { text: "actual", hint: undefined, remaining: 6 },
+  { text: "actual", hint: "", remaining: 6 },
+  { text: "Type here ", hint: "Type here", remaining: 10 },
+])(
+  "key-event clear verification distinguishes Android hints: %j",
+  async ({ text, hint, remaining }) => {
+    const hierarchy = capture({
+      class: "android.widget.EditText",
+      focused: true,
+      text,
+      "hint-text": hint,
+    });
+    expect(
+      await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+    ).toEqual(
+      remaining === 0
+        ? { success: true }
+        : {
+            success: false,
+            error: `Field was not fully cleared: ${remaining} UTF-16 units remain`,
+          },
+    );
+    expect(getFocusedTextLength(hierarchy)).toBe(remaining);
+    expect(getFocusedTextLength(hierarchy, undefined, true)).toBe(text.length);
+  },
+);
+
+test("key-event clear verification keeps an empty Compose field without captured text unreadable", async () => {
+  const hierarchy = capture({ focused: true, actions: ["set_text"] });
+  expect(getFocusedTextLength(hierarchy)).toBeUndefined();
+  expect(
+    await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+  ).toEqual({
+    success: false,
+    error: "Cannot verify key-event clear: focused field text length is unreadable",
+  });
+});
+
+test("focused iOS text equal to its placeholder remains real text", () => {
+  expect(
+    getFocusedTextLength(
+      capture({
+        class: "UITextField",
+        focused: true,
+        actions: ["set_text"],
+        value: "Hint",
+        "hint-text": "Hint",
+      }),
+    ),
+  ).toBe(4);
+});
 test("focused text length uses editable captured value and preserves empty values", () => {
   expect(
     getFocusedTextLength(

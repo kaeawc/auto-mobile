@@ -54,6 +54,15 @@ export class OverlayEventBuffer {
     };
   }
 
+  /**
+   * Begin a new sequence epoch (a fresh show): drop pending events and the high-water mark.
+   * The cumulative dropped count is kept; it is documented as cumulative until dismiss/release.
+   */
+  startEpoch(): void {
+    this.events = [];
+    this.lastSequence = undefined;
+  }
+
   /** Clear pending events, retaining the high-water mark for reconnect deduplication. */
   clear(): void {
     this.events = [];

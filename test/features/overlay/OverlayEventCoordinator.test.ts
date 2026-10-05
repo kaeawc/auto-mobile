@@ -183,12 +183,93 @@ describe("OverlayEventCoordinator", () => {
       pendingCount: 0,
       lastSequence: 2,
     });
-    expect(await awaitEvent()).toMatchObject({ reason: "dismissed", pendingCount: 0 });
+    // The consumed terminal entry is gone; nothing is retained until release.
+    expect(coordinator.counts(scope, "panel")).toBeUndefined();
     expect(client.getOverlayListenerCount()).toBe(0);
     coordinator.show(scope, "panel", client);
+    client.emitOverlayEvent(event(1));
     client.emitOverlayEvent(event(2));
-    client.emitOverlayEvent(event(3));
-    expect((await awaitEvent()).event?.sequence).toBe(3);
+    expect((await awaitEvent()).event?.sequence).toBe(1);
+  });
+  test("a consumed device-dismissed entry is removed, but an unconsumed one stays deliverable", async () => {
+    coordinator.show(scope, "panel", client);
+    client.emitOverlayEvent(event(1, "panel", "dismissed"));
+    expect(coordinator.counts(scope, "panel")?.pendingCount).toBe(1);
+    expect((await awaitEvent()).event?.kind).toBe("dismissed");
+    expect(coordinator.counts(scope, "panel")).toBeUndefined();
+    expect(client.getOverlayListenerCount()).toBe(0);
+  });
+  test("a terminal entry is kept while another waiter still needs to settle", async () => {
+    const first = awaitEvent();
+    const second = awaitEvent();
+    client.emitOverlayEvent(event(1, "panel", "dismissed"));
+    expect((await first).event?.kind).toBe("dismissed");
+    expect((await second).reason).toBe("dismissed");
+    expect(coordinator.counts(scope, "panel")).toBeUndefined();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+  test("a show starts a fresh sequence epoch so a restarted device's events are accepted", async () => {
+    coordinator.show(scope, "panel", client);
+    for (let sequence = 1; sequence <= 40; sequence++) {
+      client.emitOverlayEvent(event(sequence));
+    }
+    expect(coordinator.counts(scope, "panel")?.lastSequence).toBe(40);
+    // CtrlProxy restarts: its in-memory ledger starts again at 1 for the re-shown id.
+    coordinator.show(scope, "panel", client);
+    expect(coordinator.counts(scope, "panel")).toEqual({ pendingCount: 0, droppedCount: 0 });
+    client.emitOverlayEvent(event(1));
+    expect(await awaitEvent()).toMatchObject({ event: { sequence: 1 }, lastSequence: 1 });
+    // Within the new epoch the high-water rule still applies.
+    client.emitOverlayEvent(event(1));
+    client.emitOverlayEvent(event(2));
+    client.emitOverlayEvent(event(2));
+    expect(coordinator.counts(scope, "panel")).toMatchObject({ pendingCount: 1, lastSequence: 2 });
+  });
+  test("a re-show keeps the cumulative dropped count that status documents", () => {
+    coordinator.show(scope, "panel", client);
+    for (let sequence = 1; sequence <= OVERLAY_EVENT_BUFFER_CAPACITY + 1; sequence++) {
+      client.emitOverlayEvent(event(sequence));
+    }
+    coordinator.show(scope, "panel", client);
+    expect(coordinator.counts(scope, "panel")).toEqual({ pendingCount: 0, droppedCount: 1 });
+  });
+  test("replaceShown ends the replaced overlay's waiters as dismissed and keeps the new one", async () => {
+    coordinator.show(scope, "panel", client);
+    coordinator.show(scope, "second", client);
+    const waiting = awaitEvent();
+    client.emitOverlayEvent(event(1, "second"));
+    coordinator.replaceShown(scope.deviceId, "second");
+    expect(await waiting).toEqual({ reason: "dismissed", pendingCount: 0, droppedCount: 0 });
+    expect(coordinator.counts(scope, "panel")).toBeUndefined();
+    expect(coordinator.counts(scope, "second")?.pendingCount).toBe(1);
+    expect(client.getOverlayListenerCount()).toBe(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+  test("replaceShown leaves other devices and unshown awaited ids alone", () => {
+    const otherDevice = { ...scope, deviceId: "other" };
+    const otherClient = new FakeCtrlProxy(timer);
+    coordinator.show(otherDevice, "panel", otherClient);
+    const waiting = coordinator.awaitEvent(scope, "later", client, { timeoutMs: 10 });
+    coordinator.replaceShown(scope.deviceId, "second");
+    expect(coordinator.counts(otherDevice, "panel")).toBeDefined();
+    timer.advanceTime(10);
+    return expect(waiting).resolves.toMatchObject({ timedOut: true });
+  });
+  test("session release clears a co-tenant's buffers, waiters and listener like the status store", async () => {
+    const coTenant = { ...scope, sessionUuid: "two" };
+    coordinator.show(scope, "panel", client);
+    coordinator.show(coTenant, "second", client);
+    store.record(scope, "show", { id: "panel" }, { success: true });
+    store.record(coTenant, "show", { id: "second" }, { success: true });
+    client.emitOverlayEvent(event(1, "second"));
+    const waiting = coordinator.awaitEvent(coTenant, "second", client, { afterSequence: 5 });
+    coordinator.releaseSession("one");
+    expect(store.status(coTenant).overlays).toEqual([]);
+    expect((await waiting).reason).toBe("dismissed");
+    expect(coordinator.counts(coTenant, "second")).toBeUndefined();
+    expect(coordinator.counts(scope, "panel")).toBeUndefined();
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
   test("device dismissed resolves an active waiter with the terminal event", async () => {
     const waiting = awaitEvent();

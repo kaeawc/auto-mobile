@@ -18,6 +18,11 @@ import {
   MCP_ARGUMENT_BUDGET_CASES,
   MALFORMED_MCP_BUDGETS,
 } from "../helpers/mcpArgumentBudgetCases";
+import {
+  DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+  MAX_OVERLAY_EVENT_TIMEOUT_MS,
+} from "../../src/features/overlay/overlayEventTimeout";
+import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../../src/features/observe/waitForTimeout";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -1492,6 +1497,70 @@ describe("argument budget deadline gaps", () => {
         process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = previousFloor;
       }
     }
+  });
+  describe("overlay awaitEvent", () => {
+    const resolve = (args: unknown, timeoutMs?: number): number =>
+      resolveMcpRequestTimeoutMs({
+        id: "overlay-await",
+        type: "mcp_request",
+        method: "tools/call",
+        timeoutMs,
+        params: { name: "overlay", arguments: args },
+      });
+    const headroom = WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
+    test("the default wait outlives the tool's own default timeout", () => {
+      expect(resolve({ action: "awaitEvent", id: "panel" })).toBe(
+        DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+      );
+      expect(resolve({ action: "awaitEvent", id: "panel" })).toBeGreaterThan(
+        DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+      );
+    });
+    test("a supplied timeoutMs gets headroom, including the 60 s maximum", () => {
+      expect(resolve({ action: "awaitEvent", timeoutMs: 45_000 })).toBe(45_000 + headroom);
+      expect(resolve({ action: "awaitEvent", timeoutMs: MAX_OVERLAY_EVENT_TIMEOUT_MS })).toBe(
+        MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+      );
+      expect(resolve({ action: "awaitEvent", timeoutMs: 10 })).toBe(10 + headroom);
+    });
+    test("an over-maximum value is bounded by the tool's maximum", () => {
+      expect(resolve({ action: "awaitEvent", timeoutMs: 600_000 })).toBe(
+        MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+      );
+      expect(resolve({ action: "awaitEvent", timeoutMs: Number.MAX_SAFE_INTEGER })).toBe(
+        MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+      );
+    });
+    test("malformed values and arguments use the default wait", () => {
+      for (const value of MALFORMED_MCP_BUDGETS) {
+        const result = resolve({ action: "awaitEvent", timeoutMs: value });
+        expect(result).toBeLessThanOrEqual(MAX_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+        if (value !== Number.MAX_SAFE_INTEGER) {
+          expect(result).toBe(DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+        }
+      }
+      for (const args of [null, "wrong", [], undefined, {}]) {
+        expect(resolve(args)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+    });
+    test("other overlay actions and a larger request timeout are unchanged", () => {
+      for (const action of ["show", "update", "dismiss", "status", "toString", 1, undefined]) {
+        expect(resolve({ action, timeoutMs: 60_000 })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+      expect(resolve({ action: "awaitEvent", timeoutMs: 60_000 }, 1_000_000)).toBe(1_000_000);
+    });
+    test("hostile tool names never reach a resolver", () => {
+      for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+        expect(
+          resolveMcpRequestTimeoutMs({
+            id: "hostile",
+            type: "mcp_request",
+            method: "tools/call",
+            params: { name, arguments: { action: "awaitEvent" } },
+          }),
+        ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+    });
   });
   test("putAppFile legacy single-file shape uses one push floor", () => {
     expect(

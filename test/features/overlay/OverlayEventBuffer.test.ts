@@ -39,4 +39,14 @@ describe("OverlayEventBuffer", () => {
     });
     expect(buffer.take({})?.sequence).toBe(3);
   });
+  test("startEpoch drops pending events and the high-water mark but keeps the dropped count", () => {
+    const buffer = new OverlayEventBuffer();
+    for (let sequence = 1; sequence <= OVERLAY_EVENT_BUFFER_CAPACITY + 1; sequence++) {
+      buffer.push(event(sequence));
+    }
+    buffer.startEpoch();
+    expect(buffer.status()).toEqual({ pendingCount: 0, droppedCount: 1 });
+    expect(buffer.push(event(1))).toBe(true);
+    expect(buffer.push(event(1))).toBe(false);
+  });
 });

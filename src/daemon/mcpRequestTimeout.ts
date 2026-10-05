@@ -6,6 +6,10 @@ import {
 import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../features/navigation/exploreTimeout";
 import {
+  DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+  MAX_OVERLAY_EVENT_TIMEOUT_MS,
+} from "../features/overlay/overlayEventTimeout";
+import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
   DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
@@ -371,6 +375,23 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
   );
 }
 
+function resolveOverlayAwaitBudgetMs(args: Record<string, unknown>): number {
+  // Only `awaitEvent` waits; every other overlay action keeps the default deadline. The
+  // tool's own maximum bounds the wait, so a larger value (rejected by its schema anyway)
+  // cannot inflate the deadline past that maximum plus headroom.
+  if (args.action !== "awaitEvent") {
+    return 0;
+  }
+  return resolveArgumentTimeoutBudgetMs(
+    Math.min(
+      positiveFiniteNumber(args.timeoutMs) ?? DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+      MAX_OVERLAY_EVENT_TIMEOUT_MS,
+    ),
+    DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
 const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unknown>) => number> =
   new Map([
     [
@@ -422,6 +443,7 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
       (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
     ],
     ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
+    ["overlay", resolveOverlayAwaitBudgetMs],
   ]);
 
 function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {

@@ -9,8 +9,12 @@ import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError } from "../../models/ActionableError";
 
-export const DEFAULT_OVERLAY_EVENT_TIMEOUT_MS = 30_000;
-export const MAX_OVERLAY_EVENT_TIMEOUT_MS = 60_000;
+import {
+  DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+  MAX_OVERLAY_EVENT_TIMEOUT_MS,
+} from "./overlayEventTimeout";
+
+export { DEFAULT_OVERLAY_EVENT_TIMEOUT_MS, MAX_OVERLAY_EVENT_TIMEOUT_MS };
 export interface OverlayEventSource {
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void;
 }
@@ -55,7 +59,12 @@ export class OverlayEventCoordinator {
       }
     }
     const entry = this.watch(scope, id, client);
-    entry.buffer.clear();
+    // A show starts a fresh sequence epoch: the device's sequence ledger is in memory and a
+    // CtrlProxy restart restarts it at 1, so the previous showing's high-water mark must not
+    // reject the new showing's events. Pushes carry only id/sequence/timestamp (no show
+    // generation), so a late event from the PREVIOUS showing cannot be told apart from the
+    // new showing's events and is accepted if it arrives after this reset.
+    entry.buffer.startEpoch();
     entry.shown = true;
     entry.terminal = false;
     this.subscribe(scope.deviceId, client);
@@ -79,10 +88,24 @@ export class OverlayEventCoordinator {
     const entry = this.watch(scope, id, client);
     const immediate = this.take(entry, options);
     if (immediate) {
+      this.dropConsumedTerminal(entry);
       this.pruneSources();
       return immediate;
     }
     return this.wait(entry, options);
+  }
+
+  /**
+   * A successful show of `keepId` replaced whatever the device showed before: the device holds
+   * one overlay, so every other shown overlay ends. Waiters settle as dismissed.
+   */
+  replaceShown(deviceId: string, keepId: string): void {
+    for (const entry of this.entries.values()) {
+      if (entry.scope.deviceId === deviceId && entry.id !== keepId && entry.shown) {
+        this.remove(entry);
+      }
+    }
+    this.pruneSources();
   }
 
   dismiss(deviceId: string, id?: string): void {
@@ -95,9 +118,11 @@ export class OverlayEventCoordinator {
   }
 
   releaseSession(sessionUuid: string): void {
-    this.store.clearSession(sessionUuid);
+    // The store forgets every scope on each device the session touched, so release exactly
+    // those devices here: status and event state must never disagree about a co-tenant.
+    const devices = new Set(this.store.clearSession(sessionUuid));
     for (const entry of this.entries.values()) {
-      if (entry.scope.sessionUuid === sessionUuid) {
+      if (entry.scope.sessionUuid === sessionUuid || devices.has(entry.scope.deviceId)) {
         this.remove(entry);
       }
     }
@@ -231,6 +256,7 @@ export class OverlayEventCoordinator {
         this.timer.clearTimeout(timeoutHandle);
       }
       entry.waiters.delete(notify);
+      this.dropConsumedTerminal(entry);
       if (
         !entry.shown &&
         !entry.terminal &&
@@ -240,6 +266,18 @@ export class OverlayEventCoordinator {
         this.entries.delete(scopeKey(entry.scope, entry.id));
       }
       this.pruneSources();
+    }
+  }
+
+  /** A device-dismissed entry has nothing left to deliver once its events are consumed. */
+  private dropConsumedTerminal(entry: Entry): void {
+    if (
+      entry.terminal &&
+      entry.waiters.size === 0 &&
+      entry.buffer.status().pendingCount === 0 &&
+      this.entries.get(scopeKey(entry.scope, entry.id)) === entry
+    ) {
+      this.entries.delete(scopeKey(entry.scope, entry.id));
     }
   }
 

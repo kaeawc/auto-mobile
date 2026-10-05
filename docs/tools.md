@@ -602,7 +602,8 @@ and device unbinding clear the corresponding buffers and host status.
 scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`, or
 `dismissed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
 are valid only for `awaitEvent`. Its `timeoutMs` defaults to 30000 ms and cannot
-exceed 60000 ms. Request cancellation preserves the abort reason and removes the
+exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
+headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
 waiter's timer and abort listener. When the client supplies an MCP progress callback,
 wait start/finish notifications are best-effort and do not delay event delivery. Background subscriptions for shown overlays
 remain active to buffer events between calls.
@@ -625,11 +626,19 @@ awaiting that id from another scope is rejected until it is shown in that scope.
 Awaiting an unknown id can establish ownership without a show; an unused scope is
 removed on timeout/abort. Multiple overlays on a device share one subscription.
 Explicit successful dismiss (id or all) clears buffers across that device's host
-sessions. Show clears pending events for that id but retains sequence and overflow
-bookkeeping in the same scope. A terminal `dismissed` event remains buffered until
-consumed or the next explicit show/dismiss. Consuming it clears all remaining
-pending events; its high-water mark remains until explicit dismiss or scope release.
-Further awaits return `reason: "dismissed"` when no matching terminal event remains.
+sessions. Each show starts a fresh sequence epoch for that id: pending events and the
+sequence high-water mark are cleared (the device's sequence ledger is in memory, so a
+CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCount`
+is kept until explicit dismiss or scope release. Events carry only id, sequence and
+timestamp, so a late event from the previous showing cannot be told apart from the new
+showing's and is accepted if it arrives after the new show. A successful show of
+another id replaces the device's overlay: the replaced overlay's waiters settle with
+`reason: "dismissed"` and its buffers are removed. A terminal `dismissed` event remains
+buffered until consumed or the next explicit show/dismiss. Consuming it clears all
+remaining pending events and, once no waiter remains, removes the entry, so a later
+await behaves as for an unknown id (it waits, then times out). Session release clears
+the buffers, waiters and subscription of every scope on each device the release
+clears from host status, so event state and status never disagree.
 The device subscription ends when no nonterminal overlays remain.
 
 ```json

@@ -305,6 +305,62 @@ describe("overlay MCP tool", () => {
     ).toHaveLength(1);
   });
 
+  test("showing another overlay settles the replaced overlay's waiter as dismissed", async () => {
+    await call({ action: "show", spec });
+    const waiting = call({ action: "awaitEvent", id: "panel" });
+    await call({ action: "show", spec: { ...spec, id: "second" } });
+    expect((await waiting).payload).toMatchObject({ success: true, reason: "dismissed" });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    client.emitOverlayEvent(event(1, "second"));
+    expect((await call({ action: "awaitEvent", id: "second" })).payload.event?.sequence).toBe(1);
+  });
+
+  test("a failed show leaves the previously shown overlay's waiter waiting", async () => {
+    await call({ action: "show", spec });
+    const waiting = call({ action: "awaitEvent", id: "panel", timeoutMs: 10 });
+    client.setOverlayResult({ success: false, error: "Refused" });
+    await call({ action: "show", spec: { ...spec, id: "second" } });
+    timer.advanceTime(10);
+    expect((await waiting).payload.timedOut).toBe(true);
+  });
+
+  test("release without a snapshot device clears a co-tenant's buffers, waiters and listener", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "show", spec: { ...spec, id: "second" }, sessionUuid: "two" });
+    client.emitOverlayEvent(event(1, "second"));
+    const waiting = call({
+      action: "awaitEvent",
+      id: "second",
+      afterSequence: 9,
+      sessionUuid: "two",
+    });
+    SessionReleaseBroadcaster.emit("one", "released");
+    expect((await waiting).payload.reason).toBe("dismissed");
+    expect((await call({ action: "status", sessionUuid: "two" })).payload.overlays).toEqual([]);
+    expect(client.getOverlayListenerCount()).toBe(0);
+    const after = call({ action: "awaitEvent", id: "second", sessionUuid: "two", timeoutMs: 10 });
+    timer.advanceTime(10);
+    expect((await after).payload).toEqual({
+      success: true,
+      timedOut: true,
+      pendingCount: 0,
+      droppedCount: 0,
+    });
+  });
+
+  test("re-showing an id after a device restart accepts its sequence 1 again", async () => {
+    await call({ action: "show", spec });
+    for (let sequence = 1; sequence <= 3; sequence++) {
+      client.emitOverlayEvent(event(sequence));
+    }
+    await call({ action: "show", spec });
+    client.emitOverlayEvent(event(1));
+    expect((await call({ action: "awaitEvent", id: "panel" })).payload).toMatchObject({
+      event: { sequence: 1 },
+      lastSequence: 1,
+    });
+  });
+
   test("re-registration disposes the previous coordinator and its subscriptions", async () => {
     const lifecycle = new FakeOverlayEventLifecycle();
     unsubscribe();

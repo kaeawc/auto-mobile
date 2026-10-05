@@ -3,11 +3,11 @@ import { z as specZ, type ZodTypeAny } from "zod";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import { OverlayEventCoordinator } from "../features/overlay/OverlayEventCoordinator";
 import {
-  OverlayEventCoordinator,
   DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
   MAX_OVERLAY_EVENT_TIMEOUT_MS,
-} from "../features/overlay/OverlayEventCoordinator";
+} from "../features/overlay/overlayEventTimeout";
 import { DaemonState } from "../daemon/daemonState";
 import type { OverlayMutation } from "../features/overlay/OverlayStatusStore";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -376,6 +376,9 @@ async function performMutation(
     };
   }
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
+  if (args.action === "show" && result.success && target.id) {
+    events.replaceShown(scope.deviceId, target.id);
+  }
   const lastResult = store.record(scope, args.action, target, result);
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);

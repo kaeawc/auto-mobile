@@ -75,4 +75,7 @@ echo "::group::Failing tests"
 bash "$(dirname "${BASH_SOURCE[0]}")/summarize-bun-failures.sh" "${log_file}" || true
 echo "::endgroup::"
 tail -n 200 "${log_file}"
+if [[ "${status}" -eq 124 ]]; then
+  { grep -h 'wall-clock budget' "${log_file}" || true; } | sed 's/^/::error::coverage: /' >&2
+fi
 exit "${status}"

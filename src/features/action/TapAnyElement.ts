@@ -1674,10 +1674,11 @@ export class TapAnyElement extends BaseVisualChange {
         },
       );
 
-      targetDisplay?.assertCurrent();
+      this.checkTapDeliveryDisplay(result, targetDisplay?.assertCurrent, signal);
       return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
+      this.rethrowObservationAbort(error, signal, options.display !== undefined);
       const errorMsg = errorMessage(error);
       logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
       if (error instanceof StaleDisplayError) {
@@ -1694,6 +1695,19 @@ export class TapAnyElement extends BaseVisualChange {
         },
         error,
       );
+    }
+  }
+
+  private checkTapDeliveryDisplay(
+    result: TapAnyElementResult,
+    assertCurrent?: () => void,
+    signal?: AbortSignal,
+  ): void {
+    // A successful block returns only after the selected tap was delivered.
+    if (result.success) {
+      this.checkPostActionDisplay(result, assertCurrent, signal);
+    } else {
+      assertCurrent?.();
     }
   }
 

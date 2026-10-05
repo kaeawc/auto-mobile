@@ -110,6 +110,22 @@ describe("nightly XCTestRunner Thread Sanitizer lane", () => {
 });
 
 describe("nightly unit diagnostics", () => {
+  test("always uploads partial shard timings and JUnit reports after failure or timeout", () => {
+    const upload = stepNamed(
+      loadJobSteps(WORKFLOW, "macos-node-unit-tests"),
+      "Upload unit test diagnostics",
+    );
+    expect(upload?.uses).toBe("actions/upload-artifact@v6");
+    expect(upload?.if).toBe("always()");
+    expect(upload?.with?.name).toBe("node-unit-test-diagnostics-${{ runner.os }}");
+    expect(String(upload?.with?.path).trim().split("\n")).toEqual([
+      "scratch/test-ts-unit-shards/**",
+      "scratch/timing-unit-reports/**",
+    ]);
+    expect(upload?.with?.["if-no-files-found"]).toBe("ignore");
+    expect(upload?.with?.["retention-days"]).toBe(7);
+  });
+
   test("uses all three macOS cores for the complete unit lane", () => {
     const step = stepNamed(
       loadJobSteps(WORKFLOW, "macos-node-unit-tests"),

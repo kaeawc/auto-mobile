@@ -1,3 +1,4 @@
+import { TextIndeterminateError } from "../features/action/textTransportTimeout";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -31,9 +32,11 @@ export function shapeToolCallError(
       {
         type: "text",
         text:
-          error instanceof SessionRecoveryAssignmentError
-            ? JSON.stringify({ error: { message, ...error.details } })
-            : `Error: ${message}`,
+          error instanceof TextIndeterminateError
+            ? JSON.stringify({ success: false, error: message, retryable: false })
+            : error instanceof SessionRecoveryAssignmentError
+              ? JSON.stringify({ error: { message, ...error.details } })
+              : `Error: ${message}`,
       },
     ],
     isError: true,

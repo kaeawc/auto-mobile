@@ -3,6 +3,7 @@ import { SharedTextDelegate } from "../../../../src/features/observe/shared/Shar
 import type { DelegateContext } from "../../../../src/features/observe/shared/types";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { RequestManager } from "../../../../src/utils/RequestManager";
+import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 
 function createFakeContext(overrides?: Partial<DelegateContext>): {
   context: DelegateContext;
@@ -48,6 +49,26 @@ async function callAndResolve<T>(
 }
 
 describe("SharedTextDelegate", () => {
+  it("forwards set-text dispatch, cancellation and deadline without scaling Android defaults", async () => {
+    const h = createIosDelegateHarness();
+    const controller = new AbortController();
+    let dispatches = 0;
+    const pending = new SharedTextDelegate(h.context).requestSetText("a".repeat(1000), {
+      abortSignal: controller.signal,
+      deadlineMs: h.timer.now() + 3000,
+      onDispatch: () => {
+        dispatches++;
+      },
+    });
+    await Promise.resolve();
+    expect(dispatches).toBe(1);
+    h.advanceTime(3000);
+    await expect(pending).resolves.toEqual({
+      success: false,
+      totalTimeMs: 3000,
+      error: "Set text timed out after 3000ms",
+    });
+  });
   describe("cancelScreenshotBackoff", () => {
     it("cancels on every text operation", async () => {
       const { context, sent, cancelCalls } = createFakeContext();

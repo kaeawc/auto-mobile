@@ -1,7 +1,9 @@
+import { DispatchedObservationError } from "../../../../src/models/DispatchedObservationError";
+import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";
 import { harness } from "./displaySwipeHarness";
-import type { BootedDevice } from "../../../../src/models";
+import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import { runSessionDisplayPin } from "../../../../src/server/sessionDisplayPin";
 import { createStructuredToolResponse } from "../../../../src/utils/toolUtils";
 import { encodeIosDollar } from "../../../fixtures/hierarchyArbitraries";
@@ -125,6 +127,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
           observation: { display: { key: "external" } },
         });
         expect(h.legs()).toHaveLength(n);
+        expect(h.legs().every((leg) => leg.duration === 600)).toBe(true);
         expect(
           h.observe.getExecuteOptions().every((options) => options.display === "external"),
         ).toBe(true);
@@ -138,7 +141,11 @@ for (const route of ["ctrlproxy", "adb"] as const) {
         expect(h.talkback).not.toHaveBeenCalled();
         expect(h.voiceover).not.toHaveBeenCalled();
         if (route === "ctrlproxy") {
-          expect(h.ctrl.getSwipeHistory().every((leg) => leg.displayId === 2)).toBe(true);
+          expect(
+            h.ctrl
+              .getDragHistory()
+              .every((leg) => leg.displayId === 2 && leg.holdDurationMs === 100),
+          ).toBe(true);
           expect(h.commands()).toEqual([]);
         } else {
           expect(
@@ -175,10 +182,10 @@ for (const route of ["ctrlproxy", "adb"] as const) {
     test("dispatch failure is a failure result and stops the search", async () => {
       const h = harness({ route });
       if (route === "ctrlproxy") {
-        h.ctrl.setSwipeResult({ success: false, error: "search swipe failed" });
+        h.ctrl.setDragResult({ success: false, error: "search swipe failed", totalTimeMs: 0 });
       } else {
         h.adb.setCommandResult(
-          "shell input touchscreen -d 2 swipe 100 180 100 20 300",
+          "shell input touchscreen -d 2 swipe 100 180 100 30 600",
           "Error: search swipe failed",
         );
       }
@@ -265,8 +272,8 @@ for (const route of ["ctrlproxy", "adb"] as const) {
           expect(h.legs()[0]).toMatchObject(
             lookFor
               ? includeSystemInsets
-                ? { x1: 100, y1: 180, x2: 100, y2: 20 }
-                : { x1: 110, y1: 168, x2: 110, y2: 72 }
+                ? { x1: 100, y1: 180, x2: 100, y2: 30 }
+                : { x1: 110, y1: 168, x2: 110, y2: 78 }
               : includeSystemInsets
                 ? { x1: 100, y1: 160, x2: 100, y2: 40 }
                 : { x1: 110, y1: 156, x2: 110, y2: 84 },
@@ -281,7 +288,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       const searching = harness({ route, foundAfter: 1 });
       const result = await searching.action.execute(search);
       expect(result.success).toBe(true);
-      expect(searching.legs()[0]).toMatchObject({ x1: 100, y1: 180, x2: 100, y2: 20 });
+      expect(searching.legs()[0]).toMatchObject({ x1: 100, y1: 180, x2: 100, y2: 30 });
     });
     test("display lookFor explicitly rejects boomerang before observing", async () => {
       const h = harness({ route });
@@ -302,17 +309,63 @@ for (const route of ["ctrlproxy", "adb"] as const) {
 }
 for (const route of ["ctrlproxy", "adb"] as const) {
   for (const capture of [3, 4, 5]) {
-    test(`real post-action pipeline refuses wrong panel at capture ${capture} via ${route}`, async () => {
-      const h = harness({ route, foundAfter: Infinity });
+    test(`real post-action pipeline preserves delivery after wrong panel at capture ${capture} via ${route}`, async () => {
+      const frames: ObserveResult[] = [];
+      const h = harness({
+        route,
+        foundAfter: 1,
+        observationFor: ({ observation }) => {
+          const capture =
+            observation.display.key === "external"
+              ? observation
+              : {
+                  ...observation,
+                  viewHierarchy: {
+                    ...observation.viewHierarchy,
+                    hierarchy: {
+                      node: {
+                        $: {
+                          text: "Found",
+                          bounds: "[0,0][20,20]",
+                          class: "android.widget.TextView",
+                        },
+                      },
+                    },
+                  },
+                };
+          frames.push(capture);
+          return capture;
+        },
+      });
       h.useRealObservedInteraction();
       h.onObserve((count) => {
         h.wrongPanel(count === capture);
       });
       const result = await h.action.execute(search);
-      expect(result.success).toBe(false);
-      expect(result.staleDisplay?.retry).toBe("observe");
+      if (capture === 3) {
+        // The first post-dispatch read failed: this is delivery, not a safe refusal.
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("gesture was dispatched");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(result.observation).toBeUndefined();
+        expect(result.staleDisplay?.retry).toBe("observe");
+        expect(h.observe.getExecuteCallCount()).toBe(capture);
+      } else {
+        // A later settle read cannot erase the good selected-panel capture.
+        expect(result).toMatchObject({
+          success: true,
+          found: true,
+          observation: { display: { key: "external" }, settled: false },
+          element: { text: "Found", bounds: { left: 80, top: 80, right: 120, bottom: 120 } },
+        });
+        expect(result.observation?.freshness?.warning).toContain("display settle");
+        expect(result.staleDisplay?.retry).toBe("observe");
+        expect(h.observe.getExecuteCallCount()).toBe(capture);
+        expect(result.observation?.viewHierarchy?.displayId).toBe(2);
+        expect(result.observation?.viewHierarchy).toEqual(frames[2].viewHierarchy);
+        expect(frames[capture - 1].viewHierarchy?.displayId).toBe(0);
+      }
       expect(h.legs()).toHaveLength(1);
-      expect(h.observe.getExecuteCallCount()).toBe(capture);
     });
   }
 }
@@ -345,4 +398,66 @@ test("default lookFor stays on shared default observation path", async () => {
     true,
   );
   expect(h.legs()).toEqual([]);
+});
+
+for (const route of ["ctrlproxy", "adb"] as const) {
+  for (const maxTime of [600, 3000]) {
+    for (const capture of [4, 5]) {
+      test(`not-found wrong-panel settle stops without another swipe: ${route}, ${maxTime}, capture ${capture}`, async () => {
+        const h = harness({ route, foundAfter: Infinity });
+        h.useRealObservedInteraction();
+        h.onObserve((count) => h.wrongPanel(count === capture));
+        const result = await h.action.execute({ ...search, lookFor: { text: "Found", maxTime } });
+        expect(result.success).toBe(false);
+        expect(result.staleDisplay?.retry).toBe("observe");
+        expect(result.error).toContain("gesture was dispatched");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(h.legs()).toHaveLength(1);
+        expect(h.observe.getExecuteCallCount()).toBe(capture);
+      });
+    }
+  }
+  for (const capture of [2, 4, 5]) {
+    test(`lookFor read failure respects dispatch boundary: ${route}, capture ${capture}`, async () => {
+      const h = harness({ route, foundAfter: Infinity, stale: true, unchanged: true });
+      h.onObserve((count) => {
+        if (count === capture) {
+          throw new Error("search read unavailable");
+        }
+      });
+      const result = await h.action.execute(search);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("search read unavailable");
+      if (capture === 2) {
+        expect(result.error).not.toContain("gesture was dispatched");
+        expect(h.legs()).toHaveLength(0);
+      } else {
+        expect(result.error).toContain("gesture was dispatched");
+        expect(result.error).toContain("Do not retry automatically");
+        expect(h.legs()).toHaveLength(1);
+      }
+    });
+  }
+}
+
+test("legacy display swipe failure keeps typed stale guidance and delivery", async () => {
+  const h = harness({ platform: "ios" });
+  const stale = new StaleDisplayError({
+    observedGeneration: 1,
+    currentGeneration: 2,
+    retry: "observe",
+  });
+  h.action["executeExplicitDisplay"] = async () => undefined;
+  h.action.observedInteraction = async () => {
+    throw new DispatchedObservationError(stale);
+  };
+  const result = await h.action.execute({
+    direction: "up",
+    display: "external",
+    autoTarget: false,
+  });
+  expect(result.success).toBe(false);
+  expect(result.staleDisplay).toEqual(stale.details);
+  expect(result.error).toContain("gesture was dispatched");
+  expect(result.error).toContain("Do not retry automatically");
 });

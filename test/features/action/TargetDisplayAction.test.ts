@@ -1,3 +1,4 @@
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import type WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../src/features/observe/android/CtrlProxyGestures";
@@ -178,7 +179,22 @@ describe("explicit action display", () => {
   });
 
   for (const kind of ["tapOn", "tapAt", "swipeOn", "dragAndDrop"] as const) {
-    for (const outcome of ["changed", "unchanged", "empty", "unavailable", "throws"] as const) {
+    for (const outcome of [
+      "changed",
+      "unchanged",
+      "empty",
+      "unavailable",
+      "throws",
+      "throws-stale",
+      "settle-throws",
+      "settle-error",
+      "settle-stale",
+      "settle-transition",
+      "dispatch-throws",
+      "abort-post",
+      "abort-post-return",
+      "abort-settle",
+    ] as const) {
       test(`${kind} targeted post-capture: ${outcome}`, async () => {
         const executor = adb();
         const timer = autoTimer();
@@ -187,7 +203,9 @@ describe("explicit action display", () => {
         const cached = screen("internal", "Other panel");
         const destination = screen(
           "external",
-          outcome === "changed" ? "Notification history" : "Notifications",
+          outcome.startsWith("settle-") || outcome === "changed"
+            ? "Notification history"
+            : "Notifications",
         );
         if (outcome === "empty") {
           destination.viewHierarchy = undefined;
@@ -197,6 +215,8 @@ describe("explicit action display", () => {
         }
         let dispatched = false;
         let invalidated = false;
+        let postReads = 0;
+        const controller = new AbortController();
         const calls: string[] = [];
         class PanelObserve extends FakeObserveScreen {
           override async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
@@ -207,8 +227,43 @@ describe("explicit action display", () => {
         const observe = new PanelObserve();
         observe.setObserveResult(() => {
           calls.push(dispatched ? "post" : "pre");
-          if (dispatched && outcome === "throws") {
-            throw new Error("post-capture unavailable");
+          if (dispatched) {
+            postReads++;
+            if (outcome === "abort-post-return") {
+              controller.abort();
+              return { ...destination, viewHierarchy: undefined };
+            }
+            if (outcome === "abort-post" || (outcome === "abort-settle" && postReads > 1)) {
+              controller.abort();
+              throw new Error("cancelled post-capture");
+            }
+            if (outcome === "throws-stale") {
+              throw new StaleDisplayError({
+                observedGeneration: 1,
+                currentGeneration: 2,
+                retry: "observe",
+              });
+            }
+            if (outcome === "throws" || (outcome === "settle-throws" && postReads > 1)) {
+              throw new Error("post-capture unavailable");
+            }
+            if (postReads > 1 && outcome === "settle-transition") {
+              displayTransitions.notifyTransition(android.deviceId, "fold");
+              throw new StaleDisplayError({
+                observedGeneration: 1,
+                currentGeneration: 2,
+                retry: "observe",
+              });
+            }
+            if (postReads > 1 && outcome === "settle-error") {
+              return {
+                ...destination,
+                viewHierarchy: { hierarchy: { error: "settle unavailable" } },
+              };
+            }
+            if (postReads > 1 && outcome === "settle-stale") {
+              return { ...screen("external", "Stale"), freshness: { isFresh: false } };
+            }
           }
           const observation = invalidated ? destination : before;
           return {
@@ -240,23 +295,55 @@ describe("explicit action display", () => {
         const dispatch = spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
           if (args[0].includes("touchscreen")) {
             calls.push("dispatch");
+            if (outcome === "dispatch-throws") {
+              throw new Error("dispatch unavailable");
+            }
             dispatched = true;
           }
           return executeCommand(...args);
         });
         try {
-          const result =
+          const pending =
             action instanceof TapOnElement
-              ? await action.execute({ action: "tap", text: "Notifications", display: "external" })
+              ? action.execute(
+                  { action: "tap", text: "Notifications", display: "external" },
+                  undefined,
+                  controller.signal,
+                )
               : action instanceof TapAtCoordinate
-                ? await action.execute({ x: 40, y: 50, display: "external" })
+                ? action.execute(
+                    { x: 40, y: 50, display: "external" },
+                    undefined,
+                    controller.signal,
+                  )
                 : action instanceof SwipeOn
-                  ? await action.execute({ direction: "up", display: "external" })
-                  : await action.execute({
-                      source: { text: "Notifications" },
-                      target: { text: "Notifications" },
-                      display: "external",
-                    });
+                  ? action.execute(
+                      { direction: "up", display: "external" },
+                      undefined,
+                      controller.signal,
+                    )
+                  : action.execute(
+                      {
+                        source: { text: "Notifications" },
+                        target: { text: "Notifications" },
+                        display: "external",
+                      },
+                      undefined,
+                      controller.signal,
+                    );
+          if (outcome.startsWith("abort-")) {
+            await expect(pending).rejects.toThrow("Operation cancelled");
+            return;
+          }
+          const result = await pending;
+          if (outcome === "dispatch-throws") {
+            expect(result.success).toBe(false);
+            expect(result.error).toContain("dispatch unavailable");
+            expect(result.error).not.toContain("Do not retry automatically");
+            expect(result.observation).toBeUndefined();
+            expect(calls).toEqual(["pre", "dispatch"]);
+            return;
+          }
           expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
           expect(calls).not.toContain("wrong-panel-cache");
           expect(
@@ -264,9 +351,22 @@ describe("explicit action display", () => {
           ).toBe(true);
           const postOptions = observe.getExecuteOptions().slice(1);
           expect(postOptions.every((options) => options.freshness === "fresh")).toBe(true);
-          if (outcome === "throws") {
+          if (outcome === "throws" || outcome === "throws-stale") {
             expect(result.success).toBe(false);
-            expect(result.error).toContain("post-capture unavailable");
+            if (outcome === "throws-stale") {
+              expect(result.staleDisplay).toMatchObject({
+                observedGeneration: 1,
+                currentGeneration: 2,
+                retry: "observe",
+              });
+            } else {
+              expect(result.error).toContain("post-capture unavailable");
+            }
+            expect(result.error).toContain("gesture was dispatched");
+            expect(result.error).toContain("Do not retry automatically");
+            if (kind === "tapAt") {
+              expect(result.error).toContain("1 tap was delivered");
+            }
             expect(result.observation).toBeUndefined();
           } else {
             expect(result.success).toBe(true);
@@ -274,8 +374,15 @@ describe("explicit action display", () => {
               destination.viewHierarchy?.hierarchy,
             );
             expect(result.effect?.screenChanged).toBe(
-              outcome === "changed" || outcome === "unavailable",
+              outcome === "changed" || outcome === "unavailable" || outcome.startsWith("settle-"),
             );
+            if (outcome.startsWith("settle-")) {
+              expect(result.observation?.settled).toBe(false);
+              expect(result.observation?.freshness?.warning).toContain("display settle");
+              if (outcome === "settle-transition" || outcome === "settle-stale") {
+                expect(result.staleDisplay?.retry).toBe("observe");
+              }
+            }
             if (outcome === "empty") {
               expect(result.effect?.basis).toBe("insufficient observation data");
             }

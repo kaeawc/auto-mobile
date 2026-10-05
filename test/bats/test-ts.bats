@@ -89,6 +89,9 @@ if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
+  printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
+fi
 if [[ -n "${STUB_BUN_EXIT:-}" ]]; then exit "$STUB_BUN_EXIT"; fi
 if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unset}" >> "$STUB_BUN_WALL_FILE"
@@ -824,7 +827,7 @@ EOF
   [[ "$output" == *"\\*\\*/\\*.integration.test.ts"* ]]
 }
 
-@test "coverage wall timeout is 480 seconds" {
+@test "coverage wall timeout is 720 seconds" {
   cat > "$STUB_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/timeout-args"
@@ -832,9 +835,13 @@ exit 124
 EOF
   chmod +x "$STUB_BIN/timeout"
 
-  run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  grep -q -- '-k 2 480 ' "$BATS_TEST_TMPDIR/timeout-args"
+  grep -q -- '-k 2 720 ' "$BATS_TEST_TMPDIR/timeout-args"
+
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=33 bash "$SCRIPT" coverage
+  [ "$status" -eq 124 ]
+  grep -q -- '-k 2 33 ' "$BATS_TEST_TMPDIR/timeout-args"
 }
 
 @test "coverage wall timeout prints a diagnostic on deadline" {
@@ -846,7 +853,7 @@ EOF
 
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
-  [[ "$output" == *"Coverage test run exceeded its 480s wall-clock budget"* ]]
+  [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget"* ]]
   [[ "$output" == *"shard 1/2"* ]]
 }
 
@@ -874,7 +881,7 @@ EOF
 
   for mode in coverage stress; do
     case "$mode" in
-      coverage) label="Coverage"; expected_budget=480 ;;
+      coverage) label="Coverage"; expected_budget=720 ;;
       stress) label="Stress"; expected_budget=300 ;;
     esac
     run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "$mode"
@@ -989,6 +996,9 @@ run_timing_gate_with_recheck_times() {
     bash -c '
       if [[ "$3" == closed ]]; then
         exec 1>&-
+        # Pin the stock macOS Bash 3.2 and the no-coreutils timeout path.
+        export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
+        exec /bin/bash "$1" "$2"
       elif [[ -n "$3" ]]; then
         exec > "$3"
       fi
@@ -1009,8 +1019,8 @@ EOF
   cmp "$BATS_TEST_TMPDIR/expected-output.txt" "$summary_output"
 }
 
-# A closed stdout works on macOS as well as Linux, unlike /dev/full. These
-# exercise failures in both the progress output and the buffered summary emit.
+# A closed stdout works on macOS as well as Linux, unlike /dev/full. The
+# system-Bash path pins the Bash 3.2 failed-echo buffer regression on macOS.
 @test "timing gate clears an outlier even when stdout writes fail" {
   seed_outlier_report
   run_timing_gate_with_recheck_times "0.010 0.012 0.011" closed
@@ -1521,7 +1531,7 @@ printf '%s\n' test/utils/FileDownloader.test.ts test/planUtils.test.ts \
   test/daemon/daemonClientAvailability.integration.test.ts test/stress/memory-leak.stress.test.ts
 EOF
   chmod +x "$STUB_BIN/find"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=907919 bash "$SCRIPT" unit
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=907919 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [[ "$output" == *"seed=907919"* ]]
   [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 1 ]
@@ -1529,7 +1539,7 @@ EOF
 
   # Ordinary shards consume the same two files (one per worker).
   : > "$BUN_ARGS_FILE"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 2 ]
   grep -q 'test/planUtils.test.ts' "$BUN_ARGS_FILE"
@@ -1539,7 +1549,7 @@ EOF
 
 @test "randomized unit lane reports seed and repro on failure and preserves exit status" {
   local summary="$STUB_BIN/summary.md"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
     GITHUB_STEP_SUMMARY="$summary" STUB_BUN_EXIT=7 bash "$SCRIPT" unit
   [ "$status" -eq 7 ]
   [[ "$output" == *"seed=42"* ]]
@@ -1549,7 +1559,7 @@ EOF
 }
 
 @test "randomized unit success does not write a failure summary" {
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
     GITHUB_STEP_SUMMARY="$STUB_BIN/summary.md" bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ ! -e "$STUB_BIN/summary.md" ]
@@ -1557,12 +1567,12 @@ EOF
 
 @test "randomized unit lane rejects invalid seeds and partial targets before invoking Bun" {
   for seed in 0 -1 abc 4294967296 99999999999999999999; do
-    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED="$seed" bash "$SCRIPT" unit
+    run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED="$seed" bash "$SCRIPT" unit
     [ "$status" -eq 2 ]
   done
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit test/planUtils.test.ts
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit test/planUtils.test.ts
   [ "$status" -eq 2 ]
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit --isolate
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit --isolate
   [ "$status" -eq 2 ]
   [ ! -s "$BUN_ARGS_FILE" ]
 }
@@ -1570,8 +1580,99 @@ EOF
 @test "randomized unit lane refuses empty discovery instead of running the whole suite" {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/find"
   chmod +x "$STUB_BIN/find"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit
   [ "$status" -eq 1 ]
   [[ "$output" == *"No unit test files discovered"* ]]
   [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+# Compare the actual Bun command in the fixture-only unit shard with each
+# measurement path. Report/shard paths vary; the execution contract must not.
+@test "timing gate shares the unit shard environment and flags with every measurement path" {
+  for runner in Linux macOS; do
+    expected_timeout=5000
+    [[ "$runner" != macOS ]] || expected_timeout=20000
+    mode_log="$BATS_TEST_TMPDIR/test-mode"
+    : > "$mode_log"
+    : > "$BUN_ARGS_FILE"
+    run env -u AUTOMOBILE_TEST_MODE -u AUTOMOBILE_TEST_TIMEOUT_MS \
+      PATH="$STUB_BIN:$PATH" RUNNER_OS="$runner" \
+      STUB_BUN_TEST_MODE_FILE="$mode_log" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+      bash "$SCRIPT" unit
+    [ "$status" -eq 0 ]
+    [ -s "$mode_log" ]
+    [ "$(grep -c '^true$' "$mode_log")" -eq "$(wc -l < "$mode_log")" ]
+    main_contract="$(head -n 1 "$BUN_ARGS_FILE")"
+    main_contract="${main_contract%% --reporter*}"
+    # Full unit shards have file arguments after the shared flags.
+    main_contract="${main_contract%% test/*}"
+    [[ "$main_contract" == *"--isolate --timeout $expected_timeout --no-orphans --preload "* ]]
+
+    for path in recheck changed-file changed-source; do
+      : > "$mode_log"
+      : > "$BUN_ARGS_FILE"
+      changed_files='src/example.ts\n'
+      source_reports=""
+      case "$path" in
+        recheck) seed_outlier_report; source_reports="$report_dir" ;;
+        changed-file) changed_files="$OFFENDER_FILE\n" ;;
+      esac
+      run env -u AUTOMOBILE_TEST_MODE -u AUTOMOBILE_TEST_TIMEOUT_MS \
+        PATH="$STUB_BIN:$PATH" RUNNER_OS="$runner" \
+        STUB_BUN_TEST_MODE_FILE="$mode_log" STUB_RECHECK_TIMES="0.010 0.010 0.010" \
+        BUN_TEST_TIMING_BASE_REF=origin/main \
+        BUN_TEST_TIMING_REPORT_DIR="$source_reports" TIMING_CHANGED_FILES="$changed_files" \
+        bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/$runner-$path.xml"
+      [ "$status" -eq 0 ]
+      [ -s "$mode_log" ]
+      [ "$(grep -c '^true$' "$mode_log")" -eq "$(wc -l < "$mode_log")" ]
+      while IFS= read -r command; do
+        [[ "$command" != test\ * ]] || [[ "$command" == "$main_contract"* ]]
+      done < "$BUN_ARGS_FILE"
+    done
+  done
+}
+
+@test "timing gate preserves explicit test mode and per-test timeout overrides" {
+  mode_log="$BATS_TEST_TMPDIR/test-mode"
+  seed_outlier_report
+  run env PATH="$STUB_BIN:$PATH" RUNNER_OS=macOS AUTOMOBILE_TEST_MODE=false \
+    AUTOMOBILE_TEST_TIMEOUT_MS=1234 STUB_BUN_TEST_MODE_FILE="$mode_log" \
+    STUB_RECHECK_TIMES="0.010 0.010 0.010" \
+    BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$mode_log")" -eq 3 ]
+  [ "$(grep -c '^false$' "$mode_log")" -eq 3 ]
+  [ "$(grep -c -- '--timeout 1234 --no-orphans --preload' "$BUN_ARGS_FILE")" -eq 3 ]
+}
+
+@test "timing gate bounds an in-flight recheck by the remaining budget and reports its file" {
+  seed_outlier_report
+  cat > "$STUB_BIN/timeout" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$STUB_TIMEOUT_ARGS"
+exit 124
+EOF
+  chmod +x "$STUB_BIN/timeout"
+  run env -u AUTOMOBILE_FORCE_PORTABLE_TIMEOUT PATH="$STUB_BIN:$PATH" \
+    STUB_TIMEOUT_ARGS="$BATS_TEST_TMPDIR/timeout-args" \
+    BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=60 BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=1 \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  grep -q -- '-k 2 59 ' "$BATS_TEST_TMPDIR/timeout-args"
+  [[ "$output" == *"Could not verify within the 60s recheck budget: suite.slow"* ]]
+  [[ "$output" == *"$OFFENDER_FILE"* ]]
+}
+
+@test "timing gate treats shared unit invocation changes as complete lane inputs" {
+  run env PATH="$STUB_BIN:$PATH" BUN_TEST_TIMING_BASE_REF=origin/main \
+    TIMING_CHANGED_FILES='scripts/lib/bun-unit-test.sh\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"measuring Bun-affected unit tests"* ]]
+  grep -q -- '--changed=origin/main' "$BUN_ARGS_FILE"
 }

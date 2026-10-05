@@ -8,7 +8,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ImeAction } from "../../../models";
 import type { SetTextOptions } from "../DeviceService";
 import type { DelegateContext, BaseResult, ActionTimingResult } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 
 export class SharedTextDelegate {
   protected readonly context: DelegateContext;
@@ -30,7 +30,7 @@ export class SharedTextDelegate {
       params.frameContext = frameContext;
     }
 
-    return sendCommand<BaseResult>(this.context, {
+    return this.sendTextCommand({
       idPrefix: "setText",
       responseType: "set_text",
       messageType: "request_set_text",
@@ -38,7 +38,15 @@ export class SharedTextDelegate {
       timeoutMs,
       perf,
       errorLabel: "Set text",
+      abortSignal: options.abortSignal,
+      deadlineMs: options.deadlineMs,
+      onDispatch: options.onDispatch,
     });
+  }
+
+  /** iOS specializes unconfirmed mutations; Android retains its existing result contract. */
+  protected sendTextCommand(options: SendCommandOptions<BaseResult>): Promise<BaseResult> {
+    return sendCommand<BaseResult>(this.context, options);
   }
 
   async requestClearText(

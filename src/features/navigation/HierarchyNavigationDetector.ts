@@ -92,12 +92,21 @@ export class HierarchyNavigationDetector {
    * This is the main entry point called when new hierarchy data arrives.
    */
   public onHierarchyUpdate(
-    hierarchy: AccessibilityHierarchy,
+    hierarchy: Omit<AccessibilityHierarchy, "packageName"> & { packageName?: string },
     metrics?: HierarchyNavigationUpdateMetrics,
   ): void {
+    if (!hierarchy.packageName?.trim()) {
+      // An unattributed frame cannot prove the pending app's screen is still visible.
+      this.reset();
+      logger.debug(`[HIERARCHY_NAV] Skipping hierarchy update - unknown app`);
+      return;
+    }
     const fingerprintStart = this.timer.now();
     // Compute fingerprint for this hierarchy
-    const fingerprint = ScreenFingerprint.compute(hierarchy);
+    const fingerprint = ScreenFingerprint.compute({
+      ...hierarchy,
+      packageName: hierarchy.packageName,
+    });
     const fingerprintMs = this.timer.now() - fingerprintStart;
 
     const updateMetrics: HierarchyNavigationUpdateMetrics = {
@@ -118,12 +127,15 @@ export class HierarchyNavigationDetector {
       logger.debug(
         `[HIERARCHY_NAV] Perf: source=${updateMetrics.source ?? "unknown"}, ` +
           `convert=${updateMetrics.conversionMs ?? "n/a"}ms, ` +
-          `fingerprint=${updateMetrics.fingerprintMs ?? "n/a"}ms`,
+          `fingerprint=${fingerprintMs}ms`,
       );
     }
 
     // Check if fingerprint is different from pending
-    if (this.pendingFingerprint && this.pendingFingerprint.hash === fingerprint.hash) {
+    if (
+      this.pendingFingerprint?.packageName === fingerprint.packageName &&
+      this.pendingFingerprint.hash === fingerprint.hash
+    ) {
       // Same as pending - fingerprint hasn't changed, let debounce timer continue
       logger.debug(`[HIERARCHY_NAV] Same as pending fingerprint, waiting for stability`);
       return;
@@ -170,7 +182,10 @@ export class HierarchyNavigationDetector {
     logger.debug(`[HIERARCHY_NAV] Fingerprint stable: ${newFingerprint.hash.substring(0, 12)}`);
 
     // Check if this is a navigation (different from current stable)
-    if (this.currentStableFingerprint?.hash !== newFingerprint.hash) {
+    if (
+      this.currentStableFingerprint?.packageName !== newFingerprint.packageName ||
+      this.currentStableFingerprint.hash !== newFingerprint.hash
+    ) {
       this.recordNavigation(newFingerprint);
     }
   }
@@ -195,7 +210,10 @@ export class HierarchyNavigationDetector {
     );
 
     // Check if this is a navigation
-    if (this.currentStableFingerprint?.hash !== newFingerprint.hash) {
+    if (
+      this.currentStableFingerprint?.packageName !== newFingerprint.packageName ||
+      this.currentStableFingerprint.hash !== newFingerprint.hash
+    ) {
       this.recordNavigation(newFingerprint);
     }
   }

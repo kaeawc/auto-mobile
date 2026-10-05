@@ -434,9 +434,10 @@ async function initializeVideoRecordingState(
 async function performVideoRecordingStateInitialization(
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
-  ensureRetentionSweep(deps);
-
   const active = await deps.recordingRepository.listRecordings({ status: "recording" });
+  if (moduleDependencies === deps) {
+    ensureRetentionSweep(deps);
+  }
   if (active.length === 0) {
     return;
   }
@@ -473,8 +474,10 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
     };
   }
 
-  await initializeVideoRecordingState(moduleDependencies);
-  return moduleDependencies;
+  // A reset during initialization must not switch an operation's dependencies.
+  const deps = moduleDependencies;
+  await initializeVideoRecordingState(deps);
+  return deps;
 }
 
 export async function setVideoRecordingManagerDependencies(
@@ -656,12 +659,15 @@ function resolveMaxDurationSeconds(
   return Math.round(value);
 }
 
-async function resolveActiveRecordingId(recordingId?: string): Promise<string> {
+async function resolveActiveRecordingId(
+  deps: VideoRecordingManagerDependencies,
+  recordingId?: string,
+): Promise<string> {
   if (recordingId) {
     return recordingId;
   }
 
-  const { recordingRepository } = await getVideoRecordingDependencies();
+  const { recordingRepository } = deps;
   const active = await recordingRepository.listRecordings({ status: "recording" });
 
   if (active.length === 0) {
@@ -675,15 +681,22 @@ async function resolveActiveRecordingId(recordingId?: string): Promise<string> {
   return active[0].recordingId;
 }
 
-async function scheduleAutoStop(recordingId: string, maxDurationSeconds: number): Promise<void> {
+function scheduleAutoStop(
+  recordingId: string,
+  maxDurationSeconds: number,
+  deps: VideoRecordingManagerDependencies,
+): void {
   if (!Number.isFinite(maxDurationSeconds) || maxDurationSeconds <= 0) {
     return;
   }
 
-  const { timer } = await getVideoRecordingDependencies();
+  const { timer } = deps;
   const timeoutMs = Math.max(1, Math.round(maxDurationSeconds * 1000));
   const handle = timer.setTimeout(() => {
-    void stopVideoRecording(recordingId).catch((error) => {
+    if (moduleDependencies !== deps) {
+      return;
+    }
+    void stopVideoRecordingWithDependencies(deps, recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Failed to auto-stop recording ${recordingId}: ${error}`);
     });
   }, timeoutMs);
@@ -713,7 +726,10 @@ function ensureRetentionSweep(deps: VideoRecordingManagerDependencies): void {
     return;
   }
   const handle = timer.setInterval(() => {
-    void runRetentionSweep().catch((error) => {
+    if (moduleDependencies !== deps) {
+      return;
+    }
+    void runRetentionSweepWithDependencies(deps).catch((error) => {
       logger.warn(`[VideoRecording] TTL retention sweep failed: ${error}`);
     });
   }, retentionPolicy.sweepIntervalMs);
@@ -727,6 +743,12 @@ function ensureRetentionSweep(deps: VideoRecordingManagerDependencies): void {
  */
 export async function runRetentionSweep(): Promise<string[]> {
   const deps = await getVideoRecordingDependencies();
+  return runRetentionSweepWithDependencies(deps);
+}
+
+async function runRetentionSweepWithDependencies(
+  deps: VideoRecordingManagerDependencies,
+): Promise<string[]> {
   const { recordingRepository, retentionPolicy, now } = deps;
   if (retentionPolicy.ttlMs <= 0) {
     return [];
@@ -744,7 +766,7 @@ export async function runRetentionSweep(): Promise<string[]> {
       continue;
     }
     try {
-      const deleted = await deleteVideoRecording(recording.recordingId);
+      const deleted = await deleteVideoRecording(recording.recordingId, deps);
       if (deleted) {
         prunedRecordingIds.push(recording.recordingId);
       }
@@ -783,7 +805,7 @@ function scheduleInProgressSizeCap(
   }
   const { timer, retentionPolicy } = deps;
   const handle = timer.setInterval(() => {
-    void enforceInProgressSizeCap(recordingId, filePath, capBytes).catch((error) => {
+    void enforceInProgressSizeCap(recordingId, filePath, capBytes, deps).catch((error) => {
       logger.warn(`[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`);
     });
   }, retentionPolicy.inProgressCheckIntervalMs);
@@ -798,8 +820,14 @@ function clearInProgressSizeCap(recordingId: string): void {
   }
 }
 
-async function rearmRetainedRecordingSafety(recordingId: string): Promise<void> {
-  const deps = await getVideoRecordingDependencies();
+async function rearmRetainedRecordingSafety(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<void> {
+  // Reset owns timer teardown; an old stop must not restore its safety timers.
+  if (moduleDependencies !== deps) {
+    return;
+  }
   // A manual retry may have completed while the failed safety callback was
   // unwinding. Only re-arm work for the durable owner that is still active.
   if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
@@ -807,6 +835,9 @@ async function rearmRetainedRecordingSafety(recordingId: string): Promise<void> 
   }
   const record = await deps.recordingRepository.getRecording(recordingId);
   if (!record || record.status !== "recording") {
+    return;
+  }
+  if (moduleDependencies !== deps) {
     return;
   }
   // The repository read can yield while another successful stop releases this
@@ -818,7 +849,10 @@ async function rearmRetainedRecordingSafety(recordingId: string): Promise<void> 
 
   clearAutoStop(recordingId);
   const handle = deps.timer.setTimeout(() => {
-    void stopVideoRecording(recordingId).catch((error) => {
+    if (moduleDependencies !== deps) {
+      return;
+    }
+    void stopVideoRecordingWithDependencies(deps, recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Retained safety stop failed for ${recordingId}: ${error}`);
     });
   }, RETAINED_STOP_RETRY_MS);
@@ -833,19 +867,20 @@ async function enforceInProgressSizeCap(
   recordingId: string,
   filePath: string,
   capBytes: number,
+  deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
   // A tick may fire after the recording already stopped (cleared monitor); skip.
-  if (!inProgressSizeMonitors.has(recordingId)) {
+  if (moduleDependencies !== deps || !inProgressSizeMonitors.has(recordingId)) {
     return;
   }
-  const { statFileSize } = await getVideoRecordingDependencies();
+  const { statFileSize } = deps;
   // Host output can be absent during capture (Android pulls it only at stop).
   // Keep injected size probes intact; only the default probe's expected missing
   // file diagnostic should be quiet on recurring monitor ticks.
   const sizeBytes = await (statFileSize === getFileSize
     ? getFileSize(filePath, true)
     : statFileSize(filePath));
-  if (sizeBytes < capBytes) {
+  if (moduleDependencies !== deps || sizeBytes < capBytes) {
     return;
   }
 
@@ -854,7 +889,7 @@ async function enforceInProgressSizeCap(
       `(${sizeBytes} >= ${capBytes} bytes); stopping to protect disk.`,
   );
   clearInProgressSizeCap(recordingId);
-  await stopVideoRecording(recordingId);
+  await stopVideoRecordingWithDependencies(deps, recordingId);
 }
 
 function getHighlightSessionByDevice(deviceId: string): VideoRecordingHighlightSession | null {
@@ -1092,11 +1127,12 @@ export async function getVideoRecordingConfig(): Promise<VideoRecordingConfig> {
 export async function updateVideoRecordingConfig(
   update: VideoRecordingConfigInput | null,
 ): Promise<VideoRecordingConfigUpdateResult> {
-  const { configRepository } = await getVideoRecordingDependencies();
+  const deps = await getVideoRecordingDependencies();
+  const { configRepository } = deps;
   if (update === null) {
     await configRepository.clearConfig();
     const defaults = parseVideoRecordingConfig(serverConfig.getVideoRecordingDefaults());
-    const eviction = await enforceArchiveLimit(defaults.maxArchiveSizeMb);
+    const eviction = await enforceArchiveLimit(deps, defaults.maxArchiveSizeMb);
     return { config: defaults, evictedRecordingIds: eviction.evictedRecordingIds };
   }
 
@@ -1105,7 +1141,7 @@ export async function updateVideoRecordingConfig(
   const nextConfig = parseVideoRecordingConfig(mergedInput);
   await configRepository.setConfig(nextConfig);
 
-  const eviction = await enforceArchiveLimit(nextConfig.maxArchiveSizeMb);
+  const eviction = await enforceArchiveLimit(deps, nextConfig.maxArchiveSizeMb);
   return { config: nextConfig, evictedRecordingIds: eviction.evictedRecordingIds };
 }
 
@@ -1242,7 +1278,7 @@ export async function startVideoRecording(
       await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
     }
 
-    await scheduleAutoStop(active.recordingId, maxDurationSeconds);
+    scheduleAutoStop(active.recordingId, maxDurationSeconds, deps);
 
     const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
     scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
@@ -1314,23 +1350,35 @@ export async function rollbackVideoRecordingStart(recordingId: string): Promise<
 }
 
 export async function stopVideoRecording(recordingId?: string): Promise<StopVideoRecordingResult> {
-  const resolvedId = await resolveActiveRecordingId(recordingId);
+  const deps = await getVideoRecordingDependencies();
+  return stopVideoRecordingWithDependencies(deps, recordingId);
+}
+
+async function stopVideoRecordingWithDependencies(
+  deps: VideoRecordingManagerDependencies,
+  recordingId?: string,
+): Promise<StopVideoRecordingResult> {
+  const resolvedId = await resolveActiveRecordingId(deps, recordingId);
   const stopping = stoppingVideoRecordings.get(resolvedId);
   if (stopping) {
     return stopping;
   }
 
-  const stop = stopActiveVideoRecording(resolvedId);
+  const stop = stopActiveVideoRecording(resolvedId, deps);
   stoppingVideoRecordings.set(resolvedId, stop);
   try {
     return await stop;
   } finally {
-    stoppingVideoRecordings.delete(resolvedId);
+    if (stoppingVideoRecordings.get(resolvedId) === stop) {
+      stoppingVideoRecordings.delete(resolvedId);
+    }
   }
 }
 
-async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRecordingResult> {
-  const deps = await getVideoRecordingDependencies();
+async function stopActiveVideoRecording(
+  resolvedId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<StopVideoRecordingResult> {
   const { videoRecorderService, recordingRepository, now } = deps;
 
   let metadata: VideoRecordingMetadata;
@@ -1366,15 +1414,17 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
       // A safety timer can have just fired (or an in-progress size monitor can
       // have cleared itself) before the failed stop retained ownership. Re-arm
       // both guards so this potentially live capture does not run indefinitely.
-      void rearmRetainedRecordingSafety(resolvedId).catch((rearmError) => {
+      try {
+        await rearmRetainedRecordingSafety(resolvedId, deps);
+      } catch (rearmError) {
         logger.warn(
           `[VideoRecording] Failed to re-arm retained safety enforcement for ${resolvedId}: ${rearmError}`,
           rearmError,
         );
-      });
+      }
     } else {
       try {
-        await interruptVideoRecording(resolvedId);
+        await interruptVideoRecordingWithDependencies(resolvedId, deps);
       } catch (cleanupError) {
         logger.warn(
           `[VideoRecording] Failed to clean up orphaned recording ${resolvedId} after a failed stop: ${cleanupError}`,
@@ -1419,7 +1469,7 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
     transitions: metadata.transitions,
   });
 
-  const eviction = await enforceArchiveLimit(metadata.config.maxArchiveSizeMb, resolvedId);
+  const eviction = await enforceArchiveLimit(deps, metadata.config.maxArchiveSizeMb, resolvedId);
   if (eviction.maxSizeBytes > 0 && eviction.currentSizeBytes > eviction.maxSizeBytes) {
     metadata.warnings = [
       ...(metadata.warnings ?? []),
@@ -1435,6 +1485,13 @@ async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRe
 
 export async function interruptVideoRecording(recordingId: string): Promise<void> {
   const deps = await getVideoRecordingDependencies();
+  await interruptVideoRecordingWithDependencies(recordingId, deps);
+}
+
+async function interruptVideoRecordingWithDependencies(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<void> {
   const { recordingRepository, now } = deps;
   clearAutoStop(recordingId);
   clearInProgressSizeCap(recordingId);
@@ -1555,8 +1612,11 @@ export async function getLatestVideoRecordingMetadata(
   return recordings[0] ? toMetadata(recordings[0]) : null;
 }
 
-async function deleteVideoRecording(recordingId: string): Promise<boolean> {
-  const { recordingRepository } = await getVideoRecordingDependencies();
+async function deleteVideoRecording(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<boolean> {
+  const { recordingRepository } = deps;
   const record = await recordingRepository.getRecording(recordingId);
 
   if (!record) {
@@ -1592,11 +1652,12 @@ async function removeVideoRecordingArtifacts(filePath: string): Promise<void> {
 }
 
 async function enforceArchiveLimit(
+  deps: VideoRecordingManagerDependencies,
   maxArchiveSizeMb: number,
   protectedRecordingId?: string,
 ): Promise<VideoArchiveEvictionResult> {
   const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
-  const { recordingRepository } = await getVideoRecordingDependencies();
+  const { recordingRepository } = deps;
   const recordings = await recordingRepository.listRecordings({
     status: ["completed", "interrupted"],
     orderByLastAccessed: "asc",
@@ -1624,7 +1685,7 @@ async function enforceArchiveLimit(
     }
 
     try {
-      const deleted = await deleteVideoRecording(recording.recordingId);
+      const deleted = await deleteVideoRecording(recording.recordingId, deps);
       if (deleted) {
         evictedRecordingIds.push(recording.recordingId);
         currentSizeBytes -= recording.sizeBytes ?? 0;

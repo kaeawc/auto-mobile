@@ -254,6 +254,8 @@ interface SendCommandBaseOptions {
    * immediately when the caller goes away.
    */
   abortSignal?: AbortSignal;
+  /** Absolute caller deadline, re-read after connecting before registering the request. */
+  deadlineMs?: number;
   /** Must be explicitly confirmed on the current connection immediately before sending. */
   requiredCapability?: string;
   /** Synchronous caller fence, checked on the ready connection immediately before dispatch. */
@@ -287,11 +289,11 @@ function notConnectedCommandResult<T>(options: SendCommandOptions<T>, defaultMes
   } as T;
 }
 
-function commandEarlyResult<T>(
+function resolveCommandDispatch<T>(
   context: DelegateContext,
   options: SendCommandOptions<T>,
   connected: boolean,
-): { result: T } | undefined {
+): number | { result: T } {
   if (!connected) {
     return { result: notConnectedCommandResult(options, "Not connected") };
   }
@@ -322,7 +324,27 @@ function commandEarlyResult<T>(
     return { result: notConnectedCommandResult(options, "Request aborted before dispatch") };
   }
 
-  return undefined;
+  return resolveCommandTimeout(options, context.timer);
+}
+
+function resolveCommandTimeout<T>(
+  options: SendCommandOptions<T>,
+  timer: Timer,
+): number | { result: T } {
+  const timeoutMs =
+    options.deadlineMs === undefined
+      ? options.timeoutMs
+      : Math.min(options.timeoutMs, Math.max(0, options.deadlineMs - timer.now()));
+  if (options.deadlineMs !== undefined && timeoutMs <= 0) {
+    return {
+      result: {
+        success: false,
+        totalTimeMs: 0,
+        error: "Request deadline expired before dispatch",
+      } as T,
+    };
+  }
+  return timeoutMs;
 }
 
 function registerCommandAbort<T>(
@@ -412,11 +434,10 @@ export async function sendCommand<T>(
       ? await options.perf.track("ensureConnected", () => context.ensureConnected(options.perf))
       : await context.ensureConnected();
 
-  const earlyResult = commandEarlyResult(context, options, connected);
-  if (earlyResult) {
-    return earlyResult.result;
+  const timeoutMs = resolveCommandDispatch(context, options, connected);
+  if (typeof timeoutMs !== "number") {
+    return timeoutMs.result;
   }
-
   const requestId = context.requestManager.generateId(options.idPrefix);
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
@@ -439,7 +460,7 @@ export async function sendCommand<T>(
   const promise = context.requestManager.register<T>(
     requestId,
     options.responseType,
-    options.timeoutMs,
+    timeoutMs,
     timeoutFactory,
     responseErrorFactory,
   );

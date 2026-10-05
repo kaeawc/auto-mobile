@@ -244,6 +244,19 @@ interface CtrlProxyIosCapabilities {
   reason?: string;
 }
 
+interface IosCtrlProxyManagerOptions {
+  device: BootedDevice;
+  timer?: Timer;
+  builder?: IosCtrlProxyBuilder;
+  processExecutor?: HostProcessExecutor;
+  signingManager?: XcodeSigningManager;
+  deviceAppManager?: DeviceAppManager;
+  remoteRunner?: RemoteCtrlProxyIOSRunner;
+  hostPortAvailabilityChecker?: HostPortAvailabilityChecker;
+  xcodebuild?: Xcodebuild;
+  processClient?: IosCtrlProxyProcessClient;
+}
+
 /**
  * iOS CtrlProxy Manager
  * Manages the lifecycle of CtrlProxy running on iOS simulator or device
@@ -392,18 +405,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static readonly IPROXY_RESTART_MAX_DELAY_MS = 15000;
   private static readonly DEFAULT_IPROXY_START_TIMEOUT_MS = 5000;
 
-  private constructor(
-    device: BootedDevice,
-    timer: Timer = defaultTimer,
-    builder?: IosCtrlProxyBuilder,
-    processExecutor: HostProcessExecutor = new DefaultHostCommandExecutor(),
-    signingManager: XcodeSigningManager = new XcodeSigningManager(),
-    deviceAppManager: DeviceAppManager = new DeviceAppManager(),
-    remoteRunner?: RemoteCtrlProxyIOSRunner,
-    hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
-    xcodebuild: Xcodebuild = new XcodebuildClient(),
-    processClient?: IosCtrlProxyProcessClient,
-  ) {
+  private constructor(options: IosCtrlProxyManagerOptions) {
+    const {
+      device,
+      timer = defaultTimer,
+      builder,
+      processExecutor = new DefaultHostCommandExecutor(),
+      signingManager = new XcodeSigningManager(),
+      deviceAppManager = new DeviceAppManager(),
+      remoteRunner,
+      hostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker(),
+      xcodebuild = new XcodebuildClient(),
+      processClient,
+    } = options;
     this.device = device;
     this.timer = timer;
     // iOS automatic runner recovery has a five-minute episode limit in addition
@@ -502,7 +516,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static getInstance(device: BootedDevice, timer?: Timer): IOSCtrlProxyManager {
     requireBootedDevice(device, "IOSCtrlProxyManager.getInstance");
     if (!IOSCtrlProxyManager.instances.has(device.deviceId)) {
-      IOSCtrlProxyManager.instances.set(device.deviceId, new IOSCtrlProxyManager(device, timer));
+      IOSCtrlProxyManager.instances.set(
+        device.deviceId,
+        new IOSCtrlProxyManager({ device, timer }),
+      );
     }
     return IOSCtrlProxyManager.instances.get(device.deviceId)!;
   }
@@ -579,7 +596,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     timer: Timer,
     builder?: IosCtrlProxyBuilder,
   ): IOSCtrlProxyManager {
-    return new IOSCtrlProxyManager(device, timer, builder);
+    return new IOSCtrlProxyManager({ device, timer, builder });
   }
 
   /**
@@ -597,7 +614,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     xcodebuild?: Xcodebuild,
     processClient?: IosCtrlProxyProcessClient,
   ): IOSCtrlProxyManager {
-    return new IOSCtrlProxyManager(
+    return new IOSCtrlProxyManager({
       device,
       timer,
       builder,
@@ -606,14 +623,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       deviceAppManager,
       remoteRunner,
       hostPortAvailabilityChecker,
-      xcodebuild ??
+      xcodebuild:
+        xcodebuild ??
         new XcodebuildClient(
           async (file, args) => processExecutor.executeCommand(file, args),
           timer,
           processExecutor.spawn.bind(processExecutor),
         ),
-      processClient ?? new IosCtrlProxyProcessClient(processExecutor, timer),
-    );
+      processClient: processClient ?? new IosCtrlProxyProcessClient(processExecutor, timer),
+    });
   }
 
   /**

@@ -67,3 +67,20 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"(fail) test/server/example.test.ts > identifies flaky behavior"* ]]
 }
+
+@test "re-emits the coverage wall budget annotation after a timed-out run's tail" {
+  cat > "$STUB_DIR/timeout" <<'EOF'
+#!/usr/bin/env bash
+for ((i = 0; i < 260; i++)); do
+  printf 'shard test output %s\n' "$i"
+done
+exit 124
+EOF
+  chmod +x "$STUB_DIR/timeout"
+
+  run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_DIR:$PATH" \
+    RUNNER_OS=Linux bash "$SCRIPT" "$WORK_DIR/out.log"
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"::error::coverage: Coverage test run exceeded its 720s wall-clock budget (shard 1/2)"* ]]
+  [[ "$output" == *"shard test output 259"*"::error::coverage:"* ]]
+}

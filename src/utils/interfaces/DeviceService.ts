@@ -54,6 +54,11 @@ export interface SetTextOptions {
   dismissKeyboard?: boolean;
   /** Device-authored context paired with the observed Android frame. */
   frameContext?: string;
+  /** Caller cancellation and absolute deadline (same clock as the delegate Timer). */
+  abortSignal?: AbortSignal;
+  deadlineMs?: number;
+  /** Called synchronously after a successful transport send. */
+  onDispatch?: () => void;
 }
 
 /**

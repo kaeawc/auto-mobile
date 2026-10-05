@@ -234,11 +234,14 @@ wiring_requires_yq() {
   [ "$dependencies" = $'detect-changes\nfast-validation' ]
 }
 
-@test "PR TypeScript coverage has headroom beyond its wall-clock budget" {
+@test "PR and merge TypeScript coverage have setup headroom beyond the 12 minute wall budget" {
   wiring_requires_yq
-  run yq -r '.jobs."ts-code-coverage"."timeout-minutes" > 12' "$WF"
-  [ "$status" -eq 0 ]
-  [ "$output" = "true" ]
+  local workflow
+  for workflow in "$WF" .github/workflows/merge.yml; do
+    run yq -r '.jobs."ts-code-coverage"."timeout-minutes" >= 20' "$workflow"
+    [ "$status" -eq 0 ]
+    [ "$output" = "true" ]
+  done
 }
 
 @test "merge workflow preserves the same four lane boundaries" {

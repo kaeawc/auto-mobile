@@ -277,7 +277,7 @@ if [ -n "$budget_file" ]; then
   # too large for bash (e.g. 1e100 -> "1E+100"), which bash's -gt cannot compare.
   # Require plain digits so an out-of-range threshold fails closed, not silently.
   for _v in "$max_files" "$max_bytes"; do
-    if [ -n "$_v" ] && ! printf '%s' "$_v" | grep -qE '^[0-9]+$'; then
+    if [ -n "$_v" ] && ! grep -qE '^[0-9]+$' <<< "$_v"; then
       echo "error: budget threshold out of range for comparison (got '$_v')" >&2
       exit 2
     fi
@@ -300,7 +300,7 @@ if [ -n "$budget_file" ]; then
     echo "error: budget maxJavadocJarBytes must be a non-negative integer" >&2
     exit 2
   fi
-  if [ -n "$max_javadoc" ] && ! printf '%s' "$max_javadoc" | grep -qE '^[0-9]+$'; then
+  if [ -n "$max_javadoc" ] && ! grep -qE '^[0-9]+$' <<< "$max_javadoc"; then
     echo "error: budget maxJavadocJarBytes out of range for comparison (got '$max_javadoc')" >&2
     exit 2
   fi

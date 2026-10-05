@@ -92,7 +92,9 @@ export function harness({
     "shell cmd display get-displays",
     'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
   );
-  const ctrl = new FakeCtrlProxy();
+  const ctrl = Object.assign(new FakeCtrlProxy(), {
+    requestDeviceInfo: async () => ({ success: true, sdkInt: 36, totalTimeMs: 0 }),
+  });
   ctrl.setSupportedCommands(route === "ctrlproxy" ? ["gesture_display_id_v1"] : []);
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
     // @ts-expect-error -- Fake supplies the client methods exercised by this harness.
@@ -154,7 +156,9 @@ export function harness({
       options.previousObservation ??
       (observationFor ? await observe.execute({ display: options.display }) : frame());
     const result = await run(previous);
-    const observation = await observe.execute({ display: options.display });
+    const observation = await (options.postActionObserveScreen ?? observe).execute({
+      display: options.display,
+    });
     return { ...result, observation, effect: "changed" };
   };
   const dispatched = () => {
@@ -208,6 +212,12 @@ function trackDispatches({
     dispatched();
     return result;
   });
+  const drag = ctrl.requestDrag.bind(ctrl);
+  spyOn(ctrl, "requestDrag").mockImplementation(async (...args) => {
+    const result = await drag(...args);
+    dispatched();
+    return result;
+  });
   const execute = adb.execute.bind(adb);
   spyOn(adb, "execute").mockImplementation(async (...args) => {
     const result = await execute(...args);
@@ -219,6 +229,7 @@ function trackDispatches({
   const commands = () => adb.getAllCommands().filter((command) => command.includes("touchscreen"));
   const legs = () => [
     ...ctrl.getSwipeHistory(),
+    ...ctrl.getDragHistory().map((leg) => ({ ...leg, duration: leg.dragDurationMs })),
     ...commands().map((command) => {
       const [x1, y1, x2, y2, duration] = command.split(" ").slice(-5).map(Number);
       return { x1, y1, x2, y2, duration };

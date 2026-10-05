@@ -338,6 +338,16 @@ function defaultDaemonProcessBirthTime(): number {
   return Date.now() - Math.max(0, process.uptime() * 1_000);
 }
 
+interface CapturedDisconnectRecoveryOptions {
+  deviceId: string;
+  incidentId: string | undefined;
+  pooledDevice: PooledDevice | null | undefined;
+  sessionId: string | null | undefined;
+  session: Session | null;
+  forceGeneration: number | undefined;
+  preparation?: ReturnType<DevicePool["prepareSessionPreservingRecovery"]>;
+}
+
 export class Daemon {
   // One probe lifetime shared by all MCP connections and daemon doctor calls.
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
@@ -2286,14 +2296,10 @@ export class Daemon {
   }
 
   private async tryRecoverCapturedDisconnectTarget(
-    deviceId: string,
-    incidentId: string | undefined,
-    pooledDevice: PooledDevice | null | undefined,
-    sessionId: string | null | undefined,
-    session: Session | null,
-    forceGeneration: number | undefined,
-    preparation?: ReturnType<DevicePool["prepareSessionPreservingRecovery"]>,
+    options: CapturedDisconnectRecoveryOptions,
   ): Promise<boolean> {
+    const { deviceId, incidentId, pooledDevice, sessionId, session, forceGeneration, preparation } =
+      options;
     if (!preparation) {
       if (
         sessionId &&
@@ -2370,7 +2376,7 @@ export class Daemon {
         await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
         return { incidentId, handled: true };
       }
-      const handled = await this.tryRecoverCapturedDisconnectTarget(
+      const handled = await this.tryRecoverCapturedDisconnectTarget({
         deviceId,
         incidentId,
         pooledDevice,
@@ -2378,7 +2384,7 @@ export class Daemon {
         session,
         forceGeneration,
         preparation,
-      );
+      });
       return { incidentId, handled };
     } finally {
       this.devicePool.finishSessionPreservingRecoveryPreparation(preparation);

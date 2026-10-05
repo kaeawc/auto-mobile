@@ -1398,7 +1398,7 @@ main() {
         if [[ -n "${DESKTOP_APP_PACKAGE}" ]]; then
             log_info "Found AutoMobile desktop app package: ${DESKTOP_APP_PACKAGE}"
         else
-            log_info "Found AutoMobile desktop app: ${DESKTOP_APP_PATHS[*]}"
+            log_info "Found AutoMobile desktop app: ${DESKTOP_APP_PATHS[*]-}"
         fi
     fi
 

@@ -1,6 +1,198 @@
+import {
+  runWithTextRequestContext,
+  TextRequestState,
+} from "../../../../src/features/action/textTransportTimeout";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyText";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
+
+describe("iOS text transport safety", () => {
+  const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
+
+  for (const operation of ["append", "set", "clear", "legacyAppend"] as const) {
+    const start = (h: ReturnType<typeof createIosDelegateHarness>) => {
+      const client = new CtrlProxyText(h.context);
+      return operation === "set"
+        ? client.requestSetText("hello")
+        : operation === "clear"
+          ? client.requestClearText()
+          : client.requestAppendText("hello");
+    };
+    const harness = () =>
+      createIosDelegateHarness({
+        supportedCommands: operation === "legacyAppend" ? ["request_set_text"] : undefined,
+      });
+
+    test(`${operation}: dispatched timeout is indeterminate`, async () => {
+      const h = harness();
+      const pending = start(h);
+      await flush();
+      h.advanceTime(5000);
+      const result = await pending;
+      expect(result).toMatchObject({ success: false, retryable: false });
+      expect(result.error).toContain("outcome is indeterminate");
+      expect(result.error).toContain("Do not retry automatically. Observe before retrying.");
+      expect(h.sentMessages).toHaveLength(1);
+    });
+
+    test(`${operation}: connection drop after dispatch is indeterminate`, async () => {
+      const h = harness();
+      const pending = start(h);
+      await flush();
+      h.requestManager.cancelAll(new Error("runner disconnected"));
+      const result = await pending;
+      expect(result).toMatchObject({ success: false, retryable: false });
+      expect(result.error).toContain("outcome is indeterminate");
+      expect(result.error).toContain("runner disconnected");
+    });
+
+    test(`${operation}: no connection stays a plain failure`, async () => {
+      const h = harness();
+      h.setConnected(false);
+      expect(await start(h)).toEqual({ success: false, totalTimeMs: 0, error: "Not connected" });
+      expect(h.sentMessages).toHaveLength(0);
+    });
+
+    test(`${operation}: failed send stays a plain failure`, async () => {
+      const h = harness();
+      const socket = h.context.getWebSocket()!;
+      socket.send = () => {
+        throw new Error("send failed");
+      };
+      const result = await start(h);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("send failed");
+      expect(result.error).not.toContain("indeterminate");
+      expect(result.retryable).toBeUndefined();
+    });
+  }
+
+  test.each([false, true])("long text survives 5000ms (legacy=%s)", async (legacy) => {
+    const h = createIosDelegateHarness({
+      supportedCommands: legacy ? ["request_set_text"] : undefined,
+    });
+    const pending = new CtrlProxyText(h.context).requestAppendText("a".repeat(1000));
+    await flush();
+    h.advanceTime(5000);
+    expect(h.requestManager.getPendingCount()).toBe(1);
+    h.resolveLast({ success: true, totalTimeMs: 5001 });
+    await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 5001 });
+  });
+
+  test("set text also scales its default timeout", async () => {
+    const h = createIosDelegateHarness();
+    const pending = new CtrlProxyText(h.context).requestSetText("a".repeat(1000));
+    await flush();
+    h.advanceTime(5000);
+    expect(h.requestManager.getPendingCount()).toBe(1);
+    h.resolveLast({ success: true, totalTimeMs: 5001 });
+    await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 5001 });
+  });
+
+  test.each(["append", "legacyAppend", "set", "clear"] as const)(
+    "%s forwards dispatch and clamps after connection work",
+    async (operation) => {
+      const h = createIosDelegateHarness({
+        supportedCommands: operation === "legacyAppend" ? ["request_set_text"] : undefined,
+      });
+      const text = new CtrlProxyText({
+        ...h.context,
+        ensureConnected: async () => {
+          h.advanceTime(1000);
+          return true;
+        },
+      });
+      let dispatches = 0;
+      const options = {
+        deadlineMs: h.timer.now() + 4000,
+        onDispatch: () => {
+          dispatches++;
+        },
+      };
+      const pending =
+        operation === "set"
+          ? text.requestSetText("a".repeat(1000), options)
+          : operation === "clear"
+            ? text.requestClearText(undefined, undefined, undefined, options)
+            : text.requestAppendText("a".repeat(1000), undefined, undefined, undefined, options);
+      await flush();
+      expect(dispatches).toBe(1);
+      h.advanceTime(2999);
+      expect(h.requestManager.getPendingCount()).toBe(1);
+      h.advanceTime(1);
+      expect(await pending).toMatchObject({ success: false, retryable: false, totalTimeMs: 3000 });
+    },
+  );
+
+  test("expired deadline during handshake prevents append dispatch", async () => {
+    const h = createIosDelegateHarness();
+    const text = new CtrlProxyText({
+      ...h.context,
+      getSupportedCommands: async () => {
+        h.advanceTime(10);
+        return ["request_append_text"];
+      },
+    });
+    const result = await text.requestAppendText("a", undefined, undefined, undefined, {
+      deadlineMs: h.timer.now() + 5,
+    });
+    expect(result).toEqual({
+      success: false,
+      totalTimeMs: 0,
+      error: "Request deadline expired before dispatch",
+    });
+    expect(h.sentMessages).toHaveLength(0);
+  });
+
+  test.each(["append", "legacyAppend", "set", "clear"] as const)(
+    "%s cancels pending requests after dispatch without encouraging a retry",
+    async (operation) => {
+      const h = createIosDelegateHarness({
+        supportedCommands: operation === "legacyAppend" ? ["request_set_text"] : undefined,
+      });
+      const text = new CtrlProxyText(h.context);
+      const controller = new AbortController();
+      const options = { abortSignal: controller.signal };
+      const pending =
+        operation === "set"
+          ? text.requestSetText("hello", options)
+          : operation === "clear"
+            ? text.requestClearText(undefined, undefined, undefined, options)
+            : text.requestAppendText("hello", undefined, undefined, undefined, options);
+      await flush();
+      controller.abort();
+      expect(await pending).toMatchObject({ success: false, retryable: false });
+      expect(h.requestManager.getPendingCount()).toBe(0);
+      expect(h.sentMessages).toHaveLength(1);
+    },
+  );
+
+  test("abort during connection prevents dispatch and stays plain", async () => {
+    const h = createIosDelegateHarness();
+    const controller = new AbortController();
+    const text = new CtrlProxyText({
+      ...h.context,
+      ensureConnected: async () => {
+        controller.abort();
+        return true;
+      },
+    });
+    const result = await text.requestSetText("hello", { abortSignal: controller.signal });
+    expect(result.error).toContain("aborted before dispatch");
+    expect(result.retryable).toBeUndefined();
+    expect(h.sentMessages).toHaveLength(0);
+  });
+
+  test("confirmed runner failure stays plain", async () => {
+    const h = createIosDelegateHarness();
+    const pending = new CtrlProxyText(h.context).requestAppendText("hello");
+    await flush();
+    const failure = { success: false, totalTimeMs: 1, error: "runner_busy" };
+    h.resolveLast(failure);
+    await expect(pending).resolves.toEqual(failure);
+  });
+});
 
 describe("CtrlProxyText requestAppendText", () => {
   const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
@@ -68,5 +260,76 @@ describe("CtrlProxyText requestAppendText", () => {
     ]);
     expect(harness.resolveLast({ success: true, totalTimeMs: 1 })).toBe(true);
     await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
+  });
+});
+
+describe("iOS text uses the actual request context", () => {
+  test.each(["append", "set", "clear"] as const)(
+    "%s reserves response time after acquisition",
+    async (operation) => {
+      const h = createIosDelegateHarness();
+      const state = new TextRequestState();
+      const deadline = h.timer.now() + 4000;
+      const text = new CtrlProxyText({
+        ...h.context,
+        ensureConnected: async () => {
+          h.advanceTime(1000);
+          return true;
+        },
+      });
+      const pending = runWithTextRequestContext(
+        { textState: state, getDeadlineMs: () => deadline },
+        () =>
+          operation === "set"
+            ? text.requestSetText("a".repeat(1000))
+            : operation === "clear"
+              ? text.requestClearText()
+              : text.requestAppendText("a".repeat(1000)),
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(state.timeoutError("request expired")?.retryable).toBe(false);
+      h.advanceTime(1999);
+      expect(h.requestManager.getPendingCount()).toBe(1);
+      h.advanceTime(1);
+      expect(await pending).toMatchObject({ success: false, retryable: false, totalTimeMs: 2000 });
+      expect(state.timeoutError("later observation failed")).toBeUndefined();
+      expect(h.sentMessages).toHaveLength(1);
+    },
+  );
+
+  test.each([false, true])("request cancellation dispatched=%s", async (dispatched) => {
+    const h = createIosDelegateHarness();
+    const state = new TextRequestState();
+    const controller = new AbortController();
+    const connected = Promise.withResolvers<boolean>();
+    const text = new CtrlProxyText({ ...h.context, ensureConnected: () => connected.promise });
+    const pending = runWithTextRequestContext(
+      { textState: state, getDeadlineMs: () => h.timer.now() + 4000 },
+      () => runWithAbortSignal(controller.signal, () => text.requestSetText("hello")),
+    );
+    if (dispatched) {
+      connected.resolve(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    controller.abort(new Error("Request timed out after 4000ms"));
+    connected.resolve(true);
+    const result = await pending;
+    expect(result.retryable).toBe(dispatched ? false : undefined);
+    expect(result.error?.includes("Do not retry automatically.")).toBe(dispatched);
+    expect(state.timeoutError("later unrelated failure")).toBeUndefined();
+    expect(h.sentMessages).toHaveLength(dispatched ? 1 : 0);
+  });
+
+  test("a confirmed reply clears dispatch evidence", async () => {
+    const h = createIosDelegateHarness();
+    const state = new TextRequestState();
+    const pending = runWithTextRequestContext(
+      { textState: state, getDeadlineMs: () => undefined },
+      () => new CtrlProxyText(h.context).requestSetText("hello"),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    h.resolveLast({ success: true, totalTimeMs: 1 });
+    expect((await pending).success).toBe(true);
+    expect(state.timeoutError("expired during observation")).toBeUndefined();
   });
 });

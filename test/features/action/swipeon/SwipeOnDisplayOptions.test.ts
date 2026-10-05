@@ -274,6 +274,11 @@ for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
   test(`a11y failure has no adb fallback, search=${!!lookFor}`, async () => {
     const h = optionsHarness();
     h.ctrl.setSwipeResult({ success: false, error: "CtrlProxy display dispatch failed" });
+    h.ctrl.setDragResult({
+      success: false,
+      error: "CtrlProxy display dispatch failed",
+      totalTimeMs: 0,
+    });
     const result = await h.action.execute({
       ...displaySwipe,
       autoTarget: true,
@@ -282,7 +287,7 @@ for (const lookFor of [undefined, { text: "Found", maxTime: 3000 }]) {
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("CtrlProxy display dispatch failed");
-    expect(h.ctrl.getSwipeHistory()).toHaveLength(1);
+    expect(h.legs()).toHaveLength(1);
     expect(h.commands()).toEqual([]);
   });
 }
@@ -338,7 +343,7 @@ for (const scrollMode of ["adb", "a11y"] as const) {
     expect(result).toMatchObject({ success: true, found: true, scrollIterations: 2 });
     expect(result.warning).toBeUndefined();
     expect(h.legs()).toHaveLength(2);
-    expect(h.legs()[0]).toMatchObject({ x1: 90, y1: 160, x2: 90, y2: 80 });
+    expect(h.legs()[0]).toMatchObject({ x1: 90, y1: 160, x2: 90, y2: 85 });
     expect(selector).not.toHaveBeenCalled();
     expect(h.observe.getExecuteOptions().every((options) => options.display === "external")).toBe(
       true,

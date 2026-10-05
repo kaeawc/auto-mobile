@@ -921,7 +921,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,schema-copy-drift,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock \
+            --only yaml,lfs-pointers,schema-copy-drift,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1416,6 +1416,8 @@ jobs:
         env:
           BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
           BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+          # 360s rechecks + 180s setup/verdict reserve < 600s job timeout.
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
         run: bash scripts/validate-bun-test-timings.sh
 
   node-host-integration-tests:
@@ -1646,7 +1648,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1956,7 +1958,7 @@ jobs:
       fail-fast: false
       matrix:
         # PR runs only the primary Xcode toolchain. The full version sweep
-        # (26.0 / 26.5 / 26.6) runs on nightly.yml — Xcode-toolchain drift is
+        # (26.5 / 26.6) runs on nightly.yml — Xcode-toolchain drift is
         # slow-moving and does not need per-PR macOS minutes.
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }

@@ -455,7 +455,7 @@ setup_main_fixture() {
   detect_mcp_configs() { MCP_CONFIGS_FOUND=("fixture"); }
   detect_marketplace() { MARKETPLACE_INSTALLED=true; }
   detect_cli() { CLI_INSTALLED=true; }
-  detect_desktop_app() { DESKTOP_APP_INSTALLED=true; }
+  detect_desktop_app() { DESKTOP_APP_INSTALLED=true; DESKTOP_APP_PATHS=("${HOME}/Applications/AutoMobile.app"); }
   stop_desktop_app_processes() { printf 'desktop-stop\n' >> "${TEST_ROOT}/steps"; }
   remove_cli() { rm "${HOME}/cli"; }
   remove_desktop_app() { rm "${HOME}/desktop"; }
@@ -513,6 +513,19 @@ assert_blocked_main() {
 
 @test "all uninstall after verified stop removes selected data binaries and configs" {
   setup_main_fixture
+  run main --all --force
+  [ "$status" -eq 0 ]
+  [ ! -e "${HOME}/.automobile" ]
+  [ ! -e "${HOME}/cli" ]
+  [ ! -e "${HOME}/desktop" ]
+  [ ! -e "${HOME}/mcp" ]
+  [ ! -e "${HOME}/marketplace" ]
+  [[ "$output" == *"Uninstall complete"* ]]
+}
+
+@test "all uninstall with empty desktop app paths removes selected data binaries and configs" {
+  setup_main_fixture
+  detect_desktop_app() { DESKTOP_APP_INSTALLED=true; DESKTOP_APP_PACKAGE=""; DESKTOP_APP_PATHS=(); }
   run main --all --force
   [ "$status" -eq 0 ]
   [ ! -e "${HOME}/.automobile" ]

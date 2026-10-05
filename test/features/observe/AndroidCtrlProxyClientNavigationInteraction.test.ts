@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test, spyOn } from "bun:test";
+import { readFileSync } from "node:fs";
+import type { AccessibilityHierarchy } from "../../../src/features/observe/android/types";
 import { resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
@@ -130,6 +132,149 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
     }
     return call;
   };
+
+  // Reuse a captured Android tree, rather than inventing parser/hierarchy JSON.
+  function observePayload(): AccessibilityHierarchy {
+    const capture: { viewHierarchy: AccessibilityHierarchy } = JSON.parse(
+      readFileSync(
+        new URL("../../fixtures/android-focus/playground-text-field-pre-tap.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    return { ...capture.viewHierarchy, packageName: "", updatedAt: 1791181941976 };
+  }
+
+  test.each(["window", "root", "single-root", "top-app", "ime"])(
+    "observe sync resolves Settings identity from %s before detector/build attribution",
+    (source) => {
+      const activeWindow = {
+        appId: "com.android.settings",
+        activityName: "com.android.settings.Settings",
+      };
+      const payload = observePayload();
+      const appWindow = payload.windows!.find((window) => window.isFocused)!;
+      if (source === "window" || source === "top-app" || source === "ime") {
+        appWindow.packageName = activeWindow.appId;
+      } else {
+        const roots = payload.hierarchy.node;
+        const root = (Array.isArray(roots) ? roots : [roots]).find(
+          (node) => node?.windowId === appWindow.id,
+        )!;
+        root.packageName = activeWindow.appId;
+        if (source === "single-root") {
+          payload.hierarchy = root;
+          payload.windows = undefined;
+        }
+      }
+      if (source === "top-app" || source === "ime") {
+        appWindow.isFocused = false;
+        appWindow.isActive = false;
+      }
+      if (source === "ime") {
+        payload.windows!.push({
+          type: 2,
+          isFocused: true,
+          packageName: "com.google.android.inputmethod.latin",
+          windowLayer: 100,
+        });
+      }
+      timer.setCurrentTime(1791181941935);
+      const detector = spyOn(
+        client.getHierarchyNavigationDetector(),
+        "onHierarchyUpdate",
+      ).mockImplementation(() => {});
+      const build = spyOn(navHarness.manager, "clearBuildContext");
+      const packages = spyOn(client, "requestPackageInfo").mockRejectedValue(
+        new Error("fake package lookup unavailable"),
+      );
+      try {
+        client.handleHierarchyUpdate(payload);
+        expect(detector).toHaveBeenCalledWith(
+          expect.objectContaining({ packageName: activeWindow.appId, updatedAt: 1791181941976 }),
+        );
+        expect(build).toHaveBeenCalledWith(activeWindow.appId);
+        expect(payload.packageName).toBe(""); // Input capture is not relabeled in place.
+      } finally {
+        detector.mockRestore();
+        build.mockRestore();
+        packages.mockRestore();
+      }
+    },
+  );
+
+  test("newly resolved SDK package still skips hierarchy detection", async () => {
+    await sendNavigation("DemoIndexDestination", "dev.jasonpearson.automobile.playground");
+    const payload = observePayload();
+    payload.windows!.find((window) => window.isFocused)!.packageName =
+      "dev.jasonpearson.automobile.playground";
+    const detector = spyOn(
+      client.getHierarchyNavigationDetector(),
+      "onHierarchyUpdate",
+    ).mockImplementation(() => {});
+    try {
+      client.handleHierarchyUpdate(payload);
+      expect(detector).not.toHaveBeenCalled();
+    } finally {
+      detector.mockRestore();
+    }
+  });
+
+  test("unknown focused window cannot borrow another window's package or stale build context", () => {
+    const payload = observePayload();
+    payload.windows!.find((window) => !window.isFocused)!.packageName =
+      "dev.jasonpearson.automobile.playground";
+    const build = spyOn(navHarness.manager, "clearBuildContext");
+    try {
+      client.handleHierarchyUpdate(payload);
+      expect(build).not.toHaveBeenCalled();
+      expect(client.getHierarchyNavigationDetector().hasPendingFingerprint()).toBe(false);
+    } finally {
+      build.mockRestore();
+    }
+  });
+
+  test.each(["focused-window", "unknown"])(
+    "%s identity is navigation-only and leaves the cached/returned capture unchanged",
+    async (source) => {
+      const payload = observePayload();
+      delete payload.packageName;
+      const navigationPackage = source === "focused-window" ? "com.android.settings" : undefined;
+      if (navigationPackage) {
+        payload.windows!.find((window) => window.isFocused)!.packageName = navigationPackage;
+      }
+      const before = structuredClone(payload);
+      const navigation = client.getHierarchyNavigationDetector();
+      // Unknown frames must reset an existing pending fingerprint, not bypass the detector.
+      navigation.onHierarchyUpdate({ ...payload, packageName: "com.example.pending" });
+      expect(navigation.hasPendingFingerprint()).toBe(true);
+      const detector = spyOn(navigation, "onHierarchyUpdate");
+      const build = spyOn(navHarness.manager, "clearBuildContext");
+      const packages = spyOn(client, "requestPackageInfo").mockRejectedValue(
+        new Error("fake package lookup unavailable"),
+      );
+      try {
+        client.handleHierarchyUpdate(payload);
+        const cached = (await client.getLatestHierarchy()).hierarchy;
+        expect(cached).toBe(payload);
+        expect(cached).toEqual(before);
+        expect(Object.hasOwn(cached!, "packageName")).toBe(false);
+        expect(cached?.packageName).toBeUndefined();
+        expect(detector).toHaveBeenCalledWith({ ...payload, packageName: navigationPackage });
+        expect(detector.mock.calls[0][0]).not.toBe(payload);
+        if (navigationPackage) {
+          expect(build).toHaveBeenCalledWith(navigationPackage);
+          expect(navigation.hasPendingFingerprint()).toBe(true);
+        } else {
+          expect(build).not.toHaveBeenCalled();
+          expect(navigation.hasPendingFingerprint()).toBe(false);
+        }
+      } finally {
+        detector.mockRestore();
+        build.mockRestore();
+        packages.mockRestore();
+      }
+    },
+  );
 
   test("does not attach another app's interaction", async () => {
     const timestamp = timer.now();

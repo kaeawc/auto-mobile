@@ -213,6 +213,27 @@ describe("HierarchyNavigationDetector", () => {
   });
 
   describe("onHierarchyUpdate", () => {
+    test("unknown app cancels pending navigation and screenshot callbacks", () => {
+      let callbacks = 0;
+      detector.setNavigationCallback(() => {
+        callbacks++;
+      });
+      detector.onHierarchyUpdate(createHierarchy("Screen A"));
+      detector.onHierarchyUpdate({ ...createHierarchy("Settings"), packageName: "" });
+      fakeTimer.advanceTime(6000);
+      expect(callbacks).toBe(0);
+      expect(detector.getCurrentFingerprint()).toBeNull();
+      expect(detector.hasPendingFingerprint()).toBe(false);
+    });
+
+    test("identical hierarchy hash from another app still reports the app switch", () => {
+      const hierarchy = createHierarchy("Screen A");
+      detector.onHierarchyUpdate(hierarchy);
+      fakeTimer.advanceTime(60);
+      detector.onHierarchyUpdate({ ...hierarchy, packageName: "com.android.settings" });
+      fakeTimer.advanceTime(60);
+      expect(detector.getCurrentFingerprint()?.packageName).toBe("com.android.settings");
+    });
     test("should set pending fingerprint on first update", () => {
       const hierarchy = createHierarchy("Screen A");
       detector.onHierarchyUpdate(hierarchy);

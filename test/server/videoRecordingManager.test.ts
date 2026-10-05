@@ -20,6 +20,7 @@ import { trackProcess } from "../../src/utils/ChildProcessTracker";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
@@ -84,6 +85,10 @@ describe("videoRecordingManager", () => {
   let service: VideoRecorderService;
   let archiveRoot: string;
   let testDevice: BootedDevice;
+  const originalWarn = logger.warn.bind(logger);
+  let warnings: string[] = [];
+  let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">> | undefined;
+  let intervalSpy: ReturnType<typeof spyOn<typeof defaultTimer, "setInterval">> | undefined;
   const iosDevice: BootedDevice = {
     deviceId: "ios-device",
     platform: "ios",
@@ -95,6 +100,15 @@ describe("videoRecordingManager", () => {
   });
 
   const setup = async () => {
+    warnings = [];
+    warnSpy = spyOn(logger, "warn").mockImplementation((message, ...args) => {
+      warnings.push([message, ...args].map(String).join(" "));
+      originalWarn(message, ...args);
+    });
+    // Record accidental default-timer use without creating a real interval.
+    intervalSpy = spyOn(defaultTimer, "setInterval").mockImplementation((callback, ms) =>
+      fakeTimer.setInterval(callback, ms),
+    );
     fakeTimer = new FakeTimer();
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
@@ -130,6 +144,19 @@ describe("videoRecordingManager", () => {
     resetVideoRecordingManagerDependencies();
     resetDeviceSnapshotManagerDependencies();
     displayTransitions.reset("recording-foldable");
+    try {
+      expect(warnings.filter((message) => message.includes("real file-backed database"))).toEqual(
+        [],
+      );
+      if (intervalSpy) {
+        expect(intervalSpy).not.toHaveBeenCalled();
+      }
+    } finally {
+      warnSpy?.mockRestore();
+      intervalSpy?.mockRestore();
+      warnSpy = undefined;
+      intervalSpy = undefined;
+    }
   };
 
   const reset = async () => {
@@ -306,6 +333,80 @@ describe("videoRecordingManager", () => {
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
   });
 
+  test("failed state initialization does not arm retention", async () => {
+    const listing = spyOn(fakeRepository, "listRecordings").mockRejectedValue(
+      new ActionableError("repository unavailable"),
+    );
+    try {
+      await expect(startVideoRecording({ device: iosDevice })).rejects.toThrow(
+        "repository unavailable",
+      );
+      expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    } finally {
+      listing.mockRestore();
+    }
+  });
+
+  test.each(["completed", "interrupted", "retained"] as const)(
+    "in-flight stop keeps its dependencies across reset (%s)",
+    async (outcome) => {
+      const active = await startVideoRecording({ device: iosDevice });
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const stopBackend = fakeBackend.stop.bind(fakeBackend);
+      fakeBackend.stop = async (handle) => {
+        entered.resolve();
+        await release.promise;
+        if (outcome === "interrupted") {
+          throw new VideoCaptureFinalizationError("capture finalized without output");
+        }
+        if (outcome === "retained") {
+          throw new ProcessTeardownUnconfirmedError("capture still owned");
+        }
+        return stopBackend(handle);
+      };
+      const stopped = stopVideoRecording(active.recordingId);
+      // Attach a failure handler before releasing the backend's deterministic gate.
+      const settled = stopped.then(
+        (value) => ({ value, error: undefined }),
+        (error: unknown) => ({ value: undefined, error }),
+      );
+      await entered.promise;
+      resetVideoRecordingManagerDependencies();
+      const replacementRepository = new FakeVideoRecordingRepository();
+      const replacementTimer = new FakeTimer();
+      await setVideoRecordingManagerDependencies({
+        videoRecorderService: service,
+        recordingRepository: replacementRepository,
+        configRepository: new FakeVideoRecordingConfigRepository(),
+        highlightClient: fakeHighlightClient,
+        timer: replacementTimer,
+        now: () => new Date(replacementTimer.now()),
+      });
+      const replacementReads = spyOn(replacementRepository, "listRecordings");
+      try {
+        release.resolve();
+        const result = await settled;
+        if (outcome === "completed") {
+          expect(result.error).toBeUndefined();
+          expect(result.value?.metadata.recordingId).toBe(active.recordingId);
+        } else {
+          expect(result.error).toBeInstanceOf(ActionableError);
+        }
+        expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe(
+          outcome === "retained" ? "recording" : outcome,
+        );
+        expect(replacementReads).not.toHaveBeenCalled();
+        expect(replacementTimer.getPendingIntervalCount()).toBe(0);
+        expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        release.resolve();
+        replacementReads.mockRestore();
+      }
+    },
+  );
+
   test("manual stop clears auto-stop timeout", async () => {
     const active = await startVideoRecording({
       device: testDevice,
@@ -444,7 +545,6 @@ describe("videoRecordingManager", () => {
       "Android host-file monitor suppresses only expected missing-file warnings (%s)",
       async (code, expectedWarnings) => {
         const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
-        const warn = spyOn(logger, "warn").mockImplementation(() => {});
         const debug = spyOn(logger, "debug").mockImplementation(() => {});
         const stat = spyOn(fsPromises, "stat").mockRejectedValue(
           Object.assign(new Error("host file stat failed"), { code }),
@@ -459,9 +559,7 @@ describe("videoRecordingManager", () => {
           }
           expect(stat).toHaveBeenCalledTimes(3);
           expect(
-            warn.mock.calls.filter(([message]) =>
-              String(message).includes("Missing recording file"),
-            ),
+            warnings.filter((message) => message.includes("Missing recording file")),
           ).toHaveLength(expectedWarnings);
           expect(
             debug.mock.calls.filter(([message]) =>
@@ -472,7 +570,6 @@ describe("videoRecordingManager", () => {
           expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
         } finally {
           stat.mockRestore();
-          warn.mockRestore();
           debug.mockRestore();
         }
       },
@@ -727,8 +824,8 @@ describe("videoRecordingManager", () => {
       drainAsyncUntil(async () => false, 100, "stop not called by timer (auto-stop)"),
     ]);
     expect(stopAttempts).toBe(1);
-    // Backend failure re-arms safety in later microtasks, after signalling the call.
-    await drainAsyncUntil(async () => fakeTimer.getPendingTimeoutCount() === 1);
+    // Join the stop, including retained-owner safety rearming, before teardown.
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
     expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
     // The fired one-shot timeout is replaced by the bounded retained-owner retry.
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
@@ -739,6 +836,7 @@ describe("videoRecordingManager", () => {
       retryStopCall,
       drainAsyncUntil(async () => false, 100, "stop not called by timer (retained-owner retry)"),
     ]);
+    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
     expect(stopAttempts).toBe(2);
   });
 
@@ -1621,12 +1719,15 @@ describe("videoRecordingManager", () => {
         async () => capBytes * 2,
       );
       const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
+      const stopping = Promise.withResolvers<void>();
       fakeBackend.stop = async () => {
+        stopping.resolve();
         throw new ProcessTeardownUnconfirmedError("host process may still be alive");
       };
 
       fakeTimer.advanceTime(1000);
-      await drainAsyncUntil(async () => fakeTimer.getPendingIntervalCount() === 1);
+      await stopping.promise;
+      await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
 
       expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
       // The cap callback cleared its old interval before stop; retained safety

@@ -1,3 +1,4 @@
+import { getTextRequestDeadlineMs } from "../../../src/features/action/textTransportTimeout";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -657,6 +658,26 @@ describe("SetUIState", () => {
       expect(fakeInput.getCalls().map((call) => call.text)).toEqual(["one"]);
     });
 
+    test("forwards the actual form deadline to clear and input", async () => {
+      fakeObserve.setResult(createObserveResult(createHierarchyWithElement(textField("first", 0))));
+      fakeFieldTypeDetector.setFieldType("first", "text");
+      fakeFieldTypeDetector.setSkipVerification("first", true);
+      const deadlines: Array<number | undefined> = [];
+      const deadline = fakeTimer.now() + 122_000;
+      const action = buildCancellableTextAction(
+        () => deadlines.push(getTextRequestDeadlineMs()),
+        () => deadlines.push(getTextRequestDeadlineMs()),
+      );
+      const result = await action.execute(
+        { fields: [{ selector: { elementId: "first" }, value: "a".repeat(1000) }] },
+        undefined,
+        undefined,
+        deadline,
+      );
+      expect(result.success).toBe(true);
+      expect(deadlines).toEqual([deadline - 4000, deadline - 4000]);
+    });
+
     test("forwards the same signal to clear and input", async () => {
       const controller = new AbortController();
       const clearSignals: Array<AbortSignal | undefined> = [];
@@ -1018,6 +1039,57 @@ describe("SetUIState", () => {
   });
 
   describe("retry logic", () => {
+    test.each(["input", "clear"])("does not retry indeterminate iOS %s", async (operation) => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "field",
+            text: "",
+            class: "android.widget.EditText",
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("field", "text");
+      const error = "Unconfirmed device mutation";
+      if (operation === "input") {
+        fakeInput.setResult({ success: false, text: "", error, ...{ retryable: false } });
+      } else {
+        fakeClear.setResult({ success: false, error, ...{ retryable: false } });
+      }
+
+      const result = await createSetUIState(undefined, "ios").execute({
+        fields: [{ selector: { elementId: "field" }, value: "test" }],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.fields[0].attempts).toBe(1);
+      expect(result.fields[0].error).toContain(error);
+      expect(fakeClear.getCallCount()).toBe(1);
+      expect(fakeInput.getCallCount()).toBe(operation === "input" ? 1 : 0);
+    });
+
+    test.each(["ios", "android"] as const)(
+      "%s retries wording without a structured marker",
+      async (platform) => {
+        fakeObserve.setResult(
+          createObserveResult(
+            createHierarchyWithElement({
+              "resource-id": "field",
+              text: "",
+              class: "android.widget.EditText",
+            }),
+          ),
+        );
+        fakeFieldTypeDetector.setFieldType("field", "text");
+        fakeInput.setResult({ success: false, text: "", error: "Do not retry automatically." });
+        const result = await createSetUIState(undefined, platform).execute({
+          fields: [{ selector: { elementId: "field" }, value: "test" }],
+        });
+        expect(result.fields[0].attempts).toBe(3);
+        expect(fakeInput.getCallCount()).toBe(3);
+      },
+    );
+
     test("retries up to maxRetries on failure", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "field",

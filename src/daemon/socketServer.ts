@@ -1,3 +1,4 @@
+import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
 import {
@@ -69,7 +70,11 @@ import {
   daemonShuttingDownFailureFromToolResult,
   isDaemonShuttingDownToolResult,
 } from "./daemonShutdownOutcome";
-import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
+import {
+  registerLiveDeadline,
+  unregisterLiveDeadline,
+  getLiveTextRequestState,
+} from "./liveDeadlineRegistry";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
@@ -761,6 +766,26 @@ export interface SocketFrameTraceEvent {
   writableLengthAfterWrite?: number;
   writableLengthInCallback?: number;
   hadError?: boolean;
+}
+
+interface ProfileReaffirmForwardRouteOptions {
+  args: unknown;
+  socketSessionId: string;
+  toolName: unknown;
+  sessionUuid: string;
+  toolSelectionProfileUuid: string | undefined;
+  scopedKey: string | undefined;
+  boundRoute: McpForwardRoute | undefined;
+}
+
+interface AndroidAppendTextOptions {
+  targetDevice: BootedDevice;
+  text: string;
+  deadline: number;
+  totalTimeoutMs: number;
+  frameContext: string | undefined;
+  client: AndroidCtrlProxyClient;
+  signal?: AbortSignal;
 }
 
 export class UnixSocketServer {
@@ -2523,7 +2548,7 @@ export class UnixSocketServer {
 
     if (sessionUuid) {
       return (
-        this.profileReaffirmForwardRoute(
+        this.profileReaffirmForwardRoute({
           args,
           socketSessionId,
           toolName,
@@ -2531,7 +2556,7 @@ export class UnixSocketServer {
           toolSelectionProfileUuid,
           scopedKey,
           boundRoute,
-        ) ??
+        }) ??
         this.sessionScopedForwardRoute(
           socketSessionId,
           sessionUuid,
@@ -2597,14 +2622,17 @@ export class UnixSocketServer {
    * already bound to (#7005). Undefined for every other explicit-session call.
    */
   private profileReaffirmForwardRoute(
-    args: unknown,
-    socketSessionId: string,
-    toolName: unknown,
-    sessionUuid: string,
-    toolSelectionProfileUuid: string | undefined,
-    scopedKey: string | undefined,
-    boundRoute: McpForwardRoute | undefined,
+    options: ProfileReaffirmForwardRouteOptions,
   ): McpForwardRoute | undefined {
+    const {
+      args,
+      socketSessionId,
+      toolName,
+      sessionUuid,
+      toolSelectionProfileUuid,
+      scopedKey,
+      boundRoute,
+    } = options;
     if (toolName !== SET_TOOL_ENABLED_TOOL_NAME || sessionUuid !== toolSelectionProfileUuid) {
       return undefined;
     }
@@ -5617,15 +5645,15 @@ export class UnixSocketServer {
     // input for this device, not just this one request.
     let appendCharsSent: number | undefined;
     if (append && platform === "android") {
-      const textResult = await this.executeAndroidAppendText(
+      const textResult = await this.executeAndroidAppendText({
         targetDevice,
         text,
         deadline,
-        timeoutMs,
+        totalTimeoutMs: timeoutMs,
         frameContext,
-        client as AndroidCtrlProxyClient,
+        client: client as AndroidCtrlProxyClient,
         signal,
-      );
+      });
       assertSocketInputNotAborted(signal);
       if (textResult.charsSent !== undefined) {
         onConfirmedAppendCharsSent?.(textResult.charsSent);
@@ -5663,14 +5691,9 @@ export class UnixSocketServer {
   }
 
   private async executeAndroidAppendText(
-    targetDevice: BootedDevice,
-    text: string,
-    deadline: number,
-    totalTimeoutMs: number,
-    frameContext: string | undefined,
-    client: AndroidCtrlProxyClient,
-    signal?: AbortSignal,
+    options: AndroidAppendTextOptions,
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
+    const { targetDevice, text, deadline, totalTimeoutMs, frameContext, client, signal } = options;
     const appendTimeoutMs = deadline - this.timer.now();
     if (appendTimeoutMs <= 0) {
       return {
@@ -6392,15 +6415,16 @@ export class UnixSocketServer {
       }
       case "tools/call": {
         const progressToken = request.progressToken;
-        // Cleanup for the abort-timer path below; a no-op for the
-        // no-progress path (nothing was ever armed).
-        let cleanup: () => void = () => {};
-        // Set only on the progress-capable path below. Lets a handler on the
+        // Cleanup includes the live dispatch evidence on every tools/call and
+        // the abort timer on progress-capable calls.
+        // Lets a handler on the
         // OTHER side of this same call (e.g. `setUIStateHandler`) read this
         // exact `deadline`'s CURRENT (possibly progress-extended) value via
         // `liveDeadlineRegistry` instead of only the frozen snapshot forwarded
         // through `INTERNAL_MCP_REQUEST_TIMEOUT_PARAM` (issue #6222 P1 reopen).
-        let liveDeadlineKey: string | undefined;
+        const liveDeadlineKey = this.idGenerator.next();
+        registerLiveDeadline(liveDeadlineKey, deadline);
+        let cleanup = () => unregisterLiveDeadline(liveDeadlineKey);
 
         let callOptions: Record<string, unknown> = requestOptions;
         if (progressToken !== undefined) {
@@ -6441,8 +6465,6 @@ export class UnixSocketServer {
             );
           let abortTimer = armAbort(timeoutMs);
           const backstopMs = Math.max(deadline.ceiling - this.timer.now(), timeoutMs);
-          liveDeadlineKey = this.idGenerator.next();
-          registerLiveDeadline(liveDeadlineKey, deadline);
           const registeredLiveDeadlineKey = liveDeadlineKey;
           cleanup = () => {
             this.timer.clearTimeout(abortTimer);
@@ -6494,7 +6516,9 @@ export class UnixSocketServer {
                 callOptions,
               ),
             );
-          });
+          }).catch((error: unknown) =>
+            this.textForwardFailure(liveDeadlineKey, request.params.name, error),
+          );
         } finally {
           cleanup();
         }
@@ -6531,6 +6555,18 @@ export class UnixSocketServer {
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
     }
+  }
+
+  private textForwardFailure(key: string, toolName: string, error: unknown) {
+    // On request-deadline expiry DaemonClient.scheduleRequestTimeout fires first,
+    // so proxy/CLI callers get a plain McpTimeoutError. The primary text path
+    // clamps transport to deadline - TEXT_REQUEST_RESPONSE_MARGIN_MS and returns
+    // its indeterminate result early.
+    const indeterminate = getLiveTextRequestState(key)?.timeoutError(error);
+    if (indeterminate) {
+      return shapeToolCallError(indeterminate, { toolName, source: "MCP" });
+    }
+    throw error;
   }
 
   private async traceCallTool<T>(request: DaemonRequest, callTool: () => Promise<T>): Promise<T> {

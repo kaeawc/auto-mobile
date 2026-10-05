@@ -1,3 +1,5 @@
+import { executeAndroidSearchDrag } from "./androidSearchDrag";
+import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
 import {
@@ -517,6 +519,28 @@ export class SwipeOn extends BaseVisualChange {
       : { ...observation, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
   }
 
+  private async resolveSearchDisplaySwipeRoute({
+    options,
+    target,
+    signal,
+  }: {
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+  }): Promise<boolean> {
+    if (options.scrollMode === "a11y") {
+      return this.resolveDisplaySwipeRoute({ options, target });
+    }
+    try {
+      return await this.resolveDisplaySwipeRoute({ options, target });
+    } catch (error) {
+      throwIfAborted(signal);
+      // Auto mode's optional capability probe sends no gesture, so ADB remains safe.
+      logger.debug("[SwipeOn] CtrlProxy display gesture capability unavailable", error);
+      return false;
+    }
+  }
+
   private async searchOnAndroidDisplay({
     options,
     target,
@@ -532,7 +556,7 @@ export class SwipeOn extends BaseVisualChange {
     if (direction.error) {
       throw new ActionableError(direction.error);
     }
-    const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
+    const useCtrlProxy = await this.resolveSearchDisplaySwipeRoute({ options, target, signal });
     const display = target.observation.display.key;
     const validateObservation = (observation: ObserveResult) =>
       this.validateSelectedDisplayObservation({
@@ -557,28 +581,61 @@ export class SwipeOn extends BaseVisualChange {
       captureCacheGeneration: this.observeScreen.captureCacheGeneration?.bind(this.observeScreen),
       cacheObserveResult: this.observeScreen.cacheObserveResult?.bind(this.observeScreen),
     };
+    let dispatched = false;
+    const observe = async () => {
+      try {
+        target.assertCurrent();
+        return validateObservation(
+          await this.observeScreen.execute({
+            display,
+            freshness: "cached-ok",
+            skipScreenshot: true,
+            skipAccessibilityAudit: true,
+            signal,
+          }),
+        );
+      } catch (error) {
+        this.rethrowObservationAbort(error, signal);
+        logger.warn(`[SwipeOn] Display search read failed: ${errorMessage(error)}`, error);
+        throw dispatched ? new DispatchedObservationError(error) : error;
+      }
+    };
     const result = await this.scrollUntilVisible.executeWithStrategy({
       options: { ...options, direction: direction.direction as SwipeDirection },
       progress,
       signal,
       strategy: {
-        observe: async () => {
-          target.assertCurrent();
-          return validateObservation(
-            await this.observeScreen.execute({
-              display,
-              freshness: "cached-ok",
-              skipScreenshot: true,
-              skipAccessibilityAudit: true,
-              signal,
-            }),
-          );
-        },
-        swipe: async ({ previousObservation, ...coordinates }) => {
+        observe,
+        swipe: async ({ previousObservation, searchDragState, ...coordinates }) => {
           const result = await this.observedInteraction(
             async () => {
-              await this.dispatchDisplaySwipeLeg({ ...coordinates, target, useCtrlProxy, signal });
-              return { success: true };
+              const fallback = async () => {
+                coordinates.onSearchFallback?.();
+                await this.dispatchDisplaySwipeLeg({
+                  ...coordinates,
+                  target,
+                  useCtrlProxy: false,
+                  signal,
+                });
+                dispatched = true;
+                return { ...coordinates, success: true };
+              };
+              const gesture = await (useCtrlProxy
+                ? executeAndroidSearchDrag({
+                    ...coordinates,
+                    searchDragState,
+                    client: this.accessibilityService,
+                    signal,
+                    displayId: target.displayId === 0 ? undefined : target.displayId,
+                    beforeSend: target.assertCurrent,
+                    fallback,
+                    onIndeterminate: (cause) => {
+                      throw new DispatchedObservationError(cause);
+                    },
+                  })
+                : fallback());
+              dispatched ||= gesture.success;
+              return gesture;
             },
             {
               changeExpected: false,
@@ -591,16 +648,29 @@ export class SwipeOn extends BaseVisualChange {
               postActionObserveScreen,
             },
           );
+          this.checkPostActionDisplay(
+            result,
+            () => validateObservation(result.observation),
+            signal,
+          );
           return {
             ...coordinates,
             targetType: "screen",
             success: result.success,
-            observation: validateObservation(result.observation),
+            error: result.error,
+            outcomeIndeterminate: result.outcomeIndeterminate,
+            observation: result.observation,
+            staleDisplay: result.staleDisplay,
           };
         },
       },
     });
-    target.assertCurrent();
+    if (dispatched) {
+      // A changed revision cannot support a found claim, even with a kept capture.
+      this.checkPostActionDisplay({}, target.assertCurrent, signal);
+    } else {
+      target.assertCurrent();
+    }
     return result;
   }
 
@@ -717,6 +787,9 @@ export class SwipeOn extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
+        if (error instanceof Error && error.name === "AbortError") {
+          throw error;
+        }
         logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
         return withStaleDisplay(this.createErrorResult(errorMessage(error)), error);
       }
@@ -910,7 +983,7 @@ export class SwipeOn extends BaseVisualChange {
       throwIfAborted(signal);
 
       logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
-      if (error instanceof StaleDisplayError) {
+      if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
         return withStaleDisplay(this.createErrorResult(error.message), error);
       }
 

@@ -1,3 +1,4 @@
+import { runWithTextRequestContext } from "./textTransportTimeout";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -60,7 +61,13 @@ interface InputTextLike {
     dismissKeyboard?: boolean,
     mode?: InputTextMode,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; text: string; observation?: ObserveResult; error?: string }>;
+  ): Promise<{
+    success: boolean;
+    text: string;
+    observation?: ObserveResult;
+    error?: string;
+    retryable?: boolean;
+  }>;
 }
 
 /**
@@ -70,7 +77,12 @@ interface ClearTextLike {
   execute(
     progress?: ProgressCallback,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; observation?: ObserveResult; error?: string }>;
+  ): Promise<{
+    success: boolean;
+    observation?: ObserveResult;
+    error?: string;
+    retryable?: boolean;
+  }>;
 }
 
 /**
@@ -500,11 +512,13 @@ export class SetUIState extends BaseVisualChange {
         const fieldBudgetMs = cutoffMs() - this.timer.now();
         const raced = await this.raceAgainstDeadline<InternalFieldResult>(
           (onTick) =>
-            this.processField(
-              fieldSpec,
-              element,
-              this.withRearmOnTick(fieldProgress(processed.size), onTick),
-              signal,
+            runWithTextRequestContext({ getDeadlineMs: cutoffMs }, () =>
+              this.processField(
+                fieldSpec,
+                element,
+                this.withRearmOnTick(fieldProgress(processed.size), onTick),
+                signal,
+              ),
             ),
           () => cutoffMs(),
           this.describeSelector(fieldSpec.selector),
@@ -1493,12 +1507,18 @@ export class SetUIState extends BaseVisualChange {
           const clearStart = Date.now();
           signal?.throwIfAborted();
           const clearResult = await clearText.execute(progress, signal);
-          signal?.throwIfAborted();
+          if (clearResult.retryable !== false) {
+            signal?.throwIfAborted();
+          }
           logger.debug(
             `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
           );
           if (!clearResult.success) {
-            return { success: false, error: `Failed to clear text: ${clearResult.error}` };
+            return {
+              success: false,
+              error: `Failed to clear text: ${clearResult.error}`,
+              stopRetrying: clearResult.retryable === false,
+            };
           }
 
           // Input new text. Intentionally passes no mode so the shared
@@ -1518,12 +1538,18 @@ export class SetUIState extends BaseVisualChange {
             undefined,
             signal,
           );
-          signal?.throwIfAborted();
+          if (inputResult.retryable !== false) {
+            signal?.throwIfAborted();
+          }
           logger.debug(
             `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
           );
           if (!inputResult.success) {
-            return { success: false, error: `Failed to input text: ${inputResult.error}` };
+            return {
+              success: false,
+              error: `Failed to input text: ${inputResult.error}`,
+              stopRetrying: inputResult.retryable === false,
+            };
           }
 
           return { success: true };

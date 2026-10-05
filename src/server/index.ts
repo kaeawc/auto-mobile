@@ -1,3 +1,8 @@
+import { getLiveDeadlineMs, getLiveTextRequestState } from "../daemon/liveDeadlineRegistry";
+import {
+  TextRequestState,
+  runWithTextRequestContext,
+} from "../features/action/textTransportTimeout";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -875,7 +880,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         unknown
       >;
     }
-    logger.info("Request: ", request);
+    logger.info("Request: ", {
+      ...request,
+      params: {
+        ...request.params,
+        arguments: stripInternalToolParams(request.params.arguments),
+      },
+    });
   };
 
   // The shared envelope (`dispatchToolCall`, #6545) has already read the tool
@@ -1213,6 +1224,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         resolvedImplicitAutolockSessionUuid,
       );
     }
+    const textState =
+      (requestLiveDeadlineKey ? getLiveTextRequestState(requestLiveDeadlineKey) : undefined) ??
+      new TextRequestState();
+    const getRequestDeadlineMs = () =>
+      (requestLiveDeadlineKey ? getLiveDeadlineMs(requestLiveDeadlineKey) : undefined) ??
+      requestDeadlineMs;
     let executionEnded = false;
     const endExecutionOnce = (): void => {
       if (!executionEnded) {
@@ -1381,7 +1398,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           },
           () => tool.handler(handlerParams, progressCallback, requestSignal),
         );
-      let result = await runWithAbortSignal(requestSignal, runToolHandler);
+      let result = await runWithTextRequestContext(
+        { textState, getDeadlineMs: getRequestDeadlineMs },
+        () => runWithAbortSignal(requestSignal, runToolHandler),
+      );
       const acquiredSessionUuid = isDeviceSessionAcquisitionTool(name)
         ? getDeviceSessionIdFromResult(result)
         : undefined;
@@ -1602,7 +1622,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // The SDK's request-handler result alias is narrower than its exported
       // CallToolResult type, though this text-only error result satisfies the
       // protocol schema.
-      return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
+      return shapeToolCallError(textState.timeoutError(error) ?? error, {
+        toolName: name,
+        source: "MCP",
+      }) as McpToolCallResult;
     } finally {
       try {
         cleanupAcquisitionRelease?.();

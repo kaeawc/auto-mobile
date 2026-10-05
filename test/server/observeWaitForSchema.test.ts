@@ -33,6 +33,7 @@ import {
   observeSchema,
   registerObserveTools,
   waitForObservation,
+  type WaitForWithSettled,
 } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -2489,6 +2490,194 @@ describe("waitForObservation absent", () => {
 
   const spinner = { $: { class: "UIActivityIndicatorView", bounds: bounds(10, 10, 50, 50) } };
   const list = { $: { "resource-id": "message_list", bounds: bounds(10, 60, 190, 190) } };
+
+  const unavailableCases: Array<[string, Partial<ObserveResult>]> = [
+    [
+      "error",
+      {
+        viewHierarchy: {
+          hierarchy: { error: "unavailable", unavailableReason: "connection_lost" },
+        },
+      },
+    ],
+    ["empty", { viewHierarchy: { hierarchy: {} } }],
+    ["zero nodes", { viewHierarchy: { hierarchy: { node: [] } } }],
+    ["incomplete", { viewHierarchy: { hierarchy: { node: [] }, ctrlProxyIncomplete: true } }],
+    [
+      "unavailable reason",
+      {
+        viewHierarchy: {
+          ...makeHierarchy([list]),
+          hierarchy: { ...makeHierarchy([list]).hierarchy, unavailableReason: "connection_lost" },
+        },
+      },
+    ],
+    ["freshness unavailable", { freshness: { isFresh: true, category: "unavailable" } }],
+    ["runtime unavailable flag", { freshness: { isFresh: true, ...{ unavailable: true } } }],
+  ];
+
+  test.each(unavailableCases)(
+    "unusable %s on every absent poll times out",
+    async (_name, overrides) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult(() => ({
+        ...makeObservation([list]),
+        ...overrides,
+        viewHierarchy: overrides.viewHierarchy
+          ? { ...overrides.viewHierarchy, updatedAt: timer.now() }
+          : makeHierarchy([list]),
+      }));
+      const outcome = await waitForObservation(
+        screen,
+        { absent: { text: "Loading" }, timeout: 300 },
+        undefined,
+        false,
+        timer,
+      );
+      expect(outcome.matched).toBe(false);
+      expect(outcome.timedOut).toBe(true);
+      expect(outcome.timeoutReason).toContain("hierarchy unavailable");
+      expect(screen.getExecuteCallCount()).toBeGreaterThan(1);
+      if (_name === "error") {
+        expect(outcome.observation.viewHierarchy?.hierarchy.error).toBe("unavailable");
+      }
+    },
+  );
+
+  test("an unavailable first capture cannot establish the device timestamp floor", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([
+      {
+        ...makeObservation([]),
+        viewHierarchy: { hierarchy: { error: "unavailable" }, updatedAt: 10_000 },
+      },
+      { ...makeObservation([list]), viewHierarchy: { ...makeHierarchy([list]), updatedAt: 20 } },
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { absent: { text: "Loading" }, timeout: 300 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.polls).toBe(2);
+    expect(screen.getExecuteOptions()[1].minTimestamp).toBe(0);
+  });
+
+  test("an unavailable terminal capture without a timestamp retains its timeout diagnostic", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([
+      {
+        ...makeObservation([spinner]),
+        viewHierarchy: { ...makeHierarchy([spinner]), updatedAt: 10 },
+      },
+      { ...makeObservation([]), viewHierarchy: { hierarchy: { node: [] } } },
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { absent: { className: "UIActivityIndicatorView" }, timeout: 300 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.timeoutReason).toContain("hierarchy unavailable");
+  });
+
+  test("usable hierarchy without the absent element matches immediately", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(makeObservation([list]));
+    const outcome = await waitForObservation(
+      screen,
+      { absent: { text: "Loading" }, timeout: 300 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    expect(screen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("unusable capture between present and absent does not prove disappearance", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([
+      makeObservation([spinner, list]),
+      { ...makeObservation([]), viewHierarchy: { hierarchy: { error: "unavailable" } } },
+      makeObservation([list]),
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { absent: { className: "UIActivityIndicatorView" }, timeout: 500 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(true);
+    expect(screen.getExecuteCallCount()).toBe(3);
+  });
+
+  test.each([
+    { text: "Ready" },
+    { textAny: ["Ready"] },
+    { elementId: "message_list" },
+    { className: "Button" },
+    { contentDescription: "Ready" },
+  ])("positive legacy %j ignores unavailable matching nodes", async (selector) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(() => ({
+      ...makeObservation([
+        { $: { ...list.$, text: "Ready", class: "Button", "content-desc": "Ready" } },
+      ]),
+      freshness: { isFresh: false, category: "unavailable" },
+    }));
+    const outcome = await waitForObservation(
+      screen,
+      { ...selector, timeout: 300 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+  });
+
+  test("legacy stable gate cannot settle an unavailable hierarchy with matching window metadata", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(() => ({
+      ...makeObservation([]),
+      viewHierarchy: { hierarchy: { error: "unavailable" }, updatedAt: timer.now() },
+    }));
+    const outcome = await waitForObservation(
+      screen,
+      {
+        activeWindow: { appId: "com.example.app" },
+        settled: { quietPeriodMs: 100 },
+        timeout: 300,
+      } satisfies WaitForWithSettled,
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+  });
 
   test("resolves once the absent element disappears and the positive predicate is present", async () => {
     const timer = new FakeTimer();

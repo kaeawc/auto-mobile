@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { describe, expect, test } from "bun:test";
 import { IdentifyInteractions } from "../../../src/features/observe/IdentifyInteractions";
 import { swipeOnSchema, tapOnSchema } from "../../../src/server/interactionTools";
@@ -409,5 +411,80 @@ describe("IdentifyInteractions", () => {
       navigationOptions: 1,
       inputFields: 1,
     });
+  });
+});
+
+describe("IdentifyInteractions captured Compose editability", () => {
+  const resource: { contents: Array<{ text: string }> } = JSON.parse(
+    readFileSync("test/fixtures/identify-interactions/playground-tap-resource.json", "utf8"),
+  );
+  const tapScreen: ObserveResult = JSON.parse(resource.contents[0].text);
+  const fields: Pick<ObserveResult, "viewHierarchy"> = JSON.parse(
+    readFileSync("test/fixtures/identify-interactions/playground-text-fields.json", "utf8"),
+  );
+  const parser = new DefaultElementParser();
+
+  test("all five captured Compose buttons are tap actions without focus", () => {
+    const result = classifier.analyze(tapScreen, { platform: "android" }, null, []);
+    for (const id of [
+      "button_regular",
+      "button_elevated",
+      "button_outlined",
+      "button_text",
+      "button_filled_tonal",
+    ]) {
+      const interaction = result.interactions.find((entry) => entry.element?.resourceId === id);
+      expect(interaction?.element?.className).toBe("Unknown");
+      expect(interaction?.type).toBe("action");
+      expect(interaction?.suggestedToolCall).toEqual({
+        tool: "tapOn",
+        params: { selector: { elementId: id }, action: "tap" },
+      });
+    }
+    expect(result.summary.inputFields).toBe(0);
+  });
+
+  test("real Compose TextFields with EditText and set_text semantics retain input classification", () => {
+    const capturedFields = parser
+      .flattenViewHierarchy(fields.viewHierarchy!)
+      .filter(({ element }) => element.class === "android.widget.EditText");
+    expect(capturedFields).toHaveLength(3);
+    for (const { element } of capturedFields) {
+      expect(element.actions).toContain("set_text");
+      expect(classifier["getTypeHint"](element)).toBe("input");
+      expect(classifier["classifyInteraction"](element)).toBe("input");
+    }
+  });
+
+  test("set_text alone identifies an input without a class or focusability", () => {
+    // Isolate an existing captured action signal without inventing a hierarchy fixture.
+    const field = parser
+      .flattenViewHierarchy(fields.viewHierarchy!)
+      .find(({ element }) => element.class === "android.widget.EditText")!.element;
+    expect(classifier["getTypeHint"]({ actions: field.actions })).toBe("input");
+    expect(classifier["classifyInteraction"]({ actions: field.actions })).toBe("input");
+  });
+
+  test.each([
+    { class: "android.widget.EditText" },
+    { className: "ComposeTextField" },
+    { class: "XCUIElementTypeTextField" },
+    { class: "XCUIElementTypeSecureTextField" },
+    { class: "XCUIElementTypeSearchField" },
+    { class: "XCUIElementTypeTextView" },
+    { password: true },
+    { password: "true" },
+  ])("preserves native input class and password signals %j", (element) => {
+    expect(classifier["getTypeHint"](element)).toBe("input");
+    expect(classifier["classifyInteraction"](element)).toBe("input");
+  });
+
+  test("focus alone on a captured button never becomes an input candidate", () => {
+    const button = parser
+      .flattenViewHierarchy(tapScreen.viewHierarchy!)
+      .find(({ element }) => element["resource-id"] === "button_regular")!.element;
+    expect(button.focusable).toBe("true");
+    expect(button.clickable).toBe("true");
+    expect(classifier["getTypeHint"](button)).toBeUndefined();
   });
 });

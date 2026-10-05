@@ -177,6 +177,7 @@ export class TalkBackTapStrategy {
     fence?: DisplayFence,
   ): Promise<TalkBackTapResult> {
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
+    let swipeRequests = 0;
     const resourceId = element?.["resource-id"] as string | undefined;
     const elementText = element.text as string | undefined;
     const elementContentDesc = element["content-desc"] as string | undefined;
@@ -203,6 +204,9 @@ export class TalkBackTapStrategy {
         resourceId,
         elementText,
         elementContentDesc,
+        onSwipeRequested: () => {
+          swipeRequests += 1;
+        },
         onNavigationResult: (result) => {
           screenReaderNavigation = result;
         },
@@ -216,20 +220,87 @@ export class TalkBackTapStrategy {
       ) {
         throw error;
       }
-      const errorMsg = errorMessage(error);
-      logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${errorMsg}`);
-      return {
-        success: false,
-        method: "focus-navigation",
-        error: errorMsg,
-        screenReaderNavigation: screenReaderNavigation
-          ? { ...screenReaderNavigation, focusTrapDetected: this.isFocusTrapError(errorMsg) }
-          : {
-              reachable: false,
-              traversalOrder: [],
-              focusTrapDetected: this.isFocusTrapError(errorMsg),
-            },
-      };
+      return this.navigationFailureResult(
+        error,
+        element,
+        driver,
+        swipeRequests,
+        screenReaderNavigation,
+      );
+    }
+  }
+
+  private async navigationFailureResult(
+    error: ActionableError,
+    element: Element,
+    driver: TalkBackNavigationDriver,
+    swipeRequests: number,
+    navigation?: ScreenReaderNavigationResult,
+  ): Promise<TalkBackTapResult> {
+    const message = errorMessage(error);
+    const focusTrapDetected = this.isFocusTrapError(message);
+    const disappeared = message.includes("Target element disappeared during navigation");
+    const safeFallback =
+      !disappeared &&
+      (swipeRequests === 0 ||
+        (focusTrapDetected && (await this.targetBoundsUnchanged(element, driver))));
+    if (!safeFallback) {
+      throw new ActionableError(
+        `${message} Coordinate fallback refused; focusTrapDetected=${focusTrapDetected}. ` +
+          "Use observe to resolve the target again before retrying.",
+        { cause: error },
+      );
+    }
+    logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${message}`, error);
+    return {
+      success: false,
+      method: "focus-navigation",
+      error: message,
+      screenReaderNavigation: {
+        reachable: false,
+        traversalOrder: navigation?.traversalOrder ?? [],
+        focusTrapDetected,
+      },
+    };
+  }
+
+  private async targetBoundsUnchanged(
+    element: Element,
+    driver: TalkBackNavigationDriver,
+  ): Promise<boolean> {
+    if (!element.bounds) {
+      return false;
+    }
+    const selector = this.createFocusSelector({
+      resourceId: nonEmptyString(element["resource-id"]),
+      elementText: nonEmptyString(element.text),
+      elementContentDesc: nonEmptyString(element["content-desc"]),
+      bounds: element.bounds,
+    });
+    try {
+      const traversal = await driver.requestTraversalOrder();
+      if (traversal.error || !traversal.elements?.length) {
+        return false;
+      }
+      const index = this.matcher.findTargetIndex(traversal.elements, selector);
+      const bounds = index === null ? undefined : traversal.elements[index].bounds;
+      // Resolve with the same selector, then require all original edges, not just its center.
+      return (
+        bounds !== undefined &&
+        bounds.left === element.bounds.left &&
+        bounds.top === element.bounds.top &&
+        bounds.right === element.bounds.right &&
+        bounds.bottom === element.bounds.bottom
+      );
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      logger.warn(
+        `[TalkBackTapStrategy] Could not verify fallback target: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
     }
   }
 
@@ -261,6 +332,7 @@ export class TalkBackTapStrategy {
     elementText,
     elementContentDesc,
     onNavigationResult,
+    onSwipeRequested,
   }: {
     deviceId: string;
     element: Element;
@@ -270,6 +342,7 @@ export class TalkBackTapStrategy {
     elementText?: string;
     elementContentDesc?: string;
     onNavigationResult: (result: ScreenReaderNavigationResult) => void;
+    onSwipeRequested: () => void;
   }): Promise<TalkBackTapResult> {
     logger.debug(
       `[TalkBackTapStrategy] Attempting focus navigation to element (resourceId: ${resourceId}, text: ${elementText})`,
@@ -331,6 +404,7 @@ export class TalkBackTapStrategy {
       orderedElements,
       traversalResult,
       navigationResult,
+      onSwipeRequested,
     });
   }
 
@@ -344,6 +418,7 @@ export class TalkBackTapStrategy {
     orderedElements,
     traversalResult,
     navigationResult,
+    onSwipeRequested,
   }: {
     deviceId: string;
     element: Element;
@@ -354,6 +429,7 @@ export class TalkBackTapStrategy {
     orderedElements: Element[];
     traversalResult: TraversalOrderResult;
     navigationResult: ScreenReaderNavigationResult;
+    onSwipeRequested: () => void;
   }): Promise<TalkBackTapResult> {
     // Calculate navigation path
     const navigationPath = this.pathCalculator.calculatePath(
@@ -389,16 +465,12 @@ export class TalkBackTapStrategy {
         verificationInterval: 1,
         swipeDelay: 100,
         onFocusObserved: (focus) => this.appendTraversalFocus(navigationResult, focus),
+        onSwipeRequested,
       },
     );
 
     if (!navigationSuccess) {
-      return {
-        success: false,
-        method: "focus-navigation",
-        error: "Focus navigation did not reach target element",
-        screenReaderNavigation: navigationResult,
-      };
+      throw new ActionableError("Focus navigation did not reach target element");
     }
 
     navigationResult.reachable = true;
@@ -434,7 +506,8 @@ export class TalkBackTapStrategy {
     return (
       error.includes("Focus did not move") ||
       error.includes("could not track the TalkBack cursor") ||
-      error.includes("not converging on the target")
+      error.includes("not converging on the target") ||
+      error.includes("Focus navigation did not reach target element")
     );
   }
 
@@ -825,8 +898,9 @@ export class TalkBackTapStrategy {
           elementContentDesc: nonEmptyString(element["content-desc"]),
           bounds: element.bounds,
         });
-        // A repeated ID alone does not confirm the selected node: compare its bounds.
-        if (this.matcher.matchesFocusedTarget(focused, orderedElements, selector)) {
+        // Resolve repeated rows against their current bounds after navigation may scroll.
+        const freshElements = await this.activationTraversal(driver, orderedElements, selector);
+        if (this.matcher.matchesFocusedTarget(focused, freshElements, selector)) {
           return this.getElementCenter(focused);
         }
         throw new ActionableError(
@@ -841,5 +915,44 @@ export class TalkBackTapStrategy {
       logger.debug(`[TalkBackTapStrategy] Could not read current focus for activation: ${error}`);
     }
     return this.getElementCenter(element);
+  }
+
+  private async activationTraversal(
+    driver: TalkBackNavigationDriver,
+    orderedElements: Element[],
+    selector: ElementSelector,
+  ): Promise<Element[]> {
+    let traversal: TraversalOrderResult | undefined;
+    try {
+      traversal = await driver.requestTraversalOrder();
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      logger.warn(
+        `[TalkBackTapStrategy] Could not refresh activation traversal: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    if (!traversal?.error && traversal?.elements?.length) {
+      return traversal.elements;
+    }
+
+    // An unavailable/empty fresh traversal cannot disambiguate repeated rows. A
+    // single original match retains the matcher's existing selector-only acceptance.
+    const exactMatches = orderedElements.filter((node) =>
+      this.matcher.matchesSelector(node, selector),
+    );
+    const matches = exactMatches.length
+      ? exactMatches
+      : orderedElements.filter((node) =>
+          this.matcher.matchesSelector(node, selector, { partialMatch: true }),
+        );
+    if (matches.length === 1) {
+      return orderedElements;
+    }
+    throw new ActionableError(
+      "Cannot verify the selected TalkBack activation target: fresh traversal is unavailable or empty.",
+    );
   }
 }

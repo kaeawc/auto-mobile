@@ -8,6 +8,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { HierarchyTalkBackDriver } from "./HierarchyTalkBackDriver";
 import { notificationHierarchy, notificationRows } from "./capturedNotificationTargets";
+import type { Element } from "../../../src/models/Element";
 
 const device = { name: "test-device", platform: "android" as const, deviceId: "emulator-5554" };
 
@@ -32,7 +33,259 @@ function harness() {
   return { driver, executor, strategy, tap };
 }
 
+function navigationHarness() {
+  const setup = harness();
+  const start = { text: "Start", bounds: { left: 0, top: 0, right: 100, bottom: 100 } };
+  const target = { text: "Target", bounds: { left: 0, top: 400, right: 100, bottom: 500 } };
+  setup.driver.setElements([start, { text: "Middle 1" }, { text: "Middle 2" }, target], 0);
+  return { ...setup, start, target };
+}
+
+function shiftedRows(): Element[] {
+  return notificationRows.slice(1, 3).map((row) => ({
+    ...row,
+    bounds: { ...row.bounds!, top: row.bounds!.top - 20, bottom: row.bounds!.bottom - 20 },
+  }));
+}
+
 describe("TalkBack selected target safety", () => {
+  test.each(["strategy", "tapOn"])(
+    "disappeared target after a swipe rejects through %s",
+    async (caller) => {
+      const { driver, strategy, tap, start, target } = navigationHarness();
+      driver.onSwipe = () => driver.setElements([start], 0);
+      const result =
+        caller === "strategy"
+          ? strategy.executeTap(device.deviceId, target, driver)
+          : tap.executeAndroidTap("tap", 50, 450, 500, target, undefined, {
+              screenReaderNavigation: true,
+            });
+      await expect(result).rejects.toThrow("Target element disappeared during navigation");
+      expect(driver.getSwipeCount()).toBe(1);
+      expect(driver.tapHistory).toEqual([]);
+      expect(driver.doubleTapHistory).toEqual([]);
+    },
+  );
+
+  test("swipe failure after an earlier successful swipe rejects", async () => {
+    const { driver, strategy, target } = navigationHarness();
+    driver.onSwipe = () => {
+      if (driver.getSwipeCount() === 2) {
+        driver.setSwipeResult({ success: false, totalTimeMs: 1, error: "second swipe failed" });
+      }
+    };
+    await expect(strategy.executeTap(device.deviceId, target, driver)).rejects.toThrow(
+      "second swipe failed",
+    );
+    expect(driver.getSwipeCount()).toBe(2);
+    expect(driver.tapHistory).toEqual([]);
+  });
+
+  test("disappeared-target error always rejects even before a swipe", async () => {
+    const { driver, executor, strategy, target } = navigationHarness();
+    spyOn(executor, "navigateToElement").mockRejectedValue(
+      new ActionableError("Target element disappeared during navigation"),
+    );
+    await expect(strategy.executeTap(device.deviceId, target, driver)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+    expect(driver.getSwipeCount()).toBe(0);
+  });
+
+  test.each(["Target requires 5 additional swipes", "Unknown navigation failure"])(
+    "typed failure after swipes rejects: %s",
+    async (message) => {
+      const { driver, executor, strategy, target } = navigationHarness();
+      const navigate = executor.navigateToElement.bind(executor);
+      spyOn(executor, "navigateToElement").mockImplementation(async (...args) => {
+        await navigate(...args);
+        throw new ActionableError(message);
+      });
+      await expect(strategy.executeTap(device.deviceId, target, driver)).rejects.toThrow(message);
+      expect(driver.getSwipeCount()).toBe(3);
+      expect(driver.tapHistory).toEqual([]);
+    },
+  );
+
+  test.each([false, true])(
+    "false return after swipes rechecks original bounds (moved=%s)",
+    async (moved) => {
+      const { driver, executor, strategy, target } = navigationHarness();
+      const navigate = executor.navigateToElement.bind(executor);
+      spyOn(executor, "navigateToElement").mockImplementation(async (...args) => {
+        await navigate(...args);
+        if (moved) {
+          driver.setElements(
+            [{ ...target, bounds: { ...target.bounds, top: 380, bottom: 480 } }],
+            0,
+          );
+        }
+        return false;
+      });
+      const result = strategy.executeTap(device.deviceId, target, driver);
+      if (moved) {
+        await expect(result).rejects.toThrow("focusTrapDetected=true");
+      } else {
+        expect(await result).toMatchObject({
+          success: false,
+          screenReaderNavigation: { focusTrapDetected: true },
+        });
+      }
+      expect(driver.getSwipeCount()).toBe(3);
+      expect(driver.tapHistory).toEqual([]);
+    },
+  );
+
+  test("no-movement trap permits fallback only after a fresh unchanged target read", async () => {
+    const { driver, strategy, target } = navigationHarness();
+    driver.autoAdvanceOnSwipe = false;
+    const traversal = spyOn(driver, "requestTraversalOrder");
+    expect(await strategy.executeTap(device.deviceId, target, driver)).toMatchObject({
+      success: false,
+      screenReaderNavigation: { focusTrapDetected: true },
+    });
+    expect(driver.getSwipeCount()).toBe(3);
+    // Initial snapshot, three executor verifications, then fallback safety proof.
+    expect(traversal).toHaveBeenCalledTimes(5);
+  });
+
+  test("trap after swipes rejects when the target moved and retains trap evidence", async () => {
+    const { driver, strategy, target } = navigationHarness();
+    driver.autoAdvanceOnSwipe = false;
+    driver.onSwipe = () => {
+      driver.elements = driver.elements.map((node) =>
+        node.text === "Target"
+          ? { ...target, bounds: { ...target.bounds, top: 380, bottom: 480 } }
+          : node,
+      );
+    };
+    await expect(strategy.executeTap(device.deviceId, target, driver)).rejects.toThrow(
+      "focusTrapDetected=true",
+    );
+    expect(driver.getSwipeCount()).toBe(3);
+    expect(driver.tapHistory).toEqual([]);
+  });
+
+  test.each(["error", "empty", "throw"])("trap safety read fails closed on %s", async (failure) => {
+    const { driver, strategy, target } = navigationHarness();
+    driver.autoAdvanceOnSwipe = false;
+    const read = driver.requestTraversalOrder.bind(driver);
+    let reads = 0;
+    spyOn(driver, "requestTraversalOrder").mockImplementation(async () => {
+      if (++reads === 5) {
+        if (failure === "throw") {
+          throw new Error("traversal unavailable");
+        }
+        return {
+          elements: [],
+          totalTimeMs: 1,
+          ...(failure === "error" ? { error: "unavailable" } : {}),
+        };
+      }
+      return read();
+    });
+    await expect(strategy.executeTap(device.deviceId, target, driver)).rejects.toThrow(
+      "focusTrapDetected=true",
+    );
+    expect(driver.tapHistory).toEqual([]);
+  });
+
+  test("no navigation path before the first swipe still permits fallback", async () => {
+    const { driver, strategy, start, target } = navigationHarness();
+    driver.setElements([start], 0);
+    expect(await strategy.executeTap(device.deviceId, target, driver)).toMatchObject({
+      success: false,
+      error: "Could not calculate navigation path to target element",
+    });
+    expect(driver.getSwipeCount()).toBe(0);
+  });
+
+  test("shifted duplicate activation uses live bounds after real navigation", async () => {
+    const { driver, strategy } = harness();
+    const rows = notificationRows.slice(1, 3);
+    const live = shiftedRows();
+    driver.setElements(rows, 0);
+    driver.onSwipe = () => driver.setElements(live, 1);
+    expect(await strategy.executeTap(device.deviceId, rows[1], driver)).toMatchObject({
+      success: true,
+    });
+    const bounds = live[1].bounds!;
+    expect(driver.tapHistory).toEqual(
+      Array.from({ length: 2 }, () => ({
+        x: Math.round((bounds.left + bounds.right) / 2),
+        y: Math.round((bounds.top + bounds.bottom) / 2),
+        durationMs: 50,
+      })),
+    );
+  });
+
+  test("fresh traversal still rejects focus on the wrong same-id sibling", async () => {
+    const { driver, executor, strategy } = harness();
+    const rows = notificationRows.slice(1, 3);
+    driver.setElements(rows, 0);
+    const traversal = spyOn(driver, "requestTraversalOrder");
+    spyOn(executor, "navigateToElement").mockImplementation(async () => {
+      driver.setElements(shiftedRows(), 0);
+      return true;
+    });
+    await expect(strategy.executeTap(device.deviceId, rows[1], driver)).rejects.toThrow(
+      "focus no longer matches",
+    );
+    expect(traversal).toHaveBeenCalledTimes(2);
+    expect(driver.tapHistory).toEqual([]);
+  });
+
+  test.each(["error", "empty", "throw"])(
+    "ambiguous activation fails closed on fresh traversal %s",
+    async (failure) => {
+      const { driver, executor, strategy } = harness();
+      const rows = notificationRows.slice(1, 3);
+      driver.setElements(rows, 1);
+      spyOn(executor, "navigateToElement").mockImplementation(async () => {
+        if (failure === "throw") {
+          spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("unavailable"));
+        } else {
+          driver.queueTraversalResult({
+            elements: [],
+            totalTimeMs: 1,
+            ...(failure === "error" ? { error: "unavailable" } : {}),
+          });
+        }
+        return true;
+      });
+      await expect(strategy.executeTap(device.deviceId, rows[1], driver)).rejects.toThrow(
+        "Cannot verify the selected TalkBack activation target",
+      );
+      expect(driver.tapHistory).toEqual([]);
+    },
+  );
+
+  test.each(["error", "empty", "throw"])(
+    "unique activation accepts live focus on fresh traversal %s",
+    async (failure) => {
+      const { driver, executor, strategy } = harness();
+      const rows = notificationRows.slice(2, 3);
+      const live = shiftedRows()[1];
+      driver.setElements(rows, 0);
+      spyOn(executor, "navigateToElement").mockImplementation(async () => {
+        driver.setElements([live], 0);
+        if (failure === "throw") {
+          spyOn(driver, "requestTraversalOrder").mockRejectedValue(new Error("unavailable"));
+        } else {
+          driver.queueTraversalResult({
+            elements: [],
+            totalTimeMs: 1,
+            ...(failure === "error" ? { error: "unavailable" } : {}),
+          });
+        }
+        return true;
+      });
+      expect(await strategy.executeTap(device.deviceId, rows[0], driver)).toMatchObject({
+        success: true,
+      });
+      expect(driver.tapHistory).toHaveLength(2);
+    },
+  );
   test.each(["tap", "longPress"] as const)(
     "duplicate row %s uses its own coordinates",
     async (action) => {

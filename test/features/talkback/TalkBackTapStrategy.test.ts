@@ -102,7 +102,7 @@ describe("TalkBackTapStrategy", () => {
         screenReaderNavigation: {
           reachable: false,
           traversalOrder: [element],
-          focusTrapDetected: false,
+          focusTrapDetected: true,
         },
       });
       expect(driver.getTapCount()).toBe(0);

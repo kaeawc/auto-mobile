@@ -37,6 +37,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     manager = NavigationGraphManager.createForTesting(
       repository,
       new TestCoverageRepository(undefined, harness.db),
+      new FakeTimer(),
     );
     await manager.setCurrentApp(appId);
     await manager.recordNavigationEvent({ destination: "Home", timestamp: 1000 });
@@ -50,6 +51,139 @@ describe("NavigationGraphManager navigation write ordering", () => {
 
   afterAll(async () => {
     await harness.dispose();
+  });
+
+  test("does not correlate another app inside the SDK window or on a later revisit", async () => {
+    const otherApp = `${appId}.other`;
+    await manager.recordNavigationEvent({
+      applicationId: appId,
+      destination: "Checkout",
+      timestamp: 1000,
+    });
+    const checkout = await repository.getNode(appId, "Checkout");
+    const fingerprints = await repository.getFingerprintsForNode(checkout!.id);
+    for (const timestamp of [1200, 9000]) {
+      await manager.recordHierarchyNavigation({
+        packageName: otherApp,
+        fromFingerprint: null,
+        toFingerprint: "fp_other",
+        timestamp,
+      });
+      expect(manager.getCurrentAppId()).toBe(otherApp);
+      expect(manager.getCurrentScreen()).toBeNull();
+      expect(await repository.getNodeByFingerprint(otherApp, "fp_other")).toBeUndefined();
+      expect(await repository.getNode(appId, "Checkout")).toEqual(checkout);
+      expect(await repository.getFingerprintsForNode(checkout!.id)).toEqual(fingerprints);
+    }
+    // The other app still records and correlates its own SDK navigation normally.
+    await manager.recordNavigationEvent({
+      applicationId: otherApp,
+      destination: "Browser",
+      timestamp: 10000,
+    });
+    await manager.recordHierarchyNavigation({
+      packageName: otherApp,
+      fromFingerprint: null,
+      toFingerprint: "fp_other",
+      timestamp: 10200,
+    });
+    await manager.recordHierarchyNavigation({
+      packageName: otherApp,
+      fromFingerprint: null,
+      toFingerprint: "fp_other",
+      timestamp: 12000,
+    });
+    expect(manager.getCurrentScreen()).toBe("Browser");
+    expect(await repository.getNodeByFingerprint(otherApp, "fp_other")).toMatchObject({
+      app_id: otherApp,
+      screen_name: "Browser",
+      visit_count: 2,
+    });
+    expect(await repository.getNode(appId, "Checkout")).toEqual(checkout);
+  });
+
+  test("drops pending correlation even when the original app returns inside the window", async () => {
+    await manager.setCurrentApp(`${appId}.other`);
+    await manager.setCurrentApp(appId);
+    await manager.recordHierarchyNavigation({
+      packageName: appId,
+      fromFingerprint: null,
+      toFingerprint: "fp_return",
+      timestamp: 3200,
+    });
+    expect(await repository.getNodeByFingerprint(appId, "fp_return")).toBeUndefined();
+    expect(manager.getCurrentScreen()).toBeNull();
+  });
+
+  test("clearAllGraphs drops pending correlation with the deleted node", async () => {
+    await manager.clearAllGraphs();
+    await manager.recordHierarchyNavigation({
+      packageName: appId,
+      fromFingerprint: null,
+      toFingerprint: "fp_cleared",
+      timestamp: 3200,
+    });
+    expect(
+      await harness.db
+        .selectFrom("navigation_node_fingerprints")
+        .selectAll()
+        .where("app_id", "=", appId)
+        .where("fingerprint_hash", "=", "fp_cleared")
+        .execute(),
+    ).toEqual([]);
+    expect(await repository.getNodeByFingerprint(appId, "fp_cleared")).toBeUndefined();
+    expect(manager.getCurrentScreen()).toBeNull();
+  });
+
+  for (const change of [
+    { versionCode: 1, contentHash: "" },
+    { versionCode: 0, contentHash: "new-build" },
+  ]) {
+    test(`does not correlate across a change in ${change.versionCode ? "versionCode" : "contentHash"}`, async () => {
+      manager.setBuildContext({ appId, deviceId: "test-device", ...change });
+      await manager.recordHierarchyNavigation({
+        packageName: appId,
+        fromFingerprint: null,
+        toFingerprint: "fp_new_build",
+        timestamp: 3200,
+      });
+      expect(await repository.getNodeByFingerprint(appId, "fp_new_build")).toBeUndefined();
+    });
+  }
+
+  test("same app and build still correlate at the inclusive one-second boundary", async () => {
+    const context = { appId, versionCode: 3, contentHash: "build", deviceId: "device-one" };
+    manager.setBuildContext(context);
+    await manager.recordNavigationEvent({ destination: "Checkout", timestamp: 4000 });
+    // Device identity is provenance, not part of the graph's app/build key.
+    manager.setBuildContext({ ...context, deviceId: "device-two" });
+    await manager.recordHierarchyNavigation({
+      packageName: appId,
+      fromFingerprint: null,
+      toFingerprint: "fp_checkout",
+      timestamp: 5000,
+    });
+    expect(await repository.getNodeByFingerprint(appId, "fp_checkout")).toMatchObject({
+      app_id: appId,
+      screen_name: "Checkout",
+    });
+    expect(manager.getCurrentScreen()).toBe("Checkout");
+  });
+
+  test("ignores an already-persisted fingerprint pointing at another app's node", async () => {
+    const otherApp = `${appId}.other`;
+    const node = await repository.getNode(appId, "Other");
+    await repository.getOrCreateApp(otherApp);
+    await repository.getOrCreateFingerprint(otherApp, node!.id, "fp_corrupt", "{}", 3200);
+    await manager.recordHierarchyNavigation({
+      packageName: otherApp,
+      fromFingerprint: null,
+      toFingerprint: "fp_corrupt",
+      timestamp: 9000,
+    });
+    expect(await repository.getNodeByFingerprint(otherApp, "fp_corrupt")).toBeUndefined();
+    expect(manager.getCurrentScreen()).toBeNull();
+    expect(await repository.getNode(appId, "Other")).toEqual(node);
   });
 
   test("sanitizes legacy edge arguments on graph reads and pathfinding without rewriting storage", async () => {

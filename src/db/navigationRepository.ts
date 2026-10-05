@@ -1086,6 +1086,7 @@ export class NavigationRepository {
       .selectFrom("navigation_nodes")
       .selectAll()
       .where("id", "=", fingerprint.node_id)
+      .where("app_id", "=", appId)
       .executeTakeFirst();
   }
 

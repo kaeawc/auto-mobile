@@ -6,7 +6,7 @@ import {
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { Explore } from "../../src/features/navigation/Explore";
+import { DEFAULT_MAX_INTERACTIONS, Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
@@ -177,6 +177,38 @@ describe("navigation tool session graph selection", () => {
     }));
     await navigateToHandler(device, navigateArgs);
     expect(executedPlatform).toBe("android");
+  });
+
+  test("explore advertises the pinned runtime default of 200 interactions", () => {
+    const schema = z.toJSONSchema(exploreSchema);
+    expect(DEFAULT_MAX_INTERACTIONS).toBe(200);
+    expect(schema.properties?.maxInteractions.description).toBe(
+      `Max interactions (default: ${DEFAULT_MAX_INTERACTIONS})`,
+    );
+  });
+
+  for (const field of ["maxInteractions", "resetInterval"] as const) {
+    test(`explore rejects non-positive and fractional ${field}`, () => {
+      for (const value of [0, -1, 0.5, 1.5]) {
+        const result = exploreSchema.safeParse({ [field]: value });
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          expect(result.error.issues[0].path).toEqual([field]);
+        }
+      }
+      expect(exploreSchema.safeParse({ [field]: 1 }).success).toBe(true);
+    });
+  }
+
+  test("explore rejects non-positive timeouts and preserves fractional milliseconds", () => {
+    for (const timeoutMs of [0, -1]) {
+      const result = exploreSchema.safeParse({ timeoutMs });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0].path).toEqual(["timeoutMs"]);
+      }
+    }
+    expect(exploreSchema.safeParse({ timeoutMs: 0.5 }).success).toBe(true);
   });
 
   test("registered navigation tools resolve an omitted platform to the active iOS device", async () => {

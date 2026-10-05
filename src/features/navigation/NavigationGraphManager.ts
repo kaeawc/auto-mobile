@@ -423,6 +423,9 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   // Track active navigation from SDK events for fingerprint correlation
   private activeNavigation: {
+    appId: string;
+    versionCode: number;
+    contentHash: string;
     nodeId: number;
     screenName: string;
     startTime: number;
@@ -756,6 +759,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     this.currentAppId = appId;
     this.currentScreen = null;
+    this.activeNavigation = null;
 
     // Ensure app exists in database
     await this.repository.getOrCreateApp(appId);
@@ -1046,6 +1050,9 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Set active navigation state for fingerprint correlation. Fingerprints seen
     // within ACTIVE_NAVIGATION_WINDOW_MS will be correlated to this node.
     this.activeNavigation = {
+      appId,
+      versionCode: provenance.versionCode,
+      contentHash: provenance.contentHash,
       nodeId: node.id,
       screenName: screenName,
       startTime: timestamp,
@@ -1231,30 +1238,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     }
 
     // Case 2: Check if within active navigation window - correlate fingerprint to active node
-    if (this.activeNavigation) {
-      const timeSinceNavigation = timestamp - this.activeNavigation.startTime;
-
-      if (timeSinceNavigation >= 0 && timeSinceNavigation <= this.ACTIVE_NAVIGATION_WINDOW_MS) {
-        // Correlate this fingerprint to the active named node (scoped to this app)
-        await this.repository.getOrCreateFingerprint(
-          appId,
-          this.activeNavigation.nodeId,
-          fingerprintHash,
-          fingerprintData,
-          timestamp,
-        );
-
-        assertNavigationWriteCurrent(epoch, this.navigationWriteState);
-
-        logger.info(
-          `[NAVIGATION_GRAPH] Correlated fingerprint to ${this.activeNavigation.screenName} ` +
-            `(${timeSinceNavigation}ms after navigation)`,
-        );
-
-        // Clear active navigation after correlation
-        this.activeNavigation = null;
-        return;
-      }
+    if (await this.correlateActiveNavigation(appId, provenance, event, epoch)) {
+      return;
     }
 
     // Case 3: Check if app has named nodes - create suggestion
@@ -1294,6 +1279,43 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Case 4: App has no named nodes - do nothing
     // This app doesn't have SDK integration yet, so we don't track hierarchy-only navigation
     logger.debug(`[NAVIGATION_GRAPH] Ignoring hierarchy navigation - app has no named nodes`);
+  }
+
+  private async correlateActiveNavigation(
+    appId: string,
+    provenance: ResolvedProvenance,
+    event: HierarchyNavigationEvent,
+    epoch: number,
+  ): Promise<boolean> {
+    const navigation = this.activeNavigation;
+    if (
+      !navigation ||
+      navigation.appId !== appId ||
+      navigation.versionCode !== provenance.versionCode ||
+      navigation.contentHash !== provenance.contentHash
+    ) {
+      return false;
+    }
+
+    const timeSinceNavigation = event.timestamp - navigation.startTime;
+    if (!(timeSinceNavigation >= 0 && timeSinceNavigation <= this.ACTIVE_NAVIGATION_WINDOW_MS)) {
+      return false;
+    }
+
+    await this.repository.getOrCreateFingerprint(
+      appId,
+      navigation.nodeId,
+      event.toFingerprint,
+      event.fingerprintData || JSON.stringify({ hash: event.toFingerprint }),
+      event.timestamp,
+    );
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
+    logger.info(
+      `[NAVIGATION_GRAPH] Correlated fingerprint to ${navigation.screenName} ` +
+        `(${timeSinceNavigation}ms after navigation)`,
+    );
+    this.activeNavigation = null;
+    return true;
   }
 
   /**
@@ -1865,6 +1887,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentAppId = null;
       this.currentScreen = null;
+      this.activeNavigation = null;
       this.toolCallHistory = [];
       logger.info(`[NAVIGATION_GRAPH] Cleared all navigation graphs`);
       this.notifyGraphUpdated();

@@ -955,6 +955,49 @@ function hasDuplicateActionElement(
   );
 }
 
+/**
+ * Per-capture stamps inside an otherwise static block. They change on every call
+ * and nothing reads them, so they must not keep an unchanged block inline.
+ * `freshness` is deliberately absent: its `ageMs` is documented for a consumer
+ * working to a tighter budget, so any change there is a real change.
+ */
+const ACTION_METADATA_VOLATILE_FIELDS: Partial<
+  Record<(typeof ACTION_METADATA_FIELDS)[number], readonly string[]>
+> = { backStack: ["capturedAt"] };
+
+/** Blocks whose per-call warning shape must stay visible even when unchanged. */
+function isAlwaysSentActionBlock(field: string, block: unknown): boolean {
+  if (field === "freshness") {
+    return !isRecord(block) || block.isFresh !== true;
+  }
+  if (field === "gfxMetrics") {
+    return isRecord(block) && block.isStable === false;
+  }
+  // The error-fallback shape (partial) is otherwise identical call to call once capturedAt is ignored.
+  return field === "backStack" && isRecord(block) && block.partial === true;
+}
+
+/** Wire form of a block with its volatile keys removed, so in-memory `undefined` keys cannot differ from the recorded JSON round-trip. */
+function comparableActionBlock(field: string, block: unknown): unknown {
+  const wire: unknown = JSON.parse(stringifyToolResponse(block));
+  const volatile =
+    ACTION_METADATA_VOLATILE_FIELDS[field as keyof typeof ACTION_METADATA_VOLATILE_FIELDS];
+  if (!isRecord(wire) || !volatile) {
+    return wire;
+  }
+  return Object.fromEntries(Object.entries(wire).filter(([key]) => !volatile.includes(key)));
+}
+
+function isUnchangedActionBlock(field: string, block: unknown, previous: unknown): boolean {
+  if (block === undefined || previous === undefined || isAlwaysSentActionBlock(field, block)) {
+    return false;
+  }
+  return isDeepStrictEqual(
+    comparableActionBlock(field, block),
+    comparableActionBlock(field, previous),
+  );
+}
+
 function compactActionMetadata(
   payload: Record<string, unknown>,
   ctx: FinalizeToolResponseContext,
@@ -973,17 +1016,9 @@ function compactActionMetadata(
     return next;
   }
   const observation = payload.observation;
-  const omittedFields = ACTION_METADATA_FIELDS.filter((field) => {
-    const block = observation[field];
-    // Per-call warnings must survive even when their values have not changed.
-    if (
-      (field === "freshness" && (!isRecord(block) || block.isFresh !== true)) ||
-      (field === "gfxMetrics" && isRecord(block) && block.isStable === false)
-    ) {
-      return false;
-    }
-    return block !== undefined && isDeepStrictEqual(block, previous[field]);
-  });
+  const omittedFields = ACTION_METADATA_FIELDS.filter((field) =>
+    isUnchangedActionBlock(field, observation[field], previous[field]),
+  );
   const sourceHierarchy = isRecord(observation.viewHierarchy)
     ? observation.viewHierarchy
     : undefined;

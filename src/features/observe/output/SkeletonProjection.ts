@@ -759,20 +759,32 @@ export function getImeOccluder(elements: ObserveElements): ImeOccluder | undefin
       : undefined;
   }
   const member = imeCandidates(elements, ime).find((el) => isImeKeycap(el, ime));
-  // Uncollected IME wrappers can span the app window even when the visible
-  // keyboard occupies only its bottom edge. Keep their bounds in the <ime>
-  // summary, but measure physical occlusion from collected IME elements.
+  const provenance = member && getElementProvenance(member);
+  return {
+    bounds: measuredImeOcclusionBounds(elements, ime, row.bounds, provenance?.keyboardWindowBounds),
+    group: ime.group,
+    windowRank: provenance?.windowRank,
+    spanEnter: ime.spanEnter,
+    spanExit: ime.spanExit,
+  };
+}
+
+/** Window frames own touches; legacy captures fall back to measured IME members. */
+function measuredImeOcclusionBounds(
+  elements: ObserveElements,
+  ime: ImeWindow,
+  fallback: Bounds,
+  frame?: Element["bounds"],
+): Bounds {
+  if (frame) {
+    return [frame.left, frame.top, frame.right, frame.bottom];
+  }
+  // Uncollected wrappers can span the app and cannot establish physical occlusion.
   const boxes = allElements(elements)
     .filter((el) => isImeKeycap(el, ime))
     .map(boundsTuple)
     .filter((box): box is NonNullable<Bounds> => box !== undefined);
-  return {
-    bounds: boxes.length > 0 ? unionBounds(boxes) : row.bounds,
-    group: ime.group,
-    windowRank: member && getElementProvenance(member)?.windowRank,
-    spanEnter: ime.spanEnter,
-    spanExit: ime.spanExit,
-  };
+  return boxes.length > 0 ? unionBounds(boxes) : fallback;
 }
 
 /** Action-only iOS geometry; skeleton projection retains measured keyboard bounds. */

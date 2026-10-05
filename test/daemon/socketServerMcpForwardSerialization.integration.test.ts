@@ -792,6 +792,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       await expect(queued).resolves.toMatchObject({
         success: false,
         error: expect.stringContaining("MCP timeout"),
+        code: "daemon_queue_timeout",
       });
       expect(callCount).toBe(1);
     } finally {
@@ -1565,6 +1566,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(firstResult.success).toBe(true);
     expect(secondResult.success).toBe(false);
     expect(secondResult.error).toContain("waiting in queue");
+    expect(secondResult.code).toBe("daemon_queue_timeout");
 
     // Nothing has closed the shared transport yet.
     expect(closeCalls).toBe(0);
@@ -2656,6 +2658,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(firstResult.success).toBe(true);
     expect(secondResult.success).toBe(false);
     expect(secondResult.error).toContain("waiting in queue");
+    expect(secondResult.code).toBe("daemon_queue_timeout");
   });
 
   // Skipped on Windows: Bun 1.3.14 SIGSEGVs during named-pipe teardown after
@@ -3020,6 +3023,7 @@ describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", (
     const timedOut = await waiter;
     expect(timedOut.success).toBe(false);
     expect(timedOut.error).toContain("waiting in queue for device:device-1");
+    expect(timedOut.code).toBe("daemon_queue_timeout");
     expect(calls).toEqual(["device:device-1"]);
 
     // The key is still held: a later call must keep waiting for the holder, not

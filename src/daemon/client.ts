@@ -35,7 +35,7 @@ import {
 } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
-import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import {
@@ -99,6 +99,17 @@ export const daemonOptionsSchemaCoversAllKeys: DaemonOptionsSchemaCoversAllKeys 
 
 /** Bound on remembered cancelled request ids (issue #6384); oldest are evicted first. */
 const MAX_CANCELLED_REQUEST_IDS = 256;
+
+/**
+ * Let the daemon's deadline timer reject queue/forward work, unwind its promise
+ * chain, and flush the terminal frame before our cancellation backstop. Two
+ * seconds allow that deadline-handling latency plus the local socket round trip
+ * (including request delivery before the daemon starts its budget). This is
+ * headroom, not a hard latency guarantee under an event-loop stall. The proxy
+ * wrappers add no fixed request timeout. Do not cap this at the socket idle
+ * limit: a silent request above that limit already risks transport closure.
+ */
+export const DAEMON_RESPONSE_GRACE_MS = 2_000;
 
 const socketIdentityStatusSchema = z.object({
   reportedPidFilePath: z.string().min(1).optional(),
@@ -856,9 +867,37 @@ export class DaemonClient {
   }
 
   /**
+   * A derived tool floor can reach the native timer limit. Split that wait
+   * instead of overflowing setTimeout to 1ms when response grace is added.
+   * Keep the current handle in pendingRequests so reply, abort, progress, and
+   * disconnect cleanup always cancel the active segment.
+   */
+  private scheduleResponseBackstop(
+    requestId: string,
+    onTimeout: () => void,
+    delayMs: number,
+  ): NodeJS.Timeout {
+    const segmentMs = Math.min(delayMs, MAX_SETTIMEOUT_DELAY_MS);
+    return this.timer.setTimeout(() => {
+      if (delayMs > segmentMs) {
+        const pending = this.pendingRequests.get(requestId);
+        if (pending) {
+          pending.timeout = this.scheduleResponseBackstop(
+            requestId,
+            onTimeout,
+            delayMs - segmentMs,
+          );
+        }
+      } else {
+        onTimeout();
+      }
+    }, segmentMs);
+  }
+
+  /**
    * (Re)arm the timer that rejects a pending request with `McpTimeoutError`
-   * after `delayMs`. Used both for the initial schedule in `sendRequest` and
-   * to reschedule after `extendPendingRequestOnProgress` pushes the deadline
+   * after `delayMs + DAEMON_RESPONSE_GRACE_MS`. Used for the initial schedule
+   * in `sendRequest` and to reschedule after `extendPendingRequestOnProgress` pushes the deadline
    * forward.
    */
   private scheduleRequestTimeout(
@@ -867,17 +906,23 @@ export class DaemonClient {
     delayMs: number,
     reject: (error: Error) => void,
   ): NodeJS.Timeout {
-    return this.timer.setTimeout(() => {
-      this.pendingRequests.delete(requestId);
-      this.sendCancelFrame(requestId);
-      reject(
-        new McpTimeoutError({
-          toolName,
-          timeoutMs: delayMs,
-          origin: "DaemonClient.sendRequest",
-        }),
-      );
-    }, delayMs);
+    return this.scheduleResponseBackstop(
+      requestId,
+      () => {
+        this.pendingRequests.get(requestId)?.removeAbortListener?.();
+        this.pendingRequests.delete(requestId);
+        this.sendCancelFrame(requestId);
+        reject(
+          new McpTimeoutError({
+            toolName,
+            timeoutMs: delayMs,
+            origin: "DaemonClient.sendRequest",
+            detail: `no response from the daemon within budget + grace (${delayMs}ms + ${DAEMON_RESPONSE_GRACE_MS}ms)`,
+          }),
+        );
+      },
+      delayMs + DAEMON_RESPONSE_GRACE_MS,
+    );
   }
 
   /**
@@ -1119,7 +1164,7 @@ export class DaemonClient {
       resolveMcpRequestTimeoutMs(request),
       clampCallerMcpRequestTimeoutMs(this.connectionTimeout) ?? 0,
     );
-    // Send the deadline this client will actually wait (#6385). Without it the
+    // Send the daemon budget, excluding client response grace (#6385). Without it the
     // daemon fell back to its 30s default and aborted calls the client was still
     // prepared to wait for (the client's default is 120s). The daemon applies
     // the same clamp and floors, so both sides resolve the same deadline.
@@ -1131,7 +1176,7 @@ export class DaemonClient {
     });
     // Only a progress-emitting tools/call gets an extendable deadline -- a
     // request with no progressToken (the vast majority: reads, non-progress
-    // tools, etc.) keeps its exact original fixed timer, untouched below
+    // tools, etc.) keeps its fixed budget plus response grace, untouched below
     // (issue #6222 review, P1: this must not change behavior for tools that
     // never emit progress).
     const deadline =
@@ -1246,22 +1291,27 @@ export class DaemonClient {
 
     return new Promise((resolve, reject) => {
       let removeAbortListener = () => {};
-      const timeout = this.timer.setTimeout(() => {
-        removeAbortListener();
-        this.pendingRequests.delete(requestId);
-        this.sendCancelFrame(requestId);
-        reject(
-          new McpTimeoutError({
-            toolName: method,
-            timeoutMs,
-            origin: "DaemonClient.callDaemonMethod",
-          }),
-        );
-      }, remainingTimeoutMs);
+      const timeout = this.scheduleResponseBackstop(
+        requestId,
+        () => {
+          removeAbortListener();
+          this.pendingRequests.delete(requestId);
+          this.sendCancelFrame(requestId);
+          reject(
+            new McpTimeoutError({
+              toolName: method,
+              timeoutMs,
+              origin: "DaemonClient.callDaemonMethod",
+              detail: `no response from the daemon within budget + grace (${remainingTimeoutMs}ms + ${DAEMON_RESPONSE_GRACE_MS}ms)`,
+            }),
+          );
+        },
+        remainingTimeoutMs + DAEMON_RESPONSE_GRACE_MS,
+      );
 
       if (options.signal) {
         const onAbort = () => {
-          this.timer.clearTimeout(timeout);
+          this.timer.clearTimeout(this.pendingRequests.get(requestId)?.timeout ?? timeout);
           this.pendingRequests.delete(requestId);
           removeAbortListener();
           // Destroying this dedicated lifecycle connection tells the daemon to

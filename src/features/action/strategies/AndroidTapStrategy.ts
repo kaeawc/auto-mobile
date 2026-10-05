@@ -2,7 +2,11 @@ import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
-import type { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import {
+  TALKBACK_STATE_UNKNOWN_WARNING,
+  resolveTalkBackStateConfirmation,
+  type AccessibilityDetector,
+} from "../../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import { attachRawViewHierarchy } from "../../utility/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
@@ -34,15 +38,19 @@ export class AndroidTapStrategy implements TapStrategy {
     return filtered;
   }
 
-  async isAccessibilityServiceEnabled(): Promise<boolean> {
+  async isAccessibilityServiceEnabled(onWarning?: (warning: string) => void): Promise<boolean> {
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
     // apply to tap detection uniformly with the observe path (#3925).
-    const method = await this.accessibilityDetector.detectMethod(
+    const { talkBack: state, unconfirmed } = await resolveTalkBackStateConfirmation(
+      this.accessibilityDetector,
       this.device.deviceId,
       this.adb,
       this.featureFlags,
     );
-    return method === "talkback";
+    if (unconfirmed) {
+      onWarning?.(TALKBACK_STATE_UNKNOWN_WARNING);
+    }
+    return state === true;
   }
 
   shouldRunPreTapStability(options: TapOnElementOptions): boolean {

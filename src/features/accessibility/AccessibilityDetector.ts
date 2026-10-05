@@ -3,6 +3,8 @@ import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import type {
   AccessibilityDetector as IAccessibilityDetector,
   AccessibilityService,
+  AndroidAccessibilityState,
+  TalkBackStateConfirmation,
 } from "./interfaces/AccessibilityDetector";
 import { SystemTimer, type Timer } from "../../utils/SystemTimer";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -45,15 +47,6 @@ function isTalkBackService(component: string): boolean {
 }
 
 /**
- * Cached accessibility state value
- */
-interface AccessibilityCacheValue {
-  enabled: boolean;
-  service: AccessibilityService;
-  ctrlProxyEnabled: boolean | null;
-}
-
-/**
  * DefaultAccessibilityDetector handles detection of accessibility services (TalkBack)
  * with caching to minimize performance impact.
  *
@@ -65,12 +58,22 @@ interface AccessibilityCacheValue {
  */
 export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   private readonly DEFAULT_TTL_MS = 60000; // 60 seconds as per design doc
-  private readonly cache: TTLCache<string, AccessibilityCacheValue>;
+  private readonly cache: TTLCache<string, AndroidAccessibilityState>;
   private readonly timer: Timer;
+  // On failed refresh, retain a successful read only while its age is <90s:
+  // the normal 60s TTL plus at most 30s grace. Never renew either TTL on failure.
+  // Failed probes back off briefly; explicit invalidation discards all caches
+  // so toggle confirmation cannot reuse pre-toggle state.
+  private readonly lastKnownGood: TTLCache<string, AndroidAccessibilityState>;
+
+  private readonly FAILED_PROBE_BACKOFF_MS = 3000;
+  private readonly failedProbes: TTLCache<string, true>;
 
   constructor(timer: Timer = new SystemTimer()) {
     this.timer = timer;
     this.cache = new TTLCache(timer, { ttlMs: this.DEFAULT_TTL_MS });
+    this.failedProbes = new TTLCache(timer, { ttlMs: this.FAILED_PROBE_BACKOFF_MS });
+    this.lastKnownGood = new TTLCache(timer, { ttlMs: 90000 });
   }
 
   /**
@@ -86,91 +89,82 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     adb: AdbExecutor,
     featureFlags?: FeatureFlagService,
   ): Promise<boolean> {
-    // Check feature flag override first
-    const forceEnabled = featureFlags?.isEnabled("force-accessibility-mode");
-    if (forceEnabled) {
-      logger.debug(`[AccessibilityDetector] Force-enabled via feature flag for device ${deviceId}`);
-      return true;
-    }
-
-    // Check if auto-detection is disabled
-    const autoDetectDisabled = featureFlags && !featureFlags.isEnabled("accessibility-auto-detect");
-    if (autoDetectDisabled) {
-      logger.debug(
-        `[AccessibilityDetector] Auto-detection disabled via feature flag for device ${deviceId}`,
-      );
-      return false;
-    }
-
-    // Check cache
-    const cached = this.cache.get(deviceId);
-
-    if (cached) {
-      logger.debug(
-        `[AccessibilityDetector] Using cached result for device ${deviceId}: enabled=${cached.enabled}, service=${cached.service}`,
-      );
-      return cached.enabled;
-    }
-
-    // Detect current state
-    logger.debug(`[AccessibilityDetector] Detecting accessibility state for device ${deviceId}`);
-    const startTime = this.timer.now();
-    const state = await this.detectAccessibilityState(deviceId, adb);
-    const detectionTime = this.timer.now() - startTime;
-
-    if (detectionTime > 50) {
-      logger.warn(
-        `[AccessibilityDetector] Detection took ${detectionTime}ms (target: <50ms) for device ${deviceId}`,
-      );
-    } else {
-      logger.debug(
-        `[AccessibilityDetector] Detection completed in ${detectionTime}ms for device ${deviceId}`,
-      );
-    }
-
-    // Update cache
-    this.cache.set(deviceId, state);
-
-    return state.enabled;
+    return (await this.resolveState(deviceId, adb, featureFlags))?.enabled ?? false;
   }
 
-  /**
-   * Get the detected accessibility service type
-   *
-   * @param deviceId - The device identifier (for caching)
-   * @param adb - ADB executor for executing shell commands
-   * @param featureFlags - Feature flag service for override support
-   * @returns Promise resolving to the detected service type
-   */
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
     featureFlags?: FeatureFlagService,
   ): Promise<AccessibilityService> {
-    // Check feature flag override
-    const forceEnabled = featureFlags?.isEnabled("force-accessibility-mode");
-    if (forceEnabled) {
-      return "talkback";
-    }
+    return (await this.resolveState(deviceId, adb, featureFlags))?.service ?? "unknown";
+  }
 
-    // Check if auto-detection is disabled
-    const autoDetectDisabled = featureFlags && !featureFlags.isEnabled("accessibility-auto-detect");
-    if (autoDetectDisabled) {
-      return "unknown";
+  async resolveState(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<AndroidAccessibilityState | null> {
+    if (featureFlags?.isEnabled("force-accessibility-mode")) {
+      return { enabled: true, service: "talkback", ctrlProxyEnabled: null };
     }
+    if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {
+      return { enabled: false, service: "unknown", ctrlProxyEnabled: null };
+    }
+    return this.readState(deviceId, adb);
+  }
 
-    // Check cache
+  async resolveTalkBackState(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<boolean | null> {
+    return (await this.resolveTalkBackStateWithConfirmation(deviceId, adb, featureFlags)).talkBack;
+  }
+
+  async resolveTalkBackStateWithConfirmation(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<TalkBackStateConfirmation> {
+    const state =
+      (await this.resolveState(deviceId, adb, featureFlags)) ??
+      (await this.resolveState(deviceId, adb, featureFlags));
+    return {
+      talkBack: state === null ? null : state.service === "talkback",
+      unconfirmed: state === null || state.unconfirmed === true,
+    };
+  }
+
+  private async readState(
+    deviceId: string,
+    adb: AdbExecutor,
+  ): Promise<AndroidAccessibilityState | null> {
     const cached = this.cache.get(deviceId);
-
     if (cached) {
-      return cached.service;
+      return cached;
     }
-
-    // Detect current state
+    if (this.failedProbes.has(deviceId)) {
+      const fallback = this.lastKnownGood.get(deviceId);
+      return fallback ? { ...fallback, unconfirmed: true } : null;
+    }
+    const startTime = this.timer.now();
     const state = await this.detectAccessibilityState(deviceId, adb);
-    // Update cache
-    this.cache.set(deviceId, state);
-    return state.service;
+    const detectionTime = this.timer.now() - startTime;
+    if (detectionTime > 50) {
+      logger.warn(
+        `[AccessibilityDetector] Detection took ${detectionTime}ms (target: <50ms) for device ${deviceId}`,
+      );
+    }
+    if (state !== null) {
+      this.failedProbes.delete(deviceId);
+      this.cache.set(deviceId, state);
+      this.lastKnownGood.set(deviceId, state);
+      return state;
+    }
+    this.failedProbes.set(deviceId, true);
+    const fallback = this.lastKnownGood.get(deviceId);
+    return fallback ? { ...fallback, unconfirmed: true } : null;
   }
 
   async isCtrlProxyServiceEnabled(
@@ -182,16 +176,8 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {
       return null;
     }
-    const cached = this.cache.get(deviceId);
-    if (cached) {
-      return cached.ctrlProxyEnabled;
-    }
-    if (!adb) {
-      return null;
-    }
-    const state = await this.detectAccessibilityState(deviceId, adb);
-    this.cache.set(deviceId, state);
-    return state.ctrlProxyEnabled;
+    const state = adb ? await this.readState(deviceId, adb) : this.cache.get(deviceId);
+    return state?.ctrlProxyEnabled ?? null;
   }
 
   /**
@@ -203,6 +189,8 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   invalidateCache(deviceId: string): void {
     logger.debug(`[AccessibilityDetector] Invalidating cache for device ${deviceId}`);
     this.cache.delete(deviceId);
+    this.lastKnownGood.delete(deviceId);
+    this.failedProbes.delete(deviceId);
   }
 
   /**
@@ -211,6 +199,8 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   clearAllCache(): void {
     logger.debug(`[AccessibilityDetector] Clearing all cached entries`);
     this.cache.clear();
+    this.lastKnownGood.clear();
+    this.failedProbes.clear();
   }
 
   /**
@@ -224,7 +214,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   private async detectAccessibilityState(
     deviceId: string,
     adb: AdbExecutor,
-  ): Promise<AccessibilityCacheValue> {
+  ): Promise<AndroidAccessibilityState | null> {
     try {
       // Query enabled accessibility services
       const result = await adb.executeCommand(
@@ -275,8 +265,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
         `[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}: ${errorMessage(error)}`,
         error,
       );
-      // Preserve the user-facing fallback without treating read failure as CtrlProxy loss.
-      return { enabled: false, service: "unknown", ctrlProxyEnabled: null };
+      return null;
     }
   }
 }

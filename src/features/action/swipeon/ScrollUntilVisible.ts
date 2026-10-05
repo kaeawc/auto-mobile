@@ -1,3 +1,4 @@
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
 import {
@@ -297,6 +298,7 @@ export class ScrollUntilVisible {
     logger.info(`[SwipeOn] Looking for ${target} with maxTime=${maxTime}ms`);
 
     // Check if TalkBack is enabled (not just any accessibility service)
+    const accessibilityWarnings = new Set<string>();
     const isTalkBackEnabled = await perf.track("checkTalkBack", async () => {
       throwIfAborted(signal);
       if (strategy || this.deps.device.platform !== "android") {
@@ -306,12 +308,15 @@ export class ScrollUntilVisible {
       // cold/expired cache instead of silently reporting "not talkback" (#3915).
       // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
       // apply to scroll detection uniformly with the observe path (#3925).
-      const accessibilityService = await this.deps.accessibilityDetector.detectMethod(
+      const state = await this.deps.accessibilityDetector.resolveTalkBackState(
         this.deps.device.deviceId,
         this.deps.adb,
         this.deps.featureFlags,
       );
-      return accessibilityService === "talkback";
+      if (state === null) {
+        accessibilityWarnings.add(TALKBACK_STATE_UNKNOWN_WARNING);
+      }
+      return state === true;
     });
 
     // First check if element is already visible within the container bounds
@@ -353,6 +358,7 @@ export class ScrollUntilVisible {
         targetType: "element",
         element: foundElement,
         found: true,
+        ...(accessibilityWarnings.size ? { warnings: [...accessibilityWarnings] } : {}),
         scrollIterations: 0,
         elapsedMs: this.deps.timer.now() - startTime,
         x1: 0,
@@ -444,6 +450,9 @@ export class ScrollUntilVisible {
       });
       throwIfAborted(signal);
 
+      for (const warning of swipeResult.warnings ?? []) {
+        accessibilityWarnings.add(warning);
+      }
       if (swipeResult.observation?.viewHierarchy) {
         lastObservation = swipeResult.observation;
       }
@@ -699,6 +708,7 @@ export class ScrollUntilVisible {
       y2: 0,
       duration: 0,
       warning: swipeWarning,
+      ...(accessibilityWarnings.size ? { warnings: [...accessibilityWarnings] } : {}),
       ...(interruptedDisplay ? { staleDisplay: interruptedDisplay } : {}),
     };
   }

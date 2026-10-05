@@ -1,3 +1,7 @@
+import {
+  TALKBACK_STATE_UNKNOWN_WARNING,
+  resolveTalkBackStateConfirmation,
+} from "../accessibility/interfaces/AccessibilityDetector";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import {
   prepareTargetDisplayAction,
@@ -492,13 +496,18 @@ export class TapAnyElement extends BaseVisualChange {
     const { element, capture } = target;
     this.beforeAndroidTapForTesting?.();
     this.assertSelectedCapture(capture);
-    const talkBackEnabled =
-      element["hierarchy-source"] !== "uiautomator" &&
-      (await this.accessibilityDetector.detectMethod(
-        this.device.deviceId,
-        this.adb,
-        this.featureFlags,
-      )) === "talkback";
+    // UiAutomator captures keep their existing coordinate route, but unavailable
+    // TalkBack evidence must still be retried and reported to the caller.
+    const { talkBack: talkBackState, unconfirmed } = await resolveTalkBackStateConfirmation(
+      this.accessibilityDetector,
+      this.device.deviceId,
+      this.adb,
+      this.featureFlags,
+    );
+    if (unconfirmed) {
+      fenceOptions.onActivationWarnings?.([TALKBACK_STATE_UNKNOWN_WARNING]);
+    }
+    const talkBackEnabled = element["hierarchy-source"] !== "uiautomator" && talkBackState === true;
     if (
       talkBackEnabled &&
       (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {

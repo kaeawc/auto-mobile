@@ -91,6 +91,16 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     getInstanceSpy?.mockRestore();
   });
 
+  test("unknown TalkBack warning survives the top-level screen swipe result", async () => {
+    fakeAccessibilityDetector.setDefaultResult(null);
+    fakeObserveScreen.setObserveResult(createObserveResult("top"));
+    const result = await createSwipeOn().execute({ direction: "up", autoTarget: false });
+    expect(result.success).toBe(true);
+    expect(fakeAccessibilityDetector.getDetectionCallCount()).toBe(2);
+    expect(fakeGesture.getSwipeCalls()).toHaveLength(1);
+    expect(result.warnings?.join(" ")).toContain("could not determine");
+  });
+
   test("already aborted swipe dispatches no gesture", async () => {
     fakeObserveScreen.setObserveResult(createObserveResult("top"));
     await expect(

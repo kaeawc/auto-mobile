@@ -1026,7 +1026,8 @@ Source changes detected; measuring complete unit-lane reports.
 Rechecking 1 file(s) over the 100ms budget: 3 isolated run(s) each, median enforced.
 Recheck cleared suite.slow: median 11.00ms over 3 isolated runs (first sample 200.00ms).
 EOF
-  cmp "$BATS_TEST_TMPDIR/expected-output.txt" "$summary_output"
+  head -n 3 "$summary_output" > "$BATS_TEST_TMPDIR/original-output.txt"
+  cmp "$BATS_TEST_TMPDIR/expected-output.txt" "$BATS_TEST_TMPDIR/original-output.txt"
 }
 
 # A closed stdout works on macOS as well as Linux, unlike /dev/full. The
@@ -1773,4 +1774,127 @@ EOF
     [[ "$output" == *"AUTOMOBILE_UNIT_TEST_CHUNK_FILES must be a positive integer"* ]]
   done
   [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+@test "timing gate summary records ordered samples and both median verdicts" {
+  for times in "0.010 0.012 0.011" "0.010 0.150 0.160"; do
+    seed_outlier_report
+    cp "$report_dir/shard-0.xml" "$BATS_TEST_TMPDIR/original.xml"
+    rm -f "$STUB_RECHECK_INDEX"
+    unset GITHUB_STEP_SUMMARY
+    run_timing_gate_with_recheck_times "$times"
+    summary="$BATS_TEST_TMPDIR/timings.recheck.d/unit-timing-budget-summary.md"
+    [ -s "$summary" ]
+    grep -Fq 'First sample: 200.00ms' "$summary"
+    grep -Fq 'Budget: 100ms; configured re-runs: 3' "$summary"
+    grep -Fq 'Completed samples: 3 of 3' "$summary"
+    if [[ "$times" == "0.010 0.012 0.011" ]]; then
+      [ "$status" -eq 0 ]
+      grep -Fq 'Re-run samples: 10.00ms / 12.00ms / 11.00ms' "$summary"
+      grep -Fq 'Median: 11.00ms' "$summary"
+      grep -Fq 'Verdict: PASS (cleared)' "$summary"
+      grep -Fq 'Overall verdict: PASS' "$summary"
+    else
+      [ "$status" -eq 1 ]
+      grep -Fq 'Re-run samples: 10.00ms / 150.00ms / 160.00ms' "$summary"
+      grep -Fq 'Median: 150.00ms' "$summary"
+      grep -Fq 'Verdict: FAIL (median over budget)' "$summary"
+      grep -Fq 'Overall verdict: FAIL' "$summary"
+    fi
+    [[ "$output" == *"$(cat "$summary")"* ]]
+    ! grep -Ei 'xceeded|recheck produced|isolated runs|isolated samples' "$summary"
+    cmp "$summary" "$report_dir/unit-timing-budget-summary.md"
+    cmp "$BATS_TEST_TMPDIR/original.xml" "$report_dir/shard-0.xml"
+  done
+}
+
+@test "timing gate summary records incomplete and zero samples" {
+  for times in "skip skip 0.010" "skip skip skip"; do
+    seed_outlier_report
+    rm -f "$STUB_RECHECK_INDEX"
+    run_timing_gate_with_recheck_times "$times"
+    [ "$status" -eq 1 ]
+    summary="$BATS_TEST_TMPDIR/timings.recheck.d/unit-timing-budget-summary.md"
+    grep -Fq 'Median: not computed' "$summary"
+    if [[ "$times" == "skip skip 0.010" ]]; then
+      grep -Fq 'Completed samples: 1 of 3' "$summary"
+      grep -Fq 'Re-run samples: 10.00ms' "$summary"
+      grep -Fq 'Verdict: FAIL (fewer samples than configured)' "$summary"
+    else
+      grep -Fq 'Completed samples: 0 of 3' "$summary"
+      grep -Fq 'Verdict: FAIL (no samples)' "$summary"
+    fi
+  done
+}
+
+@test "timing gate summary appends step summary and tolerates write failure" {
+  seed_outlier_report
+  export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"
+  printf 'Existing content\n' > "$GITHUB_STEP_SUMMARY"
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [ "$(head -n 1 "$GITHUB_STEP_SUMMARY")" = 'Existing content' ]
+  tail -n +2 "$GITHUB_STEP_SUMMARY" > "$BATS_TEST_TMPDIR/appended.md"
+  cmp "$BATS_TEST_TMPDIR/appended.md" "$report_dir/unit-timing-budget-summary.md"
+  cp "$GITHUB_STEP_SUMMARY" "$BATS_TEST_TMPDIR/preserved-step-summary.md"
+  unset GITHUB_STEP_SUMMARY
+  rm -f "$STUB_RECHECK_INDEX"
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/step-summary.md" "$BATS_TEST_TMPDIR/preserved-step-summary.md"
+  export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR"
+  rm -f "$STUB_RECHECK_INDEX"
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Could not append unit timing summary"* ]]
+}
+
+@test "timing gate summary survives closed stdout with either verdict" {
+  for times in "0.010 0.012 0.011" "0.010 0.150 0.160"; do
+    seed_outlier_report
+    rm -f "$STUB_RECHECK_INDEX"
+    run_timing_gate_with_recheck_times "$times" closed
+    if [[ "$times" == "0.010 0.012 0.011" ]]; then
+      [ "$status" -eq 0 ]
+    else
+      [ "$status" -eq 1 ]
+    fi
+    [ -s "$BATS_TEST_TMPDIR/timings.recheck.d/unit-timing-budget-summary.md" ]
+  done
+}
+
+@test "timing gate summary fails missing files and unverified offenders" {
+  for file in "test/missing.test.ts" ""; do
+    seed_outlier_report
+    write_junit_report "$report_dir/shard-0.xml" "$file" suite slow 0.200
+    run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+    [ "$status" -eq 1 ]
+    grep -Fq 'First sample: 200.00ms' "$report_dir/unit-timing-budget-summary.md"
+    grep -Fq 'Completed samples: 0 of 3' "$report_dir/unit-timing-budget-summary.md"
+    grep -Fq 'Verdict: FAIL (not re-runnable; first sample stands)' "$report_dir/unit-timing-budget-summary.md"
+  done
+  seed_outlier_report
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=600 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 1 ]
+  grep -Fq 'Verdict: FAIL (could not verify within the recheck budget)' "$report_dir/unit-timing-budget-summary.md"
+  seed_changed_offender_report
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=600 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 1 ]
+  summary="$report_dir/unit-timing-budget-summary.md"
+  [ "$(grep -c '^<pre>' "$summary")" -eq 4 ]
+  for label in suite0.case suite1.case suite2.case testLaneClassification.case; do
+    grep -Fq "<pre>$label</pre>" "$summary"
+  done
+}
+
+@test "timing gate writes no summary without offenders" {
+  seed_outlier_report
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite fast 0.010
+  export GITHUB_STEP_SUMMARY="$BATS_TEST_TMPDIR/step-summary.md"
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'Source changes detected; measuring complete unit-lane reports.' ]
+  [ ! -e "$BATS_TEST_TMPDIR/timings.recheck.d/unit-timing-budget-summary.md" ]
+  [ ! -e "$report_dir/unit-timing-budget-summary.md" ]
+  [ ! -e "$GITHUB_STEP_SUMMARY" ]
 }

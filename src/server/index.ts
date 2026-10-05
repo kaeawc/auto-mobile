@@ -303,6 +303,7 @@ import { registerSnapshotTools } from "./snapshotTools";
 import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
+import { registerOverlayTools } from "./overlayTools";
 import { registerHighlightTools } from "./highlightTools";
 import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
@@ -608,6 +609,7 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerHighlightTools();
+  registerOverlayTools();
   registerDatabaseTools();
   registerStorageTools();
   registerPreferenceTools();

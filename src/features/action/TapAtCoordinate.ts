@@ -1229,22 +1229,27 @@ export class TapAtCoordinate extends BaseVisualChange {
         context.onTapDelivered();
       }
       throwIfAborted(signal);
-      if (!result.success) {
-        if (dispatched) {
-          throw indeterminateTapError(result.error);
-        }
-        throw new ActionableError(result.error ?? "Android tap failed");
+      if (result.success) {
+        return;
       }
-    } else {
-      throwIfAborted(signal);
-      context.assertCurrent();
-      await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
-        timeoutMs:
-          duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
-      });
-      context.onTapDelivered();
-      throwIfAborted(signal);
+      if (dispatched) {
+        throw indeterminateTapError(result.error);
+      }
+      if (isStaleFrameContextRejection(result.error)) {
+        throw new ActionableError(result.error ?? "Stale frame context");
+      }
+      logger.warn(
+        `[TapAtCoordinate] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
+      );
     }
+    throwIfAborted(signal);
+    context.assertCurrent();
+    await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
+      timeoutMs:
+        duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
+    });
+    context.onTapDelivered();
+    throwIfAborted(signal);
   }
 
   private async dispatchGesture(

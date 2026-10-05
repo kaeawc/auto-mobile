@@ -1,6 +1,6 @@
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
-import { NavigationGraphManager } from "./NavigationGraphManager";
+import type { NavigationGraphService } from "./NavigationGraphManager";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
@@ -9,7 +9,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
  * to detect screen transitions.
  */
 export class DefaultScreenTransitionWaiter implements ScreenTransitionWaiter {
-  private navigationManager: NavigationGraphManager;
+  private navigationManager: Pick<NavigationGraphService, "getCurrentScreen">;
   private pollIntervalMs: number;
   private timer: Timer;
 
@@ -18,7 +18,7 @@ export class DefaultScreenTransitionWaiter implements ScreenTransitionWaiter {
    * @param pollIntervalMs - How often to poll for screen changes (default: 500ms)
    */
   constructor(
-    navigationManager: NavigationGraphManager,
+    navigationManager: Pick<NavigationGraphService, "getCurrentScreen">,
     pollIntervalMs: number = 500,
     timer: Timer = defaultTimer,
   ) {

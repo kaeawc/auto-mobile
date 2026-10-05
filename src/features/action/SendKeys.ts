@@ -55,6 +55,7 @@ import {
 
 export const SEND_KEYS_MAX_COMMANDS = 100;
 export const SEND_KEYS_MAX_MODIFIERS = 4;
+const ANDROID_FOCUSED_INPUT_ERROR = "Android event delivery requires a focused editable field";
 
 // Give posted formatters/recomposition a bounded chance to finish after a mismatch.
 export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
@@ -637,7 +638,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (this.device.platform !== "android" || requestedMode !== "auto") {
       return this.resolveMode(requestedMode);
     }
-    return (await this.isFocusedAndroidPasswordField(signal, display))
+    return (await this.isFocusedAndroidPasswordField(operation, signal, display))
       ? operation === "insert"
         ? "eventAll"
         : "a11y"
@@ -645,6 +646,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private async isFocusedAndroidPasswordField(
+    operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
   ): Promise<boolean> {
@@ -655,6 +657,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
+      // Auto insert already reads focus for password routing. Reject before dispatch
+      // rather than trusting an IME acknowledgement with no readable editable target.
+      if (operation === "insert") {
+        throw new ActionableError(ANDROID_FOCUSED_INPUT_ERROR);
+      }
       return false;
     }
     const parser = new DefaultElementParser();
@@ -1019,6 +1026,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           ...(display === undefined ? {} : { display }),
         });
         this.checkAbort(signal);
+        if (observation.viewHierarchy && !hasFocusedTextInput(observation.viewHierarchy)) {
+          return ANDROID_FOCUSED_INPUT_ERROR;
+        }
         const committedText = this.readFocusedText(observation);
         if (committedText === undefined) {
           return undefined;
@@ -1831,7 +1841,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return {
         success: false,
-        error: "Android event delivery requires a focused editable field",
+        error: ANDROID_FOCUSED_INPUT_ERROR,
       };
     }
     return { success: true, hierarchy };

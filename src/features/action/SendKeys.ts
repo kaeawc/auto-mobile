@@ -1075,6 +1075,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           `${errorMessage(failure)}; ${restoreMessage}`,
         );
       }
+      logger.warn(`[SendKeys] IME restoration failed: ${errorMessage(restoreError)}`, restoreError);
       if (outcome && !outcome.success) {
         return { ...outcome, error: `${outcome.error ?? "Text commit failed."} ${restoreMessage}` };
       }

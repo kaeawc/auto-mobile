@@ -1601,6 +1601,7 @@ export class SetUIState extends BaseVisualChange {
       }
     } catch (error) {
       signal?.throwIfAborted();
+      logger.warn(`[SetUIState] Failed to apply field value: ${errorMessage(error)}`, error);
       return {
         success: false,
         error: errorMessage(error),

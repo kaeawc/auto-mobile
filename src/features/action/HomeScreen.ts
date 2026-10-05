@@ -2,7 +2,7 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, HomeScreenResult } from "../../models";
+import { ActionableError, BootedDevice, HomeScreenResult, ViewHierarchyResult } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -16,6 +16,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { DefaultElementFinder } from "../utility/ElementFinder";
 
 /**
  * Navigates to the home screen using the accessibility service global action
@@ -71,10 +72,7 @@ export class HomeScreen extends BaseVisualChange {
           const launcherPackage = await perf.track("homeNavigation", () =>
             this.executeAndroidHome(signal),
           );
-          // The verified foreground package is the device's actual launcher.
-          // Compare it to the pre-action observation without another device read.
-          alreadyOnHome =
-            launcherPackage !== undefined && previousHierarchy?.packageName === launcherPackage;
+          alreadyOnHome = this.isAndroidHomeSurface(previousHierarchy, launcherPackage);
           break;
         }
         case "ios":
@@ -98,6 +96,21 @@ export class HomeScreen extends BaseVisualChange {
         ...(alreadyOnHome ? { message: "Already on the home screen" } : {}),
       };
     }, options);
+  }
+
+  private isAndroidHomeSurface(
+    viewHierarchy: ViewHierarchyResult | undefined,
+    launcherPackage: string | undefined,
+  ): boolean {
+    if (launcherPackage === undefined || viewHierarchy?.packageName !== launcherPackage) {
+      return false;
+    }
+    // Quickstep launchers also render Recents under the launcher package.
+    // Exclude overview markers from the pre-action tree without another device read.
+    const finder = new DefaultElementFinder();
+    return !["overview_panel", "task_view_single"].some((marker) =>
+      finder.hasContainerElement(viewHierarchy, { elementId: `${launcherPackage}:id/${marker}` }),
+    );
   }
 
   private async executeAndroidHome(requestSignal?: AbortSignal): Promise<string | undefined> {

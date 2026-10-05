@@ -138,10 +138,14 @@ function parallelDeviceFailuresField(
   return {
     deviceFailures: [...failures]
       .sort(compareParallelFailures)
-      .map(({ failedStep, deviceOrder }) => ({
-        ...failedStep,
-        device: devices[deviceOrder],
-      })),
+      .map(({ failedStep, deviceOrder, abortConsequence }, index) => {
+        const { failureObservation, ...failure } = failedStep;
+        return {
+          ...failure,
+          device: devices[deviceOrder],
+          ...(index > 0 && !abortConsequence && failureObservation ? { failureObservation } : {}),
+        };
+      }),
   };
 }
 

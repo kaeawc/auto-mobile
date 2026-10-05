@@ -135,11 +135,13 @@ test("all deviceFailures reach a failed response without captureObserveSteps", a
       stepIndex: 1,
       tool: "observe",
       error: "required failure",
-      failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
     },
     { device: "B", stepIndex: -1, tool: "unknown", error: "track failure" },
   ];
-  const failedStep = deviceFailures[0];
+  const failedStep = {
+    ...deviceFailures[0],
+    failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
+  };
   const skippedSteps = [{ device: "A", stepIndex: 0, tool: "tapOn", error: "optional failure" }];
   const warnings = [{ device: "B", stepIndex: 1, tool: "observe", warnings: ["best effort"] }];
   execute.mockResolvedValue({

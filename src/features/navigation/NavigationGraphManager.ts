@@ -1162,17 +1162,17 @@ export class NavigationGraphManager implements NavigationGraphService {
     event: HierarchyNavigationEvent,
     epoch: number,
   ): Promise<void> {
+    const appId = event.packageName?.trim();
+    if (!appId) {
+      logger.debug(`[NAVIGATION_GRAPH] Skipping hierarchy navigation - unknown app`);
+      return;
+    }
     // Auto-set current app from package name if provided
-    if (event.packageName && event.packageName !== this.currentAppId) {
-      await this.setCurrentAppUnlocked(event.packageName, epoch);
+    if (appId !== this.currentAppId) {
+      await this.setCurrentAppUnlocked(appId, epoch);
     }
 
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
-
-    if (!this.currentAppId) {
-      logger.warn(`[NAVIGATION_GRAPH] Cannot record hierarchy navigation - no current app set`);
-      return;
-    }
 
     const fingerprintHash = event.toFingerprint;
     const fingerprintData = event.fingerprintData || JSON.stringify({ hash: fingerprintHash });
@@ -1185,7 +1185,6 @@ export class NavigationGraphManager implements NavigationGraphService {
     // this reach with another device's identity/hash. Capturing everything up front and
     // threading the immutable snapshot means no code path re-reads mutable state after
     // any await (#4984).
-    const appId = this.currentAppId;
     const provenance = this.resolveProvenance(appId);
 
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)

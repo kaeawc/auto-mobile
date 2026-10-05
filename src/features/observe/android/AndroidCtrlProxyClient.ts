@@ -25,6 +25,7 @@ import {
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger, type Logger } from "../../../utils/logger";
 import { displayTransitions } from "../DisplayTransition";
+import { linkWindowRoots } from "../linkWindowRoots";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
@@ -38,6 +39,7 @@ import {
   HighlightOperationResult,
   HighlightShape,
   toActionableError,
+  nodeAttributes,
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
@@ -5942,21 +5944,54 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     // Notify hierarchy navigation detector
+    const navigationPackage = this.resolveHierarchyPackage(data);
     if (!data.hierarchy) {
       logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
     } else if (data.error) {
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
-    } else if (!this.shouldUseHierarchyNavigation(data.packageName)) {
-      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${data.packageName}`);
+    } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
+      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
     } else {
       // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
       // non-SDK apps never emit navigation_event, so this is the only path that gives
       // them a real build key instead of the default/legacy one.
-      if (data.packageName) {
-        this.ensureBuildContext(data.packageName);
+      if (navigationPackage) {
+        this.ensureBuildContext(navigationPackage);
       }
-      this.getHierarchyNavigationDetector().onHierarchyUpdate(data);
+      this.getHierarchyNavigationDetector().onHierarchyUpdate({
+        ...data,
+        packageName: navigationPackage,
+      });
     }
+  }
+
+  private resolveHierarchyPackage(data: AccessibilityHierarchy): string | undefined {
+    if (data.packageName?.trim()) {
+      return data.packageName.trim();
+    }
+    const windows = (linkWindowRoots(data.hierarchy, data.windows) ?? []).filter(
+      (window) =>
+        data.displayId === undefined ||
+        data.displayId === null ||
+        window.displayId === undefined ||
+        window.displayId === null ||
+        window.displayId === data.displayId,
+    );
+    // An IME can own focus above the app. Prefer a focused non-IME surface
+    // (including system dialogs), then the active/top application window.
+    const appWindows = windows.filter((entry) => entry.type === 1);
+    const window =
+      windows.find((entry) => entry.isFocused && entry.type !== 2) ??
+      appWindows.find((entry) => entry.isActive) ??
+      appWindows.sort((left, right) => (right.windowLayer ?? 0) - (left.windowLayer ?? 0))[0];
+    const attributes = window?.hierarchy ? nodeAttributes(window.hierarchy) : {};
+    // Do not borrow a different root's identity when the selected window is unknown.
+    const candidates = window
+      ? [window.packageName, attributes.packageName, attributes.package]
+      : [data.hierarchy?.packageName];
+    return candidates
+      .flatMap((value) => (typeof value === "string" ? [value.trim()] : []))
+      .find((value) => value.length > 0);
   }
 
   private shouldUseHierarchyNavigation(packageName?: string): boolean {

@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { z } from "zod/v4";
 import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../src/features/action/TapOnElement";
@@ -246,7 +247,10 @@ describe("tapOnHandler (registered handler wiring)", () => {
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: hierarchy,
     };
-    tap.observedInteraction = async (action) => ({ ...(await action(observation)), observation });
+    tap.observedInteraction = async (action) => ({
+      ...(await action(recordObservationRead(observation))),
+      observation,
+    });
     const error =
       'Failed to perform tap on element: Target "Continue as Guest" is covered by the soft keyboard; dismiss the keyboard first.';
     setTapOnElementFactory(() => tap);

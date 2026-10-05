@@ -184,6 +184,62 @@ describe("waitForObservation DSL branch", () => {
     expect(outcome.matchedElement?.text).toBe("Account settings");
   });
 
+  test("appear settled recheck rejects matching nodes with unavailable freshness", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult((index) => ({
+      ...makeObservation([node({ "resource-id": "submit" })], (index + 1) * 10),
+      ...(index >= 2 ? { freshness: { isFresh: true, category: "unavailable" as const } } : {}),
+    }));
+    const outcome = await waitForObservation(
+      screen,
+      {
+        for: "appear",
+        elementId: "submit",
+        timeout: 500,
+        settled: { quietPeriodMs: 100 },
+      } satisfies WaitForWithSettled,
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.awaitedElement).toBeUndefined();
+  });
+
+  test("disappear settled recheck does not admit unavailable captures", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult((index) =>
+      index < 2
+        ? makeObservation([node({ "resource-id": "content" })], (index + 1) * 10)
+        : {
+            ...makeObservation([], timer.now()),
+            viewHierarchy: { hierarchy: { error: "unavailable" }, updatedAt: timer.now() },
+          },
+    );
+    const outcome = await waitForObservation(
+      screen,
+      {
+        for: "disappear",
+        text: "Loading",
+        timeout: 500,
+        settled: { quietPeriodMs: 100 },
+      } satisfies WaitForWithSettled,
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.settled).toBe(false);
+    expect(outcome.timeoutReason).toContain("hierarchy unavailable");
+  });
+
   test("for:'appear' applies the settled quiet period and returns its stable hierarchy", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

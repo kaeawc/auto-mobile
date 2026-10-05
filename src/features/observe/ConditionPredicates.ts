@@ -14,6 +14,44 @@ import { SearchableHierarchy, type SearchableEntry } from "../utility/Searchable
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import { normalizeQuotes } from "../utility/TextMatcher";
 
+const waitHierarchyProjection = new SearchableHierarchy();
+
+/**
+ * Hierarchy waits require a usable tree. Error/empty trees and explicitly
+ * unavailable captures cannot prove a hierarchy condition; freshness and
+ * verification verdicts are deliberately not consulted.
+ */
+export function waitCaptureUnavailableReason(observation: ObserveResult): string | undefined {
+  const hierarchy = observation.viewHierarchy?.hierarchy ?? {};
+  const freshness = observation.freshness ?? { isFresh: true };
+  const nodes = observation.viewHierarchy
+    ? waitHierarchyProjection.project(observation.viewHierarchy)
+    : [];
+  const hasNodes = nodes.some((node) =>
+    [node.bounds, node.className, node.elementId, node.textFields.length].some(Boolean),
+  );
+  const unavailable = [
+    !observation.viewHierarchy?.hierarchy ||
+      typeof observation.viewHierarchy.hierarchy !== "object" ||
+      "error" in hierarchy,
+    hierarchy.unavailableReason !== undefined,
+    freshness.category === "unavailable",
+    "unavailable" in freshness && freshness.unavailable === true,
+    !hasNodes,
+  ].some(Boolean);
+  if (!unavailable) {
+    return undefined;
+  }
+  const detail = [
+    hierarchy.error,
+    hierarchy.unavailableReason,
+    freshness.unavailableDetail,
+    freshness.unavailableReason,
+    freshness.warning,
+  ].find(Boolean);
+  return ["hierarchy unavailable", detail].filter(Boolean).join(": ");
+}
+
 export type ConditionResolver = Pick<ElementResolver, "resolve">;
 export type ConditionSelector = Pick<
   ResolverSelector,
@@ -266,6 +304,10 @@ export function disappear(
     requireBounds: true,
   });
   return (observation): ConditionEvaluation => {
+    const diagnostic = waitCaptureUnavailableReason(observation);
+    if (diagnostic) {
+      return { matched: false, candidates: [], diagnostic };
+    }
     const result = search(observation);
     const failure = waitResolutionFailure(result, selector, true);
     if (failure) {

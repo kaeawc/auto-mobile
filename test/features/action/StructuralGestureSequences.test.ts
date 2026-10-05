@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import androidHome from "../../fixtures/observe/android-home.json";
 import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
@@ -206,7 +207,7 @@ describe("gesture request sequences", () => {
       const controller = new AbortController();
       tap.observedInteraction = async (action) => {
         calls.push("observe");
-        return action(observation);
+        return action(recordObservationRead(observation));
       };
       let refreshCount = 0;
       tap.setRefreshViewHierarchyForTesting(async (_refresh, timeout, screen, signal) => {
@@ -299,7 +300,7 @@ describe("gesture request sequences", () => {
       };
       tap.observedInteraction = async (action) => {
         calls.push("observe");
-        return action(observation);
+        return action(recordObservationRead(observation));
       };
       const result = await tap.execute({
         action: "tap",

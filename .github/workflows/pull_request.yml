@@ -1420,6 +1420,15 @@ jobs:
           BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
         run: bash scripts/validate-bun-test-timings.sh
 
+      - name: "Upload Node Unit Timing Budget Summary"
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-timing-budget-summary
+          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
+          if-no-files-found: ignore
+          retention-days: 7
+
   node-host-integration-tests:
     timeout-minutes: 20
     name: "Node Host Integration Tests (${{ matrix.os }})"

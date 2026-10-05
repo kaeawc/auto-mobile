@@ -22,7 +22,7 @@ import {
 import { dropMcpRecording } from "../server/mcpRecordingManager";
 import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
-import { McpOverloadError, McpTimeoutError } from "./McpTimeoutError";
+import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -286,9 +286,10 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
 function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
-): Pick<DaemonResponse, "overloadFailure" | "requestFailureCause"> {
+): Pick<DaemonResponse, "code" | "overloadFailure" | "requestFailureCause"> {
   return {
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
+    ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -1308,6 +1309,7 @@ export class UnixSocketServer {
         success: false,
         error: errorMessage(error),
         ...(errorCode === undefined ? {} : { code: errorCode }),
+        ...mcpRequestFailureDetails(error, undefined),
       };
       if (pending) {
         this.writeTerminalSocketResponse(pending, errorResponse, deviceId);
@@ -1847,6 +1849,7 @@ export class UnixSocketServer {
                   timeoutMs: totalTimeoutMs,
                   origin: "UnixSocketServer.handleRequest",
                   detail: `spent ${totalTimeoutMs - this.remainingMcpForwardBudget({ deadline })}ms waiting in queue for ${executionKey}`,
+                  code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
                 }),
             },
           );
@@ -1917,6 +1920,7 @@ export class UnixSocketServer {
                   : request.method,
               timeoutMs: totalTimeoutMs,
               origin: "UnixSocketServer.handleRequest",
+              code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
               detail: sameLaneWait
                 ? `timed out in queue (waiting in queue for ${resolveSocketAdmissionLane(request)})`
                 : "timed out in queue before admission",
@@ -2068,6 +2072,9 @@ export class UnixSocketServer {
         timeoutMs: totalTimeoutMs,
         origin: "UnixSocketServer.handleRequest",
         detail: `spent ${totalTimeoutMs - remainingTimeoutMs}ms ${phase}`,
+        // Reconnect preparation may follow a dispatched attempt; only the
+        // initial execution-key queue wait proves that work never started.
+        ...(phase === "waiting in queue" ? { code: MCP_QUEUE_TIMEOUT_ERROR_CODE } : {}),
       });
     }
     if (queueWaitMs > 0) {

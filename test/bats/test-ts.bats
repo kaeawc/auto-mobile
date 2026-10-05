@@ -992,6 +992,9 @@ run_timing_gate_with_recheck_times() {
     bash -c '
       if [[ "$3" == closed ]]; then
         exec 1>&-
+        # Pin the stock macOS Bash 3.2 and the no-coreutils timeout path.
+        export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
+        exec /bin/bash "$1" "$2"
       elif [[ -n "$3" ]]; then
         exec > "$3"
       fi
@@ -1012,8 +1015,8 @@ EOF
   cmp "$BATS_TEST_TMPDIR/expected-output.txt" "$summary_output"
 }
 
-# A closed stdout works on macOS as well as Linux, unlike /dev/full. These
-# exercise failures in both the progress output and the buffered summary emit.
+# A closed stdout works on macOS as well as Linux, unlike /dev/full. The
+# system-Bash path pins the Bash 3.2 failed-echo buffer regression on macOS.
 @test "timing gate clears an outlier even when stdout writes fail" {
   seed_outlier_report
   run_timing_gate_with_recheck_times "0.010 0.012 0.011" closed
@@ -1524,7 +1527,7 @@ printf '%s\n' test/utils/FileDownloader.test.ts test/planUtils.test.ts \
   test/daemon/daemonClientAvailability.integration.test.ts test/stress/memory-leak.stress.test.ts
 EOF
   chmod +x "$STUB_BIN/find"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=907919 bash "$SCRIPT" unit
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=907919 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [[ "$output" == *"seed=907919"* ]]
   [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 1 ]
@@ -1532,7 +1535,7 @@ EOF
 
   # Ordinary shards consume the same two files (one per worker).
   : > "$BUN_ARGS_FILE"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 2 ]
   grep -q 'test/planUtils.test.ts' "$BUN_ARGS_FILE"
@@ -1542,7 +1545,7 @@ EOF
 
 @test "randomized unit lane reports seed and repro on failure and preserves exit status" {
   local summary="$STUB_BIN/summary.md"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
     GITHUB_STEP_SUMMARY="$summary" STUB_BUN_EXIT=7 bash "$SCRIPT" unit
   [ "$status" -eq 7 ]
   [[ "$output" == *"seed=42"* ]]
@@ -1552,7 +1555,7 @@ EOF
 }
 
 @test "randomized unit success does not write a failure summary" {
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 \
     GITHUB_STEP_SUMMARY="$STUB_BIN/summary.md" bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
   [ ! -e "$STUB_BIN/summary.md" ]
@@ -1560,12 +1563,12 @@ EOF
 
 @test "randomized unit lane rejects invalid seeds and partial targets before invoking Bun" {
   for seed in 0 -1 abc 4294967296 99999999999999999999; do
-    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED="$seed" bash "$SCRIPT" unit
+    run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED="$seed" bash "$SCRIPT" unit
     [ "$status" -eq 2 ]
   done
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit test/planUtils.test.ts
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit test/planUtils.test.ts
   [ "$status" -eq 2 ]
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit --isolate
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit --isolate
   [ "$status" -eq 2 ]
   [ ! -s "$BUN_ARGS_FILE" ]
 }
@@ -1573,7 +1576,7 @@ EOF
 @test "randomized unit lane refuses empty discovery instead of running the whole suite" {
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/find"
   chmod +x "$STUB_BIN/find"
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit
+  run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_RANDOM_SEED=42 bash "$SCRIPT" unit
   [ "$status" -eq 1 ]
   [[ "$output" == *"No unit test files discovered"* ]]
   [ ! -s "$BUN_ARGS_FILE" ]

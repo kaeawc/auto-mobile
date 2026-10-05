@@ -134,6 +134,17 @@ jobs:
           fi
           bash scripts/test-ts.sh unit
 
+      - name: "Upload unit test diagnostics"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-test-diagnostics-${{ runner.os }}
+          path: |
+            scratch/test-ts-unit-shards/**
+            scratch/timing-unit-reports/**
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Advisory and independent, following auto-advance-race-guard / xctestrunner-tsan.
   node-randomized-unit-tests:
     name: "Node Randomized Unit Tests (Advisory)"
@@ -479,12 +490,10 @@ jobs:
       MACOS_SIGNING_ENABLED: ${{ secrets.MACOS_DEVELOPER_ID_CERT_BASE64 != '' }}
     strategy:
       fail-fast: false
-      # The SDK still supports older Swift toolchains. Keep its SwiftPM tests on
-      # Xcode 26.0; the other packages require Swift 6.3 / Xcode 26.5 or newer.
+      # All packages require Swift 6.3 / Xcode 26.5 or newer.
       # Xcode 15.4 / macos-14 runners were retired separately in #6312.
       matrix:
         config:
-          - { name: "Xcode 26 (SDK)", runner: "macos-26", xcode: "26.0" }
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
           - { name: "Xcode 26.6", runner: "macos-26", xcode: "26.6" }
     steps:
@@ -528,16 +537,11 @@ jobs:
       - name: "Resolve Swift package dependencies"
         shell: bash
         run: |
-          if [[ "${{ matrix.config.xcode }}" == "26.0" ]]; then
-            (cd ios/auto-mobile-sdk && swift package resolve)
-          else
-            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
-              (cd "${package}" && swift package resolve)
-            done
-          fi
+          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+            (cd "${package}" && swift package resolve)
+          done
 
       - name: "Build Swift Packages"
-        if: matrix.config.xcode != '26.0'
         env:
           MACOS_SIGNING_ENABLED: ${{ env.MACOS_SIGNING_ENABLED }}
           MACOS_DEVELOPER_ID_SIGNING_IDENTITY: ${{ secrets.MACOS_DEVELOPER_ID_SIGNING_IDENTITY }}
@@ -554,18 +558,7 @@ jobs:
           echo "build took ${SECONDS}s"
 
       - name: "Test Swift Packages"
-        if: matrix.config.xcode != '26.0'
         run: ./scripts/ios/swift-test.sh
-
-      - name: "Build and test SDK on older Swift"
-        if: matrix.config.xcode == '26.0'
-        working-directory: ios/auto-mobile-sdk
-        run: |
-          echo "Swift cache hit: ${{ steps.cache-swift-packages.outputs.cache-hit }}"
-          SECONDS=0
-          swift build -Xswiftc -warnings-as-errors
-          swift test -Xswiftc -warnings-as-errors
-          echo "build took ${SECONDS}s"
 
   # Advisory diagnostic: no simulator and no downstream dependencies.
   # #6061 exposed a lock-order hang only under TSan; bound hangs as well as reports.

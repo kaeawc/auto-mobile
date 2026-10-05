@@ -7,13 +7,7 @@ const WORKFLOW = ".github/workflows/merge.yml";
 
 // These jobs retain macOS configuration while explicitly disabled. ios-xcode-build
 // is blocked by its disabled ios-xcodegen dependency, but lacks its own guard.
-const MACOS_EXCEPTIONS = new Set([
-  "build-desktop-app",
-  "ios-swift-build",
-  "ios-swift-test",
-  "ios-xcodegen",
-  "ios-xcode-build",
-]);
+const MACOS_EXCEPTIONS = new Set(["build-desktop-app", "ios-xcodegen", "ios-xcode-build"]);
 
 describe("On Merge hosted macOS removal (#8583)", () => {
   test("schedules no hosted macOS runner outside the named dormant jobs", () => {
@@ -58,6 +52,8 @@ describe("On Merge hosted macOS removal (#8583)", () => {
     }
     expect(jobs["mcp-build-and-test"]).toBeUndefined();
     expect(jobs["ios-device-webrtc"]).toBeUndefined();
+    expect(jobs["ios-swift-build"]).toBeUndefined();
+    expect(jobs["ios-swift-test"]).toBeUndefined();
   });
 
   test("has no direct hosted macOS runs-on line", () => {

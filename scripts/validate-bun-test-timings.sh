@@ -22,6 +22,13 @@
 # closed and identifies the offenders that need a larger budget.
 set -euo pipefail
 
+# Bash 3.2 retains a failed echo in its stdio buffer when stdout is closed;
+# a later command substitution can flush that text into an arithmetic value.
+# Reopen only a closed descriptor before any progress output or subprocesses.
+if ! { : 3>&1; } 2>/dev/null; then
+  exec > /dev/null
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
 source "$ROOT/scripts/lib/bun-unit-test.sh"
@@ -160,7 +167,7 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   fi
 
   if [[ "$changed_count" -eq 0 ]]; then
-    echo "No changed unit tests to validate against the ${max_ms}ms budget."
+    echo "No changed unit tests to validate against the ${max_ms}ms budget." || true
     exit 0
   fi
 else
@@ -171,7 +178,7 @@ set -- "$report_dir"/*.xml
 if [[ ! -f "$1" ]]; then
   if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" && "$affects_unit_tests" == "true" && -z "${BUN_TEST_TIMING_REPORT_DIR:-}" ]]; then
     # Bun exits successfully for empty --changed shards without writing JUnit.
-    echo "No changed unit tests to validate against the ${max_ms}ms budget."
+    echo "No changed unit tests to validate against the ${max_ms}ms budget." || true
     exit 0
   fi
   echo "No JUnit shard reports found in ${report_dir}." >&2

@@ -38,6 +38,10 @@
         android:name="dev.jasonpearson.automobile.ctrlproxy.SDK_EVENT_BATCH_ACK_SUPPORTED"
         android:value="true" />
 
+      <meta-data
+        android:name="dev.jasonpearson.automobile.ctrlproxy.SDK_ANR_ACK_SUPPORTED"
+        android:value="true" />
+
       <!-- Main Activity -->
       <activity
         android:name=".MainActivity"

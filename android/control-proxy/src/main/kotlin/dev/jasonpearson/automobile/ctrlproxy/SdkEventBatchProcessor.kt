@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 internal class SdkEventBatchProcessor(
@@ -55,7 +56,8 @@ internal class SdkEventBatchProcessor(
    * overload because the broadcast cannot be retried synchronously.
    */
   fun enqueue(batch: SdkEventBatch): Boolean =
-    queuedEvents.trySend(QueuedEvent.Batch(batch)).isSuccess
+    // A stopped service cannot deliver retained work. Leave the sender's cursor retryable.
+    scope.isActive && queuedEvents.trySend(QueuedEvent.Batch(batch)).isSuccess
 
   /** Queues a single navigation event from the legacy navigation broadcast receiver. */
   fun enqueueNavigationEvent(

@@ -178,6 +178,56 @@ describe("aggregateStatsByHost", () => {
 });
 
 describe("network resource registration", () => {
+  it("reads live events with the stream limit and summary shape", async () => {
+    registerNetworkResources({
+      getNetworkEvents: async (query) => {
+        expect(query).toEqual({ limit: 20 });
+        return [makeEvent()];
+      },
+      getNetworkEventById: async () => null,
+    });
+    const content = await ResourceRegistry.getResource(
+      "automobile:network/traffic/live",
+    )!.handler();
+    expect(content.uri).toBe("automobile:network/traffic/live");
+    expect(JSON.parse(content.text!)).toEqual({
+      events: [
+        {
+          id: 1,
+          timestamp: 1000,
+          method: "GET",
+          url: "https://api.example.com/data",
+          host: "api.example.com",
+          path: "/data",
+          statusCode: 200,
+          durationMs: 100,
+          protocol: "h2",
+          contentType: "application/json",
+          error: null,
+        },
+      ],
+    });
+  });
+
+  it("returns zero aggregate statistics for an empty capture", async () => {
+    registerNetworkResources({
+      getNetworkEvents: async (query) => {
+        expect(query).toEqual({ limit: 200 });
+        return [];
+      },
+      getNetworkEventById: async () => null,
+    });
+    const content = await ResourceRegistry.getResource("automobile:network/stats")!.handler();
+    expect(JSON.parse(content.text!)).toEqual({
+      totalRequests: 0,
+      errorCount: 0,
+      errorRate: 0,
+      avgDurationMs: 0,
+      p50: 0,
+      p95: 0,
+      byHost: {},
+    });
+  });
   it("includes transport failures in the stats error count and rate", async () => {
     registerNetworkResources({
       getNetworkEvents: async () => [

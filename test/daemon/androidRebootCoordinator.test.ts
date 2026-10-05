@@ -32,6 +32,7 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
   readonly calls: string[] = [];
   readonly outcomes: string[] = [];
   readonly attempts: string[] = [];
+  readonly attemptNumbers: number[] = [];
   cancelAt = 0;
   cancellationChecks = 0;
 
@@ -60,6 +61,7 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     attempt: { attempt: number; outcome: "failed" | "succeeded" },
   ): Promise<void> {
     this.attempts.push(attempt.outcome);
+    this.attemptNumbers.push(attempt.attempt);
   }
   setRecoveringAndroidImage(): void {
     this.calls.push("set-image");
@@ -126,11 +128,15 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
   }
 }
 
-function setup(startDevice: () => Promise<ChildProcess | null> = async () => null) {
+function setup(
+  startDevice: () => Promise<ChildProcess | null> = async () => null,
+  waitForDeviceReady: () => Promise<BootedDevice> = async () => ready,
+  maxAttempts = 1,
+) {
   const timer = new FakeTimer();
   const manager = {
     startDevice,
-    waitForDeviceReady: async () => ready,
+    waitForDeviceReady,
   } as PlatformDeviceManager;
   const port = new FakePoolPort(manager, timer);
   const { outcomes, attempts } = port;
@@ -151,7 +157,7 @@ function setup(startDevice: () => Promise<ChildProcess | null> = async () => nul
     guardedPort,
     recordLedger,
     new DeviceCriteriaMatcher(),
-    new BoundedAndroidDeviceReboot(timer, 1),
+    new BoundedAndroidDeviceReboot(timer, maxAttempts),
   );
   return { coordinator, port, outcomes, attempts, timer, recordLedger };
 }
@@ -170,6 +176,164 @@ async function run(
 }
 
 describe("AndroidRebootCoordinator", () => {
+  test("preserves retry attempt numbers and the FakeTimer backoff", async () => {
+    let starts = 0;
+    const { coordinator, port, outcomes, attempts, timer } = setup(
+      async () => {
+        if (++starts === 1) {
+          throw new Error("first launch failed");
+        }
+        return null;
+      },
+      undefined,
+      2,
+    );
+    timer.enableAutoAdvance();
+    expect(await run(coordinator)).toBe(true);
+    expect(port.attemptNumbers).toEqual([1, 2]);
+    expect(attempts).toEqual(["failed", "succeeded"]);
+    expect(outcomes).toEqual(["recovered"]);
+    expect(timer.getSleepHistory()).toEqual([1000]);
+    expect(port.calls.slice(-3)).toEqual(["bind:none", "clear-owner", "finish"]);
+  });
+
+  test("settles cancellation during a failed launch without a registered replacement", async () => {
+    const controller = new AbortController();
+    const { coordinator, port, outcomes, attempts } = setup(async () => {
+      controller.abort(new Error("cancel launch"));
+      throw controller.signal.reason;
+    });
+    expect(
+      await coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+        oldDevice,
+        "incident",
+        {},
+        controller.signal,
+        () => {},
+      ),
+    ).toBe(false);
+    expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
+    expect(outcomes).toEqual(["not-attempted"]);
+    expect(attempts).toEqual([]);
+  });
+  test.each([1, 3])("cancels at checkpoint %i in handoff order", async (checkpoint) => {
+    const { coordinator, port, outcomes, attempts, timer } = setup();
+    port.cancelAt = checkpoint;
+    expect(await run(coordinator)).toBe(false);
+    expect(outcomes).toEqual(["not-attempted"]);
+    expect(attempts).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(port.calls).toEqual([
+      "set-image",
+      "recovering:emulator-5554",
+      "stop",
+      "detach",
+      "remove:emulator-5554:true:true",
+      ...(checkpoint === 3
+        ? [
+            "recovering:emulator-5556",
+            "set-owner",
+            "identity",
+            "add:emulator-5556",
+            "remove:emulator-5556:true:false",
+            "stop-process",
+            "clear-owner",
+          ]
+        : []),
+      "finish",
+    ]);
+  });
+
+  test("retains the first cancellation cleanup failure and still clears ownership", async () => {
+    const { coordinator, port, outcomes } = setup();
+    port.cancelAt = 3;
+    const first = new Error("remove failed");
+    const originalRemove = port.removeDevice.bind(port);
+    port.removeDevice = async (id, ...args) => {
+      await originalRemove(id, ...args);
+      if (id === ready.deviceId) {
+        throw first;
+      }
+    };
+    port.stopEmulatorProcess = async () => {
+      port.calls.push("stop-process");
+      throw new Error("stop failed");
+    };
+    await expect(run(coordinator)).rejects.toBe(first);
+    expect(port.calls.slice(-3)).toEqual(["stop-process", "clear-owner", "finish"]);
+    expect(outcomes).toEqual([]);
+  });
+
+  test.each([false, true])(
+    "settles an aborted owned boot once (cleanup fails: %j)",
+    async (cleanupFails) => {
+      const controller = new AbortController();
+      const failure = new Error("owned boot cleanup failed");
+      const child = {
+        kill: () => {
+          throw new Error("unexpected direct kill");
+        },
+      } as ChildProcess;
+      const { coordinator, port, outcomes, attempts, timer } = setup(
+        async () => child,
+        async () => {
+          controller.abort(new Error("cancel readiness"));
+          throw controller.signal.reason;
+        },
+      );
+      port.stopEmulatorProcess = async () => {
+        port.calls.push("stop-process");
+        if (cleanupFails) {
+          throw failure;
+        }
+      };
+      const result = coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+        oldDevice,
+        "incident",
+        {},
+        controller.signal,
+        () => {},
+      );
+      if (cleanupFails) {
+        await expect(result).rejects.toBe(failure);
+      } else {
+        expect(await result).toBe(false);
+      }
+      expect(port.calls.filter((call) => call === "stop-process")).toHaveLength(1);
+      expect(port.calls.at(-1)).toBe("finish");
+      expect(outcomes).toEqual(cleanupFails ? [] : ["not-attempted"]);
+      expect(attempts).toEqual([]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+
+  test("cancels a failed bind and removes the registered replacement before stopping it", async () => {
+    const { coordinator, port, outcomes, attempts } = setup();
+    port.cancelAt = 4;
+    port.bindRecoveredAndroidDeviceSession = async () => {
+      throw new Error("bind failed");
+    };
+    expect(await run(coordinator)).toBe(false);
+    expect(port.calls.slice(-4)).toEqual([
+      "remove:emulator-5556:true:false",
+      "stop-process",
+      "clear-owner",
+      "finish",
+    ]);
+    expect(outcomes).toEqual(["not-attempted"]);
+    expect(attempts).toEqual([]);
+  });
+
+  test("records a bind failure and clears ownership before exhausting recovery", async () => {
+    const { coordinator, port, outcomes, attempts } = setup();
+    port.bindRecoveredAndroidDeviceSession = async () => {
+      throw new Error("bind failed");
+    };
+    expect(await run(coordinator)).toBe(false);
+    expect(port.calls.slice(-2)).toEqual(["clear-owner", "finish"]);
+    expect(outcomes).toEqual(["exhausted"]);
+    expect(attempts).toEqual(["failed"]);
+  });
   test("reboots and rebinds in the original incarnation handoff order", async () => {
     const { coordinator, port, outcomes, attempts, recordLedger } = setup();
     const record = recordLedger.startAndroidRecoveryRecord("session", { deviceId: oldDevice.id }, [

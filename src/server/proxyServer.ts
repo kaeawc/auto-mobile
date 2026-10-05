@@ -260,6 +260,123 @@ async function forwardResourceUpdate(server: McpServer, uri: string): Promise<vo
   }
 }
 
+// Maps a caught daemon error to its structured tool result. Extracted so the
+// tools/call handler stays under the complexity ceiling as branches accrue.
+function resolveCallToolErrorResult(
+  error: unknown,
+  name: string,
+  hasOutputSchema: boolean,
+): CallToolResult {
+  if (error instanceof DaemonBoundSessionExpiredError) {
+    logger.warn(`[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`);
+    return sessionOwnershipLostResult(error);
+  }
+  if (error instanceof DaemonConnectionSessionReleasedError) {
+    logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
+    return noActiveDeviceSessionResult(error);
+  }
+  if (error instanceof DaemonShuttingDownError) {
+    return daemonShuttingDownResult(hasOutputSchema, error.requestMayHaveDispatched);
+  }
+  if (error instanceof DaemonRestartDeferredError) {
+    return daemonRestartDeferredResult(error);
+  }
+  if (error instanceof McpOverloadError) {
+    return mcpOverloadResult(error, hasOutputSchema);
+  }
+  if (error instanceof DeviceControlTransportError) {
+    logger.warn(
+      `[ProxyServer] Device-control transport failure for ${error.failure.toolName} during ${error.failure.phase}`,
+    );
+    return deviceControlTransportFailureResult(error);
+  }
+  return shapeToolCallError(error, { toolName: name, source: "ProxyServer" });
+}
+
+function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy): void {
+  // Register resources/list handler. Serves a cold (empty/cached) roster without
+  // connecting when no connection exists yet, deferring the daemon connect to the
+  // first tool call (issue #5879) so a host that enumerates resources on init
+  // never blocks on a wedged daemon. Once connected, the live list is served.
+  server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    try {
+      const resources = await proxy.listAdvertisedResources();
+      return { resources };
+    } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
+      }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
+      }
+      logger.error(`[ProxyServer] Failed to list resources: ${error}`);
+      throw new ActionableError(
+        `Failed to list resources from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  });
+
+  // Register resources/templates/list handler. Cold-serves without connecting
+  // (see resources/list above); defers the daemon connect to the first tool call.
+  server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+    try {
+      const resourceTemplates = await proxy.listAdvertisedResourceTemplates();
+      return { resourceTemplates };
+    } catch (error) {
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
+      }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
+      }
+      logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
+      throw new ActionableError(
+        `Failed to list resource templates from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  });
+
+  // Register resources/read handler - forward to daemon
+  server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    const uri = request.params.uri;
+
+    if (!uri) {
+      throw new ActionableError("Resource URI is missing in the request");
+    }
+
+    logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
+
+    try {
+      const result = await proxy.readResource(uri, { signal: extra.signal });
+      return result;
+    } catch (error) {
+      extra.signal.throwIfAborted();
+      if (error instanceof DaemonBoundSessionExpiredError) {
+        throw sessionOwnershipLostError(error);
+      }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
+      }
+      if (error instanceof McpOverloadError) {
+        throw mcpOverloadError(error);
+      }
+      logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
+      throw new ActionableError(
+        `Failed to read resource from daemon: ${safeForwardedRequestErrorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  });
+}
+
 /**
  * Create an MCP server that proxies all requests through the daemon
  *
@@ -427,39 +544,6 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     }
   });
 
-  // Maps a caught daemon error to its structured tool result. Extracted so the
-  // tools/call handler stays under the complexity ceiling as branches accrue.
-  const resolveCallToolErrorResult = (
-    error: unknown,
-    name: string,
-    hasOutputSchema: boolean,
-  ): CallToolResult => {
-    if (error instanceof DaemonBoundSessionExpiredError) {
-      logger.warn(`[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`);
-      return sessionOwnershipLostResult(error);
-    }
-    if (error instanceof DaemonConnectionSessionReleasedError) {
-      logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
-      return noActiveDeviceSessionResult(error);
-    }
-    if (error instanceof DaemonShuttingDownError) {
-      return daemonShuttingDownResult(hasOutputSchema, error.requestMayHaveDispatched);
-    }
-    if (error instanceof DaemonRestartDeferredError) {
-      return daemonRestartDeferredResult(error);
-    }
-    if (error instanceof McpOverloadError) {
-      return mcpOverloadResult(error, hasOutputSchema);
-    }
-    if (error instanceof DeviceControlTransportError) {
-      logger.warn(
-        `[ProxyServer] Device-control transport failure for ${error.failure.toolName} during ${error.failure.phase}`,
-      );
-      return deviceControlTransportFailureResult(error);
-    }
-    return shapeToolCallError(error, { toolName: name, source: "ProxyServer" });
-  };
-
   // Register tools/call handler - forward to daemon through the shared
   // dispatch envelope (#6545).
   installToolCallDispatcher(server, {
@@ -492,87 +576,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
   });
 
-  // Register resources/list handler. Serves a cold (empty/cached) roster without
-  // connecting when no connection exists yet, deferring the daemon connect to the
-  // first tool call (issue #5879) so a host that enumerates resources on init
-  // never blocks on a wedged daemon. Once connected, the live list is served.
-  server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-    try {
-      const resources = await proxy.listAdvertisedResources();
-      return { resources };
-    } catch (error) {
-      if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
-      }
-      if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
-      }
-      if (error instanceof McpOverloadError) {
-        throw mcpOverloadError(error);
-      }
-      logger.error(`[ProxyServer] Failed to list resources: ${error}`);
-      throw new ActionableError(
-        `Failed to list resources from daemon: ${safeForwardedRequestErrorMessage(error)}`,
-        { cause: error },
-      );
-    }
-  });
-
-  // Register resources/templates/list handler. Cold-serves without connecting
-  // (see resources/list above); defers the daemon connect to the first tool call.
-  server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
-    try {
-      const resourceTemplates = await proxy.listAdvertisedResourceTemplates();
-      return { resourceTemplates };
-    } catch (error) {
-      if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
-      }
-      if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
-      }
-      if (error instanceof McpOverloadError) {
-        throw mcpOverloadError(error);
-      }
-      logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
-      throw new ActionableError(
-        `Failed to list resource templates from daemon: ${safeForwardedRequestErrorMessage(error)}`,
-        { cause: error },
-      );
-    }
-  });
-
-  // Register resources/read handler - forward to daemon
-  server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-    const uri = request.params.uri;
-
-    if (!uri) {
-      throw new ActionableError("Resource URI is missing in the request");
-    }
-
-    logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
-
-    try {
-      const result = await proxy.readResource(uri, { signal: extra.signal });
-      return result;
-    } catch (error) {
-      extra.signal.throwIfAborted();
-      if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
-      }
-      if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
-      }
-      if (error instanceof McpOverloadError) {
-        throw mcpOverloadError(error);
-      }
-      logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
-      throw new ActionableError(
-        `Failed to read resource from daemon: ${safeForwardedRequestErrorMessage(error)}`,
-        { cause: error },
-      );
-    }
-  });
+  registerProxyResourceHandlers(server, proxy);
 
   return { server, proxy };
 }

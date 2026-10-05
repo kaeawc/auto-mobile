@@ -520,15 +520,8 @@ export class Idle {
     // - Zero delta in slow UI threads
     // - Zero delta in frame deadline missed
     // - All percentiles < reasonable thresholds (when there are enough new frames)
-    const p50Int = percentiles.percentile50th !== null ? Math.floor(percentiles.percentile50th) : 0;
-    const p90Int = percentiles.percentile90th !== null ? Math.floor(percentiles.percentile90th) : 0;
-    const p95Int = percentiles.percentile95th !== null ? Math.floor(percentiles.percentile95th) : 0;
-    const minFramesForPercentiles = 5;
-    const hasNewFrames = deltas.totalFramesDelta !== null && deltas.totalFramesDelta > 0;
-    const hasEnoughFrames = totalFrames !== null && totalFrames >= minFramesForPercentiles;
-    const shouldCheckPercentiles =
-      deltas.totalFramesDelta === null || (hasNewFrames && hasEnoughFrames);
-    const percentilesOk = !shouldCheckPercentiles || (p50Int < 100 && p90Int < 100 && p95Int < 200);
+    const { p50Int, p90Int, p95Int, shouldCheckPercentiles, percentilesOk } =
+      this.assessPercentiles(deltas.totalFramesDelta, percentiles, totalFrames);
 
     const isStable =
       deltas.missedVsyncDelta === 0 &&
@@ -548,6 +541,29 @@ export class Idle {
     }
 
     return isStable;
+  }
+
+  private assessPercentiles(
+    totalFramesDelta: number | null,
+    percentiles: Parameters<Idle["checkStabilityCriteria"]>[1],
+    totalFrames: number | null,
+  ): {
+    p50Int: number;
+    p90Int: number;
+    p95Int: number;
+    shouldCheckPercentiles: boolean;
+    percentilesOk: boolean;
+  } {
+    const p50Int = percentiles.percentile50th !== null ? Math.floor(percentiles.percentile50th) : 0;
+    const p90Int = percentiles.percentile90th !== null ? Math.floor(percentiles.percentile90th) : 0;
+    const p95Int = percentiles.percentile95th !== null ? Math.floor(percentiles.percentile95th) : 0;
+    const minFramesForPercentiles = 5;
+    const hasNewFrames = totalFramesDelta !== null && totalFramesDelta > 0;
+    const hasEnoughFrames = totalFrames !== null && totalFrames >= minFramesForPercentiles;
+    const shouldCheckPercentiles = totalFramesDelta === null || (hasNewFrames && hasEnoughFrames);
+    const percentilesOk = !shouldCheckPercentiles || (p50Int < 100 && p90Int < 100 && p95Int < 200);
+
+    return { p50Int, p90Int, p95Int, shouldCheckPercentiles, percentilesOk };
   }
 
   /**

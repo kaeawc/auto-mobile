@@ -549,6 +549,10 @@ function gestureHitsElement(gesture: GestureEvent, element?: Partial<Element>): 
   ) {
     return false;
   }
+  return pointHitsBounds(x, y, bounds);
+}
+
+function pointHitsBounds(x: number, y: number, bounds: Element["bounds"]): boolean {
   const PAD = 20;
   return (
     x >= bounds.left - PAD &&

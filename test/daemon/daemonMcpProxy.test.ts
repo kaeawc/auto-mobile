@@ -71,6 +71,57 @@ function presentationClient(profileUuid: string): FakeDaemonClient {
   });
 }
 
+describe("connection presentation characterization", () => {
+  test.each(["error", "missing-profile", "disabled-only"])(
+    "preserves preflight handling for %s",
+    async (kind) => {
+      const fakeClient = new FakeDaemonClient({
+        toolResultFor: () =>
+          kind === "error"
+            ? { isError: true, content: [{ type: "text", text: "rejected" }] }
+            : kind === "missing-profile"
+              ? { content: [{ type: "text", text: "no profile" }] }
+              : connectionProfileResult("disabled-profile"),
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+      });
+      const manager = new FakeDaemonManager();
+      manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+      const timer = new FakeTimer();
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => fakeClient,
+        daemonManager: manager,
+        daemonAvailabilityProbe: async () => true,
+        daemonOptions: { disabledTools: ["observe"], toolResultsNoStructuredContent: false },
+        timer,
+      });
+      try {
+        if (kind === "disabled-only") {
+          expect(await proxy.listTools()).toEqual([]);
+        } else {
+          await expect(proxy.listTools()).rejects.toThrow(
+            kind === "error"
+              ? "Failed to apply connection presentation profile"
+              : "Daemon did not return a connection profile",
+          );
+        }
+        expect(fakeClient.callToolCalls).toEqual([
+          {
+            toolName: "setToolEnabled",
+            params: {
+              toolNames: ["observe"],
+              enabled: false,
+              [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: false,
+            },
+          },
+        ]);
+        expect(manager.restartCalled).toBe(false);
+      } finally {
+        await proxy.close();
+      }
+    },
+  );
+});
+
 // A FakeDaemonManager reporting a running daemon whose version matches this
 // client (the ambient stamped DAEMON_VERSION). Forwarding/recovery tests use a
 // real DaemonClient stub but must NOT consult the real local DaemonManager —

@@ -94,10 +94,12 @@ const ensureMetadata = (
   return plan.metadata as Record<string, any>;
 };
 
-const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning[]): boolean => {
+const migratePlanIdentity = (
+  plan: Record<string, any>,
+  metadata: Record<string, any>,
+  warnings: MigrationWarning[],
+): boolean => {
   let changed = false;
-  const metadata = ensureMetadata(plan, warnings);
-
   if (!plan.name && typeof plan.planName === "string") {
     plan.name = plan.planName;
     delete plan.planName;
@@ -119,6 +121,15 @@ const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning
     changed = true;
   }
 
+  return changed;
+};
+
+const migrateLegacyPlanMetadata = (
+  plan: Record<string, any>,
+  metadata: Record<string, any>,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
   if (typeof plan.generated === "string" && !metadata.createdAt) {
     metadata.createdAt = plan.generated;
     recordWarning(warnings, "Mapped generated timestamp to metadata.createdAt.");
@@ -141,6 +152,15 @@ const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning
     changed = true;
   }
 
+  return changed;
+};
+
+const migratePlanVersionMetadata = (
+  plan: Record<string, any>,
+  metadata: Record<string, any>,
+  warnings: MigrationWarning[],
+): boolean => {
+  let changed = false;
   if (typeof metadata.mcpVersion === "string" && !plan.mcpVersion) {
     plan.mcpVersion = metadata.mcpVersion;
     delete metadata.mcpVersion;
@@ -166,6 +186,14 @@ const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning
     changed = true;
   }
 
+  return changed;
+};
+
+const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning[]): boolean => {
+  const metadata = ensureMetadata(plan, warnings);
+  let changed = migratePlanIdentity(plan, metadata, warnings);
+  changed = migrateLegacyPlanMetadata(plan, metadata, warnings) || changed;
+  changed = migratePlanVersionMetadata(plan, metadata, warnings) || changed;
   return changed;
 };
 
@@ -486,12 +514,10 @@ const migrateToolParams = (
   return false;
 };
 
-const migrateStepFields = (
+const migrateStepMetadata = (
   step: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
 ): boolean => {
   let changed = false;
 
@@ -517,6 +543,18 @@ const migrateStepFields = (
     recordWarning(warnings, "Removed deprecated step description field.", stepIndex);
     changed = true;
   }
+
+  return changed;
+};
+
+const migrateStepFields = (
+  step: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+  planPlatform: unknown,
+  planDevices: unknown,
+): boolean => {
+  let changed = migrateStepMetadata(step, stepIndex, warnings);
 
   const toolName = step.tool;
   if (typeof toolName !== "string") {

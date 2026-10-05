@@ -215,13 +215,7 @@ export async function waitForRecordingFileReady(
     previousSize = size;
 
     if (timer.now() >= deadline) {
-      const observed = !everExisted
-        ? "never appeared"
-        : previousSize === null
-          ? "disappeared after appearing"
-          : previousSize === 0
-            ? "stayed empty (0 bytes)"
-            : `stopped at ${previousSize} bytes but never stabilized`;
+      const observed = describeRecordingFileReadiness(everExisted, previousSize);
       throw new Error(
         `iOS recording file not ready at ${filePath} after ${timeoutMs}ms (${attempt} probes): ${observed}`,
       );
@@ -229,6 +223,16 @@ export async function waitForRecordingFileReady(
 
     await timer.sleep(backoff.delayForAttempt(attempt));
   }
+}
+
+function describeRecordingFileReadiness(everExisted: boolean, previousSize: number | null): string {
+  return !everExisted
+    ? "never appeared"
+    : previousSize === null
+      ? "disappeared after appearing"
+      : previousSize === 0
+        ? "stayed empty (0 bytes)"
+        : `stopped at ${previousSize} bytes but never stabilized`;
 }
 
 function stderrMessages(messages: string | string[]): string[] {

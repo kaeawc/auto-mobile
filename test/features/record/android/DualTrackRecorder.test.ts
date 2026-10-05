@@ -120,6 +120,27 @@ describe("DualTrackRecorder", () => {
     recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
   });
 
+  test.each([
+    { x: 280, y: 840, hit: true },
+    { x: 420, y: 940, hit: true },
+    { x: 279, y: 891, hit: false },
+    { x: 421, y: 891, hit: false },
+    { x: 342, y: 839, hit: false },
+    { x: 342, y: 941, hit: false },
+  ])("pins padded hit boundary at $x,$y", async ({ x, y, hit }) => {
+    await recorder.start();
+    fakeA11y.emit({ type: "tap", timestamp: fakeTimer.now(), element: TAP_ELEMENT });
+    fakeGestures.emit({ type: "tap", arrivedAt: fakeTimer.now(), screenX: x, screenY: y });
+    expect((await recorder.stop()).steps).toEqual(
+      hit
+        ? [{ tool: "tapOn", params: { action: "tap", elementId: TAP_ELEMENT["resource-id"] } }]
+        : [{ tool: "tapAt", params: { x, y, action: "tap" } }],
+    );
+    expect(fakeGestures.startCount).toBe(1);
+    expect(fakeGestures.stopCount).toBe(1);
+    expect(fakeA11y.unsubscribeCount).toBe(1);
+  });
+
   test("retains the first touch-track failure with injected timing through stop", async () => {
     fakeTimer.advanceTime(10_000);
     await recorder.start();

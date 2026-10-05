@@ -395,28 +395,10 @@ export class XcodeSigningManager {
 
     const teamIds = preferredTeamIds.length > 0 ? preferredTeamIds : detectedTeams;
 
-    let selectedProfile: ProvisioningProfile | undefined;
-    if (preferredProfile) {
-      selectedProfile = profiles.find(
-        (profile) => profile.uuid === preferredProfile || profile.name === preferredProfile,
-      );
-      if (!selectedProfile) {
-        warnings.push(`Requested provisioning profile '${preferredProfile}' not found`);
-      }
-    }
+    let selectedProfile = this.selectPreferredProfile(profiles, preferredProfile, warnings);
 
     const now = this.dependencies.now();
-    if (selectedProfile && selectedProfile.expirationDate.getTime() <= now) {
-      warnings.push(`Provisioning profile '${selectedProfile.name}' is expired`);
-    }
-    if (selectedProfile && !selectedProfile.provisionsAllDevices) {
-      const matchesDevice = selectedProfile.provisionedDevices?.includes(deviceUdid) ?? false;
-      if (!matchesDevice) {
-        warnings.push(
-          `Provisioning profile '${selectedProfile.name}' does not include device ${deviceUdid}`,
-        );
-      }
-    }
+    this.warnPreferredProfileEligibility(selectedProfile, deviceUdid, now, warnings);
     const eligibleProfiles = profiles.filter((profile) => {
       if (profile.expirationDate.getTime() <= now) {
         return false;
@@ -444,48 +426,17 @@ export class XcodeSigningManager {
       selectedProfile = sorted[0];
     }
 
-    let selectedIdentity: SigningIdentity | undefined;
-    if (preferredIdentity) {
-      selectedIdentity = identities.find(
-        (identity) =>
-          identity.fingerprint === preferredIdentity.toUpperCase() ||
-          identity.name.includes(preferredIdentity),
-      );
-      if (!selectedIdentity) {
-        warnings.push(`Requested signing identity '${preferredIdentity}' not found`);
-      }
-    }
-
-    if (!selectedIdentity && selectedProfile) {
-      const fingerprints = new Set(
-        selectedProfile.developerCertificates.map((cert) => cert.fingerprint),
-      );
-      selectedIdentity = identities.find((identity) => fingerprints.has(identity.fingerprint));
-    }
+    const selectedIdentity = this.selectSigningIdentity(
+      identities,
+      preferredIdentity,
+      selectedProfile,
+      warnings,
+    );
 
     const resolvedTeamId = teamIds[0] ?? selectedProfile?.teamIds[0];
 
     if (selectedProfile && selectedIdentity) {
-      const matchingCert = selectedProfile.developerCertificates.find(
-        (cert) => cert.fingerprint === selectedIdentity?.fingerprint,
-      );
-      if (matchingCert && isCertificateExpired(matchingCert, now)) {
-        warnings.push(`Signing certificate for '${selectedProfile.name}' is expired`);
-      }
-      if (matchingCert && !isAppleIssuer(matchingCert)) {
-        warnings.push(
-          `Signing certificate issuer for '${selectedProfile.name}' is not an Apple CA`,
-        );
-      }
-      const allowTask = selectedProfile.entitlements["get-task-allow"] === true;
-      if (selectedProfile.profileType === "development" && !allowTask) {
-        warnings.push(
-          `Development profile '${selectedProfile.name}' missing get-task-allow entitlement`,
-        );
-      }
-      if (selectedProfile.profileType === "distribution" && allowTask) {
-        warnings.push(`Distribution profile '${selectedProfile.name}' enables get-task-allow`);
-      }
+      this.warnManualSigning(selectedProfile, selectedIdentity, now, warnings);
       const entitlementsPath = await this.writeEntitlementsIfNeeded(selectedProfile);
       return {
         style: "manual",
@@ -519,6 +470,97 @@ export class XcodeSigningManager {
       allowProvisioningUpdates: true,
       warnings,
     };
+  }
+
+  private selectPreferredProfile(
+    profiles: ProvisioningProfile[],
+    preferredProfile: string | null,
+    warnings: string[],
+  ): ProvisioningProfile | undefined {
+    let selectedProfile: ProvisioningProfile | undefined;
+    if (preferredProfile) {
+      selectedProfile = profiles.find(
+        (profile) => profile.uuid === preferredProfile || profile.name === preferredProfile,
+      );
+      if (!selectedProfile) {
+        warnings.push(`Requested provisioning profile '${preferredProfile}' not found`);
+      }
+    }
+
+    return selectedProfile;
+  }
+
+  private warnPreferredProfileEligibility(
+    selectedProfile: ProvisioningProfile | undefined,
+    deviceUdid: string,
+    now: number,
+    warnings: string[],
+  ): void {
+    if (selectedProfile && selectedProfile.expirationDate.getTime() <= now) {
+      warnings.push(`Provisioning profile '${selectedProfile.name}' is expired`);
+    }
+    if (selectedProfile && !selectedProfile.provisionsAllDevices) {
+      const matchesDevice = selectedProfile.provisionedDevices?.includes(deviceUdid) ?? false;
+      if (!matchesDevice) {
+        warnings.push(
+          `Provisioning profile '${selectedProfile.name}' does not include device ${deviceUdid}`,
+        );
+      }
+    }
+  }
+
+  private selectSigningIdentity(
+    identities: SigningIdentity[],
+    preferredIdentity: string | null,
+    selectedProfile: ProvisioningProfile | undefined,
+    warnings: string[],
+  ): SigningIdentity | undefined {
+    let selectedIdentity: SigningIdentity | undefined;
+    if (preferredIdentity) {
+      selectedIdentity = identities.find(
+        (identity) =>
+          identity.fingerprint === preferredIdentity.toUpperCase() ||
+          identity.name.includes(preferredIdentity),
+      );
+      if (!selectedIdentity) {
+        warnings.push(`Requested signing identity '${preferredIdentity}' not found`);
+      }
+    }
+
+    if (!selectedIdentity && selectedProfile) {
+      const fingerprints = new Set(
+        selectedProfile.developerCertificates.map((cert) => cert.fingerprint),
+      );
+      selectedIdentity = identities.find((identity) => fingerprints.has(identity.fingerprint));
+    }
+
+    return selectedIdentity;
+  }
+
+  private warnManualSigning(
+    selectedProfile: ProvisioningProfile,
+    selectedIdentity: SigningIdentity,
+    now: number,
+    warnings: string[],
+  ): void {
+    const matchingCert = selectedProfile.developerCertificates.find(
+      (cert) => cert.fingerprint === selectedIdentity?.fingerprint,
+    );
+    if (matchingCert && isCertificateExpired(matchingCert, now)) {
+      warnings.push(`Signing certificate for '${selectedProfile.name}' is expired`);
+    }
+    if (matchingCert && !isAppleIssuer(matchingCert)) {
+      warnings.push(`Signing certificate issuer for '${selectedProfile.name}' is not an Apple CA`);
+    }
+    const allowTask = selectedProfile.entitlements["get-task-allow"] === true;
+    if (selectedProfile.profileType === "development" && !allowTask) {
+      warnings.push(
+        `Development profile '${selectedProfile.name}' missing get-task-allow entitlement`,
+      );
+    }
+    if (selectedProfile.profileType === "distribution" && allowTask) {
+      warnings.push(`Distribution profile '${selectedProfile.name}' enables get-task-allow`);
+    }
   }
 
   private readTeamIdPreferences(): string[] {

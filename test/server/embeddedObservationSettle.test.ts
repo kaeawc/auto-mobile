@@ -26,6 +26,9 @@ import { resetObserveCacheStore } from "../../src/features/observe/cache/Observe
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { createDeviceHierarchyCapture } from "../../src/features/observe/DeviceHierarchyCapture";
 import type { AccessibilityHierarchy } from "../../src/features/observe/android/types";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
+import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
 
 /**
  * Unit coverage for the navigation-class embedded-observation settle gate
@@ -101,6 +104,236 @@ function airplaneRowStableId(observation: ObserveResult): string {
 function settleFor(fake: FakeObserveScreen, timer: FakeTimer): RealSettleObserve {
   return new RealSettleObserve(fake, timer);
 }
+
+/** An unchanged cache keeps its timestamp; only fresh extraction advances it. */
+class ScreenshotSettleScreen extends FakeObserveScreen {
+  private cached: ObserveResult;
+  readonly screenshots: FakeScreenshotStateStore;
+
+  constructor(
+    private readonly action: ObserveResult,
+    timer: FakeTimer,
+    private readonly settledScreenshot = true,
+  ) {
+    super();
+    this.cached = action;
+    this.setObserveResult(action);
+    this.screenshots = new FakeScreenshotStateStore(timer);
+  }
+
+  override async execute(options: ObserveScreenExecuteOptions = {}): Promise<ObserveResult> {
+    await super.execute(options);
+    if (options.requireFreshExtraction || options.freshness === "fresh") {
+      const timestamp = Number(this.cached.updatedAt) + 1;
+      this.cached = {
+        ...obs(AIRPLANE_ROW_INFLATED, timestamp),
+        platform: this.action.platform,
+        deviceId: this.action.deviceId,
+        observationId: `settle-${timestamp}`,
+        display: this.action.display,
+        screenshotCaptureAttempted: false,
+      };
+    }
+    return this.cached;
+  }
+
+  override async captureScreenshot(
+    perf?: Parameters<FakeObserveScreen["captureScreenshot"]>[0],
+    signal?: AbortSignal,
+    observation?: ObserveResult,
+  ): Promise<void> {
+    await super.captureScreenshot(perf, signal, observation);
+    if (!observation) {
+      throw new Error("Expected the adopted observation");
+    }
+    observation.screenshotCaptureAttempted = true;
+    const path = `/fake/${observation.observationId}.png`;
+    this.screenshots.updateForObservation(observation.deviceId, observation.observationId, path);
+    if (this.settledScreenshot) {
+      Object.assign(observation, {
+        screenshotPath: path,
+        screenshotSettled: true,
+        screenshotSource: "fresh",
+        screenshotCapturedAt: "2026-10-04T12:00:01.000Z",
+        screenshotImageSize: observation.screenSize,
+      });
+    }
+  }
+}
+
+function screenshotAction(platform: "android" | "ios" = "android"): ObserveResult {
+  return {
+    ...obs(AIRPLANE_ROW_HALF_INFLATED, 10),
+    platform,
+    deviceId: `screenshot-${platform}`,
+    observationId: "action-capture",
+    screenshotCaptureAttempted: true,
+    screenshotPath: "/fake/action.png",
+    screenshotSettled: true,
+    screenshotCapturedAt: "2026-10-04T12:00:00.000Z",
+  };
+}
+
+describe("embedded settle screenshot evidence", () => {
+  test.each([
+    { platform: "android" as const, display: undefined },
+    { platform: "ios" as const, display: undefined },
+    { platform: "android" as const, display: "external" },
+    { platform: "ios" as const, display: "external" },
+  ])(
+    "captures once for the adopted $platform observation (display: $display)",
+    async (scenario) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const action = screenshotAction(scenario.platform);
+      if (scenario.display) {
+        action.display = {
+          key: "external-key",
+          role: "external",
+          posture: "unknown",
+          generation: 2,
+        };
+      }
+      const fake = new ScreenshotSettleScreen(action, timer);
+      const response = createStructuredToolResponse({ success: true, observation: action });
+      await settleEmbeddedObservationInResponse(response, {
+        name: "tapOn",
+        args: { display: scenario.display },
+        internal: false,
+        createSettleObserve: () => settleFor(fake, timer),
+      });
+      const adopted = response.structuredContent!.observation;
+      expect(adopted.settled).toBe(true);
+      expect(adopted.observationId).not.toBe(action.observationId);
+      expect(fake.getCaptureScreenshotCallCount()).toBe(1);
+      expect(fake.getCapturedScreenshotObservations()[0]?.observationId).toBe(
+        adopted.observationId,
+      );
+      expect(adopted.screenshotCaptureAttempted).toBe(true);
+      expect(adopted.screenshotPath).toBe(`/fake/${adopted.observationId}.png`);
+      expect(adopted.screenshotCapturedAt).toBe("2026-10-04T12:00:01.000Z");
+      expect(adopted.screenshotSettled).toBe(true);
+      expect(fake.getExecuteOptions().every((option) => option.skipScreenshot === true)).toBe(true);
+      expect(
+        fake.getExecuteOptions().every((option) => option.display === action.display?.key),
+      ).toBe(true);
+      const finalized = finalizeToolResponse(response, { name: "tapOn" });
+      const emitted = finalized.structuredContent!.observation;
+      expect(emitted.observationScreenshotResourceUri).toBe(
+        buildObservationScreenshotUri(action.deviceId, adopted.observationId),
+      );
+      expect(emitted.screenshotPath).toBe(adopted.screenshotPath);
+    },
+  );
+
+  test("disabled screenshots adopt the hierarchy without capturing", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const action = screenshotAction();
+    action.screenshotCaptureAttempted = false;
+    delete action.screenshotPath;
+    const fake = new ScreenshotSettleScreen(action, timer);
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: settleFor(fake, timer),
+    });
+    expect(result.settled).toBe(true);
+    expect(result.observation.screenshotPath).toBeUndefined();
+    expect(result.observation.screenshotCaptureAttempted).toBe(false);
+    expect(fake.getCaptureScreenshotCallCount()).toBe(0);
+  });
+
+  test("a timeout with no adoptable capture keeps the action screenshot", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const action = screenshotAction();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(AIRPLANE_ROW_INFLATED, 5));
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: settleFor(fake, timer),
+    });
+    expect(result.observation).toBe(action);
+    expect(result.settled).toBe(false);
+    expect(fake.getCaptureScreenshotCallCount()).toBe(0);
+  });
+
+  test("a handler-settled response keeps its screenshot without another capture", async () => {
+    const timer = new FakeTimer();
+    const action = screenshotAction();
+    const fake = new ScreenshotSettleScreen(action, timer);
+    const response = createStructuredToolResponse({
+      success: true,
+      settled: true,
+      observation: action,
+    });
+    await settleEmbeddedObservationInResponse(response, {
+      name: "tapOn",
+      internal: false,
+      createSettleObserve: () => settleFor(fake, timer),
+    });
+    expect(response.structuredContent!.observation.screenshotPath).toBe(action.screenshotPath);
+    expect(fake.getExecuteCallCount()).toBe(0);
+    expect(fake.getCaptureScreenshotCallCount()).toBe(0);
+  });
+
+  test("an adoptable timeout captures evidence without changing its unsettled verdict", async () => {
+    const timer = new FakeTimer();
+    const action = screenshotAction();
+    const fake = new ScreenshotSettleScreen(action, timer);
+    const settle = settleFor(fake, timer);
+    const destination = {
+      ...obs(AIRPLANE_ROW_INFLATED, 20),
+      deviceId: action.deviceId,
+      observationId: "timeout-destination",
+      screenshotCaptureAttempted: false,
+    };
+    const execute = spyOn(settle, "execute").mockResolvedValue({
+      observation: destination,
+      settled: false,
+      polls: 2,
+      waitMs: 1000,
+      terminalReason: "timeout",
+    });
+    try {
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: action,
+        settleObserve: settle,
+      });
+      expect(result.settled).toBe(false);
+      expect(result.observation.observationId).toBe(destination.observationId);
+      expect(result.observation.screenshotPath).toBe("/fake/timeout-destination.png");
+      expect(fake.getCaptureScreenshotCallCount()).toBe(1);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
+  test("a failed terminal capture keeps the action evidence instead of failing the completed action", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const action = screenshotAction();
+    const fake = new ScreenshotSettleScreen(action, timer);
+    fake.setFailureMode("captureScreenshot", new Error("capture cancelled"));
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: action,
+        settleObserve: settleFor(fake, timer),
+      });
+      expect(result.observation).toBe(action);
+      expect(result.settled).toBe(false);
+      expect(fake.getCaptureScreenshotCallCount()).toBe(1);
+      expect(warning).toHaveBeenCalledTimes(1);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+});
 
 /** Model CtrlProxy's rejected-cache wait; only a sync can read past the initial still frame. */
 class StillFrameObserveScreen extends FakeObserveScreen {

@@ -15,10 +15,10 @@ import { ToolRegistry } from "../../server/toolRegistry";
 import { throwIfInternalToolFailed } from "../../server/internalToolCall";
 import {
   NavigationGraphManager,
-  ToolCallInteraction,
   type NavigationEdge,
   type NavigationGraphService,
 } from "./NavigationGraphManager";
+import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
 import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";

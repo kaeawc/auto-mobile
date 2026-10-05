@@ -139,6 +139,20 @@ describe("videoRecordingManager", () => {
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 
+  const drainAsyncUntil = async (
+    predicate: () => Promise<boolean>,
+    attempts = 100,
+    failureMessage = "drainAsyncUntil timed out",
+  ): Promise<void> => {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (await predicate()) {
+        return;
+      }
+      await Promise.resolve();
+    }
+    throw new Error(failureMessage);
+  };
+
   function restoreListener(options: { expiryMs?: number; failListing?: boolean } = {}) {
     return createVideoRecordingDeviceIncarnationListener(
       {
@@ -692,20 +706,33 @@ describe("videoRecordingManager", () => {
   test("re-arms a bounded stop retry when the auto-stop callback retains ownership", async () => {
     const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 1 });
     let stopAttempts = 0;
+    let stopCalled = Promise.withResolvers<void>();
     fakeBackend.stop = async () => {
       stopAttempts += 1;
+      stopCalled.resolve();
+      stopCalled = Promise.withResolvers<void>();
       throw new ProcessTeardownUnconfirmedError("host process may still be alive");
     };
 
+    const autoStopCall = stopCalled.promise;
     fakeTimer.advanceTime(1000);
-    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    await Promise.race([
+      autoStopCall,
+      drainAsyncUntil(async () => false, 100, "stop not called by timer (auto-stop)"),
+    ]);
     expect(stopAttempts).toBe(1);
+    // Backend failure re-arms safety in later microtasks, after signalling the call.
+    await drainAsyncUntil(async () => fakeTimer.getPendingTimeoutCount() === 1);
     expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
     // The fired one-shot timeout is replaced by the bounded retained-owner retry.
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
+    const retryStopCall = stopCalled.promise;
     fakeTimer.advanceTime(5000);
-    await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+    await Promise.race([
+      retryStopCall,
+      drainAsyncUntil(async () => false, 100, "stop not called by timer (retained-owner retry)"),
+    ]);
     expect(stopAttempts).toBe(2);
   });
 
@@ -1346,19 +1373,6 @@ describe("videoRecordingManager", () => {
         retentionPolicy: policy,
         ...(statFileSize ? { statFileSize } : {}),
       });
-    };
-
-    const drainAsyncUntil = async (
-      predicate: () => Promise<boolean>,
-      attempts = 100,
-    ): Promise<void> => {
-      for (let attempt = 0; attempt < attempts; attempt++) {
-        if (await predicate()) {
-          return;
-        }
-        await Promise.resolve();
-      }
-      throw new Error("drainAsyncUntil timed out");
     };
 
     test("resolveVideoRetentionPolicy uses documented defaults and env overrides", () => {

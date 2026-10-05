@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
@@ -7,6 +7,9 @@ import { ResolverElementSelector } from "../../../../src/features/utility/Resolv
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { diffObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
+import * as skeletonProjection from "../../../../src/features/observe/output/SkeletonProjection";
+import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
+import { observeDiffSelectorSchema } from "../../../../src/server/toolOutputSchemas";
 import { parseBounds } from "../../../../src/utils/bounds";
 
 // Real iOS capture: the Discover button precedes its smaller Search image;
@@ -222,5 +225,234 @@ describe("diff selector replay indexes (#9693)", () => {
     const baseline = structuredClone(capture);
     delete duplicates(baseline)[0].bounds;
     expect(changedPair(baseline).selector.index).toBeUndefined();
+  });
+});
+
+describe("review regressions", () => {
+  test("empty and stable polling diffs never project selector candidates", () => {
+    const spy = spyOn(SearchableHierarchy.prototype, "project");
+    try {
+      for (let poll = 0; poll < 3; poll++) {
+        const diff = diffObserveResult(capture, structuredClone(capture));
+        expect(diff.changed).toEqual([]);
+        expect(diff.added).toEqual([]);
+        expect(diff.removed).toEqual([]);
+      }
+      expect(spy).toHaveBeenCalledTimes(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("several changed duplicates project the skeleton exactly once", () => {
+    const next = structuredClone(capture);
+    duplicates(next).forEach((node) => {
+      node.selected = true;
+    });
+    const spy = spyOn(skeletonProjection, "projectSkeleton");
+    try {
+      expect(
+        diffObserveResult(capture, next).changed.filter(({ changes }) => changes.selected),
+      ).toHaveLength(2);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("tap-promoted inert duplicates explicitly declare ambiguity", () => {
+    const baseline = structuredClone(capture);
+    duplicates(baseline)[1].clickable = false;
+    const selector = changedPair(baseline).selector;
+    expect(selector.index).toBeUndefined();
+    expect(selector).toHaveProperty("ambiguous", true);
+    expect(changedPair(baseline, 1).selector).toHaveProperty("ambiguous", true);
+    expect(observeDiffSelectorSchema.parse(selector)).toHaveProperty("ambiguous", true);
+  });
+
+  test("toggle-only ancestors make inert matching children promotable", () => {
+    const baseline = structuredClone(capture);
+    const [parent, child] = duplicates(baseline);
+    const sibling = structuredClone(child);
+    const b = parseBounds(sibling.bounds)!;
+    sibling.bounds = [b.left + 50, b.top, b.right + 50, b.bottom];
+    const children = parent.node;
+    parent.node = [...(Array.isArray(children) ? children : children ? [children] : []), sibling];
+    // Strip other ancestors' tap evidence, retaining the captured toggle parent.
+    const entries = new SearchableHierarchy().project(baseline.viewHierarchy!);
+    let ancestor = entries.find((entry) => entry.source === parent)!.parentIndex;
+    while (ancestor !== undefined) {
+      entries[ancestor].source.clickable = false;
+      entries[ancestor].source.checkable = false;
+      delete entries[ancestor].source.actions;
+      ancestor = entries[ancestor].parentIndex;
+    }
+    parent.clickable = false;
+    parent.checkable = true;
+    child.clickable = false;
+    const selector = changedPair(baseline).selector;
+    expect(selector.index).toBeUndefined();
+    expect(selector).toHaveProperty("ambiguous", true);
+    expect(changedPair(baseline, 1).selector).toHaveProperty("ambiguous", true);
+  });
+
+  test("unique changed selectors do not request a skeleton projection", () => {
+    const baseline = structuredClone(capture);
+    duplicates(baseline)[1]["resource-id"] = "unique-image";
+    const spy = spyOn(skeletonProjection, "projectSkeleton");
+    try {
+      expect(changedPair(baseline).selector.index).toBeUndefined();
+      expect(spy).toHaveBeenCalledTimes(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("unique selectors and emitted indexes carry no ambiguity marker", () => {
+    expect(changedPair(capture).selector.index).toBe(1);
+    expect(changedPair(capture).selector).not.toHaveProperty("ambiguous");
+    const baseline = structuredClone(capture);
+    duplicates(baseline)[1]["resource-id"] = "unique-image";
+    const selector = changedPair(baseline).selector;
+    expect(selector.index).toBeUndefined();
+    expect(selector).not.toHaveProperty("ambiguous");
+  });
+
+  test("a promoted child with an id does not poison another id-less label group", () => {
+    const baseline = structuredClone(capture);
+    const [parent, child] = duplicates(baseline);
+    const sibling = structuredClone(child);
+    const b = parseBounds(sibling.bounds)!;
+    sibling.bounds = [b.left + 50, b.top, b.right + 50, b.bottom];
+    delete parent["resource-id"];
+    delete parent["view-id"];
+    delete sibling["resource-id"];
+    delete sibling["view-id"];
+    parent.text = "Shared label";
+    sibling.text = "Shared label";
+    child.text = "Shared label";
+    child.clickable = false;
+    const children = parent.node;
+    parent.node = [...(Array.isArray(children) ? children : children ? [children] : []), sibling];
+    const next = structuredClone(baseline);
+    for (const root of parser.extractRootNodes(next.viewHierarchy!)) {
+      parser.traverseNode(root, (node) => {
+        if (node.text === "Shared label" && node.className === "UIButton") {
+          node.selected = true;
+        }
+      });
+    }
+    const selector = diffObserveResult(baseline, next).changed.find(
+      ({ changes }) => changes.selected,
+    )!.selector!;
+    expect(selector.index).toBe(1);
+    expect(selector).not.toHaveProperty("ambiguous");
+  });
+
+  test("identical captured rows merge before duplicate indexes are assigned", () => {
+    const baseline = structuredClone(capture);
+    const [parent, child] = duplicates(baseline);
+    child.bounds = structuredClone(parent.bounds);
+    parent.text = "Merged match";
+    child.text = "Merged match";
+    const { next, selector } = changedPair(baseline);
+    const elements = new DefaultObserveElementCollector().collect(next.viewHierarchy!, "ios");
+    const rows = projectSkeleton(elements!, next.screenSize).skeleton.filter(
+      (row) => row.elementId === resourceId,
+    );
+    expect(rows).toHaveLength(1);
+    expect(selector.index).toBe(rows[0].index);
+    expect(selector.index).toBeUndefined();
+    expect(selector).toHaveProperty("ambiguous", true);
+  });
+
+  test("captured keyboard occlusion uses the skeleton's final duplicate set", () => {
+    const hierarchy = JSON.parse(
+      readFileSync(
+        `${import.meta.dir}/../../../fixtures/android-ime-window/playground-gboard-api36.json`,
+        "utf8",
+      ),
+    );
+    const baseline: ObserveResult = {
+      viewHierarchy: hierarchy,
+      screenSize: { width: 1080, height: 2400 },
+    };
+    const nodes: ViewHierarchyNode[] = [];
+    for (const root of parser.extractRootNodes(hierarchy)) {
+      parser.traverseNode(root, (node) => {
+        if (node.clickable === "true") {
+          nodes.push(node);
+        }
+      });
+    }
+    for (const node of nodes.slice(0, 3)) {
+      node["resource-id"] = "com.automobile.playground:id/keyboard_duplicate";
+    }
+    nodes[2].bounds = [100, 1800, 110, 1810];
+    const next = structuredClone(baseline);
+    for (const root of parser.extractRootNodes(next.viewHierarchy!)) {
+      let changed = false;
+      parser.traverseNode(root, (node) => {
+        if (!changed && node["resource-id"] === "com.automobile.playground:id/keyboard_duplicate") {
+          node.selected = true;
+          changed = true;
+        }
+      });
+    }
+    const selector = diffObserveResult(baseline, next).changed.find(
+      ({ changes }) => changes.selected,
+    )!.selector!;
+    const elements = new DefaultObserveElementCollector().collect(next.viewHierarchy!, "android");
+    const rows = projectSkeleton(elements!, next.screenSize).skeleton.filter(
+      (row) => row.elementId === "com.automobile.playground:id/keyboard_duplicate",
+    );
+    expect(rows).toHaveLength(2);
+    expect(selector.index).toBe(rows[0].index);
+  });
+
+  test("captured keyboard collapse keeps an app/keycap label unique", () => {
+    const hierarchy = JSON.parse(
+      readFileSync(
+        `${import.meta.dir}/../../../fixtures/android-ime-window/playground-gboard-api36.json`,
+        "utf8",
+      ),
+    );
+    const baseline: ObserveResult = {
+      viewHierarchy: hierarchy,
+      screenSize: { width: 1080, height: 2400 },
+    };
+    const nodes: ViewHierarchyNode[] = [];
+    for (const root of parser.extractRootNodes(hierarchy)) {
+      parser.traverseNode(root, (node) => {
+        if (node.clickable === "true") {
+          nodes.push(node);
+        }
+      });
+    }
+    const app = nodes[0];
+    delete app["resource-id"];
+    delete app["view-id"];
+    app.text = "q";
+    const next = structuredClone(baseline);
+    const nextNodes: ViewHierarchyNode[] = [];
+    for (const root of parser.extractRootNodes(next.viewHierarchy!)) {
+      parser.traverseNode(root, (node) => {
+        if (node.text === "q") {
+          nextNodes.push(node);
+        }
+      });
+    }
+    nextNodes[0].selected = true;
+    const selector = diffObserveResult(baseline, next).changed.find(
+      ({ changes }) => changes.selected,
+    )!.selector!;
+    const elements = new DefaultObserveElementCollector().collect(next.viewHierarchy!, "android");
+    const rows = projectSkeleton(elements!, next.screenSize).skeleton.filter(
+      (row) => row.label === "q",
+    );
+    expect(rows).toHaveLength(1);
+    expect(selector.index).toBe(rows[0].index);
+    expect(selector.index).toBeUndefined();
+    expect(selector).not.toHaveProperty("ambiguous");
   });
 });

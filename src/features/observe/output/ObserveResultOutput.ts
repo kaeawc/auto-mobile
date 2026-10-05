@@ -4,10 +4,11 @@ import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResu
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes as hierarchyNodeAttributes } from "../../../models/ViewHierarchyResult";
 import {
-  assignDuplicateIndexes,
   projectSkeleton,
   projectSkeletonElement,
+  projectSkeletonReplayRows,
 } from "./SkeletonProjection";
+import { DefaultObserveElementCollector } from "../ObserveElementCollector";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
@@ -508,16 +509,14 @@ export interface ObserveDiffSelector {
   elementId?: string;
   label?: string;
   /**
-   * Disambiguator (PR #6242 review PRRT_kwDOP-GF5M6fq3iI), present only when
-   * the selected element ID or label repeats among `next`'s nodes. Without it,
-   * two changed controls with the same ID or an ID-less iOS accessibility label emit the same selector, so
-   * `tapOn` would act on the first match rather than the occurrence that
-   * actually changed. Uses the skeleton's selectable gate and shared ranking
-   * (window, action preference, area, then hierarchy order). Unique selectors,
-   * non-selectable nodes and groups with a potentially promoted inert child
-   * omit it; the latter cannot guarantee replay until #7627 aligns candidates.
+   * Replay disambiguator from the next observation's own skeleton projection.
+   * Omitted for nodes absent from that projection and for a group containing an
+   * inert match promotable to an action ancestor. Duplicate selectors without
+   * a safe index carry `ambiguous: true`. Unique selectors carry neither field.
    */
   index?: number;
+  /** A duplicate selector whose replay index cannot safely be emitted. */
+  ambiguous?: boolean;
 }
 
 /** `elementId = resource-id ?? view-id`, mirroring `SkeletonProjection.deriveId`. */
@@ -544,110 +543,111 @@ function diffLabel(attributes: Record<string, unknown>): string | undefined {
  * precedence `SkeletonProjection.deriveId`/`deriveLabel` use for `skeleton`
  * rows — the same projection, so the same vocabulary. Returns `undefined` when
  * neither an id nor a label is present (a diff entry with no stable identity at
- * all), so callers can omit the field rather than emit an empty object. `index`
- * (PR #6242 review PRRT_kwDOP-GF5M6fq3iI), when supplied, is attached only
- * when a selector was actually derivable.
+ * all), so callers can omit the field rather than emit an empty object. Replay
+ * metadata is attached only when a selector was actually derivable.
  */
 function deriveDiffSelector(
   attributes: Record<string, unknown>,
-  index?: number,
+  replay?: Pick<ObserveDiffSelector, "index" | "ambiguous">,
 ): ObserveDiffSelector | undefined {
   const elementId = diffElementId(attributes);
   const label = diffLabel(attributes);
   if (elementId === undefined && label === undefined) {
     return undefined;
   }
-  return index === undefined ? { elementId, label } : { elementId, label, index };
+  return { elementId, label, ...replay };
 }
 
-/**
- * Replay indexes for flattened `next` nodes, reusing the skeleton's duplicate
- * ranker and selectable gate. The shared hierarchy projection supplies window
- * ranks and preorder positions, including candidates in captured window roots.
- * Keyed by `pathKey` so content/identity repair retains the changed node's index.
- * A bounded inert match under a tap ancestor conservatively suppresses its
- * group's index: resolution may promote it, while skeleton indexing excludes it
- * (#9693 / #7627). This structural check does not reproduce actionTarget logic.
- *
- * Also used after content and iOS stable-identity repair: a unique identity
- * among leftovers can still share a public label with another next-tree node.
- */
+/** Build replay metadata once, only after a changed entry requests a selector. */
 function computeSelectorOccurrenceIndexes(
   nodes: readonly FlatObserveNode[],
   next: ObserveResult,
-): Map<string, number> {
+  projected: readonly SearchableEntry[],
+): Map<string, Pick<ObserveDiffSelector, "index" | "ambiguous">> {
   if (!next.viewHierarchy) {
     return new Map();
   }
-  const projected = new SearchableHierarchy().project(next.viewHierarchy);
-  const entries = new Map<
-    ViewHierarchyNode,
-    Parameters<typeof assignDuplicateIndexes>[0][number]
-  >();
-  const unsafeIds = new Set<string>();
-  const unsafeLabels = new Set<string>();
-  for (const candidate of projected) {
-    const existing = entries.get(candidate.source);
-    if (existing) {
-      // A source shared by the main tree and a window has its topmost rank.
-      existing.provenance!.windowRank = Math.min(
-        existing.provenance!.windowRank!,
-        candidate.windowRank,
-      );
-      continue;
+  // Sanitized baselines drop elements and serialization loses collector provenance.
+  // Recollect through the same route ObserveElementsBuilder uses for full output.
+  const elements = new DefaultObserveElementCollector().collect(
+    next.viewHierarchy,
+    isIosObservation(next) ? "ios" : "android",
+  )!;
+  const projection = projectSkeleton(elements, next.screenSize);
+  const { rowsBySource, imeSources } = projectSkeletonReplayRows(elements, projection);
+  const seen = new Set<ViewHierarchyNode>();
+  const candidates = projected.filter((candidate) => {
+    if (seen.has(candidate.source) || imeSources.has(candidate.source)) {
+      return false;
     }
-    const row = candidate.element && projectSkeletonElement(candidate.element);
-    if (!row) {
-      continue;
+    seen.add(candidate.source);
+    return true;
+  });
+  const byId = new Map<string, SearchableEntry[]>();
+  const byLabel = new Map<string, SearchableEntry[]>();
+  const unsafeGroups = new Set<string>();
+  for (const candidate of candidates) {
+    const elementId = diffElementId(candidate.properties);
+    const label = diffLabel(candidate.properties);
+    if (elementId !== undefined) {
+      const group = byId.get(elementId) ?? [];
+      group.push(candidate);
+      byId.set(elementId, group);
     }
-    const entry = {
-      ...row,
-      elementId: diffElementId(candidate.properties),
-      label: diffLabel(candidate.properties),
-      affordances: new Set(row.affordances),
-      provenance: {
-        group: candidate.rootGroup,
-        windowRank: candidate.windowRank,
-        enter: candidate.index,
-        exit: candidate.index,
-      },
-    };
-    entries.set(candidate.source, entry);
-    if (row.affordances.length === 0 && hasTapAncestor(candidate, projected)) {
-      if (entry.elementId !== undefined) {
-        unsafeIds.add(entry.elementId);
-      }
-      if (entry.label !== undefined) {
-        unsafeLabels.add(normalizeQuotes(entry.label).trim().toLowerCase());
+    if (label !== undefined) {
+      const key = normalizeQuotes(label).trim().toLowerCase();
+      const group = byLabel.get(key) ?? [];
+      group.push(candidate);
+      byLabel.set(key, group);
+    }
+    if (candidate.affordances.length === 0 && hasTapAncestor(candidate, projected)) {
+      // Only this candidate's preferred selector group is unsafe. An id-bearing
+      // child's label must not suppress an unrelated id-less label group.
+      const key = selectorGroupKey(elementId, label);
+      if (key !== undefined) {
+        unsafeGroups.add(key);
       }
     }
   }
-  assignDuplicateIndexes([...entries.values()], next.screenSize);
   return new Map(
-    nodes.flatMap((node): [string, number][] => {
-      const entry = entries.get(node.source);
-      if (entry?.index === undefined) {
-        return [];
-      }
-      const unsafe =
-        entry.elementId !== undefined
-          ? unsafeIds.has(entry.elementId)
-          : unsafeLabels.has(
-              normalizeQuotes(entry.label ?? "")
-                .trim()
-                .toLowerCase(),
-            );
-      return unsafe ? [] : [[node.pathKey, entry.index]];
+    nodes.map((node) => {
+      const elementId = diffElementId(node.attributes);
+      const label = diffLabel(node.attributes);
+      const group =
+        elementId !== undefined
+          ? byId.get(elementId)
+          : label !== undefined
+            ? byLabel.get(normalizeQuotes(label).trim().toLowerCase())
+            : undefined;
+      const row = rowsBySource.get(node.source);
+      const unsafe = unsafeGroups.has(selectorGroupKey(elementId, label) ?? "");
+      const index = unsafe ? undefined : row?.index;
+      const replay =
+        index !== undefined ? { index } : (group?.length ?? 0) > 1 ? { ambiguous: true } : {};
+      return [node.pathKey, replay];
     }),
   );
 }
 
-/** Conservative promotion warning using captured ancestry and affordances only. */
+function selectorGroupKey(
+  elementId: string | undefined,
+  label: string | undefined,
+): string | undefined {
+  if (elementId !== undefined) {
+    return `id\0${elementId}`;
+  }
+  return label === undefined ? undefined : `label\0${normalizeQuotes(label).trim().toLowerCase()}`;
+}
+
+/** Mirror ElementResolver.hasActionAffordance's tap promotion: tap or toggle. */
 function hasTapAncestor(node: SearchableEntry, entries: readonly SearchableEntry[]): boolean {
   let parent = node.parentIndex;
   while (parent !== undefined) {
     const ancestor = entries[parent];
-    if (ancestor.bounds && ancestor.affordances.includes("tap")) {
+    if (
+      ancestor.bounds &&
+      ancestor.affordances.some((action) => action === "tap" || action === "toggle")
+    ) {
       return true;
     }
     parent = ancestor.parentIndex;
@@ -1430,7 +1430,7 @@ function repairByContentIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[],
-  occurrenceIndexByPathKey: ReadonlyMap<string, number>,
+  selectorForNode: (node: DiffRepairNode) => ObserveDiffSelector | undefined,
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByContentKey(added);
   const removedByKey = indexByContentKey(removed);
@@ -1456,10 +1456,7 @@ function repairByContentIdentity(
       changed.push({
         key: addedNode.key,
         fromKey: removedNode.key,
-        selector: deriveDiffSelector(
-          addedNode.attributes,
-          occurrenceIndexByPathKey.get(addedNode.pathKey),
-        ),
+        selector: selectorForNode(addedNode),
         changes: attrChanges,
       });
     }
@@ -1640,7 +1637,7 @@ function repairByIosStableIdentity(
   added: DiffRepairNode[],
   removed: DiffRepairNode[],
   changed: ObserveDiffNodeChange[],
-  occurrenceIndexByPathKey: ReadonlyMap<string, number>,
+  selectorForNode: (node: DiffRepairNode) => ObserveDiffSelector | undefined,
 ): { added: DiffRepairNode[]; removed: DiffRepairNode[] } {
   const addedByKey = indexByIosStableKey(added);
   const removedByKey = indexByIosStableKey(removed);
@@ -1661,10 +1658,7 @@ function repairByIosStableIdentity(
       changed.push({
         key: addedNode.key,
         fromKey: removedNode.key,
-        selector: deriveDiffSelector(
-          addedNode.attributes,
-          occurrenceIndexByPathKey.get(addedNode.pathKey),
-        ),
+        selector: selectorForNode(addedNode),
         changes: attrChanges,
       });
     }
@@ -1774,8 +1768,33 @@ export function diffObserveResult(
   const nextFlatNodes = flattenForDiff(next, cfg?.collapseKeyboard);
   const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard));
   const nextByKey = groupByKey(nextFlatNodes);
-  // Occurrence-index map for ambiguous IDs and labels among `next`'s nodes.
-  const occurrenceIndexByPathKey = computeSelectorOccurrenceIndexes(nextFlatNodes, next);
+  let projected: readonly SearchableEntry[] | undefined;
+  let replayByPathKey: ReturnType<typeof computeSelectorOccurrenceIndexes> | undefined;
+  const selectorForNode = (node: Pick<FlatObserveNode, "attributes" | "pathKey">) => {
+    const selector = deriveDiffSelector(node.attributes);
+    if (!selector || !next.viewHierarchy) {
+      return selector;
+    }
+    projected ??= new SearchableHierarchy().project(next.viewHierarchy);
+    // A unique selector cannot need an index or ambiguity metadata. Check the
+    // captured matches first so it never requests the full skeleton projection.
+    const sources = new Set<ViewHierarchyNode>();
+    for (const candidate of projected) {
+      const matches =
+        selector.elementId !== undefined
+          ? diffElementId(candidate.properties) === selector.elementId
+          : selectorGroupKey(undefined, diffLabel(candidate.properties)) ===
+            selectorGroupKey(undefined, selector.label);
+      if (matches) {
+        sources.add(candidate.source);
+      }
+    }
+    if (sources.size < 2) {
+      return selector;
+    }
+    replayByPathKey ??= computeSelectorOccurrenceIndexes(nextFlatNodes, next, projected);
+    return deriveDiffSelector(node.attributes, replayByPathKey.get(node.pathKey));
+  };
 
   const added: DiffRepairNode[] = [];
   const removed: DiffRepairNode[] = [];
@@ -1784,7 +1803,7 @@ export function diffObserveResult(
   collectPositionalNodeDiffs({
     baseByKey,
     nextByKey,
-    occurrenceIndexByPathKey,
+    selectorForNode,
     added,
     removed,
     changed,
@@ -1797,7 +1816,7 @@ export function diffObserveResult(
   let finalAdded = added;
   let finalRemoved = removed;
   if (cfg?.contentIdentity !== false) {
-    const repaired = repairByContentIdentity(added, removed, changed, occurrenceIndexByPathKey);
+    const repaired = repairByContentIdentity(added, removed, changed, selectorForNode);
     finalAdded = repaired.added;
     finalRemoved = repaired.removed;
     if (isIosObservation(baseline) && isIosObservation(next)) {
@@ -1805,7 +1824,7 @@ export function diffObserveResult(
         finalAdded,
         finalRemoved,
         changed,
-        occurrenceIndexByPathKey,
+        selectorForNode,
       );
       finalAdded = iosRepaired.added;
       finalRemoved = iosRepaired.removed;
@@ -1837,14 +1856,14 @@ export function diffObserveResult(
 function collectPositionalNodeDiffs({
   baseByKey,
   nextByKey,
-  occurrenceIndexByPathKey,
+  selectorForNode,
   added,
   removed,
   changed,
 }: {
   baseByKey: Map<string, FlatObserveNode[]>;
   nextByKey: Map<string, FlatObserveNode[]>;
-  occurrenceIndexByPathKey: Map<string, number>;
+  selectorForNode: (node: FlatObserveNode) => ObserveDiffSelector | undefined;
   added: DiffRepairNode[];
   removed: DiffRepairNode[];
   changed: ObserveDiffNodeChange[];
@@ -1858,10 +1877,7 @@ function collectPositionalNodeDiffs({
       if (Object.keys(attrChanges).length > 0) {
         changed.push({
           key: nextNodes[i].key,
-          selector: deriveDiffSelector(
-            nextNodes[i].attributes,
-            occurrenceIndexByPathKey.get(nextNodes[i].pathKey),
-          ),
+          selector: selectorForNode(nextNodes[i]),
           changes: attrChanges,
         });
       }

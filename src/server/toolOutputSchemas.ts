@@ -1178,10 +1178,16 @@ export const observeDiffSelectorSchema = z
       .nonnegative()
       .optional()
       .describe(
-        "Disambiguator present only when elementId repeats elsewhere among the " +
-          "next observation's nodes (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — same " +
-          "hierarchy-order semantics as the skeleton's #6238 `index`. Pass verbatim " +
-          "as tapOn({ selector, index }) to hit this exact occurrence.",
+        "Replay disambiguator from the next observation's skeleton for a repeated elementId " +
+          "or id-less label. Omitted when the node is absent or its own group contains " +
+          "a promotable inert match. Unique selectors carry neither index nor ambiguous.",
+      ),
+    ambiguous: z
+      .boolean()
+      .optional()
+      .describe(
+        "True when this selector matches multiple candidates, including inert nodes, " +
+          "and a safe replay index cannot be emitted. Never present with index or on a unique selector.",
       ),
   })
   .describe(

@@ -310,6 +310,7 @@ describe("diffObserveResult", () => {
     expect(diff.changed[0].selector).toEqual({
       elementId: "toggle",
       label: "Airplane mode",
+      ambiguous: true,
     });
   });
 

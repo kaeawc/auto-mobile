@@ -6,6 +6,7 @@ import {
 import { toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank } from "../../utility/selectionRank";
+import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
 import {
@@ -1326,6 +1327,47 @@ export function projectSkeleton(
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
   };
+}
+
+/**
+ * Associate the unchanged skeleton projection with captured source nodes for
+ * diff replay. Bounds and identity survive label hoisting; where several rows
+ * share them, the original label must select exactly one row. IME sources are
+ * returned separately so collapsed keycaps cannot create duplicate groups.
+ */
+export function projectSkeletonReplayRows(
+  elements: ObserveElements,
+  projection: SkeletonProjectionResult,
+): { rowsBySource: Map<ViewHierarchyNode, SkeletonElement>; imeSources: Set<ViewHierarchyNode> } {
+  const rowsBySource = new Map<ViewHierarchyNode, SkeletonElement>();
+  const imeSources = new Set<ViewHierarchyNode>();
+  const ime = detectImeWindow(elements);
+  for (const element of allElements(elements)) {
+    const source = getHierarchyNodeSource(element);
+    if (!source) {
+      continue;
+    }
+    if (isImeKeycap(element, ime)) {
+      imeSources.add(source);
+      continue;
+    }
+    const bounds = boundsTuple(element);
+    if (!bounds) {
+      continue;
+    }
+    const { elementId, displayedLabel, affordances } = toSkeletonSearchable(element);
+    const matches = projection.skeleton.filter(
+      (row) =>
+        row.elementId === elementId && row.bounds.every((edge, index) => edge === bounds[index]),
+    );
+    const row =
+      matches.find((row) => row.label === displayedLabel) ??
+      (matches.length === 1 && affordances.length > 0 ? matches[0] : undefined);
+    if (row) {
+      rowsBySource.set(source, row);
+    }
+  }
+  return { rowsBySource, imeSources };
 }
 
 /**

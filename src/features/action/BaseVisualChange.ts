@@ -11,6 +11,10 @@ import type { TapEffect } from "../../models/TapOnElementResult";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../observe/DeviceWindowCacheInvalidator";
+import {
   staleDisplayError,
   StaleDisplayError,
   type StaleDisplayDetails,
@@ -130,6 +134,10 @@ export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
 
 interface ObservedChangeOptions {
   changeExpected: boolean;
+  /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
+  foregroundAppMayChange?: boolean;
+  /** Hardware navigation and URL dispatch do not resolve coordinates from the prior tree. */
+  usesObservationForResolution?: boolean;
   /** Bind pre/post captures to the panel prepared by the action. */
   display?: string;
   previousObservation?: ObserveResult;
@@ -167,10 +175,13 @@ interface PostActionCapture {
 export class BaseVisualChange {
   /** Missing freshness remains compatible unless an internal caller requires verification. */
   static shouldRefetchCachedObservation(cached: ObserveResult, requireVerified = false): boolean {
-    return requireVerified
-      ? cached.freshness?.isFresh !== true
-      : cached.freshness?.isFresh === false;
+    return (
+      cached.settled === false ||
+      (requireVerified ? cached.freshness?.isFresh !== true : cached.freshness?.isFresh === false)
+    );
   }
+
+  windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
 
   device: BootedDevice;
   adb: AdbExecutor;
@@ -312,6 +323,29 @@ export class BaseVisualChange {
 
     // Fetch cached view hierarchy (skip if we just terminated/cleared the app)
     let previousObserveResult: ObserveResult | null = options.previousObservation ?? null;
+    if (
+      previousObserveResult &&
+      COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
+      BaseVisualChange.shouldRefetchCachedObservation(previousObserveResult)
+    ) {
+      previousObserveResult = await this.observeScreen.execute({
+        freshness: "fresh",
+        timeoutMs: options.timeoutMs ?? 2000,
+        signal: options.signal,
+        display: options.display,
+        queryOptions: options.queryOptions,
+        perf,
+      });
+      if (
+        !previousObserveResult.viewHierarchy ||
+        previousObserveResult.viewHierarchy.hierarchy.error ||
+        BaseVisualChange.shouldRefetchCachedObservation(previousObserveResult)
+      ) {
+        throw new ActionableError(
+          `Cannot resolve elements against a stale or unsettled observation: ${previousObserveResult.freshness?.warning ?? "Refresh did not establish freshness"}`,
+        );
+      }
+    }
     const predictionContext = this.buildPredictionContext(options.predictionContext);
     if (options.skipPreviousObserve) {
       logger.info("[BaseVisualChange] Skipping previous observe (app was terminated/cleared)");
@@ -340,6 +374,7 @@ export class BaseVisualChange {
             return this.observeScreen.execute({
               freshness:
                 staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+              timeoutMs: options.timeoutMs ?? 2000,
               display: options.display,
               queryOptions: options.queryOptions,
               perf,
@@ -376,6 +411,17 @@ export class BaseVisualChange {
       }
     }
 
+    if (
+      !options.skipPreviousObserve &&
+      options.usesObservationForResolution !== false &&
+      !options.previousObservation &&
+      BaseVisualChange.shouldRefetchCachedObservation(previousObserveResult!)
+    ) {
+      throw new ActionableError(
+        `Cannot perform action without a fresh, settled view hierarchy: ${previousObserveResult?.freshness?.warning ?? "The refreshed observation is still stale or unsettled"}`,
+      );
+    }
+
     const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
     if (coordinateAction && actionDisplayRevision() !== displayRevision) {
       throw this.staleDisplay(observedGeneration);
@@ -397,7 +443,13 @@ export class BaseVisualChange {
       if (coordinateAction && actionDisplayRevision() !== displayRevision) {
         throw this.staleDisplay(observedGeneration);
       }
-      return block(previousObserveResult!, fence);
+      try {
+        return await block(previousObserveResult!, fence);
+      } finally {
+        if (options.foregroundAppMayChange) {
+          this.windowCacheInvalidator.invalidate(this.device, true);
+        }
+      }
     });
 
     // Unconfirmed iOS text must return before post-action reads consume the

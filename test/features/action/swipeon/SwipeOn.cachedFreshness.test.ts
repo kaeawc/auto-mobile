@@ -65,6 +65,30 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
     });
   }
 
+  test("unsettled launch cache is refreshed before scrollable discovery", async () => {
+    const cached = { ...observation(true), settled: false };
+    const fresh = { ...observation(true), settled: true };
+    observe.setObserveSequence([cached, fresh]);
+    const find = spyOn(finder, "findScrollableElements");
+    await swipe.execute({ direction: "up" });
+    expect(find.mock.calls[0][0]).toBe(fresh.viewHierarchy);
+    expect(observe.getExecuteOptions().map((options) => options.freshness)).toEqual(["fresh"]);
+  });
+
+  test("a failed fresh read does not resolve scrollables from a still-stale tree", async () => {
+    const stale = {
+      ...observation(false),
+      freshness: { isFresh: false, warning: "Wrong foreground app" },
+    };
+    observe.setObserveResult(stale);
+    const find = spyOn(finder, "findScrollableElements");
+    const result = await swipe.execute({ direction: "up" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Wrong foreground app");
+    expect(find).not.toHaveBeenCalled();
+    expect(observe.getExecuteCallCount()).toBe(1);
+  });
+
   for (const error of [false, true]) {
     test(`unavailable stale refetch selects screen swipe (hierarchy error=${error})`, async () => {
       const fresh = observation(true);

@@ -76,6 +76,8 @@ export class HomeScreen extends BaseVisualChange {
       },
       {
         changeExpected: true,
+        foregroundAppMayChange: true,
+        usesObservationForResolution: false,
         timeoutMs: 5000,
         progress,
         perf,

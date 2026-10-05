@@ -183,6 +183,7 @@ export class LaunchApp extends BaseVisualChange {
       dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
     this.cacheInvalidator =
       dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
+    this.windowCacheInvalidator = this.cacheInvalidator;
     this.clearAppDataFactory =
       dependencies.clearAppDataFactory ??
       ((device, simctl) =>
@@ -657,6 +658,7 @@ export class LaunchApp extends BaseVisualChange {
           changeExpected: false,
           perf,
           skipPreviousObserve: true,
+          foregroundAppMayChange: true,
           // Use minTimestamp=0 so finalObserve returns cached hierarchy without a sync fetch.
           // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
           // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
@@ -1067,6 +1069,7 @@ export class LaunchApp extends BaseVisualChange {
           skipPreviousObserve: true,
           skipUiStability: skipUiStability ?? false,
           packageName,
+          foregroundAppMayChange: true,
           observationTimestampProvider: () => observationTimestampMs,
           deferPostActionScreenshot: true,
           signal,

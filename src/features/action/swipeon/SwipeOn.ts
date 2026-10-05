@@ -265,6 +265,7 @@ export class SwipeOn extends BaseVisualChange {
       throwIfAborted(signal);
       observeResult = await this.observeScreen.execute({
         freshness: staleCachedRefetch ? "fresh" : "cached-ok",
+        timeoutMs: 2000,
         signal,
       });
     }
@@ -276,9 +277,19 @@ export class SwipeOn extends BaseVisualChange {
       return { scrollables: [], candidates: [], observeResult };
     }
 
+    this.assertFreshScrollableObservation(observeResult);
+
     const scrollables = this.finder.findScrollableElements(observeResult.viewHierarchy);
     const candidates = this.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
+  }
+
+  private assertFreshScrollableObservation(observeResult: ObserveResult): void {
+    if (BaseVisualChange.shouldRefetchCachedObservation(observeResult)) {
+      throw new ActionableError(
+        `Cannot resolve scrollables against a stale or unsettled observation: ${observeResult.freshness?.warning ?? "Refresh did not establish freshness"}`,
+      );
+    }
   }
 
   private buildScrollableCandidates(scrollables: Element[]): ScrollableCandidate[] {

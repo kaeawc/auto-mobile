@@ -53,6 +53,7 @@ export class RecentApps extends BaseVisualChange {
         },
         {
           changeExpected: true,
+          foregroundAppMayChange: true,
           timeoutMs: 5000,
           progress,
           signal,
@@ -86,6 +87,7 @@ export class RecentApps extends BaseVisualChange {
       },
       {
         changeExpected: true,
+        foregroundAppMayChange: true,
         timeoutMs: 3000,
         progress,
         signal,

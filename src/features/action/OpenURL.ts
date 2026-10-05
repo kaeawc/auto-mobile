@@ -257,6 +257,8 @@ export class OpenURL extends BaseVisualChange {
       {
         signal,
         changeExpected: false,
+        foregroundAppMayChange: true,
+        usesObservationForResolution: false,
         timeoutMs: 12000,
         perf,
       },

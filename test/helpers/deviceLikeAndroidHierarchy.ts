@@ -19,6 +19,7 @@ export const DEVICE_CAPTURE_TIME = 1_700_000_000_000;
 /** Constructed trees, not recorded device captures. Only request_hierarchy extracts a new frame. */
 export async function deviceLikeAndroidHierarchy(
   label: (extraction: number) => string = () => "Still screen",
+  options: { packageName?: (extraction: number) => string; answerSync?: boolean } = {},
 ) {
   const timer = new FakeTimer();
   timer.setCurrentTime(DEVICE_CAPTURE_TIME + 10);
@@ -35,8 +36,10 @@ export async function deviceLikeAndroidHierarchy(
     exitCode: 0,
   });
   const tree = (extraction: number): AccessibilityHierarchy => ({
-    packageName: "com.android.settings",
-    foregroundActivity: "com.android.settings/.Settings",
+    packageName: options.packageName?.(extraction) ?? "com.android.settings",
+    foregroundActivity: options.packageName
+      ? `${options.packageName(extraction)}/.MainActivity`
+      : "com.android.settings/.Settings",
     updatedAt: DEVICE_CAPTURE_TIME + extraction,
     screenWidth: 1080,
     screenHeight: 2400,
@@ -82,6 +85,9 @@ export async function deviceLikeAndroidHierarchy(
       throw new Error(`Unexpected fake runner request: ${request.type}`);
     }
     extractions++;
+    if (options.answerSync === false) {
+      return;
+    }
     displayIds.push(request.displayId);
     const extracted = { ...tree(extractions), displayId: request.displayId };
     // Model the client's hierarchy_update handler: sync replies populate the

@@ -62,7 +62,7 @@ describe("BaseVisualChange cached freshness", () => {
           dispatched++;
           expect(received).toBe(fresh);
           expect(observe.getExecuteOptions()).toEqual([
-            { freshness: "fresh", display: undefined, queryOptions, perf, signal },
+            { freshness: "fresh", timeoutMs: 2000, display: undefined, queryOptions, perf, signal },
           ]);
           return { success: true };
         },
@@ -116,6 +116,60 @@ describe("BaseVisualChange cached freshness", () => {
       expect(observe.getExecuteOptions().map((options) => options.freshness)).toEqual(["fresh"]);
     });
   }
+
+  test("refetches an unsettled launch observation before resolving coordinates", async () => {
+    const cached = { ...observation({ isFresh: true }), settled: false };
+    const fresh = { ...observation({ isFresh: true, verified: true }), settled: true };
+    observe.setObserveSequence([cached, fresh]);
+    let dispatched = 0;
+    await instance.observedInteraction(
+      async (received) => {
+        dispatched++;
+        expect(received).toBe(fresh);
+        expect(observe.getExecuteCallCount()).toBe(1);
+        return { success: true };
+      },
+      { changeExpected: false },
+    );
+    expect(dispatched).toBe(1);
+  });
+
+  test("a still-stale fresh read stops dispatch with the freshness warning", async () => {
+    const stale = observation({
+      isFresh: false,
+      category: "window_identity",
+      warning: "Wrong foreground app",
+    });
+    observe.setObserveResult(stale);
+    let dispatched = 0;
+    const result = instance.observedInteraction(
+      async () => {
+        dispatched++;
+        return { success: true };
+      },
+      { changeExpected: false },
+    );
+    await expect(result).rejects.toThrow("Wrong foreground app");
+    expect(dispatched).toBe(0);
+    expect(observe.getExecuteCallCount()).toBe(1);
+    expect(stale.freshness?.isFresh).toBe(false);
+  });
+
+  test("hardware navigation can recover a stale window without resolving coordinates", async () => {
+    const stale = observation({ isFresh: false, warning: "Wrong foreground app" });
+    observe.setObserveResult(stale);
+    let dispatched = 0;
+    const result = await instance.observedInteraction(
+      async () => {
+        dispatched++;
+        return { success: true };
+      },
+      { changeExpected: false, usesObservationForResolution: false },
+    );
+    expect(dispatched).toBe(1);
+    expect(result.observation.freshness?.isFresh).toBe(false);
+    expect(result.observation.freshness?.warning).toContain("Wrong foreground app");
+  });
 
   test("supplied previous observation bypasses cache even when stale", async () => {
     const supplied = observation({ isFresh: false });

@@ -1333,6 +1333,7 @@ export class RealObserveScreen implements ObserveScreen {
 
   private async executeSingleDisplay(
     options?: ObserveScreenExecuteOptions & { preserveDisplayState?: boolean },
+    retryKnownStale = true,
   ): Promise<ObserveResult> {
     const preserveDisplayState = options?.preserveDisplayState === true;
     const observerMode = options?.observerMode === true;
@@ -1367,7 +1368,7 @@ export class RealObserveScreen implements ObserveScreen {
       const startTime = this.timer.now();
       throwIfAborted(signal);
 
-      const result = this.createBaseResult();
+      let result = this.createBaseResult();
       const captureStart = {
         revision: displayTransitions.revision(this.device.deviceId),
         identityRevision: displayTransitions.identityRevision(this.device.deviceId),
@@ -1454,7 +1455,10 @@ export class RealObserveScreen implements ObserveScreen {
           panelKey: requestedPanel?.key,
           captureStart,
         });
-      } else if (options?.freshness) {
+      } else if (
+        options?.freshness &&
+        !(this.device.platform === "android" && options.requireFreshExtraction)
+      ) {
         try {
           const captured = await this.hierarchyCapture.capture(captureRequest);
           capturedHierarchy = captured.hierarchy;
@@ -1752,6 +1756,19 @@ export class RealObserveScreen implements ObserveScreen {
       };
 
       const foregroundUnavailable = routedAggregateSecondary && sampledForeground === null;
+      const statusBarOnlyHierarchy = await this.resolveStatusBarOnlyHierarchy(
+        result,
+        foregroundIdentity,
+        postCaptureForeground,
+        signal,
+      );
+      const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
+        result,
+        foregroundIdentity,
+        postCaptureForeground,
+        getConfirmedFrameworkErrorDialog,
+        signal,
+      );
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
@@ -1779,19 +1796,8 @@ export class RealObserveScreen implements ObserveScreen {
             ? `The foreground app of display ${requestedDisplayId} could not be determined.`
             : undefined),
         missingForegroundWindow: resolveMissingForegroundWindow(result),
-        statusBarOnlyHierarchy: await this.resolveStatusBarOnlyHierarchy(
-          result,
-          foregroundIdentity,
-          postCaptureForeground,
-          signal,
-        ),
-        windowIdentityMismatch: await this.resolveWindowIdentityMismatch(
-          result,
-          foregroundIdentity,
-          postCaptureForeground,
-          getConfirmedFrameworkErrorDialog,
-          signal,
-        ),
+        statusBarOnlyHierarchy,
+        windowIdentityMismatch,
         activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
         // A matching package and recent timestamp do not verify an empty first-run
         // capture (#6352). Use all content collections, not just clickable controls:
@@ -1813,7 +1819,29 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
-      if (observerMode && result.freshness.unavailableDetail) {
+      // A known-stale tree gets one independent extraction, never another TTL cache hit.
+      // Keep the retry cache-free: a timed-out or observer read cannot seed owner state.
+      const remainingMs = Math.min(
+        500,
+        (options?.timeoutMs ?? DEFAULT_HIERARCHY_READ_TIMEOUT_MS) - (this.timer.now() - startTime),
+      );
+      if (
+        retryKnownStale &&
+        this.device.platform === "android" &&
+        !observerMode &&
+        !preserveDisplayState &&
+        !options?.skipRecompositionTracking &&
+        !options?.requireFreshExtraction &&
+        result.freshness?.isFresh === false &&
+        (windowIdentityMismatch ||
+          result.freshness.category === "cache_age" ||
+          result.freshness.category === "requested_min") &&
+        remainingMs > 0
+      ) {
+        result = await this.refreshKnownStaleObservation(result, options, remainingMs);
+      }
+
+      if (observerMode && result.freshness?.unavailableDetail) {
         result.freshness.warning += ` ${result.freshness.unavailableDetail}`;
       }
       const staleDisplay =
@@ -1927,6 +1955,53 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /** Build the ordinary critical fallback without mutating screenshot or display state. */
+  /** Spend only the caller's remaining budget; retain the original stale verdict on failure. */
+  private async refreshKnownStaleObservation(
+    result: ObserveResult,
+    options: (ObserveScreenExecuteOptions & { preserveDisplayState?: boolean }) | undefined,
+    remainingMs: number,
+  ): Promise<ObserveResult> {
+    const signal = options?.signal;
+    const retryController = new AbortController();
+    const retrySignal = signal
+      ? AbortSignal.any([signal, retryController.signal])
+      : retryController.signal;
+    try {
+      const recovered = await raceWithDeadline(
+        () =>
+          this.executeSingleDisplay(
+            {
+              ...options,
+              freshness: undefined,
+              skipWaitForFresh: true,
+              requireFreshExtraction: true,
+              timeoutMs: remainingMs,
+              skipCache: true,
+              signal: retrySignal,
+            },
+            false,
+          ),
+        {
+          timer: this.timer,
+          timeoutMs: remainingMs,
+          signal,
+          label: "Known-stale observation refresh",
+          onTimeout: () => retryController.abort(),
+        },
+      );
+      if (recovered.freshness?.isFresh === true) {
+        return recovered;
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        `[ObserveScreen] Known-stale observation refresh failed: ${describeError(error)}`,
+        error,
+      );
+    }
+    return result;
+  }
+
   private createCriticalFallback(
     error: unknown,
     options: { includeFreshness?: boolean; fallback?: ObserveResult } = {},

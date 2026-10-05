@@ -56,8 +56,10 @@ import {
   createJSONToolResponse,
   createStructuredToolResponse,
   throwIfAborted,
+  awaitWhileRequestIsLive,
   StructuredToolResponse,
 } from "../utils/toolUtils";
+import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import {
   BootedDevice,
   Element,
@@ -916,7 +918,7 @@ const runWaitForConditionDsl = async (
           polls,
         };
       }
-      await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
+      await awaitWhileRequestIsLive(timer.sleep(WAIT_FOR_POLL_INTERVAL_MS), signal);
       throwIfAborted(signal);
       observation = await pollingScreen.execute({
         timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
@@ -927,6 +929,7 @@ const runWaitForConditionDsl = async (
         skipScreenshot: true,
         skipAccessibilityAudit: true,
       });
+      throwIfAborted(signal);
       polls++;
       if (recheck) {
         const evaluation = recheck(observation);
@@ -1764,6 +1767,7 @@ export const waitForObservation = async (
   // Evaluate the current cache on the first poll, then use its device-clock
   // timestamp to request a strictly newer hierarchy on later polls.
   let observation = await observeOnce(0);
+  throwIfAborted(signal);
   checkDisplaySupport();
   const baselineTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
   // A posture-only stamp is read independently of hierarchy capture, including
@@ -1826,14 +1830,16 @@ export const waitForObservation = async (
   }
 
   while (timer.now() - startTime < timeoutMs) {
-    await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
+    await awaitWhileRequestIsLive(timer.sleep(WAIT_FOR_POLL_INTERVAL_MS), signal);
     throwIfAborted(signal);
 
     polls++;
     try {
       observation = await observeOnce(minTimestamp);
     } catch (error) {
+      throwDeviceLostFromAbortSignal(signal);
       if (
+        isDeviceLostError(error) ||
         waitFor.posture === undefined ||
         signal?.aborted ||
         (error instanceof Error && error.name === "AbortError")

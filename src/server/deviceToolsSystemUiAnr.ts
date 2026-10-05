@@ -13,7 +13,11 @@ import type {
   isUnknownAndroidRuntimeName,
   runWithinShutdownDeadline,
 } from "./deviceTools";
-import { getShutdownInitiatingExecutionId } from "./deviceToolsShutdown";
+import {
+  getShutdownInitiatingExecutionId,
+  retainLatePlatformShutdown,
+  shouldKeepIntentionalShutdownAfterCommandError,
+} from "./deviceToolsShutdown";
 import type {
   shouldClearIntentionalShutdownAfterFailure,
   waitForDeviceShutdown,
@@ -70,6 +74,12 @@ async function resolveSystemUiRecoveryImage({
   return { ...image, isRunning: false };
 }
 
+interface SystemUiAnrShutdownState {
+  command?: Promise<BootedDevice | void>;
+  settled: boolean;
+  retainsReservation: boolean;
+}
+
 interface SystemUiAnrRebootContext {
   boot: DeviceBootResult;
   args: StartDeviceArgs;
@@ -98,10 +108,8 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
     boot,
     args,
     bootService,
-    deviceManager,
     devicePool,
     totalDeadlineMs,
-    timer,
     signal,
     progress,
     recoveryAutolockClient,
@@ -121,6 +129,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
     : undefined;
   let shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
   let shutdownWasConfirmed = false;
+  const shutdown: SystemUiAnrShutdownState = { settled: false, retainsReservation: false };
   let keepReadinessReservation = false;
   let replacementBoot: DeviceBootResult | undefined;
   const releaseShutdownReservation = async (): Promise<void> => {
@@ -141,14 +150,7 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
       signal,
       recoveryAutolockClient,
     );
-    await shutdownAndroidForSystemUiAnr(
-      boot.device,
-      deviceManager,
-      timer,
-      totalDeadlineMs,
-      signal,
-      operations,
-    );
+    await shutdownAndroidForSystemUiAnr(context, shutdown);
     shutdownWasConfirmed = true;
 
     replacementBoot = await bootSystemUiAnrReplacement(
@@ -191,12 +193,12 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
     collectColdBootSettlement(operations.cancelUnownedColdBoot(replacementBoot));
     try {
       await cleanUpFailedSystemUiAnrRecovery(
-        devicePool,
+        context,
         shutdownReservation,
         shutdownWasConfirmed,
-        boot.device.deviceId,
-        signal,
-        operations,
+        shutdown,
+        error,
+        releaseShutdownReservation,
       );
     } catch (cleanupError) {
       logger.warn(
@@ -206,11 +208,11 @@ export async function rebootAndroidAfterSystemUiAnr(context: SystemUiAnrRebootCo
     }
     throw error;
   } finally {
-    await releaseShutdownReservation();
-    if (!keepReadinessReservation) {
-      shutdownReservation?.releaseRecoveryRouteLease();
+    if (!shutdown.retainsReservation) {
+      await releaseShutdownReservation();
     }
     if (!keepReadinessReservation) {
+      shutdownReservation?.releaseRecoveryRouteLease();
       try {
         await releaseReadinessReservation?.();
       } catch (error) {
@@ -241,13 +243,17 @@ async function reserveSystemUiAnrShutdown(
 }
 
 async function shutdownAndroidForSystemUiAnr(
-  device: BootedDevice,
-  deviceManager: PlatformDeviceManager,
-  timer: Timer,
-  totalDeadlineMs: number,
-  signal: AbortSignal | undefined,
-  operations: SystemUiAnrRecoveryOperations,
+  context: SystemUiAnrRebootContext,
+  shutdown: SystemUiAnrShutdownState,
 ): Promise<void> {
+  const {
+    boot: { device },
+    deviceManager,
+    timer,
+    totalDeadlineMs,
+    signal,
+    operations,
+  } = context;
   const shutdownDevice = await operations.runWithinShutdownDeadline(
     device,
     timer,
@@ -255,8 +261,15 @@ async function shutdownAndroidForSystemUiAnr(
     "System UI recovery shutdown command did not complete",
     {
       requestAbortSignal: signal,
-      operation: async (shutdownSignal, timeoutMs) =>
-        await deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs }),
+      operation: async (shutdownSignal, timeoutMs) => {
+        shutdownSignal.throwIfAborted();
+        shutdown.command = deviceManager
+          .killDevice(device, { signal: shutdownSignal, timeoutMs })
+          .finally(() => {
+            shutdown.settled = true;
+          });
+        return await shutdown.command;
+      },
       timeoutMs: undefined,
       phase: "to accept its System UI ANR recovery shutdown command",
     },
@@ -336,13 +349,14 @@ async function handoffSystemUiAnrReplacement(
 }
 
 async function cleanUpFailedSystemUiAnrRecovery(
-  devicePool: DevicePool | undefined,
+  context: SystemUiAnrRebootContext,
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   shutdownWasConfirmed: boolean,
-  deviceId: string,
-  signal: AbortSignal | undefined,
-  operations: SystemUiAnrRecoveryOperations,
+  shutdown: SystemUiAnrShutdownState,
+  error: unknown,
+  releaseShutdownReservation: () => Promise<void>,
 ): Promise<void> {
+  const { devicePool, boot, signal, operations, collectColdBootSettlement } = context;
   if (!shutdownReservation) {
     return;
   }
@@ -350,12 +364,29 @@ async function cleanUpFailedSystemUiAnrRecovery(
     await devicePool?.retireDeviceAfterSystemUiAnrRecoveryFailure(shutdownReservation.device);
     return;
   }
-  // Caller cancellation may have already stopped the emulator while shutdown
-  // confirmation was still in flight. Retain the intentional-shutdown marker so
-  // the deferred process-exit is not treated as unexpected loss, mirroring the
-  // regular kill path's guard.
-  if (operations.shouldClearIntentionalShutdownAfterFailure("android", signal)) {
-    devicePool?.clearIntentionalShutdown(deviceId);
+  const keepIntentionalShutdown = shouldKeepIntentionalShutdownAfterCommandError(error, signal);
+  // An unstarted command cannot cause a late exit. Otherwise ambiguous failures
+  // keep the marker until command settlement and a later fresh observation.
+  if (
+    !shutdown.command ||
+    (operations.shouldClearIntentionalShutdownAfterFailure("android", signal) &&
+      !keepIntentionalShutdown)
+  ) {
+    devicePool?.clearIntentionalShutdown(boot.device.deviceId);
+  }
+  if (keepIntentionalShutdown) {
+    retainLatePlatformShutdown(
+      shutdown.command,
+      shutdown.settled,
+      (settlement) => {
+        shutdown.retainsReservation = true;
+        collectColdBootSettlement(settlement);
+        void settlement.then(releaseShutdownReservation, releaseShutdownReservation);
+      },
+      async () => {
+        devicePool?.noteLatePlatformShutdownSettled(shutdownReservation.device);
+      },
+    );
   }
 }
 

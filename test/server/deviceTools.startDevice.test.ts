@@ -1818,6 +1818,95 @@ describe("startDevice handler", () => {
     );
   });
 
+  it.each(["before-call", "during-discovery", "orphaned-command"] as const)(
+    "unfences System UI recovery cancelled %s before emulator kill dispatch",
+    async (abortAt) => {
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+          timer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+      await pool.initializeWithDevices([androidDevice]);
+      await pool.bindOrReuseDeviceSession(
+        "owner-session",
+        androidDevice.deviceId,
+        "android",
+        androidImage,
+      );
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      fakeMatcher.setBootedResult(androidDevice);
+      const mark = pool.markIntentionalShutdown.bind(pool);
+      pool.markIntentionalShutdown = (serial) => {
+        mark(serial);
+        if (abortAt === "before-call") {
+          controller.abort(new Error("cancelled before emulator kill dispatch"));
+        }
+      };
+      let killCalls = 0;
+      let beginKill!: () => void;
+      let rejectKill!: (error: Error) => void;
+      const killing = new Promise<void>((resolve) => {
+        beginKill = resolve;
+      });
+      fakeDeviceUtils.killDevice = async () => {
+        killCalls++;
+        if (abortAt === "orphaned-command") {
+          beginKill();
+          return await new Promise<void>((_resolve, reject) => {
+            rejectKill = reject;
+          });
+        }
+        controller.abort(new Error("cancelled before emulator kill dispatch"));
+        throw controller.signal.reason;
+      };
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: async () => {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        },
+      });
+      registerDeviceTools();
+
+      const outcome = callStartDevice({ platform: "android" }, controller.signal);
+      if (abortAt === "orphaned-command") {
+        await killing;
+        controller.abort(new Error("cancelled before emulator kill dispatch"));
+      }
+      await expect(outcome).rejects.toThrow("cancelled before emulator kill dispatch");
+      if (abortAt === "before-call") {
+        expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(false);
+        expect(killCalls).toBe(0);
+      }
+      if (abortAt === "orphaned-command") {
+        expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(true);
+        await pool.refreshDevices();
+        expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(true);
+        rejectKill(new Error("late discovery cancellation"));
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await Promise.resolve();
+        }
+        expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
+        expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(true);
+      }
+      await pool.refreshDevices();
+      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(false);
+      expect(() => pool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
+      await pool.releaseDevice(androidDevice.deviceId, "owner-session");
+      expect(pool.getAvailableDeviceCount()).toBe(1);
+      setDeviceToolsDependencies({ ensureCtrlProxyReady: async () => {} });
+      registerDeviceTools();
+      expect(await callStartDevice({ platform: "android" })).toMatchObject({
+        runtime: { deviceId: androidDevice.deviceId },
+      });
+    },
+  );
+
   it("releases the session when confirmed System UI recovery cannot restart the AVD", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

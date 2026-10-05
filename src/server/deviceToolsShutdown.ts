@@ -374,7 +374,7 @@ function resumeCtrlProxyWhenPreparationSettles(
   );
 }
 
-function shouldKeepIntentionalShutdownAfterCommandError(
+export function shouldKeepIntentionalShutdownAfterCommandError(
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
 ): boolean {
@@ -608,8 +608,9 @@ async function recoverAfterShutdownFailure(
   requestAbortSignal: AbortSignal | undefined,
   devicePool: DevicePool | undefined,
   releaseShutdownReservation: () => Promise<void>,
-  shutdownWasConfirmed: boolean,
+  options: { shutdownWasConfirmed: boolean; expectedPooledDevice: PooledDevice | null },
 ): Promise<void> {
+  const { shutdownWasConfirmed, expectedPooledDevice } = options;
   // Only a definitive failure may reopen CtrlProxy after our fence clears;
   // the shared shutdown accessor still blocks a concurrent kill. Timeout or
   // cancellation keeps the marker and the client retired for late shutdown.
@@ -619,6 +620,10 @@ async function recoverAfterShutdownFailure(
     !shouldKeepIntentionalShutdownAfterCommandError(error, requestAbortSignal)
   ) {
     devicePool?.clearIntentionalShutdown(device.deviceId);
+  } else if (!shutdownWasConfirmed && expectedPooledDevice) {
+    // The kill command returned before this wait began. A later fresh
+    // observation may lift its fence even if disappearance was never confirmed.
+    devicePool?.noteLatePlatformShutdownSettled(expectedPooledDevice);
   }
   if (
     !shutdownWasConfirmed &&
@@ -1033,14 +1038,8 @@ async function findReplacementOrRetainShutdownReservation(
     logger.warn(`[DeviceTools] Post-release discovery failed for ${device.deviceId}: ${error}`);
     if (!disappearanceConfirmed) {
       // Teardown has not confirmed disappearance. A failed recheck cannot
-      // authorize retirement of an already-known-stopped pooled incarnation.
-      const retirement = Promise.reject(error);
-      retirement.catch((lateError) => {
-        logger.warn(
-          `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
-        );
-      });
-      retainReservationUntil(retirement);
+      // authorize retirement. Ownership release has settled, so let the
+      // caller's finally release the reservation while leaving the entry intact.
       throw error;
     }
     if (retryAfterFailure) {
@@ -1570,13 +1569,13 @@ async function killProcessAndRetireOwnership(
       requestAbortSignal,
       devicePool,
       releaseShutdownReservation,
-      shutdownWasConfirmed,
+      { shutdownWasConfirmed, expectedPooledDevice },
     );
     throw error;
   }
 }
 
-function retainLatePlatformShutdown(
+export function retainLatePlatformShutdown(
   platformShutdown: Promise<BootedDevice | void> | undefined,
   platformShutdownSettled: boolean,
   retainReservationUntil: (

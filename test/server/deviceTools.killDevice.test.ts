@@ -3777,6 +3777,102 @@ describe("killDevice handler", () => {
     expect(pool.getAvailableDeviceCount()).toBe(1);
   });
 
+  test.each(["abort", "deadline", "late-exit"] as const)(
+    "unfences an accepted Android kill after wait %s and a fresh observation",
+    async (failure) => {
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const repository = new FakeDeviceSessionRepository();
+      sessionManager = new SessionManager(timer, repository);
+      manager.setBootedDevices("android", [device]);
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer,
+          deviceManager: manager,
+          deviceSessionRepository: repository,
+        }),
+      );
+      await pool.initializeWithDevices([device]);
+      if (failure === "late-exit") {
+        await pool.bindOrReuseDeviceSession(
+          "exit-owner",
+          device.deviceId,
+          "android",
+          undefined,
+          manager.childProcess,
+        );
+        await pool.releaseDevice(device.deviceId, "exit-owner");
+      }
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      const noteSettled = spyOn(pool, "noteLatePlatformShutdownSettled");
+      let accepted = false;
+      manager.killDevice = async () => {
+        accepted = true;
+      };
+      const discover = manager.getBootedDevicesDetailed.bind(manager);
+      let beginWait!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        beginWait = resolve;
+      });
+      manager.getBootedDevicesDetailed = async (platform, options) => {
+        if (accepted) {
+          beginWait();
+          return await new Promise<BootedDeviceDiscovery>((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+              once: true,
+            });
+          });
+        }
+        return await discover(platform, options);
+      };
+      setDeviceToolsDependencies({ timer });
+      const result = ToolRegistry.getTool("killDevice")!.handler(
+        { device },
+        undefined,
+        controller.signal,
+      );
+      await waiting;
+      if (failure !== "deadline") {
+        controller.abort(new Error("cancelled shutdown wait"));
+      } else {
+        timer.advanceTime(30_000);
+      }
+      await expect(result).rejects.toThrow(
+        failure !== "deadline" ? "cancelled shutdown wait" : "Timed out waiting for",
+      );
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+      expect(await pool.isShutdownReservationHeld(device.deviceId)).toBe(false);
+      expect(pool.getAvailableDeviceCount()).toBe(0);
+      expect(noteSettled).toHaveBeenCalledWith(pool.getDevice(device.deviceId));
+      manager.getBootedDevicesDetailed = discover;
+      if (failure === "late-exit") {
+        // The accepted command's late exit remains intentional until newer
+        // discovery can see the same serial's quick reboot (no absence scan).
+        manager.childProcess.emit("exit", 0, null);
+        expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+        manager.setBootedDevices("android", [device]);
+      }
+      manager.getBootedDevicesDetailed = async (platform, options) => ({
+        ...(await discover(platform, options)),
+        freshDeviceIds: new Set(),
+      });
+      await pool.refreshDevices();
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
+      manager.getBootedDevicesDetailed = discover;
+      // Uncached, resolved evidence in a later refresh is the existing lift;
+      // command acceptance alone must not expose this incarnation to allocation.
+      await pool.refreshDevices();
+      expect(await pool.isShutdownReserved(device.deviceId)).toBe(false);
+      expect(pool.getAvailableDeviceCount()).toBe(1);
+      noteSettled.mockRestore();
+    },
+  );
+
   test("preserves caller cancellation while shutdown discovery is pending", async () => {
     const timer = new FakeTimer();
     const abortAwareManager = new AbortAwareHungDiscoveryKillDeviceManager();

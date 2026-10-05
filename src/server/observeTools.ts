@@ -2190,6 +2190,13 @@ function createSettledGate({
       return outcome;
     }
     let observation = outcome.observation;
+    // The floor must be in the device clock domain, like the `updatedAt` it is
+    // compared with (#9878, same class as #6430). The matched capture's own
+    // device stamp is inclusive, so it admits that capture (as the host
+    // `startTime` floor did with no skew) without rejecting every read of a
+    // still screen on a device whose clock trails the host. No device stamp
+    // (unavailable capture) means unfloored, as the #6430 loop does.
+    const minTimestamp = settledGateFloor(observation);
     let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
     let quietStart = timer.now();
     let polls = outcome.polls;
@@ -2217,7 +2224,7 @@ function createSettledGate({
       observation = await pollingScreen.execute({
         timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
         skipWaitForFresh: false,
-        minTimestamp: startTime,
+        minTimestamp,
         signal,
         skipBackStack: skipBackStack || undefined,
         skipScreenshot: true,
@@ -2491,6 +2498,11 @@ function waitTimestampFloor(
   return needsHierarchyFreshness && baselineTimestamp !== undefined && baselineTimestamp > 0
     ? baselineTimestamp + 1
     : 0;
+}
+
+/** Device-domain floor for the settled gate: the matched capture's own stamp, else unfloored. */
+function settledGateFloor(observation: ObserveResult): number {
+  return waitBaselineTimestamp(observation) ?? 0;
 }
 
 function waitBaselineTimestamp(observation: ObserveResult): number | undefined {

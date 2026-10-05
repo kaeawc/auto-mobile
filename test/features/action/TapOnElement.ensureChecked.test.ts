@@ -178,6 +178,8 @@ describe("tapOn ensureChecked", () => {
     const { tap, setNextElement, timer } = createTap(toggle("false"), toggle("true"));
     let preTapCaptureTimestamp = 0;
     let observationFloor = 0;
+    // The post-tap floor is read from the device clock (#9879); here it tracks the host.
+    (tap as any).adb.getDeviceTimestampMs = async () => timer.now();
     Object.assign(tap, {
       refreshViewHierarchy: async () => {
         timer.setCurrentTime(20);

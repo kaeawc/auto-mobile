@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
+import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 import { waitForObservation } from "../../../src/server/observeTools";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -135,4 +136,79 @@ describe("legacy waitForObservation device clock floor", () => {
     expect(outcome.waitMs).toBe(100);
     expect(screen.getExecuteMinTimestamps()).toEqual([0, 10_001]);
   });
+});
+
+/**
+ * #9878: the declarative `for` + `settled` quiet-period gate must floor its polls
+ * in the device clock domain, like the legacy loop (#6430) does, or a device
+ * whose clock trails the host never reaches a host-clock `startTime` floor.
+ */
+describe("waitFor settled gate device clock floor", () => {
+  const HOST_NOW = 1_000_000;
+
+  /** Stamps each capture with the device clock; an unmet floor burns the poll budget like a real wait. */
+  class DeviceClockObserveScreen extends FakeObserveScreen {
+    readonly floors: Array<number | undefined> = [];
+    constructor(
+      private readonly timer: FakeTimer,
+      private readonly deviceSkewMs: number,
+    ) {
+      super();
+      this.setObserveResult({} as ObserveResult);
+    }
+    deviceNow(): number {
+      return this.timer.now() + this.deviceSkewMs;
+    }
+    override async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+      await super.execute(options);
+      this.floors.push(options?.minTimestamp);
+      if ((options?.minTimestamp ?? 0) > this.deviceNow()) {
+        await this.timer.sleep(options?.timeoutMs ?? 0);
+      }
+      const result = observation(this.deviceNow(), "com.example");
+      (result.viewHierarchy as { hierarchy: unknown }).hierarchy = {
+        node: { "resource-id": "submit", bounds: { left: 0, top: 0, right: 200, bottom: 200 } },
+      };
+      return result;
+    }
+  }
+
+  const run = async (deviceSkewMs: number) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    timer.setCurrentTime(HOST_NOW);
+    const screen = new DeviceClockObserveScreen(timer, deviceSkewMs);
+    const outcome = await waitForObservation(
+      screen,
+      {
+        for: "appear",
+        elementId: "submit",
+        settled: { quietPeriodMs: 500 },
+        timeoutMs: 5000,
+      },
+      undefined,
+      false,
+      timer,
+      "android",
+    );
+    return { outcome, screen };
+  };
+
+  for (const [label, skewMs] of [
+    ["zero skew", 0],
+    ["device 5s ahead of the host", 5_000],
+    ["device 20s behind the host", -20_000],
+  ] as const) {
+    test(`${label}: a still screen settles instead of timing out`, async () => {
+      const { outcome, screen } = await run(skewMs);
+
+      expect(outcome.settled).toBe(true);
+      expect(outcome.timedOut).toBe(false);
+      // Every floor, including the gate's polls, is in the device clock domain.
+      const floors = screen.floors.filter((floor): floor is number => (floor ?? 0) > 0);
+      for (const floor of floors) {
+        expect(floor).toBeLessThanOrEqual(screen.deviceNow());
+      }
+    });
+  }
 });

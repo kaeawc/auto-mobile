@@ -99,6 +99,9 @@ function harness(
   const capture = new PanelCapture();
   const screenshots = new FakeScreenshotCapturer();
   const executor = new FakeAdbExecutor();
+  // The device clock the post-tap observation floor is read from (#9879).
+  const deviceClock = { skewMs: 0 };
+  executor.getDeviceTimestampMs = async () => timer.now() + deviceClock.skewMs;
   executor.setCommandResponse("cmd display get-displays", {
     stdout:
       'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
@@ -179,6 +182,7 @@ function harness(
     capture,
     screenshots,
     timer,
+    deviceClock,
     transitions,
     dispatches,
     observe,
@@ -656,6 +660,23 @@ describe("tapOn display verification", () => {
     };
     expect((await h.execute({ ensureChecked: true })).success).toBe(true);
     expect(floor).toBe(200);
+  });
+
+  test("ensureChecked observation floor is in the device clock domain when the device trails the host", async () => {
+    const h = harness(true, { checked: false });
+    h.deviceClock.skewMs = -20_000;
+    let floor: number | undefined;
+    h.onDispatch(() => {
+      h.timer.setCurrentTime(200);
+      h.setCurrent(hierarchy({ checked: true }));
+    });
+    h.action.observedInteraction = async (run, options) => {
+      const result = await run(h.observation());
+      floor = options.observationTimestampProvider?.();
+      return { ...result, observation: h.observation() };
+    };
+    expect((await h.execute({ ensureChecked: true })).success).toBe(true);
+    expect(floor).toBe(200 - 20_000);
   });
 
   test("remaining display options reject before observation or dispatch in original order", async () => {

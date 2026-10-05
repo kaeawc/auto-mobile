@@ -1,4 +1,21 @@
 import { logger } from "../utils/logger";
+import { executionTracker } from "../server/executionTracker";
+
+export interface SessionExecutionCanceller {
+  hasActiveSessionUuidExecutions(sessionId: string): boolean;
+  cancelSessionUuidExecutions(sessionId: string, reason: string): Promise<number>;
+}
+
+/** Signal abort before release; like daemon lifecycle release, do not drain executions. */
+export async function cancelAndReleaseSession<T>(
+  sessionId: string,
+  reason: string,
+  release: (cancelled: number) => Promise<T>,
+  executions: SessionExecutionCanceller = executionTracker,
+): Promise<T> {
+  const cancelled = await executions.cancelSessionUuidExecutions(sessionId, reason);
+  return release(cancelled);
+}
 
 export interface SessionReleaseManager {
   hasSession(sessionId: string): boolean;

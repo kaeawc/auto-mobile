@@ -3,6 +3,7 @@ import path from "path";
 import * as yaml from "js-yaml";
 import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import { PlanNormalizer } from "./PlanNormalizer";
 import { migratePlan } from "./PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
@@ -185,7 +186,7 @@ export class YamlPlanSerializer implements PlanSerializer {
         stepCount: planSteps.length,
       };
     } catch (error) {
-      logger.error(`Failed to export plan: ${error}`);
+      logger.warn(`Failed to export plan: ${errorMessage(error)}`, error);
       return { success: false, error: `${error}` };
     }
   }

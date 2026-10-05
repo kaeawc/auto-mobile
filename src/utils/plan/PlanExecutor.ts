@@ -854,7 +854,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      logger.error(`Plan execution failed: ${error}`);
+      logger.warn(`Plan execution failed: ${errorMessage(error)}`, error);
 
       debugSteps.push({
         step: "Plan execution error",
@@ -1059,7 +1059,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         }
         const abortConsequence = internalAbortController.signal.aborted;
         const errorMsg = errorMessage(error);
-        logger.error(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`);
+        logger.warn(`[PARALLEL_EXEC][${device}] Unexpected error: ${errorMsg}`, error);
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -1310,7 +1310,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         throw error;
       }
       const errorMsg = errorMessage(error);
-      logger.error(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMsg}`);
+      logger.warn(`[PARALLEL_EXEC][${device}] Track execution error: ${errorMsg}`, error);
 
       return {
         success: false,

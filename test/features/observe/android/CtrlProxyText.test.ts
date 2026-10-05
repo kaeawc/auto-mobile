@@ -1,3 +1,8 @@
+import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
+import {
+  runWithTextRequestContext,
+  TextRequestState,
+} from "../../../../src/features/action/textTransportTimeout";
 import { describe, expect, test } from "bun:test";
 import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
@@ -823,4 +828,24 @@ test("pre-dispatch state read round-trips and insert baseline is optional", asyn
   } finally {
     await client.close();
   }
+});
+
+test("Android text keeps its 5000ms transport and plain failure under an iOS request budget", async () => {
+  const h = createIosDelegateHarness();
+  const state = new TextRequestState();
+  const deadline = h.timer.now() + 2000;
+  const pending = runWithTextRequestContext(
+    { textState: state, getDeadlineMs: () => deadline },
+    () => new CtrlProxyText(h.context).requestSetText("a".repeat(1000)),
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  h.advanceTime(2000);
+  expect(h.requestManager.getPendingCount()).toBe(1);
+  h.advanceTime(3000);
+  expect(await pending).toEqual({
+    success: false,
+    totalTimeMs: 5000,
+    error: "Set text timed out after 5000ms",
+  });
+  expect(state.timeoutError("expired")).toBeUndefined();
 });

@@ -86,6 +86,22 @@ describe("BaseVisualChange post-action observation", () => {
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  test.each(["ios", "android"] as const)(
+    "%s indeterminate result observation policy",
+    async (platform) => {
+      const action = createVisualChange(platform);
+      fakeObserveScreen.setObserveResult(makeObserve());
+      const failure = { success: false, retryable: false, error: "Unconfirmed text" };
+      const result = await action.observedInteraction(async () => failure, {
+        previousObservation: makeObserve(),
+        changeExpected: false,
+        skipUiStability: true,
+      });
+      expect(result.retryable).toBe(false);
+      expect(fakeObserveScreen.getCallCount("execute")).toBe(platform === "ios" ? 0 : 1);
+    },
+  );
+
   test("retries a stale observation on the [50,100,200,400] backoff and caps at four attempts", async () => {
     const instance = createVisualChange("ios");
     // Every observation reports not-fresh, so shouldRetry stays true until the cap.

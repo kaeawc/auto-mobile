@@ -1,6 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
+export interface RequestContext {
+  getDeadlineMs?: () => number | undefined;
+  textState: { dispatched(): (confirmed: boolean) => void };
+}
+
 type AbortContextState = {
+  request?: RequestContext;
   signal?: AbortSignal;
 };
 
@@ -19,9 +25,12 @@ export const combineAbortSignals = (
 export const runWithAbortSignal = async <T>(
   signal: AbortSignal | undefined,
   fn: () => Promise<T>,
+  request: RequestContext | undefined = abortContext.getStore()?.request,
 ): Promise<T> => {
-  return abortContext.run({ signal }, fn);
+  return abortContext.run({ signal, request }, fn);
 };
+
+export const getRequestContext = (): RequestContext | undefined => abortContext.getStore()?.request;
 
 export const getAbortSignal = (): AbortSignal | undefined => {
   return abortContext.getStore()?.signal;

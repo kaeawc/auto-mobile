@@ -1,3 +1,4 @@
+import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -169,24 +170,50 @@ describe("InputText iOS IME action", () => {
     },
   );
 
-  test("preserves indeterminate text guidance and does not send an IME action", async () => {
-    const error =
-      "Text outcome is indeterminate: the text may have been entered. Do not retry automatically. Observe before retrying.";
-    const setText = spyOn(fakeIosCtrlProxy, "requestSetText").mockResolvedValue({
-      success: false,
-      totalTimeMs: 5000,
-      retryable: false,
-      error,
-    });
+  test("iOS input forwards the remaining request deadline", async () => {
+    const setText = spyOn(fakeIosCtrlProxy, "requestSetText");
+    const deadline = fakeTimer.now() + 4000;
     try {
-      const result = await inputText.execute("hello", "done");
-      expect(result).toMatchObject({ success: false, error });
-      expect(setText).toHaveBeenCalledTimes(1);
-      expect(imeActionSpy).not.toHaveBeenCalled();
+      await runWithTextRequestContext({ getDeadlineMs: () => deadline }, () =>
+        inputText.execute("a".repeat(1000)),
+      );
+      expect(setText.mock.calls[0][1]).toMatchObject({
+        timeoutMs: 3000,
+        deadlineMs: deadline - 1000,
+      });
     } finally {
       setText.mockRestore();
     }
   });
+
+  test.each([false, true])(
+    "preserves indeterminate text guidance after cancellation=%s",
+    async (cancelled) => {
+      const error =
+        "Text outcome is indeterminate: the text may have been entered. Do not retry automatically. Observe before retrying.";
+      const controller = new AbortController();
+      const setText = spyOn(fakeIosCtrlProxy, "requestSetText").mockImplementation(async () => {
+        if (cancelled) {
+          controller.abort(new Error("Request timed out after 30000ms"));
+        }
+        return { success: false, totalTimeMs: 5000, retryable: false, error };
+      });
+      try {
+        const result = await inputText.execute(
+          "hello",
+          "done",
+          false,
+          undefined,
+          controller.signal,
+        );
+        expect(result).toMatchObject({ success: false, error, retryable: false });
+        expect(setText).toHaveBeenCalledTimes(1);
+        expect(imeActionSpy).not.toHaveBeenCalled();
+      } finally {
+        setText.mockRestore();
+      }
+    },
+  );
 
   for (const throws of [false, true]) {
     test(`abort wins over an IME ${throws ? "exception" : "failed reply"}`, async () => {

@@ -1,3 +1,8 @@
+import {
+  resolveTextCtrlProxyTimeoutMs,
+  TEXT_MCP_REQUEST_HEADROOM_MS,
+  DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
+} from "../features/action/textTransportTimeout";
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -457,6 +462,45 @@ function resolveTapAnyOrdinaryTapBudgetMs(request: DaemonRequest): number | unde
   return Math.min(budget, MAX_SETTIMEOUT_DELAY_MS);
 }
 
+/** Platform is unavailable here: budget iOS conservatively, only raising existing floors. */
+function resolveTextToolBudgetMs(request: DaemonRequest): number {
+  if (request.method !== "tools/call") {
+    return 0;
+  }
+  const args = asRecord(request.params?.arguments);
+  const entries =
+    request.params?.name === "sendKeys"
+      ? args?.commands
+      : request.params?.name === "setUIState"
+        ? args?.fields
+        : undefined;
+  if (!Array.isArray(entries)) {
+    return 0;
+  }
+  const timeouts = entries.map((entry: unknown) => {
+    const record = asRecord(entry);
+    const text =
+      request.params?.name === "sendKeys"
+        ? record?.action === "type"
+          ? record.text
+          : undefined
+        : record?.value;
+    return typeof text === "string" ? resolveTextCtrlProxyTimeoutMs(text) : 0;
+  });
+  // Keep compatibility for short text, including caller-supplied request budgets.
+  if (!timeouts.some((timeout) => timeout > DEFAULT_TEXT_REQUEST_TIMEOUT_MS)) {
+    return 0;
+  }
+  return timeouts.reduce(
+    (budget, timeout) =>
+      Math.min(
+        MAX_SETTIMEOUT_DELAY_MS,
+        budget + (timeout > 0 ? timeout + TEXT_MCP_REQUEST_HEADROOM_MS : 0),
+      ),
+    0,
+  );
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
@@ -467,6 +511,7 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
   return Math.max(
     base,
+    resolveTextToolBudgetMs(request),
     floor ?? 0,
     devicePreparationBudget ?? 0,
     tapOnLongPressBudget ?? 0,

@@ -1,3 +1,4 @@
+import { TextIndeterminateError } from "../../src/features/action/textTransportTimeout";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -18,6 +19,17 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("serializes indeterminate text as a structured non-retryable failure", () => {
+    const error = new TextIndeterminateError("request expired");
+    const result = shapeToolCallError(error, { toolName: "sendKeys", source: "MCP" });
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      success: false,
+      error: error.message,
+      retryable: false,
+    });
+    expect(result.isError).toBe(true);
   });
 
   test("serializes pending recovery with the established error vocabulary", () => {

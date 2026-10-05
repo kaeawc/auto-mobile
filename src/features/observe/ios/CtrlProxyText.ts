@@ -12,8 +12,12 @@ import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { DelegateContext } from "./types";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { SetTextOptions } from "../DeviceService";
-import { resolveTextCtrlProxyTimeoutMs } from "../../action/textTransportTimeout";
-import { combineWithAmbientAbort } from "../../../utils/AbortContext";
+import {
+  resolveTextCtrlProxyTimeoutMs,
+  getTextRequestDeadlineMs,
+  TextIndeterminateError,
+} from "../../action/textTransportTimeout";
+import { combineWithAmbientAbort, getRequestContext } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 
@@ -33,6 +37,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     options: SendCommandOptions<BaseResult>,
   ): Promise<BaseResult> {
     let dispatched = false;
+    let completeDispatch: ((confirmed: boolean) => void) | undefined;
     const startMs = this.context.timer.now();
     const unconfirmed = (reason: string, totalTimeMs: number): BaseResult => ({
       success: false,
@@ -40,22 +45,25 @@ export class CtrlProxyText extends SharedTextDelegate {
       // Reuse executeBoundedIosIme's retryable=false marker in SendKeys.ts
       // and InputKey.indeterminateError's dispatched-but-unconfirmed guidance.
       ...(dispatched ? { retryable: false } : {}),
-      error: dispatched
-        ? `Text outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The text may have been entered or cleared. Do not retry automatically. Observe before retrying.`
-        : reason,
+      error: dispatched ? new TextIndeterminateError(reason).message : reason,
     });
     try {
-      return await sendCommand<BaseResult>(this.context, {
+      const result = await sendCommand<BaseResult>(this.context, {
         ...options,
+        deadlineMs: options.deadlineMs ?? getTextRequestDeadlineMs(),
         abortSignal: combineWithAmbientAbort(options.abortSignal),
         onDispatch: (id) => {
           dispatched = true;
+          completeDispatch = getRequestContext()?.textState.dispatched();
           options.onDispatch?.(id);
         },
         timeoutError: (timeout) =>
           unconfirmed(`${options.errorLabel} timed out after ${timeout}ms`, timeout),
       });
+      completeDispatch?.(result.retryable !== false);
+      return result;
     } catch (error) {
+      completeDispatch?.(false);
       logger.warn("[CtrlProxyText] Text transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }

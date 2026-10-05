@@ -1,3 +1,4 @@
+import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -56,7 +57,31 @@ describe("SendKeys iOS text transport", () => {
     insert.mockRestore();
   });
 
-  test.each(["timeout", "disconnect"])(
+  test("iOS executor forwards the remaining request deadline", async () => {
+    const { client } = createTextClient();
+    const insert = spyOn(client, "insert");
+    const timer = new FakeTimer();
+    const deadline = timer.now() + 4000;
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: client, timer },
+    );
+    try {
+      await runWithTextRequestContext({ getDeadlineMs: () => deadline }, () =>
+        executor.type({ action: "type", text: "a".repeat(1000) }),
+      );
+      expect(insert.mock.calls[0][1]).toMatchObject({
+        timeoutMs: 3000,
+        deadlineMs: deadline - 1000,
+      });
+    } finally {
+      insert.mockRestore();
+    }
+  });
+
+  test.each(["timeout", "disconnect", "requestExpiry"])(
     "preserves indeterminate %s through the real iOS adapter",
     async (failure) => {
       const h = createIosDelegateHarness();
@@ -77,13 +102,21 @@ describe("SendKeys iOS text transport", () => {
           timer: h.timer,
           timestampProvider: { now: async () => 0 },
         });
-        const pending = sendKeys.execute([
-          { action: "type", text: "hello" },
-          { action: "type", text: "again" },
-        ]);
+        const controller = new AbortController();
+        const pending = sendKeys.execute(
+          [
+            { action: "type", text: "hello" },
+            { action: "type", text: "again" },
+          ],
+          undefined,
+          undefined,
+          controller.signal,
+        );
         await new Promise<void>((resolve) => setImmediate(resolve));
         if (failure === "timeout") {
           h.advanceTime(5000);
+        } else if (failure === "requestExpiry") {
+          controller.abort(new Error("Request timed out after 30000ms"));
         } else {
           h.requestManager.cancelAll(new Error("runner disconnected"));
         }

@@ -740,6 +740,7 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
     );
     expect(await action["executeiOSClearText"]({ updatedAt: 0 }, controller.signal)).toEqual({
       success: false,
+      retryable: false,
       error,
     });
     expect(clear).toHaveBeenCalledTimes(1);

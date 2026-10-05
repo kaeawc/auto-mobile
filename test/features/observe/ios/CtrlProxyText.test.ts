@@ -1,3 +1,8 @@
+import {
+  runWithTextRequestContext,
+  TextRequestState,
+} from "../../../../src/features/action/textTransportTimeout";
+import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyText";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
@@ -255,5 +260,78 @@ describe("CtrlProxyText requestAppendText", () => {
     ]);
     expect(harness.resolveLast({ success: true, totalTimeMs: 1 })).toBe(true);
     await expect(pending).resolves.toEqual({ success: true, totalTimeMs: 1 });
+  });
+});
+
+describe("iOS text uses the actual request context", () => {
+  test.each(["append", "set", "clear"] as const)(
+    "%s reserves response time after acquisition",
+    async (operation) => {
+      const h = createIosDelegateHarness();
+      const state = new TextRequestState();
+      const deadline = h.timer.now() + 4000;
+      const text = new CtrlProxyText({
+        ...h.context,
+        ensureConnected: async () => {
+          h.advanceTime(1000);
+          return true;
+        },
+      });
+      const pending = runWithTextRequestContext(
+        { textState: state, getDeadlineMs: () => deadline },
+        () =>
+          operation === "set"
+            ? text.requestSetText("a".repeat(1000))
+            : operation === "clear"
+              ? text.requestClearText()
+              : text.requestAppendText("a".repeat(1000)),
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(state.timeoutError("request expired")?.retryable).toBe(false);
+      h.advanceTime(1999);
+      expect(h.requestManager.getPendingCount()).toBe(1);
+      h.advanceTime(1);
+      expect(await pending).toMatchObject({ success: false, retryable: false, totalTimeMs: 2000 });
+      expect(state.timeoutError("request expired")?.message).toContain(
+        "Do not retry automatically.",
+      );
+      expect(h.sentMessages).toHaveLength(1);
+    },
+  );
+
+  test.each([false, true])("request cancellation dispatched=%s", async (dispatched) => {
+    const h = createIosDelegateHarness();
+    const state = new TextRequestState();
+    const controller = new AbortController();
+    const connected = Promise.withResolvers<boolean>();
+    const text = new CtrlProxyText({ ...h.context, ensureConnected: () => connected.promise });
+    const pending = runWithTextRequestContext(
+      { textState: state, getDeadlineMs: () => h.timer.now() + 4000 },
+      () => runWithAbortSignal(controller.signal, () => text.requestSetText("hello")),
+    );
+    if (dispatched) {
+      connected.resolve(true);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    controller.abort(new Error("Request timed out after 4000ms"));
+    connected.resolve(true);
+    const result = await pending;
+    expect(result.retryable).toBe(dispatched ? false : undefined);
+    expect(result.error?.includes("Do not retry automatically.")).toBe(dispatched);
+    expect(state.timeoutError("expired") !== undefined).toBe(dispatched);
+    expect(h.sentMessages).toHaveLength(dispatched ? 1 : 0);
+  });
+
+  test("a confirmed reply clears dispatch evidence", async () => {
+    const h = createIosDelegateHarness();
+    const state = new TextRequestState();
+    const pending = runWithTextRequestContext(
+      { textState: state, getDeadlineMs: () => undefined },
+      () => new CtrlProxyText(h.context).requestSetText("hello"),
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    h.resolveLast({ success: true, totalTimeMs: 1 });
+    expect((await pending).success).toBe(true);
+    expect(state.timeoutError("expired during observation")).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { resolveTextCtrlProxyTimeoutMs } from "./textTransportTimeout";
+import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
@@ -124,8 +124,10 @@ const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory)
   };
 };
 
-function assertInputNotAborted(signal?: AbortSignal): void {
-  signal?.throwIfAborted();
+function assertInputNotAborted(signal?: AbortSignal, result?: { retryable?: boolean }): void {
+  if (result?.retryable !== false) {
+    signal?.throwIfAborted();
+  }
 }
 
 /**
@@ -157,7 +159,7 @@ export class InputText extends BaseVisualChange {
     mode?: InputTextMode,
     signal?: AbortSignal,
     selector?: TextInputTargetSelector,
-  ): Promise<SendTextResult & { method?: InputTextMode }> {
+  ): Promise<SendTextResult & { method?: InputTextMode; retryable?: false }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 
@@ -263,7 +265,7 @@ export class InputText extends BaseVisualChange {
         skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
       },
     );
-    assertInputNotAborted(signal);
+    assertInputNotAborted(signal, result);
     return { ...result, ...targetMetadata };
   }
 
@@ -1012,7 +1014,7 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: ImeAction,
     signal?: AbortSignal,
-  ): Promise<SendTextResult & { method?: "a11y" }> {
+  ): Promise<SendTextResult & { method?: "a11y"; retryable?: false }> {
     assertInputNotAborted(signal);
     const startMs = Date.now();
     logger.debug(
@@ -1020,11 +1022,16 @@ export class InputText extends BaseVisualChange {
     );
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
+    const deadlineMs = getTextRequestDeadlineMs();
     const result = await client.requestSetText(text, {
-      timeoutMs: resolveTextCtrlProxyTimeoutMs(text),
+      ...(deadlineMs === undefined ? {} : { deadlineMs }),
+      timeoutMs: resolveTextCtrlProxyTimeoutMs(
+        text,
+        deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
+      ),
       abortSignal: signal,
     });
-    assertInputNotAborted(signal);
+    assertInputNotAborted(signal, result);
 
     if (!result.success) {
       logger.error(
@@ -1034,6 +1041,7 @@ export class InputText extends BaseVisualChange {
         success: false,
         text,
         error: result.error,
+        ...(result.retryable === false ? { retryable: false as const } : {}),
         method: "a11y",
       };
     }

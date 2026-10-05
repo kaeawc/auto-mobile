@@ -1,3 +1,4 @@
+import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
 import {
@@ -69,7 +70,11 @@ import {
   daemonShuttingDownFailureFromToolResult,
   isDaemonShuttingDownToolResult,
 } from "./daemonShutdownOutcome";
-import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
+import {
+  registerLiveDeadline,
+  unregisterLiveDeadline,
+  getLiveTextRequestState,
+} from "./liveDeadlineRegistry";
 import {
   DaemonSocketReachability,
   type DaemonSocketReachabilityLike,
@@ -6392,15 +6397,16 @@ export class UnixSocketServer {
       }
       case "tools/call": {
         const progressToken = request.progressToken;
-        // Cleanup for the abort-timer path below; a no-op for the
-        // no-progress path (nothing was ever armed).
-        let cleanup: () => void = () => {};
-        // Set only on the progress-capable path below. Lets a handler on the
+        // Cleanup includes the live dispatch evidence on every tools/call and
+        // the abort timer on progress-capable calls.
+        // Lets a handler on the
         // OTHER side of this same call (e.g. `setUIStateHandler`) read this
         // exact `deadline`'s CURRENT (possibly progress-extended) value via
         // `liveDeadlineRegistry` instead of only the frozen snapshot forwarded
         // through `INTERNAL_MCP_REQUEST_TIMEOUT_PARAM` (issue #6222 P1 reopen).
-        let liveDeadlineKey: string | undefined;
+        const liveDeadlineKey = this.idGenerator.next();
+        registerLiveDeadline(liveDeadlineKey, deadline);
+        let cleanup = () => unregisterLiveDeadline(liveDeadlineKey);
 
         let callOptions: Record<string, unknown> = requestOptions;
         if (progressToken !== undefined) {
@@ -6441,8 +6447,6 @@ export class UnixSocketServer {
             );
           let abortTimer = armAbort(timeoutMs);
           const backstopMs = Math.max(deadline.ceiling - this.timer.now(), timeoutMs);
-          liveDeadlineKey = this.idGenerator.next();
-          registerLiveDeadline(liveDeadlineKey, deadline);
           const registeredLiveDeadlineKey = liveDeadlineKey;
           cleanup = () => {
             this.timer.clearTimeout(abortTimer);
@@ -6494,7 +6498,9 @@ export class UnixSocketServer {
                 callOptions,
               ),
             );
-          });
+          }).catch((error: unknown) =>
+            this.textForwardFailure(liveDeadlineKey, request.params.name, error),
+          );
         } finally {
           cleanup();
         }
@@ -6531,6 +6537,14 @@ export class UnixSocketServer {
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
     }
+  }
+
+  private textForwardFailure(key: string, toolName: string, error: unknown) {
+    const indeterminate = getLiveTextRequestState(key)?.timeoutError(errorMessage(error));
+    if (indeterminate) {
+      return shapeToolCallError(indeterminate, { toolName, source: "MCP" });
+    }
+    throw error;
   }
 
   private async traceCallTool<T>(request: DaemonRequest, callTool: () => Promise<T>): Promise<T> {

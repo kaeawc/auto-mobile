@@ -1217,3 +1217,84 @@ describe("tapOn long press outer budget", () => {
     },
   );
 });
+
+describe("text request floors", () => {
+  for (const length of [300, 1000, 5000]) {
+    test(`sendKeys covers ${length} characters`, () => {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "text",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name: "sendKeys",
+            arguments: { commands: [{ action: "type", text: "a".repeat(length) }] },
+          },
+        }),
+      ).toBeGreaterThan(Math.min(120_000, length * 100 + 2000));
+    });
+    test(`setUIState covers ${length} characters`, () => {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "text",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name: "setUIState",
+            arguments: {
+              fields: [{ selector: { elementId: "field" }, value: "a".repeat(length) }],
+            },
+          },
+        }),
+      ).toBeGreaterThan(Math.min(120_000, length * 100 + 2000));
+    });
+  }
+  test.each(["sendKeys", "setUIState"])("short %s keeps its existing timeout", (name) => {
+    expect(
+      resolveMcpRequestTimeoutMs({
+        id: "text",
+        type: "mcp_request",
+        method: "tools/call",
+        params: {
+          name,
+          arguments: {
+            commands: [{ action: "type", text: "hello" }],
+            fields: [{ value: "hello" }],
+          },
+        },
+      }),
+    ).toBe(name === "sendKeys" ? 30_000 : 60_000);
+  });
+});
+
+test("short sendKeys keeps a caller timeout that already fits", () => {
+  expect(
+    resolveMcpRequestTimeoutMs({
+      id: "short",
+      type: "mcp_request",
+      method: "tools/call",
+      timeoutMs: 10_000,
+      params: { name: "sendKeys", arguments: { commands: [{ action: "type", text: "hello" }] } },
+    }),
+  ).toBe(10_000);
+});
+
+test("text request floor budgets sequential commands independently", () => {
+  expect(
+    resolveMcpRequestTimeoutMs({
+      id: "batch",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "sendKeys",
+        arguments: {
+          commands: [
+            { action: "type", text: "a".repeat(1000) },
+            { action: "clear" },
+            { action: "type", text: "hello" },
+          ],
+        },
+      },
+    }),
+  ).toBe(147_000);
+});

@@ -1,3 +1,4 @@
+import { TextRequestState } from "../features/action/textTransportTimeout";
 import type { ProgressExtendableDeadline } from "./mcpRequestTimeout";
 
 /**
@@ -17,16 +18,19 @@ import type { ProgressExtendableDeadline } from "./mcpRequestTimeout";
  * object by reference instead of trying to serialize live updates over HTTP.
  *
  * Lifecycle: the daemon registers its deadline under a fresh key before
- * forwarding a progress-capable `tools/call`, forwards only the key as an
+ * forwarding a `tools/call`, forwards only the key as an
  * internal argument (`INTERNAL_LIVE_DEADLINE_KEY_PARAM`), and unregisters it
  * once the call settles (success, failure, or abandonment). A handler that
  * recognizes the key can read `.value` live at any point during execution.
  */
-const registry = new Map<string, ProgressExtendableDeadline>();
+const registry = new Map<
+  string,
+  { deadline: ProgressExtendableDeadline; textState: TextRequestState }
+>();
 
 /** Register a live deadline under `key`. Overwrites any existing entry for that key. */
 export function registerLiveDeadline(key: string, deadline: ProgressExtendableDeadline): void {
-  registry.set(key, deadline);
+  registry.set(key, { deadline, textState: new TextRequestState() });
 }
 
 /** Remove the entry for `key`, if any. Safe to call more than once (e.g. from a `finally`). */
@@ -41,7 +45,7 @@ export function unregisterLiveDeadline(key: string): void {
  * unregistered.
  */
 export function getLiveDeadlineMs(key: string): number | undefined {
-  return registry.get(key)?.value;
+  return registry.get(key)?.deadline.value;
 }
 
 /**
@@ -51,5 +55,10 @@ export function getLiveDeadlineMs(key: string): number | undefined {
  * registered under `key` (nothing to observe).
  */
 export function subscribeLiveDeadline(key: string, listener: () => void): (() => void) | undefined {
-  return registry.get(key)?.onExtended(listener);
+  return registry.get(key)?.deadline.onExtended(listener);
+}
+
+/** Shared dispatch evidence across the daemon's in-process MCP loopback. */
+export function getLiveTextRequestState(key: string): TextRequestState | undefined {
+  return registry.get(key)?.textState;
 }

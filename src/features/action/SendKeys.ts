@@ -1,4 +1,4 @@
-import { resolveTextCtrlProxyTimeoutMs } from "./textTransportTimeout";
+import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { selectablePanels } from "../../models/DisplayPanel";
@@ -307,6 +307,7 @@ export interface SendKeysTextClient {
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
       timeoutMs?: number;
+      deadlineMs?: number;
       abortSignal?: AbortSignal;
     },
   ): Promise<TextActionResult>;
@@ -672,8 +673,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
     // requested cross-platform mode in metadata, but report the actual mechanism.
+    const deadlineMs = getTextRequestDeadlineMs();
     const result = await this.textClient.insert(text, {
-      timeoutMs: resolveTextCtrlProxyTimeoutMs(text),
+      ...(deadlineMs === undefined ? {} : { deadlineMs }),
+      timeoutMs: resolveTextCtrlProxyTimeoutMs(
+        text,
+        deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
+      ),
       abortSignal: signal,
     });
     if (!result.success) {
@@ -1885,7 +1891,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           options?.timeoutMs ?? resolveTextCtrlProxyTimeoutMs(text),
           undefined,
           undefined,
-          { abortSignal: options?.abortSignal },
+          {
+            abortSignal: options?.abortSignal,
+            ...(options?.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
+          },
         ),
       clear: async (signal) =>
         client.requestClearText(undefined, 5000, undefined, { abortSignal: signal }),
@@ -2221,6 +2230,13 @@ export class SendKeys {
     }
     const execution =
       preflight ?? (await this.executeCommands(commands, progress, signal, routing));
+    if (
+      execution.results.some(
+        (result) => this.device.platform === "ios" && result.retryable === false,
+      )
+    ) {
+      return this.buildResult(execution.results, execution.failure);
+    }
     signal?.throwIfAborted();
     const observation = await observe(actionStartTimestamp);
     return this.buildResult(execution.results, execution.failure, observation);

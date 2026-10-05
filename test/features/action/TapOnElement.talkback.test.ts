@@ -132,7 +132,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         undefined,
         false,
-        { displayFence: undefined },
+        { displayFence: undefined, resolvedHierarchy: undefined },
       );
 
       executeAndroidTapWithCoordinates.mockClear();
@@ -147,7 +147,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         undefined,
         false,
-        { displayFence: undefined },
+        { displayFence: undefined, resolvedHierarchy: undefined },
       );
 
       executeAndroidTapWithCoordinates.mockClear();
@@ -162,7 +162,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         undefined,
         false,
-        { displayFence: undefined },
+        { displayFence: undefined, resolvedHierarchy: undefined },
       );
     });
   });
@@ -959,9 +959,49 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         1000,
         element,
         undefined,
-        false,
+        true,
         { displayFence: undefined },
       );
+    });
+
+    test("TalkBack long-press hand-off does not reread or resend the semantic action", async () => {
+      executeAndroidTapWithCoordinates.mockRestore();
+      const proxy = new FakeCtrlProxy();
+      proxy.setHierarchyData({ updatedAt: 1, packageName: "test", hierarchy: {} });
+      proxy.setViewHierarchyResult({ hierarchy: { node: { $: makeElement() } } });
+      const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        proxy as unknown as AndroidCtrlProxyClient,
+      );
+      let command: TapOnElement;
+      try {
+        command = new TapOnElement(
+          { name: "test-device", platform: "android", deviceId: "talkback-long-press" },
+          fakeAdb,
+          { timer: fakeTimer, talkBackStrategy: fakeTalkBackStrategy },
+        );
+      } finally {
+        client.mockRestore();
+      }
+      fakeTalkBackStrategy.setLongPressResult({
+        success: false,
+        method: "coordinate-fallback",
+        error: "gesture unavailable",
+      });
+      await command.executeAndroidTap(
+        "longPress",
+        50,
+        50,
+        1000,
+        makeElement(),
+        undefined,
+        undefined,
+        true,
+      );
+      expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
+      expect(proxy.getHierarchyRequestCount()).toBe(0);
+      expect(proxy.getActionHistory()).toEqual([]);
+      expect(proxy.getNodeActionHistory()).toEqual([]);
+      expect(fakeAdb.getAllCommands()).toEqual(["shell input touchscreen swipe 50 50 50 50 1000"]);
     });
 
     test("reports a rejected advertised semantic long press without a coordinate fallback", async () => {

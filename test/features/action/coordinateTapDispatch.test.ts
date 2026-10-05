@@ -331,6 +331,7 @@ describe("androidDisplayTapDispatch", () => {
       const timer = new FakeTimer();
       const controller = new AbortController();
       let current = true;
+      const onDispatched = mock(() => {});
       const requestTapCoordinates = mock(async () => ({ success: true }));
       const dispatch = await androidDisplayTapDispatch(
         { supportsCommand: async () => true, requestTapCoordinates },
@@ -346,7 +347,7 @@ describe("androidDisplayTapDispatch", () => {
             },
           },
           signal: controller.signal,
-          onDispatched: () => {},
+          onDispatched,
           timer,
         },
       );
@@ -364,6 +365,11 @@ describe("androidDisplayTapDispatch", () => {
       await expect(pending).rejects.toThrow(
         failure === "abort" ? OPERATION_CANCELLED_MESSAGE : "Display changed",
       );
+      await expect(pending).rejects.toBeInstanceOf(ActionableError);
+      await expect(pending).rejects.toThrow(
+        /indeterminate.*Double tap partially applied: one tap was delivered; the second tap was not confirmed/i,
+      );
+      expect(onDispatched).toHaveBeenCalledTimes(1);
       timer.advanceTime(DOUBLE_TAP_GAP_MS);
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(requestTapCoordinates).toHaveBeenCalledTimes(1);
@@ -493,6 +499,34 @@ describe("androidDisplayTapDispatch", () => {
     await expect(request).rejects.not.toThrow(/indeterminate/i);
     expect(onDispatched).not.toHaveBeenCalled();
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("counts a confirmed first double tap before propagating a racing abort", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const onDispatched = mock(() => {});
+    const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
+      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+        onDispatch?.();
+        controller.abort();
+        return { success: true };
+      },
+    );
+    const dispatch = await androidDisplayTapDispatch(
+      { supportsCommand: async () => true, requestTapCoordinates },
+      adb,
+      { action: "doubleTap" },
+      { target, signal: controller.signal, onDispatched, timer },
+    );
+
+    await expect(dispatch({ x: 10, y: 20 })).rejects.toThrow(
+      /Operation cancelled.*Double tap partially applied: one tap was delivered/i,
+    );
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(requestTapCoordinates).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("does not attempt the second double tap after an indeterminate first tap", async () => {

@@ -1482,6 +1482,7 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay,
     refresh,
     onActivationWarnings,
+    onDispatched,
     perf,
     signal,
   }: {
@@ -1491,6 +1492,7 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     refresh: RefreshViewHierarchy;
     onActivationWarnings: (messages?: string[]) => void;
+    onDispatched: () => void;
     perf: PerformanceTracker;
     signal?: AbortSignal;
   }) {
@@ -1572,6 +1574,7 @@ export class TapAnyElement extends BaseVisualChange {
       targetDisplay,
       refresh,
       onActivationWarnings,
+      onDispatched,
       signal,
       tapPoint,
       target,
@@ -1588,6 +1591,7 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay,
     refresh,
     onActivationWarnings,
+    onDispatched,
     signal,
     tapPoint,
     target,
@@ -1599,6 +1603,7 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     refresh: RefreshViewHierarchy;
     onActivationWarnings: (messages?: string[]) => void;
+    onDispatched: () => void;
     signal?: AbortSignal;
     tapPoint: { x: number; y: number };
     target: CapturedTapTarget;
@@ -1622,7 +1627,7 @@ export class TapAnyElement extends BaseVisualChange {
               this.accessibilityService,
               this.adb,
               { action, duration: longPressDuration },
-              { target: targetDisplay, signal, onDispatched: () => {}, timer: this.timer },
+              { target: targetDisplay, signal, onDispatched, timer: this.timer },
             )
           : undefined;
         if (dispatch) {
@@ -1687,6 +1692,8 @@ export class TapAnyElement extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapAnyElement");
 
+    let tapsDelivered = 0;
+    let rethrowAbort = options.display !== undefined;
     try {
       // Reject before display resolution/observation can issue device commands.
       this.getLongPressDuration(options, request);
@@ -1734,6 +1741,10 @@ export class TapAnyElement extends BaseVisualChange {
             targetDisplay,
             refresh,
             onActivationWarnings,
+            onDispatched: () => {
+              tapsDelivered++;
+              rethrowAbort = options.action !== "doubleTap" || tapsDelivered !== 1;
+            },
             perf,
             signal,
           }),
@@ -1763,7 +1774,7 @@ export class TapAnyElement extends BaseVisualChange {
       return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
-      this.rethrowObservationAbort(error, signal, options.display !== undefined);
+      this.rethrowObservationAbort(error, signal, rethrowAbort);
       const errorMsg = errorMessage(error);
       logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
       if (error instanceof StaleDisplayError) {

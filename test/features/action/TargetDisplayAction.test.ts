@@ -7,6 +7,9 @@ import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionRe
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
+import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
+import { DOUBLE_TAP_GAP_MS } from "../../../src/features/action/tapAtGesture";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SendKeys } from "../../../src/features/action/SendKeys";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
@@ -2423,4 +2426,148 @@ describe("post-action screenshot resolved display", () => {
       }
     },
   );
+});
+
+describe("selected-display double tap delivery", () => {
+  for (const kind of ["tapOn", "tapAny"] as const) {
+    for (const failure of [
+      "abort in gap",
+      "display change in gap",
+      "second tap post-send failure",
+      "first tap pre-dispatch failure",
+      "abort before dispatch",
+      "pre-dispatch fallback",
+    ] as const) {
+      test(`${kind} double tap delivery: ${failure}`, async () => {
+        const executor = adb();
+        const timer = autoTimer();
+        const transitions = new FakeDisplayTransitionReader();
+        transitions.panel = { key: "external", role: "external" };
+        const observation = screen("external");
+        observation.displayRevision = transitions.fullRevision;
+        observation.display.generation = transitions.generation;
+        const observe = new FakeObserveScreen();
+        observe.setObserveResult(observation);
+        const controller = new AbortController();
+        let tapsDelivered = 0;
+        const capability = spyOn(
+          AndroidCtrlProxyClient.prototype,
+          "supportsCommand",
+        ).mockResolvedValue(true);
+        const tap = spyOn(
+          AndroidCtrlProxyClient.prototype,
+          "requestTapCoordinates",
+        ).mockImplementation(async (...args) => {
+          args[9]?.();
+          expect(args[8]).toBe(2);
+          if (failure === "first tap pre-dispatch failure") {
+            return { success: false, error: "Stale frame context" };
+          }
+          if (failure === "pre-dispatch fallback" && tap.mock.calls.length === 1) {
+            return { success: false, error: "Not connected" };
+          }
+          args[6]?.();
+          if (failure === "second tap post-send failure" && tap.mock.calls.length === 2) {
+            return { success: false, error: "Tap timed out after send" };
+          }
+          tapsDelivered++;
+          return { success: true };
+        });
+        const sleep = timer.sleep.bind(timer);
+        const gap = spyOn(timer, "sleep").mockImplementation((ms) => {
+          const pending = sleep(ms);
+          if (ms === DOUBLE_TAP_GAP_MS && tapsDelivered === 1) {
+            if (failure === "abort in gap") {
+              controller.abort();
+            } else if (failure === "display change in gap") {
+              transitions.transition();
+            }
+          }
+          return pending;
+        });
+        try {
+          const deps = {
+            timer,
+            displayTransitions: transitions,
+            hierarchyCapture: new FakeHierarchyCapture(() => observation.viewHierarchy!),
+            lastRenderedObservation: () => observation,
+            accessibilityDetector: new FakeAccessibilityDetector(),
+          };
+          const action =
+            kind === "tapOn"
+              ? new TapOnElement(android, executor, deps)
+              : new TapAnyElement(android, executor as unknown as AdbClient, deps);
+          action.observeScreen = observe;
+          if (failure === "abort before dispatch") {
+            controller.abort(new Error(OPERATION_CANCELLED_MESSAGE));
+          }
+          const pending =
+            action instanceof TapOnElement
+              ? action.execute(
+                  { text: "Settings", action: "doubleTap", display: "external" },
+                  undefined,
+                  controller.signal,
+                )
+              : action.execute(
+                  { action: "doubleTap", display: "external" },
+                  undefined,
+                  controller.signal,
+                );
+          const partial =
+            failure === "abort in gap" ||
+            failure === "display change in gap" ||
+            failure === "second tap post-send failure";
+          if (failure === "abort before dispatch" && kind === "tapAny") {
+            await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+            await expect(pending).rejects.not.toThrow(/indeterminate|partially applied/i);
+          } else {
+            const result = await pending;
+            expect(result.success).toBe(failure === "pre-dispatch fallback");
+            if (partial) {
+              expect(result.error).toContain("Tap outcome is indeterminate");
+              expect(result.error).toContain(
+                "Double tap partially applied: one tap was delivered; the second tap was not confirmed",
+              );
+              expect(result.error).toContain("Do not retry automatically");
+              expect(result.error).not.toContain("2 taps were delivered");
+              expect(result.error).toContain(
+                failure === "abort in gap"
+                  ? OPERATION_CANCELLED_MESSAGE
+                  : failure === "display change in gap"
+                    ? "Display changed"
+                    : "Tap timed out after send",
+              );
+            } else if (failure !== "pre-dispatch fallback") {
+              expect(result.error).toContain(
+                failure === "abort before dispatch"
+                  ? OPERATION_CANCELLED_MESSAGE
+                  : "Stale frame context",
+              );
+              expect(result.error).not.toMatch(/indeterminate|partially applied/i);
+            }
+          }
+          expect(tapsDelivered).toBe(partial || failure === "pre-dispatch fallback" ? 1 : 0);
+          expect(tap.mock.calls).toHaveLength(
+            failure === "abort before dispatch"
+              ? 0
+              : failure === "second tap post-send failure" || failure === "pre-dispatch fallback"
+                ? 2
+                : 1,
+          );
+          expect(
+            executor.getExecutedCommands().filter((command) => command.includes("touchscreen")),
+          ).toEqual(
+            failure === "pre-dispatch fallback" ? ["shell input touchscreen -d 2 tap 50 60"] : [],
+          );
+          if (partial) {
+            expect(timer.getSleepHistory()).toContain(DOUBLE_TAP_GAP_MS);
+          }
+        } finally {
+          gap.mockRestore();
+          tap.mockRestore();
+          capability.mockRestore();
+        }
+      });
+    }
+  }
 });

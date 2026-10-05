@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { inputDurationArgument } from "./touchscreenInput";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
@@ -163,7 +164,7 @@ export async function androidDisplayTapDispatch(
 ): Promise<(point: { x: number; y: number }) => Promise<void>> {
   const { target, signal, timer = defaultTimer } = context;
   const useCtrlProxy = await supportsCtrlProxyGestureDisplay(client, target.displayId);
-  const dispatch = async ({ x, y }: { x: number; y: number }) => {
+  const dispatch = async ({ x, y }: { x: number; y: number }, onTapDelivered: () => void) => {
     throwIfAborted(signal);
     target.assertCurrent();
     const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
@@ -184,9 +185,11 @@ export async function androidDisplayTapDispatch(
         target.displayId === 0 ? undefined : target.displayId,
         target.assertCurrent,
       );
+      if (result.success) {
+        onTapDelivered();
+      }
       throwIfAborted(signal);
       if (result.success) {
-        context.onDispatched();
         return;
       }
       if (dispatched) {
@@ -212,16 +215,30 @@ export async function androidDisplayTapDispatch(
           options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
       },
     );
-    context.onDispatched();
+    onTapDelivered();
     throwIfAborted(signal);
   };
   return async (point) => {
-    await dispatch(point);
-    if (options.action === "doubleTap") {
-      await awaitWhileRequestIsLive(timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-      throwIfAborted(signal);
-      target.assertCurrent();
-      await dispatch(point);
+    let tapsDelivered = 0;
+    const onTapDelivered = () => {
+      tapsDelivered++;
+      context.onDispatched();
+    };
+    try {
+      await dispatch(point, onTapDelivered);
+      if (options.action === "doubleTap") {
+        await awaitWhileRequestIsLive(timer.sleep(DOUBLE_TAP_GAP_MS), signal);
+        throwIfAborted(signal);
+        target.assertCurrent();
+        await dispatch(point, onTapDelivered);
+      }
+    } catch (error) {
+      if (options.action === "doubleTap" && tapsDelivered === 1) {
+        throw indeterminateTapError(
+          `${errorMessage(error)}. Double tap partially applied: one tap was delivered; the second tap was not confirmed`,
+        );
+      }
+      throw error;
     }
   };
 }

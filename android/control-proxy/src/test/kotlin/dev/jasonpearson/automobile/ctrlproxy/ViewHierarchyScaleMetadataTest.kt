@@ -26,6 +26,26 @@ class ViewHierarchyScaleMetadataTest {
   private val lenientJson = Json { ignoreUnknownKeys = true }
 
   @Test
+  fun `incomplete reason is omitted when null even with encoded defaults`() {
+    val encoded = wireJson.encodeToJsonElement(ViewHierarchy.serializer(), ViewHierarchy())
+    assertTrue(encoded is kotlinx.serialization.json.JsonObject)
+    assertTrue("ctrlProxyIncompleteReason" !in (encoded as kotlinx.serialization.json.JsonObject))
+  }
+
+  @Test
+  fun `incomplete reason is emitted when set`() {
+    val hierarchy =
+      ViewHierarchy(ctrlProxyIncomplete = true, ctrlProxyIncompleteReason = "app_window_null_root")
+    val encoded =
+      wireJson.encodeToJsonElement(ViewHierarchy.serializer(), hierarchy)
+        as kotlinx.serialization.json.JsonObject
+    assertEquals(
+      kotlinx.serialization.json.JsonPrimitive("app_window_null_root"),
+      encoded["ctrlProxyIncompleteReason"],
+    )
+  }
+
+  @Test
   fun `scale metadata serializes on the wire when present`() {
     val hierarchy =
       ViewHierarchy(

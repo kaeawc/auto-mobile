@@ -2019,10 +2019,104 @@ class ViewHierarchyExtractorTest {
     val result = extractor.extractFromAllWindows(windows, null, occlusionEnabled = false)
 
     assertEquals(true, result.ctrlProxyIncomplete)
+    // All three causes hold; active-window withholding takes precedence.
+    assertEquals("active_window_null_root", result.ctrlProxyIncompleteReason)
     assertNull(result.packageName)
     assertNotNull(result.hierarchy)
     val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
     assertTrue(serialized.contains("com.android.systemui:id/clock"))
+  }
+
+  @Test
+  fun `active null root wins even when an app window is readable`() {
+    val app = fakeNode(packageName = "example.app", text = "Readable")
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(1, 0, app, focused = true),
+          fakeWindow(2, 1, null, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+        ),
+        null,
+        occlusionEnabled = false,
+      )
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals("active_window_null_root", result.ctrlProxyIncompleteReason)
+  }
+
+  @Test
+  fun `selected app null root wins over no accessible app window`() {
+    val bar = fakeNode(packageName = "com.android.systemui", text = "Clock")
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(1, 1, bar, type = AccessibilityWindowInfo.TYPE_SYSTEM, active = true),
+          fakeWindow(2, 0, null, focused = true),
+        ),
+        null,
+        occlusionEnabled = false,
+      )
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals("app_window_null_root", result.ctrlProxyIncompleteReason)
+  }
+
+  @Test
+  fun `non SystemUI foreground without app windows reports no app root`() {
+    val overlay = fakeNode(packageName = "example.overlay", text = "Overlay")
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(
+            1,
+            0,
+            overlay,
+            type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+            active = true,
+          )
+        ),
+        null,
+        occlusionEnabled = false,
+      )
+    assertEquals("example.overlay", result.packageName)
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals("no_app_window_root", result.ctrlProxyIncompleteReason)
+  }
+
+  @Test
+  fun `complete app capture omits incompleteness metadata`() {
+    val app = fakeNode(packageName = "example.app", text = "Readable")
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(fakeWindow(1, 0, app, focused = true, active = true)),
+        null,
+        occlusionEnabled = false,
+      )
+    assertNotNull(result.hierarchy)
+    assertNull(result.ctrlProxyIncomplete)
+    assertNull(result.ctrlProxyIncompleteReason)
+  }
+
+  @Test
+  fun `SystemUI foreground without app windows remains complete`() {
+    val shade = fakeNode(packageName = "com.android.systemui", text = "Notifications")
+    val result =
+      extractor.extractFromAllWindows(
+        listOf(
+          fakeWindow(
+            1,
+            0,
+            shade,
+            type = AccessibilityWindowInfo.TYPE_SYSTEM,
+            focused = true,
+            active = true,
+          )
+        ),
+        null,
+        occlusionEnabled = false,
+      )
+    assertEquals("com.android.systemui", result.packageName)
+    assertNotNull(result.hierarchy)
+    assertNull(result.ctrlProxyIncomplete)
+    assertNull(result.ctrlProxyIncompleteReason)
   }
 
   @Test

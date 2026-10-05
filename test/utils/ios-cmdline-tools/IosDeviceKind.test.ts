@@ -1,11 +1,30 @@
 import { describe, expect, test } from "bun:test";
-import { resolveIosDeviceKind } from "../../../src/utils/ios-cmdline-tools/IosDeviceKind";
+import {
+  resolveIosColdAppCheckKind,
+  resolveIosDeviceKind,
+} from "../../../src/utils/ios-cmdline-tools/IosDeviceKind";
 import { SimulatorTccSqliteClient } from "../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const simulatorUdid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
 describe("IosDeviceKind", () => {
+  test.each([
+    [simulatorUdid, "simulator"],
+    [simulatorUdid.toLowerCase(), "simulator"],
+    ["00008030-001C2D3E1234567A", "physical"],
+    ["00008030-001c2d3e1234567a", "physical"],
+    ["a".repeat(40), "physical"],
+    ["unrecognized-device", undefined],
+    ["booted", undefined],
+    ["emulator-5554", undefined],
+    ["", undefined],
+    [` ${simulatorUdid}`, undefined],
+    ["G1B2C3D4-E5F6-7890-ABCD-EF1234567890", undefined],
+  ] as const)("resolves cold app-check kind for %s", (deviceId, kind) => {
+    expect(resolveIosColdAppCheckKind({ deviceId })).toBe(kind);
+  });
+
   test.each([
     [simulatorUdid, "simulator"],
     [simulatorUdid.toLowerCase(), "simulator"],

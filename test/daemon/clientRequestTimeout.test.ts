@@ -12,6 +12,7 @@ import {
   MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_INSTALL_APP_MCP_TIMEOUT_MS,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
   resolveMcpRequestTimeoutMs,
   clampCallerMcpRequestTimeoutMs,
@@ -129,6 +130,26 @@ describe("DaemonClient per-request timeout", () => {
       const timeoutErr = err as McpTimeoutError;
       expect(timeoutErr.toolName).toBe("uninstallApp");
       expect(timeoutErr.timeoutMs).toBe(MIN_UNINSTALL_APP_MCP_TIMEOUT_MS);
+      expect(timeoutErr.origin).toBe("DaemonClient.sendRequest");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("installApp uses MIN_INSTALL_APP_MCP_TIMEOUT_MS", async () => {
+    const client = createConnectedClient(fakeTimer);
+
+    const promise = client.callTool("installApp", { artifactPath: "/fake/app.apk" });
+    fakeTimer.advanceTime(MIN_INSTALL_APP_MCP_TIMEOUT_MS + DAEMON_RESPONSE_GRACE_MS);
+
+    try {
+      await promise;
+      expect.unreachable("should have timed out");
+    } catch (err) {
+      expect(err).toBeInstanceOf(McpTimeoutError);
+      const timeoutErr = err as McpTimeoutError;
+      expect(timeoutErr.toolName).toBe("installApp");
+      expect(timeoutErr.timeoutMs).toBe(MIN_INSTALL_APP_MCP_TIMEOUT_MS);
       expect(timeoutErr.origin).toBe("DaemonClient.sendRequest");
     } finally {
       await client.close();

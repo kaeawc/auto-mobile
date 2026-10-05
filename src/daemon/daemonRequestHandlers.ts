@@ -1,5 +1,9 @@
 import { isSessionReleasing } from "./sessionReleaseState";
-import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
+import {
+  cancelAndReleaseSession,
+  releaseSessionAndDevice,
+  type SessionExecutionCanceller,
+} from "./releaseSessionAndDevice";
 import type { DeviceHealthMarker } from "./deviceHealthMarkers";
 import { z } from "zod";
 import {
@@ -174,6 +178,7 @@ async function handleRegisterSession(
 export async function handleDaemonRequest(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  executions?: SessionExecutionCanceller,
 ): Promise<DaemonMethodResult> {
   if (!request.method.startsWith("daemon/")) {
     return {
@@ -218,7 +223,7 @@ export async function handleDaemonRequest(
     case "daemon/activeSessions":
       return handleActiveSessions(request, state);
     case "daemon/releaseSession":
-      return handleReleaseSession(request, state);
+      return handleReleaseSession(request, state, executions);
     case DAEMON_LIST_DEVICE_SESSIONS_METHOD:
       return handleListDeviceSessions(request, state);
     default:
@@ -466,6 +471,7 @@ async function handleActiveSessions(
 async function handleReleaseSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  executions?: SessionExecutionCanceller,
 ): Promise<DaemonMethodResult> {
   const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
   if (!sessionId) {
@@ -496,7 +502,7 @@ async function handleReleaseSession(
       },
     };
   }
-  return releaseBoundSession(state, manager, sessionId, session);
+  return releaseBoundSession(state, manager, sessionId, session, executions);
 }
 
 async function releaseBoundSession(
@@ -504,17 +510,23 @@ async function releaseBoundSession(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
   session: Session | null | undefined,
+  executions: SessionExecutionCanceller = executionTracker,
 ): Promise<DaemonMethodResult> {
   const pool = state.getDevicePool();
   // A failed terminal write hides routing identity while retaining ownership.
   let deviceId =
     session?.assignedDevice ?? manager.getTerminalReleaseSnapshot?.(sessionId)?.deviceId ?? null;
-  await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
-    release: async () => {
-      deviceId = await manager.releaseSession(sessionId);
-      return deviceId;
-    },
-  });
+  const release = () =>
+    releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {
+      release: async () => {
+        deviceId = await manager.releaseSession(sessionId);
+        return deviceId;
+      },
+    });
+  // Preserve the idle path's timing: no cancellation await when there is no work.
+  await (executions.hasActiveSessionUuidExecutions(sessionId)
+    ? cancelAndReleaseSession(sessionId, "explicit-release", release, executions)
+    : release());
   return {
     success: true,
     result: {

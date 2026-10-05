@@ -20,6 +20,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { ExecutionTracker } from "../../src/server/executionTracker";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -589,7 +590,87 @@ describe("handleDaemonRequest", () => {
     expect(response.error).toBe("sessionId parameter required");
   });
 
-  test("releases session and device", async () => {
+  test.each([false, true])(
+    "release aborts only its session before freeing the device (execution ends on abort=%s)",
+    async (endOnAbort) => {
+      const timer = new FakeTimer();
+      const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+      const sessionId = "session-release-active";
+      const deviceId = "emulator-5556";
+      await sessionManager.createSession(sessionId, deviceId, "android");
+      const execution = tracker.startExecution("executePlan", undefined, sessionId);
+      const other = tracker.startExecution("executePlan", undefined, "other-session");
+      const order: string[] = [];
+      execution.abortController.signal.addEventListener("abort", () => {
+        order.push("abort");
+        if (endOnAbort) {
+          tracker.endExecution(execution.id);
+        }
+      });
+      const pool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
+      const free = spyOn(pool, "releaseDevice").mockImplementation(async () => {
+        expect(execution.abortController.signal.aborted).toBe(true);
+        order.push("free");
+      });
+      try {
+        expect(
+          await handleDaemonRequest(
+            buildRequest("daemon/releaseSession", { sessionId }),
+            new FakeDaemonState(sessionManager, pool),
+            tracker,
+          ),
+        ).toEqual({
+          success: true,
+          result: {
+            message: `Session ${sessionId} released`,
+            device: deviceId,
+            alreadyReleased: false,
+          },
+        });
+        expect(order).toEqual(["abort", "free"]);
+        expect(free.mock.calls).toEqual([[deviceId, sessionId]]);
+        expect(tracker.hasActiveSessionUuidExecutions(sessionId)).toBe(!endOnAbort);
+        expect(other.abortController.signal.aborted).toBe(false);
+        // Immediate release never installs a drain deadline, even if work ignores abort.
+        expect(timer.getPendingTimeouts()).toEqual([]);
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        tracker.endExecution(execution.id);
+        tracker.endExecution(other.id);
+        free.mockRestore();
+      }
+    },
+  );
+
+  test("unknown session release stays idempotent without cancelling or waiting", async () => {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    const cancel = spyOn(tracker, "cancelSessionUuidExecutions");
+    const pool = new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 });
+    try {
+      expect(
+        await handleDaemonRequest(
+          buildRequest("daemon/releaseSession", { sessionId: "missing" }),
+          new FakeDaemonState(sessionManager, pool),
+          tracker,
+        ),
+      ).toEqual({
+        success: true,
+        result: {
+          message: "Session missing already released or never existed",
+          alreadyReleased: true,
+        },
+      });
+      expect(cancel).not.toHaveBeenCalled();
+      expect(pool.releasedDevices).toEqual([]);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    } finally {
+      cancel.mockRestore();
+    }
+  });
+
+  test("releases session and device without a cancellation await when idle", async () => {
     const devicePool = new FakeDevicePool({
       total: 1,
       idle: 0,
@@ -602,10 +683,23 @@ describe("handleDaemonRequest", () => {
     const deviceId = "emulator-5556";
     await sessionManager.createSession(sessionId, deviceId, "android");
 
-    const response = await handleDaemonRequest(
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+    const cancel = spyOn(tracker, "cancelSessionUuidExecutions");
+    const release = spyOn(sessionManager, "releaseSession");
+    const pending = handleDaemonRequest(
       buildRequest("daemon/releaseSession", { sessionId }),
       state,
+      tracker,
     );
+    // The manager is reached synchronously, as before: no idle cancellation await.
+    expect(release).toHaveBeenCalledWith(sessionId);
+    const response = await pending;
+    expect(cancel).not.toHaveBeenCalled();
+    expect(timer.getPendingTimeouts()).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+    cancel.mockRestore();
+    release.mockRestore();
 
     expect(response.success).toBe(true);
     expect(response.result).toEqual({

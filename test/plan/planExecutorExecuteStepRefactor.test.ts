@@ -1,9 +1,12 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
+import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { z } from "zod/v4";
 import { Plan } from "../../src/models/Plan";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
+import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
@@ -78,6 +81,62 @@ describe("PlanExecutor executeStep refactor", () => {
       "executeStepRefactorDeviceLost",
       "executeStepRefactorAbortWait",
     );
+  });
+
+  test("a sibling failure aborts a parked barrier without advancing its timeout", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = preserveToolRegistry();
+    const started = Promise.withResolvers<void>();
+    ToolRegistry.register(
+      "barrier",
+      "Fake barrier",
+      z.object({ device: z.string() }),
+      async (_params, _progress, signal) => {
+        const pending = coordinator.awaitBarrier("plan-abort", "B", 2, 120000, undefined, signal);
+        started.resolve();
+        await pending;
+        return createStructuredToolResponse({ success: true });
+      },
+    );
+    ToolRegistry.register(
+      "executeStepRefactorFail",
+      "Fail after sibling parked",
+      z.object({ device: z.string() }),
+      async () => {
+        await started.promise;
+        return createStructuredToolResponse({ success: false, error: "button missing" });
+      },
+    );
+    let settled = false;
+    const pending = new DefaultPlanExecutor(timer)
+      .executePlan(
+        {
+          name: "parked barrier abort",
+          devices: ["A", "B"],
+          steps: [
+            { tool: "executeStepRefactorFail", params: { device: "A" } },
+            { tool: "barrier", params: { device: "B" } },
+          ],
+        },
+        0,
+        "android",
+      )
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await drainMicrotasks(100);
+    try {
+      expect(settled).toBe(true);
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      expect((await pending).success).toBe(false);
+    } finally {
+      coordinator.forceCleanup("plan-abort");
+      await pending;
+      restore();
+    }
   });
 
   test("successes share normalized params through sequential and device-track execution", async () => {

@@ -54,7 +54,9 @@ import {
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
 
-const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
+import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
+
+export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
 const IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS = 200;
 

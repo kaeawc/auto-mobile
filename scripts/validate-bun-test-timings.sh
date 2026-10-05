@@ -23,7 +23,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-# shellcheck source=scripts/lib/bun-unit-test.sh
+# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 runner_os="${RUNNER_OS:-}"
 if [[ -z "$runner_os" && "$(uname -s)" == Darwin ]]; then
@@ -358,12 +358,15 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
       # Per-test timeouts do not bound a whole file (hooks/many tests can
       # exceed them). Bound this process by the remaining recheck allowance so
       # the validator, rather than the CI job timeout, prints the verdict.
-      recheck_status=0
+      # Invoke separately so the function is not in an errexit-suppressed condition.
+      set +e
       run_with_timeout "$((recheck_budget_seconds - elapsed_seconds))" \
         "${BUN_UNIT_TEST_COMMAND[@]}" \
         --reporter junit \
         --reporter-outfile "$recheck_report" \
-        "$file" || recheck_status=$?
+        "$file"
+      recheck_status=$?
+      set -e
       if [[ "$recheck_status" -eq 124 || "$recheck_status" -eq 137 ]]; then
         # GNU timeout returns 137 if its two-second KILL escalation is needed.
         file_complete=false

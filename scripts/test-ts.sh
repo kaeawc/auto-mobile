@@ -47,7 +47,7 @@ if [[ "$default_workers" -lt 2 ]]; then
 fi
 
 unit_workers="${AUTOMOBILE_UNIT_TEST_WORKERS:-$default_workers}"
-# shellcheck source=scripts/lib/bun-unit-test.sh
+# shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
 source "$ROOT/scripts/lib/bun-unit-test.sh"
 per_test_timeout_ms="$(bun_test_timeout_ms "$runner_os")"
 case "$mode" in

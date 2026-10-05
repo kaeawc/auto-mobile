@@ -764,6 +764,75 @@ describe("videoRecording tool segmentation branch", () => {
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("a failed manager-owned rotation is force-cleaned before a fresh recording", async () => {
+    const originalStop = fakeBackend.stop.bind(fakeBackend);
+    let stops = 0;
+    fakeBackend.stop = async (handle) => {
+      if (++stops === 1) {
+        throw new Error("device disconnected during stop");
+      }
+      return originalStop(handle);
+    };
+    await handler()(androidDevice, { action: "start", platform: "android", maxDuration: 600 });
+    await segmentTimer.advanceTimeAsync(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
+    await waitFor(
+      () => segmentTimer.getPendingTimeoutCount() === 1,
+      "manager stop failure halts rotation",
+    );
+    // No segment completed: the tool keeps its existing empty-result error, but
+    // the session still finalizes, force-cleans its capture, and drops its registry entry.
+    await expect(handler()(androidDevice, { action: "stop", platform: "android" })).rejects.toThrow(
+      "Failed to stop video recordings",
+    );
+    expect(fakeBackend.forceStopCalls).toEqual([fakeBackend.startResults[0]]);
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+    await handler()(androidDevice, { action: "start", platform: "android" });
+    expect(
+      parse(await handler()(androidDevice, { action: "stop", platform: "android" })).count,
+    ).toBe(1);
+  });
+
+  test("a rotation stop failure returns partial video, drops the registry entry, and permits a fresh plain recording", async () => {
+    let starts = 0;
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async (request) =>
+        makeSegmentRecording(`degraded-${++starts}`, request.outputName),
+      stopVideoRecording: async (id) => {
+        if (id === "degraded-2") {
+          throw new Error("rotation pull failed");
+        }
+        return { metadata: makeSegmentMetadata(id ?? "missing"), evictedRecordingIds: [] };
+      },
+    });
+    await handler()(androidDevice, { action: "start", platform: "android", maxDuration: 600 });
+    segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
+    await waitFor(() => starts === 2, "second segment");
+    await drainMicrotasks();
+    segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
+    await waitFor(
+      () => segmentTimer.getPendingTimeoutCount() === 1,
+      "rotation halted with duration bound",
+    );
+    const stopped = parse(await handler()(androidDevice, { action: "stop", platform: "android" }));
+    expect(stopped.recordings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          recordingId: "degraded-1",
+          warnings: expect.arrayContaining([expect.stringContaining("rotation pull failed")]),
+        }),
+      ]),
+    );
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+    // The second bare stop now reaches the ordinary manager's no-active-recording path.
+    await expect(handler()(androidDevice, { action: "stop", platform: "android" })).rejects.toThrow(
+      "No active video recording",
+    );
+    await handler()(androidDevice, { action: "start", platform: "android" });
+    const fresh = parse(await handler()(androidDevice, { action: "stop", platform: "android" }));
+    expect(fresh.count).toBe(1);
+    expect(fresh.segmented).toBeUndefined();
+  });
+
   test("bare (by-device) stop finalizes the segmented session and leaves no rotation timer", async () => {
     const highlightRequests: unknown[] = [];
     const firstHighlight = {
@@ -926,7 +995,7 @@ describe("videoRecording tool segmentation branch", () => {
     resetVideoRecordingManagerDependencies();
 
     // Advance past the maxDuration bound (rotation at 170s, then auto-stop at 181s).
-    segmentTimer.advanceTime(181_000);
+    await segmentTimer.advanceTimeAsync(181_000);
     await waitFor(
       () => segmentStops.length === 2,
       "auto-stop to finalize both segments of the first session",

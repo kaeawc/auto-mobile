@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
+  getVideoRecordingMetadata as defaultGetVideoRecordingMetadata,
   rollbackVideoRecordingStart as defaultRollbackVideoRecordingStart,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
@@ -33,6 +34,8 @@ interface SegmentedSessionResult {
   recordingIds: string[];
   metadata: VideoRecordingMetadata[];
   highlights?: VideoRecordingHighlightEntry[];
+  /** Failures when no completed segment can carry metadata.warnings. */
+  warnings?: string[];
 }
 
 export interface AndroidSegmentedPlanVideoSessionOptions {
@@ -70,6 +73,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   stopVideoRecording?: (
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
+  getVideoRecordingMetadata?: typeof defaultGetVideoRecordingMetadata;
   rollbackVideoRecordingStart?: (recordingId: string) => Promise<void>;
 }
 
@@ -132,6 +136,12 @@ export class AndroidSegmentedPlanVideoSession {
 
   private stopPromise: Promise<SegmentedSessionResult> | undefined;
 
+  private stopping = false;
+  private rotationHalted = false;
+  private gapStartedAtMs: number | undefined;
+  private readonly warnings: string[] = [];
+  private readonly getVideoRecordingMetadataFn: typeof defaultGetVideoRecordingMetadata;
+
   private segmentIndex = 0;
 
   private segmentStartedAtMs = 0;
@@ -145,9 +155,6 @@ export class AndroidSegmentedPlanVideoSession {
 
   /** IDs whose stop failed during rotation and still need rollback on abort. */
   private readonly pendingRollbackRecordingIds: string[] = [];
-
-  /** Errors from failed segment stops, retained for a failed finalization report. */
-  private readonly pendingRollbackErrors: unknown[] = [];
 
   private readonly startVideoRecordingFn: (
     request: Parameters<typeof defaultStartVideoRecording>[0],
@@ -174,6 +181,8 @@ export class AndroidSegmentedPlanVideoSession {
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
+    this.getVideoRecordingMetadataFn =
+      options.getVideoRecordingMetadata ?? defaultGetVideoRecordingMetadata;
     this.rollbackVideoRecordingStartFn =
       options.rollbackVideoRecordingStart ?? defaultRollbackVideoRecordingStart;
   }
@@ -284,12 +293,15 @@ export class AndroidSegmentedPlanVideoSession {
   }
 
   private async stopInternal(): Promise<SegmentedSessionResult> {
+    this.stopping = true;
     this.timerDriven = false;
     this.clearTimers();
-    await this.pendingRotation;
-    const result = await this.finalize();
-    this.notifyFinalized();
-    return result;
+    try {
+      await this.pendingRotation;
+      return await this.finalizeSegments();
+    } finally {
+      this.notifyFinalized();
+    }
   }
 
   /**
@@ -297,6 +309,7 @@ export class AndroidSegmentedPlanVideoSession {
    * owned by this session is force-stopped and removed from durable metadata.
    */
   async abort(): Promise<void> {
+    this.stopping = true;
     this.timerDriven = false;
     this.clearTimers();
     this.sessionAbortController.abort();
@@ -324,7 +337,8 @@ export class AndroidSegmentedPlanVideoSession {
     this.completedFilePaths.splice(0);
     this.completedHighlights.splice(0);
     this.pendingRollbackRecordingIds.splice(0);
-    this.pendingRollbackErrors.splice(0);
+    this.warnings.splice(0);
+    this.gapStartedAtMs = undefined;
     this.notifyFinalized();
   }
 
@@ -353,12 +367,12 @@ export class AndroidSegmentedPlanVideoSession {
    */
   onBeforePlanStep = async (context?: PlanStepLifecycleContext): Promise<void> => {
     context?.signal?.throwIfAborted();
-    if (!this.activeRecordingId) {
+    if (this.stopping || this.rotationHalted || this.segmentIndex === 0) {
       return;
     }
 
     const elapsed = this.timer.now() - this.segmentStartedAtMs;
-    if (elapsed < this.segmentRotateAfterMs) {
+    if (this.activeRecordingId && elapsed < this.segmentRotateAfterMs) {
       return;
     }
 
@@ -408,6 +422,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.lastActivePanel ??= recording.recordedPanel;
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();
+    this.recordGap(this.segmentStartedAtMs);
     this.segmentIndex += 1;
     logger.info(
       `[SegmentedPlanVideo] Started segment ${this.segmentIndex} recordingId=${recording.recordingId}`,
@@ -421,7 +436,13 @@ export class AndroidSegmentedPlanVideoSession {
     segmentIndex: number,
   ): void {
     this.completedRecordingIds.push(recordingId);
+    // Keep manager-owned metadata untouched when applying session offsets and warnings.
+    metadata = { ...metadata, warnings: metadata.warnings ? [...metadata.warnings] : undefined };
+    if (this.completedMetadata.length === 0 && this.warnings.length > 0) {
+      metadata.warnings = [...(metadata.warnings ?? []), ...this.warnings];
+    }
     this.completedMetadata.push(metadata);
+    this.gapStartedAtMs = this.timer.now();
     this.lastActivePanel = metadata.transitions?.at(-1)?.to ?? this.lastActivePanel;
     const offsetMs = segmentIndex * this.segmentRotateAfterMs;
     if (metadata.transitions) {
@@ -472,17 +493,7 @@ export class AndroidSegmentedPlanVideoSession {
       );
       return true;
     } catch (error) {
-      logger.warn(
-        `[SegmentedPlanVideo] Failed to stop segment ${previousId} on device ${this.deviceId}: ${errorMessage(error)}`,
-      );
-      this.pendingRollbackRecordingIds.push(previousId);
-      this.pendingRollbackErrors.push(error);
-      if (!timedOut || signal?.aborted) {
-        this.timerDriven = false;
-        this.clearTimers();
-        return false;
-      }
-      return true;
+      return this.handleRotationStopFailure(previousId, error, timedOut, signal);
     } finally {
       if (
         this.rotationAbortController === rotationAbortController &&
@@ -493,28 +504,70 @@ export class AndroidSegmentedPlanVideoSession {
     }
   }
 
+  private async handleRotationStopFailure(
+    previousId: string,
+    error: unknown,
+    timedOut: boolean,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (!timedOut && !signal?.aborted && (await this.recoverStoppedSegment(previousId))) {
+      return true;
+    }
+    this.pendingRollbackRecordingIds.push(previousId);
+    if (signal?.aborted) {
+      // Cancellation is caller-owned; abort rolls back this ID without a video warning.
+      logger.debug(`[SegmentedPlanVideo] Segment ${previousId} stop cancelled`, error);
+      return false;
+    }
+    this.rememberWarning(`Failed to stop segment ${previousId}: ${errorMessage(error)}`);
+    if (!timedOut) {
+      this.rotationHalted = true;
+      this.timerDriven = false;
+      // Halt rotations, but preserve the overall max-duration auto-stop bound.
+      if (this.rotationTimerHandle !== undefined) {
+        this.timer.clearTimeout(this.rotationTimerHandle);
+        this.rotationTimerHandle = undefined;
+      }
+      return false;
+    }
+    return true;
+  }
+
   private async rotateToNextSegment(planSignal?: AbortSignal): Promise<void> {
-    if (!this.activeRecordingId) {
+    if (this.stopping || this.rotationHalted || this.sessionAbortController.signal.aborted) {
       return;
     }
 
     const previousId = this.activeRecordingId;
     const rotationAbortController = new AbortController();
     this.rotationAbortController = rotationAbortController;
-    const signal = combineAbortSignals(
-      planSignal,
-      rotationAbortController.signal,
-      this.sessionAbortController.signal,
-    );
+    const signal =
+      combineAbortSignals(
+        planSignal,
+        rotationAbortController.signal,
+        this.sessionAbortController.signal,
+      ) ?? rotationAbortController.signal;
     try {
-      if (!(await this.stopSegmentForRotation(previousId, rotationAbortController, signal))) {
+      if (
+        previousId &&
+        !(await this.stopSegmentForRotation(previousId, rotationAbortController, signal))
+      ) {
         return;
       }
+      if (this.stopping) {
+        return;
+      }
+      signal.throwIfAborted();
       await this.startSegment(signal);
     } catch (error) {
-      logger.warn(
-        `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`,
-      );
+      if (signal.aborted) {
+        // An aborted start is rolled back by its owner and is not a capture defect.
+        logger.debug("[SegmentedPlanVideo] Replacement start cancelled", error);
+      } else {
+        this.rememberWarning(
+          `Video truncated: failed to start next segment after ${previousId ?? "gap"}: ${errorMessage(error)}`,
+        );
+      }
     } finally {
       if (this.rotationAbortController === rotationAbortController) {
         this.rotationAbortController = undefined;
@@ -526,36 +579,110 @@ export class AndroidSegmentedPlanVideoSession {
    * Stops the active segment (if any) and returns every finished file path and recording id.
    */
   async finalize(): Promise<SegmentedSessionResult> {
+    return this.stop();
+  }
+
+  private rememberWarning(warning: string): void {
+    logger.warn(`[SegmentedPlanVideo] ${warning}`);
+    this.warnings.push(warning);
+    const adjacent = this.completedMetadata.at(-1);
+    if (adjacent) {
+      adjacent.warnings = [...(adjacent.warnings ?? []), warning];
+    }
+  }
+
+  private recordGap(endMs: number): void {
+    if (this.gapStartedAtMs !== undefined && endMs > this.gapStartedAtMs) {
+      this.rememberWarning(
+        `Video gap: ${endMs - this.gapStartedAtMs}ms without capture between segments or before finalization`,
+      );
+    }
+    this.gapStartedAtMs = undefined;
+  }
+
+  private async recoverStoppedSegment(recordingId: string): Promise<boolean> {
+    try {
+      // The manager returns null for missing/still-recording IDs. Archived metadata
+      // also covers interrupted recordings; preserve any warnings about their truncation.
+      const metadata = await this.getVideoRecordingMetadataFn(recordingId, {
+        touch: false,
+        ownerSessionUuid: this.ownerSessionUuid,
+      });
+      if (!metadata) {
+        return false;
+      }
+      this.recordStoppedSegment(recordingId, metadata, this.segmentIndex - 1);
+      const durationMs =
+        metadata.durationMs ?? Date.parse(metadata.endedAt ?? "") - Date.parse(metadata.startedAt);
+      if (Number.isFinite(durationMs)) {
+        this.gapStartedAtMs = Math.min(
+          this.timer.now(),
+          this.segmentStartedAtMs + Math.max(0, durationMs),
+        );
+      } else {
+        this.rememberWarning(`Video gap before recovery of ${recordingId}: duration unavailable`);
+      }
+      this.rememberWarning(
+        `Segment ${recordingId} ended before session stop; recovered archived video`,
+      );
+      return true;
+    } catch (error) {
+      this.rememberWarning(
+        `Failed to look up stopped segment ${recordingId}: ${errorMessage(error)}`,
+      );
+      return false;
+    }
+  }
+
+  private async cleanupIncompleteSegment(recordingId: string): Promise<void> {
+    try {
+      await this.rollbackVideoRecordingStartFn(recordingId);
+      const index = this.pendingRollbackRecordingIds.indexOf(recordingId);
+      if (index !== -1) {
+        this.pendingRollbackRecordingIds.splice(index, 1);
+      }
+    } catch (error) {
+      this.rememberWarning(
+        `Failed to clean up incomplete segment ${recordingId}: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  private async finalizeSegments(): Promise<SegmentedSessionResult> {
+    // An ordinary stop failure halts rotation with this last segment still eligible
+    // for manager auto-stop. Recover its archive before discarding an incomplete capture.
+    if (this.rotationHalted) {
+      const id = this.pendingRollbackRecordingIds.at(-1);
+      if (id && !(await this.recoverStoppedSegment(id))) {
+        await this.cleanupIncompleteSegment(id);
+      }
+    }
     if (this.activeRecordingId) {
       const id = this.activeRecordingId;
       try {
         const stopped = await this.stopVideoRecordingFn(id);
         this.recordStoppedSegment(id, stopped.metadata, this.segmentIndex - 1);
-        this.activeRecordingId = undefined;
-        logger.info(
-          `[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`,
-        );
       } catch (error) {
-        logger.warn(
-          `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`,
-        );
-        this.pendingRollbackRecordingIds.push(id);
-        throw error;
+        if (!(await this.recoverStoppedSegment(id))) {
+          this.rememberWarning(
+            `Video truncated: failed to finalize segment ${id}: ${errorMessage(error)}`,
+          );
+          this.pendingRollbackRecordingIds.push(id);
+          await this.cleanupIncompleteSegment(id);
+        }
+      } finally {
+        this.activeRecordingId = undefined;
       }
     }
-
-    if (this.pendingRollbackErrors.length > 0) {
-      throw new AggregateError(
-        this.pendingRollbackErrors,
-        "Failed to finalize every segmented recording",
-      );
-    }
-
+    this.recordGap(this.timer.now());
     return {
       filePaths: [...this.completedFilePaths],
       recordingIds: [...this.completedRecordingIds],
       metadata: [...this.completedMetadata],
       highlights: this.completedHighlights.length > 0 ? [...this.completedHighlights] : undefined,
+      ...(this.completedMetadata.length === 0 && this.warnings.length > 0
+        ? { warnings: [...this.warnings] }
+        : {}),
     };
   }
 }

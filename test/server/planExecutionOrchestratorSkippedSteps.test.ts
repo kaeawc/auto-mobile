@@ -89,3 +89,41 @@ test.each([{ skippedSteps: undefined }, { skippedSteps: [] }])(
     expect(await run()).not.toHaveProperty("skippedSteps");
   },
 );
+
+test("failed criticalSection warnings reach the response without captureObserveSteps", async () => {
+  const warnings = [
+    { stepIndex: 0, tool: "sendKeys", warnings: ["keyboard dismissal failed"] },
+    {
+      stepIndex: 1,
+      tool: "criticalSection",
+      device: "A",
+      warnings: [
+        "step 1 (sendKeys): keyboard dismissal failed",
+        "step 2 (tapOn): optional step failed; skipped: element not found",
+      ],
+    },
+  ];
+  const failedStep = {
+    stepIndex: 1,
+    tool: "criticalSection",
+    error: "required sub-step failed",
+    failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
+  };
+  execute.mockResolvedValue({ ...base, success: false, warnings, failedStep });
+  const result = await run();
+  expect(result).toMatchObject({ success: false, warnings, failedStep, error: failedStep.error });
+  expect(result).not.toHaveProperty("debug");
+});
+
+test.each([{ warnings: undefined }, { warnings: [] }])(
+  "failure with no warnings omits the warnings key (%j)",
+  async ({ warnings }) => {
+    execute.mockResolvedValue({
+      ...base,
+      success: false,
+      warnings,
+      failedStep: { stepIndex: 1, tool: "criticalSection", error: "required failure" },
+    });
+    expect(await run()).not.toHaveProperty("warnings");
+  },
+);

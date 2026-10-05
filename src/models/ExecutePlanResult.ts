@@ -82,7 +82,7 @@ export interface ExecutePlanResult {
   deviceId?: string; // The device ID that executed the plan (e.g., "emulator-5554" or "7B3A3792-DB53-4654-BA94-27A1D305C3B7")
   deviceMapping?: Record<string, string>; // Maps device labels to device IDs (e.g., {"A": "emulator-5554", "B": "emulator-5556"})
   debug?: ExecutePlanDebugInfo;
-  /** Best-effort warnings from steps that still succeeded (issue #6868). */
+  /** Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed (issue #6868). */
   warnings?: PlanStepWarnings[];
   /** Failed optional steps, reported regardless of captureObserveSteps. */
   skippedSteps?: PlanSkippedStep[];

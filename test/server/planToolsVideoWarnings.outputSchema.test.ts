@@ -106,7 +106,15 @@ test.each([
     executedSteps: 1,
     totalSteps: 2,
     deviceMapping: { A: "fake-A", B: "fake-B" },
-    failedStep: { stepIndex: 1, tool: "tapOn", error: "B failed" },
+    failedStep: { stepIndex: 1, tool: "criticalSection", error: "B failed" },
+    warnings: [
+      {
+        stepIndex: 1,
+        tool: "criticalSection",
+        device: "B",
+        warnings: ["step 1 (sendKeys): keyboard dismissal failed"],
+      },
+    ],
   },
 ])("executePlan failure keeps its structured and text payload: %j", async (result) => {
   execute = spyOn(PlanExecutionOrchestrator.prototype, "execute").mockResolvedValue(result);
@@ -131,4 +139,11 @@ test("executePlan with nothing to execute remains successful", async () => {
   expect(response.isError).toBeUndefined();
   expect(response.structuredContent).toEqual(result);
   expect(JSON.parse(response.content[0].text!)).toEqual(result);
+});
+
+test("executePlan describes warnings retained from failed and skipped sections", () => {
+  const json = toJSONSchema(ToolRegistry.getTool("executePlan")!.outputSchema!);
+  expect(json.properties?.warnings?.description).toBe(
+    "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
+  );
 });

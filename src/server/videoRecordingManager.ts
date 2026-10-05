@@ -1646,3 +1646,15 @@ async function enforceArchiveLimit(
     maxSizeBytes,
   };
 }
+
+/** Read a recording's status without touching its archive access time. */
+export async function getVideoRecordingStatus(
+  recordingId: string,
+  options?: { ownerSessionUuid?: string },
+): Promise<VideoRecordingRecord["status"] | undefined> {
+  const { recordingRepository } = await getVideoRecordingDependencies();
+  const record = await recordingRepository.getRecording(recordingId, {
+    ownerSessionUuid: options?.ownerSessionUuid,
+  });
+  return record?.status;
+}

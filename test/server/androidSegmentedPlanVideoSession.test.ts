@@ -73,6 +73,9 @@ function makePendingStopSession() {
   );
   const rollback = mock(async (_id: string) => {});
   const session = new AndroidSegmentedPlanVideoSession({
+    ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+    getVideoRecordingStatus: async () => undefined,
+    getVideoRecordingMetadata: async () => null,
     device: androidDevice,
     outputNamePrefix: "bounded",
     timer,
@@ -115,7 +118,17 @@ describe("AndroidSegmentedPlanVideoSession rotation stop deadline", () => {
     await flush();
     expect(start).toHaveBeenCalledTimes(1);
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    await expect(session.stop()).rejects.toThrow("Failed to finalize every segmented recording");
+    const degraded = await session.stop();
+    expect(
+      (degraded.warnings ?? degraded.metadata.flatMap((metadata) => metadata.warnings ?? [])).join(
+        " ",
+      ),
+    ).toContain("id-bounded");
+    expect(
+      (degraded.warnings ?? degraded.metadata.flatMap((metadata) => metadata.warnings ?? [])).join(
+        " ",
+      ),
+    ).toContain("adb stop failed");
     await session.abort();
     expect(rollback.mock.calls.map(([id]) => id)).toEqual(["id-bounded"]);
   });
@@ -149,9 +162,9 @@ describe("AndroidSegmentedPlanVideoSession rotation stop deadline", () => {
             message.includes("timed out"),
         ),
       ).toBe(true);
-      await expect(session.finalize()).rejects.toThrow(
-        "Failed to finalize every segmented recording",
-      );
+      const degraded = await session.finalize();
+      expect(degraded.recordingIds).toEqual(["id-bounded-seg1"]);
+      expect(degraded.metadata[0]?.warnings?.join(" ")).toContain("timed out");
       expect(stop.mock.calls.map(([id]) => id)).toEqual(["id-bounded", "id-bounded-seg1"]);
       expect(Reflect.get(session, "completedRecordingIds")).toEqual(["id-bounded-seg1"]);
       expect(Reflect.get(session, "completedFilePaths")).toEqual(["/tmp/id-bounded-seg1.mp4"]);
@@ -192,9 +205,9 @@ describe("AndroidSegmentedPlanVideoSession rotation stop deadline", () => {
     await flush();
     expect(fields.map((field) => Reflect.get(session, field))).toEqual(snapshot);
     expect(start).toHaveBeenCalledTimes(2);
-    await expect(session.finalize()).rejects.toThrow(
-      "Failed to finalize every segmented recording",
-    );
+    const degraded = await session.finalize();
+    expect(degraded.recordingIds).toEqual(["id-bounded-seg1"]);
+    expect(degraded.metadata[0]?.warnings?.join(" ")).toContain("timed out");
     expect(Reflect.get(session, "completedRecordingIds")).toEqual(["id-bounded-seg1"]);
     expect(Reflect.get(session, "completedFilePaths")).toEqual(["/tmp/id-bounded-seg1.mp4"]);
     await session.abort();
@@ -280,7 +293,15 @@ describe("AndroidSegmentedPlanVideoSession rotation stop deadline", () => {
     await flush();
     expect(start).toHaveBeenCalledTimes(2);
     expect(timer.getPendingTimeouts()).toEqual([1000]);
-    await expect(session.stop()).rejects.toThrow("Failed to finalize every segmented recording");
+    const degraded = await session.stop();
+    expect(
+      (degraded.warnings ?? degraded.metadata.flatMap((metadata) => metadata.warnings ?? [])).join(
+        " ",
+      ),
+    ).toContain("id-bounded");
+    expect(degraded.metadata.flatMap((metadata) => metadata.warnings ?? []).join(" ")).toContain(
+      "timed out",
+    );
     await session.abort();
   });
 });
@@ -289,6 +310,9 @@ describe("AndroidSegmentedPlanVideoSession", () => {
   test("forwards session ownership to every segment", async () => {
     const requests: Array<{ ownerSessionUuid?: string }> = [];
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "owned",
       ownerSessionUuid: "owner-a",
@@ -312,6 +336,9 @@ describe("AndroidSegmentedPlanVideoSession", () => {
     }));
 
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "plan-a",
       startVideoRecording: start,
@@ -329,6 +356,9 @@ describe("AndroidSegmentedPlanVideoSession", () => {
 
   test("matches a booted device by its runtime ID when its name changes", () => {
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "plan-runtime-id",
     });
@@ -372,6 +402,9 @@ describe("AndroidSegmentedPlanVideoSession", () => {
     });
 
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "plan-b",
       timer,
@@ -412,6 +445,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     const recordedPanel = { key: "11", role: "inner" as const };
     const cover = { key: "22", role: "cover" as const };
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "panels",
       timer,
@@ -484,6 +520,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
       };
     });
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -536,6 +575,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     });
 
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -610,6 +652,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     });
     const rolledBack: string[] = [];
     const abortableSession = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -638,6 +683,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     const rolledBack: string[] = [];
     let startCalls = 0;
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -666,9 +714,12 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("rolls back a segment whose auto-finalization stop failed", async () => {
+  test("auto-finalization exposes retained capture without requiring an unreachable abort", async () => {
     const timer = new FakeTimer();
-    const rolledBack: string[] = [];
+    const rollback = mock(async (_id: string) => {});
+    const stop = mock(async () => {
+      throw new Error("final stop failed");
+    });
     const session = new AndroidSegmentedPlanVideoSession({
       device: androidDevice,
       outputNamePrefix: "vid",
@@ -676,60 +727,52 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
       segmentRotateAfterMs: 1000,
       maxDurationSeconds: 0.5,
       startVideoRecording: async () => makeActiveRecording("id-vid", "/tmp/id-vid.mp4"),
-      stopVideoRecording: async () => {
-        throw new Error("final stop failed");
-      },
-      rollbackVideoRecordingStart: async (recordingId) => {
-        rolledBack.push(recordingId);
-      },
+      getVideoRecordingStatus: async () => "recording",
+      getVideoRecordingMetadata: async () => null,
+      stopVideoRecording: stop,
+      rollbackVideoRecordingStart: rollback,
     });
-
     await session.start();
     timer.advanceTime(500);
     await flush();
-    await session.abort();
-
-    expect(rolledBack).toEqual(["id-vid"]);
+    const result = await session.stop();
+    expect(result.warnings?.join(" ")).toContain("id-vid");
+    expect(result.warnings?.join(" ")).toContain("final stop failed");
+    expect(result.warnings?.join(" ")).toContain("stop by recordingId");
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(rollback).not.toHaveBeenCalled();
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("retains ownership until a failed final stop is retried or aborted", async () => {
+  test("notifies finalization once and returns a successful graceful retry", async () => {
     const timer = new FakeTimer();
-    const rolledBack: string[] = [];
-    let finalized = 0;
+    const rollback = mock(async (_id: string) => {});
+    const finalized = mock(() => {});
     let stopAttempts = 0;
     const session = new AndroidSegmentedPlanVideoSession({
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
       startVideoRecording: async () => makeActiveRecording("id-vid", "/tmp/id-vid.mp4"),
+      getVideoRecordingStatus: async () => "recording",
+      getVideoRecordingMetadata: async () => null,
       stopVideoRecording: async () => {
-        stopAttempts += 1;
-        if (stopAttempts === 1) {
+        if (++stopAttempts === 1) {
           throw new Error("final stop failed");
         }
-        return {
-          metadata: makeStopMetadata("id-vid", "/tmp/id-vid.mp4"),
-          evictedRecordingIds: [],
-        };
+        return { metadata: makeStopMetadata("id-vid", "/tmp/id-vid.mp4"), evictedRecordingIds: [] };
       },
-      rollbackVideoRecordingStart: async (recordingId) => {
-        rolledBack.push(recordingId);
-      },
-      onFinalized: () => {
-        finalized += 1;
-      },
+      rollbackVideoRecordingStart: rollback,
+      onFinalized: finalized,
     });
-
     await session.start();
-
-    await expect(session.stop()).rejects.toThrow("final stop failed");
-    expect(finalized).toBe(0);
-
-    await session.abort();
-
-    expect(rolledBack).toEqual(["id-vid"]);
-    expect(finalized).toBe(1);
+    const result = await session.stop();
+    expect(result.recordingIds).toEqual(["id-vid"]);
+    expect(result.metadata[0]?.warnings?.join(" ")).toContain("final stop failed");
+    expect(finalized).toHaveBeenCalledTimes(1);
+    expect(await session.stop()).toEqual(result);
+    expect(stopAttempts).toBe(2);
+    expect(rollback).not.toHaveBeenCalled();
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
@@ -739,6 +782,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     controller.abort(startupError);
     const rollbackError = new Error("rollback failed");
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       startupAbortSignal: controller.signal,
@@ -779,6 +825,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
       clearInterval: defaultTimer.clearInterval.bind(defaultTimer),
     };
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -831,6 +880,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     let startCalls = 0;
     let rotationSignal: AbortSignal | undefined;
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -887,6 +939,9 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     });
 
     const session = new AndroidSegmentedPlanVideoSession({
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
       device: androidDevice,
       outputNamePrefix: "vid",
       timer,
@@ -916,5 +971,534 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     const out = await session.stop();
     expect(out.recordingIds).toEqual(["id-vid", "id-vid-seg1", "id-vid-seg2"]);
     expect(stop).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("segmented recording recovery", () => {
+  function harness(
+    overrides: Partial<ConstructorParameters<typeof AndroidSegmentedPlanVideoSession>[0]> = {},
+  ) {
+    const timer = new FakeTimer();
+    let starts = 0;
+    const start = mock(async () => makeActiveRecording(`r${++starts}`, `/tmp/r${starts}.mp4`));
+    const stop = mock(async (id?: string) => ({
+      metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`),
+      evictedRecordingIds: [],
+    }));
+    const finalized = mock(() => {});
+    const lookup = mock(async (_id: string) => null);
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "recovery",
+      timer,
+      startVideoRecording: start,
+      stopVideoRecording: stop,
+      rollbackVideoRecordingStart: async () => {},
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: lookup,
+      onFinalized: finalized,
+      ...overrides,
+    });
+    return { session, timer, start, stop, finalized, lookup };
+  }
+
+  test("a long step recovers an auto-stopped segment and reports the gap before resuming", async () => {
+    const lookup = mock(async (id: string) => ({
+      ...makeStopMetadata(id, `/tmp/${id}.mp4`),
+      durationMs: 180000,
+    }));
+    const { session, timer } = harness({
+      getVideoRecordingStatus: async () => "completed",
+      stopVideoRecording: async (id) => {
+        if (id === "r1") {
+          throw new Error("No active recording found for id r1");
+        }
+        return { metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`), evictedRecordingIds: [] };
+      },
+      getVideoRecordingMetadata: lookup,
+    });
+    await session.startFirstSegment();
+    timer.advanceTime(190000);
+    await session.onBeforePlanStep();
+    timer.advanceTime(170000);
+    await session.onBeforePlanStep();
+    const result = await session.finalize();
+    expect(result.recordingIds).toEqual(["r1", "r2", "r3"]);
+    expect(result.metadata[0]?.warnings?.join(" ")).toContain("10000ms");
+    expect(lookup).toHaveBeenCalledWith("r1", { touch: false, ownerSessionUuid: undefined });
+  });
+
+  test("an auto-stopped final segment is returned without rotation", async () => {
+    const { session, timer } = harness({
+      getVideoRecordingStatus: async () => "completed",
+      stopVideoRecording: async () => {
+        throw new Error("No active recording found for id r1");
+      },
+      getVideoRecordingMetadata: async (id) => ({
+        ...makeStopMetadata(id, `/tmp/${id}.mp4`),
+        durationMs: 180000,
+      }),
+    });
+    await session.startFirstSegment();
+    timer.advanceTime(185000);
+    expect((await session.finalize()).recordingIds).toEqual(["r1"]);
+  });
+
+  test("a failed rotation returns earlier segments with a warning and keeps the duration bound", async () => {
+    let stops = 0;
+    const { session, timer, finalized, start } = harness({
+      segmentRotateAfterMs: 1000,
+      maxDurationSeconds: 3,
+      stopVideoRecording: async (id) => {
+        if (++stops > 1) {
+          throw new Error("adb pull failed");
+        }
+        return { metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`), evictedRecordingIds: [] };
+      },
+    });
+    await session.start();
+    timer.advanceTime(1000);
+    await flush();
+    timer.advanceTime(1000);
+    await flush();
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    timer.advanceTime(1000);
+    await flush();
+    const result = await session.stop();
+    expect(result.recordingIds).toEqual(["r1"]);
+    expect(result.metadata[0]?.warnings?.join(" ")).toContain("adb pull failed");
+    expect(finalized).toHaveBeenCalledTimes(1);
+    expect(await session.stop()).toEqual(result);
+    await session.onBeforePlanStep();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    const fresh = harness();
+    await fresh.session.start();
+    await fresh.session.stop();
+    expect(fresh.finalized).toHaveBeenCalledTimes(1);
+  });
+
+  test("zero completed segments still notify finalization and expose the failure", async () => {
+    const { session, finalized } = harness({
+      stopVideoRecording: async () => {
+        throw new Error("disconnected");
+      },
+    });
+    await session.start();
+    const result = await session.stop();
+    expect(result.recordingIds).toEqual([]);
+    expect(result.warnings?.join(" ")).toContain("disconnected");
+    expect(finalized).toHaveBeenCalledTimes(1);
+    expect(await session.stop()).toEqual(result);
+  });
+
+  test.each([false, true])(
+    "replacement start retries at the next cadence (timer=%p) and retains its warning",
+    async (timerDriven) => {
+      let starts = 0;
+      const { session, timer } = harness({
+        segmentRotateAfterMs: 1000,
+        startVideoRecording: async () => {
+          if (++starts === 2) {
+            throw new Error("replacement rejected");
+          }
+          return makeActiveRecording(`r${starts}`, `/tmp/r${starts}.mp4`);
+        },
+      });
+      if (timerDriven) {
+        await session.start();
+      } else {
+        await session.startFirstSegment();
+      }
+      timer.advanceTime(1000);
+      if (timerDriven) {
+        await flush();
+      } else {
+        await session.onBeforePlanStep();
+      }
+      timer.advanceTime(1000);
+      if (timerDriven) {
+        await flush();
+      } else {
+        await session.onBeforePlanStep();
+      }
+      const result = await session.stop();
+      expect(result.recordingIds).toEqual(["r1", "r3"]);
+      expect(result.metadata[0]?.warnings?.join(" ")).toContain("replacement rejected");
+      expect(result.metadata[0]?.warnings?.join(" ")).toContain("1000ms");
+    },
+  );
+
+  test("stopping after a replacement failure reports truncation and prevents retries", async () => {
+    let starts = 0;
+    const { session, timer } = harness({
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async () => {
+        if (++starts > 1) {
+          throw new Error("replacement rejected");
+        }
+        return makeActiveRecording("r1", "/tmp/r1.mp4");
+      },
+    });
+    await session.startFirstSegment();
+    timer.advanceTime(1000);
+    await session.onBeforePlanStep();
+    const result = await session.stop();
+    expect(result.metadata[0]?.warnings?.join(" ")).toContain("replacement rejected");
+    await session.onBeforePlanStep();
+    timer.advanceTime(1000);
+    await flush();
+    expect(starts).toBe(2);
+  });
+});
+
+describe("review regressions", () => {
+  function setup(status: "recording" | "completed" | "interrupted" | undefined, sizeBytes = 1) {
+    const timer = new FakeTimer();
+    let starts = 0;
+    const start = mock(async () => makeActiveRecording(`r${++starts}`, `/tmp/r${starts}.mp4`));
+    const stop = mock(async (_id?: string) => {
+      throw new Error("device pull failed");
+    });
+    const rollback = mock(async (_id: string) => {});
+    const lookup = mock(async (id: string) => ({
+      ...makeStopMetadata(id, `/tmp/${id}.mp4`),
+      sizeBytes,
+    }));
+    const statusLookup = mock(async (_id: string) => status);
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "regression",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: start,
+      stopVideoRecording: stop,
+      getVideoRecordingMetadata: lookup,
+      getVideoRecordingStatus: statusLookup,
+      rollbackVideoRecordingStart: rollback,
+    });
+    return { session, timer, start, stop, rollback, lookup, statusLookup };
+  }
+
+  test.each([
+    ["rotation", 0],
+    ["final", 0],
+    ["rotation", 1],
+    ["final", 1],
+  ] as const)(
+    "interrupted %s stop with %p host bytes is not recovered",
+    async (path, sizeBytes) => {
+      const { session, timer, rollback } = setup("interrupted", sizeBytes);
+      await session.startFirstSegment();
+      if (path === "rotation") {
+        timer.advanceTime(1000);
+        await session.onBeforePlanStep();
+      }
+      const result = await session.stop();
+      expect(result.recordingIds).toEqual([]);
+      expect(result.filePaths).toEqual([]);
+      expect(result.warnings?.join(" ")).toContain("r1");
+      expect(result.warnings?.join(" ")).toContain("device pull failed");
+      expect(rollback).not.toHaveBeenCalled();
+    },
+  );
+
+  test("a completed row without host bytes is not recovered", async () => {
+    const { session } = setup("completed", 0);
+    await session.startFirstSegment();
+    const result = await session.stop();
+    expect(result.filePaths).toEqual([]);
+    expect(result.warnings?.join(" ")).toContain("device pull failed");
+  });
+
+  test.each(["rotation", "final"])(
+    "retained %s stop retries once without deleting",
+    async (path) => {
+      const { session, timer, stop, rollback } = setup("recording");
+      await session.startFirstSegment();
+      if (path === "rotation") {
+        timer.advanceTime(1000);
+        await session.onBeforePlanStep();
+      }
+      const result = await session.stop();
+      expect(stop).toHaveBeenCalledTimes(2);
+      expect(rollback).not.toHaveBeenCalled();
+      expect(result.recordingIds).toEqual([]);
+      expect(result.warnings?.join(" ")).toContain("r1");
+      expect(result.warnings?.join(" ")).toContain("device pull failed");
+      expect(result.warnings?.join(" ")).toContain("stop by recordingId");
+    },
+  );
+
+  test("a hung graceful retry stays bounded and preserves the manager-owned capture", async () => {
+    const { session, timer, stop, rollback } = setup("recording");
+    let attempts = 0;
+    const hung = Promise.withResolvers<{
+      metadata: ReturnType<typeof makeStopMetadata>;
+      evictedRecordingIds: string[];
+    }>();
+    stop.mockImplementation(async () => {
+      if (++attempts === 1) {
+        throw new Error("device file did not finish writing");
+      }
+      return hung.promise;
+    });
+    await session.startFirstSegment();
+    const stopping = session.stop();
+    await flush();
+    expect(stop).toHaveBeenCalledTimes(2);
+    timer.advanceTime(rotationStopBudgetMs);
+    const result = await stopping;
+    expect(result.recordingIds).toEqual([]);
+    expect(result.warnings?.join(" ")).toContain("r1");
+    expect(result.warnings?.join(" ")).toContain("device file did not finish writing");
+    expect(result.warnings?.join(" ")).toContain("timed out");
+    expect(result.warnings?.join(" ")).toContain("stop by recordingId");
+    expect(rollback).not.toHaveBeenCalled();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each(["status", "metadata"])("throwing %s lookup preserves the recording", async (which) => {
+    const { session, lookup, statusLookup, rollback } = setup("completed");
+    const fail = async () => {
+      throw new Error("database unavailable");
+    };
+    if (which === "status") {
+      statusLookup.mockImplementation(fail);
+    } else {
+      lookup.mockImplementation(fail);
+    }
+    await session.startFirstSegment();
+    const result = await session.stop();
+    expect(rollback).not.toHaveBeenCalled();
+    expect(result.warnings?.join(" ")).toContain("r1");
+    expect(result.warnings?.join(" ")).toContain("database unavailable");
+  });
+
+  test("300 step boundaries bound failing starts and aggregate warnings", async () => {
+    const { session, timer, start, stop } = setup(undefined);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      stop.mockImplementation(async (id) => ({
+        metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`),
+        evictedRecordingIds: [],
+      }));
+      await session.startFirstSegment();
+      start.mockImplementation(async () => {
+        throw new Error("capture unavailable");
+      });
+      timer.advanceTime(1000);
+      for (let step = 0; step < 300; step++) {
+        await session.onBeforePlanStep();
+      }
+      expect(start).toHaveBeenCalledTimes(4); // initial success + N=3 failures
+      const result = await session.stop();
+      const warnings = result.metadata.flatMap((metadata) => metadata.warnings ?? []);
+      expect(warnings).toEqual([expect.stringContaining("capture unavailable (x3)")]);
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("failed starts after the cap retry only at rotation cadence and success resets the cap", async () => {
+    const { session, timer, start, stop } = setup(undefined);
+    stop.mockImplementation(async (id) => ({
+      metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`),
+      evictedRecordingIds: [],
+    }));
+    await session.startFirstSegment();
+    start.mockImplementation(async () => {
+      throw new Error("capture unavailable");
+    });
+    timer.advanceTime(1000);
+    for (let step = 0; step < 3; step++) {
+      await session.onBeforePlanStep();
+    }
+    timer.advanceTime(999);
+    await session.onBeforePlanStep();
+    expect(start).toHaveBeenCalledTimes(4);
+    timer.advanceTime(1);
+    await session.onBeforePlanStep();
+    expect(start).toHaveBeenCalledTimes(5);
+    start.mockImplementation(async () => makeActiveRecording("resumed", "/tmp/resumed.mp4"));
+    timer.advanceTime(1000);
+    await session.onBeforePlanStep();
+    start.mockImplementation(async () => {
+      throw new Error("capture unavailable");
+    });
+    timer.advanceTime(1000);
+    for (let step = 0; step < 3; step++) {
+      await session.onBeforePlanStep();
+    }
+    expect(start).toHaveBeenCalledTimes(9);
+    await session.stop();
+  });
+
+  test("every late timed-out rotation segment is recovered in capture order", async () => {
+    const { session, timer, stop, statusLookup, lookup, rollback } = setup("recording");
+    const late1 = Promise.withResolvers<{
+      metadata: ReturnType<typeof makeStopMetadata>;
+      evictedRecordingIds: string[];
+    }>();
+    const late2 = Promise.withResolvers<{
+      metadata: ReturnType<typeof makeStopMetadata>;
+      evictedRecordingIds: string[];
+    }>();
+    stop.mockImplementation((id) =>
+      id === "r1"
+        ? late1.promise
+        : id === "r2"
+          ? late2.promise
+          : Promise.resolve({
+              metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`),
+              evictedRecordingIds: [],
+            }),
+    );
+    await session.startFirstSegment();
+    for (let segment = 0; segment < 2; segment++) {
+      timer.advanceTime(1000);
+      const rotation = session.onBeforePlanStep();
+      timer.advanceTime(rotationStopBudgetMs);
+      await rotation;
+    }
+    late1.resolve({ metadata: makeStopMetadata("r1", "/tmp/r1.mp4"), evictedRecordingIds: [] });
+    late2.resolve({ metadata: makeStopMetadata("r2", "/tmp/r2.mp4"), evictedRecordingIds: [] });
+    await flush();
+    statusLookup.mockImplementation(async () => "completed");
+    lookup.mockImplementation(async (id) => ({
+      ...makeStopMetadata(id, `/tmp/${id}.mp4`),
+      durationMs: 1000,
+    }));
+    const result = await session.stop();
+    expect(result.recordingIds).toEqual(["r1", "r2", "r3"]);
+    expect(result.filePaths).toEqual(["/tmp/r1.mp4", "/tmp/r2.mp4", "/tmp/r3.mp4"]);
+    expect(rollback).not.toHaveBeenCalled();
+  });
+});
+
+describe("segmented session stop fences", () => {
+  test("stop during a pending rotation prevents a replacement from starting", async () => {
+    const { session, timer, pendingStop, start } = makePendingStopSession();
+    await session.startFirstSegment();
+    timer.advanceTime(1000);
+    const rotation = session.onBeforePlanStep();
+    const stopping = session.stop();
+    pendingStop.resolve({
+      metadata: makeStopMetadata("id-bounded", "/tmp/id-bounded.mp4"),
+      evictedRecordingIds: [],
+    });
+    await rotation;
+    expect((await stopping).recordingIds).toEqual(["id-bounded"]);
+    await session.onBeforePlanStep();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("abort cancellation neither reports a failed start nor retries it", async () => {
+    const timer = new FakeTimer();
+    let starts = 0;
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "cancel",
+      timer,
+      segmentRotateAfterMs: 1000,
+      ...{ rollbackVideoRecordingStart: async (_id: string) => {} },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
+      startVideoRecording: async (request) => {
+        if (++starts === 1) {
+          return makeActiveRecording("r1", "/tmp/r1.mp4");
+        }
+        await new Promise<void>((resolve) =>
+          request.abortSignal?.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        request.abortSignal?.throwIfAborted();
+        throw new Error("unexpected continuation");
+      },
+      stopVideoRecording: async () => ({
+        metadata: makeStopMetadata("r1", "/tmp/r1.mp4"),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async () => {},
+    });
+    await session.start();
+    timer.advanceTime(1000);
+    await flush();
+    await session.abort();
+    await session.onBeforePlanStep();
+    timer.advanceTime(1000);
+    await flush();
+    const result = await session.stop();
+    expect(starts).toBe(2);
+    expect(result.warnings).toBeUndefined();
+    expect(result.recordingIds).toEqual([]);
+  });
+});
+
+describe("degraded segmented session cleanup", () => {
+  test("recovers the halted segment when manager auto-stop completes it before finalization", async () => {
+    const timer = new FakeTimer();
+    let archived = false;
+    let starts = 0;
+    const rollback = mock(async (_id: string) => {});
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "late",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async () => makeActiveRecording(`r${++starts}`, `/tmp/r${starts}.mp4`),
+      stopVideoRecording: async (id) => {
+        if (id === "r2") {
+          throw new Error("stop failed before capture exited");
+        }
+        return { metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`), evictedRecordingIds: [] };
+      },
+      getVideoRecordingStatus: async () => (archived ? "completed" : "recording"),
+      getVideoRecordingMetadata: async (id) =>
+        archived ? { ...makeStopMetadata(id, `/tmp/${id}.mp4`), durationMs: 180000 } : null,
+      rollbackVideoRecordingStart: rollback,
+    });
+    await session.startFirstSegment();
+    timer.advanceTime(1000);
+    await session.onBeforePlanStep();
+    timer.advanceTime(1000);
+    await session.onBeforePlanStep();
+    archived = true;
+    timer.advanceTime(190000);
+    const result = await session.stop();
+    expect(result.recordingIds).toEqual(["r1", "r2"]);
+    expect(result.metadata.flatMap((metadata) => metadata.warnings ?? []).join(" ")).toContain(
+      "stop failed",
+    );
+    expect(result.metadata[1]?.warnings?.join(" ")).toContain("11000ms");
+    expect(rollback).not.toHaveBeenCalled();
+  });
+
+  test("retained cleanup is observable by recording ID after registry finalization", async () => {
+    const rollback = mock(async (_id: string) => {});
+    const finalized = mock(() => {});
+    const stop = mock(async () => {
+      throw new Error("force-stop unconfirmed");
+    });
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "cleanup",
+      timer: new FakeTimer(),
+      startVideoRecording: async () => makeActiveRecording("r1", "/tmp/r1.mp4"),
+      stopVideoRecording: stop,
+      getVideoRecordingStatus: async () => "recording",
+      getVideoRecordingMetadata: async () => null,
+      rollbackVideoRecordingStart: rollback,
+      onFinalized: finalized,
+    });
+    await session.start();
+    const result = await session.stop();
+    expect(result.warnings?.join(" ")).toContain("r1");
+    expect(result.warnings?.join(" ")).toContain("force-stop unconfirmed");
+    expect(result.warnings?.join(" ")).toContain("stop by recordingId");
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(rollback).not.toHaveBeenCalled();
+    expect(finalized).toHaveBeenCalledTimes(1);
   });
 });

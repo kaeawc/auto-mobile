@@ -105,8 +105,11 @@ const segmentedSessions = (() => {
       handle: string,
       session: AndroidSegmentedPlanVideoSession,
     ): Promise<StoppedSegmentedSession> {
-      const { filePaths, recordingIds, metadata, highlights } = await session.stop();
+      const { filePaths, recordingIds, metadata, highlights, warnings } = await session.stop();
       byHandle.delete(handle);
+      if (recordingIds.length === 0 && warnings?.length) {
+        throw new Error(warnings.join("; "));
+      }
       const segments: StoppedSegment[] = recordingIds.map((id, index) => ({
         recordingId: id,
         filePath: filePaths[index],

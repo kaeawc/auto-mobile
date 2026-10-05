@@ -4,7 +4,7 @@ import { ElementBounds } from "../../models/ElementBounds";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { NavigationEdge } from "../../utils/interfaces/NavigationGraph";
+import { NavigationEdge, SelectedElement } from "../../utils/interfaces/NavigationGraph";
 
 type InteractionType = "navigation" | "input" | "action" | "scroll" | "toggle";
 
@@ -190,12 +190,7 @@ export class IdentifyInteractions {
       const confidence = this.computeConfidence(element, type, candidate.hasText);
 
       const identifiers = this.getElementIdentifiers(element);
-      if (
-        !identifiers.text &&
-        !identifiers.resourceId &&
-        !identifiers.contentDescription &&
-        type !== "scroll"
-      ) {
+      if (!this.hasInteractionIdentifier(identifiers) && type !== "scroll") {
         continue;
       }
 
@@ -238,6 +233,12 @@ export class IdentifyInteractions {
     }
 
     return interactions;
+  }
+
+  private hasInteractionIdentifier(
+    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+  ): boolean {
+    return Boolean(identifiers.text || identifiers.resourceId || identifiers.contentDescription);
   }
 
   private applyFilters(
@@ -448,6 +449,12 @@ export class IdentifyInteractions {
       score += 0.05;
     }
 
+    score = this.applyTypeConfidence(score, element, type);
+
+    return Math.min(0.99, Math.max(0.1, Number(score.toFixed(2))));
+  }
+
+  private applyTypeConfidence(score: number, element: Element, type: InteractionType): number {
     switch (type) {
       case "input":
         score = Math.max(score, 0.85);
@@ -469,7 +476,7 @@ export class IdentifyInteractions {
         break;
     }
 
-    return Math.min(0.99, Math.max(0.1, Number(score.toFixed(2))));
+    return score;
   }
 
   private buildDescription(
@@ -478,18 +485,38 @@ export class IdentifyInteractions {
   ): string {
     const label = identifiers.text || identifiers.contentDescription || identifiers.resourceId;
 
+    if (!label) {
+      return this.buildUnlabeledDescription(type);
+    }
+
     switch (type) {
       case "input":
-        return label ? `${label} input field` : "Input field";
+        return `${label} input field`;
       case "toggle":
-        return label ? `${label} toggle` : "Toggle";
+        return `${label} toggle`;
       case "scroll":
-        return label ? `Scrollable area (${label})` : "Scrollable area";
+        return `Scrollable area (${label})`;
       case "navigation":
-        return label ? `${label} navigation` : "Navigation option";
+        return `${label} navigation`;
       case "action":
       default:
-        return label ? `${label} action` : "Action";
+        return `${label} action`;
+    }
+  }
+
+  private buildUnlabeledDescription(type: InteractionType): string {
+    switch (type) {
+      case "input":
+        return "Input field";
+      case "toggle":
+        return "Toggle";
+      case "scroll":
+        return "Scrollable area";
+      case "navigation":
+        return "Navigation option";
+      case "action":
+      default:
+        return "Action";
     }
   }
 
@@ -593,6 +620,28 @@ export class IdentifyInteractions {
     identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
     edge: NavigationEdge,
   ): number {
+    const { edgeText, edgeId } = this.getEdgeTapIdentifiers(edge);
+
+    let score = 0;
+
+    if (edge.interaction?.toolName === "tapOn") {
+      score = this.scoreTapMatch(identifiers, edgeId, edgeText);
+    }
+
+    const selectedElements = edge.interaction?.uiState?.selectedElements || [];
+    if (selectedElements.length > 0) {
+      for (const selected of selectedElements) {
+        score = this.scoreSelectedElementMatch(identifiers, selected, score);
+      }
+    }
+
+    return score;
+  }
+
+  private getEdgeTapIdentifiers(edge: NavigationEdge): {
+    edgeText: string | undefined;
+    edgeId: string | undefined;
+  } {
     const args = edge.interaction?.args || {};
     const edgeText = typeof args.text === "string" ? args.text : undefined;
     const edgeId =
@@ -602,46 +651,49 @@ export class IdentifyInteractions {
           ? args.id
           : undefined;
 
+    return { edgeText, edgeId };
+  }
+
+  private scoreTapMatch(
+    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+    edgeId: string | undefined,
+    edgeText: string | undefined,
+  ): number {
     let score = 0;
-
-    if (edge.interaction?.toolName === "tapOn") {
-      if (edgeId && identifiers.resourceId && edgeId === identifiers.resourceId) {
-        score = Math.max(score, 0.95);
-      }
-
-      if (
-        edgeText &&
-        this.textMatches(edgeText, identifiers.text, identifiers.contentDescription)
-      ) {
-        score = Math.max(score, 0.85);
-      }
+    if (edgeId && identifiers.resourceId && edgeId === identifiers.resourceId) {
+      score = Math.max(score, 0.95);
     }
 
-    const selectedElements = edge.interaction?.uiState?.selectedElements || [];
-    if (selectedElements.length > 0) {
-      for (const selected of selectedElements) {
-        if (
-          selected.resourceId &&
-          identifiers.resourceId &&
-          selected.resourceId === identifiers.resourceId
-        ) {
-          score = Math.max(score, 0.8);
-        }
-        if (
-          selected.text &&
-          this.textMatches(selected.text, identifiers.text, identifiers.contentDescription)
-        ) {
-          score = Math.max(score, 0.75);
-        }
-        if (
-          selected.contentDesc &&
-          this.textMatches(selected.contentDesc, identifiers.text, identifiers.contentDescription)
-        ) {
-          score = Math.max(score, 0.7);
-        }
-      }
+    if (edgeText && this.textMatches(edgeText, identifiers.text, identifiers.contentDescription)) {
+      score = Math.max(score, 0.85);
     }
+    return score;
+  }
 
+  private scoreSelectedElementMatch(
+    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+    selected: SelectedElement,
+    score: number,
+  ): number {
+    if (
+      selected.resourceId &&
+      identifiers.resourceId &&
+      selected.resourceId === identifiers.resourceId
+    ) {
+      score = Math.max(score, 0.8);
+    }
+    if (
+      selected.text &&
+      this.textMatches(selected.text, identifiers.text, identifiers.contentDescription)
+    ) {
+      score = Math.max(score, 0.75);
+    }
+    if (
+      selected.contentDesc &&
+      this.textMatches(selected.contentDesc, identifiers.text, identifiers.contentDescription)
+    ) {
+      score = Math.max(score, 0.7);
+    }
     return score;
   }
 

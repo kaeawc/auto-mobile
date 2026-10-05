@@ -105,6 +105,12 @@ export interface DisplayFenceOption {
 
 const NO_OP_DISPLAY_FENCE: DisplayFence = Object.freeze({ assertCurrent: () => {} });
 
+/** Intermediate action reads resolve targets and effects; terminal evidence is captured once. */
+const INTERMEDIATE_OBSERVATION_OPTIONS = {
+  skipScreenshot: true,
+  skipAccessibilityAudit: true,
+} satisfies ObserveScreenExecuteOptions;
+
 export function resolveDisplayFence(options?: DisplayFenceOption): DisplayFence {
   return options?.displayFence ?? NO_OP_DISPLAY_FENCE;
 }
@@ -366,6 +372,7 @@ export class BaseVisualChange {
             BaseVisualChange.shouldRefetchCachedObservation(cached!, options.skipCallerDisplayFence)
           ) {
             return this.observeScreen.execute({
+              ...INTERMEDIATE_OBSERVATION_OPTIONS,
               freshness:
                 staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
               timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
@@ -387,6 +394,7 @@ export class BaseVisualChange {
         logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
+            ...INTERMEDIATE_OBSERVATION_OPTIONS,
             freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
             timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
             skipStaleWindowRecovery: true,
@@ -1033,8 +1041,7 @@ export class BaseVisualChange {
         perf,
         minTimestamp,
         signal: options.signal,
-        skipScreenshot: true,
-        skipAccessibilityAudit: true,
+        ...INTERMEDIATE_OBSERVATION_OPTIONS,
       },
       shouldRetry,
       blockResult,

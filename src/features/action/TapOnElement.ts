@@ -4061,7 +4061,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           // Strategy returns the platform-relevant boolean: TalkBack on
           // Android, VoiceOver on iOS. Downstream call paths are split by
           // the platform switch below, so a single flag suffices.
-          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled();
+          const activationWarnings: string[] = [];
+          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled(
+            (warning) => activationWarnings.push(warning),
+          );
           const requireResourceId = isAccessibilityServiceEnabled;
           let tapElement: Element;
           let usedParent: boolean;
@@ -4192,7 +4195,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
-          const activationWarnings: string[] = [];
 
           // Platform-specific tap execution
           await perf.track("executeTap", async () => {
@@ -4413,6 +4415,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const fence = options?.displayFence;
+    // Check if TalkBack is enabled (not just any accessibility service)
+    const talkBackEnabled =
+      typeof isTalkBackEnabled === "boolean"
+        ? isTalkBackEnabled
+        : await this.strategy.isAccessibilityServiceEnabled(options?.onActivationWarning);
+
     // XML-only candidates have no CtrlProxy node identity, even if their resource
     // ID also exists in the incomplete native tree. Never retarget semantic actions.
     if (element["hierarchy-source"] === "uiautomator") {
@@ -4421,13 +4429,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       });
       return undefined;
     }
-
-    // Check if TalkBack is enabled (not just any accessibility service)
-    const talkBackEnabled =
-      typeof isTalkBackEnabled === "boolean"
-        ? isTalkBackEnabled
-        : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) ===
-          "talkback";
 
     if (options?.container?.container || options?.selectionStrategy === "unique") {
       await this.executeScopedAndroidTap({

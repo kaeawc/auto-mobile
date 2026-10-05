@@ -19,6 +19,7 @@ import { registerCriticalSectionTools } from "../server/criticalSectionTools";
 import { registerDatabaseTools } from "../server/databaseTools";
 import { registerDeepLinkTools } from "../server/deepLinkTools";
 import { registerFormTools } from "../server/formTools";
+import { registerOverlayTools } from "../server/overlayTools";
 import { registerHighlightTools } from "../server/highlightTools";
 import { registerNavigationTools } from "../server/navigationTools";
 import { registerNetworkTools } from "../server/networkTools";
@@ -54,6 +55,7 @@ export function initializeCliTools(): void {
   registerDeepLinkTools();
   registerFormTools();
   registerHighlightTools();
+  registerOverlayTools();
   registerNavigationTools();
   registerNetworkTools();
   registerPreferenceTools();

@@ -18,7 +18,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
-`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
+`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`, `overlay`,
 `identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
@@ -563,7 +563,45 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
+| 🪟 <code>overlay</code>              | Shows, updates, dismisses, or reports host-local Android overlays.        |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
+
+### overlay
+
+The Android-only `overlay` tool is omitted from discovery by default. Enable it
+with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
+`show`, `update`, `dismiss`, or `status`. `show` requires a full `spec` (id,
+window, optional state, root); `update` requires `id` and exactly one of `spec`
+or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
+requires either `id` or `all: true`. `spec.window.opacity` is an integer
+percentage from 0 to 100, default 100; use a replacement spec to change it.
+
+Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
+`keepScreenAwake` option also applies. `timeoutMs` bounds device requests
+(default 5000 ms). Validation uses the existing overlay schema and limits
+before contacting CtrlProxy. Verify rendering with `observe`; overlay returns
+no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
+scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
+See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
+
+`status` performs no device request. It reports only overlays successfully
+shown by this host in the current session and device, with their last action,
+result, and host timestamp in milliseconds. It also returns the last attempted
+mutation as `lastResult`, including a failed show without claiming it is shown.
+Failed updates or dismissals retain known presence. Successful dismissal removes
+the id from that device's host records; successful dismiss-all clears that device's entries across host sessions.
+Device-side actions, disconnects, and events are not reflected.
+
+```json
+{
+  "action": "show",
+  "spec": {
+    "id": "demo",
+    "window": { "placement": { "type": "fullscreen" }, "opacity": 80 },
+    "root": { "type": "text", "text": "Hello" }
+  }
+}
+```
 
 ### Navigation and highlight options
 

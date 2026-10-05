@@ -45,7 +45,10 @@ export const EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS = 1000;
  * exists only to bound a single device read that hangs past that budget, so it
  * must fire strictly AFTER the loop has had time to finish its terminal work
  * (back-stack reconciliation, cache write). Equal deadlines made the winner a
- * timer tie (#9880).
+ * timer tie (#9880). The margin is a budget, not a guarantee: the terminal
+ * back-stack read and reconciliation capture are bounded only by the fence, so
+ * if they take longer than this margin the fence still wins and the gate falls
+ * back to the uncached action capture.
  */
 export const EMBEDDED_OBSERVATION_SETTLE_FENCE_MARGIN_MS = 1000;
 
@@ -107,8 +110,8 @@ export async function settleEmbeddedObservation(
   // well, combined with the caller's signal so a cancelled request stops
   // observing immediately. The fence is armed on the injected timer (real clock
   // in production) and deliberately outlives the loop budget by a margin, so a
-  // never-settling screen always ends through the loop's own timeout path and
-  // never through the fence (#9880).
+  // never-settling screen ordinarily ends through the loop's own timeout path and
+  // never through the fence unless terminal work outlasts the margin (#9880).
   const strictDisplay = isExplicitDisplay(input.observation, input.args);
   const fence = createSettleFence(input.timer ?? defaultTimer);
   try {

@@ -1,4 +1,5 @@
 import { StaleDisplayError } from "../../src/models/StaleDisplayError";
+import { nodeAttributes } from "../../src/models/ViewHierarchyResult";
 import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import {
   deferTerminalScreenshot,
@@ -1249,6 +1250,11 @@ describe("settleEmbeddedObservation abort fence (#9880)", () => {
     );
   }
 
+  /** The root node's `text`, read through the typed hierarchy accessor. */
+  function rootText(observation: ObserveResult): unknown {
+    return nodeAttributes(observation.viewHierarchy!.hierarchy.node!)["text"];
+  }
+
   /** Records the signal and the fence timers armed while the loop runs. */
   function recordingSettle(
     inner: SettleObserve,
@@ -1291,16 +1297,14 @@ describe("settleEmbeddedObservation abort fence (#9880)", () => {
       expect(timer.now()).toBe(EMBEDDED_OBSERVATION_SETTLE_TIMEOUT_MS);
       expect(recorded.signals[0].aborted).toBe(false);
 
-      const newestText = (index: number) =>
-        (tickingClock(index).viewHierarchy!.hierarchy.node as any).text;
       const lastIndex = fake.getExecuteCallCount() - 1;
-      const returnedText = (outcome.observation.viewHierarchy!.hierarchy.node as any).text;
+      const returnedText = rootText(outcome.observation);
       expect(outcome.settled).toBe(false);
       expect(outcome.observation).not.toBe(captured);
-      expect(returnedText).toBe(newestText(lastIndex));
+      expect(returnedText).toBe(rootText(tickingClock(lastIndex)));
       const cached = fake.getCacheObserveResultObservations();
       expect(cached).toHaveLength(1);
-      expect((cached[0].viewHierarchy!.hierarchy.node as any).text).toBe(returnedText);
+      expect(rootText(cached[0])).toBe(returnedText);
       expect(warn).not.toHaveBeenCalled();
       expect(timer.uncleared().filter((ms) => ms === FENCE_MS)).toEqual([]);
     } finally {

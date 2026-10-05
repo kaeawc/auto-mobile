@@ -3026,7 +3026,7 @@ describe("LaunchApp", () => {
         const harness = createIOSTestHarness({
           bundleId: userBundleId,
           launchSuccess: false,
-          installedApps: [],
+          installedApps: [systemBundleId],
         });
         try {
           const warmResult = await harness.iosLaunchApp.execute(userBundleId, false, false);
@@ -3090,6 +3090,42 @@ describe("LaunchApp", () => {
         harness.cleanup();
       }
     });
+
+    for (const installedApps of [[], ["com.example.other"], ["com.apple.Fitness"]]) {
+      test.each(launchPaths.slice(1))(
+        `proceeds after an implausible cold listing ${JSON.stringify(installedApps)} on $name`,
+        async (path) => {
+          fakeTimer.enableAutoAdvance();
+          const harness = createIOSTestHarness({ bundleId: userBundleId, installedApps });
+          try {
+            const result = await harness.iosLaunchApp.execute(
+              userBundleId,
+              path.clear,
+              path.cold,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              path.args,
+            );
+            expect(result.success).toBe(true);
+            expect(result.error).not.toBe("App is not installed");
+            expect(harness.calls).toEqual([
+              "listapps",
+              `terminate:${simulatorId}:${userBundleId}`,
+              ...(path.clear ? ["clearFactory", `clear:${userBundleId}`] : []),
+              `launch:${simulatorId}:${userBundleId}:${JSON.stringify({
+                foregroundIfRunning: false,
+                launchArguments: path.args,
+              })}`,
+            ]);
+            expect(harness.installedApps.getCallCount()).toBe(1);
+          } finally {
+            harness.cleanup();
+          }
+        },
+      );
+    }
 
     test("skips the cold installed check for simulator system bundles", async () => {
       fakeTimer.enableAutoAdvance();
@@ -3240,7 +3276,7 @@ describe("LaunchApp", () => {
       }
     });
 
-    test("reports a missing iOS simulator app after a successful empty listing", async () => {
+    test("warm launch still confirms a missing iOS simulator app after a successful empty listing", async () => {
       fakeTimer.enableAutoAdvance();
       const { iosLaunchApp, installedApps, cleanup } = createIOSTestHarness({
         bundleId: userBundleId,
@@ -3471,6 +3507,8 @@ describe("LaunchApp", () => {
       terminateError?: Error;
       cacheInvalidator?: FakeDeviceWindowCacheInvalidator;
       useDefaultClearAppData?: boolean;
+      installedApps?: string[];
+      listingSuccessful?: boolean;
     }) {
       const iosDevice: BootedDevice = {
         name: "test-ios",
@@ -3538,7 +3576,8 @@ describe("LaunchApp", () => {
         layoutSeqSum: 1,
       });
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
-        installedApps: [userBundleId],
+        installedApps: opts.installedApps ?? [userBundleId],
+        successful: opts.listingSuccessful,
       });
       const performanceTracker = new DefaultPerformanceTracker(fakeTimer);
 
@@ -3603,6 +3642,69 @@ describe("LaunchApp", () => {
         }
       },
     );
+
+    test.each([
+      {
+        name: "trustworthy missing",
+        apps: ["com.apple.Preferences"],
+        successful: true,
+        missing: true,
+      },
+      {
+        name: "trustworthy installed",
+        apps: ["com.apple.Preferences", userBundleId],
+        successful: true,
+        missing: false,
+      },
+      { name: "empty", apps: [], successful: true, missing: false },
+      { name: "partial", apps: ["com.example.other"], successful: true, missing: false },
+      { name: "failed", apps: ["com.apple.Preferences"], successful: false, missing: false },
+    ])("physical cold pre-check handles $name listing", async (listing) => {
+      fakeTimer.enableAutoAdvance();
+      const h = createDeviceHarness({
+        deviceId: physicalUdid,
+        installedApps: listing.apps,
+        listingSuccessful: listing.successful,
+      });
+      try {
+        const result = await h.iosLaunchApp.execute(userBundleId, true, true);
+        expect(h.installedApps.getCallCount()).toBe(1);
+        expect(h.simctlCalls).toEqual([]);
+        expect(h.terminateCalls).toEqual([]);
+        if (listing.missing) {
+          expect(result).toMatchObject({ success: false, error: "App is not installed" });
+          expect(h.deviceAppLauncher.launchCalls).toEqual([]);
+          expect(h.clearCalls).toEqual([]);
+          expect(h.fakeCtrlProxy.clearCacheCallCount).toBe(0);
+        } else {
+          expect(result.success).toBe(true);
+          expect(h.clearCalls).toHaveLength(1);
+          expect(h.deviceAppLauncher.launchCalls).toEqual([
+            {
+              deviceUdid: physicalUdid,
+              bundleId: userBundleId,
+              terminateExisting: true,
+            },
+          ]);
+        }
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    test("unknown device IDs skip the cold installed check", async () => {
+      fakeTimer.enableAutoAdvance();
+      const h = createDeviceHarness({ deviceId: "unrecognized-device", installedApps: [] });
+      try {
+        const result = await h.iosLaunchApp.execute(userBundleId, false, true);
+        expect(result.success).toBe(true);
+        expect(h.installedApps.getCallCount()).toBe(0);
+        expect(h.deviceAppLauncher.launchCalls).toHaveLength(1);
+        expect(h.simctlCalls).toEqual([]);
+      } finally {
+        h.cleanup();
+      }
+    });
 
     test("launch arguments force a fresh simulator process and reach simctl", async () => {
       fakeTimer.enableAutoAdvance();

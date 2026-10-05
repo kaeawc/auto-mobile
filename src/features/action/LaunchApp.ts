@@ -20,6 +20,7 @@ import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import {
   resolveIosLaunchBackend,
@@ -423,15 +424,25 @@ export class LaunchApp extends BaseVisualChange {
     );
   }
 
+  private isTrustworthyIosColdAppListing(apps: string[]): boolean {
+    // Both listers include system apps. Missing Settings means an empty or
+    // partial inventory cannot establish absence before attempting a launch.
+    return apps.includes("com.apple.Preferences");
+  }
+
   private async checkIosAppNotInstalled(
     bundleId: string,
     perf: PerformanceTracker,
     signal?: AbortSignal,
+    coldPrecheck = false,
   ): Promise<LaunchAppResult | undefined> {
     const installedAppsResult = await perf.track("checkInstalled", () =>
       this.installedAppsProvider.listInstalledApps(signal),
     );
     this.assertLaunchNotAborted(signal);
+    if (coldPrecheck && !this.isTrustworthyIosColdAppListing(installedAppsResult.apps)) {
+      return undefined;
+    }
     if (installedAppsResult.successful && !installedAppsResult.apps.includes(bundleId)) {
       logger.info("App is not installed");
       return { success: false, packageName: bundleId, error: "App is not installed" };
@@ -478,10 +489,15 @@ export class LaunchApp extends BaseVisualChange {
           });
           const simulator = backend.kind === "simulator";
 
-          // Reject missing simulator apps before termination, data clearing, or
-          // CtrlProxy targeting. An unsuccessful listing is inconclusive.
-          if (needsColdStart && !isSystemBundleId && simulator) {
-            const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal);
+          // Reject missing apps before termination, data clearing, or CtrlProxy
+          // targeting only with a trustworthy inventory. Unknown IDs cannot
+          // safely use the physical lister: its routing differs from launch.
+          if (
+            needsColdStart &&
+            !isSystemBundleId &&
+            (simulator || isIosPhysicalUdid(this.device.deviceId))
+          ) {
+            const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal, true);
             if (missingApp) {
               perf.end();
               return missingApp;

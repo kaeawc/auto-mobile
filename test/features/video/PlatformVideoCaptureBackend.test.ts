@@ -20,6 +20,9 @@ import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
 
+const screenrecordLivenessCommand =
+  'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'';
+
 describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   let backend: PlatformVideoCaptureBackend;
   let tempDir: string;
@@ -716,6 +719,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       const fakeClient = fakeFactory.getFakeClient();
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
+      fakeClient.setCommandResult(screenrecordLivenessCommand, "pidof-status:1\n");
       fakeClient.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
         "0",
         "0",
@@ -738,13 +742,65 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(fakeClient.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(5);
       expect(fakeClient.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
       expect(fakeClient.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(true);
+      expect(fakeClient.getCommandCount(screenrecordLivenessCommand)).toBe(1);
+      expect(fakeTimer.getSleepHistory()).toEqual([1000, 300, 300, 300, 300, 300]);
+      expect(
+        fakeClient
+          .getInteractionLog()
+          .filter((entry) => entry.kind === "command")
+          .slice(-1),
+      ).toEqual([{ kind: "command", text: screenrecordLivenessCommand }]);
     });
+
+    test.each(["alive", "unreachable", "unparseable", "query error", "timeout"] as const)(
+      "retains zero-byte Android capture and retries stop when device liveness is %s",
+      async (liveness) => {
+        const factory = new FakeAdbClientFactory();
+        const adb = factory.getFakeClient();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        adb.setCommandResult("shell stat -c %s /sdcard/auto-mobile-test.mp4", "0");
+        if (liveness === "unreachable" || liveness === "timeout") {
+          adb.setCommandError(screenrecordLivenessCommand, new Error(liveness));
+          adb.setCommandError("shell pkill -2 screenrecord", new Error(liveness));
+        } else {
+          adb.setCommandResult(
+            screenrecordLivenessCommand,
+            liveness === "alive"
+              ? "1234\npidof-status:0\n"
+              : liveness === "query error"
+                ? "pidof-status:1\n"
+                : "garbage",
+            liveness === "query error" ? "pidof failed" : "",
+          );
+        }
+        const capture = new FakeChildProcess(timer);
+        capture.exitCode = 0;
+        const handle = buildAndroidStopHandle(path.join(tempDir, "retained.mp4"), capture);
+        const backend = new PlatformVideoCaptureBackend(factory, timer);
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          const error = await backend.stop(handle).catch((error: unknown) => error);
+          expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+          expect(error).toMatchObject({
+            retainOwnership: true,
+            message: expect.stringContaining("stopping the recording again"),
+          });
+          expect(adb.wasSpawned("rm /sdcard/auto-mobile-test.mp4")).toBe(false);
+          expect(adb.getCommandCount(screenrecordLivenessCommand)).toBe(attempt);
+          expect(adb.getCommandCount("shell stat -c %s /sdcard/auto-mobile-test.mp4")).toBe(
+            attempt * 5,
+          );
+        }
+        expect(adb.getSpawnCalls().filter((call) => call[0] === "pull")).toHaveLength(0);
+      },
+    );
 
     test.each(["nonzero", "error", "reject"] as const)(
       "zero-byte terminal cleanup warns on rm %s and preserves the typed failure",
       async (outcome) => {
         const factory = new FakeAdbClientFactory();
         const adb = factory.getFakeClient();
+        adb.setCommandResult(screenrecordLivenessCommand, "pidof-status:1\n");
         adb.setCommandResultSequence("shell stat -c %s /sdcard/auto-mobile-test.mp4", [
           "0",
           "0",

@@ -3,7 +3,6 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { platform } from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { ActionableError, type BootedDevice } from "../../models";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -24,7 +23,6 @@ import {
   type FfmpegProcess,
 } from "../../utils/media/FfmpegClient";
 import {
-  getFileSize,
   PROCESS_EXIT_TIMEOUT_MS,
   trackProcess,
   waitForExit,
@@ -141,6 +139,9 @@ const defaultRecordingFileProbe: RecordingFileProbe = {
       const stats = await fsPromises.stat(filePath);
       return stats.size;
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw toActionableError(error, `Failed to stat recording ${filePath}`);
+      }
       // ENOENT is expected while ffmpeg hasn't created the output file yet;
       // null lets the readiness poll keep waiting instead of erroring out.
       logger.debug(
@@ -477,6 +478,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       const metadata = hierarchy ? client.getScreenScaleMetadata() : null;
       return metadata ? { width: metadata.pixelWidth, height: metadata.pixelHeight } : null;
     },
+    private readonly recordingFileProbe: RecordingFileProbe = defaultRecordingFileProbe,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -532,12 +534,22 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           { timer: this.timer },
         );
       }
-      const sizeBytes = await getFileSize(handle.outputPath);
+      const sizeBytes = await this.recordingFileProbe.size(handle.outputPath);
       if (!sizeBytes) {
         throw new ActionableError("The finalized recording is missing or contains zero bytes.");
       }
       // Probe the produced codec: the iOS copy path can preserve HEVC.
       const codec = await this.codecProbe.codec(handle.outputPath);
+      if (backendHandle.capturePath) {
+        try {
+          await this.captureFileRemover.remove(backendHandle.capturePath);
+        } catch (error) {
+          logger.warn(
+            `[FfmpegVideo] Failed to remove raw recording: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }
       this.logProcessWarnings("capture", backendHandle.captureTracker);
       if (backendHandle.ffmpegTracker) {
         this.logProcessWarnings("ffmpeg", backendHandle.ffmpegTracker);
@@ -551,33 +563,47 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         codec,
       };
     } catch (error) {
-      // Capture is gone; a failed encoder cannot make this recording recoverable.
-      const cleanupError = await this.cleanupStartingTrackers(
-        [backendHandle.ffmpegTracker].filter(
-          (tracker): tracker is ProcessTracker => tracker !== undefined,
-        ),
+      throw await this.buildFinalizationError(backendHandle, error);
+    }
+  }
+
+  private async buildFinalizationError(
+    backendHandle: FfmpegBackendHandle,
+    error: unknown,
+  ): Promise<VideoCaptureFinalizationError> {
+    // Capture is gone, so release its owner, but preserve recoverable raw bytes.
+    const cleanupError = await this.cleanupStartingTrackers(
+      [backendHandle.ffmpegTracker].filter(
+        (tracker): tracker is ProcessTracker => tracker !== undefined,
+      ),
+    );
+    if (cleanupError) {
+      logger.warn(
+        `[FfmpegVideo] Failed to clean up recording encoder: ${errorMessage(cleanupError)}`,
+        cleanupError,
       );
-      if (cleanupError) {
+    }
+    let retainedCapturePath = backendHandle.capturePath;
+    if (retainedCapturePath) {
+      try {
+        const rawSize = await this.recordingFileProbe.size(retainedCapturePath);
+        if (rawSize === null || rawSize === 0) {
+          await this.captureFileRemover.remove(retainedCapturePath);
+          retainedCapturePath = undefined;
+        }
+      } catch (cleanupError) {
         logger.warn(
-          `[FfmpegVideo] Failed to clean up recording encoder: ${errorMessage(cleanupError)}`,
+          `[FfmpegVideo] Could not inspect or remove raw recording; retaining ${retainedCapturePath}: ${errorMessage(cleanupError)}`,
           cleanupError,
         );
       }
-      if (backendHandle.capturePath) {
-        try {
-          await this.captureFileRemover.remove(backendHandle.capturePath);
-        } catch (cleanupError) {
-          logger.warn(
-            `[FfmpegVideo] Failed to remove unusable raw recording: ${errorMessage(cleanupError)}`,
-            cleanupError,
-          );
-        }
-      }
-      throw new VideoCaptureFinalizationError(
-        `Capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
-        { cause: error },
-      );
     }
+    return new VideoCaptureFinalizationError(
+      retainedCapturePath
+        ? `Capture exited but finalization failed. Raw capture retained at ${retainedCapturePath}. ${errorMessage(error)}`
+        : `Capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
+      { cause: error, retainedCapturePath },
+    );
   }
 
   async forceStop(handle: RecordingHandle): Promise<void> {
@@ -1169,7 +1195,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // can lag behind process exit on a loaded runner. Poll for a stable, non-empty
     // file before failing, so a momentarily-missing file is not a hard error (#2730).
     try {
-      await waitForRecordingFileReady(capturePath, { timer: this.timer });
+      await waitForRecordingFileReady(capturePath, {
+        timer: this.timer,
+        probe: this.recordingFileProbe,
+      });
     } catch (error) {
       const reason = errorMessage(error);
       throw new ActionableError(
@@ -1226,12 +1255,6 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
 
     await this.assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker);
-
-    try {
-      await fsPromises.rm(capturePath, { recursive: true, force: true });
-    } catch (error) {
-      logger.warn(`[FfmpegVideo] Failed to remove raw recording ${capturePath}: ${error}`);
-    }
   }
 
   private async buildFfmpegArgs(
@@ -1444,14 +1467,13 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     args: string[],
     tracker: FfmpegDiagnosticsTracker,
   ): Promise<void> {
-    const outputExists = await pathExists(outputPath);
-    if (!outputExists) {
+    const sizeBytes = await this.recordingFileProbe.size(outputPath);
+    if (sizeBytes === null) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage("FFmpeg output file missing", args, tracker, outputPath),
       );
     }
 
-    const sizeBytes = await getFileSize(outputPath);
     if (!sizeBytes) {
       throw new ActionableError(
         this.buildFfmpegFailureMessage("FFmpeg output file is empty", args, tracker, outputPath),

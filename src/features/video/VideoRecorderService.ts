@@ -98,11 +98,17 @@ export class VideoCaptureFinalizationError extends ActionableError {
    * service must retain its handle so a later stop can retry finalization.
    */
   readonly retainOwnership: boolean;
+  /** A recoverable raw file which terminal cleanup must preserve. */
+  readonly retainedCapturePath?: string;
 
-  constructor(message: string, options?: ErrorOptions & { retainOwnership?: boolean }) {
+  constructor(
+    message: string,
+    options?: ErrorOptions & { retainOwnership?: boolean; retainedCapturePath?: string },
+  ) {
     super(message, options);
     this.name = "VideoCaptureFinalizationError";
     this.retainOwnership = options?.retainOwnership ?? false;
+    this.retainedCapturePath = options?.retainedCapturePath;
   }
 }
 
@@ -442,17 +448,21 @@ export class VideoRecorderService {
     }
     if (error instanceof VideoCaptureFinalizationError) {
       if (error.retainOwnership) {
-        return toActionableError(
-          error,
-          `Recording ${recordingId} stopped but its retained device artifact still needs finalization`,
+        return new VideoCaptureFinalizationError(
+          `Recording ${recordingId} ownership retained; stop again to finalize its device artifact: ${error.message}`,
+          { cause: error, retainOwnership: true },
         );
       }
-      // The backend observed its capture exit before artifact finalization
-      // failed. Keeping this handle would permanently block a new capture,
-      // even though force-stop cannot recover the already-removed source.
+      // Capture teardown is confirmed. Keeping the handle would block a new
+      // capture; any recoverable raw source no longer needs a device owner.
       this.activeRecordings.delete(recordingId);
       try {
-        await this.removeRecordingArtifacts(recordingId, active.outputPath);
+        if (error.retainedCapturePath) {
+          // The raw capture shares this directory; remove only the failed output.
+          await this.fileSystem.rm(active.outputPath, { force: true });
+        } else {
+          await this.removeRecordingArtifacts(recordingId, active.outputPath);
+        }
       } catch (cleanupError) {
         this.log.warn(
           `[VideoRecorderService] Failed to remove unusable recording artifacts for ${recordingId}: ${errorMessage(cleanupError)}`,

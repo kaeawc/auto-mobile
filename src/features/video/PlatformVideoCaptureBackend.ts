@@ -278,7 +278,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     backendHandle: AndroidBackendHandle,
     retainDeviceFile: boolean,
   ): Promise<void> {
-    // A non-empty file still observed growing may have a device-side writer
+    // An empty or still-growing file may have a device-side writer
     // even after the host adb exits. Keep that copy and owner recoverable.
     if (retainDeviceFile) {
       logger.warn(
@@ -385,6 +385,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       return false;
     }
     if (observedFile) {
+      if (!(await this.confirmDeviceScreenrecordExited(adb))) {
+        return false;
+      }
       throw new ActionableError(
         `Device recording remained empty (zero bytes) after ${DEVICE_FILE_FINALIZE_POLL_ATTEMPTS} checks with capture exit confirmed.`,
       );
@@ -393,6 +396,25 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       `[VideoCapture] Could not observe device file ${deviceTempPath}; attempting bounded pull recovery`,
     );
     return true;
+  }
+
+  private async confirmDeviceScreenrecordExited(adb: AdbExecutor): Promise<boolean> {
+    try {
+      // pidof exits 1 for no matches. Preserve its status explicitly rather
+      // than masking command/transport failures with `|| true`.
+      const result = await adb.executeCommand(
+        'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'',
+        5000,
+        undefined,
+        true,
+      );
+      return (
+        !result.error && result.stderr.trim() === "" && result.stdout.trim() === "pidof-status:1"
+      );
+    } catch (error) {
+      logger.warn("[VideoCapture] Could not confirm device screenrecord exit", error);
+      return false;
+    }
   }
 
   /** Spawns `adb pull` once and settles on the process's exit code. */

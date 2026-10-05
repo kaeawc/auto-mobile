@@ -27,7 +27,10 @@ import type {
   FfmpegStartRequest,
   FfmpegStartedProcess,
 } from "../../../src/utils/media/FfmpegClient";
-import { trackProcess } from "../../../src/utils/ChildProcessTracker";
+import {
+  ProcessTeardownUnconfirmedError,
+  trackProcess,
+} from "../../../src/utils/ChildProcessTracker";
 import type { BootedDevice } from "../../../src/models";
 import type { Timer } from "../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -140,6 +143,12 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
   }
 
   exited = false;
+  spawnFailed = false;
+
+  failSpawn(error: NodeJS.ErrnoException): void {
+    this.spawnFailed = true;
+    this.emit("error", error);
+  }
 
   /** Runs inside stop(), modelling the real helper's SIGTERM grace period. */
   onStop?: () => void;
@@ -148,7 +157,7 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
   async stop(): Promise<unknown> {
     this.stopped += 1;
     this.onStop?.();
-    if (!this.exited) {
+    if (!this.exited && !this.spawnFailed) {
       this.exitWith({ code: null, signal: "SIGTERM" });
     }
     return { code: null, signal: "SIGTERM" };
@@ -972,19 +981,53 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     harness.helper.stop = async () => ({ code: null, signal: "SIGKILL" });
     const error = await harness.backend.stop(handle).catch((error: unknown) => error);
     expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(ProcessTeardownUnconfirmedError);
     expect(error).not.toBeInstanceOf(VideoCaptureFinalizationError);
   });
 
-  test("stop reports the helper spawn failure rather than a trust hint", async function () {
-    const harness = makeHarness();
-    const handle = await harness.backend.start(makeConfig());
-    // A spawn failure arrives after start() returned and may never emit "exit".
-    harness.helper.emit("error", new Error("spawn /helpers/screen-capture-helper EACCES"));
+  test.each(["ENOENT", "EACCES"])(
+    "stop reports helper spawn failure %s without an exit event",
+    async function (code) {
+      const harness = makeHarness();
+      const handle = await harness.backend.start(makeConfig());
+      // A spawn failure arrives after start() returned and may never emit "exit".
+      const cause = Object.assign(new Error(`spawn /helpers/screen-capture-helper ${code}`), {
+        code,
+        syscall: "spawn /helpers/screen-capture-helper",
+        path: "/helpers/screen-capture-helper",
+      });
+      harness.helper.failSpawn(cause);
+      const error = await harness.backend.stop(handle).catch((error: unknown) => error);
+      expect(harness.helper.exited).toBe(false);
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        cause,
+        message: expect.stringContaining(
+          `could not be run, so no recording was produced: ${cause.message}`,
+        ),
+      });
+    },
+  );
 
-    await expect(harness.backend.stop(handle)).rejects.toThrow(
-      "could not be run, so no recording was produced: spawn /helpers/screen-capture-helper EACCES",
-    );
-  });
+  test.each(["kill", "send", "unknown"])(
+    "helper %s error without exit retains ownership",
+    async (syscall) => {
+      const harness = makeHarness();
+      const handle = await harness.backend.start(makeConfig());
+      harness.helper.emit(
+        "error",
+        Object.assign(new Error("operation failed"), {
+          code: "EACCES",
+          syscall,
+        }),
+      );
+      harness.helper.stop = async () => ({ code: null, signal: "SIGKILL" });
+      const error = await harness.backend.stop(handle).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(ProcessTeardownUnconfirmedError);
+      expect(error).not.toBeInstanceOf(VideoCaptureFinalizationError);
+    },
+  );
 
   test("stop reports an actionable trust/connection error when no frame ever arrived", async function () {
     const harness = makeHarness();

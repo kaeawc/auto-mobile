@@ -711,6 +711,12 @@ describe("videoRecordingManager", () => {
       const factory = new FakeAdbClientFactory();
       factory
         .getFakeClient()
+        .setCommandResult(
+          'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'',
+          "pidof-status:1\n",
+        );
+      factory
+        .getFakeClient()
         .setCommandResultSequence("shell stat -c %s /sdcard/empty.mp4", ["0", "0", "0", "0", "0"]);
       const captureBackend =
         platform === "ios"
@@ -722,6 +728,8 @@ describe("videoRecordingManager", () => {
               undefined,
               captureTimer,
               { remove: async () => {} },
+              undefined,
+              { size: async () => 0 },
             )
           : new PlatformVideoCaptureBackend(factory, captureTimer);
       if (platform === "ios") {

@@ -14,7 +14,7 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
 import { FakeSecurePermissions } from "../../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { ActionableError } from "../../../src/models";
+import { ActionableError, toActionableError } from "../../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../../src/utils/ChildProcessTracker";
 
 describe("parseVideoRecordingConfig", () => {
@@ -440,6 +440,10 @@ describe("VideoRecorderService", () => {
     expect(removed).toEqual([path.dirname(recording.outputPath)]);
     expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
     expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toMatchObject({
+      message: "Recording produced no usable video. Start a new recording.",
+    });
+    expect(toActionableError(error, "Failed to stop video recording")).toBe(error);
     await expect(recorder.startRecording({ device })).resolves.toBeDefined();
   });
 
@@ -467,6 +471,54 @@ describe("VideoRecorderService", () => {
     };
     await expect(recorder.stopRecording(recording.recordingId)).rejects.toBe(failure);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("cleanup denied"), expect.any(Error));
+    expect(recorder.listActiveRecordingIds()).toEqual([]);
+    await expect(recorder.startRecording({ device })).resolves.toBeDefined();
+  });
+
+  test("retained finalization failure surfaces ownership and stop again guidance through service", async () => {
+    const recording = await service.startRecording();
+    const failure = new VideoCaptureFinalizationError("Device artifact is not finalized.", {
+      retainOwnership: true,
+    });
+    backend.stop = async () => {
+      throw failure;
+    };
+    const error = await service
+      .stopRecording(recording.recordingId)
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+    expect(error).toMatchObject({
+      retainOwnership: true,
+      cause: failure,
+      message: `Recording ${recording.recordingId} ownership retained; stop again to finalize its device artifact: ${failure.message}`,
+    });
+    expect(toActionableError(error, "Failed to stop video recording")).toBe(error);
+    expect(service.listActiveRecordingIds()).toEqual([recording.recordingId]);
+  });
+
+  test("terminal failure preserves recoverable raw capture directory and releases ownership", async () => {
+    const removed: string[] = [];
+    const recorder = new VideoRecorderService({
+      backend,
+      archiveRoot,
+      securePermissions,
+      fileSystem: {
+        rm: async (filePath) => {
+          removed.push(String(filePath));
+        },
+      },
+      idGenerator: new CountingIdGenerator("raw"),
+    });
+    const device = { deviceId: "raw-device", platform: "ios" as const };
+    const recording = await recorder.startRecording({ device });
+    const failure = new VideoCaptureFinalizationError("Raw capture retained at raw.mov", {
+      retainedCapturePath: path.join(path.dirname(recording.outputPath), "raw.mov"),
+    });
+    backend.stop = async () => {
+      throw failure;
+    };
+    await expect(recorder.stopRecording(recording.recordingId)).rejects.toBe(failure);
+    expect(removed).toEqual([recording.outputPath]);
     expect(recorder.listActiveRecordingIds()).toEqual([]);
     await expect(recorder.startRecording({ device })).resolves.toBeDefined();
   });

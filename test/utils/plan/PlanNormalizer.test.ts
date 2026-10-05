@@ -137,4 +137,13 @@ describe("PlanNormalizer", () => {
 
     expect(normalized.optional).toBeUndefined();
   });
+
+  test("toolAndParams merges inline fields under explicit params without logging or throwing", () => {
+    expect(
+      PlanNormalizer.toolAndParams({ command: "tapOn", text: "a", params: { text: "b", id: 1 } }),
+    ).toEqual({ tool: "tapOn", params: { text: "b", id: 1 } });
+    for (const invalid of [null, undefined, 1, "x", [], {}, { tool: 5 }]) {
+      expect(PlanNormalizer.toolAndParams(invalid)).toBeUndefined();
+    }
+  });
 });

@@ -7,6 +7,8 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
 import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { logger } from "../../../src/utils/logger";
 import { notificationHierarchy, notificationRows } from "../talkback/capturedNotificationTargets";
 
@@ -384,7 +386,7 @@ describe("TapOnElement extended selectors", () => {
           element: Element,
         ): Promise<void>;
       };
-      return { proxy, internals };
+      return { proxy, internals, tapOn };
     }
 
     const uniqueIdElement: Element = {
@@ -401,12 +403,206 @@ describe("TapOnElement extended selectors", () => {
       expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
     }
 
+    test("reuses a resolved unique-id hierarchy without a device read", async () => {
+      const { tapOn, proxy, internals } = setup();
+      const options = { action: "longPress" as const, resolvedHierarchy: notificationHierarchy };
+      const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
+      try {
+        await tapOn.executeAndroidTap(
+          "longPress",
+          50,
+          25,
+          1000,
+          uniqueIdElement,
+          undefined,
+          options,
+          false,
+        );
+        expect(proxy.getHierarchyRequestCount()).toBe(0);
+        expect(proxy.getActionHistory()).toMatchObject([
+          { action: "long_click", resourceId: uniqueIdElement["resource-id"] },
+        ]);
+        expect(internals.adb.getAllCommands()).toEqual([]);
+      } finally {
+        rawMode.mockRestore();
+      }
+    });
+
+    test.each([
+      ["shared", notificationHierarchy, repeatedIdElement],
+      ["incomplete", { ...notificationHierarchy, ctrlProxyIncomplete: true }, uniqueIdElement],
+      [
+        "truncated",
+        { ...notificationHierarchy, truncationReasons: ["max_children"] },
+        uniqueIdElement,
+      ],
+    ] satisfies [string, ViewHierarchyResult, Element][])(
+      "rejects a resolved %s hierarchy without a device read",
+      async (_name, resolvedHierarchy, element) => {
+        const harness = setup();
+        const options = { action: "longPress" as const, resolvedHierarchy };
+        const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
+        try {
+          await harness.tapOn.executeAndroidTap(
+            "longPress",
+            50,
+            25,
+            1000,
+            element,
+            undefined,
+            options,
+            false,
+          );
+          expect(harness.proxy.getHierarchyRequestCount()).toBe(0);
+          expectCoordinateFallback(harness);
+        } finally {
+          rawMode.mockRestore();
+        }
+      },
+    );
+
+    test.each([false, true])(
+      "fallback read skips fresh waiting and forwards cancellation (raw=%s)",
+      async (raw) => {
+        const { tapOn, proxy } = setup();
+        const controller = new AbortController();
+        const options = {
+          action: "longPress" as const,
+          ...(raw ? { resolvedHierarchy: notificationHierarchy } : {}),
+        };
+        const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(raw);
+        const read = spyOn(proxy, "getAccessibilityHierarchy");
+        try {
+          await tapOn.executeAndroidTap(
+            "longPress",
+            50,
+            25,
+            1000,
+            uniqueIdElement,
+            controller.signal,
+            options,
+            false,
+          );
+          expect(read).toHaveBeenCalledTimes(1);
+          expect(read).toHaveBeenCalledWith(
+            undefined,
+            undefined,
+            true,
+            undefined,
+            true,
+            controller.signal,
+          );
+          expect(proxy.getActionHistory()).toHaveLength(1);
+        } finally {
+          read.mockRestore();
+          rawMode.mockRestore();
+        }
+      },
+    );
+
+    test("aborting during the fallback read stops semantic and coordinate presses", async () => {
+      const { tapOn, proxy, internals } = setup();
+      const controller = new AbortController();
+      const aborted = new DOMException("cancelled during hierarchy read", "AbortError");
+      const read = spyOn(proxy, "getAccessibilityHierarchy").mockImplementation(async () => {
+        controller.abort(aborted);
+        return null;
+      });
+      try {
+        await expect(
+          tapOn.executeAndroidTap(
+            "longPress",
+            50,
+            25,
+            1000,
+            uniqueIdElement,
+            controller.signal,
+            undefined,
+            false,
+          ),
+        ).rejects.toThrow("Operation cancelled");
+        expect(proxy.getActionHistory()).toEqual([]);
+        expect(proxy.getNodeActionHistory()).toEqual([]);
+        expect(internals.adb.getAllCommands()).toEqual([]);
+      } finally {
+        read.mockRestore();
+      }
+    });
+
+    test.each([
+      ["unique", uniqueIdElement],
+      ["shared", repeatedIdElement],
+    ] satisfies [string, Element][])(
+      "tapOn threads the hierarchy selected after the stability refresh (%s id)",
+      async (kind, element) => {
+        const { tapOn, proxy, internals } = setup();
+        // The initial tree has one match; the refreshed capture may introduce another.
+        const initialHierarchy: ViewHierarchyResult = { hierarchy: { node: { $: element } } };
+        const strategy = new FakeTapStrategy();
+        strategy.setShouldRunPreTapStability(true);
+        const flow = tapOn as unknown as {
+          strategy: FakeTapStrategy;
+          selectionStateTracker: { prepare(): Promise<null>; finalize(): Promise<[]> };
+        };
+        flow.strategy = strategy;
+        flow.selectionStateTracker = { prepare: async () => null, finalize: async () => [] };
+        tapOn.observedInteraction = (callback) =>
+          callback({ viewHierarchy: initialHierarchy, screenSize: { width: 1080, height: 2400 } });
+        const stable = spyOn(
+          tapOn,
+          "resolveAndroidStableTapTargetAfterRefreshes",
+        ).mockResolvedValue({
+          ok: true,
+          viewHierarchy: notificationHierarchy,
+          tapElement: element,
+          usedParent: false,
+          selection: {
+            element,
+            totalMatches: kind === "unique" ? 1 : 2,
+            indexInMatches: 0,
+            strategy: "first",
+          },
+        });
+        const dispatch = spyOn(tapOn, "executeAndroidTap");
+        const rawMode = spyOn(serverConfig, "isRawElementSearchEnabled").mockReturnValue(false);
+        try {
+          const result = await tapOn.execute({
+            elementId: element["resource-id"],
+            action: "longPress",
+            duration: 1000,
+          });
+          expect(result.success).toBe(true);
+          expect(stable).toHaveBeenCalledTimes(1);
+          expect(dispatch.mock.calls[0]?.[6]).toMatchObject({
+            resolvedHierarchy: notificationHierarchy,
+          });
+          expect(dispatch.mock.calls[0]?.[6]?.resolvedHierarchy).toBe(notificationHierarchy);
+          expect(proxy.getHierarchyRequestCount()).toBe(0);
+          expect(proxy.getNodeActionHistory()).toEqual([]);
+          if (kind === "unique") {
+            expect(proxy.getActionHistory()).toMatchObject([
+              { action: "long_click", resourceId: element["resource-id"] },
+            ]);
+            expect(internals.adb.getAllCommands()).toEqual([]);
+          } else {
+            expect(proxy.getActionHistory()).toEqual([]);
+            expect(internals.adb.getAllCommands()).toHaveLength(1);
+            expect(internals.adb.getAllCommands()[0]).toContain("shell input touchscreen swipe");
+          }
+        } finally {
+          rawMode.mockRestore();
+          dispatch.mockRestore();
+          stable.mockRestore();
+        }
+      },
+    );
+
     test("uses one bare-id long click after reading a complete unfiltered unique-id hierarchy", async () => {
       const { proxy, internals } = setup();
       const read = spyOn(proxy, "getAccessibilityHierarchy");
       try {
         await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
-        expect(read).toHaveBeenCalledWith(undefined, undefined, false, undefined, true);
+        expect(read).toHaveBeenCalledWith(undefined, undefined, true, undefined, true, undefined);
         expect(proxy.getActionHistory()).toEqual([
           { action: "long_click", resourceId: uniqueIdElement["resource-id"], timeoutMs: 5000 },
         ]);

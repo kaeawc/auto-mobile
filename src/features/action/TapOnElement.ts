@@ -188,6 +188,11 @@ const IOS_STATUS_BAR_CLASSES = new Set([
   "UIStatusBarWindow",
 ]);
 
+/** Internal action context; never part of the public tapOn schema. */
+type ResolvedAndroidTapOptions = DisplayFenceOption & {
+  resolvedHierarchy?: ViewHierarchyResult;
+};
+
 /** Internal I/O seam: decisions and timing remain shared with the default tap path. */
 interface AndroidTapVerification {
   refresh: (timeoutMs: number) => Promise<ViewHierarchyResult | null>;
@@ -4212,6 +4217,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   {
                     ...options,
                     displayFence: fence,
+                    resolvedHierarchy: viewHierarchy,
                     onActivationWarning: (warning) => activationWarnings.push(warning),
                   },
                   isAccessibilityServiceEnabled,
@@ -4413,10 +4419,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     options?: TapOnElementOptions &
-      DisplayFenceOption & { onActivationWarning?: (warning: string) => void },
+      ResolvedAndroidTapOptions & { onActivationWarning?: (warning: string) => void },
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
-    const fence = options?.displayFence;
+    const { displayFence: fence, resolvedHierarchy } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
       typeof isTalkBackEnabled === "boolean"
@@ -4463,6 +4469,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, false, {
       displayFence: fence,
+      resolvedHierarchy,
     });
     return undefined;
   }
@@ -4521,7 +4528,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     skipSemanticAction: boolean = false,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: ResolvedAndroidTapOptions = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     if (action === "tap") {
@@ -4534,9 +4541,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticAction, {
-        displayFence: fence,
-      });
+      await this.executeAndroidLongPress(
+        x,
+        y,
+        durationMs,
+        element,
+        signal,
+        skipSemanticAction,
+        fenceOptions,
+      );
     } else if (action === "doubleTap") {
       await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
       await this.timer.sleep(200);
@@ -4798,7 +4811,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       longPressDuration,
       retryTarget,
       signal,
-      options,
+      { ...options, resolvedHierarchy: probe.hierarchy },
       isTalkBackEnabled,
     );
   }
@@ -4888,7 +4901,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           durationMs,
           element,
           signal,
-          false,
+          // TalkBackTapStrategy.executeLongPress already ran the uniqueness guard
+          // and attempted long_click for this selector; continue with coordinates.
+          true,
           { displayFence: fence },
         );
       }
@@ -5146,13 +5161,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     skipSemanticAction: boolean = false,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: ResolvedAndroidTapOptions = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     if (!skipSemanticAction) {
       const selector = stableNodeSelectorForElement(element);
-      if (selector && (await this.trySemanticAndroidLongPress(element, selector))) {
+      if (
+        selector &&
+        (await this.trySemanticAndroidLongPress(element, selector, signal, fenceOptions))
+      ) {
         return;
       }
     }
@@ -5216,26 +5234,40 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private semanticAndroidLongPressTargetError(
     selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
+    signal?: AbortSignal,
+    options: ResolvedAndroidTapOptions = {},
   ): Promise<string | undefined> {
+    // Raw search resolves against a filtered projection that may omit duplicate IDs.
+    // Default extraction matches the cached tree already accepted by this guard.
+    const resolvedHierarchy = serverConfig.isRawElementSearchEnabled()
+      ? undefined
+      : options.resolvedHierarchy;
     return nodeActionTargetError(selector, {
       supportsNodeActionSelectors: () => this.accessibilityService.supportsNodeActionSelectors(),
       getAccessibilityHierarchy: () =>
-        this.accessibilityService.getAccessibilityHierarchy(
-          undefined,
-          undefined,
-          false,
-          undefined,
-          true,
-        ),
+        resolvedHierarchy
+          ? Promise.resolve(resolvedHierarchy)
+          : this.accessibilityService.getAccessibilityHierarchy(
+              undefined,
+              undefined,
+              true,
+              undefined,
+              true,
+              signal,
+            ),
     });
   }
 
   private async trySemanticAndroidLongPress(
     element: Element,
     selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
+    signal?: AbortSignal,
+    options: ResolvedAndroidTapOptions = {},
   ): Promise<boolean> {
     const needsNodeSelector = requiresNodeSelector(selector);
-    const targetError = await this.semanticAndroidLongPressTargetError(selector);
+    const targetError = await this.semanticAndroidLongPressTargetError(selector, signal, options);
+    // The hierarchy reader turns cancellation into null; never degrade it to a press.
+    throwIfAborted(signal);
     if (targetError) {
       logger.info(`[TapOnElement] ${targetError}; using coordinate long press`);
       return false;

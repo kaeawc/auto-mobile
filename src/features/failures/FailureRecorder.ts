@@ -133,6 +133,16 @@ export interface RecordNonFatalInput {
   videoPath?: string;
 }
 
+interface FailureNotificationOptions {
+  occurrenceId: string;
+  groupId: string;
+  type: FailureType;
+  severity: FailureSeverity;
+  title: string;
+  message: string;
+  deviceId: string | null;
+}
+
 /**
  * FailureRecorder provides a high-level API for recording various types of failures.
  * It handles signature generation, severity calculation, and stores failures in the database.
@@ -233,15 +243,15 @@ export class FailureRecorder implements FailureRecorderService {
       logger.debug(`[FailureRecorder] Recorded tool failure: ${input.toolName} (${occurrenceId})`);
 
       // Push notification to connected IDE plugins
-      this.pushFailureNotification(
+      this.pushFailureNotification({
         occurrenceId,
-        signature, // groupId is based on signature
-        "tool_failure",
+        groupId: signature, // groupId is based on signature
+        type: "tool_failure",
         severity,
-        failureInput.title,
-        input.errorMessage,
-        input.deviceId ?? null,
-      );
+        title: failureInput.title,
+        message: input.errorMessage,
+        deviceId: input.deviceId ?? null,
+      });
 
       return occurrenceId;
     } catch (error) {
@@ -284,15 +294,15 @@ export class FailureRecorder implements FailureRecorderService {
       logger.debug(`[FailureRecorder] Recorded crash: ${title} (${occurrenceId})`);
 
       // Push notification to connected IDE plugins
-      this.pushFailureNotification(
+      this.pushFailureNotification({
         occurrenceId,
-        signature,
-        "crash",
+        groupId: signature,
+        type: "crash",
         severity,
         title,
-        `${input.exceptionType}: ${input.exceptionMessage}`,
-        input.deviceId ?? null,
-      );
+        message: `${input.exceptionType}: ${input.exceptionMessage}`,
+        deviceId: input.deviceId ?? null,
+      });
 
       // Push to telemetry timeline
       this.telemetryRecorder.recordFailureTelemetry({
@@ -349,15 +359,15 @@ export class FailureRecorder implements FailureRecorderService {
       logger.debug(`[FailureRecorder] Recorded ANR: ${title} (${occurrenceId})`);
 
       // Push notification to connected IDE plugins
-      this.pushFailureNotification(
+      this.pushFailureNotification({
         occurrenceId,
-        signature,
-        "anr",
-        "high", // ANRs are always high severity
+        groupId: signature,
+        type: "anr",
+        severity: "high", // ANRs are always high severity
         title,
-        input.reason,
-        input.deviceId ?? null,
-      );
+        message: input.reason,
+        deviceId: input.deviceId ?? null,
+      });
 
       // Push to telemetry timeline
       this.telemetryRecorder.recordFailureTelemetry({
@@ -414,15 +424,15 @@ export class FailureRecorder implements FailureRecorderService {
       logger.debug(`[FailureRecorder] Recorded non-fatal: ${title} (${occurrenceId})`);
 
       // Push notification to connected IDE plugins
-      this.pushFailureNotification(
+      this.pushFailureNotification({
         occurrenceId,
-        signature,
-        "nonfatal",
+        groupId: signature,
+        type: "nonfatal",
         severity,
         title,
-        failureInput.message,
-        input.deviceId ?? null,
-      );
+        message: failureInput.message,
+        deviceId: input.deviceId ?? null,
+      });
 
       // Push to telemetry timeline
       this.telemetryRecorder.recordFailureTelemetry({
@@ -450,15 +460,8 @@ export class FailureRecorder implements FailureRecorderService {
   /**
    * Push a failure notification to connected IDE plugins
    */
-  private pushFailureNotification(
-    occurrenceId: string,
-    groupId: string,
-    type: FailureType,
-    severity: FailureSeverity,
-    title: string,
-    message: string,
-    deviceId: string | null,
-  ): void {
+  private pushFailureNotification(options: FailureNotificationOptions): void {
+    const { occurrenceId, groupId, type, severity, title, message, deviceId } = options;
     const server = getFailuresPushServer();
     if (server) {
       const notification: FailureNotificationPush = {

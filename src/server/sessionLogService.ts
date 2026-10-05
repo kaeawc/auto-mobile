@@ -303,6 +303,17 @@ function parseAndroidRead(path: string, stdout: string, maxBytes: number): Sessi
   return { path, status: "read", ...boundedContent(buffer, byteCount, maxBytes) };
 }
 
+interface AndroidSessionLogCommandOptions {
+  adb: AdbExecutor;
+  device: BootedDevice;
+  appId: string;
+  container: AppFileContainer;
+  target: AndroidTarget & { kind: "runAs" | "external" };
+  script: string;
+  operation: "read" | "reset";
+  signal?: AbortSignal;
+}
+
 export class AndroidSessionLogProvider implements SessionLogProvider {
   readonly platform = "android" as const;
 
@@ -324,16 +335,16 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
         continue;
       }
       try {
-        const result = await this.run(
+        const result = await this.run({
           adb,
           device,
           appId,
-          request.container,
+          container: request.container,
           target,
-          androidReadScript(target, maxBytes),
-          "read",
+          script: androidReadScript(target, maxBytes),
+          operation: "read",
           signal,
-        );
+        });
         entries.push(parseAndroidRead(path, result.stdout, maxBytes));
       } catch (error) {
         entries.push(failedPath(path, error));
@@ -352,16 +363,16 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
         continue;
       }
       try {
-        const result = await this.run(
+        const result = await this.run({
           adb,
-          request.device,
-          request.appId,
-          request.container,
+          device: request.device,
+          appId: request.appId,
+          container: request.container,
           target,
-          androidResetScript(target),
-          "reset",
-          request.signal,
-        );
+          script: androidResetScript(target),
+          operation: "reset",
+          signal: request.signal,
+        });
         entries.push({ path, status: result.stdout.trim() === "reset" ? "reset" : "missing" });
       } catch (error) {
         entries.push(failedPath(path, error));
@@ -370,16 +381,8 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
     return entries;
   }
 
-  private run(
-    adb: AdbExecutor,
-    device: BootedDevice,
-    appId: string,
-    container: AppFileContainer,
-    target: AndroidTarget & { kind: "runAs" | "external" },
-    script: string,
-    operation: "read" | "reset",
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  private run(options: AndroidSessionLogCommandOptions): Promise<ExecResult> {
+    const { adb, device, appId, container, target, script, operation, signal } = options;
     const command =
       target.kind === "external"
         ? `shell sh -c ${shellQuote(script)}`

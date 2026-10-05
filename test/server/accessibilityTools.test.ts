@@ -38,10 +38,35 @@ function accessibilityHandler() {
 describe("accessibilityTools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
+    accessibilityDetector.clearAllCache();
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
+    accessibilityDetector.clearAllCache();
+  });
+
+  test("unreadable Android status reports a reason without enabled false", async () => {
+    accessibilityDetector.clearAllCache();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("enabled_accessibility_services", new Error("device offline"));
+    const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+    try {
+      registerAccessibilityTools();
+      const response = await accessibilityHandler()(ANDROID_DEVICE, {});
+      expect(response).toMatchObject({
+        structuredContent: {
+          service: "unknown",
+          reason:
+            "could not determine TalkBack state: device accessibility settings read unavailable",
+        },
+      });
+      expect(response.structuredContent).not.toHaveProperty("enabled");
+      expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+    } finally {
+      factory.mockRestore();
+      accessibilityDetector.clearAllCache();
+    }
   });
 
   describe("registration", () => {
@@ -204,13 +229,9 @@ describe("accessibilityTools", () => {
           calls.push("client");
           return adb;
         }),
-        spyOn(accessibilityDetector, "isAccessibilityEnabled").mockImplementation(async () => {
-          calls.push("enabled");
-          return enabled;
-        }),
-        spyOn(accessibilityDetector, "detectMethod").mockImplementation(async () => {
-          calls.push("method");
-          return enabled ? "talkback" : "unknown";
+        spyOn(accessibilityDetector, "resolveState").mockImplementation(async () => {
+          calls.push("state");
+          return { enabled, service: enabled ? "talkback" : "unknown", ctrlProxyEnabled: false };
         }),
       ];
       try {
@@ -218,7 +239,7 @@ describe("accessibilityTools", () => {
         expect(await accessibilityHandler()(ANDROID_DEVICE, {})).toMatchObject({
           structuredContent: { enabled, service: enabled ? "talkback" : "unknown" },
         });
-        expect(calls).toEqual(["invalidate", "client", "enabled", "method"]);
+        expect(calls).toEqual(["invalidate", "client", "state"]);
       } finally {
         spies.forEach((spy) => spy.mockRestore());
       }
@@ -296,7 +317,7 @@ describe("accessibilityTools", () => {
       },
     );
 
-    test("defaults an absent TalkBack state and omits an applied toggle's reason", async () => {
+    test("rejects an absent TalkBack state instead of defaulting to disabled", async () => {
       const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
         new FakeAdbExecutor(),
       );
@@ -307,11 +328,9 @@ describe("accessibilityTools", () => {
       });
       try {
         registerAccessibilityTools();
-        const response = await accessibilityHandler()(ANDROID_DEVICE, { talkback: false });
-        expect(response).toHaveProperty("structuredContent", {
-          enabled: false,
-          service: "unknown",
-        });
+        await expect(accessibilityHandler()(ANDROID_DEVICE, { talkback: false })).rejects.toThrow(
+          "already applied",
+        );
       } finally {
         toggle.mockRestore();
         factory.mockRestore();

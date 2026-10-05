@@ -6,11 +6,34 @@ import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
  */
 export type AccessibilityService = "talkback" | "voiceover" | "unknown";
 
+/** A successful settings read; null from resolveState means unavailable. */
+export interface AndroidAccessibilityState {
+  enabled: boolean;
+  service: AccessibilityService;
+  ctrlProxyEnabled: boolean | null;
+}
+
+export const TALKBACK_STATE_UNKNOWN_WARNING =
+  "AutoMobile could not determine TalkBack state after two probes; using the default gesture. TalkBack may be enabled.";
+
 /**
  * Interface for Android accessibility detection
  * Detects and caches TalkBack state on Android devices via ADB
  */
 export interface AccessibilityDetector {
+  resolveState(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<AndroidAccessibilityState | null>;
+
+  /** Gesture decision: synchronously retry an unavailable probe once, then return null. */
+  resolveTalkBackState(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<boolean | null>;
+
   /**
    * CtrlProxy's actual enabled state; null means detection failed or was skipped.
    * Omit adb to consume only an existing cached read (e.g. after an observe audit).

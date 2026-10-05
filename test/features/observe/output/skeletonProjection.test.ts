@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getImeOccluder,
   toSkeleton,
   projectSkeleton,
   projectSkeletonElement,
 } from "../../../../src/features/observe/output/SkeletonProjection";
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
+import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
@@ -18,6 +20,21 @@ import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyRe
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 import { imeOcclusionHierarchy } from "../../../fixtures/observe/imeOcclusion";
 import iosFormsEmptyFields from "../../../fixtures/observe/ios-forms-empty-fields";
+
+import capturedIme from "../../../fixtures/android-ime-window/playground-gboard-api36.json";
+import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
+import type {
+  AccessibilityHierarchy,
+  HierarchyDelegateContext,
+} from "../../../../src/features/observe/android/types";
+import { FakeTimer } from "../../../fakes/FakeTimer";
+
+const capturedImeHierarchy = () =>
+  new CtrlProxyHierarchy({
+    timer: new FakeTimer(),
+  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+    structuredClone(capturedIme) as AccessibilityHierarchy,
+  );
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
 
@@ -45,6 +62,38 @@ function findById(skeleton: SkeletonElement[], id: string): SkeletonElement | un
 }
 
 describe("Android IME occlusion", () => {
+  test.each([false, true])(
+    "captured app bottom navigation is covered by the full IME frame (raw-search=%s)",
+    (rawSearch) => {
+      const previous = serverConfig.isRawElementSearchEnabled();
+      try {
+        serverConfig.setRawElementSearchEnabled(rawSearch);
+        const raw = capturedImeHierarchy();
+        const hierarchy = (
+          Object.create(ViewHierarchy.prototype) as ViewHierarchy
+        ).filterViewHierarchy(raw);
+        attachRawViewHierarchy(hierarchy, raw);
+        const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+        expect(getImeOccluder(elements)).toMatchObject({
+          bounds: [0, 1517, 1080, 2400],
+          windowRank: 1,
+        });
+        const { skeleton, context } = projectSkeleton(elements, { width: 1080, height: 2400 });
+        for (const label of ["Demos", "Slides", "Settings", "Password"]) {
+          // Gboard also has a Settings key; select the app's lower row by its bounds.
+          const isAppRow = (row: SkeletonElement) => row.label === label && row.bounds[1] > 1633;
+          expect(skeleton.find(isAppRow)).toBeUndefined();
+          expect(context.find(isAppRow)).toMatchObject({ occluded: true, affordances: [] });
+        }
+        expect(
+          skeleton.some((row) => row.affordances.includes("tap") && row.bounds[3] < 1517),
+        ).toBe(true);
+      } finally {
+        serverConfig.setRawElementSearchEnabled(previous);
+      }
+    },
+  );
+
   test("moves fully covered app actions to occluded context and retains exposed actions", () => {
     const elements = new DefaultObserveElementCollector().collect(
       imeOcclusionHierarchy(),

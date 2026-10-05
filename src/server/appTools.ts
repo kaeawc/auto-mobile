@@ -883,7 +883,9 @@ export const setAppPermissionsHandler = async (
 
   const response = createJSONToolResponse({
     message: result.success
-      ? `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
+      ? result.changedCount === 0
+        ? `No app permission changes were needed for ${args.appId} (already in the requested state)`
+        : `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
       : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
     ...result,
   });

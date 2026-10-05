@@ -1,3 +1,4 @@
+import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   defaultAdbClientFactory,
@@ -25,7 +26,7 @@ type SimctlAppearanceRunner = Pick<SimCtl, "executeCommandArgs">;
  * its content or navigation (issue #6096): the user's font/text scale, the
  * effective display density, and the light/dark theme (night mode). Each is
  * settable, observable in a subsequent screen capture, and restorable to the
- * device default via `reset`.
+ * device baseline via `reset` (Android night mode only when this tool changed it).
  *
  * Android supports all three fields. The iOS Simulator supports `theme` only,
  * via `simctl ui appearance` (matching how the device-snapshot iOS settings
@@ -105,11 +106,21 @@ export interface SetDisplayConfigInput {
   fontScale?: FontScaleInput;
   density?: DensityInput;
   theme?: DisplayTheme;
-  /** Restore font scale, density, and theme to device defaults. */
+  /** Android: reset font/density defaults and restore only night mode changed by this tool. */
   reset?: boolean;
 }
 
+/** Process-lifetime baseline for the first night-mode value this tool replaces. */
+export interface ThemeBaselineStore {
+  get(deviceId: string): DisplayTheme | undefined;
+  set(deviceId: string, theme: DisplayTheme): void;
+  delete(deviceId: string): void;
+}
+
+const defaultThemeBaselines: ThemeBaselineStore = new Map<string, DisplayTheme>();
+
 export interface DisplayConfigDependencies {
+  themeBaselines?: ThemeBaselineStore;
   adbFactory?: AdbClientFactory;
   /** iOS Simulator appearance seam; defaults to a `SimCtlClient` for the device. */
   simctl?: SimctlAppearanceRunner;
@@ -254,8 +265,11 @@ export class DisplayConfig {
 
   private simctl: SimctlAppearanceRunner;
 
+  private themeBaselines: ThemeBaselineStore;
+
   constructor(device: BootedDevice, dependencies: DisplayConfigDependencies = {}) {
     this.device = device;
+    this.themeBaselines = dependencies.themeBaselines ?? defaultThemeBaselines;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? new SimCtlClient(device);
   }
@@ -453,8 +467,7 @@ export class DisplayConfig {
     // `setIosAppearance`/`applyIosChanges` catch their own `executeCommandArgs`
     // rejection and return it as an error fragment (mirroring the Android
     // `runChecked` pattern), so the mutation step itself never throws here.
-    // Light is the platform default appearance, matching the Android reset's
-    // choice of the AOSP default theme (issue #6096).
+    // Light remains the iOS Simulator reset appearance (issue #6096).
     const errors = input.reset
       ? await this.setIosAppearance("light")
       : await this.applyIosChanges(input);
@@ -534,7 +547,7 @@ export class DisplayConfig {
     ) {
       return this.invalidRequest(
         "reset cannot be combined with an explicit fontScale, density, or theme: reset restores " +
-          "all three to their device defaults. Send reset on its own, or send only the explicit " +
+          "the platform defaults and recorded night-mode baseline. Send reset on its own, or send only the explicit " +
           "fields you want to change.",
       );
     }
@@ -585,6 +598,7 @@ export class DisplayConfig {
         platform: this.device.platform,
         supported: this.support(),
         error: errorMessage(error),
+        message: errorMessage(error),
       };
     }
 
@@ -594,12 +608,13 @@ export class DisplayConfig {
     // never dropped from the restoration state (issue #6096 review). The device
     // may now be partially modified, so we still read post-mutation state and
     // always return `previous` so the caller can restore what changed.
-    const { errors, issuedDensity } = input.reset
-      ? { errors: await this.applyReset(adb), issuedDensity: "default" as const }
+    const expectedTheme = this.prepareAndroidTheme(input, previous);
+    const mutation = input.reset
+      ? await this.applyReset(adb, expectedTheme)
       : await this.applyChanges(adb, input, physicalDensity);
+    const { errors, issuedDensity } = mutation;
 
     let applied: DisplayConfigValues | undefined;
-    let readError: string | undefined;
     try {
       const postMutation = await this.readRawValues(adb);
       applied = postMutation.values;
@@ -607,15 +622,16 @@ export class DisplayConfig {
         input,
         postMutation,
         issuedDensity,
+        expectedTheme,
       );
+      this.confirmAndroidThemeRestore(mutation.restoredTheme, postMutation.values.theme);
       errors.push(...verificationErrors);
     } catch (error) {
       logger.warn(`[DisplayConfig] setConfig post-read failed: ${errorMessage(error)}`, error);
-      readError = `failed to read applied values: ${errorMessage(error)}`;
+      errors.push(`failed to read applied values: ${errorMessage(error)}`);
     }
 
-    const allErrors = readError ? [...errors, readError] : errors;
-    const error = allErrors.length > 0 ? allErrors.join("; ") : undefined;
+    const error = errors.length > 0 ? errors.join("; ") : undefined;
     return {
       success: error === undefined,
       deviceId: this.device.deviceId,
@@ -624,7 +640,53 @@ export class DisplayConfig {
       ...(applied ? { applied } : {}),
       previous,
       ...(error ? { error } : {}),
+      message: this.androidResultMessage(input.reset, expectedTheme, error),
     };
+  }
+
+  private prepareAndroidTheme(
+    input: SetDisplayConfigInput,
+    previous: DisplayConfigValues,
+  ): DisplayTheme | undefined {
+    if (input.reset) {
+      return this.themeBaselines.get(this.device.deviceId);
+    }
+    // Capture before dispatch: even a rejected write can leave a partially changed device.
+    if (
+      input.theme !== undefined &&
+      previous.theme !== undefined &&
+      this.themeBaselines.get(this.device.deviceId) === undefined
+    ) {
+      this.themeBaselines.set(this.device.deviceId, previous.theme);
+    }
+    return input.theme;
+  }
+
+  private confirmAndroidThemeRestore(
+    restoredTheme: DisplayTheme | undefined,
+    appliedTheme: DisplayTheme | undefined,
+  ): void {
+    if (restoredTheme !== undefined && appliedTheme === restoredTheme) {
+      this.themeBaselines.delete(this.device.deviceId);
+    }
+  }
+
+  private androidResultMessage(
+    reset: boolean | undefined,
+    theme: DisplayTheme | undefined,
+    error: string | undefined,
+  ): string | undefined {
+    if (error !== undefined) {
+      return error;
+    }
+    if (!reset) {
+      return undefined;
+    }
+    const nightMode =
+      theme === undefined
+        ? "night mode left unchanged (displayConfig did not change it)"
+        : `night mode restored to ${theme} (changed earlier by displayConfig)`;
+    return `Reset font scale and density to device defaults; ${nightMode}.`;
   }
 
   private async readValues(adb: AdbExecutor): Promise<DisplayConfigValues> {
@@ -643,9 +705,9 @@ export class DisplayConfig {
     physicalDensity: number | undefined;
   }> {
     const [fontRaw, densityRaw, nightRaw] = await Promise.all([
-      this.run(adb, "shell settings get system font_scale"),
-      this.run(adb, "shell wm density"),
-      this.run(adb, "shell cmd uimode night"),
+      this.run(adb, "shell settings get system font_scale", "font scale"),
+      this.run(adb, "shell wm density", "density"),
+      this.run(adb, "shell cmd uimode night", "night mode"),
     ]);
     const parsedDensity = parseWmDensity(densityRaw);
     const fontScaleSnapshot = parseFontScaleSnapshot(fontRaw);
@@ -689,14 +751,18 @@ export class DisplayConfig {
     adb: AdbExecutor,
     input: SetDisplayConfigInput,
     physicalDensity: number | undefined,
-  ): Promise<{ errors: string[]; issuedDensity?: number | "default" }> {
+  ): Promise<{
+    errors: string[];
+    issuedDensity?: number | "default";
+    restoredTheme?: DisplayTheme;
+  }> {
     const errors: string[] = [];
     if (input.fontScale !== undefined) {
       const command =
         input.fontScale === "default"
           ? "shell settings delete system font_scale"
           : `shell settings put system font_scale ${input.fontScale}`;
-      errors.push(...(await this.runChecked(adb, command)));
+      errors.push(...(await this.runChecked(adb, command, "font scale")));
     }
     // `issuedDensity` stays `undefined` unless a `wm density` command was
     // actually dispatched. When `resolveDensityCommand` rejects the request
@@ -710,25 +776,44 @@ export class DisplayConfig {
       if ("error" in resolution) {
         errors.push(resolution.error);
       } else {
-        errors.push(...(await this.runChecked(adb, resolution.command)));
+        errors.push(...(await this.runChecked(adb, resolution.command, "density")));
         issuedDensity = resolution.target;
       }
     }
     if (input.theme !== undefined) {
       errors.push(
-        ...(await this.runChecked(adb, `shell cmd uimode night ${nightModeArg(input.theme)}`)),
+        ...(await this.runChecked(
+          adb,
+          `shell cmd uimode night ${nightModeArg(input.theme)}`,
+          "night mode",
+        )),
       );
     }
     return { errors, issuedDensity };
   }
 
-  private async applyReset(adb: AdbExecutor): Promise<string[]> {
+  private async applyReset(
+    adb: AdbExecutor,
+    theme: DisplayTheme | undefined,
+  ): Promise<{ errors: string[]; issuedDensity: "default"; restoredTheme?: DisplayTheme }> {
     const errors: string[] = [];
-    errors.push(...(await this.runChecked(adb, "shell settings delete system font_scale")));
-    errors.push(...(await this.runChecked(adb, "shell wm density reset")));
-    // `no` is the AOSP default (light); an app can still opt into `system` itself.
-    errors.push(...(await this.runChecked(adb, "shell cmd uimode night no")));
-    return errors;
+    errors.push(
+      ...(await this.runChecked(adb, "shell settings delete system font_scale", "font scale")),
+    );
+    errors.push(...(await this.runChecked(adb, "shell wm density reset", "density")));
+    let restoredTheme: DisplayTheme | undefined;
+    if (theme !== undefined) {
+      const themeErrors = await this.runChecked(
+        adb,
+        `shell cmd uimode night ${nightModeArg(theme)}`,
+        "night mode",
+      );
+      errors.push(...themeErrors);
+      if (themeErrors.length === 0) {
+        restoredTheme = theme;
+      }
+    }
+    return { errors, issuedDensity: "default", restoredTheme };
   }
 
   /**
@@ -769,11 +854,16 @@ export class DisplayConfig {
     input: SetDisplayConfigInput,
     postMutation: Awaited<ReturnType<DisplayConfig["readRawValues"]>>,
     issuedDensity: number | "default" | undefined,
+    expectedTheme: DisplayTheme | undefined,
   ): string[] {
     const errors: string[] = [];
     const expectedFontScale = input.reset ? "default" : input.fontScale;
     const appliedFontScale = postMutation.restorableValues.fontScale;
-    if (expectedFontScale !== undefined && appliedFontScale !== expectedFontScale) {
+    const fontScaleMatches =
+      expectedFontScale === "default"
+        ? appliedFontScale === "default" || appliedFontScale === DEFAULT_FONT_SCALE
+        : appliedFontScale === expectedFontScale;
+    if (expectedFontScale !== undefined && !fontScaleMatches) {
       errors.push(
         `Font scale remained ${String(appliedFontScale)} after requesting ${String(expectedFontScale)}.`,
       );
@@ -798,7 +888,6 @@ export class DisplayConfig {
       }
     }
 
-    const expectedTheme = input.reset ? "light" : input.theme;
     if (expectedTheme !== undefined && postMutation.values.theme !== expectedTheme) {
       errors.push(
         `Night mode remained ${String(postMutation.values.theme)} after requesting ${expectedTheme}.`,
@@ -811,14 +900,20 @@ export class DisplayConfig {
    * Read a command's stdout, rejecting shell-reported failures rather than
    * fabricating a restoration baseline from partial output.
    */
-  private async run(adb: AdbExecutor, command: string): Promise<string> {
-    const result = await adb.executeCommand(command, undefined, undefined, true);
-    const stdout = result.stdout;
-    const stderr = result.stderr ?? "";
-    if (outputLooksLikeShellFailure(stdout, stderr)) {
-      throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
+  private async run(adb: AdbExecutor, command: string, setting: string): Promise<string> {
+    try {
+      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const stdout = result.stdout;
+      const stderr = result.stderr ?? "";
+      if (outputLooksLikeShellFailure(stdout, stderr)) {
+        throw new Error(`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`);
+      }
+      return stdout;
+    } catch (error) {
+      throw new ActionableError(`${setting}: failed to read '${command}': ${errorMessage(error)}`, {
+        cause: error,
+      });
     }
-    return stdout;
   }
 
   /**
@@ -829,17 +924,18 @@ export class DisplayConfig {
    * restoration state for an earlier field that already changed the device
    * (issue #6096 review).
    */
-  private async runChecked(adb: AdbExecutor, command: string): Promise<string[]> {
+  private async runChecked(adb: AdbExecutor, command: string, setting: string): Promise<string[]> {
     try {
       const result = await adb.executeCommand(command, undefined, undefined, true);
       const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {
-        return [`'${command}' reported: ${`${stdout} ${stderr}`.trim()}`];
+        return [`${setting}: '${command}' reported: ${`${stdout} ${stderr}`.trim()}`];
       }
       return [];
     } catch (error) {
-      return [`'${command}' failed: ${errorMessage(error)}`];
+      logger.warn(`[DisplayConfig] ${setting} command failed: ${errorMessage(error)}`, error);
+      return [`${setting}: '${command}' failed: ${errorMessage(error)}`];
     }
   }
 }

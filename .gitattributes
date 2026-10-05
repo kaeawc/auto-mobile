@@ -1,4 +1,5 @@
 test/fixtures/android-display/**/*.txt text eol=lf
+test/fixtures/android-display-config/*.txt text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
@@ -12,6 +13,7 @@ test/fixtures/android-getevent/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
+test/fixtures/android-ime-window/*.json text eol=lf
 test/fixtures/swipeon-auto-target/foldable.json text eol=lf
 test/fixtures/swipeon-auto-target/landscape.json text eol=lf
 test/fixtures/swipeon-auto-target/portrait-element.json text eol=lf

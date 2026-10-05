@@ -31,6 +31,7 @@ export interface StoppedSegment {
 export async function writeSegmentManifest(
   sessionId: string,
   segments: StoppedSegment[],
+  videoWarnings?: string[],
 ): Promise<string | undefined> {
   const first = segments[0];
   if (!first) {
@@ -41,10 +42,14 @@ export async function writeSegmentManifest(
     const manifest = {
       sessionId,
       segmentCount: segments.length,
+      ...(videoWarnings?.length ? { videoWarnings: [...new Set(videoWarnings)] } : {}),
       segments: segments.map((segment) => ({
         index: segment.segmentIndex,
         recordingId: segment.recordingId,
         filePath: segment.filePath,
+        ...(segment.recordedPanel && { recordedPanel: segment.recordedPanel }),
+        ...(segment.transitions && { transitions: segment.transitions }),
+        ...(segment.warnings?.length && { warnings: segment.warnings }),
       })),
     };
     await fsPromises.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

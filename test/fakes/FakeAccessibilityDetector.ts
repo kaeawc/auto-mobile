@@ -1,6 +1,7 @@
 import type {
   AccessibilityDetector,
   AccessibilityService,
+  AndroidAccessibilityState,
 } from "../../src/features/accessibility/interfaces/AccessibilityDetector";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
@@ -24,9 +25,11 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
     return this.ctrlProxyResults.get(deviceId) ?? null;
   }
 
-  private detectionResults: Map<string, { enabled: boolean; service: AccessibilityService }> =
-    new Map();
-  private defaultResult: { enabled: boolean; service: AccessibilityService } = {
+  private detectionResults: Map<
+    string,
+    { enabled: boolean | null; service: AccessibilityService }
+  > = new Map();
+  private defaultResult: { enabled: boolean | null; service: AccessibilityService } = {
     enabled: false,
     service: "unknown",
   };
@@ -55,7 +58,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   /**
    * Configure the default detection result for all devices
    */
-  setDefaultResult(enabled: boolean, service: AccessibilityService = "unknown"): void {
+  setDefaultResult(enabled: boolean | null, service: AccessibilityService = "unknown"): void {
     this.defaultResult = { enabled, service };
   }
 
@@ -64,7 +67,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
    * queue is exhausted, detection falls back to the per-device / default result.
    * Lets a test model a state transition across the two detections a toggle now
    * performs — the pre-apply idempotency check and the post-apply confirmation
-   * (#3921). Only affects `detectMethod`; `isAccessibilityEnabled` is unchanged.
+   * (#3921). Also feeds `resolveState`; `isAccessibilityEnabled` is unchanged.
    */
   enqueueDetectMethodResults(...services: AccessibilityService[]): void {
     this.detectMethodQueue.push(...services);
@@ -128,7 +131,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   ): Promise<boolean> {
     this.detectionCallCount++;
     const result = this.detectionResults.get(deviceId) || this.defaultResult;
-    return result.enabled;
+    return result.enabled ?? false;
   }
 
   async detectMethod(
@@ -147,6 +150,34 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
     }
     const result = this.detectionResults.get(deviceId) || this.defaultResult;
     return result.service;
+  }
+
+  async resolveState(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<AndroidAccessibilityState | null> {
+    const service = await this.detectMethod(deviceId, adb, featureFlags);
+    const result = this.detectionResults.get(deviceId) ?? this.defaultResult;
+    if (result.enabled === null) {
+      return null;
+    }
+    return {
+      enabled: service === "talkback" || result.enabled,
+      service,
+      ctrlProxyEnabled: this.ctrlProxyResults.get(deviceId) ?? null,
+    };
+  }
+
+  async resolveTalkBackState(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagService,
+  ): Promise<boolean | null> {
+    const state =
+      (await this.resolveState(deviceId, adb, featureFlags)) ??
+      (await this.resolveState(deviceId, adb, featureFlags));
+    return state === null ? null : state.service === "talkback";
   }
 
   invalidateCache(deviceId: string): void {

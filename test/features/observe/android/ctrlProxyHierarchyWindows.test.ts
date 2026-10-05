@@ -1,8 +1,10 @@
+import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
 import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { getElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
@@ -75,6 +77,9 @@ test.each([false, true])(
     expect(resolve(2).chosen?.nativeId).toBe("large-main");
     const elements = new DefaultObserveElementCollector().collect(projected, "android")!;
     expect(elements.clickable).toHaveLength(3);
+    expect(elements.clickable.map((element) => getElementProvenance(element)?.windowRank)).toEqual([
+      1, 1, 0,
+    ]);
     expect(elements.clickable?.map((element) => element["resource-id"])).toEqual([
       "large-main",
       "small-main",
@@ -120,4 +125,94 @@ test("ambiguous root ownership markers do not choose an arbitrary window subtree
     windows: [{ id: 0, windowLayer: 5 }],
   });
   expect(converted.windows?.[0].hierarchy).toBeUndefined();
+});
+
+test("linked activity/dialog duplicate skeleton indexes replay the resolver's topmost choice", () => {
+  const hierarchy = converter().convertToViewHierarchyResult({
+    updatedAt: 100,
+    packageName: "app",
+    hierarchy: {
+      node: [
+        { windowId: 1, node: button("app:id/ok", 10) },
+        { windowId: 2, node: button("app:id/ok", 50) },
+      ],
+    },
+    windows: [
+      { id: 1, windowLayer: 0 },
+      { id: 2, windowLayer: 10 },
+    ],
+  } as AccessibilityHierarchy);
+  const rows = projectSkeleton(
+    new DefaultObserveElementCollector().collect(hierarchy, "android")!,
+  ).skeleton;
+  expect(rows).toHaveLength(2);
+  const selector = new ResolverElementSelector();
+  for (const row of rows) {
+    expect(row.index).toBeDefined();
+    const selection = selector.selectByResourceId(hierarchy, row.elementId!, {
+      index: row.index,
+      intentAction: "inspect",
+    });
+    expect(selection.element?.bounds).toEqual({
+      left: row.bounds[0],
+      top: row.bounds[1],
+      right: row.bounds[2],
+      bottom: row.bounds[3],
+    });
+  }
+  const defaultPick = selector.selectByResourceId(hierarchy, "app:id/ok", {
+    intentAction: "inspect",
+  });
+  expect(rows.find((row) => row.index === 0)?.bounds).toEqual([
+    0,
+    0,
+    defaultPick.element?.bounds.right,
+    20,
+  ]);
+});
+
+test("linked window above the IME retains tap even inside the keyboard rectangle", () => {
+  const hierarchy = converter().convertToViewHierarchyResult({
+    updatedAt: 100,
+    packageName: "app",
+    hierarchy: {
+      node: [
+        {
+          windowId: 1,
+          node: {
+            ...button("app:id/lower", 100),
+            bounds: { left: 0, top: 160, right: 100, bottom: 190 },
+          },
+        },
+        {
+          windowId: 2,
+          extras: { "automobile:imePackage": "com.google.android.inputmethod.latin" },
+          node: {
+            ...button("com.google.android.inputmethod.latin:id/key_pos_q", 400),
+            text: "Q",
+            bounds: { left: 0, top: 150, right: 400, bottom: 240 },
+          },
+        },
+        {
+          windowId: 3,
+          node: {
+            ...button("app:id/upper", 100),
+            bounds: { left: 0, top: 160, right: 100, bottom: 190 },
+          },
+        },
+      ],
+    },
+    windows: [
+      { id: 1, windowLayer: 0 },
+      { id: 2, type: 2, windowLayer: 1, bounds: { left: 0, top: 150, right: 400, bottom: 240 } },
+      { id: 3, windowLayer: 2 },
+    ],
+  } as AccessibilityHierarchy);
+  const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+  const { skeleton, context } = projectSkeleton(elements);
+  expect(skeleton.find((row) => row.elementId === "app:id/upper")?.affordances).toContain("tap");
+  expect(context.find((row) => row.elementId === "app:id/lower")).toMatchObject({
+    occluded: true,
+    affordances: [],
+  });
 });

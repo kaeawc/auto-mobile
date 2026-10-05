@@ -54,6 +54,24 @@ describe("TapOnElement TalkBack mode detection", () => {
     ).mockResolvedValue(undefined);
   });
 
+  test("unknown TalkBack retries once and warns before the default coordinate tap", async () => {
+    fakeAccessibilityDetector.setDefaultResult(null);
+    const warnings: string[] = [];
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      "resource-id": "test:id/button",
+    };
+    await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element, undefined, {
+      action: "tap",
+      onActivationWarning: (warning) => warnings.push(warning),
+    });
+    expect(fakeAccessibilityDetector.getDetectionCallCount()).toBe(2);
+    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledTimes(1);
+    expect(executeAndroidTapWithAccessibility).not.toHaveBeenCalled();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("could not determine");
+  });
+
   test.each(["tap", "doubleTap", "longPress"])(
     "XML-only %s never invokes native semantic targeting",
     async (action) => {

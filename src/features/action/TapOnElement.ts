@@ -661,14 +661,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     hierarchy: ViewHierarchyResult,
     { options, screenSize }: TapPointContext,
+    bounds: ElementBounds = element.bounds,
   ): { x: number; y: number } {
     const ime = this.getImeOccluderForTap(element, hierarchy, screenSize);
     if (!ime) {
       return this.resolveTapPoint(element);
     }
-    const { left, top, right, bottom } = element.bounds;
+    const { left, top, right, bottom } = bounds;
     const point = tapPointOutsideIme([left, top, right, bottom], ime.bounds);
-    if (point) {
+    // Check the candidate before dispatch, even if the safe-point helper regresses.
+    // HierarchyHitTest estimates accessible nodes, whose root bounds can extend
+    // above the touch-owning frame; use the captured window rectangle here.
+    const imeBounds = {
+      left: ime.bounds[0],
+      top: ime.bounds[1],
+      right: ime.bounds[2],
+      bottom: ime.bounds[3],
+    };
+    if (point && !pointInTapBounds(point, imeBounds)) {
       return point;
     }
     const elementLabel = element.text ?? element["content-desc"] ?? element["resource-id"];
@@ -1286,10 +1296,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
-    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     if (this.device.platform !== "ios") {
-      return ime ? exposedImePoint : this.geometry.getElementCenter({ bounds: visibleBounds });
+      return ime
+        ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
+        : this.geometry.getElementCenter({ bounds: visibleBounds });
     }
+    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
     const chromeElements = context.chromeElements ?? [target];
     const navClipped = this.navigationTapBounds(
@@ -4049,7 +4061,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           // Strategy returns the platform-relevant boolean: TalkBack on
           // Android, VoiceOver on iOS. Downstream call paths are split by
           // the platform switch below, so a single flag suffices.
-          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled();
+          const activationWarnings: string[] = [];
+          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled(
+            (warning) => activationWarnings.push(warning),
+          );
           const requireResourceId = isAccessibilityServiceEnabled;
           let tapElement: Element;
           let usedParent: boolean;
@@ -4180,7 +4195,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
-          const activationWarnings: string[] = [];
 
           // Platform-specific tap execution
           await perf.track("executeTap", async () => {
@@ -4401,6 +4415,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const fence = options?.displayFence;
+    // Check if TalkBack is enabled (not just any accessibility service)
+    const talkBackEnabled =
+      typeof isTalkBackEnabled === "boolean"
+        ? isTalkBackEnabled
+        : await this.strategy.isAccessibilityServiceEnabled(options?.onActivationWarning);
+
     // XML-only candidates have no CtrlProxy node identity, even if their resource
     // ID also exists in the incomplete native tree. Never retarget semantic actions.
     if (element["hierarchy-source"] === "uiautomator") {
@@ -4409,13 +4429,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       });
       return undefined;
     }
-
-    // Check if TalkBack is enabled (not just any accessibility service)
-    const talkBackEnabled =
-      typeof isTalkBackEnabled === "boolean"
-        ? isTalkBackEnabled
-        : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) ===
-          "talkback";
 
     if (options?.container?.container || options?.selectionStrategy === "unique") {
       await this.executeScopedAndroidTap({

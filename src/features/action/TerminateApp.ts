@@ -28,6 +28,11 @@ import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosIns
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
+import { sequenceBackoff } from "../../utils/Backoff";
+
+// #9724: let the dying Android window leave before requesting a fresh hierarchy.
+const TERMINATE_VERIFY_BUDGET_MS = 3000;
+const TERMINATE_VERIFY_BACKOFF_MS = [50, 100, 200, 400, 800] as const;
 
 import {
   DefaultDeviceWindowCacheInvalidator,
@@ -217,22 +222,23 @@ export class TerminateApp extends BaseVisualChange {
         const isForeground = await perf.track("checkForeground", async () => {
           const foregroundApp = await this.adb.getForegroundApp();
           return (
-            foregroundApp !== null &&
-            foregroundApp.packageName === packageName &&
-            foregroundApp.userId === targetUserId
+            foregroundApp?.packageName === packageName && foregroundApp.userId === targetUserId
           );
         });
 
-        await perf.track("forceStop", async () => {
-          await this.adb.executeCommand(
-            `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`,
-          );
-        });
+        const forceStopCommand = `shell am force-stop --user ${targetUserId} ${shellQuote(packageName)}`;
+        await perf.track("forceStop", () => this.adb.executeCommand(forceStopCommand));
 
         // The process is now gone, so any cached window/hierarchy record for it is
         // stale. Invalidate it so a client re-observing to recover gets a fresh
         // sync instead of the same phantom window (issue #5867).
         this.cacheInvalidator.invalidate(this.device);
+
+        if (!options?.skipObservation) {
+          await perf.track("awaitTerminated", () =>
+            this.awaitTerminated(packageName, targetUserId, isForeground, signal),
+          );
+        }
 
         return {
           success: true,
@@ -260,6 +266,80 @@ export class TerminateApp extends BaseVisualChange {
         perf,
       });
     });
+  }
+
+  private async awaitTerminated(
+    packageName: string,
+    userId: number,
+    wasForeground: boolean,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const startedAt = this.timer.now();
+    const deadline = startedAt + TERMINATE_VERIFY_BUDGET_MS;
+    const backoff = sequenceBackoff(TERMINATE_VERIFY_BACKOFF_MS);
+    let attempts = 0;
+    let gone = false;
+
+    while (this.timer.now() < deadline) {
+      throwIfAborted(signal);
+      attempts++;
+      gone = await this.isAndroidAppGone(packageName, userId, wasForeground, signal);
+      throwIfAborted(signal);
+      if (gone) {
+        break;
+      }
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
+        break;
+      }
+      await this.timer.sleep(Math.min(backoff.delayForAttempt(attempts), remainingMs));
+    }
+    throwIfAborted(signal);
+
+    if (attempts > 1) {
+      logger.info(
+        `[TerminateApp] Termination verification for ${packageName} took ${attempts} attempts and ${this.timer.now() - startedAt}ms`,
+      );
+    }
+    if (!gone) {
+      // Force-stop succeeded; a missing post-condition must not change its result.
+      logger.warn(
+        `[TerminateApp] ${packageName} for user ${userId} still reported running/foreground or could not be verified after force-stop (${TERMINATE_VERIFY_BUDGET_MS}ms budget)`,
+      );
+    }
+  }
+
+  private async isAndroidAppGone(
+    packageName: string,
+    userId: number,
+    wasForeground: boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    try {
+      const [processes, foreground] = await Promise.all([
+        readAndroidPackageProcesses(this.adb, packageName, {
+          userId,
+          timer: this.timer,
+          signal,
+        }),
+        wasForeground ? this.adb.getForegroundApp(signal) : Promise.resolve(null),
+      ]);
+      return (
+        !processes.isRunning &&
+        !(foreground?.packageName === packageName && foreground.userId === userId)
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      if (
+        error instanceof Error &&
+        (error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE)
+      ) {
+        throw error;
+      }
+      // Verification is best-effort after a successful force-stop; retry unreadable state.
+      logger.warn(`[TerminateApp] Termination verification read failed: ${errorMessage(error)}`);
+      return false;
+    }
   }
 
   private async executeiOS(

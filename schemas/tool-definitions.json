@@ -64,7 +64,7 @@
           "additionalProperties": false
         }
       },
-      "required": ["enabled", "service"],
+      "required": ["service"],
       "additionalProperties": {}
     }
   },
@@ -1171,7 +1171,7 @@
   },
   {
     "name": "displayConfig",
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, and light/dark (night mode) theme — for adaptive-layout and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only (via `simctl ui appearance`); physical iOS devices are unsupported. On Android, reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light mode. iOS Simulator reset restores light appearance.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1209,7 +1209,7 @@
           "enum": ["light", "dark", "system", "custom"]
         },
         "reset": {
-          "description": "Restore font scale, density, and theme to device defaults.",
+          "description": "On Android, restore font scale and density to device defaults. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance.",
           "type": "boolean"
         },
         "platform": {
@@ -1643,6 +1643,25 @@
           },
           "required": ["executionTimeMs", "steps"],
           "additionalProperties": false
+        },
+        "videoFilePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "videoRecordingIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "videoWarnings": {
+          "description": "Video capture gaps, truncation or failures",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "warnings": {
           "description": "Best-effort warnings from steps that still succeeded",
@@ -13277,7 +13296,7 @@
               "additionalProperties": false
             }
           },
-          "required": ["enabled", "service"],
+          "required": ["service"],
           "additionalProperties": {}
         },
         "deviceLock": {

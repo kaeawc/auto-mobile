@@ -11,6 +11,7 @@ import {
   PlanExecutionOptions,
   type PlanStepWarnings,
   type PlanSkippedStep,
+  type PlanDeviceFailure,
 } from "../models/ExecutePlanResult";
 import {
   TestExecutionRepository,
@@ -158,6 +159,13 @@ function planSkippedStepsField(skippedSteps: PlanSkippedStep[] | undefined): {
   skippedSteps?: PlanSkippedStep[];
 } {
   return skippedSteps?.length ? { skippedSteps } : {};
+}
+
+/** The deviceFailures response field, omitted when no device failures were reported. */
+function planDeviceFailuresField(deviceFailures: PlanDeviceFailure[] | undefined): {
+  deviceFailures?: PlanDeviceFailure[];
+} {
+  return deviceFailures?.length ? { deviceFailures } : {};
 }
 
 /**
@@ -372,6 +380,7 @@ export class PlanExecutionOrchestrator {
         // (#6887 review).
         ...planWarningsField(result.warnings),
         ...planSkippedStepsField(result.skippedSteps),
+        ...planDeviceFailuresField(result.deviceFailures),
         videoWarnings: finalizedVideo.videoWarnings,
         ...(finalizedVideo.videoFilePaths.length > 0
           ? {

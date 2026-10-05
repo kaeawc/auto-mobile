@@ -1,3 +1,4 @@
+import { captureChosenTerminalScreenshot } from "../../../src/utils/PostActionCaptureContext";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
@@ -51,6 +52,35 @@ function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): 
 }
 
 describe("RealSettleObserve", () => {
+  test("terminal capture retry uses the same chosen hierarchy and caller signal", async () => {
+    const fake = new FakeObserveScreen();
+    const chosen = obs({ text: "chosen" }, { observationId: "chosen" });
+    const signal = new AbortController().signal;
+    let attempts = 0;
+    const capture = spyOn(fake, "captureScreenshot").mockImplementation(
+      async (_perf, passedSignal, frame) => {
+        expect(passedSignal).toBe(signal);
+        expect(frame).toBe(chosen);
+        if (++attempts === 1) {
+          throw new Error("first capture failed");
+        }
+        frame!.screenshotPath = "/fake/chosen.png";
+      },
+    );
+    try {
+      const delegate = new RealSettleObserve(fake, new FakeTimer());
+      await captureChosenTerminalScreenshot(
+        chosen,
+        delegate.captureScreenshot.bind(delegate),
+        signal,
+      );
+      expect(attempts).toBe(2);
+      expect(chosen.screenshotPath).toBe("/fake/chosen.png");
+    } finally {
+      capture.mockRestore();
+    }
+  });
+
   test("terminal screenshot capture delegates the adopted observation and caller signal", async () => {
     const timer = new FakeTimer();
     const fake = new FakeObserveScreen();

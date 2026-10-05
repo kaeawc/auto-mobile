@@ -22,6 +22,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -162,6 +163,7 @@ class WebSocketServer(
         is CurrentFocusResult -> response.requestId
         is TraversalOrderResult -> response.requestId
         is HighlightResponse -> response.requestId
+        is OverlayResult -> response.requestId
         is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
         is PreferenceFilesResult -> response.requestId
         is PreferencesResult -> response.requestId
@@ -177,6 +179,7 @@ class WebSocketServer(
         is HierarchyUpdateEvent -> response.requestId
         // Other event/status frames never echo a requestId.
         is ConnectedResponse,
+        is OverlayEvent,
         is InteractionEvent,
         is PackageEvent,
         is NavigationEventResponse,
@@ -192,6 +195,13 @@ class WebSocketServer(
         is AnrEvent -> null
       }
 
+    /** The sealed wire serializer is the single source of registered top-level request names. */
+    private val registeredRequestTypes: List<String> = run {
+      val descriptor = ProtocolRequest.serializer().descriptor
+      val subtypes = descriptor.getElementDescriptor(descriptor.getElementIndex("value"))
+      List(subtypes.elementsCount) { subtypes.getElementDescriptor(it).serialName }
+    }
+
     /**
      * Maps an inbound-decode failure into an actionable, legible wire message. An unknown/
      * unregistered command type surfaces "Unknown command type: <type>" (symmetric to the iOS
@@ -204,14 +214,8 @@ class WebSocketServer(
         throwable.message?.takeIf { it.isNotBlank() }
           ?: throwable::class.simpleName
           ?: "unknown error"
-      val looksLikeUnknownType =
-        cause.contains("polymorphic", ignoreCase = true) ||
-          cause.contains("class discriminator", ignoreCase = true)
-      if (looksLikeUnknownType) {
-        extractStringField(raw, "type")?.let { type ->
-          return "Unknown command type: $type"
-        }
-      }
+      val type = extractStringField(raw, "type")
+      if (type != null && type !in registeredRequestTypes) return "Unknown command type: $type"
       val looksLikeOutOfRangeNumber =
         cause.contains("special floating-point value", ignoreCase = true) ||
           cause.contains("non-finite floating point", ignoreCase = true) ||
@@ -219,19 +223,43 @@ class WebSocketServer(
       if (looksLikeOutOfRangeNumber) {
         return "Malformed request: a numeric value is out of range or not representable."
       }
+      if (
+        type in listOf("show_overlay", "update_overlay", "dismiss_overlay") &&
+          cause.contains("Class discriminator was missing") &&
+          !cause.contains("at path:")
+      ) {
+        decodeFailurePath(raw, cause)?.let {
+          return "Malformed request: $cause at path: $it"
+        }
+      }
       return "Malformed request: $cause"
     }
+
+    // kotlinx omits the path for a missing discriminator; match its input object structurally.
+    private fun decodeFailurePath(raw: String, cause: String): String? = runCatching {
+      val target =
+        lenientJson.parseToJsonElement(cause.substringAfter("JSON input:", "").trim())
+          as? JsonObject ?: return@runCatching null
+      fun findPath(value: JsonElement, path: String): String? =
+        when {
+          value == target -> path
+          value is JsonObject ->
+            value.entries.firstNotNullOfOrNull { (key, child) -> findPath(child, "$path.$key") }
+          value is JsonArray ->
+            value.withIndex().firstNotNullOfOrNull { (index, child) ->
+              findPath(child, "$path[$index]")
+            }
+          else -> null
+        }
+      findPath(lenientJson.parseToJsonElement(raw), "$")
+    }
+      .getOrNull()
   }
 
   internal fun supportedCommands(): List<String> = buildList {
     // The handler dispatches exhaustively over this sealed hierarchy, so its serializer is the
     // source of truth for every request type accepted by the wire decoder.
-    val requestDescriptor = ProtocolRequest.serializer().descriptor
-    val subtypeDescriptor =
-      requestDescriptor.getElementDescriptor(requestDescriptor.getElementIndex("value"))
-    for (index in 0 until subtypeDescriptor.elementsCount) {
-      add(subtypeDescriptor.getElementDescriptor(index).serialName)
-    }
+    addAll(registeredRequestTypes)
     add("node_selector_actions")
     add("ime_key_events_v1")
     add("tap_double_v1")
@@ -264,7 +292,10 @@ class WebSocketServer(
     ignoreUnknownKeys = true
   }
 
-  /** JSON configuration for protocol sealed classes with polymorphic serialization */
+  /**
+   * Host validation rejects unknown overlay fields and enforces limits. Device decoding remains
+   * lenient for compatibility; device re-validation belongs to #9297/#9299.
+   */
   private val protocolJson = Json {
     prettyPrint = false
     ignoreUnknownKeys = true
@@ -861,13 +892,13 @@ class WebSocketServer(
     if (overflowed) disconnectClient(connection, "Outgoing buffer full")
   }
 
-  /** Send a typed error response only to the client whose inbound message failed. */
+  /** Send a typed terminal failure only to the client whose inbound message failed. */
   private suspend fun sendErrorResponse(
     connection: ConnectedClient,
-    response: ErrorResponse,
+    response: WebSocketResponse,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    response.requestId?.let { requestId ->
+    correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }
     }
     sendToClient(connection, message)
@@ -967,10 +998,22 @@ class WebSocketServer(
         Log.w(TAG, "Failed to parse client message: $message", e)
         sendErrorResponse(
           connection,
-          CorrelatedErrorReporter.frame(
-            requestId = extractRequestId(message),
-            errorMessage = describeDecodeFailure(message, e),
-          ),
+          if (
+            extractStringField(message, "type") in
+              listOf("show_overlay", "update_overlay", "dismiss_overlay")
+          ) {
+            OverlayResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = extractRequestId(message),
+              success = false,
+              error = describeDecodeFailure(message, e),
+            )
+          } else {
+            CorrelatedErrorReporter.frame(
+              requestId = extractRequestId(message),
+              errorMessage = describeDecodeFailure(message, e),
+            )
+          },
         )
         return
       }

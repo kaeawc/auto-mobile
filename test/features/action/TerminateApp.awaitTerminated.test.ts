@@ -217,6 +217,62 @@ describe("TerminateApp Android termination verification", () => {
     expect(result).toMatchObject({ success: true, wasRunning: true, wasForeground: true });
   });
 
+  test("restarted process with a new pid ends verification early", async () => {
+    adb.remainingProcesses = "4471:com.example.app/u0a123";
+    // Even a lingering foreground record must not hide a confirmed restart.
+    adb.foregroundDeathMs = Infinity;
+    observe.setObserveResult({
+      updatedAt: timer.now(),
+      screenSize: { width: 1170, height: 2532 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: { hierarchy: { node: [] }, updatedAt: timer.now() },
+    });
+    const result = await executeObserved();
+    expect(elapsed()).toBe(0);
+    expect(timer.getSleepHistory()).toEqual([]);
+    expect(adb.postProcessReads).toBe(1);
+    expect(adb.postForegroundReads).toBe(1);
+    expect(adb.getCommandCalls().filter(({ command }) => command === PROCESSES)).toHaveLength(2);
+    expect(result).toMatchObject({
+      success: true,
+      packageName: PACKAGE,
+      wasInstalled: true,
+      wasRunning: true,
+      wasForeground: true,
+      userId: 0,
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "was killed and restarted with a new pid (old pids: 3220; new pids: 4471)",
+      ),
+    );
+  });
+
+  test("an original pid among new pids keeps polling to the budget", async () => {
+    adb.remainingProcesses = `${RUNNING}\n4471:com.example.app/u0a123`;
+    await executeObserved();
+    expect(elapsed()).toBe(3000);
+    expect(adb.postProcessReads).toBe(7);
+    expect(timer.getSleepHistory()).toEqual([50, 100, 200, 400, 800, 800, 650]);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("still reported running/foreground"),
+    );
+  });
+
+  test("a read failure is retried before recognizing a restart", async () => {
+    adb.remainingProcesses = "4471:com.example.app/u0a123";
+    adb.readError = new Error("dumpsys unavailable");
+    const result = await executeObserved();
+    expect(result.success).toBe(true);
+    expect(elapsed()).toBe(50);
+    expect(adb.postProcessReads).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([50]);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("verification read failed"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("was killed and restarted"));
+  });
+
   test.each(["process", "foreground"] as const)(
     "%s read error warns and polling continues",
     async (read) => {
@@ -342,6 +398,43 @@ describe("TerminateApp Android termination verification", () => {
       expect(adb.postProcessReads).toBe(1);
       expect(observe.getExecuteCallCount()).toBe(0);
     } finally {
+      sleep.mockRestore();
+    }
+  });
+
+  test("abort during backoff rejects before the pending fake sleep elapses", async () => {
+    const sleepTimer = new FakeTimer();
+    const sleep = spyOn(timer, "sleep").mockImplementation((ms) => sleepTimer.sleep(ms));
+    adb.processDeathMs = Infinity;
+    const controller = new AbortController();
+    let outcome: unknown;
+    const waiting = executeObserved(controller.signal).then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    try {
+      // Drain asynchronous setup without advancing the fake clock.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(sleepTimer.getPendingSleeps()).toEqual([50]);
+      timer.advanceTime(10);
+      controller.abort();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).toHaveProperty("message", OPERATION_CANCELLED_MESSAGE);
+      expect(elapsed()).toBe(10);
+      expect(sleepTimer.getPendingSleeps()).toEqual([50]);
+      expect(adb.postProcessReads).toBe(1);
+      expect(adb.postForegroundReads).toBe(1);
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(observe.getExecuteCallCount()).toBe(0);
+    } finally {
+      controller.abort();
+      sleepTimer.resolveAll();
+      await waiting;
       sleep.mockRestore();
     }
   });

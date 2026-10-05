@@ -35,6 +35,7 @@ interface RunOptions {
   successfulDevices?: string[];
   delayedTrack?: string;
   failureObservation?: FailureObservationSummary;
+  holdFirstObservation?: boolean;
 }
 
 async function runInOrder(
@@ -45,14 +46,22 @@ async function runInOrder(
     successfulDevices = [],
     delayedTrack,
     failureObservation,
+    holdFirstObservation = false,
   }: RunOptions = {},
 ): Promise<PlanExecutionResult> {
   const releases = new Map(order.map((device) => [device, Promise.withResolvers<void>()]));
   const started = new Map(order.map((device) => [device, Promise.withResolvers<void>()]));
   const executor = new DefaultPlanExecutor(new FakeTimer());
+  const observationRelease = Promise.withResolvers<void>();
+  let observationCalls = 0;
   if (failureObservation) {
     Object.defineProperty(executor, "buildFailureObservationContext", {
-      value: async () => failureObservation,
+      value: async () => {
+        if (holdFirstObservation && observationCalls++ === 0) {
+          await observationRelease.promise;
+        }
+        return failureObservation;
+      },
     });
   }
   if (delayedTrack) {
@@ -102,8 +111,10 @@ async function runInOrder(
           releases.get(device)!.resolve();
           await flushMicrotasks();
         }
+        observationRelease.resolve();
         return await execution;
       } finally {
+        observationRelease.resolve();
         for (const release of releases.values()) {
           release.resolve();
         }
@@ -243,7 +254,7 @@ describe("parallel reported failure selection", () => {
     expect(result).not.toHaveProperty("deviceFailures");
   });
 
-  test("preserves each device's failure observation", async () => {
+  test("omits the selected observation from deviceFailures while preserving other evidence", async () => {
     const observation = { capturedAtMs: 12, activeWindow: { appId: "fake.app" } };
     const result = await runInOrder(["A", "Z"], { failureObservation: observation });
     expect(result.deviceFailures).toEqual([
@@ -252,7 +263,6 @@ describe("parallel reported failure selection", () => {
         stepIndex: 0,
         tool: toolName,
         error: "failure on Z",
-        failureObservation: observation,
       },
       {
         device: "A",
@@ -262,7 +272,30 @@ describe("parallel reported failure selection", () => {
         failureObservation: observation,
       },
     ]);
-    expect(result.deviceFailures?.[0]).toEqual(result.failedStep);
+    expect(result.failedStep?.failureObservation).toBe(observation);
+    expect(result.deviceFailures?.[0]).not.toHaveProperty("failureObservation");
+    expect(result.deviceFailures?.[1]?.failureObservation).toBe(
+      result.perDeviceResults?.get("A")?.failedStep?.failureObservation,
+    );
+  });
+
+  test("omits abort-consequence observations but retains the device failure", async () => {
+    const observation = { capturedAtMs: 12, activeWindow: { appId: "fake.app" } };
+    // Z has failed and is capturing evidence when A finishes and triggers abort.
+    const result = await runInOrder(["Z", "A"], {
+      strategy: "immediate",
+      failureObservation: observation,
+      holdFirstObservation: true,
+    });
+    expect(result.failedStep).toMatchObject({ device: "A", failureObservation: observation });
+    expect(result.perDeviceResults?.get("Z")?.failedStep?.failureObservation).toBe(observation);
+    expect(result.deviceFailures?.[1]).toEqual({
+      device: "Z",
+      stepIndex: 0,
+      tool: toolName,
+      error: "failure on Z",
+    });
+    expect(result.deviceFailures?.[1]).not.toHaveProperty("failureObservation");
   });
 
   test("pins a single-track partitioned plan", async () => {

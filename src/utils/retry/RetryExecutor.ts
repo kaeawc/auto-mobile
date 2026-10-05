@@ -90,6 +90,29 @@ export const DEFAULT_RETRY_OPTIONS: Required<
   delays: 1000,
 };
 
+function resolveRetryOptions(options?: RetryOptions) {
+  const maxAttempts = options?.maxAttempts ?? DEFAULT_RETRY_OPTIONS.maxAttempts;
+  const delays = options?.delays ?? DEFAULT_RETRY_OPTIONS.delays;
+  const shouldRetry = options?.shouldRetry ?? (() => true);
+  const onRetry = options?.onRetry;
+  const signal = options?.signal;
+  return { maxAttempts, delays, shouldRetry, onRetry, signal };
+}
+
+function retryOperationError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function retryAbortError(signal?: AbortSignal): Error {
+  const reason = signal?.reason;
+  // A bare abort() supplies a DOMException that is an Error in Bun. Keep
+  // the existing generic message for that default while preserving typed reasons.
+  return reason instanceof Error &&
+    !(reason instanceof DOMException && reason.name === "AbortError")
+    ? reason
+    : new Error("Operation aborted");
+}
+
 /**
  * Default implementation of RetryExecutor.
  */
@@ -100,20 +123,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
     operation: (attempt: number) => Promise<T>,
     options?: RetryOptions,
   ): Promise<RetryResult<T>> {
-    const maxAttempts = options?.maxAttempts ?? DEFAULT_RETRY_OPTIONS.maxAttempts;
-    const delays = options?.delays ?? DEFAULT_RETRY_OPTIONS.delays;
-    const shouldRetry = options?.shouldRetry ?? (() => true);
-    const onRetry = options?.onRetry;
-    const signal = options?.signal;
-    const abortError = () => {
-      const reason = signal?.reason;
-      // A bare abort() supplies a DOMException that is an Error in Bun. Keep
-      // the existing generic message for that default while preserving typed reasons.
-      return reason instanceof Error &&
-        !(reason instanceof DOMException && reason.name === "AbortError")
-        ? reason
-        : new Error("Operation aborted");
-    };
+    const { maxAttempts, delays, shouldRetry, onRetry, signal } = resolveRetryOptions(options);
 
     const startTime = this.timer.now();
     let lastError: Error | undefined;
@@ -123,7 +133,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
       if (signal?.aborted) {
         return {
           success: false,
-          error: abortError(),
+          error: retryAbortError(signal),
           attempts: attempt,
           totalTimeMs: this.timer.now() - startTime,
         };
@@ -138,42 +148,43 @@ export class DefaultRetryExecutor implements RetryExecutor {
           totalTimeMs: this.timer.now() - startTime,
         };
       } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
+        lastError = retryOperationError(err);
         // The operation can reject at the same instant its signal aborts.
         // Preserve the cancellation reason before shouldRetry classifies the
         // stale operation error as terminal.
         if (signal?.aborted) {
           return {
             success: false,
-            error: abortError(),
+            error: retryAbortError(signal),
             attempts: attempt,
             totalTimeMs: this.timer.now() - startTime,
           };
         }
 
         // Check if we should retry
-        if (attempt < maxAttempts) {
-          if (!shouldRetry(lastError, attempt)) {
-            // shouldRetry returned false - stop retrying
-            return {
-              success: false,
-              error: lastError,
-              attempts: attempt,
-              totalTimeMs: this.timer.now() - startTime,
-            };
-          }
+        if (!(attempt < maxAttempts)) {
+          continue;
+        }
+        if (!shouldRetry(lastError, attempt)) {
+          // shouldRetry returned false - stop retrying
+          return {
+            success: false,
+            error: lastError,
+            attempts: attempt,
+            totalTimeMs: this.timer.now() - startTime,
+          };
+        }
 
-          const delay = delayForAttempt(delays, attempt);
-          onRetry?.(lastError, attempt, delay);
+        const delay = delayForAttempt(delays, attempt);
+        onRetry?.(lastError, attempt, delay);
 
-          if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
-            return {
-              success: false,
-              error: abortError(),
-              attempts: attempt,
-              totalTimeMs: this.timer.now() - startTime,
-            };
-          }
+        if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
+          return {
+            success: false,
+            error: retryAbortError(signal),
+            attempts: attempt,
+            totalTimeMs: this.timer.now() - startTime,
+          };
         }
       }
     }

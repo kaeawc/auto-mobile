@@ -148,6 +148,31 @@ interface ElementCacheEntry {
   screenshotFingerprint: string;
 }
 
+function resolveMaxCacheSize(config: ContrastCheckConfig) {
+  return {
+    screenshots: config.maxCacheSize?.screenshots ?? 10,
+    colorPairs: config.maxCacheSize?.colorPairs ?? 1000,
+    elements: config.maxCacheSize?.elements ?? 500,
+    backgrounds: config.maxCacheSize?.backgrounds ?? 200,
+  };
+}
+
+function resolveContrastConfig(config: ContrastCheckConfig) {
+  return {
+    useMultiPointSampling: config.useMultiPointSampling ?? true,
+    detectGradients: config.detectGradients ?? true,
+    compositeOverlays: config.compositeOverlays ?? false,
+    detectTextShadows: config.detectTextShadows ?? false,
+    samplingPoints: config.samplingPoints ?? 9,
+    enableScreenshotCache: config.enableScreenshotCache ?? true,
+    enableColorPairCache: config.enableColorPairCache ?? true,
+    enableElementCache: config.enableElementCache ?? true,
+    enableBackgroundCache: config.enableBackgroundCache ?? true,
+    screenshotCacheTTL: config.screenshotCacheTTL ?? 60_000,
+    maxCacheSize: resolveMaxCacheSize(config),
+  };
+}
+
 export class ContrastChecker {
   private config: Required<Omit<ContrastCheckConfig, "maxCacheSize">> & {
     maxCacheSize: Required<NonNullable<ContrastCheckConfig["maxCacheSize"]>>;
@@ -183,24 +208,7 @@ export class ContrastChecker {
   ) {
     this.timer = timer;
     this.backend = backend;
-    this.config = {
-      useMultiPointSampling: config.useMultiPointSampling ?? true,
-      detectGradients: config.detectGradients ?? true,
-      compositeOverlays: config.compositeOverlays ?? false,
-      detectTextShadows: config.detectTextShadows ?? false,
-      samplingPoints: config.samplingPoints ?? 9,
-      enableScreenshotCache: config.enableScreenshotCache ?? true,
-      enableColorPairCache: config.enableColorPairCache ?? true,
-      enableElementCache: config.enableElementCache ?? true,
-      enableBackgroundCache: config.enableBackgroundCache ?? true,
-      screenshotCacheTTL: config.screenshotCacheTTL ?? 60_000,
-      maxCacheSize: {
-        screenshots: config.maxCacheSize?.screenshots ?? 10,
-        colorPairs: config.maxCacheSize?.colorPairs ?? 1000,
-        elements: config.maxCacheSize?.elements ?? 500,
-        backgrounds: config.maxCacheSize?.backgrounds ?? 200,
-      },
-    };
+    this.config = resolveContrastConfig(config);
   }
   /**
    * Calculate contrast ratio between text element and its background
@@ -266,6 +274,41 @@ export class ContrastChecker {
     }
   }
 
+  private getBatchCachedContrast(
+    element: Element,
+    wcagLevel: WcagLevel,
+    screenshotFingerprint: string,
+  ): ElementCacheEntry | undefined {
+    if (!this.config.enableElementCache) {
+      return undefined;
+    }
+    const elementKey = this.elementCacheKey(element, wcagLevel);
+    const cached = this.elementCache.get(elementKey);
+    if (cached && cached.screenshotFingerprint === screenshotFingerprint) {
+      this.elementHits++;
+      return cached;
+    }
+    this.elementMisses++;
+    return undefined;
+  }
+
+  private cacheBatchContrast(
+    element: Element,
+    wcagLevel: WcagLevel,
+    screenshotFingerprint: string,
+    result: ContrastResult | null,
+  ): void {
+    // Cache the result
+    if (result && this.config.enableElementCache) {
+      const elementKey = this.elementCacheKey(element, wcagLevel);
+      this.elementCache.set(elementKey, {
+        result,
+        timestamp: this.timer.now(),
+        screenshotFingerprint,
+      });
+    }
+  }
+
   /**
    * Phase 4: Batch process multiple elements with a single screenshot load
    * @param screenshotPath Path to the screenshot image
@@ -287,32 +330,17 @@ export class ContrastChecker {
 
       for (const element of elements) {
         try {
-          // Check element cache first
-          if (this.config.enableElementCache) {
-            const elementKey = this.elementCacheKey(element, wcagLevel);
-            const cached = this.elementCache.get(elementKey);
-
-            if (cached && cached.screenshotFingerprint === screenshotFingerprint) {
-              this.elementHits++;
-              results.set(element, cached.result);
-              continue;
-            }
-            this.elementMisses++;
+          const cached = this.getBatchCachedContrast(element, wcagLevel, screenshotFingerprint);
+          if (cached) {
+            results.set(element, cached.result);
+            continue;
           }
 
           // Calculate contrast for this element
           const result = await this.checkContrastWithImage(image, element, wcagLevel);
           results.set(element, result);
 
-          // Cache the result
-          if (result && this.config.enableElementCache) {
-            const elementKey = this.elementCacheKey(element, wcagLevel);
-            this.elementCache.set(elementKey, {
-              result,
-              timestamp: this.timer.now(),
-              screenshotFingerprint,
-            });
-          }
+          this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, result);
         } catch (error) {
           logger.warn(`Error checking contrast for element: ${errorMessage(error)}`, error);
           results.set(element, null);
@@ -743,6 +771,28 @@ export class ContrastChecker {
     return samples;
   }
 
+  private backgroundColorsAtRadius(
+    image: RawImage,
+    bounds: Element["bounds"],
+    textColor: RGB,
+    x: number,
+    y: number,
+    radius: number,
+  ): RGB[] {
+    const colors: RGB[] = [];
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        const sampleX = clamp(x + dx, bounds.left, bounds.right - 1);
+        const sampleY = clamp(y + dy, bounds.top, bounds.bottom - 1);
+        const color = this.resolvePixelColor(image, sampleX, sampleY);
+        if (!this.isSimilarColor(color, textColor)) {
+          colors.push(color);
+        }
+      }
+    }
+    return colors;
+  }
+
   private async sampleBackgroundAtPoint(
     image: RawImage,
     bounds: Element["bounds"],
@@ -752,17 +802,7 @@ export class ContrastChecker {
   ): Promise<RGB> {
     const searchRadii = [2, 4, 6, 8];
     for (const radius of searchRadii) {
-      const colors: RGB[] = [];
-      for (let dx = -radius; dx <= radius; dx++) {
-        for (let dy = -radius; dy <= radius; dy++) {
-          const sampleX = clamp(x + dx, bounds.left, bounds.right - 1);
-          const sampleY = clamp(y + dy, bounds.top, bounds.bottom - 1);
-          const color = this.resolvePixelColor(image, sampleX, sampleY);
-          if (!this.isSimilarColor(color, textColor)) {
-            colors.push(color);
-          }
-        }
-      }
+      const colors = this.backgroundColorsAtRadius(image, bounds, textColor, x, y, radius);
       if (colors.length > 0) {
         return this.averageColor(colors);
       }
@@ -861,17 +901,30 @@ export class ContrastChecker {
     return this.compositeColors(baseColor, pixel);
   }
 
+  private underlyingColorAtRadius(
+    image: RawImage,
+    x: number,
+    y: number,
+    radius: number,
+  ): RGB | null {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        const sampleX = clamp(x + dx, 0, image.width - 1);
+        const sampleY = clamp(y + dy, 0, image.height - 1);
+        const pixel = this.pixelRGBA(image, sampleX, sampleY);
+        if (pixel.a === 255) {
+          return { r: pixel.r, g: pixel.g, b: pixel.b };
+        }
+      }
+    }
+    return null;
+  }
+
   private findUnderlyingColor(image: RawImage, x: number, y: number): RGB | null {
     for (let radius = 1; radius <= 12; radius++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        for (let dy = -radius; dy <= radius; dy++) {
-          const sampleX = clamp(x + dx, 0, image.width - 1);
-          const sampleY = clamp(y + dy, 0, image.height - 1);
-          const pixel = this.pixelRGBA(image, sampleX, sampleY);
-          if (pixel.a === 255) {
-            return { r: pixel.r, g: pixel.g, b: pixel.b };
-          }
-        }
+      const color = this.underlyingColorAtRadius(image, x, y, radius);
+      if (color) {
+        return color;
       }
     }
 

@@ -527,18 +527,9 @@ export class LaunchApp extends BaseVisualChange {
               // the devicectl launch below passes `--terminate-existing`, which is
               // the authoritative cold-boot relaunch (an explicit pre-terminate
               // would add a redundant round-trip).
-              await perf.track("terminateApp", async () => {
-                try {
-                  await terminator.terminateApp(bundleId);
-                } catch (error) {
-                  // Cold-start cleanup may find no running app; launching still proceeds.
-                  logger.debug(
-                    `[LaunchApp] Pre-launch termination unavailable: ${errorMessage(error)}`,
-                  );
-                } finally {
-                  this.cacheInvalidator.invalidate(this.device);
-                }
-              });
+              await perf.track("terminateApp", () =>
+                this.terminateIosAppBeforeLaunch(terminator, bundleId),
+              );
               this.assertLaunchNotAborted(signal);
             }
 
@@ -619,13 +610,10 @@ export class LaunchApp extends BaseVisualChange {
             // runner's XCUIApplication target, so synchronize that target through
             // the runner before requiring an app-specific hierarchy.
             signal?.throwIfAborted();
-            const retargetAbortController = new AbortController();
-            const retarget = ctrlProxyClient.requestLaunchApp(
+            const { retargetAbortController, retarget } = this.requestIosLaunchRetarget(
+              ctrlProxyClient,
               bundleId,
-              undefined,
               perf,
-              false,
-              retargetAbortController.signal,
             );
             const ctrlProxyLaunchResult = await this.waitForIosRetarget(
               retarget,
@@ -675,11 +663,81 @@ export class LaunchApp extends BaseVisualChange {
         undefined,
         undefined,
         signal,
-        coldBoot,
+        { coldBoot },
       );
       await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
       return settledResult;
     });
+  }
+
+  private requestIosLaunchRetarget(
+    ctrlProxyClient: IOSCtrlProxyClient,
+    bundleId: string,
+    perf: PerformanceTracker,
+  ) {
+    const retargetAbortController = new AbortController();
+    const retarget = ctrlProxyClient.requestLaunchApp(
+      bundleId,
+      undefined,
+      perf,
+      false,
+      retargetAbortController.signal,
+    );
+    return { retargetAbortController, retarget };
+  }
+
+  private async terminateIosAppBeforeLaunch(
+    terminator: NonNullable<ReturnType<typeof resolveIosColdStartTerminateBackend>>,
+    bundleId: string,
+  ): Promise<void> {
+    try {
+      await terminator.terminateApp(bundleId);
+    } catch (error) {
+      // Cold-start cleanup may find no running app; launching still proceeds.
+      logger.debug(`[LaunchApp] Pre-launch termination unavailable: ${errorMessage(error)}`);
+    } finally {
+      this.cacheInvalidator.invalidate(this.device);
+    }
+  }
+
+  private requestIosHierarchyForPackage(
+    xcTestClient: IOSCtrlProxyClient,
+    expectedPackageName: string,
+    timeoutMs: number,
+  ): Promise<string> {
+    return xcTestClient
+      .requestHierarchySync(undefined, true, undefined, timeoutMs)
+      .then((result) => {
+        const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
+        if (pkg === expectedPackageName) {
+          return "sync";
+        }
+        // A sync can race the app's first hierarchy push and still return the
+        // previous foreground app. Keep waiting for that push or the real
+        // timeout instead of letting "wrong app" win the race immediately.
+        return new Promise<never>(() => {});
+      })
+      .catch((err) => {
+        logger.warn(`[LaunchApp] iOS hierarchy sync failed during race: ${err}`);
+        // A transient sync failure is not terminal while the push listener is
+        // still active. The timeout promise remains the readiness bound.
+        return new Promise<never>(() => {});
+      });
+  }
+
+  private isCachedIosHierarchyReady(
+    cachedPackageName: string | undefined,
+    expectedPackageName?: string,
+  ): boolean {
+    return Boolean(
+      cachedPackageName && (!expectedPackageName || cachedPackageName === expectedPackageName),
+    );
+  }
+
+  private clearIosHierarchyTimeout(timeoutHandle: NodeJS.Timeout | undefined): void {
+    if (timeoutHandle) {
+      this.timer.clearTimeout(timeoutHandle);
+    }
   }
 
   private async waitForIosHierarchyReady(
@@ -695,7 +753,7 @@ export class LaunchApp extends BaseVisualChange {
     // This makes warm launches (app already foreground) ~0ms instead of ~133ms.
     const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, 0);
     const cachedPkg = (cached?.hierarchy as { packageName?: string } | null)?.packageName;
-    if (cachedPkg && (!expectedPackageName || cachedPkg === expectedPackageName)) {
+    if (this.isCachedIosHierarchyReady(cachedPkg, expectedPackageName)) {
       logger.info(
         `[LaunchApp] iOS hierarchy already cached (pkg=${cachedPkg}, ${this.timer.now() - startTime}ms)`,
       );
@@ -719,24 +777,11 @@ export class LaunchApp extends BaseVisualChange {
         });
       });
 
-      const syncPromise = xcTestClient
-        .requestHierarchySync(undefined, true, undefined, timeoutMs)
-        .then((result) => {
-          const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
-          if (pkg === expectedPackageName) {
-            return "sync";
-          }
-          // A sync can race the app's first hierarchy push and still return the
-          // previous foreground app. Keep waiting for that push or the real
-          // timeout instead of letting "wrong app" win the race immediately.
-          return new Promise<never>(() => {});
-        })
-        .catch((err) => {
-          logger.warn(`[LaunchApp] iOS hierarchy sync failed during race: ${err}`);
-          // A transient sync failure is not terminal while the push listener is
-          // still active. The timeout promise remains the readiness bound.
-          return new Promise<never>(() => {});
-        });
+      const syncPromise = this.requestIosHierarchyForPackage(
+        xcTestClient,
+        expectedPackageName,
+        timeoutMs,
+      );
 
       let winner: string;
       try {
@@ -749,9 +794,7 @@ export class LaunchApp extends BaseVisualChange {
         signal?.throwIfAborted();
       } finally {
         pushUnsubscribe?.();
-        if (timeoutHandle) {
-          this.timer.clearTimeout(timeoutHandle);
-        }
+        this.clearIosHierarchyTimeout(timeoutHandle);
       }
 
       if (winner === "push" || winner === "sync") {
@@ -834,309 +877,315 @@ export class LaunchApp extends BaseVisualChange {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
 
-    return runWithNestedPerfTracker(perf, async () => {
-      logger.info(`executeAndroid: ${packageName}`);
+    return runWithNestedPerfTracker(perf, () =>
+      this.runAndroidLaunch(
+        { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal },
+        perf,
+      ),
+    );
+  }
 
-      const preflight = Promise.allSettled([
-        // Auto-detect target user if not specified
-        perf.track("detectTargetUser", async () => {
-          return this.targetUserDetector.detectTargetUserId(packageName, userId, signal);
-        }),
-        // Check app status (installation and running)
-        perf.track("checkInstalled", async () => {
-          return this.installedAppsProvider.listInstalledApps(signal);
-        }),
-      ]);
-      const [targetUserResult, installedAppsResult] = await this.waitForAndroidPreflight(
-        preflight,
+  private async runAndroidLaunch(
+    options: AndroidLaunchOptions,
+    perf: PerformanceTracker,
+  ): Promise<LaunchAppResult> {
+    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
+      options;
+    logger.info(`executeAndroid: ${packageName}`);
+
+    const preflight = Promise.allSettled([
+      // Auto-detect target user if not specified
+      perf.track("detectTargetUser", async () => {
+        return this.targetUserDetector.detectTargetUserId(packageName, userId, signal);
+      }),
+      // Check app status (installation and running)
+      perf.track("checkInstalled", async () => {
+        return this.installedAppsProvider.listInstalledApps(signal);
+      }),
+    ]);
+    const [targetUserResult, installedAppsResult] = await this.waitForAndroidPreflight(
+      preflight,
+      signal,
+    );
+    signal?.throwIfAborted();
+
+    if (targetUserResult.status === "rejected") {
+      throw targetUserResult.reason;
+    }
+    if (installedAppsResult.status === "rejected") {
+      throw installedAppsResult.reason;
+    }
+
+    const targetUserId = targetUserResult.value;
+    const listing = installedAppsResult.value;
+    if (!listing.successful) {
+      throw toActionableError(
+        listing.error ??
+          new Error(
+            `installed-app listing did not complete successfully for ${this.device.deviceId}`,
+          ),
+        `Could not determine whether ${packageName} is installed`,
+      );
+    }
+    const installedApps = listing.apps;
+    logger.info(`[LaunchApp] Found ${installedApps.length} installed app(s)`);
+    logger.info(`[LaunchApp] Looking for package: ${packageName}`);
+    logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);
+    if (!installedApps.includes(packageName)) {
+      logger.error(`[LaunchApp] App ${packageName} is not installed`);
+      logger.error(`[LaunchApp] DEBUG: installedApps.length = ${installedApps.length}`);
+      logger.error(`[LaunchApp] DEBUG: installedApps = [${installedApps.join(", ")}]`);
+      perf.end();
+      return {
+        success: false,
+        packageName: packageName,
+        userId: targetUserId,
+        error: "App is not installed",
+      };
+    }
+
+    // Check if app is running
+    const isRunning = await perf.track("checkRunning", async () => {
+      const isRunningArgs = ["shell", "dumpsys", "activity", "processes"];
+      logger.info(`[LaunchApp] Checking if app is running: ${isRunningArgs.join(" ")}`);
+      const result = await readAndroidPackageProcesses(this.adb, packageName, {
+        userId: targetUserId,
         signal,
-      );
-      signal?.throwIfAborted();
-
-      if (targetUserResult.status === "rejected") {
-        throw targetUserResult.reason;
-      }
-      if (installedAppsResult.status === "rejected") {
-        throw installedAppsResult.reason;
-      }
-
-      const targetUserId = targetUserResult.value;
-      const listing = installedAppsResult.value;
-      if (!listing.successful) {
-        throw toActionableError(
-          listing.error ??
-            new Error(
-              `installed-app listing did not complete successfully for ${this.device.deviceId}`,
-            ),
-          `Could not determine whether ${packageName} is installed`,
-        );
-      }
-      const installedApps = listing.apps;
-      logger.info(`[LaunchApp] Found ${installedApps.length} installed app(s)`);
-      logger.info(`[LaunchApp] Looking for package: ${packageName}`);
-      logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);
-      if (!installedApps.includes(packageName)) {
-        logger.error(`[LaunchApp] App ${packageName} is not installed`);
-        logger.error(`[LaunchApp] DEBUG: installedApps.length = ${installedApps.length}`);
-        logger.error(`[LaunchApp] DEBUG: installedApps = [${installedApps.join(", ")}]`);
-        perf.end();
-        return {
-          success: false,
-          packageName: packageName,
-          userId: targetUserId,
-          error: "App is not installed",
-        };
-      }
-
-      // Check if app is running
-      const isRunning = await perf.track("checkRunning", async () => {
-        const isRunningArgs = ["shell", "dumpsys", "activity", "processes"];
-        logger.info(`[LaunchApp] Checking if app is running: ${isRunningArgs.join(" ")}`);
-        const result = await readAndroidPackageProcesses(this.adb, packageName, {
-          userId: targetUserId,
-          signal,
-          timer: this.timer,
-        });
-        logger.info(
-          `[LaunchApp] App running: ${result.isRunning} (processes: ${JSON.stringify(result.processes)})`,
-        );
-        return result.isRunning;
+        timer: this.timer,
       });
-      this.assertLaunchNotAborted(signal);
-
-      let didTerminateOrClear = false;
-      let alreadyForeground: boolean | null = false;
-
-      if (isRunning) {
-        if (clearAppData) {
-          const clearResult = await perf.track("clearAppData", async () => {
-            return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
-          });
-          this.assertLaunchNotAborted(signal);
-          if (!clearResult.success) {
-            const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
-            logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
-            perf.end();
-            return { success: false, packageName, userId: targetUserId, error };
-          }
-          didTerminateOrClear = true;
-        } else if (coldBoot) {
-          const coldBootResult = await perf.track("terminateApp", async () => {
-            return this.createAndroidColdBoot(this.device).execute(packageName, {
-              skipObservation: true,
-              userId: targetUserId,
-            });
-          });
-          this.assertLaunchNotAborted(signal);
-          if (!coldBootResult.success) {
-            const error = `Cold boot could not stop ${packageName}: ${coldBootResult.error ?? "unknown error"}`;
-            logger.warn(`[LaunchApp] ${error}`);
-            perf.end();
-            return { success: false, packageName, userId: targetUserId, error };
-          }
-          didTerminateOrClear = true;
-        }
-
-        // Skip foreground check if we just terminated or cleared - we know app is not in foreground
-        if (!didTerminateOrClear) {
-          // Check if app is in foreground - use getForegroundApp which returns user context
-          const foregroundApp = await perf.track(`checkForeground`, async () => {
-            return this.adb.getForegroundApp();
-          });
-          this.assertLaunchNotAborted(signal);
-
-          alreadyForeground =
-            foregroundApp &&
-            foregroundApp.packageName === packageName &&
-            foregroundApp.userId === targetUserId;
-
-          if (alreadyForeground) {
-            logger.info(
-              `[LaunchApp] App ${packageName} is already in foreground in user ${targetUserId}`,
-            );
-          }
-        }
-      } else {
-        if (clearAppData) {
-          const clearResult = await perf.track("clearAppData", async () => {
-            return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
-          });
-          this.assertLaunchNotAborted(signal);
-          if (!clearResult.success) {
-            const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
-            logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
-            perf.end();
-            return { success: false, packageName, userId: targetUserId, error };
-          }
-        }
-      }
-
-      if (alreadyForeground) {
-        // "Make this app foreground" is a goal, not a transition: the goal already
-        // holds, so this is a success flagged with `alreadyForeground` — not an
-        // error a client has to string-match to decide whether to continue, which
-        // also discarded the observation a launch normally returns (issue #6868).
-        const result = await this.observedInteraction(
-          async () => {
-            perf.end();
-            return {
-              success: true,
-              alreadyForeground: true,
-              packageName,
-              activityName,
-              userId: targetUserId,
-            };
-          },
-          {
-            changeExpected: false,
-            perf,
-            packageName,
-            signal,
-            skipPreviousObserve: true,
-            skipUiStability: skipUiStability ?? false,
-            deferPostActionScreenshot: true,
-          },
-        );
-        // The foreground read and this observation are two separate device reads,
-        // so another app or a system surface can take over in between. Reconcile
-        // through the SAME validation the launch path uses rather than asserting
-        // `alreadyForeground: true` over a capture of a different app, which
-        // `buildLaunchAppResponse` would surface as a clean success with a
-        // mismatched `observedAppId` and no error (issue #6868 review).
-        const settledResult = await this.ensureLaunchObservationMatchesPackage(
-          result,
-          packageName,
-          ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-          undefined,
-          signal,
-          coldBoot,
-          targetUserId,
-        );
-        await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
-        return settledResult;
-      }
-
-      logger.info(`[LaunchApp] Proceeding with app launch`);
-      this.assertLaunchNotAborted(signal);
-
-      const captureDisplayedMetrics = serverConfig.isUiPerfModeEnabled();
       logger.info(
-        `[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`,
+        `[LaunchApp] App running: ${result.isRunning} (processes: ${JSON.stringify(result.processes)})`,
       );
-      const displayedMetricsCollector = captureDisplayedMetrics
-        ? new DisplayedTimeMetricsCollector(this.device, this.adbFactory)
-        : null;
-      let displayedMetricsStartMs: number | null = null;
+      return result.isRunning;
+    });
+    this.assertLaunchNotAborted(signal);
 
-      const foregroundWaitTimeoutMs = 5000;
-      const foregroundPollIntervalMs = 200;
-      let observationTimestampMs: number | undefined;
+    let didTerminateOrClear = false;
+    let alreadyForeground: boolean | null = false;
 
-      const launchResult = await this.observedInteraction(
+    if (isRunning) {
+      if (clearAppData) {
+        const clearResult = await perf.track("clearAppData", async () => {
+          return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
+        });
+        this.assertLaunchNotAborted(signal);
+        if (!clearResult.success) {
+          const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
+          logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
+          perf.end();
+          return { success: false, packageName, userId: targetUserId, error };
+        }
+        didTerminateOrClear = true;
+      } else if (coldBoot) {
+        const coldBootResult = await perf.track("terminateApp", async () => {
+          return this.createAndroidColdBoot(this.device).execute(packageName, {
+            skipObservation: true,
+            userId: targetUserId,
+          });
+        });
+        this.assertLaunchNotAborted(signal);
+        if (!coldBootResult.success) {
+          const error = `Cold boot could not stop ${packageName}: ${coldBootResult.error ?? "unknown error"}`;
+          logger.warn(`[LaunchApp] ${error}`);
+          perf.end();
+          return { success: false, packageName, userId: targetUserId, error };
+        }
+        didTerminateOrClear = true;
+      }
+
+      // Skip foreground check if we just terminated or cleared - we know app is not in foreground
+      if (!didTerminateOrClear) {
+        // Check if app is in foreground - use getForegroundApp which returns user context
+        const foregroundApp = await perf.track(`checkForeground`, async () => {
+          return this.adb.getForegroundApp();
+        });
+        this.assertLaunchNotAborted(signal);
+
+        alreadyForeground =
+          foregroundApp &&
+          foregroundApp.packageName === packageName &&
+          foregroundApp.userId === targetUserId;
+
+        if (alreadyForeground) {
+          logger.info(
+            `[LaunchApp] App ${packageName} is already in foreground in user ${targetUserId}`,
+          );
+        }
+      }
+    } else {
+      if (clearAppData) {
+        const clearResult = await perf.track("clearAppData", async () => {
+          return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
+        });
+        this.assertLaunchNotAborted(signal);
+        if (!clearResult.success) {
+          const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
+          logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
+          perf.end();
+          return { success: false, packageName, userId: targetUserId, error };
+        }
+      }
+    }
+
+    if (alreadyForeground) {
+      // "Make this app foreground" is a goal, not a transition: the goal already
+      // holds, so this is a success flagged with `alreadyForeground` — not an
+      // error a client has to string-match to decide whether to continue, which
+      // also discarded the observation a launch normally returns (issue #6868).
+      const result = await this.observedInteraction(
         async () => {
-          if (displayedMetricsCollector) {
-            displayedMetricsStartMs = await perf.track("displayedLogcatStartTime", () =>
-              this.adb.getDeviceTimestampMs(),
-            );
-          }
-          const launchOutcome = await this.performLaunch(
+          perf.end();
+          return {
+            success: true,
+            alreadyForeground: true,
             packageName,
             activityName,
-            targetUserId,
-            perf,
-            signal,
-          );
-          signal?.throwIfAborted();
-          const foregroundReady = await this.waitForAppForeground(
-            packageName,
-            targetUserId,
-            foregroundWaitTimeoutMs,
-            foregroundPollIntervalMs,
-            perf,
-            signal,
-          );
-          if (!foregroundReady) {
-            logger.warn(
-              `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
-            );
-          }
-          observationTimestampMs = await this.adb.getDeviceTimestampMs();
-          return launchOutcome;
+            userId: targetUserId,
+          };
         },
         {
           changeExpected: false,
           perf,
+          packageName,
+          signal,
           skipPreviousObserve: true,
           skipUiStability: skipUiStability ?? false,
-          packageName,
-          foregroundAppMayChange: true,
-          observationTimestampProvider: () => observationTimestampMs,
           deferPostActionScreenshot: true,
-          signal,
         },
       );
-
-      signal?.throwIfAborted();
-      const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
-        launchResult,
+      // The foreground read and this observation are two separate device reads,
+      // so another app or a system surface can take over in between. Reconcile
+      // through the SAME validation the launch path uses rather than asserting
+      // `alreadyForeground: true` over a capture of a different app, which
+      // `buildLaunchAppResponse` would surface as a clean success with a
+      // mismatched `observedAppId` and no error (issue #6868 review).
+      const settledResult = await this.ensureLaunchObservationMatchesPackage(
+        result,
         packageName,
         ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
         undefined,
         signal,
-        coldBoot,
-        targetUserId,
+        { coldBoot, expectedUserId: targetUserId },
       );
-      if (clearAppData && settledLaunchResult.success && settledLaunchResult.observation) {
-        await this.waitForAndroidColdStableFrame(settledLaunchResult, packageName, signal);
-      }
-      await this.captureTerminalObservationScreenshot(
-        settledLaunchResult.observation,
-        perf,
-        signal,
-      );
+      await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
+      return settledResult;
+    }
 
-      logger.info(
-        `[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`,
-      );
-      if (
-        displayedMetricsCollector &&
-        displayedMetricsStartMs !== null &&
-        settledLaunchResult?.observation
-      ) {
-        const displayedMetricsEndMs = await perf.track("displayedLogcatEndTime", () =>
-          this.adb.getDeviceTimestampMs(),
-        );
-        logger.info(
-          `[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`,
-        );
-        const displayedTimeMetrics = await displayedMetricsCollector.captureDisplayedMetrics(
-          {
-            packageName,
-            startTimestampMs: displayedMetricsStartMs,
-            endTimestampMs: displayedMetricsEndMs,
-          },
-          perf,
-        );
-        logger.info(`[LaunchApp] Captured ${displayedTimeMetrics.length} displayed metrics`);
-        settledLaunchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
+    logger.info(`[LaunchApp] Proceeding with app launch`);
+    this.assertLaunchNotAborted(signal);
 
-        // Store TTI for the performance monitor to report
-        // Use the first displayed metric as the TTI (time to first frame / interactive)
-        if (displayedTimeMetrics.length > 0) {
-          const firstMetric = displayedTimeMetrics[0];
-          setLastTtiMs(this.device.deviceId, packageName, firstMetric.displayedTimeMs);
-          logger.info(
-            `[LaunchApp] Recorded TTI for ${packageName}: ${firstMetric.displayedTimeMs}ms`,
+    const captureDisplayedMetrics = serverConfig.isUiPerfModeEnabled();
+    logger.info(
+      `[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`,
+    );
+    const displayedMetricsCollector = captureDisplayedMetrics
+      ? new DisplayedTimeMetricsCollector(this.device, this.adbFactory)
+      : null;
+    let displayedMetricsStartMs: number | null = null;
+
+    const foregroundWaitTimeoutMs = 5000;
+    const foregroundPollIntervalMs = 200;
+    let observationTimestampMs: number | undefined;
+
+    const launchResult = await this.observedInteraction(
+      async () => {
+        if (displayedMetricsCollector) {
+          displayedMetricsStartMs = await perf.track("displayedLogcatStartTime", () =>
+            this.adb.getDeviceTimestampMs(),
           );
-        } else {
-          logger.info(`[LaunchApp] No displayed metrics found for ${packageName}`);
         }
-      } else {
-        logger.info(`[LaunchApp] Skipping TTI capture - conditions not met`);
-      }
+        const launchOutcome = await this.performLaunch(
+          packageName,
+          activityName,
+          targetUserId,
+          perf,
+          signal,
+        );
+        signal?.throwIfAborted();
+        const foregroundReady = await this.waitForAppForeground(
+          packageName,
+          targetUserId,
+          foregroundWaitTimeoutMs,
+          foregroundPollIntervalMs,
+          perf,
+          signal,
+        );
+        if (!foregroundReady) {
+          logger.warn(
+            `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
+          );
+        }
+        observationTimestampMs = await this.adb.getDeviceTimestampMs();
+        return launchOutcome;
+      },
+      {
+        changeExpected: false,
+        perf,
+        skipPreviousObserve: true,
+        skipUiStability: skipUiStability ?? false,
+        packageName,
+        foregroundAppMayChange: true,
+        observationTimestampProvider: () => observationTimestampMs,
+        deferPostActionScreenshot: true,
+        signal,
+      },
+    );
 
-      return settledLaunchResult;
-    });
+    signal?.throwIfAborted();
+    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
+      launchResult,
+      packageName,
+      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
+      undefined,
+      signal,
+      { coldBoot, expectedUserId: targetUserId },
+    );
+    if (clearAppData && settledLaunchResult.success && settledLaunchResult.observation) {
+      await this.waitForAndroidColdStableFrame(settledLaunchResult, packageName, signal);
+    }
+    await this.captureTerminalObservationScreenshot(settledLaunchResult.observation, perf, signal);
+
+    logger.info(
+      `[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`,
+    );
+    if (
+      displayedMetricsCollector &&
+      displayedMetricsStartMs !== null &&
+      settledLaunchResult?.observation
+    ) {
+      const displayedMetricsEndMs = await perf.track("displayedLogcatEndTime", () =>
+        this.adb.getDeviceTimestampMs(),
+      );
+      logger.info(
+        `[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`,
+      );
+      const displayedTimeMetrics = await displayedMetricsCollector.captureDisplayedMetrics(
+        {
+          packageName,
+          startTimestampMs: displayedMetricsStartMs,
+          endTimestampMs: displayedMetricsEndMs,
+        },
+        perf,
+      );
+      logger.info(`[LaunchApp] Captured ${displayedTimeMetrics.length} displayed metrics`);
+      settledLaunchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
+
+      // Store TTI for the performance monitor to report
+      // Use the first displayed metric as the TTI (time to first frame / interactive)
+      if (displayedTimeMetrics.length > 0) {
+        const firstMetric = displayedTimeMetrics[0];
+        setLastTtiMs(this.device.deviceId, packageName, firstMetric.displayedTimeMs);
+        logger.info(
+          `[LaunchApp] Recorded TTI for ${packageName}: ${firstMetric.displayedTimeMs}ms`,
+        );
+      } else {
+        logger.info(`[LaunchApp] No displayed metrics found for ${packageName}`);
+      }
+    } else {
+      logger.info(`[LaunchApp] Skipping TTI capture - conditions not met`);
+    }
+
+    return settledLaunchResult;
   }
 
   private async waitForAndroidColdStableFrame(
@@ -1307,10 +1356,10 @@ export class LaunchApp extends BaseVisualChange {
     expectedPackageName: string,
     timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
     pollIntervalMs: number = LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
-    signal?: AbortSignal,
-    coldBoot?: boolean,
-    expectedUserId?: number,
+    signal: AbortSignal | undefined,
+    options: { coldBoot?: boolean; expectedUserId?: number },
   ): Promise<LaunchAppResult> {
+    const { coldBoot, expectedUserId } = options;
     signal?.throwIfAborted();
     result = await this.collapseNotificationShadeIfCovering(result, signal);
     if (
@@ -1857,6 +1906,62 @@ export class LaunchApp extends BaseVisualChange {
     signal?.throwIfAborted();
   }
 
+  private async tryAndroidIntentLaunch(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean }> {
+    logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
+    try {
+      // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
+      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+      logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
+      const result = await this.adb.executeCommand(intentCmd);
+      this.assertLaunchNotAborted(signal);
+      // am start may report launch errors on stderr while still returning exit code 0.
+      if (result.stdout && !result.stdout.includes("Error") && !result.stderr.includes("Error")) {
+        logger.info(`[LaunchApp] Intent launch completed successfully`);
+        return { success: true };
+      }
+      logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
+      return { success: false };
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.warn(
+        `[LaunchApp] Intent launch failed: ${errorMessage(error)}, falling back to monkey`,
+      );
+      return { success: false };
+    }
+  }
+
+  private async tryAndroidMonkeyLaunch(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean }> {
+    logger.info(`[LaunchApp] Trying monkey launch (fallback approach) for user ${userId}`);
+    try {
+      const monkeyCmd = `shell monkey -p ${shellQuote(packageName)} -c android.intent.category.LAUNCHER 1`;
+      logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
+      const result = await this.adb.executeCommand(monkeyCmd);
+      this.assertLaunchNotAborted(signal);
+      if (
+        /No activities found to run|[Mm]onkey aborted/.test(`${result.stdout}\n${result.stderr}`)
+      ) {
+        logger.info(`[LaunchApp] Monkey launch reported no activity`);
+        return { success: false };
+      }
+      logger.info(`[LaunchApp] Monkey launch completed successfully`);
+      return { success: true };
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.warn(
+        `[LaunchApp] Monkey launch failed: ${errorMessage(error)}, falling back to activity discovery`,
+      );
+      return { success: false };
+    }
+  }
+
   private async performLaunch(
     packageName: string,
     activityName: string | undefined,
@@ -1869,33 +1974,9 @@ export class LaunchApp extends BaseVisualChange {
 
     // Try am start with intent first (alternative to monkey)
     if (!targetActivity) {
-      const intentResult = await perf.track("intentLaunch", async () => {
-        logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
-        try {
-          // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
-          const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
-          logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
-          const result = await this.adb.executeCommand(intentCmd);
-          this.assertLaunchNotAborted(signal);
-          // am start may report launch errors on stderr while still returning exit code 0.
-          if (
-            result.stdout &&
-            !result.stdout.includes("Error") &&
-            !result.stderr.includes("Error")
-          ) {
-            logger.info(`[LaunchApp] Intent launch completed successfully`);
-            return { success: true };
-          }
-          logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
-          return { success: false };
-        } catch (error) {
-          this.assertLaunchNotAborted(signal);
-          logger.warn(
-            `[LaunchApp] Intent launch failed: ${errorMessage(error)}, falling back to monkey`,
-          );
-          return { success: false };
-        }
-      });
+      const intentResult = await perf.track("intentLaunch", () =>
+        this.tryAndroidIntentLaunch(packageName, userId, signal),
+      );
       this.assertLaunchNotAborted(signal);
 
       if (intentResult.success) {
@@ -1916,31 +1997,9 @@ export class LaunchApp extends BaseVisualChange {
           `[LaunchApp] Skipping monkey for user ${userId}: monkey cannot target a user; continuing to activity discovery`,
         );
       } else {
-        const monkeyResult = await perf.track("monkeyLaunch", async () => {
-          logger.info(`[LaunchApp] Trying monkey launch (fallback approach) for user ${userId}`);
-          try {
-            const monkeyCmd = `shell monkey -p ${shellQuote(packageName)} -c android.intent.category.LAUNCHER 1`;
-            logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
-            const result = await this.adb.executeCommand(monkeyCmd);
-            this.assertLaunchNotAborted(signal);
-            if (
-              /No activities found to run|[Mm]onkey aborted/.test(
-                `${result.stdout}\n${result.stderr}`,
-              )
-            ) {
-              logger.info(`[LaunchApp] Monkey launch reported no activity`);
-              return { success: false };
-            }
-            logger.info(`[LaunchApp] Monkey launch completed successfully`);
-            return { success: true };
-          } catch (error) {
-            this.assertLaunchNotAborted(signal);
-            logger.warn(
-              `[LaunchApp] Monkey launch failed: ${errorMessage(error)}, falling back to activity discovery`,
-            );
-            return { success: false };
-          }
-        });
+        const monkeyResult = await perf.track("monkeyLaunch", () =>
+          this.tryAndroidMonkeyLaunch(packageName, userId, signal),
+        );
         this.assertLaunchNotAborted(signal);
 
         if (monkeyResult.success) {

@@ -1,9 +1,13 @@
 package dev.jasonpearson.automobile.protocol
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 
@@ -488,5 +492,33 @@ class WebSocketResponseTest {
     assertEquals(0, decoded.frameMetrics.totalFrames)
     assertEquals(null, decoded.frameMetrics.fps)
     assertEquals(null, decoded.frameMetrics.jankFrames)
+  }
+
+  @Test
+  fun `overlay result echoes request id and event has no request id`() {
+    val resultLiteral =
+      """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":false,"error":"overlay host not wired"}"""
+    val result = json.decodeFromString<WebSocketResponse>(resultLiteral)
+    assertEquals("r1", assertIs<OverlayResult>(result).requestId)
+    assertEquals(resultLiteral, json.encodeToString<WebSocketResponse>(result))
+    val eventLiteral =
+      """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":1,"kind":"emit","name":"next","payload":{"nested":[true,null]},"state":{"label":"Next","enabled":true},"pages":{"pager":0}}"""
+    val event = assertIs<OverlayEvent>(json.decodeFromString<WebSocketResponse>(eventLiteral))
+    assertEquals(OverlayEventKind.EMIT, event.kind)
+    assertEquals(1L, event.sequence)
+    assertEquals(mapOf("pager" to 0), event.pages)
+    assertEquals(eventLiteral, json.encodeToString<WebSocketResponse>(event))
+    assertFalse(json.encodeToString<WebSocketResponse>(event).contains("requestId"))
+    for (kind in listOf("page_changed", "dismissed")) {
+      val literal =
+        """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":2,"kind":"$kind","name":null,"payload":null,"state":{},"pages":{}}"""
+      assertEquals(
+        literal,
+        json.encodeToString<WebSocketResponse>(json.decodeFromString<WebSocketResponse>(literal)),
+      )
+    }
+    assertFailsWith<SerializationException> {
+      json.decodeFromString<WebSocketResponse>(eventLiteral.replace("emit", "unknown"))
+    }
   }
 }

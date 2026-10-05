@@ -162,9 +162,15 @@ test("executePlan declares optional deviceFailures with required device labels",
       tool: "tapOn",
       error: "missing",
       device: "A",
+    },
+    {
+      stepIndex: 1,
+      tool: "tapOn",
+      error: "missing",
+      device: "B",
       failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
     },
-    { stepIndex: -1, tool: "unknown", error: "track failure", device: "B" },
+    { stepIndex: -1, tool: "unknown", error: "track failure", device: "C" },
   ];
   expect(schema.parse({ ...base, deviceFailures })).toEqual({ ...base, deviceFailures });
   for (const entry of [

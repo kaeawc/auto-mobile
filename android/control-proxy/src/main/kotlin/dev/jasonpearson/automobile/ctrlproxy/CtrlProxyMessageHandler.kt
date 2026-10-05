@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
 import dev.jasonpearson.automobile.protocol.DiscoverKeystore
+import dev.jasonpearson.automobile.protocol.DismissOverlay
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
 import dev.jasonpearson.automobile.protocol.GetDataStore
@@ -17,6 +18,7 @@ import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListDataStores
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
 import dev.jasonpearson.automobile.protocol.RemovePreference
@@ -58,12 +60,14 @@ import dev.jasonpearson.automobile.protocol.SetNetworkErrorSimulation
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRules
 import dev.jasonpearson.automobile.protocol.SetPreference
 import dev.jasonpearson.automobile.protocol.SetRecompositionTracking
+import dev.jasonpearson.automobile.protocol.ShowOverlay
 import dev.jasonpearson.automobile.protocol.StartRecording
 import dev.jasonpearson.automobile.protocol.StopRecording
 import dev.jasonpearson.automobile.protocol.SubscribeStorage
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
 import dev.jasonpearson.automobile.protocol.UnsubscribeStorage
+import dev.jasonpearson.automobile.protocol.UpdateOverlay
 import dev.jasonpearson.automobile.protocol.ValidateFrameContext
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
@@ -464,6 +468,30 @@ class CtrlProxyMessageHandler(
       is GetTraversalOrder -> actions.getTraversalOrder(request.requestId)
       is AddHighlight ->
         actions.addHighlight(request.requestId, request.id, request.shape?.toModel())
+
+      is ShowOverlay -> actions.showOverlay(request.requestId, request.spec)
+      is UpdateOverlay -> {
+        if ((request.spec == null) == (request.state == null)) {
+          return OverlayResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            error = "update_overlay requires exactly one of spec or state",
+          )
+        }
+        actions.updateOverlay(request.requestId, request.id, request.spec, request.state)
+      }
+      is DismissOverlay -> {
+        if ((request.id == null) == (request.all == null) || request.all == false) {
+          return OverlayResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            error = "dismiss_overlay requires exactly one of id or all:true",
+          )
+        }
+        actions.dismissOverlay(request.requestId, request.id, request.all)
+      }
       is ListPreferenceFiles -> actions.listPreferenceFiles(request.requestId, request.packageName)
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)

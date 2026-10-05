@@ -29,6 +29,8 @@ constructor(
   @SerialName("accessibility-focused-element")
   val accessibilityFocusedElement: UIElementInfo? = null, // Element with TalkBack cursor
   val ctrlProxyIncomplete: Boolean? = null,
+  /** Cause of an incomplete capture; omitted for complete captures and older services. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val ctrlProxyIncompleteReason: String? = null,
   val error: String? = null, // For error cases like locked screen
   val screenWidth: Int? = null,
   val screenHeight: Int? = null,

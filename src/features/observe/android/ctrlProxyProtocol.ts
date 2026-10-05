@@ -29,6 +29,7 @@
  *   same treatment separately.
  */
 
+import type { OverlaySpec, OverlayJson } from "../../overlay/overlaySpec";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
 import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
@@ -418,6 +419,46 @@ export interface GetTraversalOrderMessage {
   requestId: string;
 }
 
+export type OverlayState = NonNullable<OverlaySpec["state"]>;
+export interface ShowOverlayMessage {
+  type: "show_overlay";
+  requestId: string;
+  spec: OverlaySpec;
+}
+/** Replacement spec.id must equal the top-level id; hosts reject mismatches before sending. */
+export type OverlayUpdate = { id: string } & (
+  | { spec: OverlaySpec; state?: never }
+  | { state: OverlayState; spec?: never }
+);
+export type UpdateOverlayMessage = { type: "update_overlay"; requestId: string } & OverlayUpdate;
+export type OverlayDismiss = { id: string; all?: never } | { all: true; id?: never };
+export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string } & OverlayDismiss;
+
+export interface OverlayResult {
+  success: boolean;
+  totalTimeMs?: number;
+  error?: string | null;
+  requestId?: string;
+  timestamp?: number;
+}
+
+/** Id-less push; pager selection has its own namespace, separate from authored state. */
+export interface OverlayEvent {
+  type: "overlay_event";
+  timestamp: number;
+  id: string;
+  /**
+   * Emitter contract: per overlay id, monotonic starting at 1; reconnects must not reset it.
+   * Hosts should treat lower-or-equal sequences for the same id as duplicates.
+   */
+  sequence: number;
+  kind: "emit" | "page_changed" | "dismissed";
+  name: string | null;
+  payload: OverlayJson;
+  state: OverlayState;
+  pages: Record<string, number>;
+}
+
 // =============================================================================
 // Highlight Request
 // =============================================================================
@@ -691,6 +732,9 @@ export type CtrlProxyRequest =
   | RequestDeviceInfoMessage
   | GetCurrentFocusMessage
   | GetTraversalOrderMessage
+  | ShowOverlayMessage
+  | UpdateOverlayMessage
+  | DismissOverlayMessage
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
@@ -730,6 +774,9 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
  * the raw advertised list for the remaining optional text/keyboard capabilities.
  */
 export const ANDROID_CAPABILITY_REQUEST_TYPES = [
+  "show_overlay",
+  "update_overlay",
+  "dismiss_overlay",
   "discover_keystore",
   "set_hierarchy_interval",
   "request_activate_accessibility_link",
@@ -786,6 +833,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
   "current_focus_result",
   "traversal_order_result",
   "highlight_response",
+  "overlay_result",
   "global_action_result",
   "frame_context_validation_result",
   "device_info_result",
@@ -809,6 +857,7 @@ export const ANDROID_ID_LESS_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "navigation_event",
   "package_event",
   "interaction_event",
+  "overlay_event",
   "handled_exception_event",
   "crash_event",
   "anr_event",
@@ -885,6 +934,9 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   get_current_focus: true,
   get_traversal_order: true,
   add_highlight: true,
+  show_overlay: true,
+  update_overlay: true,
+  dismiss_overlay: true,
   list_preference_files: true,
   get_preferences: true,
   discover_keystore: true,
@@ -1143,6 +1195,22 @@ export const ctrlProxyRequests = {
 
   getTraversalOrder(args: { requestId: string }): GetTraversalOrderMessage {
     return { type: "get_traversal_order", requestId: args.requestId };
+  },
+
+  showOverlay(args: { requestId: string; spec: OverlaySpec }): ShowOverlayMessage {
+    return { type: "show_overlay", requestId: args.requestId, spec: args.spec };
+  },
+
+  updateOverlay(args: { requestId: string } & OverlayUpdate): UpdateOverlayMessage {
+    return args.spec !== undefined
+      ? { type: "update_overlay", requestId: args.requestId, id: args.id, spec: args.spec }
+      : { type: "update_overlay", requestId: args.requestId, id: args.id, state: args.state };
+  },
+
+  dismissOverlay(args: { requestId: string } & OverlayDismiss): DismissOverlayMessage {
+    return args.id !== undefined
+      ? { type: "dismiss_overlay", requestId: args.requestId, id: args.id }
+      : { type: "dismiss_overlay", requestId: args.requestId, all: args.all };
   },
 
   addHighlight(args: {

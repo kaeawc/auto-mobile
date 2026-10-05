@@ -549,8 +549,7 @@ describe("LaunchApp", () => {
       0,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.success).toBe(false);
@@ -572,8 +571,7 @@ describe("LaunchApp", () => {
       0,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.success).toBe(true);
@@ -616,8 +614,7 @@ describe("LaunchApp", () => {
       0,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.success).toBe(false);
@@ -639,8 +636,7 @@ describe("LaunchApp", () => {
       1000,
       100,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.verifiedBy).toBeUndefined();
@@ -665,8 +661,7 @@ describe("LaunchApp", () => {
       1000,
       100,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.verifiedBy).toBe("task-root");
@@ -685,8 +680,7 @@ describe("LaunchApp", () => {
       1,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(fakeTimer.getSleepHistory()).toEqual([1]);

@@ -189,6 +189,130 @@ describe("plan video warnings and completed recording recovery", () => {
     ]);
   });
 
+  test.each(["android", "ios"] as const)(
+    "%s startup failure warns without changing the plan outcome",
+    async (platform) => {
+      execute.mockResolvedValue({ ...success, success: false });
+      const video = recorder();
+      if (platform === "android") {
+        start.mockRejectedValue(new Error("device busy"));
+      } else {
+        video.startVideoRecording = async () => {
+          throw new Error("device busy");
+        };
+      }
+      const result = await run(platform, video);
+      expect(result).toMatchObject({ success: false, executedSteps: 1, totalSteps: 1 });
+      expect(result.videoFilePaths).toBeUndefined();
+      expect(result.videoWarnings).toEqual([
+        "Failed to start automatic video recording: device busy",
+      ]);
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(finalize).not.toHaveBeenCalled();
+    },
+  );
+
+  test("iOS rejects a completed archive without host bytes", async () => {
+    const video: VideoRecorder = {
+      ...recorder(),
+      stopVideoRecording: async () => {
+        throw new Error("stop failed");
+      },
+      getVideoRecordingStatus: async () => "completed",
+      getVideoRecordingMetadata: async () => ({ ...metadata, sizeBytes: 0 }),
+    };
+    const result = await run("ios", video);
+    expect(result.success).toBe(true);
+    expect(result.videoFilePaths).toBeUndefined();
+    expect(result.videoRecordingIds).toBeUndefined();
+    expect(result.videoWarnings).toEqual(["Failed to stop automatic video recording: stop failed"]);
+  });
+
+  test.each([0, -100, 100])(
+    "iOS completion at plan end (%sms offset) does not claim an early end",
+    async (offset) => {
+      const timer = new FakeTimer();
+      execute.mockImplementation(async () => {
+        timer.advanceTime(10_000);
+        return success;
+      });
+      const video: VideoRecorder = {
+        ...recorder(),
+        stopVideoRecording: async () => {
+          // Recovery happens later than the stop attempt; compare against the attempt.
+          timer.advanceTime(5_000);
+          throw new Error("resource notification failed");
+        },
+        getVideoRecordingStatus: async () => "completed",
+        getVideoRecordingMetadata: async () => ({
+          ...metadata,
+          durationMs: 10_000,
+          endedAt: new Date(10_000 + offset).toISOString(),
+          warnings: ["archive warning", "archive warning"],
+        }),
+      };
+      const result = await run("ios", video, timer);
+      expect(result.videoFilePaths).toEqual([metadata.filePath]);
+      expect(result.videoWarnings).toEqual(["archive warning"]);
+    },
+  );
+
+  test.each([10_000, 300_000])(
+    "iOS plan-end recovery at duration %sms adds only an applicable cap warning",
+    async (durationMs) => {
+      const timer = new FakeTimer();
+      execute.mockImplementation(async () => {
+        timer.advanceTime(durationMs);
+        return success;
+      });
+      const video: VideoRecorder = {
+        ...recorder(),
+        stopVideoRecording: async () => {
+          throw new Error("resource notification failed");
+        },
+        getVideoRecordingStatus: async () => "completed",
+        getVideoRecordingMetadata: async () => ({
+          ...metadata,
+          durationMs,
+          endedAt: new Date(durationMs).toISOString(),
+        }),
+      };
+      const result = await run("ios", video, timer);
+      expect(result.videoFilePaths).toEqual([metadata.filePath]);
+      if (durationMs === 300_000) {
+        expect(result.videoWarnings).toEqual([
+          "Video recording rec-1 stopped at the 300s cap; the remainder of the plan was not recorded",
+        ]);
+      } else {
+        expect(result.videoWarnings).toBeUndefined();
+      }
+    },
+  );
+
+  test.each(["1970-01-01T00:00:09.899Z", "invalid", undefined])(
+    "iOS genuinely early or unknown end (%s) retains the neutral warning",
+    async (endedAt) => {
+      const timer = new FakeTimer();
+      execute.mockImplementation(async () => {
+        timer.advanceTime(10_000);
+        return success;
+      });
+      const video: VideoRecorder = {
+        ...recorder(),
+        stopVideoRecording: async () => {
+          throw new Error("stop failed");
+        },
+        getVideoRecordingStatus: async () => "completed",
+        getVideoRecordingMetadata: async () => ({ ...metadata, durationMs: 9000, endedAt }),
+      };
+      const result = await run("ios", video, timer);
+      expect(result.videoFilePaths).toEqual([metadata.filePath]);
+      expect(result.videoWarnings).toEqual([
+        "Video recording rec-1 ended before the plan finished; the remainder of the plan was not recorded",
+      ]);
+    },
+  );
+
   test.each([true, false])(
     "iOS recovers cap-stopped video without changing plan success=%s",
     async (passed) => {

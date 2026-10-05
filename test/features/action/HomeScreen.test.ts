@@ -178,6 +178,99 @@ describe("HomeScreen", () => {
       expect(result).not.toHaveProperty("message");
     });
 
+    describe("Android launcher surfaces", () => {
+      const launcherPackage = "com.google.android.apps.nexuslauncher";
+
+      beforeEach(() => {
+        fakeWindow.configureActiveWindow({
+          appId: launcherPackage,
+          activityName: "NexusLauncherActivity",
+          layoutSeqSum: 123,
+        });
+        fakeAdb.setCommandResponse(
+          "shell cmd package resolve-activity --brief -c android.intent.category.HOME -a android.intent.action.MAIN",
+          { stdout: `${launcherPackage}/.NexusLauncherActivity`, stderr: "" },
+        );
+      });
+
+      // Marker ids come from the device skeleton capture; no raw hierarchy was captured.
+      test.each([
+        { markers: ["overview_panel", "task_view_single"] },
+        { markers: ["overview_panel"] },
+        { markers: ["task_view_single"] },
+      ])(
+        "presses Home from Recents with markers %j without an already-home message",
+        async ({ markers }) => {
+          const overview = createObserveResult();
+          overview.viewHierarchy = {
+            packageName: launcherPackage,
+            hierarchy: {
+              node: {
+                $: { class: "Launcher" },
+                node: markers.map((marker) => ({
+                  $: { "resource-id": `${launcherPackage}:id/${marker}` },
+                })),
+              },
+            },
+          };
+          const home = createObserveResult();
+          home.viewHierarchy = {
+            packageName: launcherPackage,
+            hierarchy: { node: { $: { "resource-id": `${launcherPackage}:id/workspace` } } },
+          };
+          fakeObserveScreen.setObserveSequence([overview, home]);
+
+          const result = await homeScreen.execute();
+
+          expect(result.success).toBe(true);
+          expect(result).not.toHaveProperty("message");
+          expect(result.error).toBeUndefined();
+          expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+        },
+      );
+
+      test("an unchanged Recents overview fails the expected visual change", async () => {
+        const overview = createObserveResult();
+        overview.viewHierarchy = {
+          packageName: launcherPackage,
+          hierarchy: {
+            node: {
+              $: { "resource-id": `${launcherPackage}:id/overview_panel` },
+              node: [{ $: { "resource-id": `${launcherPackage}:id/task_view_single` } }],
+            },
+          },
+        };
+        fakeObserveScreen.setObserveResult(overview);
+
+        const result = await homeScreen.execute();
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe("No visual change observed");
+        expect(result).not.toHaveProperty("message");
+        expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+      });
+
+      test("a home workspace without overview markers still reports already-home", async () => {
+        const home = createObserveResult();
+        home.viewHierarchy = {
+          packageName: launcherPackage,
+          hierarchy: {
+            node: {
+              $: { "resource-id": `${launcherPackage}:id/workspace` },
+              node: [{ $: { "resource-id": `${launcherPackage}:id/accessibility_action_view` } }],
+            },
+          },
+        };
+        fakeObserveScreen.setObserveResult(home);
+
+        const result = await homeScreen.execute();
+
+        expect(result.success).toBe(true);
+        expect(result.message).toBe("Already on the home screen");
+        expect(result.error).toBeUndefined();
+      });
+    });
+
     test("reuses the verified configured launcher for a custom Android home package", async () => {
       const observation = createObserveResult();
       observation.viewHierarchy = {

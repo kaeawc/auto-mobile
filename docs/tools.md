@@ -1903,9 +1903,12 @@ is authoritative. Reads may fall back after a recognized SDK timeout, transport
 loss, missing route, or inspection-disabled response. Unknown faults, app mismatch,
 and mutation refusals surface as errors.
 
-Writes fall back only when the client is absent or closed before dispatch. Once
-an SDK write is attempted, failures never cause a container write; ambiguous
-failures report that the write may or may not have been applied. Inspection-disabled
+Writes fall back when the client is absent or closed, or the runner refuses the
+SDK route before dispatch because the target app lacks the SDK. The runner marks
+these refusals with `sdk_unavailable_not_dispatched`; exact legacy capability
+refusals are also recognized. Reads fall back on these refusals too. Dispatched
+or ambiguous SDK write failures never cause a container write and report that the
+write may or may not have been applied. Inspection-disabled
 and mutation-refused writes surface errors, preserving the app's opt-in policy.
 Read-back verification uses the successful write route and reports the type read
 back, while comparing according to the requested input type. SDK-redacted reads

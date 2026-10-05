@@ -3,6 +3,8 @@ import Foundation
 extension CommandHandler {
     // MARK: - Storage
 
+    private static let preferenceSdkNotDispatchedCode = "sdk_unavailable_not_dispatched"
+
     /// A localhost SDK server may belong to a different foreground app. Check both
     /// the requested bundle and the server owner before any preference operation.
     private func preferenceClient(_ requested: String?) async throws -> (String, any SdkPreferenceFetching) {
@@ -15,12 +17,14 @@ extension CommandHandler {
         guard normalizedBundleId(await sdkHierarchyClient?.fetchServerInfo()?.bundleId) == appId else {
             throw CommandError.executionFailed(
                 "iOS key-value storage requires \(appId) to embed and initialize the AutoMobile SDK "
-                    + "and call UserDefaultsInspector.shared.setEnabled(true)"
+                    + "and call UserDefaultsInspector.shared.setEnabled(true): \(Self.preferenceSdkNotDispatchedCode)"
             )
         }
         guard let client = sdkPreferenceClient else {
-            throw CommandError
-                .executionFailed("iOS key-value storage requires the target app to embed the AutoMobile SDK")
+            throw CommandError.executionFailed(
+                "iOS key-value storage requires the target app to embed the AutoMobile SDK: "
+                    + Self.preferenceSdkNotDispatchedCode
+            )
         }
         return (appId, client)
     }

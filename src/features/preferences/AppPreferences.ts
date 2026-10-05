@@ -422,15 +422,12 @@ export class AppPreferences {
           );
         }
         if (write) {
-          throw new ActionableError(
-            `iOS UserDefaults SDK write failed: ${detail}. The write may or may not have been applied. Read the value through the SDK before retrying; no container write was attempted.`,
-            { cause: error },
-          );
+          assertIosPreferenceSdkWriteNotDispatched(error);
         }
         if (!isIosPreferenceSdkUnavailable(error)) {
           throw toActionableError(error, "Failed to access iOS app UserDefaults");
         }
-        // Reads are safe to retry from disk after an expected SDK capability/transport miss.
+        // A pre-dispatch refusal cannot have written; reads may also retry transport misses.
         logger.debug(`iOS preference SDK unavailable: ${detail}`, error);
       }
     }
@@ -891,11 +888,35 @@ function iosSdkStoreName(store: string): string {
   return store === "standard" ? "Standard" : store;
 }
 
+/** A dispatched or ambiguous SDK write must never be retried through the container. */
+function assertIosPreferenceSdkWriteNotDispatched(error: unknown): void {
+  if (!isIosPreferenceSdkNotDispatched(error)) {
+    throw new ActionableError(
+      `iOS UserDefaults SDK write failed: ${errorMessage(error)}. The write may or may not have been applied. Read the value through the SDK before retrying; no container write was attempted.`,
+      { cause: error },
+    );
+  }
+}
+
+/** Runner capability guards that refused before any SDK preference operation was sent. */
+export function isIosPreferenceSdkNotDispatched(error: unknown): boolean {
+  const message = errorMessage(error);
+  if (/(?:^|: )sdk_unavailable_not_dispatched$/.test(message)) {
+    return true;
+  }
+  // Older runners lack the token. Match only their complete capability refusals,
+  // including the optional CommandError wire prefix, never network/foreground faults.
+  return /^(?:Command execution failed: )?iOS key-value storage requires (?:[A-Za-z0-9_.-]+ to embed and initialize the AutoMobile SDK and call UserDefaultsInspector\.shared\.setEnabled\(true\)|the target app to embed the AutoMobile SDK)$/.test(
+    message,
+  );
+}
+
 export function isIosPreferenceSdkUnavailable(error: unknown): boolean {
   const message = errorMessage(error);
-  // Read-only policy: known transport/deadline/capability signals. Never authorize
-  // retries of writes, app mismatch, mutation refusals, or unknown SDK faults.
+  // Reads may retry known transport/deadline/capability signals. Only the separate
+  // not-dispatched predicate permits writes to retry; mismatch and mutation faults do not.
   return (
+    isIosPreferenceSdkNotDispatched(error) ||
     error instanceof CtrlProxyServicePortChangedError ||
     // Compatibility with pending requests from clients emitting the original Error.
     message === "CtrlProxy service port changed" ||

@@ -117,7 +117,7 @@ final class StorageRoutingTests: XCTestCase {
     private func handler(
         foreground: String = "com.example.app",
         sdkBundle: String? = "com.example.app",
-        client: RecordingPreferenceClient,
+        client: RecordingPreferenceClient?,
         runner: RunnerStorageTrap
     )
         -> CommandHandler
@@ -242,14 +242,61 @@ final class StorageRoutingTests: XCTestCase {
     }
 
     func testMissingSdkFailsWithoutRunnerWrite() async throws {
+        for sdkBundle in [nil, "com.other.app"] as [String?] {
+            let client = RecordingPreferenceClient()
+            let runner = RunnerStorageTrap()
+            let handler = handler(sdkBundle: sdkBundle, client: client, runner: runner)
+            let expected = "Command execution failed: iOS key-value storage requires com.example.app "
+                + "to embed and initialize the AutoMobile SDK and call UserDefaultsInspector.shared.setEnabled(true)"
+                + ": sdk_unavailable_not_dispatched"
+            for type in ["set_preference", "remove_preference", "clear_preferences"] {
+                let result = try await handler.handle(request(type, fields: [
+                    "fileName": "duoStore", "key": "kvDuo", "value": "42", "valueType": "INT",
+                ])) as? WebSocketResponse
+                XCTAssertEqual(result?.success, false)
+                XCTAssertEqual(result?.error, expected)
+            }
+            let read = try await handler.handle(request("get_preference", fields: ["key": "kvDuo"]))
+                as? StorageEntryResponse
+            XCTAssertEqual(read?.success, false)
+            XCTAssertEqual(read?.error, expected)
+            let calls = await client.recorded()
+            XCTAssertEqual(calls, [])
+            XCTAssertEqual(runner.calls, 0)
+        }
+    }
+
+    func testMissingPreferenceClientFailsBeforeDispatch() async throws {
+        let runner = RunnerStorageTrap()
+        let handler = handler(client: nil, runner: runner)
+        let expected = "Command execution failed: iOS key-value storage requires the target app "
+            + "to embed the AutoMobile SDK: sdk_unavailable_not_dispatched"
+        for type in ["set_preference", "remove_preference", "clear_preferences"] {
+            let result = try await handler.handle(request(type, fields: [
+                "fileName": "duoStore", "key": "kvDuo", "value": "42", "valueType": "INT",
+            ])) as? WebSocketResponse
+            XCTAssertEqual(result?.success, false)
+            XCTAssertEqual(result?.error, expected)
+        }
+        let read = try await handler.handle(request("get_preference", fields: ["key": "kvDuo"]))
+            as? StorageEntryResponse
+        XCTAssertEqual(read?.success, false)
+        XCTAssertEqual(read?.error, expected)
+        XCTAssertEqual(runner.calls, 0)
+    }
+
+    func testForegroundRefusalRemainsUnmarked() async throws {
         let client = RecordingPreferenceClient()
         let runner = RunnerStorageTrap()
-        let handler = handler(sdkBundle: nil, client: client, runner: runner)
+        let handler = handler(foreground: "com.other.app", client: client, runner: runner)
         let result = try await handler.handle(request("set_preference", fields: [
-            "fileName": "duoStore", "key": "kvDuo", "value": "42", "valueType": "INT",
+            "key": "kvDuo", "value": "42", "valueType": "INT",
         ])) as? WebSocketResponse
         XCTAssertEqual(result?.success, false)
-        XCTAssertTrue(result?.error?.contains("embed and initialize the AutoMobile SDK") == true)
+        XCTAssertEqual(
+            result?.error,
+            "Command execution failed: iOS key-value storage requires com.example.app to be the foreground app"
+        )
         let calls = await client.recorded()
         XCTAssertEqual(calls, [])
         XCTAssertEqual(runner.calls, 0)

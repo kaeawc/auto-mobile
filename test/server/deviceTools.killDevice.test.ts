@@ -2579,7 +2579,7 @@ describe("killDevice handler", () => {
       const activePool = DaemonState.getInstance().getDevicePool();
       await activePool.releaseDevice(image.deviceId!);
       allocationOutcome = await activePool
-        .assignMultipleDevices(["racing-session"], 1, "android")
+        .assignMultipleDevices(["racing-session"], 0, "android")
         .then(
           () => "assigned" as const,
           () => "blocked" as const,
@@ -2734,7 +2734,7 @@ describe("killDevice handler", () => {
       videoRecorderService: {
         stopRecording: async () => {
           allocationOutcome = await pool
-            .assignMultipleDevices(["racing-session"], 1, "android")
+            .assignMultipleDevices(["racing-session"], 0, "android")
             .then(
               () => "assigned" as const,
               () => "blocked" as const,
@@ -3982,7 +3982,7 @@ describe("killDevice handler", () => {
       expect(pool.getDevice(device.deviceId)).toBe(incarnation);
       expect(await pool.isShutdownReserved(device.deviceId)).toBe(true);
       expect(pool.getAvailableDeviceCount()).toBe(0);
-      await expect(pool.assignMultipleDevices(["new-owner"], 1_000, "android")).rejects.toThrow(
+      await expect(pool.assignMultipleDevices(["new-owner"], 0, "android")).rejects.toThrow(
         "Timed out allocating devices",
       );
       expect(sessionManager.getSessionForDevice(device.deviceId)).toBeNull();

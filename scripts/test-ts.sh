@@ -72,6 +72,9 @@ validate_positive_integer() {
 }
 
 validate_positive_integer "AUTOMOBILE_UNIT_TEST_WORKERS" "$unit_workers"
+if [[ "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES+x}" == x ]]; then
+  validate_positive_integer "AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES"
+fi
 validate_positive_integer "AUTOMOBILE_TEST_TIMEOUT_MS" "$per_test_timeout_ms"
 
 run_test_command() {
@@ -322,6 +325,11 @@ run_unit_shards() {
   local file index shard shard_number worker_count rc pid shard_status timing_log report_name
   local test_files=()
   local pids=()
+  local chunk_deadline=""
+  if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" && -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
+    validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+    chunk_deadline=$(($(date +%s) + AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS))
+  fi
 
   rm -rf "$shard_root"
   mkdir -p "$shard_root"
@@ -401,15 +409,28 @@ run_unit_shards() {
           --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
         )
       fi
-      if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
+      local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
+      if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+        # One child owns the sequential loop: the watchdog bounds ALL chunks,
+        # including startup/report work, and still signals their process group.
+        shard_args=(bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
+          "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
+        if [[ -n "$chunk_deadline" ]]; then
+          shard_budget=$((chunk_deadline - $(date +%s)))
+          if [[ "$shard_budget" -le 0 ]]; then
+            exit 124
+          fi
+        fi
+      fi
+      if [[ -n "$shard_budget" ]]; then
         validate_positive_integer \
           "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
-          "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+          "$shard_budget"
         # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
         source "$ROOT/scripts/ios/run_with_timeout.sh"
         shard_status=0
         set +e
-        run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
+        run_with_timeout "$shard_budget" \
           ${shard_args[@]+"${shard_args[@]}"} \
           ${shard_files[@]+"${shard_files[@]}"}
         shard_status=$?

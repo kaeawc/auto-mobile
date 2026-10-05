@@ -16,6 +16,7 @@ import {
   VideoRecorderService,
   parseVideoRecordingConfig,
   type ActiveVideoRecording,
+  type StartVideoRecordingOptions,
   type VideoCaptureBackend,
 } from "../features/video";
 import { serverConfig } from "../utils/ServerConfig";
@@ -1131,6 +1132,35 @@ async function ensureRecordingDeviceAvailable(
   }
 }
 
+function videoRecordingStartOptions(
+  request: StartVideoRecordingRequest,
+  configInput: VideoRecordingConfigInput,
+  maxDurationSeconds: number,
+  abortSignal: AbortSignal,
+  recordingDisplay: AndroidRecordingDisplay | undefined,
+): StartVideoRecordingOptions {
+  return {
+    outputName: request.outputName,
+    config: configInput,
+    device: request.device,
+    maxDurationSeconds,
+    abortSignal,
+    display: request.display,
+    recordingPanel: recordingDisplay?.panel,
+    physicalDisplayId: recordingDisplay?.physicalId,
+  };
+}
+
+function applyRecordingDisplayWarning(
+  active: ActiveVideoRecording,
+  recordingDisplay: AndroidRecordingDisplay | undefined,
+): void {
+  active.warning = recordingDisplay?.warning ?? active.warning;
+  if (active.warning?.includes("rejected --display-id")) {
+    active.recordedPanel = undefined;
+  }
+}
+
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
@@ -1154,21 +1184,17 @@ export async function startVideoRecording(
       normalizeHighlightTiming(highlight);
     }
 
-    active = await videoRecorderService.startRecording({
-      outputName: request.outputName,
-      config: configInput,
-      device: request.device,
-      maxDurationSeconds,
-      abortSignal: start.abortSignal,
-      display: request.display,
-      recordingPanel: recordingDisplay?.panel,
-      physicalDisplayId: recordingDisplay?.physicalId,
-    });
+    active = await videoRecorderService.startRecording(
+      videoRecordingStartOptions(
+        request,
+        configInput,
+        maxDurationSeconds,
+        start.abortSignal,
+        recordingDisplay,
+      ),
+    );
     start.abortSignal.throwIfAborted();
-    active.warning = recordingDisplay?.warning ?? active.warning;
-    if (active.warning?.includes("rejected --display-id")) {
-      active.recordedPanel = undefined;
-    }
+    applyRecordingDisplayWarning(active, recordingDisplay);
 
     await recordingRepository.insertRecording({
       recordingId: active.recordingId,

@@ -6,6 +6,7 @@ import {
   DeviceTeardownDeadlineError,
   type DeviceTeardownPhase,
   type DeviceTeardownService,
+  type DeviceTeardownWorkflow,
 } from "../devices/deviceTeardownService";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
@@ -74,6 +75,147 @@ function teardownDeadlineFailure(
       : `teardown ${phase} did not complete`,
     timeoutMs,
   );
+}
+
+type TeardownState = {
+  context: TeardownContext;
+  target: TeardownResolvedTarget;
+  androidManager?: AndroidCtrlProxyManager;
+  earlyResponse?: TeardownToolResponse;
+  lastVerificationFailure?: TeardownToolResponse;
+};
+
+function createDeleteDeviceWorkflow(
+  args: TeardownDeviceArgs,
+  deps: DeviceToolsDependencies,
+  deadlineMs: number,
+  timeoutMs: number,
+): DeviceTeardownWorkflow<TeardownState, "accepted" | "not_required", TeardownToolResponse> {
+  return {
+    resolve: async (requestAbortSignal, lifecycleLease) => {
+      const context: TeardownContext = {
+        args,
+        dependencies: deps,
+        deviceManager: deps.deviceManagerFactory(),
+        requestAbortSignal,
+        deadlineDevice: teardownDeadlineDevice(args),
+        deadlineMs,
+        timeoutMs,
+        cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
+        lifecycleLease,
+        mode: args.force === true ? "serial-only" : "named",
+        initialScan: { serials: new Set(), pooledEntries: [] },
+      };
+      const resolution = await resolveTeardownTarget(context);
+      if ("response" in resolution) {
+        return { response: resolution.response };
+      }
+      const runtime = resolution.target.wasBooted ? resolution.target.bootedDevice : undefined;
+      const androidManager =
+        runtime?.platform === "android"
+          ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
+          : undefined;
+      return { target: { context, target: resolution.target, androidManager } };
+    },
+    stop: async (state, requestAbortSignal, retainLeaseUntil) => {
+      const { context, target } = state;
+      let stop: "accepted" | "not_required" = "not_required";
+      if (target.wasBooted) {
+        const stopped = await shutdownDevice(
+          {
+            device: target.bootedDevice,
+            timer: deps.timer,
+            deadlineMs: context.deadlineMs,
+            requestAbortSignal,
+            stopPerformanceMonitoring: deps.stopPerformanceMonitoring,
+          },
+          deps,
+          "deleteDevice",
+          {
+            strictDeadline: true,
+            timeoutMs: context.timeoutMs,
+            retainLifecycleUntil: retainLeaseUntil,
+            pooledAvdIdentity: {
+              capture: target.pooledAvdCapture,
+              force: args.force ?? false,
+            },
+          },
+        );
+        stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
+      } else {
+        await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
+        await retireStoppedTeardownOwnership(context, target);
+      }
+
+      const restarted = await checkForRestartedTeardownTarget(context, target, "stop");
+      if (restarted) {
+        state.earlyResponse = restarted;
+      }
+      return stop;
+    },
+    destroy: async (state, _requestAbortSignal, retainLeaseUntil, markDestructionStarted) => {
+      if (state.earlyResponse) {
+        return;
+      }
+      const { context, target } = state;
+      await destroyTeardownTarget(context, target, retainLeaseUntil, markDestructionStarted, () => {
+        void finalizeTeardownEviction(context, target, state.androidManager);
+      });
+      await finalizeTeardownEviction(context, target, state.androidManager);
+    },
+    verify: async (state, stop) => {
+      if (state.earlyResponse) {
+        return state.earlyResponse;
+      }
+      return await verifyTeardownAbsence(state.context, state.target, stop, (failure) => {
+        state.lastVerificationFailure = failure;
+      });
+    },
+    conflict: () =>
+      createTeardownFailureResponse(
+        args,
+        "precondition",
+        "operation_id_conflict",
+        "The operation ID has already been used with different teardown arguments.",
+      ),
+    failure: (phase: DeviceTeardownPhase, error, state) => {
+      if (error instanceof DeviceTeardownDeadlineError) {
+        const mapped = teardownDeadlineFailure(phase, state, args, timeoutMs);
+        if (!(mapped instanceof Error)) {
+          return mapped;
+        }
+        error = mapped;
+      }
+      const effectiveError =
+        phase === "precondition" &&
+        error instanceof Error &&
+        error.message.startsWith("Timed out waiting to teardown")
+          ? shutdownTimeoutError(
+              teardownDeadlineDevice(args),
+              "waiting for stable device lifecycle reservation",
+              timeoutMs,
+            )
+          : error;
+      logger.warn(
+        `[DeviceTools] teardown operation ${args.operationId} failed during ${phase} ` +
+          `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
+        effectiveError,
+      );
+      return createTeardownFailureResponse(
+        args,
+        phase,
+        // The last-moment identity check refuses a target this daemon
+        // cannot tie to the runtime; that is an identity outcome, not a
+        // generic operation failure (#6863 review).
+        effectiveError instanceof PooledAvdIdentityError
+          ? "target_identity_unresolved"
+          : "operation_failed",
+        String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
+        state?.target.device,
+      );
+    },
+    isFailure: isTeardownFailure,
+  };
 }
 
 export function createLifecycleHandlers() {
@@ -158,13 +300,6 @@ export function createLifecycleHandlers() {
   ): Promise<TeardownToolResponse> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS;
     const deadlineMs = deps.timer.now() + timeoutMs;
-    type TeardownState = {
-      context: TeardownContext;
-      target: TeardownResolvedTarget;
-      androidManager?: AndroidCtrlProxyManager;
-      earlyResponse?: TeardownToolResponse;
-      lastVerificationFailure?: TeardownToolResponse;
-    };
     try {
       return await teardownService.teardown<
         TeardownState,
@@ -180,139 +315,7 @@ export function createLifecycleHandlers() {
           cancellationPolicy: args.cancellationPolicy ? "cancel-on-caller-abort" : undefined,
           lifecycleLease,
         },
-        {
-          resolve: async (requestAbortSignal, lifecycleLease) => {
-            const context: TeardownContext = {
-              args,
-              dependencies: deps,
-              deviceManager: deps.deviceManagerFactory(),
-              requestAbortSignal,
-              deadlineDevice: teardownDeadlineDevice(args),
-              deadlineMs,
-              timeoutMs,
-              cancelOnRequestAbort: args.cancellationPolicy === "cancel-on-request-abort",
-              lifecycleLease,
-              mode: args.force === true ? "serial-only" : "named",
-              initialScan: { serials: new Set(), pooledEntries: [] },
-            };
-            const resolution = await resolveTeardownTarget(context);
-            if ("response" in resolution) {
-              return { response: resolution.response };
-            }
-            const runtime = resolution.target.wasBooted
-              ? resolution.target.bootedDevice
-              : undefined;
-            const androidManager =
-              runtime?.platform === "android"
-                ? AndroidCtrlProxyManager.getExistingInstance(runtime.deviceId)
-                : undefined;
-            return { target: { context, target: resolution.target, androidManager } };
-          },
-          stop: async (state, requestAbortSignal, retainLeaseUntil) => {
-            const { context, target } = state;
-            let stop: "accepted" | "not_required" = "not_required";
-            if (target.wasBooted) {
-              const stopped = await shutdownDevice(
-                {
-                  device: target.bootedDevice,
-                  timer: deps.timer,
-                  deadlineMs: context.deadlineMs,
-                  requestAbortSignal,
-                  stopPerformanceMonitoring: deps.stopPerformanceMonitoring,
-                },
-                deps,
-                "deleteDevice",
-                {
-                  strictDeadline: true,
-                  timeoutMs: context.timeoutMs,
-                  retainLifecycleUntil: retainLeaseUntil,
-                  pooledAvdIdentity: {
-                    capture: target.pooledAvdCapture,
-                    force: args.force ?? false,
-                  },
-                },
-              );
-              stop = stopped.alreadyStoppedMessage ? "not_required" : "accepted";
-            } else {
-              await stopSegmentedVideoRecordingsBeforeDestroy(context, target);
-              await retireStoppedTeardownOwnership(context, target);
-            }
-
-            const restarted = await checkForRestartedTeardownTarget(context, target, "stop");
-            if (restarted) {
-              state.earlyResponse = restarted;
-            }
-            return stop;
-          },
-          destroy: async (state, _requestAbortSignal, retainLeaseUntil, markDestructionStarted) => {
-            if (state.earlyResponse) {
-              return;
-            }
-            const { context, target } = state;
-            await destroyTeardownTarget(
-              context,
-              target,
-              retainLeaseUntil,
-              markDestructionStarted,
-              () => {
-                void finalizeTeardownEviction(context, target, state.androidManager);
-              },
-            );
-            await finalizeTeardownEviction(context, target, state.androidManager);
-          },
-          verify: async (state, stop) => {
-            if (state.earlyResponse) {
-              return state.earlyResponse;
-            }
-            return await verifyTeardownAbsence(state.context, state.target, stop, (failure) => {
-              state.lastVerificationFailure = failure;
-            });
-          },
-          conflict: () =>
-            createTeardownFailureResponse(
-              args,
-              "precondition",
-              "operation_id_conflict",
-              "The operation ID has already been used with different teardown arguments.",
-            ),
-          failure: (phase: DeviceTeardownPhase, error, state) => {
-            if (error instanceof DeviceTeardownDeadlineError) {
-              const mapped = teardownDeadlineFailure(phase, state, args, timeoutMs);
-              if (!(mapped instanceof Error)) {
-                return mapped;
-              }
-              error = mapped;
-            }
-            const effectiveError =
-              phase === "precondition" &&
-              error instanceof Error &&
-              error.message.startsWith("Timed out waiting to teardown")
-                ? shutdownTimeoutError(
-                    teardownDeadlineDevice(args),
-                    "waiting for stable device lifecycle reservation",
-                    timeoutMs,
-                  )
-                : error;
-            logger.warn(
-              `[DeviceTools] teardown operation ${args.operationId} failed during ${phase} ` +
-                `for ${args.target.platform}:${args.target.stableId}: ${effectiveError}`,
-              effectiveError,
-            );
-            return createTeardownFailureResponse(
-              args,
-              phase,
-              // The last-moment identity check refuses a target this daemon
-              // cannot tie to the runtime; that is an identity outcome, not a
-              // generic operation failure (#6863 review).
-              effectiveError instanceof PooledAvdIdentityError
-                ? "target_identity_unresolved"
-                : "operation_failed",
-              String(effectiveError instanceof Error ? effectiveError.message : effectiveError),
-              state?.target.device,
-            );
-          },
-          isFailure: isTeardownFailure,
-        },
+        createDeleteDeviceWorkflow(args, deps, deadlineMs, timeoutMs),
       );
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error);

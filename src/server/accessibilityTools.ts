@@ -37,6 +37,91 @@ interface AccessibilityArgs {
   voiceover?: boolean;
 }
 
+async function toggleTalkBackAccessibility(device: BootedDevice, requestedEnabled: boolean) {
+  try {
+    const toggle = new TalkBackToggle(device);
+    const talkback = await toggle.toggle(requestedEnabled);
+    if (!talkback.supported) {
+      throw new ActionableError(
+        talkback.reason ?? "TalkBack toggle is not supported on this device",
+      );
+    }
+    const enabled = talkback.currentState ?? false;
+    const service = enabled ? ("talkback" as const) : ("unknown" as const);
+    return createStructuredToolResponse({
+      enabled,
+      service,
+      ...(!talkback.applied && talkback.reason !== undefined ? { reason: talkback.reason } : {}),
+      ...(talkback.warning !== undefined ? { warning: talkback.warning } : {}),
+      ...(talkback.blockingPrompt !== undefined ? { blockingPrompt: talkback.blockingPrompt } : {}),
+    });
+  } catch (error) {
+    throw error instanceof ActionableError
+      ? error
+      : toActionableError(error, `Failed to toggle accessibility services`);
+  }
+}
+
+async function handleAndroidAccessibility(device: BootedDevice, args: AccessibilityArgs) {
+  if (args.voiceover !== undefined) {
+    throw new ActionableError("VoiceOver is not supported on Android devices");
+  }
+  if (args.talkback !== undefined) {
+    return await toggleTalkBackAccessibility(device, args.talkback);
+  }
+
+  // Detect current TalkBack state on Android
+  accessibilityDetector.invalidateCache(device.deviceId);
+  const adb = defaultAdbClientFactory.create(device);
+  const featureFlags = FeatureFlagService.getInstance();
+  const enabled = await accessibilityDetector.isAccessibilityEnabled(
+    device.deviceId,
+    adb,
+    featureFlags,
+  );
+  const service = await accessibilityDetector.detectMethod(device.deviceId, adb, featureFlags);
+  logger.debug(`[accessibility tool] TalkBack state: enabled=${enabled}, service=${service}`);
+  return createStructuredToolResponse({ enabled, service });
+}
+
+async function handleIosAccessibility(device: BootedDevice, args: AccessibilityArgs) {
+  if (args.talkback !== undefined) {
+    throw new ActionableError("TalkBack is not supported on iOS devices");
+  }
+  if (args.voiceover !== undefined) {
+    const toggle = new VoiceOverToggle(device);
+    const voiceover = await toggle.toggle(args.voiceover);
+    if (!voiceover.supported) {
+      throw new ActionableError(
+        voiceover.reason ?? "VoiceOver toggle is not supported on this device",
+      );
+    }
+    if (!voiceover.applied) {
+      // Unconfirmed toggle (e.g. a CtrlProxy outage during confirmation
+      // polling) must surface as a failure, never as a normal enabled:false
+      // response — otherwise the client can't distinguish "confirmed off"
+      // from "we don't actually know" (#6496).
+      throw new ActionableError(voiceover.reason ?? "VoiceOver toggle could not be confirmed");
+    }
+    const enabled = voiceover.currentState ?? false;
+    const service = enabled ? ("voiceover" as const) : ("unknown" as const);
+    return createStructuredToolResponse({ enabled, service });
+  }
+
+  // Detect current VoiceOver state on iOS
+  iosVoiceOverDetector.invalidateCache(device.deviceId);
+  const client = IOSCtrlProxyClient.getInstance(device);
+  const featureFlags = FeatureFlagService.getInstance();
+  const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
+    device.deviceId,
+    client,
+    featureFlags,
+  );
+  const service = enabled ? ("voiceover" as const) : ("unknown" as const);
+  logger.debug(`[accessibility tool] VoiceOver state: enabled=${enabled}`);
+  return createStructuredToolResponse({ enabled, service });
+}
+
 export function registerAccessibilityTools() {
   const accessibilityHandler = async (
     device: BootedDevice,
@@ -44,90 +129,11 @@ export function registerAccessibilityTools() {
     _progress?: ProgressCallback,
   ) => {
     if (device.platform === "android") {
-      if (args.voiceover !== undefined) {
-        throw new ActionableError("VoiceOver is not supported on Android devices");
-      }
-      if (args.talkback !== undefined) {
-        try {
-          const toggle = new TalkBackToggle(device);
-          const talkback = await toggle.toggle(args.talkback);
-          if (!talkback.supported) {
-            throw new ActionableError(
-              talkback.reason ?? "TalkBack toggle is not supported on this device",
-            );
-          }
-          const enabled = talkback.currentState ?? false;
-          const service = enabled ? ("talkback" as const) : ("unknown" as const);
-          return createStructuredToolResponse({
-            enabled,
-            service,
-            ...(!talkback.applied && talkback.reason !== undefined
-              ? { reason: talkback.reason }
-              : {}),
-            ...(talkback.warning !== undefined ? { warning: talkback.warning } : {}),
-            ...(talkback.blockingPrompt !== undefined
-              ? { blockingPrompt: talkback.blockingPrompt }
-              : {}),
-          });
-        } catch (error) {
-          throw error instanceof ActionableError
-            ? error
-            : toActionableError(error, `Failed to toggle accessibility services`);
-        }
-      }
-
-      // Detect current TalkBack state on Android
-      accessibilityDetector.invalidateCache(device.deviceId);
-      const adb = defaultAdbClientFactory.create(device);
-      const featureFlags = FeatureFlagService.getInstance();
-      const enabled = await accessibilityDetector.isAccessibilityEnabled(
-        device.deviceId,
-        adb,
-        featureFlags,
-      );
-      const service = await accessibilityDetector.detectMethod(device.deviceId, adb, featureFlags);
-      logger.debug(`[accessibility tool] TalkBack state: enabled=${enabled}, service=${service}`);
-      return createStructuredToolResponse({ enabled, service });
+      return await handleAndroidAccessibility(device, args);
     }
-
     if (device.platform === "ios") {
-      if (args.talkback !== undefined) {
-        throw new ActionableError("TalkBack is not supported on iOS devices");
-      }
-      if (args.voiceover !== undefined) {
-        const toggle = new VoiceOverToggle(device);
-        const voiceover = await toggle.toggle(args.voiceover);
-        if (!voiceover.supported) {
-          throw new ActionableError(
-            voiceover.reason ?? "VoiceOver toggle is not supported on this device",
-          );
-        }
-        if (!voiceover.applied) {
-          // Unconfirmed toggle (e.g. a CtrlProxy outage during confirmation
-          // polling) must surface as a failure, never as a normal enabled:false
-          // response — otherwise the client can't distinguish "confirmed off"
-          // from "we don't actually know" (#6496).
-          throw new ActionableError(voiceover.reason ?? "VoiceOver toggle could not be confirmed");
-        }
-        const enabled = voiceover.currentState ?? false;
-        const service = enabled ? ("voiceover" as const) : ("unknown" as const);
-        return createStructuredToolResponse({ enabled, service });
-      }
-
-      // Detect current VoiceOver state on iOS
-      iosVoiceOverDetector.invalidateCache(device.deviceId);
-      const client = IOSCtrlProxyClient.getInstance(device);
-      const featureFlags = FeatureFlagService.getInstance();
-      const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
-        device.deviceId,
-        client,
-        featureFlags,
-      );
-      const service = enabled ? ("voiceover" as const) : ("unknown" as const);
-      logger.debug(`[accessibility tool] VoiceOver state: enabled=${enabled}`);
-      return createStructuredToolResponse({ enabled, service });
+      return await handleIosAccessibility(device, args);
     }
-
     throw new ActionableError(`Unsupported platform: ${device.platform}`);
   };
 

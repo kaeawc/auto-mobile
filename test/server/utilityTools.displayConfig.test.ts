@@ -1,8 +1,13 @@
+import { DisplayConfig } from "../../src/features/utility/DisplayConfig";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import Ajv2020 from "ajv/dist/2020";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { changeLocalizationSchema, displayConfigSchema } from "../../src/server/utilityTools";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  changeLocalizationSchema,
+  displayConfigSchema,
+  registerUtilityTools,
+} from "../../src/server/utilityTools";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -91,5 +96,53 @@ describe("displayConfigSchema", () => {
       expect(validate({ reset: true })).toBe(true);
       expect(validate({ theme: "dark" })).toBe(true);
     });
+  });
+});
+
+describe("displayConfig handler", () => {
+  const device = { deviceId: "fake-device", platform: "android" as const, name: "Fake" };
+  const result = {
+    success: true,
+    deviceId: device.deviceId,
+    platform: device.platform,
+    supported: { fontScale: true, density: true, theme: true },
+    current: { fontScale: 1, density: 320, theme: "light" as const },
+  };
+  test.each([{}, { reset: false }])("reads configuration without a set field: %j", async (args) => {
+    const get = spyOn(DisplayConfig.prototype, "getConfig").mockResolvedValue(result);
+    const set = spyOn(DisplayConfig.prototype, "setConfig").mockResolvedValue(result);
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(
+        device,
+        args,
+      );
+      expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
+      expect(get).toHaveBeenCalledTimes(1);
+      expect(set).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+  test.each([
+    { reset: true },
+    { reset: false, fontScale: 1.2, density: 480, theme: "dark" as const },
+  ])("projects set fields: %j", async (args) => {
+    const get = spyOn(DisplayConfig.prototype, "getConfig").mockResolvedValue(result);
+    const set = spyOn(DisplayConfig.prototype, "setConfig").mockResolvedValue(result);
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(
+        device,
+        args,
+      );
+      expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
+      expect(set).toHaveBeenCalledWith(args);
+      expect(get).not.toHaveBeenCalled();
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
   });
 });

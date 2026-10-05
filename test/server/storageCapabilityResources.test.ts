@@ -66,7 +66,7 @@ describe("storageCapabilityResources", () => {
   const androidPhysical: BootedDevice = { ...androidEmulator, deviceId: "1A2B3C4D" };
   const captures = [
     ["dumpsys-package-installed", "supported", true],
-    ["dumpsys-package-system-installed", "unavailable", false],
+    ["dumpsys-package-system-installed", "partial", false],
     ["dumpsys-package-not-installed", "partial", undefined],
     ["adb-failure", "partial", undefined],
   ] as const;
@@ -114,6 +114,42 @@ describe("storageCapabilityResources", () => {
     expect(adb.getExecutedCommands()).toEqual(["shell dumpsys package 'com.example.app'"]);
   });
 
+  test("starts both capability probes before either resolves", async () => {
+    const profileStarted = Promise.withResolvers<void>();
+    const profile = Promise.withResolvers<{ userId: number; source: "currentUser" }>();
+    const build = Promise.withResolvers<boolean | undefined>();
+    const calls: string[] = [];
+    setDevices([androidPhysical], {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      createUserResolver: () => ({
+        resolve: () => {
+          calls.push("profile started");
+          profileStarted.resolve();
+          return profile.promise;
+        },
+      }),
+      probeDebuggableBuild: () => {
+        calls.push("build started");
+        return build.promise;
+      },
+      createKeystoreDiscovery: () => new FakeKeystoreDiscovery(),
+    });
+    const pending = readResource(
+      `automobile:devices/${androidPhysical.deviceId}/storage/capabilities?appId=com.example.app`,
+    );
+    await profileStarted.promise;
+    try {
+      expect(calls).toEqual(["profile started", "build started"]);
+    } finally {
+      profile.resolve({ userId: 0, source: "currentUser" });
+      build.resolve(true);
+      const content = await pending;
+      const body = JSON.parse(content.text ?? "{}");
+      expect(body.context.activeUserProfile).toBe(true);
+      expect(body.context.debuggableBuild).toBe(true);
+    }
+  });
+
   test("debuggable probe is injected with the device executor and each appId", async () => {
     const adb = new FakeAdbExecutor();
     const calls: string[] = [];
@@ -129,7 +165,7 @@ describe("storageCapabilityResources", () => {
     });
     for (const [appId, expected] of [
       ["com.example.debug", "supported"],
-      ["com.example.release", "unavailable"],
+      ["com.example.release", "partial"],
     ] as const) {
       const content = await readResource(
         `automobile:devices/${androidPhysical.deviceId}/storage/capabilities?appId=${appId}`,

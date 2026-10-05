@@ -217,8 +217,10 @@ export async function getStorageCapabilitiesResource(
       };
     }
 
-    const activeUserProfile = await resolveActiveUserProfile(device, dependencies);
-    const debuggableBuild = await resolveDebuggableBuild(device, appId, dependencies);
+    const [activeUserProfile, debuggableBuild] = await Promise.all([
+      resolveActiveUserProfile(device, dependencies),
+      resolveDebuggableBuild(device, appId, dependencies),
+    ]);
     const context = resolveStorageCapabilityContext(
       device,
       appId,

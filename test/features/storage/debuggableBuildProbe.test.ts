@@ -18,6 +18,9 @@ const system = fixture("dumpsys-package-system-installed");
 test("captured pkgFlags distinguishes debuggable and system apps", () => {
   expect(parseDebuggableBuild(debuggable)).toBe(true);
   expect(parseDebuggableBuild(system)).toBe(false);
+  for (const name of ["disabled-user", "hidden", "suspended"]) {
+    expect(parseDebuggableBuild(fixture(`dumpsys-package-${name}`))).toBe(true);
+  }
 });
 test("missing package, empty output and permission flags remain unknown", () => {
   expect(parseDebuggableBuild(fixture("dumpsys-package-not-installed"))).toBeUndefined();
@@ -61,4 +64,11 @@ test("app scope is one literal shell argument even with metacharacters", async (
   expect(adb.getExecutedCommands()).toEqual([
     "shell dumpsys package 'com.example.app'\\''; echo injected'",
   ]);
+});
+
+test.each([
+  "dumpsys-package-uninstalled-user0-keepdata",
+  "dumpsys-package-system-uninstalled-user0",
+])("captured %s is unknown when uninstalled for user 0", (name) => {
+  expect(parseDebuggableBuild(fixture(name))).toBeUndefined();
 });

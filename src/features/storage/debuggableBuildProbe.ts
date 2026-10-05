@@ -4,10 +4,13 @@ import { shellQuote } from "../../utils/shellQuote";
 
 /** Only the package's pkgFlags list establishes debuggability, not permission flags. */
 export function parseDebuggableBuild(output: string): boolean | undefined {
-  const flagsLine = output
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.startsWith("pkgFlags=["));
+  const lines = output.split("\n").map((line) => line.trim());
+  // The probe has no alternate user scope; retained data is not an installed user-0 app.
+  const userState = lines.find((line) => line.startsWith("User 0:"));
+  if (userState?.slice("User 0:".length).trim().split(/\s+/).includes("installed=false")) {
+    return undefined;
+  }
+  const flagsLine = lines.find((line) => line.startsWith("pkgFlags=["));
   if (!flagsLine || !flagsLine.endsWith("]")) {
     return undefined;
   }

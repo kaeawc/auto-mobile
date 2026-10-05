@@ -387,6 +387,55 @@ describe("InputText", () => {
     ]);
   });
 
+  test("eventAll stops at a failed Unicode run without sending later keys or dismissing", async () => {
+    const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const calls: string[] = [];
+    const inputText = new InputText(
+      androidDevice,
+      factory,
+      () => ({
+        close: async () => {
+          calls.push("close");
+          return { success: true, open: false };
+        },
+      }),
+      timer,
+    );
+    const execute = spyOn(factory.getFakeClient(), "executeCommand");
+    stubAndroidSetText(async (text) => {
+      calls.push(`set:${text}`);
+      return {
+        success: text === "",
+        error: text === "" ? undefined : "field disappeared",
+        totalTimeMs: 1,
+      };
+    });
+    try {
+      const result = await testInputText(inputText).executeAndroidTextInput(
+        "a你好b",
+        undefined,
+        true,
+        "eventAll",
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("field disappeared");
+      expect(result.method).toBe("eventAll");
+      expect(calls).toEqual(["set:", "set:a你好"]);
+      expect(execute.mock.calls.map(([command]) => command)).toEqual([
+        "shell getprop ro.build.version.sdk",
+        "shell getprop ro.build.version.sdk",
+        "shell input keyevent KEYCODE_A",
+        "shell getprop ro.build.version.sdk",
+        "shell getprop ro.build.version.sdk",
+        "shell getprop ro.build.version.sdk",
+      ]);
+    } finally {
+      execute.mockRestore();
+    }
+  });
+
   test("eventAll fails before key events when initial a11y clear fails", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);

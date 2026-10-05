@@ -7,7 +7,11 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
-import { DeviceState, emulatorConsoleReportsFailure } from "../utility/DeviceState";
+import {
+  DeviceState,
+  emulatorConsoleReportsFailure,
+  type BiometricEnrollmentState,
+} from "../utility/DeviceState";
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";
@@ -206,22 +210,38 @@ export class BiometricAuth extends BaseVisualChange {
       const enrollmentState = await enrollment.setBiometricEnrollmentState(
         options.action === "enroll" ? "enrolled" : "not_enrolled",
       );
-      return {
-        success:
-          enrollmentState.supported && !enrollmentState.error && enrollmentState.verified !== false,
-        action: options.action,
-        modality,
-        fingerprintId: options.fingerprintId,
-        errorCode: options.errorCode,
-        supported: enrollmentState.supported,
-        ...(enrollmentState.error ? { error: enrollmentState.error } : {}),
-        ...(enrollmentState.error
-          ? {}
-          : { message: `Biometric enrollment set to ${enrollmentState.enrollment}.` }),
-      };
+      return this.iosBiometricEnrollmentResult(options, modality, enrollmentState);
     }
 
-    const wantMatch = options.action === "match";
+    const targets = this.getIosBiometricTargets(options.action, modality);
+    return this.postIosBiometricResult(options, modality, simctl, enrollment, targets, udid);
+  }
+
+  private iosBiometricEnrollmentResult(
+    options: BiometricAuthOptions,
+    modality: NonNullable<BiometricAuthOptions["modality"]>,
+    enrollmentState: BiometricEnrollmentState,
+  ): BiometricAuthResult {
+    return {
+      success:
+        enrollmentState.supported && !enrollmentState.error && enrollmentState.verified !== false,
+      action: options.action,
+      modality,
+      fingerprintId: options.fingerprintId,
+      errorCode: options.errorCode,
+      supported: enrollmentState.supported,
+      ...(enrollmentState.error ? { error: enrollmentState.error } : {}),
+      ...(enrollmentState.error
+        ? {}
+        : { message: `Biometric enrollment set to ${enrollmentState.enrollment}.` }),
+    };
+  }
+
+  private getIosBiometricTargets(
+    action: BiometricAuthOptions["action"],
+    modality: NonNullable<BiometricAuthOptions["modality"]>,
+  ): string[] {
+    const wantMatch = action === "match";
     const keys = BiometricAuth.IOS_KEYS;
 
     const targets: string[] = [];
@@ -234,6 +254,17 @@ export class BiometricAuth extends BaseVisualChange {
       targets.push(wantMatch ? keys.pearl.match : keys.pearl.nomatch);
     }
 
+    return targets;
+  }
+
+  private async postIosBiometricResult(
+    options: BiometricAuthOptions,
+    modality: NonNullable<BiometricAuthOptions["modality"]>,
+    simctl: BiometricSimctl,
+    enrollment: DeviceState,
+    targets: string[],
+    udid: string,
+  ): Promise<BiometricAuthResult> {
     try {
       const enrollmentState = await enrollment.getBiometricEnrollmentState();
       if (enrollmentState.error) {

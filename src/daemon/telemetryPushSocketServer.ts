@@ -70,6 +70,22 @@ export function boundBackfillEventText(event: TelemetryEvent): TelemetryEvent {
     return event;
   }
   const data = event.data as Record<string, unknown>;
+  let bounded = boundBackfillTextFields(data, textFields);
+  for (const { field, isJsonString } of structuredFields ?? []) {
+    const value = data[field];
+    const capped = boundStructuredField(value, isJsonString);
+    if (capped !== value) {
+      bounded = bounded ?? { ...data };
+      bounded[field] = capped;
+    }
+  }
+  return bounded ? { ...event, data: bounded as TelemetryEvent["data"] } : event;
+}
+
+function boundBackfillTextFields(
+  data: Record<string, unknown>,
+  textFields: readonly string[] | undefined,
+): Record<string, unknown> | null {
   let bounded: Record<string, unknown> | null = null;
   for (const field of textFields ?? []) {
     const value = data[field];
@@ -82,15 +98,7 @@ export function boundBackfillEventText(event: TelemetryEvent): TelemetryEvent {
       bounded[field] = capped;
     }
   }
-  for (const { field, isJsonString } of structuredFields ?? []) {
-    const value = data[field];
-    const capped = boundStructuredField(value, isJsonString);
-    if (capped !== value) {
-      bounded = bounded ?? { ...data };
-      bounded[field] = capped;
-    }
-  }
-  return bounded ? { ...event, data: bounded as TelemetryEvent["data"] } : event;
+  return bounded;
 }
 
 interface TelemetryFilter {

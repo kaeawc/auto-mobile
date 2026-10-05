@@ -113,6 +113,21 @@ export interface AndroidRebootCoordinatorPoolPort {
   ): boolean;
 }
 
+interface AndroidRelaunchContext {
+  device: PooledDevice;
+  avdName: string;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+  preservedAutolockSessionId: string | undefined;
+  recoveryImage: DeviceInfo;
+  target: DeviceInfo;
+  recoveryDeviceIds: Set<string>;
+  incidentId: string | undefined;
+  signal: AbortSignal;
+  retainLeaseUntil: (settlement: Promise<unknown>) => void;
+  nextAttempt: () => number;
+}
+
 export class AndroidRebootCoordinator {
   constructor(
     private readonly pool: AndroidRebootCoordinatorPoolPort,
@@ -201,121 +216,21 @@ export class AndroidRebootCoordinator {
         return false;
       }
       await this.pool.removeDevice(device.id, true, device);
-      let intentionallyStopped = false;
-      let intentionalShutdownCleanupError: unknown;
-      const recovered = await this.androidDeviceReboot.run(target, async () => {
-        if (this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
-          intentionallyStopped = true;
-          // Cancelled before the emulator was touched: don't spend the
-          // crash-loop budget on it (issue #7545).
-          return "cancelled";
-        }
-        const attempt = ++recoveryAttempt;
-        let childProcess: ChildProcess | null = null;
-        let ready: BootedDevice | undefined;
-        let readinessCompleted = false;
-        let handoffOwner: symbol | undefined;
-        let ownedBootSettlementAttempted = false;
-        let ownedBootSettlementError: unknown;
-        const settleOwnedBoot = async (): Promise<void> => {
-          ownedBootSettlementAttempted = true;
-          try {
-            await this.pool.stopEmulatorProcess(childProcess, retainLeaseUntil);
-          } catch (error) {
-            ownedBootSettlementError = error;
-            throw error;
-          }
-        };
-        const stopCancelledRecovery = async (deviceToRemove?: BootedDevice): Promise<void> => {
-          intentionallyStopped = true;
-          if (deviceToRemove) {
-            try {
-              await this.pool.removeDevice(deviceToRemove.deviceId);
-            } catch (error) {
-              intentionalShutdownCleanupError = error;
-            }
-          }
-          try {
-            await this.pool.stopEmulatorProcess(childProcess, retainLeaseUntil);
-          } catch (error) {
-            intentionalShutdownCleanupError ??= error;
-          }
-        };
-        const finishCancelledRecovery = async (): Promise<void> => {
-          if (ownedBootSettlementAttempted) {
-            intentionallyStopped = true;
-            intentionalShutdownCleanupError ??= ownedBootSettlementError;
-            return;
-          }
-          await stopCancelledRecovery(readinessCompleted ? ready : undefined);
-        };
-        try {
-          childProcess = await this.pool.getDeviceManager().startDevice(target);
-          ready = this.criteriaMatcher.withDeviceImageMetadata(
-            await waitForDeviceReadyOrCancel(
-              this.pool.getDeviceManager(),
-              target,
-              childProcess,
-              undefined,
-              signal,
-              this.pool.getTimer(),
-              settleOwnedBoot,
-            ),
-            recoveryImage,
-          );
-          readinessCompleted = true;
-          recoveryDeviceIds.add(ready.deviceId);
-          this.pool.addRecoveringAndroidDeviceId(ready.deviceId);
-          handoffOwner = Symbol("android-recovery-handoff");
-          this.pool.setAndroidRecoveryHandoffOwner(ready.deviceId, handoffOwner);
-          if (this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
-            await stopCancelledRecovery();
-            return;
-          }
-          await this.pool.addDevice(
-            ready,
-            recoveryImage,
-            true,
-            this.pool.identityEvidenceForBootedDevice(ready),
-          );
-          if (this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
-            await stopCancelledRecovery(ready);
-            return;
-          }
-          await this.pool.bindRecoveredAndroidDeviceSession(
-            device.id,
-            avdName,
-            preservedSessionId,
-            preservedSession,
-            ready,
-            recoveryImage,
-            childProcess,
-            preservedAutolockSessionId,
-            handoffOwner,
-          );
-          await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
-            attempt,
-            outcome: "succeeded",
-          });
-        } catch (error) {
-          if (
-            signal.aborted ||
-            this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)
-          ) {
-            await finishCancelledRecovery();
-            return;
-          }
-          await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
-            attempt,
-            outcome: "failed",
-          });
-          throw error;
-        } finally {
-          if (handoffOwner !== undefined && ready !== undefined) {
-            this.pool.clearAndroidRecoveryHandoffOwnerIfCurrent(ready.deviceId, handoffOwner);
-          }
-        }
-      });
+      const { recovered, intentionallyStopped, intentionalShutdownCleanupError } =
+        await this.runAndroidRelaunch({
+          device,
+          avdName,
+          preservedSessionId,
+          preservedSession,
+          preservedAutolockSessionId,
+          recoveryImage,
+          target,
+          recoveryDeviceIds,
+          incidentId,
+          signal,
+          retainLeaseUntil,
+          nextAttempt: () => ++recoveryAttempt,
+        });
       if (intentionallyStopped) {
         if (intentionalShutdownCleanupError !== undefined) {
           throw intentionalShutdownCleanupError;
@@ -342,6 +257,142 @@ export class AndroidRebootCoordinator {
         replacementHandoffOwner,
       );
     }
+  }
+
+  private async runAndroidRelaunch({
+    device,
+    avdName,
+    preservedSessionId,
+    preservedSession,
+    preservedAutolockSessionId,
+    recoveryImage,
+    target,
+    recoveryDeviceIds,
+    incidentId,
+    signal,
+    retainLeaseUntil,
+    nextAttempt,
+  }: AndroidRelaunchContext): Promise<{
+    recovered: boolean;
+    intentionallyStopped: boolean;
+    intentionalShutdownCleanupError: unknown;
+  }> {
+    let intentionallyStopped = false;
+    let intentionalShutdownCleanupError: unknown;
+    const recovered = await this.androidDeviceReboot.run(target, async () => {
+      if (this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
+        intentionallyStopped = true;
+        // Cancelled before the emulator was touched: don't spend the
+        // crash-loop budget on it (issue #7545).
+        return "cancelled";
+      }
+      const attempt = nextAttempt();
+      let childProcess: ChildProcess | null = null;
+      let ready: BootedDevice | undefined;
+      let readinessCompleted = false;
+      let handoffOwner: symbol | undefined;
+      let ownedBootSettlementAttempted = false;
+      let ownedBootSettlementError: unknown;
+      const settleOwnedBoot = async (): Promise<void> => {
+        ownedBootSettlementAttempted = true;
+        try {
+          await this.pool.stopEmulatorProcess(childProcess, retainLeaseUntil);
+        } catch (error) {
+          ownedBootSettlementError = error;
+          throw error;
+        }
+      };
+      const stopCancelledRecovery = async (deviceToRemove?: BootedDevice): Promise<void> => {
+        intentionallyStopped = true;
+        if (deviceToRemove) {
+          try {
+            await this.pool.removeDevice(deviceToRemove.deviceId);
+          } catch (error) {
+            intentionalShutdownCleanupError = error;
+          }
+        }
+        try {
+          await this.pool.stopEmulatorProcess(childProcess, retainLeaseUntil);
+        } catch (error) {
+          intentionalShutdownCleanupError ??= error;
+        }
+      };
+      const finishCancelledRecovery = async (): Promise<void> => {
+        if (ownedBootSettlementAttempted) {
+          intentionallyStopped = true;
+          intentionalShutdownCleanupError ??= ownedBootSettlementError;
+          return;
+        }
+        await stopCancelledRecovery(readinessCompleted ? ready : undefined);
+      };
+      try {
+        childProcess = await this.pool.getDeviceManager().startDevice(target);
+        ready = this.criteriaMatcher.withDeviceImageMetadata(
+          await waitForDeviceReadyOrCancel(
+            this.pool.getDeviceManager(),
+            target,
+            childProcess,
+            undefined,
+            signal,
+            this.pool.getTimer(),
+            settleOwnedBoot,
+          ),
+          recoveryImage,
+        );
+        readinessCompleted = true;
+        recoveryDeviceIds.add(ready.deviceId);
+        this.pool.addRecoveringAndroidDeviceId(ready.deviceId);
+        handoffOwner = Symbol("android-recovery-handoff");
+        this.pool.setAndroidRecoveryHandoffOwner(ready.deviceId, handoffOwner);
+        if (this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
+          await stopCancelledRecovery();
+          return;
+        }
+        await this.pool.addDevice(
+          ready,
+          recoveryImage,
+          true,
+          this.pool.identityEvidenceForBootedDevice(ready),
+        );
+        if (this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)) {
+          await stopCancelledRecovery(ready);
+          return;
+        }
+        await this.pool.bindRecoveredAndroidDeviceSession(
+          device.id,
+          avdName,
+          preservedSessionId,
+          preservedSession,
+          ready,
+          recoveryImage,
+          childProcess,
+          preservedAutolockSessionId,
+          handoffOwner,
+        );
+        await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
+          attempt,
+          outcome: "succeeded",
+        });
+      } catch (error) {
+        if (
+          signal.aborted ||
+          this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)
+        ) {
+          await finishCancelledRecovery();
+          return;
+        }
+        await this.pool.recordEmulatorLossRecoveryAttempt(incidentId, {
+          attempt,
+          outcome: "failed",
+        });
+        throw error;
+      } finally {
+        if (handoffOwner !== undefined && ready !== undefined) {
+          this.pool.clearAndroidRecoveryHandoffOwnerIfCurrent(ready.deviceId, handoffOwner);
+        }
+      }
+    });
+    return { recovered, intentionallyStopped, intentionalShutdownCleanupError };
   }
 
   private trackAndroidRecoveryImageReservation(sessionId: string | undefined): void {

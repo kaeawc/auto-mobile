@@ -796,13 +796,9 @@ export class CtrlProxyHierarchy {
    * Check if a node has meaningful content (text, identifier, test-tag)
    */
   private hasContentProperties(attrs: Record<string, unknown>): boolean {
+    const contentFields = ["text", "value", "resource-id", "content-desc", "test-tag", "role"];
     return Boolean(
-      (attrs["text"] && attrs["text"] !== "") ||
-      (attrs["value"] && attrs["value"] !== "") ||
-      (attrs["resource-id"] && attrs["resource-id"] !== "") ||
-      (attrs["content-desc"] && attrs["content-desc"] !== "") ||
-      (attrs["test-tag"] && attrs["test-tag"] !== "") ||
-      (attrs["role"] && attrs["role"] !== "") ||
+      contentFields.some((field) => attrs[field] && attrs[field] !== "") ||
       this.hasMeaningfulViewId(attrs),
     );
   }
@@ -908,32 +904,13 @@ export class CtrlProxyHierarchy {
     const inIcon = insideSpringBoardIcon || attrs["class"] === "SBIconView";
 
     // Process children first (recursively)
-    const filteredChildren: ConvertedNode[] = [];
-    for (const child of children) {
-      const filtered = this.filterHierarchyNode(child, false, inIcon);
-      if (filtered) {
-        // If child filtering returned an array (promoted grandchildren), flatten it
-        if (Array.isArray(filtered)) {
-          filteredChildren.push(...filtered);
-        } else {
-          filteredChildren.push(filtered);
-        }
-      }
-    }
+    const filteredChildren = this.filterHierarchyChildren(children, inIcon);
     const compactedChildren = this.dropRedundantStaticTextChildren(attrs, filteredChildren);
     const dedupedChildren = this.dedupeNoiseSiblings(compactedChildren);
 
     // Root node is always kept
     if (isRoot) {
-      const cleanedAttrs = this.cleanAttributes(attrs);
-      const result: ConvertedNode = { $: cleanedAttrs };
-      if (node.extras) {
-        result.extras = node.extras;
-      }
-      if (dedupedChildren.length > 0) {
-        result.node = dedupedChildren;
-      }
-      return result;
+      return this.buildFilteredNode(node, attrs, dedupedChildren);
     }
 
     // Check if this node is a structural wrapper
@@ -948,25 +925,41 @@ export class CtrlProxyHierarchy {
     }
 
     // Check if node has any meaningful properties
-    const hasContent = this.hasContentProperties(attrs);
-    const hasInteraction = this.hasInteractionProperties(attrs);
-    const isClickable = attrs["clickable"] === "true";
-
     // Keep node if:
     // 1. Has content (text, identifier, etc.)
     // 2. Has interaction properties (scrollable, focused, selected)
     // 3. Is clickable and is a leaf node (actual tappable element)
     // 4. Has meaningful filtered children
-    const keepNode =
-      hasContent ||
-      hasInteraction ||
-      (isClickable && dedupedChildren.length === 0) ||
-      dedupedChildren.length > 0;
+    const keepNode = this.hasMeaningfulFilteredNode(attrs, dedupedChildren);
 
     if (!keepNode) {
       return null;
     }
 
+    return this.buildFilteredNode(node, attrs, dedupedChildren);
+  }
+
+  private filterHierarchyChildren(children: ConvertedNode[], inIcon: boolean): ConvertedNode[] {
+    const filteredChildren: ConvertedNode[] = [];
+    for (const child of children) {
+      const filtered = this.filterHierarchyNode(child, false, inIcon);
+      if (filtered) {
+        // If child filtering returned an array (promoted grandchildren), flatten it
+        if (Array.isArray(filtered)) {
+          filteredChildren.push(...filtered);
+        } else {
+          filteredChildren.push(filtered);
+        }
+      }
+    }
+    return filteredChildren;
+  }
+
+  private buildFilteredNode(
+    node: ConvertedNode,
+    attrs: Record<string, unknown>,
+    dedupedChildren: ConvertedNode[],
+  ): ConvertedNode {
     const cleanedAttrs = this.cleanAttributes(attrs);
     const result: ConvertedNode = { $: cleanedAttrs };
     if (node.extras) {
@@ -976,6 +969,18 @@ export class CtrlProxyHierarchy {
       result.node = dedupedChildren;
     }
     return result;
+  }
+
+  private hasMeaningfulFilteredNode(
+    attrs: Record<string, unknown>,
+    children: ConvertedNode[],
+  ): boolean {
+    const hasContent = this.hasContentProperties(attrs);
+    const hasInteraction = this.hasInteractionProperties(attrs);
+    const isClickable = attrs["clickable"] === "true";
+    return (
+      hasContent || hasInteraction || (isClickable && children.length === 0) || children.length > 0
+    );
   }
 
   private isIconArtworkImage(node: ConvertedNode): boolean {
@@ -1037,11 +1042,18 @@ export class CtrlProxyHierarchy {
     );
   }
 
-  private isRedundantStaticTextChild(parentText: string, child: ConvertedNode): boolean {
-    if (child.node && child.node.length > 0) {
-      return false;
+  private hasChildrenOrExtras(node: ConvertedNode): boolean {
+    if (node.node && node.node.length > 0) {
+      return true;
     }
-    if (child.extras && Object.keys(child.extras).length > 0) {
+    if (node.extras && Object.keys(node.extras).length > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  private isRedundantStaticTextChild(parentText: string, child: ConvertedNode): boolean {
+    if (this.hasChildrenOrExtras(child)) {
       return false;
     }
 
@@ -1103,10 +1115,7 @@ export class CtrlProxyHierarchy {
   }
 
   private noiseSiblingKey(node: ConvertedNode): string | null {
-    if (node.node && node.node.length > 0) {
-      return null;
-    }
-    if (node.extras && Object.keys(node.extras).length > 0) {
+    if (this.hasChildrenOrExtras(node)) {
       return null;
     }
 
@@ -1125,9 +1134,7 @@ export class CtrlProxyHierarchy {
     }
 
     return JSON.stringify([
-      attrs["class"] ?? "",
-      attrs["text"] ?? "",
-      attrs["resource-id"] ?? "",
+      ...["class", "text", "resource-id"].map((field) => attrs[field] ?? ""),
       attrs["bounds"] ?? null,
     ]);
   }

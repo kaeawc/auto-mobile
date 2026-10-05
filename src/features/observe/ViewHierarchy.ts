@@ -761,26 +761,29 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @returns True if node has meaningful string properties
    */
   meetsStringFilterCriteria(props: any): boolean {
+    const stringProperties = [
+      "resourceId",
+      "resource-id",
+      "viewId",
+      "view-id",
+      "text",
+      "contentDesc",
+      "content-desc",
+      "test-tag",
+      "role",
+      "state-description",
+      "error-message",
+      "hint-text",
+      "tooltip-text",
+      "pane-title",
+      "live-region",
+      "collection-info",
+      "collection-item-info",
+      "range-info",
+      "input-type",
+    ];
     return Boolean(
-      (props.resourceId && props.resourceId !== "") ||
-      (props["resource-id"] && props["resource-id"] !== "") ||
-      (props.viewId && props.viewId !== "") ||
-      (props["view-id"] && props["view-id"] !== "") ||
-      (props.text && props.text !== "") ||
-      (props.contentDesc && props.contentDesc !== "") ||
-      (props["content-desc"] && props["content-desc"] !== "") ||
-      (props["test-tag"] && props["test-tag"] !== "") ||
-      (props.role && props.role !== "") ||
-      (props["state-description"] && props["state-description"] !== "") ||
-      (props["error-message"] && props["error-message"] !== "") ||
-      (props["hint-text"] && props["hint-text"] !== "") ||
-      (props["tooltip-text"] && props["tooltip-text"] !== "") ||
-      (props["pane-title"] && props["pane-title"] !== "") ||
-      (props["live-region"] && props["live-region"] !== "") ||
-      (props["collection-info"] && props["collection-info"] !== "") ||
-      (props["collection-item-info"] && props["collection-item-info"] !== "") ||
-      (props["range-info"] && props["range-info"] !== "") ||
-      (props["input-type"] && props["input-type"] !== "") ||
+      stringProperties.some((key) => props[key] && props[key] !== "") ||
       props.recomposition ||
       props.recompositionMetrics,
     );
@@ -792,15 +795,18 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @returns True if node has meaningful boolean properties
    */
   meetsBooleanFilterCriteria(props: any): boolean {
+    const booleanProperties = [
+      "clickable",
+      "focusable",
+      "scrollable",
+      "focused",
+      "accessibility-focused",
+      "checkable",
+      "checked",
+      "selected",
+    ];
     return Boolean(
-      props.clickable === "true" ||
-      props.focusable === "true" ||
-      props.scrollable === "true" ||
-      props.focused === "true" ||
-      props["accessibility-focused"] === "true" ||
-      props.checkable === "true" ||
-      props.checked === "true" ||
-      props.selected === "true" ||
+      booleanProperties.some((key) => props[key] === "true") ||
       props.selected === true ||
       props["long-clickable"] === "true" ||
       (Array.isArray(props.actions) && props.actions.length > 0) ||
@@ -831,22 +837,23 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   processNodeChildren(node: any, filterFn: (child: any) => any, truncations?: string[]): any[] {
     const relevantChildren: any[] = [];
 
-    if (node.node) {
-      const allChildren = Array.isArray(node.node) ? node.node : [node.node];
-      if (allChildren.length > MAX_FILTERED_CHILDREN_PER_NODE && truncations) {
-        truncations.push(
-          `${HOST_OUTPUT_CHILD_CAP_REASON_PREFIX}${this.describeTruncatedNode(node)} kept ${MAX_FILTERED_CHILDREN_PER_NODE} of ${allChildren.length}]`,
-        );
-      }
-      const children = allChildren.slice(0, MAX_FILTERED_CHILDREN_PER_NODE);
-      for (const child of children) {
-        const filteredChild = filterFn(child);
-        if (filteredChild) {
-          if (Array.isArray(filteredChild)) {
-            relevantChildren.push(...filteredChild);
-          } else {
-            relevantChildren.push(filteredChild);
-          }
+    if (!node.node) {
+      return relevantChildren;
+    }
+    const allChildren = Array.isArray(node.node) ? node.node : [node.node];
+    if (allChildren.length > MAX_FILTERED_CHILDREN_PER_NODE && truncations) {
+      truncations.push(
+        `${HOST_OUTPUT_CHILD_CAP_REASON_PREFIX}${this.describeTruncatedNode(node)} kept ${MAX_FILTERED_CHILDREN_PER_NODE} of ${allChildren.length}]`,
+      );
+    }
+    const children = allChildren.slice(0, MAX_FILTERED_CHILDREN_PER_NODE);
+    for (const child of children) {
+      const filteredChild = filterFn(child);
+      if (filteredChild) {
+        if (Array.isArray(filteredChild)) {
+          relevantChildren.push(...filteredChild);
+        } else {
+          relevantChildren.push(filteredChild);
         }
       }
     }
@@ -1012,22 +1019,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
     if (node["$"]) {
       const cleanedProps: any = {};
-      for (const key in node.$) {
-        if (allowedProperties.includes(key)) {
-          const normalizedKey =
-            key === "resourceId" ? "resource-id" : key === "contentDesc" ? "content-desc" : key;
-          if (node.$[key] === "") {
-            continue;
-          }
-          if (key === "enabled" && (node.$[key] === true || node.$[key] === "true")) {
-            continue;
-          }
-          if (key !== "enabled" && (node.$[key] === false || node.$[key] === "false")) {
-            continue;
-          }
-          cleanedProps[normalizedKey] = node.$[key];
-        }
-      }
+      this.copyCleanAttributeBag(node.$, cleanedProps, allowedProperties);
 
       if (Object.keys(cleanedProps).length > 0) {
         for (const key in cleanedProps) {
@@ -1048,13 +1040,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         if (!allowedProperties.includes(key)) {
           continue;
         }
-        if (node[key] === "") {
-          continue;
-        }
-        if (key === "enabled" && (node[key] === true || node[key] === "true")) {
-          continue;
-        }
-        if (key !== "enabled" && (node[key] === false || node[key] === "false")) {
+        if (this.shouldOmitNodeProperty(node, key)) {
           continue;
         }
         result[key] = node[key];
@@ -1062,5 +1048,36 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     }
 
     return result;
+  }
+
+  private copyCleanAttributeBag(
+    props: Record<string, unknown>,
+    result: Record<string, unknown>,
+    allowedProperties: readonly string[],
+  ): void {
+    for (const key in props) {
+      if (!allowedProperties.includes(key)) {
+        continue;
+      }
+      const normalizedKey =
+        key === "resourceId" ? "resource-id" : key === "contentDesc" ? "content-desc" : key;
+      if (this.shouldOmitNodeProperty(props, key)) {
+        continue;
+      }
+      result[normalizedKey] = props[key];
+    }
+  }
+
+  private shouldOmitNodeProperty(props: Record<string, unknown>, key: string): boolean {
+    if (props[key] === "") {
+      return true;
+    }
+    if (key === "enabled" && (props[key] === true || props[key] === "true")) {
+      return true;
+    }
+    if (key !== "enabled" && (props[key] === false || props[key] === "false")) {
+      return true;
+    }
+    return false;
   }
 }

@@ -449,6 +449,22 @@ export class MissingDeviceLiveness {
       await this.pool.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
       return;
     }
+    return this.dispatchEvictedDeviceRemoval(
+      device,
+      attemptDeviceLossRecovery,
+      correlatedIncidentId,
+      identityObservation,
+      lockPoolRemoval,
+    );
+  }
+
+  private async dispatchEvictedDeviceRemoval(
+    device: PooledDevice,
+    attemptDeviceLossRecovery: boolean,
+    correlatedIncidentId: string | undefined,
+    identityObservation: IdentityObservation | undefined,
+    lockPoolRemoval: boolean | undefined,
+  ): Promise<void> {
     this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
     if (attemptDeviceLossRecovery && this.pool.shouldRebootDisconnectedAndroidDevice(device)) {
       if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {

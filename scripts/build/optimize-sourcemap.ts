@@ -1,5 +1,10 @@
 export const STRIP_SOURCES_ENV = "AUTOMOBILE_SOURCEMAP_STRIP_SOURCES";
 
+export function shouldStripSources(env: Record<string, string | undefined>): boolean {
+  const value = env[STRIP_SOURCES_ENV]?.trim().toLowerCase();
+  return value !== "0" && value !== "false";
+}
+
 export interface SourceMap {
   sources: string[];
   sourcesContent?: unknown;
@@ -22,7 +27,7 @@ export function selectSourceMaps(
     .map((path) => ({ path, options }));
 }
 
-/** Preserve main's dependency-only trimming unless all source text is explicitly stripped. */
+/** Preserve dependency-only trimming when stripping all source text is disabled. */
 export function optimizeSourceMap(
   map: SourceMap,
   options: SourceMapOptions = {},

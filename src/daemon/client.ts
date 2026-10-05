@@ -780,17 +780,18 @@ export class DaemonClient {
     this.buffer = lines.pop() || ""; // Keep incomplete line in buffer
 
     for (const line of lines) {
-      if (line.trim()) {
-        try {
-          const frame: unknown = JSON.parse(line);
-          if (isDaemonNotification(frame)) {
-            this.handleNotification(frame);
-          } else {
-            this.handleResponse(frame as DaemonResponse);
-          }
-        } catch (error) {
-          logger.error(`Error parsing daemon response: ${error}`);
+      if (!line.trim()) {
+        continue;
+      }
+      try {
+        const frame: unknown = JSON.parse(line);
+        if (isDaemonNotification(frame)) {
+          this.handleNotification(frame);
+        } else {
+          this.handleResponse(frame as DaemonResponse);
         }
+      } catch (error) {
+        logger.error(`Error parsing daemon response: ${error}`);
       }
     }
   }

@@ -1,3 +1,4 @@
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   VideoStreamSocketServer,
@@ -133,6 +134,7 @@ async function harness(
         await options.resolveGate;
         return device;
       },
+      captureRegistry: createDeviceCaptureRegistry(),
       createCaptureSource: async (opts) => {
         hints.push(opts);
         emissions.push(opts.onData);

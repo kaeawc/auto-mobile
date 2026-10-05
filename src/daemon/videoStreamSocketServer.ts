@@ -1,3 +1,7 @@
+import {
+  getDefaultDeviceCaptureRegistry,
+  type DeviceCaptureRegistry,
+} from "../features/webrtc/deviceCaptureRegistry";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   decideLifecycleEvent,
@@ -92,6 +96,7 @@ function tracksConsumers(
 
 export interface VideoStreamSocketServerDependencies {
   createCaptureSource: CaptureSourceFactory;
+  captureRegistry?: DeviceCaptureRegistry;
   resolveDevice: (deviceId?: string) => Promise<BootedDevice>;
   /** Monotonic microseconds, used for packet presentation timestamps. */
   nowUs: () => bigint;
@@ -937,88 +942,93 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         this.startHeartbeat(deviceId, capture);
       }
     };
-    return await this.deps.createCaptureSource({
+    return (this.deps.captureRegistry ?? getDefaultDeviceCaptureRegistry()).acquire({
       device,
-      onData: (chunk) => {
-        const current = this.captures.get(deviceId);
-        if (current !== capture || capture.generation !== generation || chunk.length === 0) {
-          return;
-        }
-        current.lastEncodedDataMs = this.timer.now();
-        current.firstEvidenceMs ??= current.lastEncodedDataMs;
-        current.encodedSinceSourceFrame = true;
-        if (!current.heartbeatTimer) {
-          this.startHeartbeat(deviceId, current);
-        }
-        this.broadcast(deviceId, chunk);
+      create: (options) => this.deps.createCaptureSource({ ...options, onError: options.onError! }),
+      hasConsumers: this.hasSubscribers(capture),
+      options: {
+        device,
+        onData: (chunk) => {
+          const current = this.captures.get(deviceId);
+          if (current !== capture || capture.generation !== generation || chunk.length === 0) {
+            return;
+          }
+          current.lastEncodedDataMs = this.timer.now();
+          current.firstEvidenceMs ??= current.lastEncodedDataMs;
+          current.encodedSinceSourceFrame = true;
+          if (!current.heartbeatTimer) {
+            this.startHeartbeat(deviceId, current);
+          }
+          this.broadcast(deviceId, chunk);
+        },
+        onSourceFrame: attestSource,
+        onSourceIdle: () => {
+          if (
+            this.captures.get(deviceId) !== capture ||
+            capture.generation !== generation ||
+            !capture.encodedSinceSourceFrame
+          ) {
+            return;
+          }
+          capture.lastIdleMs = this.timer.now();
+        },
+        onEncodedAccessUnit: () => {
+          if (this.captures.get(deviceId) !== capture || capture.generation !== generation) {
+            return;
+          }
+          for (const nal of capture.parser.flush()) {
+            this.broadcastNal(deviceId, capture, nal);
+          }
+          this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
+          capture.keyFrameAuBytes = 0;
+          capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
+        },
+        onIdleAttestationSupport: (supported) => {
+          if (
+            this.captures.get(deviceId) === capture &&
+            capture.generation === generation &&
+            device.platform === "ios"
+          ) {
+            capture.legacySimulatorHelper = !supported;
+          }
+        },
+        // Record the source's attested rotation so the next config packet re-attests it to
+        // subscribers, including a late joiner via replayParameterSets (issue #4786).
+        onRotation: (rotation) => {
+          const current = this.captures.get(deviceId);
+          if (current === capture && capture.generation === generation) {
+            current.rotation = rotation;
+          }
+        },
+        onDroppedFrames: (droppedFrames) => {
+          const current = this.captures.get(deviceId);
+          if (
+            current !== capture ||
+            capture.generation !== generation ||
+            !Number.isSafeInteger(droppedFrames) ||
+            droppedFrames < 0 ||
+            !this.sourceEvidenceIsRecent(capture, this.timer.now())
+          ) {
+            return;
+          }
+          const packet = encodeDroppedFrames(droppedFrames);
+          for (const subscriber of capture.subscribers) {
+            this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
+          }
+        },
+        onError: (error) => {
+          if (this.captures.get(deviceId) === capture && capture.generation === generation) {
+            logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
+            void this.stopCapture(deviceId);
+          }
+        },
+        bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
+        size: hints.size,
+        quality: hints.quality,
+        // Use the observation rate for this platform when the client sent no hint.
+        // A client hint wins so farm viewers can lower the rate across streams.
+        fps: hints.fps ?? defaultCaptureFps(device),
       },
-      onSourceFrame: attestSource,
-      onSourceIdle: () => {
-        if (
-          this.captures.get(deviceId) !== capture ||
-          capture.generation !== generation ||
-          !capture.encodedSinceSourceFrame
-        ) {
-          return;
-        }
-        capture.lastIdleMs = this.timer.now();
-      },
-      onEncodedAccessUnit: () => {
-        if (this.captures.get(deviceId) !== capture || capture.generation !== generation) {
-          return;
-        }
-        for (const nal of capture.parser.flush()) {
-          this.broadcastNal(deviceId, capture, nal);
-        }
-        this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
-        capture.keyFrameAuBytes = 0;
-        capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
-      },
-      onIdleAttestationSupport: (supported) => {
-        if (
-          this.captures.get(deviceId) === capture &&
-          capture.generation === generation &&
-          device.platform === "ios"
-        ) {
-          capture.legacySimulatorHelper = !supported;
-        }
-      },
-      // Record the source's attested rotation so the next config packet re-attests it to
-      // subscribers, including a late joiner via replayParameterSets (issue #4786).
-      onRotation: (rotation) => {
-        const current = this.captures.get(deviceId);
-        if (current === capture && capture.generation === generation) {
-          current.rotation = rotation;
-        }
-      },
-      onDroppedFrames: (droppedFrames) => {
-        const current = this.captures.get(deviceId);
-        if (
-          current !== capture ||
-          capture.generation !== generation ||
-          !Number.isSafeInteger(droppedFrames) ||
-          droppedFrames < 0 ||
-          !this.sourceEvidenceIsRecent(capture, this.timer.now())
-        ) {
-          return;
-        }
-        const packet = encodeDroppedFrames(droppedFrames);
-        for (const subscriber of capture.subscribers) {
-          this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
-        }
-      },
-      onError: (error) => {
-        if (this.captures.get(deviceId) === capture && capture.generation === generation) {
-          logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
-          void this.stopCapture(deviceId);
-        }
-      },
-      bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
-      size: hints.size,
-      quality: hints.quality,
-      // Use the observation rate for this platform when the client sent no hint.
-      // A client hint wins so farm viewers can lower the rate across streams.
-      fps: hints.fps ?? defaultCaptureFps(device),
     });
   }
 
@@ -1158,6 +1168,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.source = null;
     this.resetForNewEncoder(capture);
     try {
+      // Release then reacquire: with another transport holder, first-acquirer hints still win.
       await outgoing.stop();
       if (this.captures.get(deviceId) !== capture) {
         return;

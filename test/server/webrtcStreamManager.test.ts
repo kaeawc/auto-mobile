@@ -1,3 +1,4 @@
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as manager from "../../src/server/webrtcStreamManager";
 import { logger } from "../../src/utils/logger";
@@ -174,7 +175,10 @@ async function flushPublisherStart(): Promise<void> {
 }
 
 beforeEach(() => {
-  setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
+  setWebRtcStreamManagerDependencies({
+    timer: new FakeTimer(),
+    captureRegistry: createDeviceCaptureRegistry(),
+  });
 });
 
 afterEach(() => {

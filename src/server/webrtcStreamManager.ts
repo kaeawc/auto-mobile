@@ -1,3 +1,7 @@
+import {
+  getDefaultDeviceCaptureRegistry,
+  type DeviceCaptureRegistry,
+} from "../features/webrtc/deviceCaptureRegistry";
 import { isDeepStrictEqual } from "node:util";
 import {
   decideOwnershipChange,
@@ -128,6 +132,7 @@ interface WebRtcStreamRecord {
 }
 
 export interface WebRtcStreamManagerDependencies {
+  captureRegistry?: DeviceCaptureRegistry;
   idGenerator: IdGenerator;
   createPublisher: (config: WebRtcPublisherConfig, deps: WebRtcPublisherDeps) => WebRtcPublisher;
   createSource: (options: H264CaptureSourceOptions, jarPath: string | null) => H264CaptureSource;
@@ -788,6 +793,10 @@ function createStreamRecord(
   return record;
 }
 
+function getCaptureRegistry(): DeviceCaptureRegistry {
+  return dependencies.captureRegistry ?? getDefaultDeviceCaptureRegistry();
+}
+
 /** Stop and clear the capture source for a stream (before each (re)establish). */
 async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   record.sourceStarted = false;
@@ -824,8 +833,10 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   record.sourceFailed = false;
   record.mediaParser = new H264AnnexBParser();
   let source: H264CaptureSource | null = null;
-  source = dependencies.createSource(
-    {
+  source = getCaptureRegistry().acquire({
+    device: record.device,
+    create: (options) => dependencies.createSource(options, record.jarPath),
+    options: {
       device: record.device,
       onData: (chunk) => {
         if (record.source !== source) {
@@ -884,8 +895,7 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
         }
       },
     },
-    record.jarPath,
-  );
+  });
   sourceRef.current = source;
   record.source = source;
   try {

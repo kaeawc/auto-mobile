@@ -1,4 +1,14 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import {
   registerOverlayTools,
   overlaySchema,
@@ -22,6 +32,10 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
 import { InMemoryOverlayStatusStore } from "../../src/features/overlay/OverlayStatusStore";
+import { FakeOverlayEventLifecycle } from "../fakes/FakeOverlayEventLifecycle";
+import { event } from "../helpers/overlayTestEvent";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { OVERLAY_EVENT_BUFFER_CAPACITY } from "../../src/features/overlay/OverlayEventBuffer";
 
 const device: BootedDevice = { deviceId: "fake-overlay", platform: "android", name: "Fake" };
 const spec = {
@@ -39,7 +53,7 @@ describe("overlay MCP tool", () => {
     restore = preserveToolRegistry();
     timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    unsubscribe = registerOverlayTools({ clientFactory: () => client, clock: timer });
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, clock: timer, timer });
   });
   afterEach(() => {
     unsubscribe();
@@ -53,6 +67,295 @@ describe("overlay MCP tool", () => {
     expect(response.content.every((item: { type: string }) => item.type === "text")).toBe(true);
     return { response, payload };
   }
+
+  test("awaitEvent returns a buffered event immediately without a device request", async () => {
+    await call({ action: "show", spec });
+    client.emitOverlayEvent({
+      type: "overlay_event",
+      id: "panel",
+      sequence: 1,
+      kind: "emit",
+      name: "save",
+      payload: null,
+      state: {},
+      pages: {},
+      timestamp: 1,
+    });
+    const { response, payload } = await call({ action: "awaitEvent", id: "panel" });
+    expect(response.isError).not.toBe(true);
+    expect(payload).toMatchObject({
+      success: true,
+      event: { id: "panel", sequence: 1 },
+      pendingCount: 0,
+      droppedCount: 0,
+    });
+    expect(client.getOverlayHistory()).toHaveLength(1);
+  });
+
+  test("awaitEvent waits with FakeTimer, times out successfully, and forwards no command", async () => {
+    const waiting = call({ action: "awaitEvent", id: "panel", timeoutMs: 10 });
+    timer.advanceTime(10);
+    const { response, payload } = await waiting;
+    expect(response.isError).not.toBe(true);
+    expect(payload).toEqual({ success: true, timedOut: true, pendingCount: 0, droppedCount: 0 });
+    expect(client.getOverlayHistory()).toEqual([]);
+    expect(client.getOverlayListenerCount()).toBe(0);
+  });
+
+  test("awaitEvent reports progress through the existing handler callback", async () => {
+    const progress = mock(async (amount: number) => {
+      if (amount === 0) {
+        client.emitOverlayEvent(event(1));
+      }
+    });
+    const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
+      device,
+      { action: "awaitEvent", id: "panel" },
+      progress,
+    );
+    expect(overlayOutputSchema.parse(response.structuredContent).event?.sequence).toBe(1);
+    expect(progress.mock.calls.map(([amount]) => amount)).toEqual([0, 1]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("awaitEvent resolves an event during a wait and returns all event fields", async () => {
+    const waiting = call({
+      action: "awaitEvent",
+      id: "panel",
+      eventName: "save",
+      kind: "emit",
+      afterSequence: 1,
+    });
+    client.emitOverlayEvent(event(1));
+    client.emitOverlayEvent(event(2, "panel", "page_changed", "page"));
+    client.emitOverlayEvent(event(3));
+    const expected = {
+      id: "panel",
+      sequence: 3,
+      kind: "emit",
+      name: "save",
+      payload: { value: 3 },
+      state: { title: "Hello" },
+      pages: {},
+      timestamp: 3,
+    };
+    expect((await waiting).payload.event).toEqual(expected);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each(["explicit", "ambient"])(
+    "%s request abort rejects with the abort reason and cleans the wait",
+    async (source) => {
+      const controller = new AbortController();
+      const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+      const waiting =
+        source === "explicit"
+          ? handler(device, { action: "awaitEvent", id: "panel" }, undefined, controller.signal)
+          : runWithAbortSignal(controller.signal, () =>
+              handler(device, { action: "awaitEvent", id: "panel" }),
+            );
+      const reason = new DOMException("Request cancelled", "AbortError");
+      controller.abort(reason);
+      await expect(waiting).rejects.toBe(reason);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(client.getOverlayListenerCount()).toBe(0);
+    },
+  );
+
+  test("status reports counts without a device request and page changes preserve host mutation status", async () => {
+    await call({ action: "show", spec });
+    for (let sequence = 1; sequence <= OVERLAY_EVENT_BUFFER_CAPACITY + 1; sequence++) {
+      client.emitOverlayEvent(event(sequence, "panel", "page_changed", "page"));
+    }
+    const history = client.getOverlayHistory();
+    expect((await call({ action: "status" })).payload.overlays).toEqual([
+      {
+        id: "panel",
+        lastAction: "show",
+        success: true,
+        timestamp: 0,
+        pendingCount: OVERLAY_EVENT_BUFFER_CAPACITY,
+        lastSequence: OVERLAY_EVENT_BUFFER_CAPACITY + 1,
+        droppedCount: 1,
+      },
+    ]);
+    expect(client.getOverlayHistory()).toEqual(history);
+    expect((await call({ action: "awaitEvent", id: "panel" })).payload).toMatchObject({
+      event: { sequence: 2 },
+      droppedCount: 1,
+      pendingCount: OVERLAY_EVENT_BUFFER_CAPACITY - 1,
+    });
+  });
+
+  test("device-side dismissal removes status and remains deliverable", async () => {
+    await call({ action: "show", spec });
+    client.emitOverlayEvent(event(1, "panel", "dismissed"));
+    expect((await call({ action: "status" })).payload.overlays).toEqual([]);
+    expect((await call({ action: "awaitEvent", id: "panel" })).payload).toMatchObject({
+      success: true,
+      event: { kind: "dismissed" },
+      pendingCount: 0,
+    });
+    expect(client.getOverlayListenerCount()).toBe(0);
+  });
+
+  test("dismissal arriving during show acknowledgement is reflected in status", async () => {
+    const show = spyOn(client, "requestShowOverlay").mockImplementation(async () => {
+      client.emitOverlayEvent(event(1, "panel", "dismissed"));
+      return { success: true };
+    });
+    await call({ action: "show", spec });
+    expect((await call({ action: "status" })).payload.overlays).toEqual([]);
+    expect((await call({ action: "awaitEvent", id: "panel" })).payload.event?.kind).toBe(
+      "dismissed",
+    );
+    show.mockRestore();
+  });
+
+  test("session release and device removal clear host status and listeners", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    SessionReleaseBroadcaster.emit("one", "released");
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    await call({ action: "show", spec, sessionUuid: "one" });
+    getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(device.deviceId);
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+  });
+
+  test("explicit dismiss drops buffered events and unsubscribes", async () => {
+    await call({ action: "show", spec });
+    client.emitOverlayEvent(event(1));
+    await call({ action: "dismiss", id: "panel" });
+    expect(client.getOverlayListenerCount()).toBe(0);
+    const waiting = call({ action: "awaitEvent", id: "panel", timeoutMs: 10 });
+    timer.advanceTime(10);
+    expect((await waiting).payload).toEqual({
+      success: true,
+      timedOut: true,
+      pendingCount: 0,
+      droppedCount: 0,
+    });
+  });
+
+  test("legacy mutation responses and status without events are byte-identical", async () => {
+    const show = await call({ action: "show", spec });
+    const expectedShow =
+      '{"success":true,"lastResult":{"id":"panel","lastAction":"show","success":true,"timestamp":0}}';
+    expect(show.response.content[0].text).toBe(expectedShow);
+    expect(JSON.stringify(show.response.structuredContent)).toBe(expectedShow);
+    expect((await call({ action: "status" })).response.content[0].text).toBe(
+      '{"success":true,"overlays":[{"id":"panel","lastAction":"show","success":true,"timestamp":0}],"lastResult":{"id":"panel","lastAction":"show","success":true,"timestamp":0}}',
+    );
+    expect(
+      (await call({ action: "update", id: "panel", state: {} })).response.content[0].text,
+    ).toBe(
+      '{"success":true,"lastResult":{"id":"panel","lastAction":"update","success":true,"timestamp":0}}',
+    );
+    expect((await call({ action: "dismiss", all: true })).response.content[0].text).toBe(
+      '{"success":true,"lastResult":{"all":true,"lastAction":"dismiss","success":true,"timestamp":0}}',
+    );
+  });
+
+  test.each([
+    { action: "awaitEvent" },
+    { action: "awaitEvent", id: "panel", timeoutMs: 60_001 },
+    { action: "awaitEvent", id: "panel", timeoutMs: 0 },
+    { action: "awaitEvent", id: "panel", afterSequence: -1 },
+    { action: "awaitEvent", id: "panel", afterSequence: 1.5 },
+    { action: "awaitEvent", id: "panel", kind: "unknown" },
+    { action: "awaitEvent", id: "panel", state: {} },
+    { action: "status", afterSequence: 0 },
+    { action: "show", spec, eventName: "save" },
+    { action: "update", id: "panel", state: {}, kind: "emit" },
+    { action: "dismiss", id: "panel", eventName: "save" },
+  ])("rejects invalid wait fields %j", async (input) => {
+    expect(overlaySchema.safeParse(input).success).toBe(false);
+    expect((await call(input)).response.isError).toBe(true);
+    expect(client.getOverlayListenerCount()).toBe(0);
+  });
+
+  test("the default session broadcaster and device-removal seam clean subscriptions", async () => {
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer });
+    await call({ action: "show", spec, sessionUuid: "default-one" });
+    const waiting = call({ action: "awaitEvent", id: "panel", sessionUuid: "default-one" });
+    SessionReleaseBroadcaster.emit("default-one");
+    expect((await waiting).payload.reason).toBe("dismissed");
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    await call({ action: "show", spec, sessionUuid: "default-one" });
+    getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(device.deviceId);
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect((await call({ action: "status", sessionUuid: "default-one" })).payload.overlays).toEqual(
+      [],
+    );
+  });
+
+  test("release clears old host status even after another scope takes event ownership", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "show", spec, sessionUuid: "two" });
+    await call({ action: "show", spec, sessionUuid: "other" }, { ...device, deviceId: "other" });
+    SessionReleaseBroadcaster.emit("one", "released");
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    // A release forgets every scope on the session's devices, as the status store pins.
+    expect((await call({ action: "status", sessionUuid: "two" })).payload.overlays).toEqual([]);
+    expect(
+      (await call({ action: "status", sessionUuid: "other" }, { ...device, deviceId: "other" }))
+        .payload.overlays,
+    ).toHaveLength(1);
+  });
+
+  test("re-registration disposes the previous coordinator and its subscriptions", async () => {
+    const lifecycle = new FakeOverlayEventLifecycle();
+    unsubscribe();
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer, lifecycle });
+    await call({ action: "show", spec });
+    expect(client.getOverlayListenerCount()).toBe(1);
+    expect(lifecycle.getListenerCount()).toBe(3);
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer });
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect(lifecycle.getListenerCount()).toBe(0);
+  });
+
+  test("an injected lifecycle drives session release, device removal and unbinding", async () => {
+    const lifecycle = new FakeOverlayEventLifecycle();
+    unsubscribe();
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer, lifecycle });
+    for (const release of [
+      () => lifecycle.releaseSession("one"),
+      () => lifecycle.removeDevice(device.deviceId),
+      () => lifecycle.unbindDevice(device.deviceId),
+    ]) {
+      await call({ action: "show", spec, sessionUuid: "one" });
+      release();
+      expect(client.getOverlayListenerCount()).toBe(0);
+      expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    }
+  });
+
+  test("failed shows do not retain subscriptions and failed dismiss preserves buffered events", async () => {
+    client.setOverlayResult({ success: false, error: "Refused" });
+    await call({ action: "show", spec });
+    expect(client.getOverlayListenerCount()).toBe(0);
+    client.setOverlayResult({ success: true });
+    await call({ action: "show", spec });
+    client.emitOverlayEvent(event(1));
+    client.setOverlayResult({ success: false, error: "Refused" });
+    await call({ action: "dismiss", id: "panel" });
+    expect(client.getOverlayListenerCount()).toBe(1);
+    expect((await call({ action: "awaitEvent", id: "panel" })).payload.event?.sequence).toBe(1);
+  });
+
+  test("a terminal event removes all host sessions' shown records for its device/id", async () => {
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "show", spec, sessionUuid: "two" });
+    client.emitOverlayEvent(event(1, "panel", "dismissed"));
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    expect((await call({ action: "status", sessionUuid: "two" })).payload.overlays).toEqual([]);
+    expect(
+      (await call({ action: "awaitEvent", id: "panel", sessionUuid: "two" })).payload.event?.kind,
+    ).toBe("dismissed");
+  });
 
   test("registering overlay preserves an existing highlight registration", () => {
     registerHighlightTools();
@@ -284,7 +587,7 @@ describe("overlay MCP tool", () => {
     ).toHaveLength(1);
   });
 
-  test.each(["show", "update", "dismiss", "status"])(
+  test.each(["show", "update", "dismiss", "status", "awaitEvent"])(
     "iOS %s fails with Android-only guidance",
     async (action) => {
       const input =
@@ -294,7 +597,9 @@ describe("overlay MCP tool", () => {
             ? { action, id: "panel", state: {} }
             : action === "dismiss"
               ? { action, all: true }
-              : { action };
+              : action === "awaitEvent"
+                ? { action, id: "panel" }
+                : { action };
       const { response, payload } = await call(input, { ...device, platform: "ios" });
       expect(response.isError).toBe(true);
       expect(payload.error).toContain("Android only");

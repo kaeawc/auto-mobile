@@ -1,6 +1,18 @@
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import {
+  OverlayEventCoordinator,
+  DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+  MAX_OVERLAY_EVENT_TIMEOUT_MS,
+} from "../features/overlay/OverlayEventCoordinator";
+import { DaemonState } from "../daemon/daemonState";
+import type { OverlayMutation } from "../features/overlay/OverlayStatusStore";
+import { defaultTimer } from "../utils/SystemTimer";
+import { combineWithAmbientAbort } from "../utils/AbortContext";
+import type { ProgressCallback } from "./toolRegistry";
 import { ToolRegistry } from "./toolRegistry";
 import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import { ActionableError, toActionableError } from "../models/ActionableError";
@@ -23,8 +35,6 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { deleteInternalToolParams } from "../daemon/constants";
-import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
-import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 
 // The settled spec is Zod 3; registry/device targeting use Zod 4. The installed
 // MCP SDK converts the original schema, avoiding a second authored spec schema.
@@ -95,7 +105,7 @@ const stateInput = z
 export const overlaySchema = addDeviceTargetingToSchema(
   z
     .object({
-      action: z.enum(["show", "update", "dismiss", "status"]),
+      action: z.enum(["show", "update", "dismiss", "status", "awaitEvent"]),
       spec: specInput
         .optional()
         .describe(
@@ -105,21 +115,43 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .string()
         .min(1)
         .optional()
-        .describe("Overlay id for update or dismiss; must equal spec.id on update"),
+        .describe(
+          "Overlay id required for update, dismiss or awaitEvent; must equal spec.id on update",
+        ),
       state: stateInput
         .optional()
         .describe("Flat state patch for update; use either spec or state"),
       all: z.literal(true).optional().describe("Dismiss all overlays on the targeted device"),
-      timeoutMs: z.number().int().positive().optional(),
+      eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
+      kind: z
+        .enum(["emit", "page_changed", "dismissed"])
+        .optional()
+        .describe("awaitEvent only: filter event kind"),
+      afterSequence: z
+        .number()
+        .int()
+        .nonnegative()
+        .max(Number.MAX_SAFE_INTEGER)
+        .optional()
+        .describe("awaitEvent only: return a sequence strictly above this cursor"),
+      timeoutMs: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          `Device request timeout; awaitEvent defaults to ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms, maximum ${MAX_OVERLAY_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result`,
+        ),
     })
     .strict(),
 ).superRefine((value, ctx) => {
-  const fields = ["spec", "id", "state", "all"] as const;
+  const fields = ["spec", "id", "state", "all", "eventName", "kind", "afterSequence"] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: ["spec"],
     update: ["id", "spec", "state"],
     dismiss: ["id", "all"],
     status: [],
+    awaitEvent: ["id", "eventName", "kind", "afterSequence"],
   };
   for (const field of fields) {
     if (value[field] !== undefined && !allowed[value.action].includes(field)) {
@@ -129,6 +161,9 @@ export const overlaySchema = addDeviceTargetingToSchema(
         message: `${value.action} allows ${allowed[value.action].join(", ") || "no mutation fields"}`,
       });
     }
+  }
+  if (value.action === "awaitEvent") {
+    validateAwaitEventInput(value, ctx);
   }
   if (value.action === "show" && value.spec === undefined) {
     ctx.addIssue({ code: "custom", path: ["spec"], message: "show requires spec" });
@@ -144,6 +179,19 @@ export const overlaySchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+function validateAwaitEventInput(value: z.infer<typeof overlaySchema>, ctx: z.RefinementCtx): void {
+  if (value.id === undefined) {
+    ctx.addIssue({ code: "custom", path: ["id"], message: "awaitEvent requires id" });
+  }
+  if (value.timeoutMs !== undefined && value.timeoutMs > MAX_OVERLAY_EVENT_TIMEOUT_MS) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["timeoutMs"],
+      message: `awaitEvent timeoutMs must not exceed ${MAX_OVERLAY_EVENT_TIMEOUT_MS}`,
+    });
+  }
+}
 
 function validateUpdateInput(value: z.infer<typeof overlaySchema>, ctx: z.RefinementCtx): void {
   if (!value.id || (value.spec === undefined) === (value.state === undefined)) {
@@ -180,21 +228,71 @@ const lastResultSchema = z.object({
   totalTimeMs: z.number().optional(),
   timestamp: z.number().describe("Host clock milliseconds when the request completed"),
 });
+const eventCountsSchema = z.object({
+  pendingCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Unconsumed events, including events excluded by filters or cursor"),
+  lastSequence: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Highest sequence accepted for this overlay"),
+  droppedCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Cumulative events dropped by buffer overflow in this scope"),
+});
+const overlayEventOutputSchema = z.object({
+  id: z.string(),
+  sequence: z.number().int().nonnegative(),
+  kind: z.enum(["emit", "page_changed", "dismissed"]),
+  name: z.string().nullable(),
+  payload: z.json(),
+  state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+  pages: z.record(z.string(), z.number().int().nonnegative()),
+  timestamp: z.number(),
+});
 export const overlayOutputSchema = z.object({
   success: z.boolean(),
   error: z.string().optional(),
-  overlays: z.array(lastResultSchema).optional(),
+  overlays: z.array(lastResultSchema.extend(eventCountsSchema.shape)).optional(),
   lastResult: lastResultSchema.optional(),
+  event: overlayEventOutputSchema.optional(),
+  timedOut: z
+    .literal(true)
+    .optional()
+    .describe("awaitEvent reached its timeout without a matching event; success remains true"),
+  reason: z
+    .literal("dismissed")
+    .optional()
+    .describe("The overlay scope ended without a matching event"),
+  ...eventCountsSchema.shape,
 });
 
+export interface OverlayEventLifecycle {
+  /** `releasedDeviceId` is the device named by the release snapshot, when one exists. */
+  subscribeSessionRelease(
+    listener: (sessionUuid: string, releasedDeviceId?: string) => void,
+  ): () => void;
+  subscribeDeviceRemoval(listener: (deviceId: string) => void): () => void;
+  subscribeDeviceUnbound(listener: (deviceId: string) => void): () => void;
+}
 type OverlayClient = Pick<
   AndroidCtrlProxyClient,
-  "requestShowOverlay" | "requestUpdateOverlay" | "requestDismissOverlay"
+  "requestShowOverlay" | "requestUpdateOverlay" | "requestDismissOverlay" | "onOverlayEvent"
 >;
-interface OverlayToolDependencies {
+export interface OverlayToolDependencies {
   clientFactory?: (device: BootedDevice) => OverlayClient;
   store?: OverlayStatusStore;
   clock?: Pick<Timer, "now">;
+  timer?: Timer;
+  lifecycle?: OverlayEventLifecycle;
 }
 const responseFor = (payload: z.infer<typeof overlayOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
@@ -220,14 +318,148 @@ async function mutate(
   return client.requestDismissOverlay(target, args.timeoutMs);
 }
 
+function clearMutationEvents(
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  target: { id?: string; all?: true },
+  action: OverlayMutation,
+  success: boolean,
+  previouslyShown: boolean,
+): void {
+  if ((action === "dismiss" && success) || (action === "show" && !success && !previouslyShown)) {
+    events.dismiss(scope.deviceId, target.id);
+  }
+}
+
+function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): () => void {
+  const state = DaemonState.getInstance();
+  if (!state.isInitialized()) {
+    return () => {};
+  }
+  const manager = state.getSessionManager();
+  // This removable hook observes the same rebind as onSessionDeviceUnbound,
+  // including a forced same-serial replacement, without retaining callbacks.
+  return manager.onDeviceOwnershipChange((deviceId, invalidation) => {
+    if (invalidation === "full" || manager.getSessionForDevice(deviceId) === null) {
+      listener(deviceId);
+    }
+  });
+}
+
+async function performMutation(
+  dependencies: {
+    store: OverlayStatusStore;
+    events: OverlayEventCoordinator;
+    clientFactory: (device: BootedDevice) => OverlayClient;
+  },
+  device: BootedDevice,
+  args: Omit<z.infer<typeof overlaySchema>, "action"> & { action: OverlayMutation },
+  scope: OverlayScope,
+) {
+  const { store, events, clientFactory } = dependencies;
+  const target = args.all
+    ? { all: true as const }
+    : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
+  const client = clientFactory(device);
+  const previouslyShown = store.status(scope).overlays.some((entry) => entry.id === target.id);
+  if (args.action === "show") {
+    events.show(scope, target.id!, client);
+  }
+  let result: OverlayResult;
+  try {
+    result = await mutate(client, args);
+  } catch (error) {
+    logger.warn("[overlay] Request failed", error);
+    result = {
+      success: false,
+      error: toActionableError(error, "Overlay request failed").message,
+    };
+  }
+  clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
+  const lastResult = store.record(scope, args.action, target, result);
+  if (target.id && events.isDismissed(scope, target.id)) {
+    store.dismissed(scope, target.id);
+  }
+  return responseFor({
+    success: result.success,
+    ...(result.error ? { error: result.error } : {}),
+    lastResult,
+  });
+}
+
+function notifyOverlayWaitProgress(
+  progress: ProgressCallback | undefined,
+  completed: boolean,
+): void {
+  if (!progress) {
+    return;
+  }
+  // Transport notifications are best-effort and must not extend the bounded wait.
+  void Promise.resolve()
+    .then(() =>
+      progress(
+        completed ? 1 : 0,
+        1,
+        completed ? "Overlay event wait finished" : "Waiting for an overlay event",
+      ),
+    )
+    .catch((error) => {
+      logger.warn("[overlay] Wait progress notification failed", error);
+    });
+}
+
+function defaultOverlayLifecycle(): OverlayEventLifecycle {
+  return {
+    subscribeSessionRelease: (listener) =>
+      SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot) =>
+        listener(sessionUuid, snapshot?.deviceId),
+      ),
+    subscribeDeviceRemoval: (listener) =>
+      getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener),
+    subscribeDeviceUnbound: subscribeOverlayDeviceUnbound,
+  };
+}
+
+/**
+ * The single lifecycle mechanism: a released session (and the device its snapshot names),
+ * a removed device and an unbound device all clear host status and event buffers.
+ */
+function subscribeOverlayCleanup(
+  lifecycle: OverlayEventLifecycle,
+  events: OverlayEventCoordinator,
+): () => void {
+  const cleanups = [
+    lifecycle.subscribeSessionRelease((sessionUuid, releasedDeviceId) => {
+      events.releaseSession(sessionUuid);
+      if (releasedDeviceId) {
+        events.releaseDevice(releasedDeviceId);
+      }
+    }),
+    lifecycle.subscribeDeviceRemoval((deviceId) => events.releaseDevice(deviceId)),
+    lifecycle.subscribeDeviceUnbound((deviceId) => events.releaseDevice(deviceId)),
+  ];
+  return () => {
+    for (const cleanup of cleanups) {
+      cleanup();
+    }
+  };
+}
+
 export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
-  // Registry replacement makes the previous handler/store obsolete.
+  // Registry replacement makes the previous handler, store and event buffers obsolete.
   unsubscribeOverlayLifecycle?.();
-  const store = dependencies.store ?? new InMemoryOverlayStatusStore(dependencies.clock);
+  const store =
+    dependencies.store ?? new InMemoryOverlayStatusStore(dependencies.clock ?? dependencies.timer);
   const clientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
-  const handler = async (device: BootedDevice, input: unknown) => {
+  const events = new OverlayEventCoordinator(dependencies.timer ?? defaultTimer, store);
+  const handler = async (
+    device: BootedDevice,
+    input: unknown,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     const external: Record<string, unknown> =
       input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
     deleteInternalToolParams(external);
@@ -247,49 +479,52 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     }
     const scope = overlayScope(device, args);
     if (args.action === "status") {
-      return responseFor({ success: true, ...store.status(scope) });
+      const status = store.status(scope);
+      return responseFor({
+        success: true,
+        ...status,
+        overlays: status.overlays.map((entry) => {
+          const counts = entry.id ? events.counts(scope, entry.id) : undefined;
+          return counts?.lastSequence === undefined ? entry : { ...entry, ...counts };
+        }),
+      });
     }
-    const target = args.all
-      ? { all: true as const }
-      : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
-    let result: OverlayResult;
-    try {
-      result = await mutate(clientFactory(device), args);
-    } catch (error) {
-      logger.warn("[overlay] Request failed", error);
-      result = {
-        success: false,
-        error: toActionableError(error, "Overlay request failed").message,
-      };
+    if (args.action === "awaitEvent") {
+      const waiting = events.awaitEvent(scope, args.id!, clientFactory(device), {
+        eventName: args.eventName,
+        kind: args.kind,
+        afterSequence: args.afterSequence,
+        timeoutMs: args.timeoutMs,
+        signal: combineWithAmbientAbort(signal),
+      });
+      notifyOverlayWaitProgress(progress, false);
+      try {
+        return responseFor({ success: true, ...(await waiting) });
+      } finally {
+        notifyOverlayWaitProgress(progress, true);
+      }
     }
-    const lastResult = store.record(scope, args.action, target, result);
-    return responseFor({
-      success: result.success,
-      ...(result.error ? { error: result.error } : {}),
-      lastResult,
-    });
+    return performMutation(
+      { store, events, clientFactory },
+      device,
+      { ...args, action: args.action },
+      scope,
+    );
   };
   ToolRegistry.registerDeviceAware(
     "overlay",
-    'Show, update (spec or flat state), dismiss (id or all:true), or inspect host-local overlay status on Android. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. Verify with observe; no screenshot is returned. Status reflects host requests only, not device events.',
+    'Show, update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },
   );
-  const unsubscribeSession = SessionReleaseBroadcaster.subscribe(
-    (sessionUuid, _reason, snapshot) => {
-      store.clearSession(sessionUuid);
-      if (snapshot) {
-        store.clearDevice(snapshot.deviceId);
-      }
-    },
+  const unsubscribeCleanup = subscribeOverlayCleanup(
+    dependencies.lifecycle ?? defaultOverlayLifecycle(),
+    events,
   );
-  const unsubscribeDevice = getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved((deviceId) => {
-    store.clearDevice(deviceId);
-  });
   const unsubscribe = () => {
-    unsubscribeSession();
-    unsubscribeDevice();
+    unsubscribeCleanup();
+    events.dispose();
     if (unsubscribeOverlayLifecycle === unsubscribe) {
       unsubscribeOverlayLifecycle = undefined;
     }

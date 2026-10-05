@@ -769,11 +769,6 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
-  const compactMetadata = canCompactActionMetadata(ctx, payload, envelopeView.envelope);
-  if (compactMetadata) {
-    sanitizedPayload = compactActionMetadata(sanitizedPayload ?? payload, ctx);
-  }
-
   if (
     ctx.artifactWriter &&
     !ctx.internal &&
@@ -834,7 +829,20 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
+  // Artifacts retain complete metadata. Compact only the residue delivered inline,
+  // and preserve the original envelope when compaction has nothing to remove.
+  if (canCompactActionMetadata(ctx, payload, envelopeView.envelope)) {
+    const inlinePayload = sanitizedPayload ?? payload;
+    const compacted = compactActionMetadata(inlinePayload, ctx);
+    if (compacted !== inlinePayload) {
+      sanitizedPayload = compacted;
+    }
+  }
+
   if (!sanitizedPayload) {
+    if (canRecordActionMetadata(ctx)) {
+      recordInlineActionMetadata(payload, ctx, actionMetadataDeviceId(payload, ctx.name));
+    }
     return response;
   }
 
@@ -844,8 +852,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload,
     envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
   );
-  if (compactMetadata) {
-    recordInlineActionMetadata(sanitizedPayload, ctx, actionMetadataDeviceId(payload));
+  if (canRecordActionMetadata(ctx)) {
+    recordInlineActionMetadata(sanitizedPayload, ctx, actionMetadataDeviceId(payload, ctx.name));
   }
   if (pendingBaselineUpdate) {
     ctx.baselineStore!.set(
@@ -878,29 +886,38 @@ const ACTION_METADATA_FIELDS = [
 ] as const;
 const HIERARCHY_METADATA_FIELDS = ["insets", "systemInsets"] as const;
 
+function canRecordActionMetadata(ctx: FinalizeToolResponseContext): boolean {
+  return (
+    serverConfig.isActionsCompactMetadataEnabled() &&
+    !ctx.internal &&
+    !!ctx.sessionUuid &&
+    !!ctx.baselineStore?.getActionMetadata &&
+    !!ctx.baselineStore.setActionMetadata
+  );
+}
+
 function canCompactActionMetadata(
   ctx: FinalizeToolResponseContext,
   payload: Record<string, unknown>,
   envelope: object,
 ): boolean {
   return (
-    serverConfig.isActionsCompactMetadataEnabled() &&
+    canRecordActionMetadata(ctx) &&
     ctx.name !== "observe" &&
-    !ctx.internal &&
-    !!ctx.sessionUuid &&
-    !!ctx.baselineStore?.getActionMetadata &&
-    !!ctx.baselineStore.setActionMetadata &&
     payload.success !== false &&
     payload.error === undefined &&
     (envelope as { isError?: boolean }).isError !== true
   );
 }
 
-function actionMetadataBlocks(payload: Record<string, unknown>): Record<string, unknown> {
-  if (!isRecord(payload.observation)) {
+function actionMetadataBlocks(
+  payload: Record<string, unknown>,
+  name: string,
+): Record<string, unknown> {
+  const observation = name === "observe" ? payload : payload.observation;
+  if (!isRecord(observation)) {
     return {};
   }
-  const observation = payload.observation;
   const blocks: Record<string, unknown> = {};
   for (const field of ACTION_METADATA_FIELDS) {
     if (observation[field] !== undefined) {
@@ -917,8 +934,12 @@ function actionMetadataBlocks(payload: Record<string, unknown>): Record<string, 
   return blocks;
 }
 
-function actionMetadataDeviceId(payload: Record<string, unknown>): string | undefined {
-  const deviceId = isRecord(payload.observation) ? payload.observation.deviceId : undefined;
+function actionMetadataDeviceId(
+  payload: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const observation = name === "observe" ? payload : payload.observation;
+  const deviceId = isRecord(observation) ? observation.deviceId : undefined;
   return typeof deviceId === "string" && deviceId.length > 0 ? deviceId : undefined;
 }
 
@@ -938,11 +959,12 @@ function compactActionMetadata(
   payload: Record<string, unknown>,
   ctx: FinalizeToolResponseContext,
 ): Record<string, unknown> {
-  const next = { ...payload };
+  let next = payload;
   if (hasDuplicateActionElement(payload, ctx.outputSchema)) {
+    next = { ...payload };
     delete next.element;
   }
-  const deviceId = actionMetadataDeviceId(payload);
+  const deviceId = actionMetadataDeviceId(payload, ctx.name);
   if (!deviceId || !isRecord(payload.observation)) {
     return next;
   }
@@ -950,32 +972,45 @@ function compactActionMetadata(
   if (!previous) {
     return next;
   }
-  const observation = { ...payload.observation };
-  for (const field of ACTION_METADATA_FIELDS) {
+  const observation = payload.observation;
+  const omittedFields = ACTION_METADATA_FIELDS.filter((field) => {
+    const block = observation[field];
+    // Per-call warnings must survive even when their values have not changed.
     if (
-      observation[field] !== undefined &&
-      isDeepStrictEqual(observation[field], previous[field])
+      (field === "freshness" && (!isRecord(block) || block.isFresh !== true)) ||
+      (field === "gfxMetrics" && isRecord(block) && block.isStable === false)
     ) {
-      delete observation[field];
+      return false;
     }
+    return block !== undefined && isDeepStrictEqual(block, previous[field]);
+  });
+  const sourceHierarchy = isRecord(observation.viewHierarchy)
+    ? observation.viewHierarchy
+    : undefined;
+  const omittedHierarchyFields = HIERARCHY_METADATA_FIELDS.filter(
+    (field) =>
+      sourceHierarchy?.[field] !== undefined &&
+      isDeepStrictEqual(sourceHierarchy[field], previous[`viewHierarchy.${field}`]),
+  );
+  if (omittedFields.length === 0 && omittedHierarchyFields.length === 0) {
+    return next;
   }
-  if (isRecord(observation.viewHierarchy)) {
-    const hierarchy = { ...observation.viewHierarchy };
-    for (const field of HIERARCHY_METADATA_FIELDS) {
-      if (
-        hierarchy[field] !== undefined &&
-        isDeepStrictEqual(hierarchy[field], previous[`viewHierarchy.${field}`])
-      ) {
-        delete hierarchy[field];
-      }
+
+  const compactedObservation = { ...observation };
+  for (const field of omittedFields) {
+    delete compactedObservation[field];
+  }
+  if (omittedHierarchyFields.length > 0) {
+    const hierarchy = { ...sourceHierarchy };
+    for (const field of omittedHierarchyFields) {
+      delete hierarchy[field];
     }
-    observation.viewHierarchy = hierarchy;
+    compactedObservation.viewHierarchy = hierarchy;
   }
-  next.observation = observation;
-  return next;
+  return { ...next, observation: compactedObservation };
 }
 
-/** Run after envelope rewrite and both spills: artifacts do not count as inline delivery. */
+/** Record only final inline blocks, including observe and errors; artifacts do not count. */
 function recordInlineActionMetadata(
   payload: Record<string, unknown>,
   ctx: FinalizeToolResponseContext,
@@ -984,7 +1019,7 @@ function recordInlineActionMetadata(
   if (!deviceId) {
     return;
   }
-  const blocks = actionMetadataBlocks(payload);
+  const blocks = actionMetadataBlocks(payload, ctx.name);
   const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
   if (Object.keys(blocks).length === 0 && previous) {
     return;

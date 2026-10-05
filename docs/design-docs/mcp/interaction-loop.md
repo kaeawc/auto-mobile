@@ -95,7 +95,13 @@ but duplicate element removal still applies. An empty snapshot on a device
 switch invalidates the previous device's metadata without claiming delivery.
 
 Only blocks that survive artifact and oversized-residue spills **inline** are
-remembered as sent; an artifact pointer does not count as delivery. `observe`,
-internal tool-to-tool calls, and error responses neither omit blocks nor update
-this record. Calls without a session/store emit the existing full response.
-The record lives in the session cache and is cleared on session release/rebind.
+remembered as sent, and artifacts are always written from the uncompacted payload;
+an artifact pointer does not count as delivery. Any non-internal session-scoped
+response that carries a block inline (including `observe` and error responses,
+which never omit blocks themselves) updates the record for exactly those blocks.
+`freshness` with `isFresh !== true` and `gfxMetrics` with `isStable === false`
+are always sent. Internal tool-to-tool calls neither omit nor record, and calls
+without a session/store emit the existing full response. The record lives in the
+session cache and is cleared on session release/rebind. It is written while the
+response is finalized, before the transport sends it, so a response dropped
+after that point leaves the client without the omitted block until it changes.

@@ -36,7 +36,63 @@ test.each([
   },
 );
 
-test("key-event clear verification keeps an empty Compose field without captured text unreadable", async () => {
+test.each([
+  { class: "android.widget.EditText", focused: "true" },
+  { className: "android.widget.EditText", focused: true, password: "false" },
+  { class: "androidx.appcompat.widget.AppCompatEditText", focused: true, text: "" },
+  { class: "android.view.View", focused: true, actions: ["set_text"] },
+  { class: "android.view.View", focused: true, editable: "true" },
+])("key-event clear verification accepts an empty non-password Android input: %j", async (node) => {
+  const hierarchy = capture(node);
+  expect(getFocusedTextLength(hierarchy)).toBe(0);
+  expect(getFocusedTextLength(hierarchy, undefined, true)).toBe(0);
+  expect(
+    await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+  ).toEqual({ success: true });
+});
+
+test.each([
+  { class: "android.widget.EditText", focused: true, password: true },
+  { class: "android.widget.EditText", focused: "true", password: "true" },
+  { class: "android.view.View", focused: true, editable: true, password: true },
+  { class: "UISecureTextField", focused: true },
+  { class: "UITextField", focused: true, actions: ["set_text"], "hint-text": "Hint" },
+])(
+  "key-event clear verification keeps hidden or absent iOS values unreadable: %j",
+  async (node) => {
+    const hierarchy = capture(node);
+    expect(getFocusedTextLength(hierarchy)).toBeUndefined();
+    expect(getFocusedTextLength(hierarchy, undefined, true)).toBeUndefined();
+    expect(
+      await verifyKeyEventClear(async () => ({ timestamp: 0, viewHierarchy: hierarchy })),
+    ).toEqual({
+      success: false,
+      error: "Cannot verify key-event clear: focused field text length is unreadable",
+    });
+  },
+);
+
+test.each([
+  { timestamp: 0, viewHierarchy: capture({ class: "android.widget.EditText", focused: false }) },
+  { timestamp: 0, viewHierarchy: capture({ class: "android.view.View", focused: true }) },
+  { timestamp: 0 },
+  { timestamp: 0, viewHierarchy: { hierarchy: { error: "unavailable" } } },
+  {
+    timestamp: 0,
+    viewHierarchy: capture({ class: "android.widget.EditText", focused: true }),
+    freshness: { isFresh: false },
+  },
+])(
+  "key-event clear verification requires a fresh focused editable input: %j",
+  async (observation) => {
+    expect(await verifyKeyEventClear(async () => observation)).toEqual({
+      success: false,
+      error: "Cannot verify key-event clear: no fresh focused editable field available",
+    });
+  },
+);
+
+test("key-event clear verification keeps a classless field without captured text unreadable", async () => {
   const hierarchy = capture({ focused: true, actions: ["set_text"] });
   expect(getFocusedTextLength(hierarchy)).toBeUndefined();
   expect(

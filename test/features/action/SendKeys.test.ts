@@ -1220,13 +1220,102 @@ describe("DefaultSendKeysCommandExecutor", () => {
         ]),
       ).toMatchObject({ success: true });
       expect(adb.getExecutedCommands()).toEqual([
-        "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_MOVE_END",
-        ...(before.length > 0
-          ? [`shell input keyevent ${Array<string>(before.length).fill("KEYCODE_DEL").join(" ")}`]
-          : []),
+        "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+        "shell input keyevent KEYCODE_DEL",
         "shell input keyevent KEYCODE_Z",
         "shell input keyevent KEYCODE_Z",
       ]);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  test.each(["first\nlater\nlines", "abc", undefined])(
+    "eventOnly replace types after clearing to an absent Compose-style value (before=%j)",
+    async (before) => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(34);
+      const { client, calls } = createTextClient();
+      const observer: SendKeysObserver = {
+        execute: async (options) =>
+          focusedAndroidObservation(
+            "",
+            { text: options?.minTimestamp === 0 ? undefined : before },
+            0,
+          ),
+      };
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: client, timer: new FakeTimer() },
+      );
+      const sendKeys = new SendKeys(androidDevice, undefined, {
+        executor,
+        observer,
+        timer: new FakeTimer(),
+        timestampProvider: { now: async () => 0 },
+      });
+
+      expect(
+        await sendKeys.execute([
+          { action: "type", text: "zz", operation: "replace", mode: "eventOnly" },
+        ]),
+      ).toMatchObject({ success: true });
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+        "shell input keyevent KEYCODE_DEL",
+        "shell input keyevent KEYCODE_Z",
+        "shell input keyevent KEYCODE_Z",
+      ]);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  test.each([false, true])(
+    "eventOnly replace refuses an absent password value (absentBefore=%s)",
+    async (absentBefore) => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(34);
+      const { client, calls } = createTextClient();
+      const observer: SendKeysObserver = {
+        execute: async (options) =>
+          focusedAndroidObservation(
+            "",
+            {
+              text: absentBefore || options?.minTimestamp === 0 ? undefined : "•••",
+              password: "true",
+            },
+            0,
+          ),
+      };
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: client, timer: new FakeTimer() },
+      );
+
+      expect(
+        await executor.type({
+          action: "type",
+          text: "zz",
+          operation: "replace",
+          mode: "eventOnly",
+        }),
+      ).toMatchObject({
+        success: false,
+        error: absentBefore
+          ? "eventOnly replacement requires a known focused text length; use a11y replacement instead"
+          : "Cannot verify key-event clear: focused field text length is unreadable",
+      });
+      expect(adb.getExecutedCommands()).toEqual(
+        absentBefore
+          ? []
+          : [
+              "shell input keycombination KEYCODE_CTRL_LEFT KEYCODE_A",
+              "shell input keyevent KEYCODE_DEL",
+            ],
+      );
       expect(calls).toEqual([]);
     },
   );

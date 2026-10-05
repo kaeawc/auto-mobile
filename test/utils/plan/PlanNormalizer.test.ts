@@ -1,7 +1,86 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { PlanNormalizer } from "../../../src/utils/plan/PlanNormalizer";
 
 describe("PlanNormalizer", () => {
+  test("logs only the tool name and index once at info", () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const normalized = PlanNormalizer.normalizeStep({ tool: "inputText", text: "hunter2" }, 0);
+
+      expect(normalized).toEqual({ tool: "inputText", params: { text: "hunter2" } });
+      expect(info.mock.calls.flat().some((argument) => String(argument).includes("hunter2"))).toBe(
+        false,
+      );
+      expect(info.mock.calls).toEqual([["Normalized step 0: inputText"]]);
+    } finally {
+      info.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  test("keeps the raw and normalized JSON dumps at debug", () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const step = { tool: "inputText", text: "hunter2" };
+      const normalized = PlanNormalizer.normalizeStep(step, 0);
+
+      expect(debug.mock.calls).toEqual([
+        ["Processing step 0:", JSON.stringify(step, null, 2)],
+        ["Normalized step 0:", JSON.stringify(normalized, null, 2)],
+      ]);
+      expect(debug.mock.calls.every(([, dump]) => String(dump).includes("hunter2"))).toBe(true);
+    } finally {
+      info.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
+  test("preserves command, params, label, and optional mapping", () => {
+    expect(
+      PlanNormalizer.normalizeStep(
+        {
+          command: "inputText",
+          text: "inline",
+          params: { text: "hunter2" },
+          label: "Enter text",
+          optional: true,
+        },
+        3,
+      ),
+    ).toEqual({
+      tool: "inputText",
+      params: { text: "hunter2" },
+      label: "Enter text",
+      optional: true,
+    });
+  });
+
+  test("logs one info summary per step when normalizing two steps", () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const normalized = PlanNormalizer.normalizeSteps([
+        { tool: "inputText", text: "hunter2" },
+        { tool: "tapOn", text: "Submit" },
+      ]);
+
+      expect(normalized).toEqual([
+        { tool: "inputText", params: { text: "hunter2" } },
+        { tool: "tapOn", params: { text: "Submit" } },
+      ]);
+      expect(info.mock.calls).toEqual([
+        ["Normalized step 0: inputText"],
+        ["Normalized step 1: tapOn"],
+      ]);
+    } finally {
+      info.mockRestore();
+      debug.mockRestore();
+    }
+  });
+
   test("merges inline fields into params", () => {
     const normalized = PlanNormalizer.normalizeStep(
       { tool: "tapOn", text: "Hello", device: "A" },

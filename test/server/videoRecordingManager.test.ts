@@ -13,6 +13,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
+import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
@@ -84,6 +85,8 @@ describe("videoRecordingManager", () => {
   let fakeRepository: FakeVideoRecordingRepository;
   let service: VideoRecorderService;
   let archiveRoot: string;
+  let archiveParent: string;
+  let archiveGeneration = 0;
   let testDevice: BootedDevice;
   const originalWarn = logger.warn.bind(logger);
   let warnings: string[] = [];
@@ -96,10 +99,10 @@ describe("videoRecordingManager", () => {
   };
 
   beforeAll(async () => {
-    archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
+    archiveParent = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
   });
 
-  const setup = async () => {
+  const setup = async (createRecordingDirectories = false) => {
     warnings = [];
     warnSpy = spyOn(logger, "warn").mockImplementation((message, ...args) => {
       warnings.push([message, ...args].map(String).join(" "));
@@ -114,13 +117,15 @@ describe("videoRecordingManager", () => {
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
     fakeHighlightClient = new FakeHighlightClient();
     fakeRepository = new FakeVideoRecordingRepository();
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
-    await fsPromises.mkdir(archiveRoot, { recursive: true });
+    // Isolate reused fake recording IDs without filesystem work in every reset.
+    // Only artifact scenarios create their directories; afterAll removes them all.
+    archiveRoot = path.join(archiveParent, String(archiveGeneration++));
 
     service = new VideoRecorderService({
       backend: fakeBackend,
       idGenerator: new FakeIdGenerator(),
       archiveRoot,
+      securePermissions: new FakeSecurePermissions(createRecordingDirectories),
       now: () => new Date(fakeTimer.now()),
     });
 
@@ -169,7 +174,7 @@ describe("videoRecordingManager", () => {
 
   afterAll(async () => {
     cleanup();
-    await fsPromises.rm(archiveRoot, { recursive: true, force: true });
+    await fsPromises.rm(archiveParent, { recursive: true, force: true });
   });
 
   const drainAsyncUntil = async (
@@ -430,6 +435,7 @@ describe("videoRecordingManager", () => {
 
     const finish = async (outputName: string, sizeBytes = 10) => {
       const active = await startVideoRecording({ device: iosDevice, outputName });
+      await fsPromises.mkdir(path.dirname(active.outputPath), { recursive: true });
       await fsPromises.writeFile(active.outputPath, "video-bytes");
       fakeBackend.setStopResultOverrides({ sizeBytes });
       return stopVideoRecording(active.recordingId);
@@ -522,6 +528,7 @@ describe("videoRecordingManager", () => {
         statFileSize: async () => capBytes * 2,
       });
       const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      await fsPromises.mkdir(path.dirname(active.outputPath), { recursive: true });
       await fsPromises.writeFile(active.outputPath, "video-bytes");
       fakeBackend.setStopResultOverrides({ sizeBytes: capBytes * 2 });
       const stopping = fakeBackend.waitForStopCall();
@@ -1165,6 +1172,9 @@ describe("videoRecordingManager", () => {
   });
 
   test("force-stops backend success and removes ownership when persistence fails", async () => {
+    // Create the recording directory so the assertion below proves rollback removes it.
+    cleanup();
+    await setup(true);
     fakeRepository.insertRecording = async () => {
       throw new Error("database unavailable");
     };
@@ -1185,6 +1195,7 @@ describe("videoRecordingManager", () => {
     const cleanupFailingService = new VideoRecorderService({
       backend: fakeBackend,
       archiveRoot,
+      securePermissions: new FakeSecurePermissions(false),
       now: () => new Date(fakeTimer.now()),
       fileSystem: {
         rm: async () => {
@@ -1214,6 +1225,7 @@ describe("videoRecordingManager", () => {
     const cleanupFailingService = new VideoRecorderService({
       backend: fakeBackend,
       archiveRoot,
+      securePermissions: new FakeSecurePermissions(false),
       now: () => new Date(fakeTimer.now()),
       fileSystem: {
         rm: async () => {

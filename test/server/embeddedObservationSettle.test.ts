@@ -289,6 +289,40 @@ describe("embedded settle on a still Android frame (#9579)", () => {
     }
   });
 
+  test("real Android cache resumes after a finishing capture contradicts the stable pair", async () => {
+    const h = await deviceLikeAndroidHierarchy((n) => (n <= 2 ? "A" : "B"));
+    const screen = deviceLikeObserveScreen(h);
+    const recomposition = spyOn(screen, "processRecomposition").mockResolvedValue(undefined);
+    const collect = spyOn(screen, "collectDeferredBackStack").mockResolvedValue(true);
+    const started = h.timer.now();
+    try {
+      const result = await settleEmbeddedObservation({
+        actionClass: "navigation",
+        observation: obs(AIRPLANE_ROW_INFLATED, DEVICE_CAPTURE_TIME),
+        settleObserve: new RealSettleObserve(screen, h.timer),
+      });
+      expect(result.settled).toBe(true);
+      expect(h.extractions()).toBe(5);
+      expect(result.observation.viewHierarchy?.updatedAt).toBe(DEVICE_CAPTURE_TIME + 5);
+      expect(JSON.stringify(result.observation.viewHierarchy?.hierarchy)).toContain('"B"');
+      expect(h.reads.every((read) => read.fresh === true)).toBe(true);
+      expect(h.reads.map((read) => read.floor)).toEqual(
+        [1, 1, 2, 3, 4].map((n) => DEVICE_CAPTURE_TIME + n),
+      );
+      expect(h.timer.now() - started).toBe(400);
+      expect(recomposition.mock.calls.map(([observation]) => observation)).toEqual([
+        result.observation,
+      ]);
+      expect(collect).toHaveBeenCalledTimes(2);
+    } finally {
+      collect.mockRestore();
+      recomposition.mockRestore();
+      h.restore();
+      resetObserveCacheStore();
+      displayTransitions.reset(h.device.deviceId);
+    }
+  });
+
   test("syncs past the action capture, then settles without waiting for a nonexistent push", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

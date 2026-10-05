@@ -4,6 +4,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import type { TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
+  resolveTalkBackStateConfirmation,
   type AccessibilityDetector,
 } from "../../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
@@ -40,12 +41,13 @@ export class AndroidTapStrategy implements TapStrategy {
   async isAccessibilityServiceEnabled(onWarning?: (warning: string) => void): Promise<boolean> {
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
     // apply to tap detection uniformly with the observe path (#3925).
-    const state = await this.accessibilityDetector.resolveTalkBackState(
+    const { talkBack: state, unconfirmed } = await resolveTalkBackStateConfirmation(
+      this.accessibilityDetector,
       this.device.deviceId,
       this.adb,
       this.featureFlags,
     );
-    if (state === null) {
+    if (unconfirmed) {
       onWarning?.(TALKBACK_STATE_UNKNOWN_WARNING);
     }
     return state === true;

@@ -1,13 +1,12 @@
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { errorMessage } from "../../utils/describeUnknownError";
-import type { BootedDevice, ExecResult } from "../../models";
+import type { BootedDevice } from "../../models";
 import {
   SimulatorTccSqliteClient,
   permissionForTccService,
   tccServiceForPermission,
   type TccPermissionReader,
 } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
-import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import {
   resolveIosPermissionsBackend,
@@ -59,37 +58,6 @@ export interface IosSimulatorPermissionQueryResult {
 export { type IosSimulatorPrivacyClient } from "../../utils/ios-cmdline-tools/IosPermissionsBackend";
 
 export { type TccPermissionReader } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
-
-/** @deprecated Inject SimulatorTccSqliteClient dependencies directly in new callers. */
-export interface SqliteCommandExecutor {
-  execFile(command: string, args: string[]): Promise<{ stdout: string }>;
-}
-
-class LegacySqliteCommandExecutorAdapter implements HostCommandExecutor {
-  constructor(private readonly sqlite: SqliteCommandExecutor) {}
-
-  async executeCommand(file: string, args: string[] = []): Promise<ExecResult> {
-    const { stdout } = await this.sqlite.execFile(file, args);
-    return {
-      stdout,
-      stderr: "",
-      toString: () => stdout,
-      trim: () => stdout.trim(),
-      includes: (search: string) => stdout.includes(search),
-    };
-  }
-}
-
-/** @deprecated Use SimulatorTccSqliteClient. Retains the prior injected-executor constructor contract. */
-export class SqliteTccPermissionReader extends SimulatorTccSqliteClient {
-  constructor(sqlite?: SqliteCommandExecutor, homeDirectory?: string) {
-    super({
-      ...(sqlite ? { executor: new LegacySqliteCommandExecutorAdapter(sqlite) } : {}),
-      ...(sqlite ? { fileSystem: { stat: async () => ({ isFile: () => true }) } } : {}),
-      ...(homeDirectory ? { homeDirectory } : {}),
-    });
-  }
-}
 
 export function isIosSimulatorDevice(device: BootedDevice): boolean {
   return resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator";

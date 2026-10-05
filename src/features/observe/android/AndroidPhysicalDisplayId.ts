@@ -112,12 +112,6 @@ export class AndroidPhysicalDisplayIdResolver {
   }
 }
 
-/** Resolve the active logical default display to a physical SurfaceFlinger ID. */
-export async function resolveActivePhysicalDisplayId(adb: AdbExecutor): Promise<string | null> {
-  const result = await resolvePhysicalDisplay(adb);
-  return result.kind === "display" ? result.id : null;
-}
-
 type PhysicalDisplayResolution =
   | { kind: "single" }
   | { kind: "display"; id: string }

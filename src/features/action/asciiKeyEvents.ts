@@ -1,1 +1,4 @@
-export * from "../../utils/android-cmdline-tools/asciiKeyEvents";
+export {
+  buildAsciiKeyEventPlan,
+  type KeyEventPlan,
+} from "../../utils/android-cmdline-tools/asciiKeyEvents";

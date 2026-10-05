@@ -26,6 +26,13 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
     onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
 
+  /** Dispatch both activation taps in one device request. */
+  requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    onDispatch?: () => void,
+  ): Promise<A11yTapCoordinatesResult>;
+
   /**
    * Request an accessibility action on an element.
    * @param action - The action to perform (e.g., "click", "long_click")
@@ -88,6 +95,14 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
       undefined,
       onDispatch,
     );
+  }
+
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    onDispatch?: () => void,
+  ): Promise<A11yTapCoordinatesResult> {
+    return this.accessibilityService.requestDoubleTapCoordinates(x, y, onDispatch);
   }
 
   async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {

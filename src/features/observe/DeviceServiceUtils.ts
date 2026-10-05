@@ -387,13 +387,13 @@ export async function sendCommand<T>(
         options.requiredCapability &&
         context.isCommandSupported?.(options.requiredCapability) !== true
       ) {
-        context.requestManager.resolve(
-          requestId,
-          responseErrorFactory(
+        context.requestManager.resolve(requestId, {
+          ...responseErrorFactory(
             `${options.requiredCapability} is not confirmed by the connected device service`,
             0,
           ),
-        );
+          unsupportedCapability: options.requiredCapability,
+        });
       } else {
         // Capability, caller fence, and cancellation share this synchronous pre-send step.
         // No await may separate these checks from sending the first committing message.

@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PerformanceAudit } from "../../../src/features/performance/PerformanceAudit";
 import { isTouchLatencySamplingEnabled } from "../../../src/features/performance/performanceAuditConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { logger } from "../../../src/utils/logger";
 
 interface TestViolation {
   metric: string;
@@ -29,6 +31,115 @@ const ASSIGNED_WEIGHTS: Array<{ metric: string; weight: number }> = [
   { metric: "touchLatency", weight: 0.85 },
   { metric: "anr", weight: 1.0 },
 ];
+
+describe("PerformanceAudit TTI characterization", () => {
+  let factory: FakeAdbClientFactory;
+  let timer: FakeTimer;
+  let audit: PerformanceAudit;
+  let sleepSpy: ReturnType<typeof spyOn<typeof defaultTimer, "sleep">>;
+  let infoSpy: ReturnType<typeof spyOn<typeof logger, "info">>;
+  let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  const readCommand = "shell dumpsys gfxinfo 'com.example'";
+  const resetCommand = `${readCommand} reset`;
+  const measure = () =>
+    audit["measureTimeToInteractive"]("com.example", 250, new NoOpPerformanceTracker());
+
+  beforeEach(() => {
+    factory = new FakeAdbClientFactory();
+    timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    sleepSpy = spyOn(defaultTimer, "sleep").mockImplementation((ms) => timer.sleep(ms));
+    infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    audit = new PerformanceAudit(
+      { deviceId: "test-device", name: "test", platform: "android" },
+      factory,
+    );
+  });
+  afterEach(() => {
+    sleepSpy.mockRestore();
+    infoSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  test("returns first stable start after six samples, preserving reset/sleep/read order", async () => {
+    const order: string[] = [];
+    const adb = factory.getFakeClient();
+    const execute = adb.executeCommand.bind(adb);
+    const executeSpy = spyOn(adb, "executeCommand").mockImplementation((command) => {
+      order.push(command);
+      return execute(command);
+    });
+    sleepSpy.mockImplementation((ms) => {
+      order.push(`sleep ${ms}`);
+      return timer.sleep(ms);
+    });
+    try {
+      expect(await measure()).toBe(350);
+      expect(order).toEqual(
+        Array.from({ length: 6 }, () => [resetCommand, "sleep 100", readCommand]).flat(),
+      );
+      expect(infoSpy).toHaveBeenCalledWith("[PerformanceAudit] TTI reached: 350ms");
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  test.each(["Number Missed Vsync", "Number Slow UI thread", "Number Frame deadline missed"])(
+    "%s resets the shared stability start before a fresh stable window",
+    async (metric) => {
+      factory.getFakeClient().setCommandResultSequence(readCommand, [
+        { stdout: "", stderr: "" },
+        { stdout: "", stderr: "" },
+        { stdout: `${metric}: 1`, stderr: "" },
+        { stdout: "", stderr: "" },
+      ]);
+      expect(await measure()).toBe(650);
+      expect(factory.getFakeClient().getAllCommands()).toEqual(
+        Array.from({ length: 9 }, () => [resetCommand, readCommand]).flat(),
+      );
+      expect(timer.getSleepHistory()).toEqual(Array(9).fill(100));
+      expect(infoSpy).toHaveBeenCalledWith("[PerformanceAudit] TTI reached: 650ms");
+    },
+  );
+
+  test("persistent jank times out after exactly fifty samples", async () => {
+    factory.getFakeClient().setCommandResult(readCommand, "Number Missed Vsync: 1");
+    expect(await measure()).toBeNull();
+    expect(factory.getFakeClient().getAllCommands()).toEqual(
+      Array.from({ length: 50 }, () => [resetCommand, readCommand]).flat(),
+    );
+    expect(timer.getSleepHistory()).toEqual(Array(50).fill(100));
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[PerformanceAudit] TTI measurement timed out after 5000ms",
+    );
+    expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test.each(["reset", "sleep", "read"])(
+    "%s error exits with the same warning and no later work",
+    async (stage) => {
+      const error = new Error("sample failed");
+      if (stage === "sleep") {
+        sleepSpy.mockRejectedValue(error);
+      } else {
+        factory
+          .getFakeClient()
+          .setCommandError(stage === "reset" ? resetCommand : readCommand, error);
+      }
+      expect(await measure()).toBeNull();
+      expect(factory.getFakeClient().getAllCommands()).toEqual(
+        stage === "read" ? [resetCommand, readCommand] : [resetCommand],
+      );
+      expect(sleepSpy).toHaveBeenCalledTimes(stage === "reset" ? 0 : 1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[PerformanceAudit] Failed to measure TTI: Error: sample failed",
+      );
+      expect(infoSpy).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("PerformanceAudit.generateDiagnostics - top contributors", function () {
   let audit: PerformanceAudit;

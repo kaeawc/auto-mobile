@@ -304,7 +304,12 @@ export class VideoServerJarProvider {
       });
       return jarPath;
     } catch (error) {
-      await fs.rm(tempPath, { force: true }).catch(() => {});
+      await fs.rm(tempPath, { force: true }).catch((cleanupError) => {
+        logger.warn(
+          `[VIDEO_JAR] Failed to remove partial download ${tempPath}: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      });
       throw error;
     }
   }

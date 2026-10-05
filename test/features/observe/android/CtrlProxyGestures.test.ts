@@ -875,6 +875,61 @@ it("tap cancellation inside the pre-send guard prevents dispatch and cleans regi
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
+describe("CtrlProxyGestures atomic double tap", () => {
+  it("sends both taps in one request and correlates the existing tap reply", async () => {
+    const { context, sent, requestManager } = createFakeContext({ isCommandSupported: () => true });
+    const onDispatch = spyOn({ sent: () => {} }, "sent");
+    const promise = new CtrlProxyGestures(context).requestDoubleTapCoordinates(
+      10.4,
+      20.6,
+      onDispatch,
+    );
+    await flush();
+    expect(sent).toHaveLength(1);
+    const message = JSON.parse(sent[0]);
+    expect(message).toMatchObject({
+      type: "request_tap_coordinates",
+      x: 10,
+      y: 21,
+      duration: 50,
+      doubleTap: true,
+    });
+    expect(Number.isInteger(message.duration)).toBe(true);
+    expect(message.duration).toBeGreaterThanOrEqual(1);
+    requestManager.resolve(message.requestId, { success: true, totalTimeMs: 400 });
+    expect(await promise).toMatchObject({ success: true, totalTimeMs: 400 });
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
+  it("never degrades to a single tap when an older runner lacks the capability", async () => {
+    const { context, sent, requestManager } = createFakeContext({
+      isCommandSupported: (name) => name !== "tap_double_v1",
+    });
+    const result = await new CtrlProxyGestures(context).requestDoubleTapCoordinates(10, 20);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("tap_double_v1");
+    expect(result.unsupportedCapability).toBe("tap_double_v1");
+    expect(sent).toEqual([]);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+});
+
+it("atomic tap capability requires explicit advertisement even on legacy handshakes", () => {
+  const client = AndroidCtrlProxyClient.createForTesting(
+    { deviceId: "atomic-tap-capability", platform: "android", name: "Fake" },
+    new FakeAdbExecutor(),
+    undefined,
+    new FakeTimer(),
+  );
+  for (const commands of [null, new Set<string>(), new Set(["full_command_set_v1"])]) {
+    client["supportedCommands"] = commands;
+    expect(client["isCommandSupported"]("tap_double_v1")).toBe(false);
+  }
+  client["supportedCommands"] = new Set(["tap_double_v1"]);
+  expect(client["isCommandSupported"]("tap_double_v1")).toBe(true);
+});
+
 describe("Android client drag dispatch hook", () => {
   it("fires onDispatch after send and forwards signal, display and beforeSend", async () => {
     const { context, sent, requestManager, timer } = createFakeContext({

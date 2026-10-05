@@ -3,7 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.graphics.RectF
 import android.view.Display
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,6 +32,23 @@ class CtrlProxyDisplayRoutingDispatchTest {
   @After
   fun tearDown() {
     fixture.close()
+  }
+
+  @Test
+  fun `double tap wire request dispatches two fixed gap strokes together`() = runTest {
+    val json = Json { ignoreUnknownKeys = true }
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_tap_coordinates","requestId":"double","x":100,"y":100,"duration":50,"doubleTap":true}"""
+      )
+    CtrlProxyMessageHandler(fixture.actions).handleMessage(request)
+    val dispatch = fixture.shadow.gesturesDispatched.single().description()
+    assertEquals(2, dispatch.strokeCount)
+    assertEquals(0L, dispatch.getStroke(0).startTime)
+    assertEquals(50L, dispatch.getStroke(0).duration)
+    assertEquals(150L, dispatch.getStroke(1).startTime)
+    assertEquals(50L, dispatch.getStroke(1).duration)
+    fixture.cancelLastStroke()
   }
 
   @Test

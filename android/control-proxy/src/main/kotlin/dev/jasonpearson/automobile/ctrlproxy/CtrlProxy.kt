@@ -1960,6 +1960,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestScreenshot(requestId: String?, displayId: Int?) =
     broadcastScreenshot(requestId, displayId)
 
+  override fun requestDoubleTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    frameContext: String?,
+    displayId: Int?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
+    performTapCoordinates(requestId, x, y, 50L, frameContext, displayId, doubleTap = true)
+  }
+
   override fun requestTapCoordinates(
     requestId: String?,
     x: Double,
@@ -4503,6 +4514,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     duration: Long = 10,
     frameContext: String? = null,
     displayId: Int? = null,
+    doubleTap: Boolean = false,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
@@ -4514,10 +4526,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
 
       // Build the gesture description
-      val gesture =
-        gestureBuilder(displayId)
-          .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
-          .build()
+      val builder =
+        gestureBuilder(displayId).addStroke(GestureDescription.StrokeDescription(path, 0, duration))
+      if (doubleTap) {
+        // Fixed 100ms release-to-press gap, independent of host reply latency.
+        builder.addStroke(GestureDescription.StrokeDescription(path, duration + 100L, duration))
+      }
+      val gesture = builder.build()
       perfProvider.endOperation("buildPath")
 
       val gestureBuiltTime = System.currentTimeMillis()

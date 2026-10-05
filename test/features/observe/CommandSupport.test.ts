@@ -27,7 +27,7 @@ const iosDevice: BootedDevice = {
   name: "iPhone",
 };
 
-// Old APK fixture: the partial advertisement from services predating full_command_set_v1.
+// Legacy partial-advertisement fixture: optional capabilities without full_command_set_v1.
 const oldApkAdvertisedCommands = [
   "discover_keystore",
   "set_hierarchy_interval",
@@ -38,6 +38,7 @@ const oldApkAdvertisedCommands = [
   "request_commit_text",
   "ime_key_events_v1",
   "gesture_display_id_v1",
+  "tap_double_v1",
   "request_cancel_ime_commit",
   "request_set_keyboard_profile",
   "request_list_keyboard_profiles",
@@ -107,6 +108,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     expect(context.isCommandSupported?.("request_insert_text")).toBe(true);
     expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
+    expect(context.isCommandSupported?.("tap_double_v1")).toBe(false);
     client["webSocketMessageHandlers"].connected({ type: "connected" });
     expect(context.isCommandSupported?.("request_select_all")).toBe(true);
     expect(context.isCommandSupported?.("request_insert_text")).toBe(true);
@@ -118,6 +120,7 @@ describe("CtrlProxy command support", () => {
     expect(context.isCommandSupported?.("request_ime_action")).toBe(true);
     expect(context.isCommandSupported?.("request_insert_text")).toBe(false);
     expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
+    expect(context.isCommandSupported?.("tap_double_v1")).toBe(false);
     client["webSocketMessageHandlers"].connected({
       type: "connected",
       supportedCommands: oldApkAdvertisedCommands,
@@ -126,6 +129,7 @@ describe("CtrlProxy command support", () => {
       expect(context.isCommandSupported?.(command)).toBe(true);
     }
     expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(true);
+    expect(context.isCommandSupported?.("tap_double_v1")).toBe(true);
     client["webSocketMessageHandlers"].error({
       type: "error",
       error: "Unknown command type: request_select_all",

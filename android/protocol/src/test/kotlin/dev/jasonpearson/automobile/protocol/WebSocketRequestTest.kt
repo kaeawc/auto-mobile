@@ -147,6 +147,17 @@ class WebSocketRequestTest {
     assertEquals(100.0, request.x)
     assertEquals(200.0, request.y)
     assertEquals(10L, request.duration) // default
+    assertEquals(false, request.doubleTap)
+  }
+
+  @Test
+  fun `deserialize atomic double tap opt in`() {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_tap_coordinates","requestId":"double","x":100,"y":200,"doubleTap":true}"""
+      )
+    assertIs<RequestTapCoordinates>(request)
+    assertEquals(true, request.doubleTap)
   }
 
   @Test

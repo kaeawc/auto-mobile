@@ -252,7 +252,10 @@ export interface ScreenshotResult extends ScreenshotPerformanceMetadata {
 export type A11ySwipeResult = GestureTimingResult;
 
 /** Tap coordinates result from accessibility service */
-export type A11yTapCoordinatesResult = BaseResult;
+export interface A11yTapCoordinatesResult extends BaseResult {
+  /** Required capability was not advertised; no gesture request was dispatched. */
+  unsupportedCapability?: string;
+}
 
 /** Drag result from accessibility service */
 export type A11yDragResult = GestureTimingResult;

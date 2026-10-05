@@ -73,6 +73,7 @@ data class RequestTapCoordinates(
   val duration: Long = 10L,
   val frameContext: String? = null,
   val displayId: Int? = null,
+  val doubleTap: Boolean = false,
 ) : WebSocketRequest()
 
 @Serializable

@@ -250,6 +250,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     duration: Long,
   ) = record("requestSwipe", requestId, x1, y1, x2, y2, duration)
 
+  override fun requestDoubleTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    frameContext: String?,
+    displayId: Int?,
+  ) = record("requestDoubleTapCoordinates", requestId, x, y, frameContext, displayId)
+
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
     record("requestTapCoordinates", requestId, x, y, duration)
 

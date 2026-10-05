@@ -1,6 +1,7 @@
 import { isFailedNetworkRequest } from "../utils/networkRequestOutcome";
 import type { NetworkEventWithId } from "../db/networkEventRepository";
 import { computePercentile } from "../utils/percentile";
+import { logger } from "../utils/logger";
 
 export interface GraphLeaf {
   method?: string;
@@ -74,7 +75,8 @@ export function buildNetworkGraph(
         scheme = parsed.protocol.replace(":", "");
         host = parsed.hostname;
       } catch {
-        // use fallback host
+        // Captured URLs may be malformed; the event host still supplies a usable graph fallback.
+        logger.debug("Network graph URL could not be parsed; using fallback host");
       }
     }
 

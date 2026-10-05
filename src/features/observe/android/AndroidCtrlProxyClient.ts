@@ -3086,6 +3086,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
+  /** TalkBack activation with device-side double-tap timing. */
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    onDispatch?: () => void,
+  ): Promise<A11yTapCoordinatesResult> {
+    return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch);
+  }
+
   async requestTwoFingerSwipe(
     x1: number,
     y1: number,
@@ -6437,7 +6446,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return this.supportedCommands.has(messageType);
     }
     // Legacy behavior for services that predate full_command_set_v1 (older APKs).
-    if (messageType === "gesture_display_id_v1") {
+    if (messageType === "gesture_display_id_v1" || messageType === "tap_double_v1") {
       return this.supportedCommands?.has(messageType) === true;
     }
     if (this.supportedCommands === null) {

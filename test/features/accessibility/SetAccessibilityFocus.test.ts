@@ -1,4 +1,5 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { logger } from "../../../src/utils/logger";
+import { describe, expect, test, beforeEach, spyOn } from "bun:test";
 import { SetAccessibilityFocus } from "../../../src/features/accessibility/SetAccessibilityFocus";
 import {
   ActionableError,
@@ -476,7 +477,8 @@ describe("SetAccessibilityFocus", () => {
   });
 
   test("returns success:false with the service error when set fails", async () => {
-    service.setSetThrows(new Error("Element not found with resource-id: com.example:id/missing"));
+    const failure = new Error("Element not found with resource-id: com.example:id/missing");
+    service.setSetThrows(failure);
     observeScreen.setObserveResult(
       makeObserveResult(
         makeViewHierarchy([
@@ -486,10 +488,17 @@ describe("SetAccessibilityFocus", () => {
     );
     const feature = makeFeature();
 
-    const result = await feature.execute({ action: "set", resourceId: "com.example:id/missing" });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Element not found with resource-id");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await feature.execute({ action: "set", resourceId: "com.example:id/missing" });
+      expect(result).toEqual({ success: false, error: failure.message });
+      expect(warn).toHaveBeenCalledWith(
+        `[accessibilityFocus] Failed to set focus: ${failure.message}`,
+        failure,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("returns success:false with the service error when clear fails", async () => {

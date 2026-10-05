@@ -55,6 +55,8 @@ import {
 
 export const SEND_KEYS_MAX_COMMANDS = 100;
 export const SEND_KEYS_MAX_MODIFIERS = 4;
+const ANDROID_FOCUSED_INPUT_ERROR = "Android event delivery requires a focused editable field";
+const ANDROID_TYPE_FOCUSED_INPUT_ERROR = `${ANDROID_FOCUSED_INPUT_ERROR}. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.`;
 
 // Give posted formatters/recomposition a bounded chance to finish after a mismatch.
 export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
@@ -353,6 +355,7 @@ export interface SendKeysInputKey {
 interface ImeCommitRouting {
   signal?: AbortSignal;
   display?: string;
+  focusedInputVerified?: boolean;
 }
 
 export interface SendKeysPlatformDependencies {
@@ -434,7 +437,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           error: validationError,
         };
       }
-      resolvedMode = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
+      const routing = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
+      resolvedMode = routing.mode;
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
       const autoImeFallback = getAutoImeFallback(
         operation,
@@ -451,8 +455,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
               mode: resolvedMode,
               keyboardProfile: command.keyboardProfile,
               autoImeFallback,
-              routing: { signal, display },
-              focusedInputVerified: this.isAutoPasswordInsert(requestedMode, resolvedMode),
+              routing: { signal, display, focusedInputVerified: routing.focusedInputVerified },
+              focusedInputVerified: routing.focusedInputVerified,
             });
       this.recordCaretState(result);
       return {
@@ -621,33 +625,27 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.device.platform === "ios" ? "xcuiTypeText" : mode;
   }
 
-  private isAutoPasswordInsert(
-    requestedMode: SendKeysTypingMode,
-    mode: AndroidSendKeysTypingMode,
-  ): boolean {
-    return requestedMode === "auto" && mode === "eventAll";
-  }
-
   private async resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<AndroidSendKeysTypingMode> {
+  ): Promise<{ mode: AndroidSendKeysTypingMode; focusedInputVerified: boolean }> {
     if (this.device.platform !== "android" || requestedMode !== "auto") {
-      return this.resolveMode(requestedMode);
+      return { mode: this.resolveMode(requestedMode), focusedInputVerified: false };
     }
-    return (await this.isFocusedAndroidPasswordField(signal, display))
-      ? operation === "insert"
-        ? "eventAll"
-        : "a11y"
-      : "ime";
+    const password = await this.isFocusedAndroidPasswordField(operation, signal, display);
+    return {
+      mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
+      focusedInputVerified: password !== undefined,
+    };
   }
 
   private async isFocusedAndroidPasswordField(
+    operation: SendKeysOperation,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<boolean> {
+  ): Promise<boolean | undefined> {
     const observation = await this.observer.execute({
       signal,
       freshness: "fresh",
@@ -655,7 +653,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
-      return false;
+      // Auto insert already reads focus for password routing. Reject before dispatch
+      // rather than trusting an IME acknowledgement with no readable editable target.
+      if (operation === "insert") {
+        throw new ActionableError(ANDROID_TYPE_FOCUSED_INPUT_ERROR);
+      }
+      // Replace still dispatches; distinguish absent focus from a focused non-password field.
+      return undefined;
     }
     const parser = new DefaultElementParser();
     const detector = new FieldTypeDetector();
@@ -1019,6 +1023,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           ...(display === undefined ? {} : { display }),
         });
         this.checkAbort(signal);
+        if (this.imeReadBackLacksRequiredFocus(observation, routing)) {
+          return ANDROID_TYPE_FOCUSED_INPUT_ERROR;
+        }
         const committedText = this.readFocusedText(observation);
         if (committedText === undefined) {
           return undefined;
@@ -1042,6 +1049,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       logger.warn(`[SendKeys] IME read-back unavailable: ${errorMessage(error)}`, error);
     }
     return undefined;
+  }
+
+  private imeReadBackLacksRequiredFocus(
+    observation: ObserveResult,
+    routing: ImeCommitRouting,
+  ): boolean {
+    // Auto-submit/navigation can remove focus after a legitimate commit. A passed
+    // pre-check makes that read-back unverifiable, like an unreadable field.
+    return (
+      !routing.focusedInputVerified &&
+      observation.viewHierarchy !== undefined &&
+      !hasFocusedTextInput(observation.viewHierarchy)
+    );
   }
 
   private describeImeCommitFailure(result: TextActionResult): TextActionResult {
@@ -1379,7 +1399,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           "eventLast requires a real tail key event, but a previous insert could not place the caret; text was not sent",
       };
     }
-    const focusResult = await this.requireFocusedAndroidInput(signal);
+    const focusResult = await this.requireFocusedAndroidInput(
+      signal,
+      ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+    );
     if (!focusResult.success) {
       return focusResult;
     }
@@ -1468,7 +1491,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (!focusedInputVerified) {
-      const focusResult = await this.requireFocusedAndroidInput(signal);
+      const focusResult = await this.requireFocusedAndroidInput(
+        signal,
+        ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      );
       if (!focusResult.success) {
         return focusResult;
       }
@@ -1754,7 +1780,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       plans.push(plan);
     }
 
-    const focusResult = await this.requireFocusedAndroidInput(signal);
+    const focusResult = await this.requireFocusedAndroidInput(
+      signal,
+      ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+    );
     if (!focusResult.success) {
       return focusResult;
     }
@@ -1822,6 +1851,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private async requireFocusedAndroidInput(
     signal?: AbortSignal,
+    error: string = ANDROID_FOCUSED_INPUT_ERROR,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
     | { success: false; error: string }
@@ -1831,7 +1861,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return {
         success: false,
-        error: "Android event delivery requires a focused editable field",
+        error,
       };
     }
     return { success: true, hierarchy };

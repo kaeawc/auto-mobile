@@ -1,3 +1,13 @@
+import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { accessibilityDetector } from "../../../src/features/accessibility/AccessibilityDetector";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import {
+  TALKBACK_ACTIVATION_WARNING,
+  TALKBACK_PRECISE_FOCUS_SETTLE_MS,
+} from "../../../src/features/talkback/TalkBackTapStrategy";
 import { logger } from "../../../src/utils/logger";
 import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import { createTapAt, observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
@@ -760,12 +770,17 @@ describe("TapAtCoordinate", () => {
       expect(dispatches.at(-1)?.y).toBeLessThan(height);
     },
   );
+  let defaultDetection: ReturnType<typeof spyOn>;
   beforeEach(() => {
+    defaultDetection = spyOn(accessibilityDetector, "resolveTalkBackState").mockResolvedValue(
+      false,
+    );
     displayTransitions.reset(androidDevice.deviceId);
     displayTransitions.reset(iosDevice.deviceId);
   });
 
   afterEach(() => {
+    defaultDetection.mockRestore();
     displayTransitions.reset(androidDevice.deviceId);
     displayTransitions.reset(iosDevice.deviceId);
   });
@@ -2135,4 +2150,308 @@ test("iOS snapshot tap accepts size-derived rotation and rejects a later rotatio
     await tapAt.execute({ x: 10, y: 20, snapshotId: capture.reference.snapshotId }),
   ).toMatchObject({ success: false, error: expect.stringContaining("rotation") });
   expect(iosDispatches).toHaveLength(1);
+});
+
+describe("TapAtCoordinate TalkBack", () => {
+  function setup(state: boolean | null = true, device = androidDevice, useDefaultDriver = false) {
+    const detector = new FakeAccessibilityDetector();
+    detector.setDefaultResult(state, state === true ? "talkback" : "unknown");
+    const driver = new FakeTalkBackNavigationDriver();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(observation(10, 10));
+    const transitions = new FakeDisplayTransitionReader();
+    const plainCalls: number[][] = [];
+    const client: CoordinateTapClient<() => void> = {
+      requestTapCoordinates: async (x, y, duration = 0) => {
+        plainCalls.push([x, y, duration]);
+        return { success: true };
+      },
+    };
+    const tapAt = new TapAtCoordinate(device, adb, {
+      timer,
+      androidClient: client,
+      iosClient: client,
+      accessibilityDetector: detector,
+      talkBackDriverFactory: useDefaultDriver ? undefined : { createDriver: () => driver },
+      displayTransitions: transitions,
+      lastRenderedObservation: () => ({
+        display: { key: device.displays?.panels.at(-1)?.key ?? "0" },
+      }),
+    });
+    setFakeTapAtWindow(tapAt);
+    tapAt.observeScreen = observeScreen;
+    return { tapAt, detector, driver, timer, adb, observeScreen, transitions, plainCalls, client };
+  }
+
+  test.each(["tap", "doubleTap"] as const)(
+    "%s focuses then waits before one TalkBack activation gesture",
+    async (action) => {
+      const h = setup();
+      const activation = spyOn(h.driver, "requestDoubleTapCoordinates").mockImplementation(
+        async (x, y, onDispatch) => {
+          expect(h.timer.wasSleepCalled(TALKBACK_PRECISE_FOCUS_SETTLE_MS)).toBe(true);
+          expect(h.timer.now()).toBeGreaterThanOrEqual(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
+          expect(h.driver.tapHistory).toEqual([{ x: 1, y: 2, durationMs: 50 }]);
+          onDispatch?.();
+          return { success: true, totalTimeMs: 1 };
+        },
+      );
+      const result = await h.tapAt.execute({ x: 1, y: 2, action });
+      expect(result).toMatchObject({
+        success: true,
+        action,
+        warnings: [TALKBACK_ACTIVATION_WARNING],
+      });
+      expect(activation).toHaveBeenCalledTimes(1);
+      expect(h.plainCalls).toEqual([]);
+      expect(h.timer.wasSleepCalled(DOUBLE_TAP_GAP_MS)).toBe(false);
+      expect(h.detector.getDetectionCallCount()).toBe(1);
+    },
+  );
+
+  test("unconfirmed activation uses the existing warnings field", async () => {
+    const h = setup();
+    expect(await h.tapAt.execute({ x: 1, y: 2 })).toMatchObject({
+      success: true,
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    });
+    expect(h.driver.doubleTapHistory).toEqual([{ x: 1, y: 2 }]);
+  });
+
+  test.each([false, null])(
+    "state %s keeps plain dispatch and reports unavailable evidence",
+    async (state) => {
+      const h = setup(state);
+      const result = await h.tapAt.execute({ x: 1, y: 2 });
+      expect(result.success).toBe(true);
+      expect(h.plainCalls).toEqual([[1, 2, 10]]);
+      expect(h.driver.tapHistory).toEqual([]);
+      expect(h.detector.getDetectionCallCount()).toBe(state === null ? 2 : 1);
+      expect(result.warnings).toEqual(
+        state === null ? [TALKBACK_STATE_UNKNOWN_WARNING] : undefined,
+      );
+    },
+  );
+
+  test("iOS never consults the Android detector", async () => {
+    const h = setup(true, iosDevice);
+    expect((await h.tapAt.execute({ x: 1, y: 2 })).success).toBe(true);
+    expect(h.detector.getDetectionCallCount()).toBe(0);
+    expect(h.plainCalls).toEqual([[1, 2, 50]]);
+    expect(h.driver.tapHistory).toEqual([]);
+  });
+
+  test("long press reuses the strategy coordinate fallback duration", async () => {
+    const h = setup();
+    expect(
+      await h.tapAt.execute({ x: 1, y: 2, action: "longPress", durationMs: 1200 }),
+    ).toMatchObject({ success: true, action: "longPress" });
+    expect(h.driver.tapHistory).toEqual([{ x: 1, y: 2, durationMs: 1200 }]);
+    expect(h.driver.doubleTapHistory).toEqual([]);
+    expect(h.plainCalls).toEqual([]);
+  });
+
+  test("a display transition after focus prevents activation", async () => {
+    const h = setup();
+    const focus = h.driver.requestTapCoordinates.bind(h.driver);
+    spyOn(h.driver, "requestTapCoordinates").mockImplementation(async (...args) => {
+      const result = await focus(...args);
+      h.transitions.transition();
+      return result;
+    });
+    const result = await h.tapAt.execute({ x: 1, y: 2 });
+    expect(result.success).toBe(false);
+    expect(result.staleDisplay).toBeDefined();
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toEqual([]);
+    expect(h.observeScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("aborting after focus prevents activation even when fake time advances", async () => {
+    const h = setup();
+    const controller = new AbortController();
+    const focus = h.driver.requestTapCoordinates.bind(h.driver);
+    spyOn(h.driver, "requestTapCoordinates").mockImplementation(async (...args) => {
+      const result = await focus(...args);
+      controller.abort();
+      return result;
+    });
+    const result = await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal);
+    expect(result.success).toBe(false);
+    h.timer.advanceTime(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
+    await Promise.resolve();
+    expect(h.driver.doubleTapHistory).toEqual([]);
+    expect(h.plainCalls).toEqual([]);
+  });
+
+  test("stale focus rejection gets exactly one safe fresh retry", async () => {
+    const h = setup();
+    h.driver.queueTapResult({ success: false, totalTimeMs: 0, error: "Stale frame context" });
+    h.observeScreen.setObserveSequence([
+      observation(10, 10, "epoch:1"),
+      observation(10, 10, "epoch:2"),
+      observation(10, 10, "epoch:3"),
+    ]);
+    expect((await h.tapAt.execute({ x: 1, y: 2 })).success).toBe(true);
+    expect(h.driver.tapHistory).toHaveLength(2);
+    expect(h.driver.doubleTapHistory).toHaveLength(1);
+    expect(h.observeScreen.getExecuteCallCount()).toBe(3);
+    expect(h.plainCalls).toEqual([]);
+  });
+
+  test("stale activation rejection after focus is never retried", async () => {
+    const h = setup();
+    h.driver.queueTapResult({ success: true, totalTimeMs: 1 });
+    h.driver.queueTapResult({ success: false, totalTimeMs: 0, error: "Stale frame context" });
+    const result = await h.tapAt.execute({ x: 1, y: 2 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Focus touch was delivered");
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toHaveLength(1);
+    expect(h.observeScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("a dispatched but unconfirmed focus failure is never retried", async () => {
+    const h = setup();
+    h.driver.tapDispatched = true;
+    h.driver.setTapResult({ success: false, totalTimeMs: 0, error: "Stale frame context" });
+    const result = await h.tapAt.execute({ x: 1, y: 2 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("indeterminate");
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toEqual([]);
+    expect(h.observeScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("default focus transport preserves fresh frame contexts, signal and beforeSend fence", async () => {
+    const h = setup(true, androidDevice, true);
+    h.observeScreen.setObserveSequence([
+      observation(10, 10, "epoch:1"),
+      observation(10, 10, "epoch:2"),
+      observation(10, 10, "epoch:3"),
+    ]);
+    const controller = new AbortController();
+    const frames: (string | undefined)[] = [];
+    spyOn(h.client, "requestTapCoordinates").mockImplementation(
+      async (x, y, duration, _timeout, _perf, frame, onDispatch, signal, displayId, beforeSend) => {
+        expect([x, y, duration]).toEqual([1, 2, 50]);
+        expect(signal).toBe(controller.signal);
+        expect(displayId).toBeUndefined();
+        expect(beforeSend).toBeFunction();
+        beforeSend?.();
+        frames.push(frame);
+        expect(onDispatch).toBeFunction();
+        onDispatch?.();
+        if (frames.length === 1) {
+          return { success: false, error: "Stale frame context" };
+        }
+        return { success: true };
+      },
+    );
+    const activation = spyOn(
+      AndroidCtrlProxyClient.prototype,
+      "requestDoubleTapCoordinates",
+    ).mockResolvedValue({ success: true, totalTimeMs: 1 });
+    try {
+      const result = await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal);
+      expect(result.success).toBe(true);
+      expect(frames).toEqual(["epoch:1", "epoch:2"]);
+      expect(activation).toHaveBeenCalledTimes(1);
+    } finally {
+      activation.mockRestore();
+    }
+  });
+
+  test("default focus transport never retries a dispatched request with a lost reply", async () => {
+    const h = setup(true, androidDevice, true);
+    const focus = spyOn(h.client, "requestTapCoordinates").mockImplementation(
+      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+        onDispatch?.();
+        throw new Error("Stale frame context mentioned in a lost reply");
+      },
+    );
+    const result = await h.tapAt.execute({ x: 1, y: 2 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("indeterminate");
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(h.observeScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("cancellation during settle prevents a late activation", async () => {
+    const h = setup();
+    const controller = new AbortController();
+    const focus = h.driver.requestTapCoordinates.bind(h.driver);
+    spyOn(h.driver, "requestTapCoordinates").mockImplementation(async (...args) => {
+      const result = await focus(...args);
+      h.timer.setTimeout(() => controller.abort(), TALKBACK_PRECISE_FOCUS_SETTLE_MS / 2);
+      return result;
+    });
+    expect((await h.tapAt.execute({ x: 1, y: 2 }, undefined, controller.signal)).success).toBe(
+      false,
+    );
+    expect(h.timer.wasSleepCalled(TALKBACK_PRECISE_FOCUS_SETTLE_MS)).toBe(true);
+    await h.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS * 2);
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toEqual([]);
+  });
+
+  test("post-observation failure reports all three delivered TalkBack touches", async () => {
+    const h = setup();
+    const capture = h.observeScreen.execute.bind(h.observeScreen);
+    let captures = 0;
+    spyOn(h.observeScreen, "execute").mockImplementation(async (...args) => {
+      if (++captures > 1) {
+        throw new DispatchedObservationError(new Error("Post-action capture failed"));
+      }
+      return capture(...args);
+    });
+    const result = await h.tapAt.execute({ x: 1, y: 2 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("3 taps were delivered.");
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toHaveLength(1);
+  });
+
+  test("explicit primary display uses the TalkBack route", async () => {
+    const h = setup();
+    h.observeScreen.setObserveResult({
+      ...observation(10, 10),
+      display: { key: "0", role: "unknown", generation: 7 },
+    });
+    expect((await h.tapAt.execute({ x: 1, y: 2, display: "active" })).success).toBe(true);
+    expect(h.driver.tapHistory).toHaveLength(1);
+    expect(h.driver.doubleTapHistory).toHaveLength(1);
+    expect(h.plainCalls).toEqual([]);
+  });
+
+  test("secondary display fails closed rather than activating the primary display", async () => {
+    const h = setup(true, {
+      ...androidDevice,
+      displays: {
+        panels: [
+          { key: "0", role: "unknown", sizePx: { width: 10, height: 10 } },
+          { key: "2", role: "external", sizePx: { width: 10, height: 10 } },
+        ],
+        postures: [],
+      },
+    });
+    h.adb.setCommandResponse("cmd display get-displays", {
+      stdout:
+        'Display id 0: DisplayInfo{uniqueId "local:0" type INTERNAL, real 10 x 10}\nDisplay id 2: DisplayInfo{uniqueId "local:2" type EXTERNAL, real 10 x 10}',
+      stderr: "",
+    });
+    h.observeScreen.setObserveResult({
+      ...observation(10, 10),
+      display: { key: "2", role: "external", generation: 7 },
+    });
+    const result = await h.tapAt.execute({ x: 1, y: 2, display: "2" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("TalkBack coordinate activation cannot target display 2");
+    expect(h.driver.tapHistory).toEqual([]);
+    expect(h.driver.doubleTapHistory).toEqual([]);
+    expect(h.plainCalls).toEqual([]);
+  });
 });

@@ -631,9 +631,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
           error,
         );
+        const warnings = toolResultWarnings(error);
         return {
           status: "skipped",
           error: errorMsg,
+          ...(warnings ? { warnings } : {}),
           details: {
             params: step.params,
             error: errorMsg,
@@ -794,6 +796,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           logPrefix: `[PLAN_STEP_${i + 1}]`,
         });
 
+        if (stepResult.warnings) {
+          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
+        }
+
         if (stepResult.status === "skipped") {
           this.recordSkippedOptionalStep(
             { debugSteps, skippedSteps },
@@ -803,10 +809,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             stepResult.error ?? "Unknown error",
           );
           continue;
-        }
-
-        if (stepResult.warnings) {
-          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
         }
 
         if (stepResult.status === "failed") {
@@ -1276,6 +1278,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           debugLog: true,
         });
 
+        if (stepResult.warnings) {
+          warnings.push({
+            stepIndex: planIndex,
+            tool: step.tool,
+            device,
+            warnings: stepResult.warnings,
+          });
+        }
+
         if (stepResult.status === "skipped") {
           logger.warn(
             `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`,
@@ -1289,15 +1300,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             details: stepResult.details,
           });
           continue;
-        }
-
-        if (stepResult.warnings) {
-          warnings.push({
-            stepIndex: planIndex,
-            tool: step.tool,
-            device,
-            warnings: stepResult.warnings,
-          });
         }
 
         if (stepResult.status === "failed") {

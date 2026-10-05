@@ -114,7 +114,9 @@ const executePlanResultSchema = z
         }),
       )
       .optional()
-      .describe("Best-effort warnings from steps that still succeeded"),
+      .describe(
+        "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
+      ),
     skippedSteps: z
       .array(
         z.object({

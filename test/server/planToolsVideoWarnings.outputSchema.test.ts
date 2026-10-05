@@ -140,3 +140,10 @@ test("executePlan with nothing to execute remains successful", async () => {
   expect(response.structuredContent).toEqual(result);
   expect(JSON.parse(response.content[0].text!)).toEqual(result);
 });
+
+test("executePlan describes warnings retained from failed and skipped sections", () => {
+  const json = toJSONSchema(ToolRegistry.getTool("executePlan")!.outputSchema!);
+  expect(json.properties?.warnings?.description).toBe(
+    "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
+  );
+});

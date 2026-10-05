@@ -224,9 +224,15 @@ describe("PlanExecutor — failed criticalSection warnings", () => {
     restoreTools();
   });
 
-  function sectionStep(device = "A", optional = false, withWarnings = true): Plan["steps"][number] {
+  function sectionStep(
+    device = "A",
+    optional = false,
+    withWarnings = true,
+    options: { outerOptional?: boolean; singleWarning?: boolean } = {},
+  ): Plan["steps"][number] {
     return {
       tool: "criticalSection",
+      ...(options.outerOptional !== undefined ? { optional: options.outerOptional } : {}),
       params: {
         device,
         lock: `warning-lock-${device}`,
@@ -235,17 +241,119 @@ describe("PlanExecutor — failed criticalSection warnings", () => {
           ...(withWarnings
             ? [
                 { tool: "sectionWarning", params: { device } },
-                {
-                  tool: optional ? "sectionFailure" : "sectionWarning",
-                  params: { device },
-                  optional,
-                },
+                ...(options.singleWarning
+                  ? []
+                  : [
+                      {
+                        tool: optional ? "sectionFailure" : "sectionWarning",
+                        params: { device },
+                        optional,
+                      },
+                    ]),
               ]
             : []),
           { tool: "sectionFailure", params: { device } },
         ],
       },
     };
+  }
+
+  test.each([false, true])(
+    "outer optional=%s preserves earlier warnings exactly once",
+    async (outerOptional) => {
+      const section = sectionStep("A", false, true, { outerOptional, singleWarning: true });
+      const result = await executor.executePlan(
+        {
+          name: "outer-optional-section",
+          steps: [
+            { tool: "sectionWarning", params: {} },
+            section,
+            { tool: "sectionWarning", params: {} },
+          ],
+        },
+        0,
+      );
+      expect(result.success).toBe(outerOptional);
+      expect(result.executedSteps).toBe(outerOptional ? 2 : 1);
+      expect(result.warnings).toEqual([
+        { stepIndex: 0, tool: "sectionWarning", warnings: ["epilogue failed"] },
+        {
+          stepIndex: 1,
+          tool: "criticalSection",
+          warnings: ["step 1 (sectionWarning): epilogue failed"],
+        },
+        ...(outerOptional
+          ? [{ stepIndex: 2, tool: "sectionWarning", warnings: ["epilogue failed"] }]
+          : []),
+      ]);
+      if (outerOptional) {
+        expect(result.skippedSteps).toEqual([
+          { stepIndex: 1, tool: "criticalSection", error: sectionError("A") },
+        ]);
+        expect(result.failedStep).toBeUndefined();
+      } else {
+        expect(result.skippedSteps).toBeUndefined();
+        expect(result.failedStep).toMatchObject({
+          stepIndex: 1,
+          tool: "criticalSection",
+          error: sectionError("A"),
+        });
+      }
+    },
+  );
+
+  test("multi-device skipped section keeps warning indexes and device labels without duplicates", async () => {
+    const result = await executor.executePlan(
+      {
+        name: "multi-device-optional-section",
+        devices: ["A", "B"],
+        steps: [
+          { tool: "sectionWarning", params: { device: "A" } },
+          { tool: "sectionWarning", params: { device: "B" } },
+          sectionStep("A", false, true, { outerOptional: true, singleWarning: true }),
+          { tool: "sectionWarning", params: { device: "A" } },
+        ],
+      },
+      0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "finish-current-step",
+    );
+    expect(result.success).toBe(true);
+    expect(result.executedSteps).toBe(3);
+    expect(result.skippedSteps).toEqual([
+      { stepIndex: 2, tool: "criticalSection", error: sectionError("A"), device: "A" },
+    ]);
+    expect(result.warnings).toEqual([
+      { stepIndex: 0, tool: "sectionWarning", device: "A", warnings: ["epilogue failed"] },
+      { stepIndex: 1, tool: "sectionWarning", device: "B", warnings: ["epilogue failed"] },
+      {
+        stepIndex: 2,
+        tool: "criticalSection",
+        device: "A",
+        warnings: ["step 1 (sectionWarning): epilogue failed"],
+      },
+      { stepIndex: 3, tool: "sectionWarning", device: "A", warnings: ["epilogue failed"] },
+    ]);
+  });
+
+  test("skipped outer section without earlier warnings omits the warnings entry", async () => {
+    const result = await executor.executePlan(
+      {
+        name: "optional-section-no-warnings",
+        steps: [sectionStep("A", false, false, { outerOptional: true })],
+      },
+      0,
+    );
+    expect(result.success).toBe(true);
+    expect(result.skippedSteps).toHaveLength(1);
+    expect(result).not.toHaveProperty("warnings");
+  });
+
+  function sectionError(device: string): string {
+    return `Error: Critical section "warning-lock-${device}" failed for device fake-device: Failed at step 2/2 (sectionFailure): required failure`;
   }
 
   test.each([false, true])(

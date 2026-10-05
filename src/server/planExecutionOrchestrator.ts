@@ -362,7 +362,7 @@ export class PlanExecutionOrchestrator {
         deviceId: this.device.deviceId,
         deviceMapping,
         ...(this.request.captureObserveSteps && result.debug ? { debug: result.debug } : {}),
-        // Best-effort warnings from steps that still succeeded are NOT gated on
+        // Best-effort warnings, including from failed or skipped sections, are NOT gated on
         // captureObserveSteps: the debug trace is an opt-in diagnostic, while a
         // keyboard that would not dismiss changes what every later step saw
         // (#6887 review).

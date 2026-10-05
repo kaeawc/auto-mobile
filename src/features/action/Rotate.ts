@@ -60,6 +60,19 @@ type AlreadyAppliedOrientationDecision =
       reason: "orientation-differs" | "live-rotation-unavailable" | "live-orientation-changed";
     };
 
+interface AndroidRotationResultOptions {
+  orientation: "portrait" | "landscape";
+  value: number;
+  currentOrientation: string;
+  achievedOrientation: string;
+  warning: string | undefined;
+  restoreConfirmed: boolean;
+  preserveLock: boolean;
+  restoreAutomaticRotation: boolean;
+  wasAutoRotateEnabled: boolean;
+  signal?: AbortSignal;
+}
+
 export class Rotate extends BaseVisualChange {
   // Serializes the read-auto-rotate -> disable -> rotate -> restore-auto-rotate
   // critical section per device, so two concurrent rotations against the SAME
@@ -876,17 +889,20 @@ export class Rotate extends BaseVisualChange {
   }
 
   private async finalizeAndroidRotation(
-    orientation: "portrait" | "landscape",
-    value: number,
-    currentOrientation: string,
-    achievedOrientation: string,
-    warning: string | undefined,
-    restoreConfirmed: boolean,
-    preserveLock: boolean,
-    restoreAutomaticRotation: boolean,
-    wasAutoRotateEnabled: boolean,
-    signal?: AbortSignal,
+    options: AndroidRotationResultOptions,
   ): Promise<RotateResult> {
+    const {
+      orientation,
+      value,
+      currentOrientation,
+      achievedOrientation,
+      warning,
+      restoreConfirmed,
+      preserveLock,
+      restoreAutomaticRotation,
+      wasAutoRotateEnabled,
+      signal,
+    } = options;
     throwIfAborted(signal);
     const orientationLockState = await this.getOrientationLockState(signal);
     const rotationPerformed = currentOrientation !== orientation;
@@ -1441,7 +1457,7 @@ export class Rotate extends BaseVisualChange {
           await this.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
 
-      const result = await this.finalizeAndroidRotation(
+      const result = await this.finalizeAndroidRotation({
         orientation,
         value,
         currentOrientation,
@@ -1452,7 +1468,7 @@ export class Rotate extends BaseVisualChange {
         restoreAutomaticRotation,
         wasAutoRotateEnabled,
         signal,
-      );
+      });
       return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
     } catch (error) {
       return this.recoverAndroidRotation({
@@ -1585,20 +1601,23 @@ export class Rotate extends BaseVisualChange {
     const { achievedOrientation } = confirmation;
     let { warning } = confirmation;
     if (achievedOrientation === orientation) {
-      const result = await this.finalizeAndroidRotation(
+      const result = await this.finalizeAndroidRotation({
         orientation,
         value,
         currentOrientation,
         achievedOrientation,
-        [restoreFailure?.message, `Rotation was confirmed after an earlier error: ${error}`]
+        warning: [
+          restoreFailure?.message,
+          `Rotation was confirmed after an earlier error: ${error}`,
+        ]
           .filter(Boolean)
           .join(" "),
-        !restoreFailure,
+        restoreConfirmed: !restoreFailure,
         preserveLock,
         restoreAutomaticRotation,
         wasAutoRotateEnabled,
         signal,
-      );
+      });
       return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
     }
     if (achievedOrientation !== "unknown" && achievedOrientation !== orientation) {

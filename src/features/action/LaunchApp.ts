@@ -129,6 +129,16 @@ function resolvePerformanceSamplingCoordinator(
   return dependencies.performanceSamplingCoordinator ?? getPerformanceMonitor();
 }
 
+interface AndroidLaunchOptions {
+  packageName: string;
+  clearAppData: boolean;
+  coldBoot: boolean;
+  activityName?: string;
+  userId?: number;
+  skipUiStability?: boolean;
+  signal?: AbortSignal;
+}
+
 export class LaunchApp extends BaseVisualChange {
   private simctl: SimCtlClient;
   private deviceAppLauncher: DeviceAppLauncher;
@@ -379,7 +389,7 @@ export class LaunchApp extends BaseVisualChange {
             "launchArguments are supported on iOS only. Android launch intent extras require a separate interface.",
           );
         }
-        return this.executeAndroidWithSamplingPriority(
+        return this.executeAndroidWithSamplingPriority({
           packageName,
           clearAppData,
           coldBoot,
@@ -387,25 +397,21 @@ export class LaunchApp extends BaseVisualChange {
           userId,
           skipUiStability,
           signal,
-        );
+        });
       default:
         throw unsupportedPlatformError(this.device.platform, "launch apps");
     }
   }
 
   private async executeAndroidWithSamplingPriority(
-    packageName: string,
-    clearAppData: boolean,
-    coldBoot: boolean,
-    activityName?: string,
-    userId?: number,
-    skipUiStability?: boolean,
-    signal?: AbortSignal,
+    options: AndroidLaunchOptions,
   ): Promise<LaunchAppResult> {
+    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
+      options;
     return await this.performanceSamplingCoordinator.withDeviceSamplingPaused(
       this.device.deviceId,
       async () =>
-        await this.executeAndroid(
+        await this.executeAndroid({
           packageName,
           clearAppData,
           coldBoot,
@@ -413,7 +419,7 @@ export class LaunchApp extends BaseVisualChange {
           userId,
           skipUiStability,
           signal,
-        ),
+        }),
     );
   }
 
@@ -786,15 +792,9 @@ export class LaunchApp extends BaseVisualChange {
    * @param userId - Optional Android user ID (auto-detected if not provided)
    * @param skipUiStability - Whether to skip UI stability checks
    */
-  private async executeAndroid(
-    packageName: string,
-    clearAppData: boolean,
-    coldBoot: boolean,
-    activityName?: string,
-    userId?: number,
-    skipUiStability?: boolean,
-    signal?: AbortSignal,
-  ): Promise<LaunchAppResult> {
+  private async executeAndroid(options: AndroidLaunchOptions): Promise<LaunchAppResult> {
+    const { packageName, clearAppData, coldBoot, activityName, userId, skipUiStability, signal } =
+      options;
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
 

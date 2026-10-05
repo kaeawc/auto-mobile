@@ -356,6 +356,27 @@ export interface SendKeysPlatformDependencies {
   inputKey?: SendKeysInputKey;
 }
 
+interface ActiveImeCommitOptions {
+  text: string;
+  operation: SendKeysOperation;
+  keyboardProfile: KeyboardProfileId | undefined;
+  prior: string | null;
+  wasEnabled: boolean;
+  priorSubtype: ImeSubtypeSnapshot;
+  routing?: ImeCommitRouting;
+  mode?: "ime" | "imeKeyEvents";
+}
+
+interface AndroidTypeOptions {
+  text: string;
+  operation: SendKeysOperation;
+  mode: AndroidSendKeysTypingMode;
+  keyboardProfile: KeyboardProfileId | undefined;
+  autoImeFallback?: AndroidSendKeysTypingMode;
+  routing?: ImeCommitRouting;
+  focusedInputVerified?: boolean;
+}
+
 export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly adb: AdbExecutor;
   private readonly textClient: SendKeysTextClient;
@@ -419,15 +440,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
           ? await this.executeIosType(command.text, operation, signal)
-          : await this.executeAndroidType(
-              command.text,
+          : await this.executeAndroidType({
+              text: command.text,
               operation,
-              resolvedMode,
-              command.keyboardProfile,
+              mode: resolvedMode,
+              keyboardProfile: command.keyboardProfile,
               autoImeFallback,
-              { signal, display },
-              this.isAutoPasswordInsert(requestedMode, resolvedMode),
-            );
+              routing: { signal, display },
+              focusedInputVerified: this.isAutoPasswordInsert(requestedMode, resolvedMode),
+            });
       this.recordCaretState(result);
       return {
         ...baseResult,
@@ -676,14 +697,17 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private async executeAndroidType(
-    text: string,
-    operation: SendKeysOperation,
-    mode: AndroidSendKeysTypingMode,
-    keyboardProfile: KeyboardProfileId | undefined,
-    autoImeFallback?: AndroidSendKeysTypingMode,
-    routing: ImeCommitRouting = {},
-    focusedInputVerified = false,
+    options: AndroidTypeOptions,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    const {
+      text,
+      operation,
+      mode,
+      keyboardProfile,
+      autoImeFallback,
+      routing = {},
+      focusedInputVerified = false,
+    } = options;
     const { signal } = routing;
     if (operation === "replace") {
       this.resetCaretState();
@@ -734,14 +758,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
     }
     try {
-      const fallback = await this.executeAndroidType(
+      const fallback = await this.executeAndroidType({
         text,
         operation,
-        autoImeFallback,
+        mode: autoImeFallback,
         keyboardProfile,
-        undefined,
+        autoImeFallback: undefined,
         routing,
-      );
+      });
       return { ...fallback, resolvedMode: fallback.resolvedMode ?? autoImeFallback };
     } catch (error) {
       signal?.throwIfAborted();
@@ -826,7 +850,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
     const priorSubtype = await catalog.readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal);
 
-    return this.commitWithActiveIme(
+    return this.commitWithActiveIme({
       text,
       operation,
       keyboardProfile,
@@ -835,21 +859,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       priorSubtype,
       routing,
       mode,
-    );
+    });
   }
 
   private async commitWithActiveIme(
-    text: string,
-    operation: SendKeysOperation,
-    keyboardProfile: KeyboardProfileId | undefined,
-    prior: string | null,
-    wasEnabled: boolean,
-    priorSubtype: ImeSubtypeSnapshot,
-    routing: ImeCommitRouting = {},
-    mode: "ime" | "imeKeyEvents" = "ime",
+    options: ActiveImeCommitOptions,
   ): Promise<
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
+    const {
+      text,
+      operation,
+      keyboardProfile,
+      prior,
+      wasEnabled,
+      priorSubtype,
+      routing = {},
+      mode = "ime",
+    } = options;
     const { signal } = routing;
     this.checkAbort(signal);
     const profileResult = await this.setRequestedKeyboardProfile(keyboardProfile);

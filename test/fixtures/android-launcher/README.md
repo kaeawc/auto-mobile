@@ -26,6 +26,14 @@ observations, not hand-written fixtures.
 - `launcher-allapps-emulator-5600.json` and `launcher-allapps-emulator-5602.json`: all-apps drawer.
 - `launcher-widgets-emulator-5600.json`: widgets picker (phone only).
 
-No open-folder capture exists. Both home captures expose a visible `workspace` with
+`launcher-folder-emulator-5600.json` (phone) and `launcher-folder-emulator-5602.json`
+(foldable) are verbatim, untrimmed `observe` copies from manual-test batch 34,
+emulator-5600 / emulator-5602, API 36, `com.google.android.apps.nexuslauncher`, tested
+main SHA `f5c7eca2ae23f33067311e1c67a91dc5d6a9db69`. Both open folders expose
+`folder_content`, `folder_footer`, and `folder_name`, omit `workspace`, and are
+distinguished from both home captures by `folder_content` (none of the three folder
+ids appears in either home capture).
+
+Both home captures expose a visible `workspace` with
 `occlusionState: "partial"`; the five overlay captures omit it. The foldable all-apps
 capture retains a visible `hotseat`, so hotseat presence cannot establish home.

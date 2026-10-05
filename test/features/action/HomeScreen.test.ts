@@ -90,6 +90,10 @@ describe("HomeScreen", () => {
     // Create fakes for testing
     fakeAdb = new FakeAdbExecutor();
     fakeObserveScreen = new FakeObserveScreen();
+    fakeObserveScreen.setFailureMode(
+      "getMostRecentCachedObserveResult",
+      new Error("No cached observation"),
+    );
     fakeWindow = new FakeWindow();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeTimer = new FakeTimer();
@@ -223,6 +227,8 @@ describe("HomeScreen", () => {
       });
 
       test.each([
+        { surface: "folder", deviceId: 5600 },
+        { surface: "folder", deviceId: 5602 },
         { surface: "allapps", deviceId: 5600 },
         { surface: "allapps", deviceId: 5602 },
         { surface: "widgets", deviceId: 5600 },
@@ -242,10 +248,13 @@ describe("HomeScreen", () => {
           expect(result).not.toHaveProperty("message");
           expect(result.error).toBeUndefined();
           expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
         },
       );
 
       test.each([
+        { surface: "folder", deviceId: 5600 },
+        { surface: "folder", deviceId: 5602 },
         { surface: "allapps", deviceId: 5600 },
         { surface: "allapps", deviceId: 5602 },
         { surface: "widgets", deviceId: 5600 },
@@ -317,6 +326,7 @@ describe("HomeScreen", () => {
       test.each([5600, 5602])(
         "an unchanged home workspace on emulator-%s still reports already-home",
         async (deviceId) => {
+          getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
           fakeObserveScreen.setObserveResult(launcherObservation("home", deviceId));
 
           const result = await homeScreen.execute();
@@ -324,8 +334,98 @@ describe("HomeScreen", () => {
           expect(result.success).toBe(true);
           expect(result.message).toBe("Already on the home screen");
           expect(result.error).toBeUndefined();
+          expect(fakeAdb.getExecutedCommands()).not.toContain("shell input keyevent 3");
+          expect(getInstanceSpy).not.toHaveBeenCalled();
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
         },
       );
+
+      test.each([5600, 5602])(
+        "revalidates a cached home workspace before dispatching Home from the drawer on emulator-%s",
+        async (deviceId) => {
+          const cached = launcherObservation("home", deviceId);
+          // Even a fresh-looking cache acquired outside execute() has no proof for this call.
+          cached.freshness = { isFresh: true };
+          fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", null);
+          const cache = spyOn(
+            fakeObserveScreen,
+            "getMostRecentCachedObserveResult",
+          ).mockResolvedValue(cached);
+          fakeObserveScreen.setObserveSequence([
+            launcherObservation("allapps", deviceId),
+            launcherObservation("home", deviceId),
+          ]);
+          try {
+            const result = await homeScreen.execute();
+            expect(result.success).toBe(true);
+            expect(result).not.toHaveProperty("message");
+            expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+            expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+            expect(fakeObserveScreen.getExecuteOptions()[0]).toMatchObject({
+              freshness: "fresh",
+              skipScreenshot: true,
+            });
+            // The live drawer replaces the stale Home baseline for visual-change verification.
+            expect(cached.viewHierarchy).toBe(
+              launcherObservation("allapps", deviceId).viewHierarchy,
+            );
+          } finally {
+            cache.mockRestore();
+          }
+        },
+      );
+
+      test.each(["home", "allapps"])(
+        "reads a cached %s hierarchy once before deciding, without a redundant read",
+        async (surface) => {
+          const cached = launcherObservation(surface, 5600);
+          fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", null);
+          const cache = spyOn(
+            fakeObserveScreen,
+            "getMostRecentCachedObserveResult",
+          ).mockResolvedValue(cached);
+          fakeObserveScreen.setObserveSequence([
+            launcherObservation(surface, 5600),
+            launcherObservation("home", 5600),
+          ]);
+          try {
+            const result = await homeScreen.execute();
+            expect(result.success).toBe(true);
+            expect(result.message).toBe(
+              surface === "home" ? "Already on the home screen" : undefined,
+            );
+            expect(fakeAdb.getExecutedCommands().includes("shell input keyevent 3")).toBe(
+              surface !== "home",
+            );
+            expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+          } finally {
+            cache.mockRestore();
+          }
+        },
+      );
+
+      test("reuses a read already acquired in this call when the cache needs refreshing", async () => {
+        const cached = launcherObservation("home", 5600);
+        cached.freshness = { isFresh: false };
+        fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", null);
+        const cache = spyOn(
+          fakeObserveScreen,
+          "getMostRecentCachedObserveResult",
+        ).mockResolvedValue(cached);
+        fakeObserveScreen.setObserveSequence([
+          launcherObservation("allapps", 5600),
+          launcherObservation("home", 5600),
+        ]);
+        try {
+          const result = await homeScreen.execute();
+          expect(result.success).toBe(true);
+          expect(result).not.toHaveProperty("message");
+          expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+          expect(fakeObserveScreen.getExecuteCallCount()).toBe(2);
+        } finally {
+          cache.mockRestore();
+        }
+      });
     });
 
     test("reuses the verified configured launcher for a custom Android home package", async () => {

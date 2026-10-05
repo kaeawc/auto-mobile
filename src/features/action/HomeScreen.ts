@@ -2,7 +2,13 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, HomeScreenResult, ViewHierarchyResult } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  HomeScreenResult,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -18,6 +24,12 @@ import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
+import {
+  wasHierarchyReadDuringCall,
+  withObservationReadScope,
+} from "../observe/observationReadScope";
+import { isForegroundLauncher } from "../observe/androidLauncherPackages";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 
 // Overlay ids come from the Pixel Launcher captures under test/fixtures/android-launcher/.
 const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
@@ -26,6 +38,7 @@ const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
   "apps_view",
   "search_container_all_apps",
   "primary_widgets_list_view",
+  "folder_content",
 ] as const;
 
 /**
@@ -61,6 +74,13 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<HomeScreenResult> {
+    return withObservationReadScope(() => this.executeWithReadScope(progress, signal));
+  }
+
+  private async executeWithReadScope(
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<HomeScreenResult> {
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("homeScreen");
@@ -75,14 +95,19 @@ export class HomeScreen extends BaseVisualChange {
     };
 
     return await this.observedInteraction(async (previousObservation) => {
-      const previousHierarchy = previousObservation?.viewHierarchy;
+      const previousHierarchy = await this.readHomeHierarchy(
+        previousObservation,
+        perf,
+        options.timeoutMs,
+        signal,
+      );
       let alreadyOnHome = false;
       switch (this.device.platform) {
         case "android": {
-          const launcherPackage = await perf.track("homeNavigation", () =>
-            this.executeAndroidHome(signal),
-          );
-          alreadyOnHome = this.isAndroidHomeSurface(previousHierarchy, launcherPackage);
+          alreadyOnHome = await this.isAndroidHomeSurface(previousHierarchy, signal);
+          if (!alreadyOnHome) {
+            await perf.track("homeNavigation", () => this.executeAndroidHome(signal));
+          }
           break;
         }
         case "ios":
@@ -108,11 +133,59 @@ export class HomeScreen extends BaseVisualChange {
     }, options);
   }
 
-  private isAndroidHomeSurface(
+  private async readHomeHierarchy(
+    previousObservation: ObserveResult,
+    perf: PerformanceTracker,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<ViewHierarchyResult | undefined> {
+    if (
+      this.device.platform === "android" &&
+      (!previousObservation.viewHierarchy ||
+        !wasHierarchyReadDuringCall(previousObservation.viewHierarchy))
+    ) {
+      const currentObservation = await perf.track("refreshHomeObservation", () =>
+        this.observeScreen.execute({
+          freshness: "fresh",
+          requireFreshExtraction: true,
+          timeoutMs,
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+          skipPerformanceAudit: true,
+          skipRecompositionTracking: true,
+          skipBackStack: true,
+          skipCache: true,
+          skipStaleWindowRecovery: true,
+          perf,
+          signal,
+        }),
+      );
+      // The shared visual-change check must compare against the current surface,
+      // not a cached Home tree that would match the post-dispatch Home tree.
+      Object.assign(previousObservation, currentObservation);
+    }
+    return previousObservation.viewHierarchy;
+  }
+
+  private async isAndroidHomeSurface(
     viewHierarchy: ViewHierarchyResult | undefined,
-    launcherPackage: string | undefined,
-  ): boolean {
-    if (launcherPackage === undefined || viewHierarchy?.packageName !== launcherPackage) {
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const launcherPackage = viewHierarchy?.packageName;
+    if (!launcherPackage || viewHierarchy?.hierarchy?.error) {
+      return false;
+    }
+    if (
+      !(await isForegroundLauncher(
+        launcherPackage,
+        this.adb,
+        this.device.deviceId,
+        this.timer,
+        deviceIncarnationToken(this.device.deviceId),
+        signal,
+        5000,
+      ))
+    ) {
       return false;
     }
     const finder = new DefaultElementFinder();

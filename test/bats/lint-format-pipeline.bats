@@ -1,12 +1,47 @@
 #!/usr/bin/env bats
 #
-# Keep oxlint's autofix output compatible with oxfmt's formatter.
+# Keep local autofix output format-clean and CI checks read-only.
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   TEST_DIR="$(mktemp -d)"
   FIXTURE="$TEST_DIR/fixture.ts"
   printf 'if (true) console.log("fixture");\n' >"$FIXTURE"
+  REAL_BASH="$(command -v bash)"
+  mkdir -p "$TEST_DIR/bin"
+  # Run real oxlint/oxfmt with the repo config, but keep repo-wide gates hermetic.
+  printf '#!%s\n' "$REAL_BASH" >"$TEST_DIR/bin/bash"
+  cat >>"$TEST_DIR/bin/bash" <<'EOF'
+set -euo pipefail
+case "${1:-}" in
+  scripts/oxlint-baseline.sh | scripts/check-boundaries.sh | scripts/check-element-resolution-ratchet.sh)
+    printf 'follow-on: %s\n' "$1"
+    ;;
+  *) exec "$REAL_BASH" "$@" ;;
+esac
+EOF
+  chmod +x "$TEST_DIR/bin/bash"
+  cd "$REPO_ROOT"
+}
+
+run_lint() {
+  run env -u CI "$@" REAL_BASH="$REAL_BASH" \
+    PATH="$TEST_DIR/bin:$REPO_ROOT/node_modules/.bin:$PATH" \
+    "$REAL_BASH" "$REPO_ROOT/scripts/lint.sh" "$FIXTURE"
+}
+
+assert_follow_on_checks() {
+  [[ "$output" == *"follow-on: scripts/oxlint-baseline.sh"* ]]
+  [[ "$output" == *"follow-on: scripts/check-boundaries.sh"* ]]
+  [[ "$output" == *"follow-on: scripts/check-element-resolution-ratchet.sh"* ]]
+}
+
+assert_local_autofix() {
+  [ "$status" -eq 0 ]
+  assert_follow_on_checks
+  grep -q 'if (true) {' "$FIXTURE"
+  run "$REPO_ROOT/node_modules/.bin/oxfmt" --check "$FIXTURE"
+  [ "$status" -eq 0 ]
 }
 
 teardown() {
@@ -36,11 +71,74 @@ teardown() {
   fixture_with_error="$TEST_DIR/fixture-with-error.ts"
   printf 'if (true) console.log("fixture");\nif (a == b) { console.log(a); }\n' >"$fixture_with_error"
 
-  run env PATH="$REPO_ROOT/node_modules/.bin:$PATH" bash "$REPO_ROOT/scripts/lint.sh" "$fixture_with_error"
+  run env -u CI PATH="$REPO_ROOT/node_modules/.bin:$PATH" bash "$REPO_ROOT/scripts/lint.sh" "$fixture_with_error"
   [ "$status" -ne 0 ]
   [[ "$output" == *"skipping baseline and boundary checks"* ]]
   grep -q 'if (true) {' "$fixture_with_error"
 
   run bash -c 'cd "$1" && bunx oxfmt --check "$2"' _ "$REPO_ROOT" "$fixture_with_error"
   [ "$status" -eq 0 ]
+}
+
+@test "CI=true rejects an autofixable curly violation without rewriting" {
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint CI=true
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"curly"* ]]
+  [[ "$output" == *"Checking formatting"* ]]
+  [[ "$output" != *"follow-on:"* ]]
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "CI=1 rejects an autofixable curly violation without rewriting" {
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint CI=1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"curly"* ]]
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "CI accepts a clean fixture and runs all follow-on checks" {
+  printf 'console.log("fixture");\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run_lint CI=true
+  [ "$status" -eq 0 ]
+  assert_follow_on_checks
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "CI check mode supports system Bash" {
+  [ -x /bin/bash ] || skip "system Bash is unavailable"
+  REAL_BASH=/bin/bash
+  printf 'console.log("fixture");\n' >"$FIXTURE"
+  run_lint CI=true
+  [ "$status" -eq 0 ]
+  assert_follow_on_checks
+}
+
+@test "CI rejects formatting-only violations without rewriting" {
+  printf 'console.log(  "fixture"  );\n' >"$FIXTURE"
+  cp "$FIXTURE" "$TEST_DIR/original.ts"
+  run "$REPO_ROOT/node_modules/.bin/oxlint" "$FIXTURE"
+  [ "$status" -eq 0 ]
+  run_lint CI=true
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Format issues found"* ]]
+  [[ "$output" != *"follow-on:"* ]]
+  cmp "$FIXTURE" "$TEST_DIR/original.ts"
+}
+
+@test "CI unset keeps local autofixing" {
+  run_lint
+  assert_local_autofix
+}
+
+@test "CI=false keeps local autofixing" {
+  run_lint CI=false
+  assert_local_autofix
+}
+
+@test "CI empty keeps local autofixing" {
+  run_lint CI=
+  assert_local_autofix
 }

@@ -107,7 +107,7 @@ Bun is the primary task runner for TypeScript tooling. Turborepo provides task c
 
 ```bash
 turbo run build        # Compile TypeScript (cached)
-turbo run lint         # Lint with auto-fix (cached)
+turbo run lint         # Lint: auto-fix locally, check-only in CI (cached)
 turbo run test         # Run all tests (cached)
 turbo run lint build test  # Run all with caching + parallelism
 bun test --bail        # Stop on first failure (no cache)
@@ -173,13 +173,14 @@ that gates NEW violations of rules the code predates is an external gate,
 its counts in `scripts/oxlint-baseline.txt`.
 
 ```bash
-bun run lint            # oxlint --fix, then the ratchet gate (CI runs this)
+bun run lint            # auto-fix locally, check-only in CI, then ratchet/boundary gates
 bun run lint:prune      # after FIXING violations: shrink the baseline
 bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 ```
 
-Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (a
-non-zero exit). The ratchet only gates the rules set to `warn` because they carry
+Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
+exit code is authoritative; CI disables fixes so even auto-fixable violations
+exit non-zero). The ratchet only gates the rules set to `warn` because they carry
 pre-existing violations: `complexity`, `max-depth`, `max-params`,
 `max-lines-per-function`, `auto-mobile/catch-convention`,
 `auto-mobile/no-unknown-cast`,
@@ -187,14 +188,23 @@ pre-existing violations: `complexity`, `max-depth`, `max-params`,
 (`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
 shifts. Because the type-aware rules need type info, the ratchet script runs
-`oxlint --type-aware` (tsgolint) — which is why the main `oxlint --fix` does not,
+`oxlint --type-aware` (tsgolint) — which is why the initial oxlint stage does not,
 and CI type-checks only once. When you FIX violations, run `bun run lint:prune` and
 commit the smaller file; the ratchet refuses to grow without `-- --allow-grow`.
 
-The `scripts/lint.sh` script always runs `oxfmt --write` after `oxlint --fix`, even when oxlint fails, so autofix output is format-clean; baseline and boundary checks run only when oxlint passes. `test/bats/lint-format-pipeline.bats` guards this contract.
+The `scripts/lint.sh` script uses read-only `oxlint` followed by `oxfmt --check`
+when `CI` is exactly `true` or `1`. All other values (including unset, empty, and
+`false`) use `oxlint --fix` followed by `oxfmt --write`, even when oxlint fails,
+so local autofix output is format-clean. In both modes oxfmt runs even after an
+oxlint failure; the ratchet and both boundary gates run only when both stages
+pass. CI therefore checks the committed tree without rewriting it. Turbo hashes
+and forwards `CI` so local fix results cannot satisfy CI's check cache.
+`bun run format:check` remains `oxfmt --check` in every environment.
+`scripts/prepush-node.sh` inherits this mode: local runs fix, and `CI=true`/`1`
+runs check only. `test/bats/lint-format-pipeline.bats` guards this contract.
 
-`bun run lint` runs `oxlint --fix`, so only **non-auto-fixable** rules belong to
-the ratchet — an auto-fixable one would rewrite `src/` on every CI run. Keep each
+Local `bun run lint` runs `oxlint --fix`, so only **non-auto-fixable** rules belong to
+the ratchet — an auto-fixable one would rewrite `src/` on every local lint run. Keep each
 ratchet rule as its own rule (the custom plugin already does) rather than folding
 selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.

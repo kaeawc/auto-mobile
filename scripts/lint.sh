@@ -2,10 +2,22 @@
 
 set -euo pipefail
 
+oxfmt_mode=--write
+# Only these CI values enable read-only checks; unset/empty/false stay local.
 set +e
-oxlint --fix "$@"
-oxlint_status=$?
-oxfmt --write "$@"
+case "${CI:-}" in
+  true | 1)
+    oxlint "$@"
+    oxlint_status=$?
+    oxfmt_mode=--check
+    ;;
+  *)
+    oxlint --fix "$@"
+    oxlint_status=$?
+    ;;
+esac
+
+oxfmt "$oxfmt_mode" "$@"
 oxfmt_status=$?
 set -e
 

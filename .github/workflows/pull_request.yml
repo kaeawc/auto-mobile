@@ -63,11 +63,29 @@ jobs:
             const prNumber = context.issue.number;
 
             // Get list of changed files
-            const { data: files } = await github.rest.pulls.listFiles({
+            const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
+              per_page: 100,
             });
+
+            // listFiles is capped at 3000 files. Only skip with a complete list.
+            let expectedFileCount = context.payload.pull_request.changed_files;
+            if (!Number.isInteger(expectedFileCount) || expectedFileCount < 0) {
+              try {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                });
+                expectedFileCount = pr.changed_files;
+              } catch (error) {
+                console.log('Unable to determine changed file count:', error);
+              }
+            }
+            const fileListComplete = Number.isInteger(expectedFileCount) &&
+              expectedFileCount >= 0 && files.length === expectedFileCount;
 
             // Documentation file patterns
             const docPatterns = [
@@ -90,10 +108,12 @@ jobs:
             };
 
             // Check if ALL files are documentation files
-            const allFilesAreDocs = files.length > 0 && files.every(file => isDocFile(file.filename));
+            const allFilesAreDocs = fileListComplete && files.length > 0 && files.every(file => isDocFile(file.filename));
 
             console.log('Files changed:', files.map(f => f.filename).join(', '));
             console.log('Total files:', files.length);
+            console.log('Expected files:', expectedFileCount);
+            console.log('File list complete:', fileListComplete);
             console.log('All files are docs:', allFilesAreDocs);
             files.forEach(file => {
               console.log(`  ${file.filename}: ${isDocFile(file.filename) ? 'doc' : 'code'}`);
@@ -168,7 +188,15 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
+              per_page: 100,
             });
+
+            // listFiles is capped at 3000 files. Only skip with a complete list.
+            const payloadFileCount = context.payload.pull_request.changed_files;
+            const expectedFileCount = Number.isInteger(payloadFileCount) && payloadFileCount >= 0
+              ? payloadFileCount : pr.changed_files;
+            const fileListComplete = Number.isInteger(expectedFileCount) &&
+              expectedFileCount >= 0 && files.length === expectedFileCount;
 
             // The pull_request event already carries the complete label
             // snapshot. Reusing it avoids an extra API request in the required
@@ -195,7 +223,7 @@ jobs:
             const documentation = labelNames.includes('documentation');
             const titleMatches = pr.title.startsWith('chore:');
             const branchMatches = pr.head.ref.startsWith('auto-update/');
-            const allFilesAreDocs = files.length > 0 && files.every(file => isDocFile(file.filename));
+            const allFilesAreDocs = fileListComplete && files.length > 0 && files.every(file => isDocFile(file.filename));
             const autoChore = sameRepo && automated && documentation && titleMatches && branchMatches && allFilesAreDocs;
 
             console.log('PR Title:', pr.title);
@@ -204,6 +232,8 @@ jobs:
             console.log('Automated label:', automated);
             console.log('Documentation label:', documentation);
             console.log('Files changed:', files.map(f => f.filename).join(', '));
+            console.log('Expected files:', expectedFileCount);
+            console.log('File list complete:', fileListComplete);
             console.log('All files are docs:', allFilesAreDocs);
             console.log('Result - auto chore:', autoChore);
 

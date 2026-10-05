@@ -1843,6 +1843,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun onUnbind(intent: Intent?): Boolean {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
+    if (::overlayController.isInitialized) {
+      // Dismiss without terminal destruction so a same-process rebind can show overlays again.
+      CoroutineScope(Dispatchers.Main.immediate).launch {
+        overlayController.dismiss(requestId = null, id = null, all = true)
+      }
+    }
     return super.onUnbind(intent)
   }
 

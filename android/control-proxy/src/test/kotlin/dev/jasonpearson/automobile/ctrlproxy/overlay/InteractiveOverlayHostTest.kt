@@ -185,6 +185,114 @@ class InteractiveOverlayHostTest {
   }
 
   @Test
+  fun `not attached dismissal clears active state and allows a fresh window`() = runTest {
+    host.show()
+    val oldView = manager.view!!
+    val owner = oldView.findViewTreeLifecycleOwner()!!
+    host.withTouchThrough {
+      manager.failRemove = true
+      manager.removeFailure = IllegalArgumentException("not attached")
+      assertTrue(host.dismiss())
+      assertFalse(host.isShowing)
+      assertNull(host.currentPlacement)
+      assertFalse(host.isTouchThroughActive)
+      assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
+      assertTrue(host.show())
+    }
+    assertNotSame(oldView, manager.view)
+    assertEquals(2, manager.added.size)
+    assertEquals(2, history.count { it == "add" })
+    assertEquals(1, manager.updated.size)
+    assertTrue(host.isShowing)
+    assertFalse(host.isTouchThroughActive)
+  }
+
+  @Test
+  fun `not attached removal lets destroy succeed and clear state`() = runTest {
+    host.show()
+    val owner = manager.view!!.findViewTreeLifecycleOwner()!!
+    manager.failRemove = true
+    manager.removeFailure = IllegalArgumentException("not attached")
+    assertTrue(host.destroy())
+    assertTrue(host.destroy())
+    assertFalse(host.isShowing)
+    assertNull(host.currentPlacement)
+    assertFalse(host.isTouchThroughActive)
+    assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
+    assertFalse(host.show())
+  }
+
+  @Test
+  fun `not attached update fails current show but allows a fresh window`() = runTest {
+    host.show()
+    val oldView = manager.view!!
+    val owner = oldView.findViewTreeLifecycleOwner()!!
+    manager.failUpdate = true
+    manager.updateFailure = IllegalArgumentException("not attached")
+    assertFalse(host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen())))
+    assertFalse(host.isShowing)
+    assertNull(host.currentPlacement)
+    assertFalse(host.isTouchThroughActive)
+    assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
+    assertTrue(host.show())
+    assertNotSame(oldView, manager.view)
+    assertEquals(2, manager.added.size)
+    assertTrue(host.isShowing)
+  }
+
+  @Test
+  fun `not attached touch through activation clears window without running gesture`() = runTest {
+    host.show()
+    manager.failUpdate = true
+    manager.updateFailure = IllegalArgumentException("not attached")
+    var ran = false
+    val error = runCatching { host.withTouchThrough { ran = true } }.exceptionOrNull()
+    assertTrue(error is IllegalStateException)
+    assertEquals("Failed to enable overlay touch-through", error!!.message)
+    assertFalse(ran)
+    assertFalse(host.isShowing)
+    assertNull(host.currentPlacement)
+    assertFalse(host.isTouchThroughActive)
+    assertTrue(host.show())
+    assertEquals(2, manager.added.size)
+  }
+
+  @Test
+  fun `not attached touch through restoration clears window and active token`() = runTest {
+    host.show()
+    val owner = manager.view!!.findViewTreeLifecycleOwner()!!
+    val error = runCatching {
+      host.withTouchThrough {
+        manager.failUpdate = true
+        manager.updateFailure = IllegalArgumentException("not attached")
+      }
+    }
+      .exceptionOrNull()
+    assertTrue(error is IllegalStateException)
+    assertEquals("Failed to restore overlay touchability", error!!.message)
+    assertFalse(host.isShowing)
+    assertNull(host.currentPlacement)
+    assertFalse(host.isTouchThroughActive)
+    assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
+    assertTrue(host.show())
+    assertEquals(2, manager.added.size)
+  }
+
+  @Test
+  fun `other removal failure keeps window placement and allows retry`() = runTest {
+    host.show()
+    val owner = manager.view!!.findViewTreeLifecycleOwner()!!
+    manager.failRemove = true
+    assertFalse(host.dismiss())
+    assertTrue(host.isShowing)
+    assertEquals(OverlayPlacement.Floating(), host.currentPlacement)
+    assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
+    manager.failRemove = false
+    assertTrue(host.dismiss())
+    assertFalse(host.isShowing)
+  }
+
+  @Test
   fun `opacity changes whole view with no window add remove or layout update`() = runTest {
     host.show(InteractiveOverlayRequest(opacityPercent = 70))
     assertEquals(0.7f, manager.view!!.alpha, 0f)

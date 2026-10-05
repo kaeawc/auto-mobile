@@ -54,7 +54,10 @@ interface InteractiveOverlayHost {
 
   suspend fun replace(request: InteractiveOverlayRequest): Boolean
 
-  /** Removes immediately, allowing the app to regain focus. Failed removal is retryable. */
+  /**
+   * Removes immediately, allowing the app to regain focus. A window already detached counts as
+   * removed; other failed removals are retryable.
+   */
   suspend fun dismiss(): Boolean
 
   /**
@@ -71,8 +74,9 @@ interface InteractiveOverlayHost {
    * in NonCancellable, unless dismissed/destroyed. Show/replace preserve touch-through and the
    * active token; restoration clears NOT_TOUCHABLE from the newest layout params. A platform update
    * failure throws rather than dispatching a gesture that could silently hit the overlay. Failed
-   * restoration leaves the active state set and throws; dismissal can recover it. Do not nest on
-   * the same host.
+   * restoration leaves the active state set and throws; dismissal can recover it. If the window is
+   * already detached, update failure clears the window and active state before throwing. Do not
+   * nest on the same host.
    */
   suspend fun <T> withTouchThrough(
     settleMillis: Long = DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS,
@@ -204,15 +208,23 @@ class DefaultInteractiveOverlayHost(
     try {
       windowManager.removeViewImmediate(current.view)
     } catch (error: Exception) {
-      Log.e(TAG, "Failed to remove interactive overlay; dismissal can be retried", error)
-      return false
+      if (isNotAttached(error)) {
+        Log.w(TAG, "Interactive overlay already detached; clearing window", error)
+      } else {
+        Log.e(TAG, "Failed to remove interactive overlay; dismissal can be retried", error)
+        return false
+      }
     }
+    clearWindow(current)
+    return true
+  }
+
+  private fun clearWindow(current: Window) {
     touchThroughToken = null
     window = null
     placement = null
     current.owner.destroy()
     current.view.disposeComposition()
-    return true
   }
 
   override suspend fun destroy(): Boolean = mainThread.onMain {
@@ -267,11 +279,14 @@ class DefaultInteractiveOverlayHost(
       windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update interactive overlay", error)
+      if (isNotAttached(error)) clearWindow(current)
       return false
     }
     current.params = params
     return true
   }
+
+  private fun isNotAttached(error: Exception) = error is IllegalArgumentException
 
   private fun copyParams(params: WindowManager.LayoutParams) =
     WindowManager.LayoutParams().apply { copyFrom(params) }

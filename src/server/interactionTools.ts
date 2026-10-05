@@ -1609,7 +1609,8 @@ export async function swipeOnHandler(
       display: args.display,
       container: args.container,
       autoTarget: args.display === undefined ? (args.autoTarget ?? true) : args.autoTarget,
-      direction: resolvedDirection.direction,
+      // SwipeOnArgs requires a direction, and the resolver's inversion map covers all four values.
+      direction: resolvedDirection.direction!,
       lookFor: args.lookFor,
       speed: args.speed,
       includeSystemInsets:

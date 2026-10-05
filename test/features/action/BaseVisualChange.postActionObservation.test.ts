@@ -1,3 +1,10 @@
+import {
+  runWithPostActionCaptureScope,
+  hasPendingTerminalScreenshot,
+} from "../../../src/utils/PostActionCaptureContext";
+import { settleEmbeddedObservationInResponse } from "../../../src/server/embeddedObservationSettle";
+import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
+import { createStructuredToolResponse, getStructuredField } from "../../../src/utils/toolUtils";
 import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -43,12 +50,18 @@ describe("BaseVisualChange post-action observation", () => {
       ...overrides,
     }) as unknown as ObserveResult;
 
+  class TerminalVisualChange extends BaseVisualChange {
+    captureTerminal(observation: ObserveResult) {
+      return this.captureTerminalObservationScreenshot(observation);
+    }
+  }
+
   function createVisualChange(
     platform: "android" | "ios" = "ios",
     renderedDisplayRevision?: () => number | undefined,
-  ): BaseVisualChange {
+  ): TerminalVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new BaseVisualChange(
+    const instance = new TerminalVisualChange(
       device,
       fakeAdb as unknown as any,
       fakeTimer,
@@ -518,6 +531,137 @@ describe("BaseVisualChange post-action observation", () => {
     // Exactly one observe: the errored hierarchy short-circuits all retries.
     expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
     expect(fakeTimer.getSleepHistory()).toEqual([]);
+  });
+
+  test.each([false, true])(
+    "pipeline captures only after choosing final hierarchy (display: %s)",
+    async (display) => {
+      process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "false";
+      fakeObserveScreen.setObserveResult((index) =>
+        makeObserve({
+          updatedAt: 10 + index,
+          deviceId: "device-123",
+          observationId: `frame-${index}`,
+          display: { key: "panel", role: "external", posture: "unknown", generation: 1 },
+          viewHierarchy: { hierarchy: { node: { text: "screen" } }, updatedAt: 10 + index },
+        }),
+      );
+      await runWithPostActionCaptureScope(undefined, async () => {
+        const result = await createVisualChange().observedInteraction(
+          async () => ({ success: true }),
+          {
+            changeExpected: false,
+            skipPreviousObserve: true,
+            display: display ? "panel" : undefined,
+          },
+        );
+        expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
+        expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+        const response = createStructuredToolResponse(result);
+        await settleEmbeddedObservationInResponse(response, {
+          name: "tapOn",
+          args: display ? { display: "panel" } : {},
+          internal: false,
+          createSettleObserve: () => new RealSettleObserve(fakeObserveScreen, fakeTimer),
+        });
+        const final = getStructuredField(response, "observation")!;
+        expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+        expect(fakeObserveScreen.getCapturedScreenshotObservations()[0]?.observationId).toBe(
+          final.observationId,
+        );
+        expect(final.updatedAt).toBeGreaterThan(result.observation.updatedAt);
+      });
+    },
+  );
+
+  test.each([false, true])(
+    "deferred action terminal capture works with finalizer scope: %s",
+    async (scopeEnabled) => {
+      process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "false";
+      fakeObserveScreen.setObserveResult(
+        makeObserve({ deviceId: "device-123", observationId: "terminal" }),
+      );
+      await runWithPostActionCaptureScope(
+        undefined,
+        async () => {
+          const instance = createVisualChange();
+          const result = await instance.observedInteraction(async () => ({ success: true }), {
+            changeExpected: false,
+            skipPreviousObserve: true,
+            deferPostActionScreenshot: true,
+          });
+          await instance.captureTerminal(result.observation);
+          expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(scopeEnabled ? 0 : 1);
+          expect(hasPendingTerminalScreenshot(result.observation)).toBe(scopeEnabled);
+        },
+        scopeEnabled,
+      );
+      expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+    },
+  );
+
+  test("internal scope captures immediately while an outer pipeline owns a pending capture", async () => {
+    process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV] = "false";
+    fakeObserveScreen.setObserveResult(
+      makeObserve({ deviceId: "device-123", observationId: "internal" }),
+    );
+    await runWithPostActionCaptureScope(undefined, async () => {
+      await runWithPostActionCaptureScope(
+        undefined,
+        async () => {
+          const result = await createVisualChange().observedInteraction(
+            async () => ({ success: true }),
+            {
+              changeExpected: false,
+              skipPreviousObserve: true,
+            },
+          );
+          expect(hasPendingTerminalScreenshot(result.observation)).toBe(false);
+          expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+        },
+        false,
+      );
+    });
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+  });
+
+  test("audit-only capture records action-time policy and finalizes once", async () => {
+    serverConfig.setAccessibilityAuditConfig({
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    });
+    fakeObserveScreen.setObserveResult(
+      makeObserve({ deviceId: "device-123", observationId: "audit-only" }),
+    );
+    await runWithPostActionCaptureScope(undefined, async () => {
+      const result = await createVisualChange().observedInteraction(
+        async () => ({ success: true }),
+        {
+          changeExpected: false,
+          skipPreviousObserve: true,
+        },
+      );
+      expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+      expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
+      serverConfig.setAccessibilityAuditConfig(null);
+    });
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(1);
+  });
+
+  test("pipeline disabled policy still makes zero terminal captures", async () => {
+    fakeObserveScreen.setObserveResult(makeObserve());
+    await runWithPostActionCaptureScope(undefined, async () => {
+      const result = await createVisualChange().observedInteraction(
+        async () => ({ success: true }),
+        {
+          changeExpected: false,
+          skipPreviousObserve: true,
+        },
+      );
+      expect(hasPendingTerminalScreenshot(result.observation)).toBe(false);
+    });
+    expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
   });
 
   test("skips automatic post-action screenshots by default", async () => {

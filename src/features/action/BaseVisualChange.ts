@@ -52,6 +52,7 @@ import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOption
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { hierarchyChanged, hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { deferTerminalScreenshot } from "../../utils/PostActionCaptureContext";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
@@ -639,6 +640,14 @@ export class BaseVisualChange {
       return;
     }
     if (this.shouldCapturePostActionScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
+      if (
+        this.observeScreen.captureScreenshot &&
+        deferTerminalScreenshot(observation, async (chosen, requestSignal) => {
+          await this.observeScreen.captureScreenshot?.(perf, requestSignal ?? signal, chosen);
+        })
+      ) {
+        return;
+      }
       await this.observeScreen.captureScreenshot?.(perf, signal, observation);
       return;
     }

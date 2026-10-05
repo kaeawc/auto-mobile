@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import type { Element } from "../../../src/models/Element";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
-import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import {
+  TalkBackTapStrategy,
+  TALKBACK_ACTIVATION_WARNING,
+} from "../../../src/features/talkback/TalkBackTapStrategy";
 
 describe("TapOnElement TalkBack mode detection", () => {
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
@@ -969,43 +974,58 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
 });
 
 describe("TapOnElement precise TalkBack coordinate fallback", () => {
-  test("focuses the unidentifiable element before TalkBack activation taps", async () => {
-    const accessibilityDetector = new FakeAccessibilityDetector();
-    accessibilityDetector.setTalkBackEnabled(true);
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const driver = new FakeTalkBackNavigationDriver();
-    const events: string[] = [];
-    const requestTapCoordinates = driver.requestTapCoordinates.bind(driver);
-    const sleep = timer.sleep.bind(timer);
-    spyOn(driver, "requestTapCoordinates").mockImplementation(async (x, y, durationMs) => {
-      events.push("tap");
-      return requestTapCoordinates(x, y, durationMs);
-    });
-    spyOn(timer, "sleep").mockImplementation(async (ms) => {
-      events.push(`sleep:${ms}`);
-      return sleep(ms);
-    });
-    const tapOnElement = new TapOnElement(
-      { name: "test-device", platform: "android", deviceId: "emulator-5554" },
-      null,
-      {
-        accessibilityDetector,
-        timer,
-        talkBackStrategy: new TalkBackTapStrategy({ timer }),
-        talkBackDriverFactory: { createDriver: () => driver },
-      },
-    );
-    const element = {
-      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-      text: "Unidentified action",
-    };
+  test.each([undefined, "unique"] as const)(
+    "focuses the unidentifiable element before activation (selection=%s)",
+    async (selectionStrategy) => {
+      const accessibilityDetector = new FakeAccessibilityDetector();
+      accessibilityDetector.setTalkBackEnabled(true);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const driver = new FakeTalkBackNavigationDriver();
+      const events: string[] = [];
+      const requestTapCoordinates = driver.requestTapCoordinates.bind(driver);
+      const sleep = timer.sleep.bind(timer);
+      spyOn(driver, "requestTapCoordinates").mockImplementation(async (x, y, durationMs) => {
+        events.push("tap");
+        return requestTapCoordinates(x, y, durationMs);
+      });
+      const doubleTap = driver.requestDoubleTapCoordinates.bind(driver);
+      spyOn(driver, "requestDoubleTapCoordinates").mockImplementation(async (...args) => {
+        events.push("doubleTap");
+        return doubleTap(...args);
+      });
+      spyOn(timer, "sleep").mockImplementation(async (ms) => {
+        events.push(`sleep:${ms}`);
+        return sleep(ms);
+      });
+      const tapOnElement = new TapOnElement(
+        { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+        null,
+        {
+          accessibilityDetector,
+          timer,
+          talkBackStrategy: new TalkBackTapStrategy({ timer }),
+          talkBackDriverFactory: { createDriver: () => driver },
+        },
+      );
+      const element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        text: "Unidentified action",
+      };
 
-    await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element);
+      const warnings: string[] = [];
+      await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element, undefined, {
+        action: "tap",
+        selectionStrategy,
+        onActivationWarning: (warning) => warnings.push(warning),
+      });
 
-    expect(driver.tapHistory).toHaveLength(3);
-    expect(events).toEqual(["tap", "sleep:500", "tap", "sleep:200", "tap"]);
-  });
+      expect(driver.tapHistory).toHaveLength(1);
+      expect(driver.doubleTapHistory).toHaveLength(1);
+      expect(events).toEqual(["tap", "sleep:500", "doubleTap"]);
+      expect(warnings).toEqual([expect.stringContaining("activation is unconfirmed")]);
+    },
+  );
 });
 
 describe("TapOnElement screen-reader navigation result", () => {
@@ -1033,13 +1053,30 @@ describe("TapOnElement screen-reader navigation result", () => {
     focusTrapDetected: false,
   };
 
-  const createCommand = (tapResult: any) => {
+  const createCommand = (
+    tapResult: any,
+    activationWarning?: string,
+    coordinate?: { driver: FakeTalkBackNavigationDriver; service: FakeCtrlProxy; element: Element },
+  ) => {
     const accessibilityDetector = new FakeAccessibilityDetector();
     accessibilityDetector.setTalkBackEnabled(true);
     const strategy = new FakeTalkBackTapStrategy();
     strategy.setTapResult(tapResult);
+    if (activationWarning) {
+      strategy.setPreciseTapResult({
+        success: true,
+        method: "coordinate-fallback",
+        warnings: [activationWarning],
+      });
+    }
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
+    if (coordinate) {
+      androidGetInstanceSpy.mockReturnValue(
+        coordinate.service as unknown as AndroidCtrlProxyClient,
+      );
+    }
+    const targetElement = coordinate?.element ?? element;
     const observation = {
       viewHierarchy: { hierarchy: {} },
       screenSize: { width: 100, height: 100 },
@@ -1050,9 +1087,9 @@ describe("TapOnElement screen-reader navigation result", () => {
       {
         accessibilityDetector,
         timer,
-        talkBackStrategy: strategy,
+        talkBackStrategy: coordinate ? new TalkBackTapStrategy({ timer }) : strategy,
         talkBackDriverFactory: {
-          createDriver: () => new FakeTalkBackNavigationDriver(),
+          createDriver: () => coordinate?.driver ?? new FakeTalkBackNavigationDriver(),
         },
         waitForCondition: {
           execute: async () => ({
@@ -1065,7 +1102,7 @@ describe("TapOnElement screen-reader navigation result", () => {
           }),
         },
         featureFlags: {
-          isEnabled: (key: string) => key === "screen-reader-navigation",
+          isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
         } as FeatureFlagService,
       },
     );
@@ -1074,20 +1111,165 @@ describe("TapOnElement screen-reader navigation result", () => {
       observation,
     }));
     spyOn(command as any, "searchForElement").mockResolvedValue({
-      selection: { element, indexInMatches: 0, totalMatches: 1, strategy: "first" },
+      selection: { element: targetElement, indexInMatches: 0, totalMatches: 1, strategy: "first" },
       viewHierarchy: observation.viewHierarchy,
       containerFound: true,
       stats: { durationMs: 0, requestCount: 0, changeCount: 0 },
     });
     spyOn(command as any, "resolveTapTargetElement").mockReturnValue({
-      element,
+      element: targetElement,
       usedParent: false,
     });
-    spyOn(command as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
+    if (!coordinate) {
+      spyOn(command as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
+    }
     spyOn((command as any).selectionStateTracker, "prepare").mockResolvedValue(null);
     spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
     return command;
   };
+
+  const capabilityWarning =
+    "TalkBack activation is unconfirmed: the connected device service does not support the single-gesture double tap (tap_double_v1). Update CtrlProxy. The plain coordinate tap path was used instead. Observe the result before retrying.";
+  const failedGestureWarning =
+    "TalkBack activation is unconfirmed: the TalkBack gesture failed, so the plain coordinate tap path was used instead. Observe the result before retrying.";
+  const unidentifiedElement: Element = {
+    text: "Unidentified action",
+    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+  };
+
+  test.each([undefined, "unique"] as const)(
+    "capability absent preserves the legacy fallback dispatch and warns (selection=%s)",
+    async (selectionStrategy) => {
+      const driver = new FakeTalkBackNavigationDriver();
+      driver.doubleTapCapabilitySupported = false;
+      const service = new FakeCtrlProxy(new FakeTimer());
+      const command = createCommand(undefined, undefined, {
+        driver,
+        service,
+        element: unidentifiedElement,
+      });
+      const fallback = spyOn(service, "requestTapCoordinates");
+      const result = await command.execute({
+        action: "tap",
+        text: unidentifiedElement.text,
+        selectionStrategy,
+      });
+
+      expect(result.success).toBe(true);
+      expect(driver.tapHistory).toEqual([{ x: 50, y: 50, durationMs: 50 }]);
+      expect(driver.doubleTapHistory).toEqual([]);
+      // Same CtrlProxy-first dispatchCoordinateTapOrAdbFallback path as the legacy fallback.
+      expect(service.getTapHistory()).toEqual([{ x: 50, y: 50, duration: 10 }]);
+      expect(fallback).toHaveBeenCalledTimes(1);
+      expect(fallback).toHaveBeenCalledWith(
+        50,
+        50,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        expect.any(Function),
+        undefined,
+        undefined,
+        undefined,
+      );
+      expect(result.warnings).toEqual([capabilityWarning]);
+    },
+  );
+
+  test.each([undefined, "unique"] as const)(
+    "capability present sends one activation double tap and warns (selection=%s)",
+    async (selectionStrategy) => {
+      const driver = new FakeTalkBackNavigationDriver();
+      const service = new FakeCtrlProxy(new FakeTimer());
+      const command = createCommand(undefined, undefined, {
+        driver,
+        service,
+        element: unidentifiedElement,
+      });
+      const result = await command.execute({
+        action: "tap",
+        text: unidentifiedElement.text,
+        selectionStrategy,
+      });
+      expect(result.success).toBe(true);
+      expect(driver.tapHistory).toEqual([{ x: 50, y: 50, durationMs: 50 }]);
+      expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 50 }]);
+      expect(service.getTapHistory()).toEqual([]);
+      expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+    },
+  );
+
+  test.each([undefined, "unique"] as const)(
+    "failed TalkBack gesture uses the legacy fallback and truthful warning (selection=%s)",
+    async (selectionStrategy) => {
+      const driver = new FakeTalkBackNavigationDriver();
+      driver.setTapResult({
+        success: false,
+        totalTimeMs: 0,
+        error: "Focus rejected before dispatch",
+      });
+      const service = new FakeCtrlProxy(new FakeTimer());
+      const command = createCommand(undefined, undefined, {
+        driver,
+        service,
+        element: unidentifiedElement,
+      });
+      const result = await command.execute({
+        action: "tap",
+        text: unidentifiedElement.text,
+        selectionStrategy,
+      });
+      expect(result.success).toBe(true);
+      expect(driver.doubleTapHistory).toEqual([]);
+      expect(service.getTapHistory()).toEqual([{ x: 50, y: 50, duration: 10 }]);
+      expect(result.warnings).toEqual([failedGestureWarning]);
+    },
+  );
+
+  test.each([undefined, "unique"] as const)(
+    "TalkBack long press emits no activation warning (selection=%s)",
+    async (selectionStrategy) => {
+      const driver = new FakeTalkBackNavigationDriver();
+      const service = new FakeCtrlProxy(new FakeTimer());
+      const command = createCommand(undefined, undefined, {
+        driver,
+        service,
+        element: unidentifiedElement,
+      });
+      const result = await command.execute({
+        action: "longPress",
+        text: unidentifiedElement.text,
+        selectionStrategy,
+      });
+      expect(result.success).toBe(true);
+      expect(driver.tapHistory).toHaveLength(1);
+      expect(driver.doubleTapHistory).toEqual([]);
+      expect(result.warnings).toBeUndefined();
+    },
+  );
+
+  test("ACTION_CLICK succeeds without an activation warning or coordinate gesture", async () => {
+    const driver = new FakeTalkBackNavigationDriver();
+    driver.doubleTapCapabilitySupported = false;
+    const service = new FakeCtrlProxy(new FakeTimer());
+    const command = createCommand(undefined, undefined, { driver, service, element });
+    const result = await command.execute({ action: "tap", elementId: "test:id/button" });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+    expect(driver.actionHistory).toEqual([{ action: "click", resourceId: "test:id/button" }]);
+    expect(driver.tapHistory).toEqual([]);
+    expect(driver.doubleTapHistory).toEqual([]);
+    expect(service.getTapHistory()).toEqual([]);
+  });
+
+  test("public tap result preserves unconfirmed activation warnings", async () => {
+    const warning = "TalkBack activation is unconfirmed; the gesture may only have moved focus";
+    const command = createCommand({ success: false, method: "focus-navigation" }, warning);
+    const result = await command.execute({ action: "tap", elementId: "test:id/button" });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([warning]);
+  });
 
   test("returns the successful cursor journey from public execute", async () => {
     const command = createCommand({
@@ -1119,8 +1301,8 @@ describe("TapOnElement screen-reader navigation result", () => {
 });
 
 describe("TapOnElement TalkBack dispatch uncertainty", () => {
-  test.each([0, 1, 2])(
-    "never sends ADB after coordinate tap %s loses its reply",
+  test.each([0, 1])(
+    "never sends ADB after coordinate request %s loses its reply",
     async (failedTap) => {
       const detector = new FakeAccessibilityDetector();
       detector.setTalkBackEnabled(true);
@@ -1149,7 +1331,8 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
           bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         }),
       ).rejects.toThrow("outcome is indeterminate");
-      expect(driver.getTapCount()).toBe(failedTap + 1);
+      expect(driver.getTapCount()).toBe(1);
+      expect(driver.doubleTapHistory).toHaveLength(failedTap);
       expect(driver.getActionCount()).toBe(0);
       expect(adb.getCommandCalls()).toEqual([]);
       expect(adb.getSpawnCalls()).toEqual([]);
@@ -1169,10 +1352,10 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
       acknowledged: false,
       success: false,
       error: "WebSocket not connected",
-      taps: 3,
+      taps: 1,
     },
-    { dispatched: true, acknowledged: true, success: false, error: "node not found", taps: 3 },
-    { dispatched: true, acknowledged: true, success: false, error: "Click not supported", taps: 3 },
+    { dispatched: true, acknowledged: true, success: false, error: "node not found", taps: 1 },
+    { dispatched: true, acknowledged: true, success: false, error: "Click not supported", taps: 1 },
     { dispatched: true, acknowledged: true, success: true, error: undefined, taps: 0 },
   ])("dispatches only one activation for %j", async ({ taps, ...actionResult }) => {
     const detector = new FakeAccessibilityDetector();
@@ -1203,6 +1386,7 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
     }
     expect(driver.getActionCount()).toBe(1);
     expect(driver.getTapCount()).toBe(taps);
+    expect(driver.doubleTapHistory).toHaveLength(taps);
     expect(adb.getCommandCalls()).toEqual([]);
   });
 });

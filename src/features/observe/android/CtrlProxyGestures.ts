@@ -7,9 +7,12 @@
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
+import {
+  SharedGestureDelegate,
+  DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+} from "../shared/SharedGestureDelegate";
 import { sendCommand } from "../DeviceServiceUtils";
-import type { DelegateContext, A11ySwipeResult } from "./types";
+import type { DelegateContext, A11ySwipeResult, A11yTapCoordinatesResult } from "./types";
 import { normalizeCtrlProxyMilliseconds } from "./ctrlProxyProtocol";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
@@ -26,6 +29,29 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   protected override gestureDisplayParams(displayId?: number): { displayId?: number } {
     // Preserve the requested target; sendCommand validates the current connection's capability.
     return displayId === undefined || displayId === 0 ? {} : { displayId };
+  }
+
+  /** Android schedules both strokes; reply latency cannot stretch the double-tap gap. */
+  async requestDoubleTapCoordinates(
+    x: number,
+    y: number,
+    onDispatch?: () => void,
+  ): Promise<A11yTapCoordinatesResult> {
+    return sendCommand<A11yTapCoordinatesResult>(this.context, {
+      idPrefix: "double_tap",
+      responseType: "tap_coordinates",
+      messageType: "request_tap_coordinates",
+      params: this.gestureParams("request_tap_coordinates", {
+        x: this.coord(x),
+        y: this.coord(y),
+        duration: 50,
+        doubleTap: true,
+      }),
+      requiredCapability: "tap_double_v1",
+      timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      errorLabel: "Double tap",
+      onDispatch,
+    });
   }
 
   protected override gestureParams(

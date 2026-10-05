@@ -85,6 +85,18 @@ describe("Android millisecond serialization", () => {
       }
     },
   );
+  test("normalizes double-tap strokes while preserving the doubleTap flag", () => {
+    expect(
+      normalizeCtrlProxyMilliseconds("request_tap_coordinates", { doubleTap: true, duration: 0 }),
+    ).toEqual({ doubleTap: true, duration: 1 });
+    expect(
+      normalizeCtrlProxyMilliseconds("request_tap_coordinates", {
+        doubleTap: true,
+        duration: 49.6,
+      }),
+    ).toEqual({ doubleTap: true, duration: 50 });
+  });
+
   test("preserves absent fields, drops undefined on serialization and rounds legacy drag durations", () => {
     const params = { x1: 1.5, holdTime: 250.5, duration: 0.1, holdDurationMs: undefined };
     expect(JSON.stringify(normalizeCtrlProxyMilliseconds("request_drag", params))).toBe(

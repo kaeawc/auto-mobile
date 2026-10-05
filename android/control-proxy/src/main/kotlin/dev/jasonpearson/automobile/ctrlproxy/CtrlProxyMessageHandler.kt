@@ -168,14 +168,24 @@ class CtrlProxyMessageHandler(
             error = nonFiniteError(field, value),
           )
         }
-        actions.requestTapCoordinates(
-          request.requestId,
-          request.x,
-          request.y,
-          request.duration,
-          request.frameContext,
-          request.displayId,
-        )
+        if (request.doubleTap) {
+          actions.requestDoubleTapCoordinates(
+            request.requestId,
+            request.x,
+            request.y,
+            request.frameContext,
+            request.displayId,
+          )
+        } else {
+          actions.requestTapCoordinates(
+            request.requestId,
+            request.x,
+            request.y,
+            request.duration,
+            request.frameContext,
+            request.displayId,
+          )
+        }
       }
       is RequestTwoFingerSwipe -> {
         if (request.displayId != null) {

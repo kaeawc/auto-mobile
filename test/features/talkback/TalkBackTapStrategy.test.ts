@@ -593,9 +593,8 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("coordinate-fallback");
-      expect(driver.getTapCount()).toBe(2);
-      expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 50 });
-      expect(driver.tapHistory[1]).toEqual({ x: 50, y: 50, durationMs: 50 });
+      expect(driver.getTapCount()).toBe(0);
+      expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 50 }]);
     });
 
     test("uses full duration for longPress action", async () => {
@@ -607,29 +606,28 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 1000 }); // Full duration
     });
 
-    test("returns error when first tap of doubleTap fails", async () => {
+    test("returns error when atomic doubleTap fails before dispatch", async () => {
       driver.queueTapResult({ success: false, totalTimeMs: 1, error: "tap failed" });
 
       const result = await strategy.executeCoordinateFallback(50, 50, "doubleTap", 500, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
-      expect(result.error).toContain("First tap failed");
+      expect(result.error).toContain("Double tap failed");
       expect(result.completedTaps).toBe(0);
-      expect(driver.getTapCount()).toBe(1);
+      expect(driver.doubleTapHistory).toHaveLength(1);
+      expect(driver.getTapCount()).toBe(0);
     });
 
-    test("returns error when second tap of doubleTap fails", async () => {
-      driver.queueTapResult({ success: true, totalTimeMs: 1 });
-      driver.queueTapResult({ success: false, totalTimeMs: 1, error: "second tap failed" });
+    test("atomic doubleTap reply loss is indeterminate without another activation", async () => {
+      driver.tapDispatched = true;
+      driver.queueTapResult({ success: false, totalTimeMs: 5000, error: "double tap timed out" });
 
-      const result = await strategy.executeCoordinateFallback(50, 50, "doubleTap", 500, driver);
-
-      expect(result.success).toBe(false);
-      expect(result.method).toBe("coordinate-fallback");
-      expect(result.error).toContain("Second tap failed");
-      expect(result.completedTaps).toBe(1);
-      expect(driver.getTapCount()).toBe(2);
+      await expect(
+        strategy.executeCoordinateFallback(50, 50, "doubleTap", 500, driver),
+      ).rejects.toThrow("outcome is indeterminate");
+      expect(driver.doubleTapHistory).toHaveLength(1);
+      expect(driver.getTapCount()).toBe(0);
     });
 
     test("returns error when single tap fails", async () => {
@@ -644,6 +642,35 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executePreciseTap", () => {
+    test("activation is one request despite 400ms tap replies", async () => {
+      const tap = driver.requestTapCoordinates.bind(driver);
+      const doubleTap = driver.requestDoubleTapCoordinates.bind(driver);
+      spyOn(driver, "requestTapCoordinates").mockImplementation(async (...args) => {
+        const result = await tap(...args);
+        await fakeTimer.sleep(400);
+        return result;
+      });
+      spyOn(driver, "requestDoubleTapCoordinates").mockImplementation(async (...args) => {
+        const result = await doubleTap(...args);
+        await fakeTimer.sleep(400);
+        return result;
+      });
+
+      await strategy.executePreciseTap(80, 40, driver);
+
+      expect(driver.doubleTapHistory).toEqual([{ x: 80, y: 40 }]);
+      expect(driver.tapHistory).toEqual([{ x: 80, y: 40, durationMs: 50 }]);
+      expect(fakeTimer.getSleepHistory()).toEqual([400, 500, 400]);
+    });
+
+    test("acknowledged TalkBack gesture warns that activation is unconfirmed", async () => {
+      const result = await strategy.executePreciseTap(80, 40, driver);
+      expect(result).toMatchObject({
+        success: true,
+        warnings: [expect.stringContaining("activation is unconfirmed")],
+      });
+    });
+
     test.each([new Error("Socket lost after send"), new ActionableError("Socket lost after send")])(
       "a thrown error after coordinate dispatch is indeterminate: %j",
       async (error) => {
@@ -671,11 +698,9 @@ describe("TalkBackTapStrategy", () => {
         focusCompleted: true,
         completedTaps: 2,
       });
-      expect(driver.tapHistory).toEqual([
-        { x: 80, y: 40, durationMs: 50 },
-        { x: 80, y: 40, durationMs: 50 },
-        { x: 80, y: 40, durationMs: 50 },
-      ]);
+      expect(driver.tapHistory).toEqual([{ x: 80, y: 40, durationMs: 50 }]);
+      expect(driver.doubleTapHistory).toEqual([{ x: 80, y: 40 }]);
+      expect(fakeTimer.getSleepHistory()).toEqual([500]);
     });
 
     test("reports when the focus tap fails before activation", async () => {

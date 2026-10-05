@@ -119,7 +119,6 @@
 3	src/features/action/SetUIState.ts	eslint(complexity)
 3	src/features/action/TapOnElement.ts	eslint(max-lines-per-function)
 3	src/features/observe/ObserveScreen.ts	eslint(complexity)
-3	src/features/observe/ios/CtrlProxyHierarchy.ts	eslint(complexity)
 3	src/server/toolRegistry.ts	eslint(complexity)
 3	src/utils/retry/RetryExecutor.ts	auto-mobile(catch-convention)
 4	src/daemon/devicePool.ts	eslint(max-params)

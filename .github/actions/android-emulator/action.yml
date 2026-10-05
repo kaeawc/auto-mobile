@@ -130,6 +130,7 @@ runs:
           avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}
 
     - name: Create AVD and generate snapshot for caching
+      id: avd-create
       if: steps.avd-cache.outputs.cache-hit != 'true'
       uses: reactivecircus/android-emulator-runner@v2.35.0
       with:
@@ -152,6 +153,19 @@ runs:
           ls -la "$ANDROID_AVD_HOME" 2>/dev/null || echo "ANDROID_AVD_HOME not found"
           echo ""
           echo "Generated AVD snapshot for caching."
+
+    - name: Surface AVD Creation Diagnostics
+      if: failure() && steps.avd-create.outcome == 'failure'
+      shell: ${{ inputs.shell }}
+      env:
+        SYSTEM_IMAGE_RELATIVE_PATH: system-images/android-${{ inputs.api_level }}/${{ inputs.target }}/${{ inputs.arch }}
+      run: |
+        set +e
+        diagnostics_dir="${{ github.workspace }}/android-emulator-diagnostics/avd-create"
+        bash "${{ github.workspace }}/scripts/android/collect-emulator-diagnostics.sh" "$diagnostics_dir" "AVD creation failed before emulator test attempts."
+        timeout -k 2 10 ls -la "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/$SYSTEM_IMAGE_RELATIVE_PATH" > "$diagnostics_dir/system-image-state.txt" 2>&1
+        bash "${{ github.workspace }}/scripts/android/print-emulator-diagnostics.sh" "$diagnostics_dir" "AVD creation failed; captured diagnostics follow:"
+        exit 0
 
     - name: Setup Release Keystore
       if: ${{ inputs.release-keystore-base64 != '' }}
@@ -201,9 +215,7 @@ runs:
       if: steps.emulator-attempt-1.outcome == 'failure'
       shell: ${{ inputs.shell }}
       run: |
-        diagnostics_dir="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
-        echo "First emulator attempt failed; captured diagnostics follow:"
-        find "$diagnostics_dir" -maxdepth 1 -type f -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
+        bash "${{ github.workspace }}/scripts/android/print-emulator-diagnostics.sh" "${{ github.workspace }}/android-emulator-diagnostics/attempt-1" "First emulator attempt failed; captured diagnostics follow:"
 
     - name: Reset AutoMobile Daemon Before Retry
       if: steps.emulator-attempt-1.outcome == 'failure'
@@ -229,6 +241,12 @@ runs:
           exit "${test_status}"
         }
 
+    - name: Surface Emulator Diagnostics After Retry
+      if: always() && steps.emulator-attempt-2.outcome == 'failure'
+      shell: ${{ inputs.shell }}
+      run: |
+        bash "${{ github.workspace }}/scripts/android/print-emulator-diagnostics.sh" "${{ github.workspace }}/android-emulator-diagnostics/attempt-2" "Emulator retry failed; captured diagnostics follow:"
+
     - name: Verify Emulator Tests Passed
       if: always()
       shell: ${{ inputs.shell }}
@@ -245,7 +263,7 @@ runs:
         fi
 
     - name: Upload Emulator Diagnostics
-      if: always() && steps.emulator-attempt-1.outcome == 'failure'
+      if: always() && (steps.emulator-attempt-1.outcome == 'failure' || steps.avd-create.outcome == 'failure')
       continue-on-error: true
       uses: actions/upload-artifact@v6
       with:

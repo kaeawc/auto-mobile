@@ -81,6 +81,7 @@ case "$1 $2" in
       */check-runs/12/annotations*|*/check-runs/13/annotations*|*/check-runs/14/annotations*) annotation_response '[]' ;;
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
+      */actions/jobs/45/logs) printf '%s\n' "$FAKE_EMULATOR_LOG" ;;
       */actions/jobs/44/logs) printf '%s\n' "$FAKE_XCTEST_LOG" ;;
       */actions/jobs/35/logs) printf 'First emulator attempt failed; captured diagnostics follow:\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=241\nStarting emulator retry attempt 2.\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=237: readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/36/logs) printf 'getAndroid automation runner readiness failed: phase=runner-health attempts=4\n' ;;
@@ -733,4 +734,42 @@ JSON
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" bash "$SCRIPT" 325
   [ "$status" -eq 0 ]
   [[ "$output" == *"WebRTC → Check results → none → CHECK-UPSTREAM-FIRST"* ]]
+}
+
+startup_fixture() {
+  local job="$1"
+  jq -n --arg job "$job" '{headBranch:"work/ci", jobs:[{databaseId:45,name:$job,conclusion:"failure",steps:[{name:"Create AVD and generate snapshot for caching",conclusion:"failure"}]}]}' > "$FIXTURE"
+}
+
+@test "JUnit emulator startup log classifies without an executed retry" {
+  startup_fixture "Run JUnit Runner Emulator Tests"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_EMULATOR_LOG=$'Warning: Error on ZipFile unknown archive\nerror: could not connect to TCP port 5554: Connection refused' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — emulator start-up infra failure"* ]]
+}
+
+@test "Playground emulator connection refusal and ZipFile each classify" {
+  startup_fixture "Run Playground Automobile Emulator Tests"
+  for message in 'could not connect to TCP port 5554: Connection refused' 'Error on ZipFile unknown archive'; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_EMULATOR_LOG="$message" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — emulator start-up infra failure"* ]]
+  done
+}
+
+@test "JUnit connection refusal and ZipFile each classify with ANSI log text" {
+  startup_fixture "Run JUnit Runner Emulator Tests"
+  for message in 'could not connect to TCP port 5554: Connection refused' 'Error on ZipFile unknown archive'; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_EMULATOR_LOG=$'\033[31m'"$message"$'\033[0m' bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — emulator start-up infra failure"* ]]
+  done
+}
+
+@test "unrelated Node job cannot inherit emulator startup signatures" {
+  startup_fixture "Node Unit Tests"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_EMULATOR_LOG=$'Error on ZipFile unknown archive\ncould not connect to TCP port 5554: Connection refused' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }

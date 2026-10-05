@@ -27,6 +27,8 @@ import type { SessionManager } from "../daemon/sessionManager";
 import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
 import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 import {
+  getVideoRecordingMetadata as defaultGetVideoRecordingMetadata,
+  getVideoRecordingStatus as defaultGetVideoRecordingStatus,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
@@ -37,6 +39,7 @@ import { ProgressCallback } from "./toolRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
+import { errorMessage } from "../utils/describeUnknownError";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -78,6 +81,8 @@ export interface PlanExecutionRequest {
 export interface VideoRecorder {
   startVideoRecording: typeof defaultStartVideoRecording;
   stopVideoRecording: typeof defaultStopVideoRecording;
+  getVideoRecordingStatus?: typeof defaultGetVideoRecordingStatus;
+  getVideoRecordingMetadata?: typeof defaultGetVideoRecordingMetadata;
 }
 
 /**
@@ -105,6 +110,7 @@ interface VideoState {
 interface FinalizedVideo {
   videoFilePaths: string[];
   videoRecordingIds: string[];
+  videoWarnings?: string[];
 }
 
 type ExecutionContext = {
@@ -273,6 +279,8 @@ export class PlanExecutionOrchestrator {
     this.videoRecorder = deps.videoRecorder ?? {
       startVideoRecording: defaultStartVideoRecording,
       stopVideoRecording: defaultStopVideoRecording,
+      getVideoRecordingStatus: defaultGetVideoRecordingStatus,
+      getVideoRecordingMetadata: defaultGetVideoRecordingMetadata,
     };
   }
 
@@ -351,6 +359,7 @@ export class PlanExecutionOrchestrator {
         // keyboard that would not dismiss changes what every later step saw
         // (#6887 review).
         ...planWarningsField(result.warnings),
+        videoWarnings: finalizedVideo.videoWarnings,
         ...(finalizedVideo.videoFilePaths.length > 0
           ? {
               videoFilePaths: finalizedVideo.videoFilePaths,
@@ -702,6 +711,12 @@ export class PlanExecutionOrchestrator {
         "Failed to finalize segmented video",
         async () => {
           const finalized = await video.androidSession!.finalize();
+          const videoWarnings = [
+            ...new Set([
+              ...(finalized.warnings ?? []),
+              ...finalized.metadata.flatMap((metadata) => metadata.warnings ?? []),
+            ]),
+          ];
           this.perfLog(`Segmented video finalized (${finalized.filePaths.length} file(s))`);
           // Best-effort manifest so a plan run's ordered segments are discoverable on disk,
           // matching the raw videoRecording stop path (writeSegmentManifest logs-and-continues
@@ -711,11 +726,24 @@ export class PlanExecutionOrchestrator {
             recordingId,
             filePath: finalized.filePaths[index],
             segmentIndex: index,
+            ...(finalized.metadata[index]?.recordedPanel && {
+              recordedPanel: finalized.metadata[index].recordedPanel,
+            }),
+            ...(finalized.metadata[index]?.transitions && {
+              transitions: finalized.metadata[index].transitions,
+            }),
+            ...(finalized.metadata[index]?.warnings && {
+              warnings: finalized.metadata[index].warnings,
+            }),
           }));
           if (segments.length > 0) {
-            await writeSegmentManifest(segments[0].recordingId, segments);
+            await writeSegmentManifest(segments[0].recordingId, segments, videoWarnings);
           }
-          return { videoFilePaths: finalized.filePaths, videoRecordingIds: finalized.recordingIds };
+          return {
+            videoFilePaths: finalized.filePaths,
+            videoRecordingIds: finalized.recordingIds,
+            ...(videoWarnings.length ? { videoWarnings } : {}),
+          };
         },
       );
     }
@@ -725,7 +753,17 @@ export class PlanExecutionOrchestrator {
         `Stopping automatic video recording: ${recordingId}`,
         "Failed to stop automatic video recording",
         async () => {
-          const stopResult = await this.videoRecorder.stopVideoRecording(recordingId);
+          let stopResult: Awaited<ReturnType<VideoRecorder["stopVideoRecording"]>>;
+          try {
+            stopResult = await this.videoRecorder.stopVideoRecording(recordingId);
+          } catch (error) {
+            logger.warn(`Plan video stop failed for ${recordingId}: ${errorMessage(error)}`);
+            const recovered = await this.recoverCompletedIosVideo(recordingId);
+            if (recovered) {
+              return recovered;
+            }
+            throw error;
+          }
           this.perfLog(`Video recording stopped successfully: ${stopResult.metadata.filePath}`);
           return {
             videoFilePaths: [stopResult.metadata.filePath],
@@ -735,6 +773,35 @@ export class PlanExecutionOrchestrator {
       );
     }
     return { videoFilePaths: [], videoRecordingIds: [] };
+  }
+
+  private async recoverCompletedIosVideo(recordingId: string): Promise<FinalizedVideo | undefined> {
+    const { getVideoRecordingStatus, getVideoRecordingMetadata } = this.videoRecorder;
+    if (!getVideoRecordingStatus || !getVideoRecordingMetadata) {
+      return undefined;
+    }
+    try {
+      if ((await getVideoRecordingStatus(recordingId)) !== "completed") {
+        return undefined;
+      }
+      const metadata = await getVideoRecordingMetadata(recordingId, { touch: false });
+      if (!metadata?.filePath) {
+        return undefined;
+      }
+      const warning =
+        metadata.durationMs !== undefined &&
+        metadata.durationMs >= DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS * 1000
+          ? `Video recording ${recordingId} stopped at the ${DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS}s cap; the remainder of the plan was not recorded`
+          : `Video recording ${recordingId} ended before the plan finished; the remainder of the plan was not recorded`;
+      return {
+        videoFilePaths: [metadata.filePath],
+        videoRecordingIds: [recordingId],
+        videoWarnings: [...new Set([...(metadata.warnings ?? []), warning])],
+      };
+    } catch (error) {
+      logger.warn(`Failed to recover archived plan video ${recordingId}: ${errorMessage(error)}`);
+      return undefined;
+    }
   }
 
   private async finalizeWithFallback(
@@ -749,7 +816,11 @@ export class PlanExecutionOrchestrator {
       logger.warn(
         `[PERF +${this.timer.now() - this.perfStart}ms] ${failureMessage}: ${videoError}`,
       );
-      return { videoFilePaths: [], videoRecordingIds: [] };
+      return {
+        videoFilePaths: [],
+        videoRecordingIds: [],
+        videoWarnings: [`${failureMessage}: ${errorMessage(videoError)}`],
+      };
     }
   }
 

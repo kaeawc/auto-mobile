@@ -3,7 +3,8 @@
  * Tests WCAG color contrast calculations and requirements
  */
 
-import { expect, describe, it, beforeEach } from "bun:test";
+import { expect, describe, it, beforeEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import * as path from "path";
 import { ContrastChecker } from "../../../src/features/accessibility/ContrastChecker";
 import type { Element } from "../../../src/models/Element";
@@ -33,6 +34,36 @@ function uniformRaw(
 }
 
 describe("ContrastChecker", function () {
+  it("warns for screenshot failures and preserves null and batch null results", async () => {
+    const failure = new Error("screenshot unreadable");
+    const checker = new ContrastChecker({}, new FakeTimer(), new FakeImageBackend(), {
+      readFile: async () => {
+        throw failure;
+      },
+    });
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      text: "Sample",
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await checker.checkContrast("/missing/contrast.png", element, "AA")).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to stat contrast screenshot"),
+        expect.any(Error),
+      );
+      expect(warn).toHaveBeenCalledWith("Contrast checking error: screenshot unreadable", failure);
+      expect(await checker.checkContrastBatch("/missing/contrast.png", [element], "AA")).toEqual(
+        new Map([[element, null]]),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        "Batch contrast checking error: screenshot unreadable",
+        failure,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
   let checker: ContrastChecker;
   const fixturesDir = path.join(__dirname, "../../fixtures/screenshots");
   const syntheticScreenshotPath = "/synthetic/contrast.png";

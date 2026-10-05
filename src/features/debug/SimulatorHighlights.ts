@@ -8,6 +8,7 @@ import {
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import {
   readScreenCaptureHelperEnvOverride,
@@ -142,6 +143,7 @@ export class SimulatorHighlights {
       }
       return await this.waitForReply(host, requestId, signal);
     } catch (error) {
+      logger.warn(`[SimulatorHighlights] Failed to send highlight: ${errorMessage(error)}`, error);
       return { success: false, error: String(error) };
     }
   }

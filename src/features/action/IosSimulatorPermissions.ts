@@ -298,7 +298,7 @@ export class IosSimulatorPermissions {
             service,
             state,
             ...(authValueForResult === null ? {} : { authValue: authValueForResult }),
-            ...(row ? { raw: row as Record<string, string | number | null> } : {}),
+            ...(row ? { raw: row } : {}),
           };
         }),
       };

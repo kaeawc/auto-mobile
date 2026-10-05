@@ -14,6 +14,7 @@ import type {
 } from "../../models";
 import { toActionableError } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import {
   defaultSecurePermissions,
@@ -617,8 +618,11 @@ export class VideoRecorderService {
   private async safeStat(filePath: string): Promise<Stats | null> {
     try {
       return await fsPromises.stat(filePath);
-    } catch {
-      this.log.warn(`[VideoRecorderService] Missing recording file at ${filePath}`);
+    } catch (error) {
+      this.log.warn(
+        `[VideoRecorderService] Missing recording file at ${filePath}: ${errorMessage(error)}`,
+        error,
+      );
       return null;
     }
   }
@@ -667,12 +671,14 @@ function parseResolution(
   return { width, height };
 }
 
-function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: number): number {
-  const maxBitrateKbps = Math.max(0, Math.floor(maxThroughputMbps * 1000));
-  if (!maxBitrateKbps) {
+export function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: number): number {
+  if (!(maxThroughputMbps > 0)) {
     return targetBitrateKbps;
   }
 
+  // Throughput caps use whole Kbps: 1 Kbps is the minimum representable cap.
+  // A smaller positive budget must not round to zero and disable the cap.
+  const maxBitrateKbps = Math.max(1, Math.floor(maxThroughputMbps * 1000));
   return Math.min(targetBitrateKbps, maxBitrateKbps);
 }
 

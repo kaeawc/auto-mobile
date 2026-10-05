@@ -105,21 +105,11 @@ export class LongPressMetadataDetector {
         for (const [startKey, endKey] of selectionKeyPairs) {
           const startValue = props?.[startKey] ?? props?.[startKey.toLowerCase()];
           const endValue = props?.[endKey] ?? props?.[endKey.toLowerCase()];
-          if (startValue === undefined || endValue === undefined) {
+          if (!this.isActiveSelectionRange(startValue, endValue)) {
             continue;
           }
-          const startNumeric =
-            typeof startValue === "string" ? parseInt(startValue, 10) : Number(startValue);
-          const endNumeric =
-            typeof endValue === "string" ? parseInt(endValue, 10) : Number(endValue);
-          if (
-            !Number.isNaN(startNumeric) &&
-            !Number.isNaN(endNumeric) &&
-            endNumeric > startNumeric
-          ) {
-            selectionFound = true;
-            return;
-          }
+          selectionFound = true;
+          return;
         }
       });
       if (selectionFound) {
@@ -128,6 +118,16 @@ export class LongPressMetadataDetector {
     }
 
     return selectionFound;
+  }
+
+  private isActiveSelectionRange(startValue: unknown, endValue: unknown): boolean {
+    if (startValue === undefined || endValue === undefined) {
+      return false;
+    }
+    const startNumeric =
+      typeof startValue === "string" ? parseInt(startValue, 10) : Number(startValue);
+    const endNumeric = typeof endValue === "string" ? parseInt(endValue, 10) : Number(endValue);
+    return !Number.isNaN(startNumeric) && !Number.isNaN(endNumeric) && endNumeric > startNumeric;
   }
 
   private getRootSignatures(viewHierarchy?: ViewHierarchyResult): Set<string> {
@@ -164,17 +164,21 @@ export class LongPressMetadataDetector {
       const className = (props.class ?? props.className ?? "").toLowerCase();
       // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
       const text = (props.text ?? props["content-desc"] ?? "").toLowerCase();
-      if (
-        resourceId.includes("menu") ||
-        resourceId.includes("popup") ||
-        className.includes("menu") ||
-        className.includes("popup") ||
-        text.includes("menu") ||
-        text.includes("popup")
-      ) {
+      if (this.hasMenuIndicator(resourceId, className, text)) {
         found = true;
       }
     });
     return found;
+  }
+
+  private hasMenuIndicator(resourceId: string, className: string, text: string): boolean {
+    return (
+      resourceId.includes("menu") ||
+      resourceId.includes("popup") ||
+      className.includes("menu") ||
+      className.includes("popup") ||
+      text.includes("menu") ||
+      text.includes("popup")
+    );
   }
 }

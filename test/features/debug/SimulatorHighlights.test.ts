@@ -1,5 +1,6 @@
 import { createExecResult } from "../../../src/utils/execResult";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import type { ChildProcess } from "node:child_process";
 import { SimulatorHighlights } from "../../../src/features/debug/SimulatorHighlights";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
@@ -52,6 +53,28 @@ async function spawned() {
 }
 
 describe("SimulatorHighlights", () => {
+  test("warns on helper resolution failure and preserves its typed result", async () => {
+    const failure = new Error("helper unavailable");
+    const client = new SimulatorHighlights(device, {
+      timer: new FakeTimer(),
+      resolveHelper: async () => {
+        throw failure;
+      },
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await client.requestAddHighlight("failed", shape)).toEqual({
+        success: false,
+        error: "Error: helper unavailable",
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "[SimulatorHighlights] Failed to send highlight: helper unavailable",
+        failure,
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
   test("old pinned helpers use the SDK without sending unsupported flags", async () => {
     const executor = new Executor();
     executor.supportsHighlight = false;

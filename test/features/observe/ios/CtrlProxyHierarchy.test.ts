@@ -50,6 +50,42 @@ function makeHierarchy(root: CtrlProxyNode): any {
 describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
 
+  test("preserves the runner's SpringBoard fallback diagnostic", () => {
+    const hierarchy = {
+      updatedAt: 0,
+      packageName: "com.apple.springboard",
+      hierarchy: { className: "XCUIApplication" },
+      fallbackToSpringboard: true,
+    };
+
+    expect(subject.convertToViewHierarchyResult(hierarchy)).toHaveProperty(
+      "fallbackToSpringboard",
+      true,
+    );
+  });
+
+  test("leaves conversion unchanged when the runner omits the fallback diagnostic", () => {
+    const result = subject.convertToViewHierarchyResult({
+      updatedAt: 0,
+      packageName: "com.apple.springboard",
+      hierarchy: { className: "XCUIApplication" },
+    });
+
+    expect(result).toStrictEqual({
+      hierarchy: { node: { $: { class: "XCUIApplication" } } },
+      packageName: "com.apple.springboard",
+      updatedAt: 0,
+      windows: undefined,
+      screenScale: undefined,
+      screenWidth: undefined,
+      screenHeight: undefined,
+      rotation: undefined,
+      systemInsets: undefined,
+      insets: undefined,
+    });
+    expect(result).not.toHaveProperty("fallbackToSpringboard");
+  });
+
   test("carries runner depth truncation to the shared hierarchy result", () => {
     const hierarchy: XCTestHierarchy = {
       updatedAt: 0,

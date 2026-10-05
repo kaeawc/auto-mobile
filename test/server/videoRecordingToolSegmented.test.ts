@@ -31,6 +31,9 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
+import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
+import { parseArgs } from "../../src/cli/parseArgs";
+import { serverConfig } from "../../src/utils/ServerConfig";
 
 isolateToolRegistry();
 
@@ -169,6 +172,82 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+
+  test.each([0.4, 0.5, 0.999])(
+    "the tool schema rejects fractional FPS %p before capture",
+    (fps) => {
+      const schema = ToolRegistry.getTool("videoRecording")!.schema;
+      const result = schema.safeParse({ action: "start", platform: "android", fps });
+      expect(result.success).toBe(false);
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: ["fps"] })]),
+      );
+      expect(fakeBackend.startCalls).toHaveLength(0);
+      expect(schema.safeParse({ action: "start", platform: "android", fps: 1 }).success).toBe(true);
+    },
+  );
+
+  test.each(["0.4", "0.5", "0.999"])("both daemon flag parsers reject sub-1 FPS %p", (value) => {
+    const daemonWarnings: string[] = [];
+    const cliWarnings: string[] = [];
+    expect(
+      parseDaemonArgs(
+        ["--video-fps", value],
+        {},
+        { warn: (message) => daemonWarnings.push(message) },
+      ).videoFps,
+    ).toBeUndefined();
+    const defaults = parseArgs(
+      ["--video-fps", value],
+      { warn: (message) => cliWarnings.push(message) },
+      {},
+    ).videoRecordingDefaults;
+    expect(defaults.fps).toBeUndefined();
+    expect(daemonWarnings).toContain(`Invalid video fps: ${value}`);
+    expect(cliWarnings).toContain(`Invalid video fps: ${value}`);
+    expect(parseDaemonArgs(["--video-fps", "1"], {}, { warn: () => {} }).videoFps).toBe(1);
+    expect(parseArgs(["--video-fps", "1"], { warn: () => {} }, {}).videoRecordingDefaults.fps).toBe(
+      1,
+    );
+  });
+
+  test("tool and daemon flags admit tiny throughput, and startup retains its cap", async () => {
+    const schema = ToolRegistry.getTool("videoRecording")!.schema;
+    const args = schema.parse({
+      action: "start",
+      platform: "android",
+      targetBitrateKbps: 10000,
+      maxThroughputMbps: 0.0005,
+    });
+    const flags = ["--video-target-bitrate-kbps", "10000", "--video-max-throughput-mbps", "0.0005"];
+    const daemon = parseDaemonArgs(flags, {}, { warn: () => {} });
+    expect(daemon.videoTargetBitrateKbps).toBe(10000);
+    expect(daemon.videoMaxThroughputMbps).toBe(0.0005);
+    const defaults = parseArgs(flags, { warn: () => {} }, {}).videoRecordingDefaults;
+    expect(defaults.targetBitrateKbps).toBe(10000);
+    expect(defaults.maxThroughputMbps).toBe(0.0005);
+    await handler()(androidDevice, args);
+    expect(fakeBackend.startCalls[0]?.targetBitrateKbps).toBe(1);
+    await handler()(androidDevice, { action: "stop", platform: "android" });
+  });
+
+  test("daemon CLI defaults retain the tiny throughput cap without tool overrides", async () => {
+    const previousDefaults = serverConfig.getVideoRecordingDefaults();
+    const defaults = parseArgs(
+      ["--video-target-bitrate-kbps", "10000", "--video-max-throughput-mbps", "0.0005"],
+      { warn: () => {} },
+      {},
+    ).videoRecordingDefaults;
+    serverConfig.setVideoRecordingDefaults(defaults);
+    try {
+      await handler()(androidDevice, { action: "start", platform: "android" });
+      expect(fakeBackend.startCalls[0]?.maxThroughputMbps).toBe(0.0005);
+      expect(fakeBackend.startCalls[0]?.targetBitrateKbps).toBe(1);
+      await handler()(androidDevice, { action: "stop", platform: "android" });
+    } finally {
+      serverConfig.setVideoRecordingDefaults(previousDefaults);
+    }
+  });
 
   test("all-device start preserves partial failures and bare-stop discovery order", async () => {
     const second: BootedDevice = { ...androidDevice, deviceId: "second" };

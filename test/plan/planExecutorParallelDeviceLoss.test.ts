@@ -6,7 +6,10 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { waitForObservation } from "../../src/server/observeTools";
 import { withTemporaryTool } from "../helpers/withTemporaryTool";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 const toolName = "parallelDeviceLossTest";
 const toolSchema = z.object({ device: z.string(), later: z.boolean().optional() });
@@ -35,6 +38,7 @@ async function checkDeviceLoss(
   devices = ["A", "B"],
   siblingError?: Error,
   hideSignalReason = false,
+  waitForLoss?: "typed-poll-error" | "cancelled-transport-error",
 ): Promise<void> {
   const loss = new DeviceLostError("A", "device-disconnected:A");
   const siblingStarted = Promise.withResolvers<void>();
@@ -45,6 +49,25 @@ async function checkDeviceLoss(
   let reasonAtAbort: DeviceLostError | undefined;
   let laterCalls = 0;
   let settled = false;
+  const timer = new FakeTimer();
+  const caller = new AbortController();
+  const screen = new FakeObserveScreen();
+  if (waitForLoss) {
+    screen.setObserveResult((index) => {
+      if (index === 1) {
+        if (waitForLoss === "cancelled-transport-error") {
+          caller.abort(loss);
+          throw new Error("adb: device 'A' not found");
+        }
+        throw loss;
+      }
+      return {
+        updatedAt: index,
+        screenSize: { width: 200, height: 200 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      };
+    });
+  }
 
   await withTemporaryTool(
     toolName,
@@ -56,6 +79,15 @@ async function checkDeviceLoss(
         async (params: z.infer<typeof toolSchema>, _progress, signal) => {
           if (params.device === "A") {
             await siblingStarted.promise;
+            if (waitForLoss) {
+              return await waitForObservation(
+                screen,
+                { posture: "closed", timeout: 40_000 },
+                signal,
+                false,
+                timer,
+              );
+            }
             throw loss;
           }
           if (params.later) {
@@ -90,13 +122,13 @@ async function checkDeviceLoss(
     async () => {
       // Supply a caller signal so tools receive the composed signal, not just
       // the internal controller's signal.
-      const execution = new DefaultPlanExecutor(new FakeTimer()).executePlan(
+      const execution = new DefaultPlanExecutor(timer).executePlan(
         parallelPlan(devices),
         0,
         undefined,
         undefined,
         undefined,
-        new AbortController().signal,
+        caller.signal,
         strategy,
       );
       const completion = execution.then(
@@ -109,6 +141,12 @@ async function checkDeviceLoss(
       );
       try {
         await siblingStarted.promise;
+        if (waitForLoss) {
+          await drainUntil(() => timer.getPendingSleepCount() > 0, {
+            description: "waitFor first poll sleep",
+          });
+          timer.advanceTime(100);
+        }
         await flushMicrotasks();
         expect(settled).toBe(false);
         expect(abortedInFlight).toBe(true);
@@ -116,6 +154,10 @@ async function checkDeviceLoss(
         expect(reasonAtAbort).toBe(loss);
         expect(deviceLostErrorFromAbortSignal(siblingSignal!)).toBe(loss);
         expect(laterCalls).toBe(0);
+        if (waitForLoss) {
+          expect(screen.getExecuteCallCount()).toBe(2);
+          expect(timer.now()).toBe(100);
+        }
 
         releaseSibling.resolve();
         await expect(execution).rejects.toBe(loss);
@@ -124,6 +166,10 @@ async function checkDeviceLoss(
         expect(settled).toBe(true);
         expect(laterCalls).toBe(0);
       } finally {
+        if (waitForLoss) {
+          caller.abort(loss);
+          timer.advanceTime(100);
+        }
         releaseSibling.resolve();
         await siblingFinished.promise;
         await completion;
@@ -134,6 +180,20 @@ async function checkDeviceLoss(
 }
 
 describe("parallel plan device loss", () => {
+  test("waitFor device loss aborts the sibling track before timeout", async () => {
+    await checkDeviceLoss("finish-current-step", ["A", "B"], undefined, false, "typed-poll-error");
+  });
+
+  test("waitFor transport rejection retains the execution's device-loss cancellation", async () => {
+    await checkDeviceLoss(
+      "finish-current-step",
+      ["A", "B"],
+      undefined,
+      false,
+      "cancelled-transport-error",
+    );
+  });
+
   test("aborts siblings in flight and waits for them before rejecting", async () => {
     await checkDeviceLoss("immediate");
   });

@@ -34,7 +34,7 @@ interface TestRecordingStopResult {
 export interface TestRecordingStatus {
   recordingId: string;
   deviceId: string;
-  platform: string;
+  platform: Platform;
   startedAt: string;
   eventCount: number;
   durationMs: number;

@@ -291,7 +291,7 @@ describe("detector CtrlProxy signal", () => {
     expect(h.adb.getExecutedCommands()).toHaveLength(2);
   });
 
-  test("failure is not cached; every call retries and recovery needs no timer advance", async () => {
+  test("failure remains unknown during short backoff; recovery retries after three seconds", async () => {
     spyOn(logger, "warn").mockImplementation(() => {});
     const h = harness();
     const failedAdb = new FakeAdbExecutor();
@@ -299,8 +299,10 @@ describe("detector CtrlProxy signal", () => {
     expect(await h.detector.isAccessibilityEnabled(device.deviceId, failedAdb)).toBe(false);
     expect(await h.detector.detectMethod(device.deviceId, failedAdb)).toBe("unknown");
     expect(await h.detector.isCtrlProxyServiceEnabled(device.deviceId, failedAdb)).toBeNull();
-    expect(failedAdb.getExecutedCommands()).toHaveLength(3);
+    expect(failedAdb.getExecutedCommands()).toHaveLength(1);
     h.setOutput(ctrlProxy!);
+    expect(await h.detector.isCtrlProxyServiceEnabled(device.deviceId, h.adb)).toBeNull();
+    h.timer.advanceTime(3000);
     expect(await h.detector.isCtrlProxyServiceEnabled(device.deviceId, h.adb)).toBe(true);
   });
 

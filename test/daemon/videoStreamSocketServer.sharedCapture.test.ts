@@ -9,7 +9,10 @@ import {
   stopWebRtcStream,
 } from "../../src/server/webrtcStreamManager";
 import type { BootedDevice } from "../../src/models";
-import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
+import type {
+  H264CaptureSource,
+  H264CaptureSourceOptions,
+} from "../../src/features/webrtc/H264CaptureSource";
 import type { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import { logger } from "../../src/utils/logger";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -23,6 +26,11 @@ class Source implements H264CaptureSource {
   ) {}
   starts = 0;
   stops = 0;
+  keyFrames = 0;
+  requestKeyFrame(): boolean {
+    this.keyFrames++;
+    return true;
+  }
   async start(): Promise<void> {
     this.starts++;
     this.events.push(`start${this.id}`);
@@ -33,6 +41,31 @@ class Source implements H264CaptureSource {
   }
 }
 class Relay extends VideoStreamSocketServer {
+  snapshot() {
+    return (
+      Reflect.get(this, "captures") as Map<
+        string,
+        {
+          generation: number;
+          parser: object;
+          waitingForKeyFrame: Set<FakeSocket>;
+          lastEncodedDataMs: number | null;
+          firstEvidenceMs: number | null;
+          encodedSinceSourceFrame: boolean;
+          heartbeatTimer: unknown;
+          appliedHints: { fps?: number; size?: { width: number; height: number } };
+        }
+      >
+    ).get(device.deviceId)!;
+  }
+  async replaceHints(hints: { fps?: number }): Promise<void> {
+    const replace = Reflect.get(this, "reconfigureCapture") as (
+      deviceId: string,
+      capture: object,
+      hints: { fps?: number },
+    ) => Promise<void>;
+    await replace.call(this, device.deviceId, this.snapshot(), hints);
+  }
   async request(
     socket: FakeSocket,
     action: "subscribe" | "unsubscribe",
@@ -41,14 +74,17 @@ class Relay extends VideoStreamSocketServer {
     await this.processLine(socket, JSON.stringify({ action, deviceId: device.deviceId, ...hints }));
   }
 }
-function harness() {
+function harness(platform: "android" | "ios" = "android") {
+  const captureDevice = { ...device, platform };
   const timer = new FakeTimer();
   const captureRegistry = createDeviceCaptureRegistry();
   const sources: Source[] = [];
   const events: string[] = [];
+  const options: H264CaptureSourceOptions[] = [];
   let relayCreates = 0;
   let webrtcCreates = 0;
-  const create = () => {
+  const create = (value: H264CaptureSourceOptions) => {
+    options.push(value);
     const id = sources.length + 1;
     events.push(`create${id}`);
     const source = new Source(events, id);
@@ -59,9 +95,9 @@ function harness() {
     timer,
     captureRegistry,
     resolveVideoJar: async () => null,
-    createSource: () => {
+    createSource: (value) => {
       webrtcCreates++;
-      return create();
+      return create(value);
     },
     createPublisher: (config) =>
       ({
@@ -76,11 +112,11 @@ function harness() {
   const relay = new Relay(
     {
       captureRegistry,
-      resolveDevice: async () => device,
+      resolveDevice: async () => captureDevice,
       nowUs: () => 1n,
-      createCaptureSource: async () => {
+      createCaptureSource: async (value) => {
         relayCreates++;
-        return create();
+        return create(value);
       },
     },
     "/unused/shared-capture.sock",
@@ -88,11 +124,19 @@ function harness() {
     { authorize: () => {} },
     permissiveDeviceAdmissionGate,
   );
-  return { timer, sources, relay, events, counts: () => [webrtcCreates, relayCreates] };
+  return {
+    timer,
+    sources,
+    options,
+    device: captureDevice,
+    relay,
+    events,
+    counts: () => [webrtcCreates, relayCreates],
+  };
 }
 afterEach(() => resetWebRtcStreamManager());
 for (const first of ["webrtc", "relay"] as const) {
-  test(`${first} first shares capture across modules and retains it until the final release`, async () => {
+  test(`${first} first respects callback capabilities and source lifetime`, async () => {
     const h = harness();
     const socket = new FakeSocket();
     let streamId = "";
@@ -112,8 +156,8 @@ for (const first of ["webrtc", "relay"] as const) {
         await h.relay.request(socket, "subscribe");
         await startWebrtc();
       }
-      expect(h.counts()).toEqual(first === "webrtc" ? [1, 0] : [0, 1]);
-      expect(h.sources).toHaveLength(1);
+      expect(h.counts()).toEqual(first === "webrtc" ? [1, 0] : [1, 1]);
+      expect(h.sources).toHaveLength(first === "webrtc" ? 1 : 2);
       expect(h.sources[0].starts).toBe(1);
       if (first === "webrtc") {
         await stopWebRtcStream(streamId);
@@ -125,7 +169,8 @@ for (const first of ["webrtc", "relay"] as const) {
         await h.relay.request(socket, "unsubscribe");
         h.timer.advanceTime(3_000);
         await h.relay.close();
-        expect(h.sources[0].stops).toBe(0);
+        expect(h.sources[0].stops).toBe(1);
+        expect(h.sources[1].stops).toBe(0);
         await stopWebRtcStream(streamId);
       }
       expect(h.sources[0].stops).toBe(1);
@@ -175,50 +220,169 @@ test("sole relay reconfigure stops the old source before constructing the new so
   expect(h.sources.map((source) => source.stops)).toEqual([1, 1]);
 });
 
-test("relay reconfigure while WebRTC holds the source keeps it and warns about ignored hints", async () => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  const info = spyOn(logger, "info").mockImplementation(() => {});
+test("incompatible relay reconfigure uses a private source and leaves WebRTC untouched", async () => {
   const h = harness();
-  let streamId = "";
+  const stream = await startWebRtcStream({
+    device,
+    overrides: { whipEndpoint: "https://example.test/whip" },
+  });
   try {
-    // Start the relay first so the initial shared acquisition has matching defaults.
-    await h.relay.request(new FakeSocket(), "subscribe", { fps: 30 });
-    streamId = (
-      await startWebRtcStream({
-        device,
-        overrides: { whipEndpoint: "https://example.test/whip", androidFps: 30 },
-      })
-    ).streamId;
-    warn.mockClear();
+    await h.relay.request(new FakeSocket(), "subscribe");
     await h.relay.request(new FakeSocket(), "subscribe", { quality: "high", fps: 15 });
     h.timer.advanceTime(200);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 24; i++) {
       await Promise.resolve();
     }
-    // The existing success log pins that the swap completed, rather than only scheduling it.
+    expect(h.counts()).toEqual([1, 1]);
+    expect(h.sources).toHaveLength(2);
+    expect(h.options[1].quality).toBe("high");
+    expect(h.options[1].fps).toBe(15);
+    expect(h.sources[0].stops).toBe(0);
+    expect(h.events).toEqual(["create1", "start1", "create2", "start2"]);
+  } finally {
+    await h.relay.close();
+    await stopWebRtcStream(stream.streamId);
+  }
+});
+test("satisfied shared relay reconfigure preserves viewers and skips keyframe requests", async () => {
+  const info = spyOn(logger, "info").mockImplementation(() => {});
+  const h = harness();
+  const stream = await startWebRtcStream({
+    device,
+    overrides: { whipEndpoint: "https://example.test/whip" },
+  });
+  try {
+    await h.relay.request(new FakeSocket(), "subscribe");
+    await h.relay.request(new FakeSocket(), "subscribe", { fps: 30 });
+    const before = h.relay.snapshot();
+    const parser = before.parser;
+    const generation = before.generation,
+      waiters = [...before.waitingForKeyFrame];
+    const keyFrames = h.sources[0].keyFrames;
+    info.mockClear();
+    h.timer.advanceTime(200);
+    for (let i = 0; i < 24; i++) {
+      await Promise.resolve();
+    }
+    const after = h.relay.snapshot();
+    expect(h.events).toEqual(["create1", "start1"]);
+    expect(after.parser).toBe(parser);
+    expect(after.generation).toBe(generation);
+    expect([...after.waitingForKeyFrame]).toEqual(waiters);
+    expect(h.sources[0].keyFrames).toBe(keyFrames);
     expect(
       info.mock.calls.some(([message]) =>
         String(message).includes("shared capture quality changed"),
       ),
-    ).toBe(true);
-    expect(h.counts()).toEqual([0, 1]);
-    expect(h.sources).toHaveLength(1);
-    expect(h.events).toEqual(["create1", "start1"]);
-    expect(h.sources[0].stops).toBe(0);
-    expect(
-      warn.mock.calls.some(([message]) =>
-        String(message).includes(
-          `${device.deviceId}: ignoring conflicting capture hints (quality, fps)`,
-        ),
-      ),
-    ).toBe(true);
+    ).toBe(false);
+    expect(after.appliedHints.fps).toBe(30);
   } finally {
     await h.relay.close();
-    if (streamId) {
-      await stopWebRtcStream(streamId);
-    }
-    warn.mockRestore();
+    await stopWebRtcStream(stream.streamId);
     info.mockRestore();
   }
-  expect(h.sources[0].stops).toBe(1);
 });
+test("relay replay parses parameter sets without liveness evidence", async () => {
+  const h = harness();
+  try {
+    await h.relay.request(new FakeSocket(), "subscribe");
+    h.timer.advanceTime(50);
+    const sps = Buffer.from([0, 0, 0, 1, 7, 11]),
+      pps = Buffer.from([0, 0, 0, 1, 8, 12]);
+    expect(h.options[0].onReplayData).toBeDefined();
+    h.options[0].onReplayData?.(sps);
+    h.options[0].onReplayData?.(pps);
+    const state = h.relay.snapshot();
+    expect(state.lastEncodedDataMs).toBeNull();
+    expect(state.firstEvidenceMs).toBeNull();
+    expect(state.encodedSinceSourceFrame).toBe(false);
+    expect(state.heartbeatTimer).toBeNull();
+    h.options[0].onData(Buffer.from([0, 0, 0, 1, 5, 128]));
+    expect(state.lastEncodedDataMs).toBe(50);
+    expect(state.firstEvidenceMs).toBe(50);
+    expect(state.encodedSinceSourceFrame).toBe(true);
+    expect(state.heartbeatTimer).not.toBeNull();
+  } finally {
+    await h.relay.close();
+  }
+});
+for (const first of ["relay", "webrtc"] as const) {
+  test(`iOS ${first} first respects binding WebRTC rate and flexible relay default`, async () => {
+    const h = harness("ios");
+    let streamId = "";
+    const start = async () => {
+      streamId = (
+        await startWebRtcStream({
+          device: h.device,
+          overrides: { whipEndpoint: "https://example.test/whip" },
+        })
+      ).streamId;
+    };
+    try {
+      if (first === "relay") {
+        await h.relay.request(new FakeSocket(), "subscribe");
+        await start();
+      } else {
+        await start();
+        await h.relay.request(new FakeSocket(), "subscribe");
+      }
+      expect(h.counts()).toEqual(first === "relay" ? [1, 1] : [1, 0]);
+      expect(h.options.map((value) => value.fps)).toEqual(first === "relay" ? [5, 15] : [15]);
+      if (first === "webrtc") {
+        await h.relay.request(new FakeSocket(), "subscribe", { fps: 5 });
+        h.timer.advanceTime(200);
+        for (let i = 0; i < 24; i++) {
+          await Promise.resolve();
+        }
+        expect(h.counts()).toEqual([1, 1]);
+        expect(h.options[1].fps).toBe(5);
+      }
+    } finally {
+      await h.relay.close();
+      if (streamId) {
+        await stopWebRtcStream(streamId);
+      }
+    }
+  });
+}
+
+test("sole relay recreates even when replacement hints are a satisfied subset", async () => {
+  const h = harness();
+  try {
+    await h.relay.request(new FakeSocket(), "subscribe", { quality: "low", fps: 30 });
+    await h.relay.replaceHints({ fps: 30 });
+    expect(h.events).toEqual(["create1", "start1", "stop1", "create2", "start2"]);
+    expect(h.options[1].quality).toBeUndefined();
+    expect(h.options[1].fps).toBe(30);
+  } finally {
+    await h.relay.close();
+  }
+});
+for (const explicit of [false, true]) {
+  test(`relay header uses only actual or unknown source size (explicit=${explicit})`, async () => {
+    const h = harness();
+    const stream = await startWebRtcStream({
+      device,
+      overrides: {
+        whipEndpoint: "https://example.test/whip",
+        size: { width: 640, height: 360 },
+        bitrateKbps: 1000,
+      },
+    });
+    try {
+      const socket = new FakeSocket();
+      const size = { width: 100, height: 200 };
+      await h.relay.request(socket, "subscribe", explicit ? { size } : {});
+      expect(h.counts()).toEqual(explicit ? [1, 1] : [1, 0]);
+      const header = socket.written.find((value): value is Buffer => Buffer.isBuffer(value))!;
+      expect(header.readInt32BE(4)).toBe(explicit ? 100 : 0);
+      expect(header.readInt32BE(8)).toBe(explicit ? 200 : 0);
+      if (explicit) {
+        expect(h.options[1].size).toEqual(size);
+      }
+    } finally {
+      await h.relay.close();
+      await stopWebRtcStream(stream.streamId);
+    }
+  });
+}

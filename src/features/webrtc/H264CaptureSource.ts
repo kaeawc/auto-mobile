@@ -20,6 +20,8 @@ export interface H264CaptureSourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Cached parameter sets for a late shared joiner; never fresh producer/liveness evidence. */
+  onReplayData?: (chunk: Buffer) => void;
   /** Called only for a fresh frame from the capture producer, before encoder replay can occur. */
   onSourceFrame?: () => void;
   /** Native Simulator idle callback from an attached stream; carries no encoded frame. */

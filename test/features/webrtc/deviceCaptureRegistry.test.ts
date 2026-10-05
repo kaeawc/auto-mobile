@@ -1,10 +1,16 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { createDeviceCaptureRegistry } from "../../../src/features/webrtc/deviceCaptureRegistry";
+import {
+  createDeviceCaptureRegistry,
+  captureHintsCompatible,
+  stopStaleCapture,
+  type CaptureHintField,
+} from "../../../src/features/webrtc/deviceCaptureRegistry";
 import type {
   H264CaptureSource,
   H264CaptureSourceOptions,
 } from "../../../src/features/webrtc/H264CaptureSource";
 import type { BootedDevice } from "../../../src/models";
+import { H264AnnexBParser } from "../../../src/features/webrtc/h264";
 import { logger } from "../../../src/utils/logger";
 
 const device = { deviceId: "a", platform: "android", name: "Pixel" } as BootedDevice;
@@ -227,16 +233,16 @@ describe("device capture registry", () => {
     await a.stop();
     expect([h.sources[0].starts, h.sources[0].stops]).toEqual([0, 1]);
   });
-  test("stopStale only reaches the underlying source on the last holder", async () => {
+  test("stopStale retires a shared source on the first stale release", async () => {
     const h = harness();
     const a = h.acquire(),
       b = h.acquire();
     await Promise.all([a.start(), b.start()]);
-    await a.stopStale(true);
-    expect(h.sources[0].staleStops).toEqual([]);
-    await b.stopStale(false);
-    await b.stopStale(true);
-    expect(h.sources[0].staleStops).toEqual([false]);
+    await a.stopStale!(true);
+    expect(h.sources[0].staleStops).toEqual([true]);
+    await b.stopStale!(false);
+    await b.stopStale!(true);
+    expect(h.sources[0].staleStops).toEqual([true]);
     expect(h.sources[0].stops).toBe(1);
   });
   test("stopStale falls back to stop when unavailable", async () => {
@@ -253,7 +259,7 @@ describe("device capture registry", () => {
       }),
     });
     await a.start();
-    await a.stopStale(true);
+    await stopStaleCapture(a, true);
     expect(stops).toBe(1);
   });
   test("fatal error fans out once, retires and serializes the next acquire", async () => {
@@ -299,17 +305,17 @@ describe("device capture registry", () => {
       },
       hasConsumers: false,
     });
-    a.setHasConsumers(false);
+    a.setHasConsumers?.(false);
     const b = h.acquire();
     created.resolve(h.sources[0]);
     await Promise.all([a.start(), b.start()]);
     expect(h.sources[0].consumers[0]).toBe(true);
     await b.stop();
     expect(h.sources[0].consumers.at(-1)).toBe(false);
-    a.setHasConsumers(true);
+    a.setHasConsumers?.(true);
     expect(h.sources[0].consumers.at(-1)).toBe(true);
     await a.stop();
-    a.setHasConsumers(false);
+    a.setHasConsumers?.(false);
   });
   test("all callback sinks fan out without copying and released handles receive nothing", async () => {
     const h = harness();
@@ -397,7 +403,9 @@ describe("device capture registry", () => {
     const b = h.acquire({ onData: (data) => seen.push(data) });
     await b.start();
     await b.start();
-    expect(seen).toEqual([sps, pps]);
+    expect(seen).toEqual([]);
+    h.sources[0].options.onData(annex(1, 44));
+    expect(seen).toEqual([sps, pps, annex(1, 44)]);
     expect(h.sources[0].keyFrames).toEqual(["viewer"]);
     await a.stop();
     await b.stop();
@@ -405,7 +413,7 @@ describe("device capture registry", () => {
     await fresh.start();
     const c = h.acquire({ onData: (data) => seen.push(data) });
     await c.start();
-    expect(seen).toHaveLength(2);
+    expect(seen).toHaveLength(3);
     await fresh.stop();
     await c.stop();
   });
@@ -419,7 +427,9 @@ describe("device capture registry", () => {
     const seen: Buffer[] = [];
     const b = h.acquire({ onData: (data) => seen.push(data) });
     await b.start();
-    expect(seen).toEqual([pps]);
+    expect(seen).toEqual([]);
+    h.sources[0].options.onData(annex(1, 44));
+    expect(seen).toEqual([pps, annex(1, 44)]);
     await a.stop();
     await b.stop();
   });
@@ -445,8 +455,8 @@ describe("device capture registry", () => {
     expect(h.sources[2].stops).toBe(0);
     await silent.stop();
   });
-  test("conflicting hints log once and never override first-acquirer configuration", async () => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  test("incompatible hints log once per cause and retain private requested settings", async () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
     const h = harness();
     try {
       const a = h.acquire({
@@ -457,20 +467,14 @@ describe("device capture registry", () => {
       });
       const b = h.acquire({ fps: 5, quality: "high", bitrateBps: 200 });
       const c = h.acquire({ fps: 60 });
-      await a.start();
-      await b.start();
-      await c.start();
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0][0]).toContain(
-        "a: ignoring conflicting capture hints (bitrateBps, size, quality, fps)",
-      );
-      expect(h.sources[0].options.fps).toBe(30);
-      expect(h.sources[0].options.quality).toBe("low");
-      await a.stop();
-      await b.stop();
-      await c.stop();
+      const d = h.acquire({ fps: 50 });
+      await Promise.all([a.start(), b.start(), c.start(), d.start()]);
+      expect(info).toHaveBeenCalledTimes(2);
+      expect(info.mock.calls[0][0]).toContain("incompatible settings (bitrateBps, quality, fps)");
+      expect(h.sources.map((source) => source.options.fps)).toEqual([30, 5, 60, 50]);
+      await Promise.all([a.stop(), b.stop(), c.stop(), d.stop()]);
     } finally {
-      warn.mockRestore();
+      info.mockRestore();
     }
   });
   test("stop failure logs warn and does not block fresh acquisition", async () => {
@@ -653,7 +657,7 @@ describe("device capture registry", () => {
     h.sources[0].startGate = gate.promise;
     const start = a.start();
     try {
-      const stop = a.stopStale(true);
+      const stop = a.stopStale!(true);
       expect(h.sources[0].staleStops).toEqual([true]);
       await stop;
       await start;
@@ -798,4 +802,279 @@ describe("device capture registry", () => {
       warn.mockRestore();
     }
   });
+});
+
+describe("review regressions", () => {
+  test("optional capabilities remain absent, including during async creation", async () => {
+    const registry = createDeviceCaptureRegistry();
+    const gate = Promise.withResolvers<H264CaptureSource>();
+    const handle = registry.acquire({
+      device,
+      options: { device, onData: () => {} },
+      create: () => gate.promise,
+    });
+    expect(handle.getTelemetry).toBeUndefined();
+    expect(handle.requestKeyFrame).toBeUndefined();
+    expect(handle.stopStale).toBeUndefined();
+    expect(handle.setHasConsumers).toBeUndefined();
+    gate.resolve({ start: async () => {}, stop: async () => {} });
+    await handle.start();
+    expect(handle.getTelemetry).toBeUndefined();
+    expect(handle.requestKeyFrame).toBeUndefined();
+    await handle.stop();
+  });
+  for (const pendingStart of [false, true]) {
+    test(`byte-stream joiner aligns replay and ignores split start codes (pending=${pendingStart})`, async () => {
+      const h = harness();
+      const gate = Promise.withResolvers<void>();
+      const a = h.acquire();
+      if (pendingStart) {
+        h.sources[0].startGate = gate.promise;
+      }
+      const starting = a.start();
+      if (!pendingStart) {
+        await starting;
+      }
+      const sps = annex(7, 11),
+        pps = annex(8, 12);
+      h.sources[0].options.onData(Buffer.concat([sps, pps, annex(1, 20)]));
+      const chunks: Buffer[] = [];
+      const b = h.acquire({ onData: (chunk) => chunks.push(chunk) });
+      const joining = b.start();
+      h.sources[0].options.onData(Buffer.from([21, 0, 0]));
+      h.sources[0].options.onData(Buffer.from([1, 5, 22]));
+      expect(chunks).toEqual([]);
+      const whole = annex(1, 30);
+      h.sources[0].options.onData(Buffer.concat([Buffer.from([23]), whole, annex(1, 31)]));
+      const parser = new H264AnnexBParser();
+      expect(chunks.flatMap((chunk) => parser.push(chunk)).concat(parser.flush())).toEqual([
+        sps.subarray(4),
+        pps.subarray(4),
+        whole.subarray(4),
+        annex(1, 31).subarray(4),
+      ]);
+      // Replay never enters the entry parser: a later joiner sees the same original sets.
+      const replay: Buffer[] = [];
+      const c = h.acquire({ onData: (chunk) => replay.push(chunk) });
+      const third = c.start();
+      h.sources[0].options.onData(annex(1, 32));
+      expect(replay.slice(0, 2)).toEqual([sps, pps]);
+      gate.resolve();
+      await Promise.all([starting, joining, third]);
+      await Promise.all([a.stop(), b.stop(), c.stop()]);
+    });
+  }
+  test("packet-framed joiner receives out-of-band replay at its first boundary", async () => {
+    const h = harness();
+    const a = h.acquire();
+    await a.start();
+    const sps = annex(7, 11),
+      pps = annex(8, 12);
+    h.sources[0].options.onData(Buffer.concat([sps, pps]));
+    h.sources[0].options.onEncodedAccessUnit?.();
+    const live: Buffer[] = [],
+      replay: Buffer[] = [];
+    const b = h.acquire({
+      onData: (chunk) => live.push(chunk),
+      onReplayData: (chunk) => replay.push(chunk),
+    });
+    await b.start();
+    expect(live).toEqual([]);
+    const packet = annex(5, 128);
+    h.sources[0].options.onData(packet);
+    expect(replay).toEqual([sps, pps]);
+    expect(live).toEqual([packet]);
+    await Promise.all([a.stop(), b.stop()]);
+  });
+  test("stale holder retires all peers and fences a fresh source", async () => {
+    const h = harness();
+    const errors: Error[] = [],
+      ownerErrors: Error[] = [];
+    const a = h.acquire({ onError: (error) => ownerErrors.push(error) });
+    const b = h.acquire({ onError: (error) => errors.push(error) });
+    await Promise.all([a.start(), b.start()]);
+    const gate = Promise.withResolvers<void>();
+    h.sources[0].stopGate = gate.promise;
+    const stopping = a.stopStale!(true);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("stale");
+    expect(ownerErrors).toEqual([]);
+    const fresh = h.acquire();
+    const starting = fresh.start();
+    expect(h.sources).toHaveLength(1);
+    gate.resolve();
+    await Promise.all([stopping, starting, b.stop()]);
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[0].staleStops).toEqual([true]);
+    await fresh.stop();
+  });
+  test("binding settings get private sources while flexible defaults share", async () => {
+    const h = harness();
+    const a = h.acquire({ fps: 5 });
+    await a.start();
+    const b = h.acquire({ fps: 15, bitrateBps: 1000000, size: { width: 100, height: 200 } });
+    await b.start();
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[1].options.fps).toBe(15);
+    const c = h.registry.acquire({
+      device,
+      create: h.create,
+      options: { device, onData: () => {}, fps: 30 },
+      flexibleHints: ["fps"],
+    });
+    await c.start();
+    expect(h.sources).toHaveLength(2);
+    await Promise.all([a.stop(), b.stop(), c.stop()]);
+  });
+  test("late metrics snapshot is delivered only to the joining holder", async () => {
+    const h = harness();
+    const seen: unknown[][] = [[], []];
+    const a = h.acquire({ onFrameMetrics: (metrics) => seen[0].push(metrics) });
+    await a.start();
+    const metrics = {
+      native: null,
+      helper: null,
+      encoder: {
+        captureTimestampMs: null,
+        frameAgeMs: null,
+        queueDepth: 0,
+        droppedFrames: 0,
+        bytesQueued: 0,
+        highWaterMarkBytes: 0,
+        maxFrameBytes: 100,
+        outputWriteDurationMs: null,
+        outputWriteHighWaterDurationMs: 0,
+      },
+    };
+    h.sources[0].options.onFrameMetrics?.(metrics);
+    const b = h.acquire({ onFrameMetrics: (value) => seen[1].push(value) });
+    await b.start();
+    expect(seen).toEqual([[metrics], [metrics]]);
+    h.sources[0].options.onFrameMetrics?.(metrics);
+    expect(seen[0]).toEqual(seen[1]);
+    await Promise.all([a.stop(), b.stop()]);
+  });
+});
+
+for (const field of ["bitrateBps", "size", "quality", "fps"] as const) {
+  const value = {
+    bitrateBps: 1000,
+    size: { width: 100, height: 200 },
+    quality: "low",
+    fps: 15,
+  } as const;
+  const different = {
+    bitrateBps: 2000,
+    size: { width: 200, height: 100 },
+    quality: "high",
+    fps: 5,
+  } as const;
+  for (const mode of ["equal", "different", "unspecified", "unknown", "flexible"] as const) {
+    test(`compatibility ${field}: ${mode}`, () => {
+      const actual: H264CaptureSourceOptions = {
+        device,
+        onData: () => {},
+        ...(mode === "unknown" ? {} : { [field]: value[field] }),
+      };
+      const requested: H264CaptureSourceOptions = {
+        device,
+        onData: () => {},
+        ...(mode === "unspecified"
+          ? {}
+          : {
+              [field]:
+                mode === "different" || mode === "flexible" ? different[field] : value[field],
+            }),
+      };
+      const flexible: readonly CaptureHintField[] = mode === "flexible" ? [field] : [];
+      expect(captureHintsCompatible(actual, requested, flexible)).toBe(
+        mode !== "different" && mode !== "unknown",
+      );
+    });
+  }
+}
+for (const [actual, requested, compatible] of [
+  [false, true, false],
+  [true, false, true],
+  [true, true, true],
+  [false, false, true],
+] as const) {
+  test(`audio compatibility ${actual} -> ${requested}`, () => {
+    expect(
+      captureHintsCompatible(
+        { device, onData: () => {}, audioEnabled: actual },
+        { device, onData: () => {}, audioEnabled: requested },
+      ),
+    ).toBe(compatible);
+  });
+}
+
+test("relay-only callbacks remain absent and a metrics-requiring joiner is private", async () => {
+  const h = harness();
+  const a = h.acquire();
+  await a.start();
+  expect(h.sources[0].options.onFrameMetrics).toBeUndefined();
+  expect(h.sources[0].options.onAudioData).toBeUndefined();
+  const b = h.acquire({ onFrameMetrics: () => {} });
+  await b.start();
+  expect(h.sources).toHaveLength(2);
+  expect(h.sources[1].options.onFrameMetrics).toBeDefined();
+  await Promise.all([a.stop(), b.stop()]);
+});
+test("simultaneous private stops fence fresh creation and private fatal errors stay local", async () => {
+  const h = harness();
+  const a = h.acquire({ fps: 5 });
+  const errors: Error[] = [];
+  const b = h.acquire({ fps: 15, onError: (error) => errors.push(error) });
+  await Promise.all([a.start(), b.start()]);
+  const first = Promise.withResolvers<void>(),
+    second = Promise.withResolvers<void>();
+  h.sources[0].stopGate = first.promise;
+  h.sources[1].stopGate = second.promise;
+  const stopped = a.stop();
+  h.sources[1].options.onError?.(new Error("private failure"));
+  expect(errors).toHaveLength(1);
+  const c = h.acquire();
+  const started = c.start();
+  first.resolve();
+  await flush();
+  expect(h.sources).toHaveLength(2);
+  second.resolve();
+  await Promise.all([stopped, started, b.stop()]);
+  expect(h.sources).toHaveLength(3);
+  await c.stop();
+});
+test("optional capabilities forward resolved source identity and arguments", async () => {
+  const h = harness();
+  const gate = Promise.withResolvers<H264CaptureSource>();
+  const telemetry = {
+    lastEncodedFrameTimestampUs: 1,
+    lastIdrTimestampUs: 2,
+    idrRequestCount: 3,
+    idrCompletionCount: 4,
+    encodedAccessUnitCount: 5,
+  };
+  const a = h.registry.acquire({
+    device,
+    options: { device, onData: () => {} },
+    create: (options) => {
+      const source = h.create(options);
+      Object.assign(source, {
+        getTelemetry() {
+          expect(this).toBe(source);
+          return telemetry;
+        },
+      });
+      return gate.promise;
+    },
+  });
+  gate.resolve(h.sources[0]);
+  await a.start();
+  expect(a.getTelemetry?.()).toBe(telemetry);
+  expect(a.requestKeyFrame?.("probe")).toBe(true);
+  expect(h.sources[0].keyFrames).toEqual(["probe"]);
+  a.setHasConsumers?.(false);
+  expect(h.sources[0].consumers.at(-1)).toBe(false);
+  await a.stopStale!(true);
+  expect(h.sources[0].staleStops).toEqual([true]);
 });

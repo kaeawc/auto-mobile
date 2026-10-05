@@ -1,5 +1,7 @@
 import {
   getDefaultDeviceCaptureRegistry,
+  canRetainSharedCapture,
+  stopStaleCapture,
   type DeviceCaptureRegistry,
 } from "../features/webrtc/deviceCaptureRegistry";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
@@ -942,25 +944,30 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         this.startHeartbeat(deviceId, capture);
       }
     };
+    const consumeData = (chunk: Buffer, fresh: boolean): void => {
+      const current = this.captures.get(deviceId);
+      if (current !== capture || capture.generation !== generation || chunk.length === 0) {
+        return;
+      }
+      if (fresh) {
+        current.lastEncodedDataMs = this.timer.now();
+        current.firstEvidenceMs ??= current.lastEncodedDataMs;
+        current.encodedSinceSourceFrame = true;
+        if (!current.heartbeatTimer) {
+          this.startHeartbeat(deviceId, current);
+        }
+      }
+      this.broadcast(deviceId, chunk);
+    };
     return (this.deps.captureRegistry ?? getDefaultDeviceCaptureRegistry()).acquire({
       device,
       create: (options) => this.deps.createCaptureSource({ ...options, onError: options.onError! }),
       hasConsumers: this.hasSubscribers(capture),
+      flexibleHints: hints.fps === undefined ? ["fps"] : [],
       options: {
         device,
-        onData: (chunk) => {
-          const current = this.captures.get(deviceId);
-          if (current !== capture || capture.generation !== generation || chunk.length === 0) {
-            return;
-          }
-          current.lastEncodedDataMs = this.timer.now();
-          current.firstEvidenceMs ??= current.lastEncodedDataMs;
-          current.encodedSinceSourceFrame = true;
-          if (!current.heartbeatTimer) {
-            this.startHeartbeat(deviceId, current);
-          }
-          this.broadcast(deviceId, chunk);
-        },
+        onData: (chunk) => consumeData(chunk, true),
+        onReplayData: (chunk) => consumeData(chunk, false),
         onSourceFrame: attestSource,
         onSourceIdle: () => {
           if (
@@ -1061,6 +1068,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       bitrateKbps: request.bitrateKbps ?? desired.bitrateKbps,
       size: takingOwnership ? request.size : desired.size,
     };
+    this.retainSharedHints(capture, capture.desiredHints);
     if (!sameHints(capture.desiredHints, capture.appliedHints)) {
       logger.info(`[VideoStream] ${deviceId} scheduling shared capture quality change`);
     }
@@ -1153,6 +1161,25 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
+  private retainSharedHints(capture: DeviceCapture, hints: CaptureHints): boolean {
+    if (
+      !capture.source ||
+      !canRetainSharedCapture(capture.source, {
+        device: capture.device,
+        onData: () => {},
+        bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
+        size: hints.size,
+        quality: hints.quality,
+        fps: hints.fps,
+      })
+    ) {
+      return false;
+    }
+    // Preserve viewer/parser/liveness state when every binding hint is already satisfied.
+    capture.appliedHints = hints;
+    return true;
+  }
+
   private async reconfigureCapture(
     deviceId: string,
     capture: DeviceCapture,
@@ -1162,13 +1189,16 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (!outgoing || this.captures.get(deviceId) !== capture) {
       return;
     }
+    if (this.retainSharedHints(capture, hints)) {
+      return;
+    }
     // Fence the retiring source and its cache only at the swap. Existing viewers can consume its
     // output through the debounce; joiners held for the new hints cannot.
     capture.generation++;
     capture.source = null;
     this.resetForNewEncoder(capture);
     try {
-      // Release then reacquire: with another transport holder, first-acquirer hints still win.
+      // Incompatible settings acquire a private source without disturbing other transports.
       await outgoing.stop();
       if (this.captures.get(deviceId) !== capture) {
         return;
@@ -1708,8 +1738,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const stopping = (async () => {
       try {
         try {
-          if (stale && capture.source?.stopStale) {
-            await capture.source.stopStale(this.producerEvidenceIsStale(capture));
+          if (stale && capture.source) {
+            await stopStaleCapture(capture.source, this.producerEvidenceIsStale(capture));
           } else {
             await capture.source?.stop();
           }

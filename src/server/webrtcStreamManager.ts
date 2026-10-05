@@ -833,42 +833,44 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   record.sourceFailed = false;
   record.mediaParser = new H264AnnexBParser();
   let source: H264CaptureSource | null = null;
+  const consumeData = (chunk: Buffer, fresh: boolean): void => {
+    if (record.source !== source) {
+      return;
+    }
+    if (fresh && !record.telemetry.firstMediaFrame) {
+      record.telemetry.firstMediaFrame = dependencies.now().toISOString();
+    }
+    let nals: Buffer[];
+    try {
+      nals = record.mediaParser.push(chunk);
+    } catch (error) {
+      record.sourceFailed = true;
+      markFailure(record, "capture_runtime_failed", error, "degraded");
+      record.publisher.notifySourceFailed(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return;
+    }
+    for (const nal of nals) {
+      const type = nalUnitType(nal);
+      if (type === NAL_TYPE_SPS) {
+        record.cachedSps = Buffer.from(nal);
+      } else if (type === NAL_TYPE_PPS) {
+        record.cachedPps = Buffer.from(nal);
+      }
+      if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
+        record.telemetry.firstIdr = dependencies.now().toISOString();
+      }
+    }
+    record.publisher.writeH264Chunk(chunk);
+  };
   source = getCaptureRegistry().acquire({
     device: record.device,
     create: (options) => dependencies.createSource(options, record.jarPath),
     options: {
       device: record.device,
-      onData: (chunk) => {
-        if (record.source !== source) {
-          return;
-        }
-        if (!record.telemetry.firstMediaFrame) {
-          record.telemetry.firstMediaFrame = dependencies.now().toISOString();
-        }
-        let nals: Buffer[];
-        try {
-          nals = record.mediaParser.push(chunk);
-        } catch (error) {
-          record.sourceFailed = true;
-          markFailure(record, "capture_runtime_failed", error, "degraded");
-          record.publisher.notifySourceFailed(
-            error instanceof Error ? error : new Error(String(error)),
-          );
-          return;
-        }
-        for (const nal of nals) {
-          const type = nalUnitType(nal);
-          if (type === NAL_TYPE_SPS) {
-            record.cachedSps = Buffer.from(nal);
-          } else if (type === NAL_TYPE_PPS) {
-            record.cachedPps = Buffer.from(nal);
-          }
-          if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
-            record.telemetry.firstIdr = dependencies.now().toISOString();
-          }
-        }
-        record.publisher.writeH264Chunk(chunk);
-      },
+      onData: (chunk) => consumeData(chunk, true),
+      onReplayData: (chunk) => consumeData(chunk, false),
       onAudioData: (chunk) => {
         if (record.source === source) {
           record.publisher.writePcmAudioChunk(chunk);

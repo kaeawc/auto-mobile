@@ -493,7 +493,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyClipboardResult>;
+    onDispatch?: () => void,
+  ): Promise<CtrlProxyClipboardResult & { acknowledged?: boolean }>;
 
   requestPressHome(
     timeoutMs?: number,
@@ -3935,8 +3936,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyClipboardResult> {
-    return this.clipboard.requestClipboard(action, text, timeoutMs, perf, signal);
+    onDispatch?: () => void,
+  ): Promise<CtrlProxyClipboardResult & { acknowledged?: boolean }> {
+    return this.clipboard.requestClipboard(action, text, timeoutMs, perf, signal, onDispatch);
   }
 
   // ===========================================================================

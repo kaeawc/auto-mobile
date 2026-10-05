@@ -42,6 +42,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     await manager.setCurrentApp(appId);
     await manager.recordNavigationEvent({ destination: "Home", timestamp: 1000 });
     await manager.recordHierarchyNavigation({
+      packageName: appId,
       fromFingerprint: null,
       toFingerprint: "fp_home",
       timestamp: 1200,
@@ -479,6 +480,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
       const eventWrite = manager.recordNavigationEvent({ destination: "New", timestamp: 4000 });
       await eventStarted.promise;
       const hierarchyWrite = manager.recordHierarchyNavigation({
+        packageName: appId,
         fromFingerprint: null,
         toFingerprint: "fp_home",
         timestamp: 5000,

@@ -1537,3 +1537,40 @@ test("request budget constants are the tool implementation constants", () => {
   expect(storagePushMs).toBe(SHARED_STORAGE_PUSH_TIMEOUT_MS);
   expect(appPushMs).toBe(APP_FILE_PUSH_TIMEOUT_MS);
 });
+
+describe("client-supplied tool names that match inherited object members", () => {
+  const INHERITED_NAMES = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"];
+  const ARGUMENT_SETS: Array<Record<string, unknown> | undefined> = [
+    undefined,
+    {},
+    { timeout: 600_000, timeoutMs: 600_000, files: [{}, {}], commands: [], fields: [] },
+  ];
+
+  test.each(INHERITED_NAMES)("%s resolves to the default deadline without throwing", (name) => {
+    for (const args of ARGUMENT_SETS) {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "inherited",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    }
+  });
+
+  test.each([undefined, null, 7, true, {}])(
+    "non-string tool name %p resolves to the default deadline without throwing",
+    (name) => {
+      for (const args of ARGUMENT_SETS) {
+        const request = {
+          id: "non-string",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name, arguments: args },
+        } as unknown as Parameters<typeof resolveMcpRequestTimeoutMs>[0];
+        expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+    },
+  );
+});

@@ -214,22 +214,26 @@ const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS = Math.max(
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
 );
 
-const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
-  deviceSnapshot: DEFAULT_VM_SNAPSHOT_TIMEOUT_MS + SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
-  barrier: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-  criticalSection: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-  explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-  stageSharedStorage: SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
-  stageSharedStorageFixtures:
-    SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
-  putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
-  setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
-  uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
-  crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
-  getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
-  setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
-  setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
-};
+// A Map, not a plain object: the tool name is client-supplied, and an index such
+// as `table["constructor"]` would reach inherited `Object.prototype` members.
+const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
+  Object.entries({
+    deviceSnapshot: DEFAULT_VM_SNAPSHOT_TIMEOUT_MS + SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+    barrier: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    criticalSection: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    stageSharedStorage: SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    stageSharedStorageFixtures:
+      SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+    crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
+    getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
+  }),
+);
 
 /**
  * Floor for `openLink` — deep links can trigger sign-in, onboarding, data sync,
@@ -272,8 +276,8 @@ function resolveEnvTimeoutFloorMs(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
-function resolveFixedToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
-  return TOOL_TIMEOUT_FLOORS[toolName ?? ""];
+function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
+  return typeof toolName === "string" ? TOOL_TIMEOUT_FLOORS.get(toolName) : undefined;
 }
 
 function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
@@ -424,8 +428,10 @@ function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {
   if (request.method !== "tools/call") {
     return 0;
   }
-  const resolver = ARGUMENT_BUDGET_RESOLVERS.get(request.params?.name ?? "");
-  return resolver?.(asRecord(request.params?.arguments) ?? {}) ?? 0;
+  const toolName: unknown = request.params?.name;
+  const resolver =
+    typeof toolName === "string" ? ARGUMENT_BUDGET_RESOLVERS.get(toolName) : undefined;
+  return typeof resolver === "function" ? resolver(asRecord(request.params?.arguments) ?? {}) : 0;
 }
 
 function resolveNamedDevicePreparationBudgetMs(argumentsRecord: Record<string, unknown>): number {

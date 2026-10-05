@@ -118,6 +118,7 @@ describe("displayConfig handler", () => {
         args,
       );
       expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
+      expect(response.isError).not.toBe(true);
       expect(get).toHaveBeenCalledTimes(1);
       expect(set).not.toHaveBeenCalled();
     } finally {
@@ -138,10 +139,47 @@ describe("displayConfig handler", () => {
         args,
       );
       expect(JSON.parse(response.content[0].text!)).toMatchObject(result);
+      expect(response.isError).not.toBe(true);
       expect(set).toHaveBeenCalledWith(args);
       expect(get).not.toHaveBeenCalled();
     } finally {
       get.mockRestore();
+      set.mockRestore();
+    }
+  });
+  test("failed setConfig results set isError and retain the error payload", async () => {
+    const failure = { ...result, success: false, error: "density: reset refused" };
+    const set = spyOn(DisplayConfig.prototype, "setConfig").mockResolvedValue(failure);
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
+        reset: true,
+      });
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(response.content[0].text!)).toMatchObject({
+        ...failure,
+        message: failure.error,
+      });
+    } finally {
+      set.mockRestore();
+    }
+  });
+
+  test("successful reset preserves the feature's specific restoration message", async () => {
+    const resetResult = {
+      ...result,
+      message:
+        "Reset font scale and density to device defaults; night mode left unchanged (displayConfig did not change it).",
+    };
+    const set = spyOn(DisplayConfig.prototype, "setConfig").mockResolvedValue(resetResult);
+    try {
+      registerUtilityTools();
+      const response = await ToolRegistry.getTool("displayConfig")!.deviceAwareHandler!(device, {
+        reset: true,
+      });
+      expect(response.isError).not.toBe(true);
+      expect(JSON.parse(response.content[0].text!).message).toBe(resetResult.message);
+    } finally {
       set.mockRestore();
     }
   });

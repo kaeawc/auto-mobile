@@ -7,12 +7,13 @@ import {
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TapAnyElementOptions } from "../../models/TapAnyElementOptions";
 import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { DOUBLE_TAP_GAP_MS, LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
 export interface CoordinateTapClient<Dispatch = never> {
@@ -159,7 +160,9 @@ export async function androidDisplayTapDispatch(
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
     onDispatched: () => void;
-    timer?: Pick<Timer, "sleep">;
+    timer?: Pick<Timer, "sleep" | "now">;
+    /** Receives a caution when the sequential fallback starts the taps outside the double-tap window. */
+    onWarning?: (warning: string) => void;
   },
 ): Promise<(point: { x: number; y: number }) => Promise<void>> {
   const { target, signal, timer = defaultTimer } = context;
@@ -225,11 +228,20 @@ export async function androidDisplayTapDispatch(
       context.onDispatched();
     };
     try {
-      await dispatch(point, onTapDelivered);
       if (options.action === "doubleTap") {
-        await awaitWhileRequestIsLive(timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-        throwIfAborted(signal);
-        target.assertCurrent();
+        await dispatchAndroidDoubleTap({
+          // The panel must be routable before a single-gesture double tap may target it.
+          client: useCtrlProxy ? client : undefined,
+          point,
+          displayId: target.displayId === 0 ? undefined : target.displayId,
+          timer,
+          signal,
+          assertCurrent: target.assertCurrent,
+          onTapDelivered,
+          onWarning: context.onWarning,
+          tap: () => dispatch(point, onTapDelivered),
+        });
+      } else {
         await dispatch(point, onTapDelivered);
       }
     } catch (error) {

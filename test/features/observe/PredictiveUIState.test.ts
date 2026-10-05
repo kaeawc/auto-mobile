@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { PredictiveUIState } from "../../../src/features/observe/PredictiveUIState";
 import { PredictionHistoryRepository } from "../../../src/db/predictionHistoryRepository";
 import type { Element, ObserveResult } from "../../../src/models";
@@ -31,8 +40,17 @@ describe("PredictiveUIState characterization", () => {
   let currentApp: ReturnType<typeof spyOn>;
   let edges: ReturnType<typeof spyOn>;
 
-  beforeEach(async () => {
+  // Migrations initialize the in-memory fixture, not the prediction behavior under test.
+  beforeAll(async () => {
     harness = await installInMemoryNavManager();
+  });
+
+  afterAll(async () => {
+    await harness.dispose();
+  });
+
+  beforeEach(async () => {
+    await harness.db.deleteFrom("prediction_transition_stats").execute();
     state = new PredictiveUIState();
     state["historyRepository"] = new PredictionHistoryRepository(harness.db);
     parser = new FakeElementParser();
@@ -45,11 +63,10 @@ describe("PredictiveUIState characterization", () => {
     ]);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     currentScreen.mockRestore();
     currentApp.mockRestore();
     edges.mockRestore();
-    await harness.dispose();
   });
 
   test("returns no predictions for missing hierarchy, screen, or a different foreground app", async () => {

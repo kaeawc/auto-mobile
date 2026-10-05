@@ -131,6 +131,7 @@ run_gate "stale-base guard" stale_base_guard
 run_gate "format check" bun run format:check
 run_gate "typecheck" bun run typecheck
 run_gate "lint" bun run lint
+run_gate "test as-any ratchet" bash scripts/test-as-any-baseline.sh
 run_gate "tool definitions drift" tool_definitions_drift_guard
 run_gate "repository lint tests" bun test test/lint/
 run_gate "image runtime smoke" bun run test:image:bun

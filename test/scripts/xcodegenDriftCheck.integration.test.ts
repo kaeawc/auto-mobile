@@ -21,6 +21,8 @@ const normalizeScript = join(repoRoot, "scripts/ios/pbxproj_normalize.sh");
 const tempDirs: string[] = [];
 // Covers a cold windows-latest Bash/MSYS start; this is a hook ceiling, not a per-test timeout.
 const WARM_UP_HOOK_TIMEOUT_MS = 60_000;
+// Match the existing Bash cases' ceiling on Windows; keep Bun's default elsewhere.
+const BASH_TEST_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 5000;
 
 // A minimal PBXProject `targets = (...)` block in two of the orders XcodeGen
 // 2.46.0 alternates between for the same spec (issue #4080). Same members, same
@@ -291,69 +293,84 @@ describe("xcodegen drift check", () => {
     );
   }, 15_000);
 
-  test("ctrl-proxy scope refuses to generate with a skewed XcodeGen version", () => {
-    // Regression guard for #3975: generating with a version other than the pin
-    // produces an ordering-only diff that reads as a stale project file. The
-    // gate must fail BEFORE writing, naming both versions.
-    const repoDir = createTempRepo();
+  test(
+    "ctrl-proxy scope refuses to generate with a skewed XcodeGen version",
+    () => {
+      // Regression guard for #3975: generating with a version other than the pin
+      // produces an ordering-only diff that reads as a stale project file. The
+      // gate must fail BEFORE writing, naming both versions.
+      const repoDir = createTempRepo();
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
-      cwd: repoDir,
-      encoding: "utf8",
-      env: fakeToolEnvironment(repoDir, {
-        FAKE_XCODEGEN_VERSION: "2.45.4",
-        FAKE_XCODEGEN_BEHAVIOR: "modify",
-      }),
-    });
+      const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: fakeToolEnvironment(repoDir, {
+          FAKE_XCODEGEN_VERSION: "2.45.4",
+          FAKE_XCODEGEN_BEHAVIOR: "modify",
+        }),
+      });
 
-    expectExitStatus(result, 1);
-    const output = result.stdout + result.stderr;
-    expect(output).toContain("version mismatch");
-    expect(output).toContain("2.45.4");
-    expect(output).toContain(pinnedXcodegenVersion);
-    // It must not have run the generator, so the project stays untouched.
-    expect(
-      readFileSync(join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"), "utf8"),
-    ).toBe("committed project\n");
-  });
+      expectExitStatus(result, 1);
+      const output = result.stdout + result.stderr;
+      expect(output).toContain("version mismatch");
+      expect(output).toContain("2.45.4");
+      expect(output).toContain(pinnedXcodegenVersion);
+      // It must not have run the generator, so the project stays untouched.
+      expect(
+        readFileSync(
+          join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"),
+          "utf8",
+        ),
+      ).toBe("committed project\n");
+    },
+    BASH_TEST_TIMEOUT_MS,
+  );
 
-  test("ctrl-proxy scope passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {
-    const repoDir = createTempRepo();
+  test(
+    "ctrl-proxy scope passes when xcodegen generation leaves the committed CtrlProxy project unchanged",
+    () => {
+      const repoDir = createTempRepo();
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
-      cwd: repoDir,
-      encoding: "utf8",
-      env: fakeToolEnvironment(repoDir),
-    });
+      const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: fakeToolEnvironment(repoDir),
+      });
 
-    expectExitStatus(result, 0);
-    expect(result.stdout + result.stderr).toContain("XcodeGen project files are in sync");
-  });
+      expectExitStatus(result, 0);
+      expect(result.stdout + result.stderr).toContain("XcodeGen project files are in sync");
+    },
+    BASH_TEST_TIMEOUT_MS,
+  );
 
-  test("ctrl-proxy scope passes when only the PBXProject target order changed (#4080)", () => {
-    // XcodeGen 2.46.0 emits the targets array in one of two environment-dependent
-    // orders for the same spec + pinned version. A pure reorder is not drift, so
-    // the check must normalize it away and pass — not fail like a stale project.
-    const repoDir = createTempRepo();
-    const projectPath = join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
-    // Commit the declaration order; the fake generator emits the alphabetical one.
-    writeFileSync(projectPath, declarationOrderProject);
-    writeFileSync(join(repoDir, "baseline/project.pbxproj"), declarationOrderProject);
+  test(
+    "ctrl-proxy scope passes when only the PBXProject target order changed (#4080)",
+    () => {
+      // XcodeGen 2.46.0 emits the targets array in one of two environment-dependent
+      // orders for the same spec + pinned version. A pure reorder is not drift, so
+      // the check must normalize it away and pass — not fail like a stale project.
+      const repoDir = createTempRepo();
+      const projectPath = join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
+      // Commit the declaration order; the fake generator emits the alphabetical one.
+      writeFileSync(projectPath, declarationOrderProject);
+      writeFileSync(join(repoDir, "baseline/project.pbxproj"), declarationOrderProject);
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
-      cwd: repoDir,
-      encoding: "utf8",
-      env: fakeToolEnvironment(repoDir, {
-        FAKE_XCODEGEN_BEHAVIOR: "reorder",
-        FAKE_REORDERED_PROJECT: alphabeticalOrderProject,
-      }),
-    });
+      const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: fakeToolEnvironment(repoDir, {
+          FAKE_XCODEGEN_BEHAVIOR: "reorder",
+          FAKE_REORDERED_PROJECT: alphabeticalOrderProject,
+        }),
+      });
 
-    expectExitStatus(result, 0);
-    expect(result.stdout + result.stderr).toContain("target-array order normalized");
-    // The benign reorder must be restored to the committed bytes, not left dirty.
-    expect(readFileSync(projectPath, "utf8")).toBe(declarationOrderProject);
-  });
+      expectExitStatus(result, 0);
+      expect(result.stdout + result.stderr).toContain("target-array order normalized");
+      // The benign reorder must be restored to the committed bytes, not left dirty.
+      expect(readFileSync(projectPath, "utf8")).toBe(declarationOrderProject);
+    },
+    BASH_TEST_TIMEOUT_MS,
+  );
 
   test("all scope uses the repo-wide generator for wider iOS build gates", () => {
     const repoDir = createTempRepo();
@@ -370,20 +387,24 @@ describe("xcodegen drift check", () => {
     expect(result.stdout + result.stderr).toContain("Run scripts/ios/xcodegen-generate.sh");
   }, 15_000);
 
-  test("all scope fails when repo-wide generation fails", () => {
-    const repoDir = createTempRepo();
+  test(
+    "all scope fails when repo-wide generation fails",
+    () => {
+      const repoDir = createTempRepo();
 
-    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--all"], {
-      cwd: repoDir,
-      encoding: "utf8",
-      env: fakeToolEnvironment(repoDir),
-    });
+      const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--all"], {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: fakeToolEnvironment(repoDir),
+      });
 
-    expectExitStatus(result, 2);
-    expect(result.stdout + result.stderr).toContain(
-      "repo-wide xcodegen-generate.sh should not be called",
-    );
-  });
+      expectExitStatus(result, 2);
+      expect(result.stdout + result.stderr).toContain(
+        "repo-wide xcodegen-generate.sh should not be called",
+      );
+    },
+    BASH_TEST_TIMEOUT_MS,
+  );
 
   test("pull request workflow gates both Xcode project jobs on the drift check", () => {
     const xcodeBuildSteps = loadJobSteps(".github/workflows/pull_request.yml", "ios-xcode-build");

@@ -2087,8 +2087,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           this.sdkCapabilityRefreshInFlight = null;
         }
       })
-      .catch(() => {
+      .catch((error) => {
         // The caller handles the rejection; this branch prevents an unhandled promise rejection.
+        logger.debug(`[IOSCtrlProxyClient] SDK capability refresh cleanup: ${errorMessage(error)}`);
       });
     return promise;
   }
@@ -4462,6 +4463,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, result.format),
       };
     } catch (error) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Screenshot backoff capture failed: ${errorMessage(error)}`,
+        error,
+      );
       return { success: false, error: `${error}` };
     }
   }

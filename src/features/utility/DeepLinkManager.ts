@@ -426,7 +426,10 @@ export class DeepLinkManager implements DeepLinkManager {
         rawOutput: packageInfoResult.stdout,
       };
     } catch (error) {
-      logger.error(`[DeepLinkManager] Failed to get deep links for ${appId}: ${error}`);
+      logger.warn(
+        `[DeepLinkManager] Failed to get deep links for ${appId}: ${errorMessage(error)}`,
+        error,
+      );
       return {
         success: false,
         appId,
@@ -967,7 +970,10 @@ export class DeepLinkManager implements DeepLinkManager {
       }
     } catch (error) {
       throwIfAborted(this.chooserSignal);
-      logger.error(`[DeepLinkManager] Failed to handle intent chooser: ${error}`);
+      logger.warn(
+        `[DeepLinkManager] Failed to handle intent chooser: ${errorMessage(error)}`,
+        error,
+      );
       return {
         success: false,
         detected: true,

@@ -474,7 +474,10 @@ export class ClearText extends BaseVisualChange {
       return { success: false, error: result.error };
     } catch (error) {
       signal?.throwIfAborted();
-      logger.error(`[ClearText] CtrlProxy iOS exception: ${error} totalMs=${Date.now() - startMs}`);
+      logger.warn(
+        `[ClearText] CtrlProxy iOS exception: ${errorMessage(error)} totalMs=${Date.now() - startMs}`,
+        error,
+      );
       return { success: false, error: String(error) };
     }
   }

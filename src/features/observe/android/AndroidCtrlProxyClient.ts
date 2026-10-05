@@ -70,6 +70,7 @@ import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortM
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import {
   TrackedScreenGeometry,
   screenshotBindingPushOptions,
@@ -4696,9 +4697,34 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private ensureLocalPortAvailableForForwarding(): void {
+  private async ensureLocalPortAvailableForForwarding(signal?: AbortSignal): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     const currentAllocation = PortManager.getPort(this.portAllocationId);
-    const currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+    let currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+    if (currentAllocation === this.localPort) {
+      const backoff = fixedBackoff(50);
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (currentPortIsAvailable) {
+          return;
+        }
+        if (this.closed) {
+          return;
+        }
+        throwIfAborted(signal);
+        // adb tears down its listener asynchronously after --remove; this short busy window is expected and bounded.
+        logger.debug(
+          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/3)`,
+        );
+        await awaitWhileRequestIsLive(this.timer.sleep(backoff.delayForAttempt(attempt)), signal);
+        if (this.closed) {
+          return;
+        }
+        throwIfAborted(signal);
+        currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+      }
+    }
     if (currentAllocation === this.localPort && currentPortIsAvailable) {
       return;
     }
@@ -4753,11 +4779,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (!clearedCurrentPort) {
         throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
       }
+      await this.ensureLocalPortAvailableForForwarding(signal);
       if (this.closed) {
         return;
       }
-
-      this.ensureLocalPortAvailableForForwarding();
       logger.debug(
         `[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`,
       );

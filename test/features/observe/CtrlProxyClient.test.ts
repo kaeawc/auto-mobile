@@ -1178,7 +1178,7 @@ describe("AndroidCtrlProxyClient", function () {
         }
       ).setupPortForwarding();
 
-      expect(checkedPorts).toEqual([8765, 8765, 8767]);
+      expect(checkedPorts).toEqual([8765, 8765, 8765, 8765, 8765, 8767]);
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
       expect(
@@ -1190,6 +1190,138 @@ describe("AndroidCtrlProxyClient", function () {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
   });
+
+  test("retries a busy removed port once without reallocating", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port) => {
+        checkedPorts.push(port);
+        return checkedPorts.length > 1;
+      },
+    });
+
+    await accessibilityServiceClient.setupPortForwarding();
+
+    expect(checkedPorts).toEqual([8765, 8765]);
+    expect(fakeTimer.getSleepHistory()).toEqual([50]);
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
+    expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
+    expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8767 tcp:8765");
+  });
+
+  test("reallocates a persistently busy removed port after three probe retries", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port) => {
+        checkedPorts.push(port);
+        return port !== 8765;
+      },
+    });
+    const info = spyOn(logger, "info");
+    try {
+      await accessibilityServiceClient.setupPortForwarding();
+
+      expect(checkedPorts).toEqual([8765, 8765, 8765, 8765, 8767]);
+      expect(fakeTimer.getSleepHistory()).toEqual([50, 50, 50]);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
+      expect(info).toHaveBeenCalledWith(
+        "[CTRL_PROXY] Reallocated local port from 8765 to 8767 before adb forward",
+      );
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("does not retry the probe when the current allocation differs from the removed port", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
+    PortManager.release(testDevice.deviceId);
+    PortManager.allocate(testDevice.deviceId, { reservedPorts: [8765, 8766] });
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port) => {
+        checkedPorts.push(port);
+        return port !== 8765;
+      },
+    });
+
+    await accessibilityServiceClient.setupPortForwarding();
+
+    expect(checkedPorts).toEqual([8765, 8767]);
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+    expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
+  });
+
+  test("does not probe or retry when removing the current forward fails", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+      () => true,
+    );
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port) => {
+        checkedPorts.push(port);
+        return false;
+      },
+    });
+
+    await expect(accessibilityServiceClient.setupPortForwarding()).rejects.toThrow(
+      "Failed to remove existing CtrlProxy forward on tcp:8765",
+    );
+    expect(checkedPorts).toEqual([]);
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
+  });
+
+  for (const cancellation of ["abort", "close"] as const) {
+    test(`stops the removed-port probe retry on ${cancellation}`, async function () {
+      await accessibilityServiceClient.close();
+      fakeTimer = new FakeTimer();
+      PortManager.setClockForTesting(fakeTimer);
+      accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(),
+        fakeTimer,
+      );
+      registerTestSingleton(accessibilityServiceClient);
+      stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
+      const checkedPorts: number[] = [];
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port) => {
+          checkedPorts.push(port);
+          return false;
+        },
+      });
+      const controller = new AbortController();
+      const setup = accessibilityServiceClient.setupPortForwarding(undefined, controller.signal);
+      const completion = setup.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await flushMicrotasks();
+      expect(fakeTimer.getPendingSleeps()).toEqual([50]);
+      if (cancellation === "abort") {
+        controller.abort();
+        expect(await completion).toEqual(new Error(OPERATION_CANCELLED_MESSAGE));
+      } else {
+        await accessibilityServiceClient.close();
+        fakeTimer.advanceTime(50);
+        expect(await completion).toBeUndefined();
+      }
+      expect(checkedPorts).toEqual([8765]);
+      expect(fakeTimer.getSleepHistory()).toEqual([50]);
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8765 tcp:8765");
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8767 tcp:8765");
+    });
+  }
 
   test("confirms removal immediately without sleeping before probing the host port", async function () {
     await accessibilityServiceClient.close();

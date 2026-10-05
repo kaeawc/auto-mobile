@@ -5,8 +5,10 @@ import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import type { Element } from "../../../src/models";
+import type { Element, ViewHierarchyResult } from "../../../src/models";
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { logger } from "../../../src/utils/logger";
+import { notificationHierarchy, notificationRows } from "../talkback/capturedNotificationTargets";
 
 const createTapOnElement = (selector: FakeElementSelector) => {
   return new TapOnElement(
@@ -362,6 +364,8 @@ describe("TapOnElement extended selectors", () => {
 
     function setup() {
       const proxy = new FakeCtrlProxy();
+      proxy.setHierarchyData({ updatedAt: 1, packageName: "com.android.systemui", hierarchy: {} });
+      proxy.setViewHierarchyResult(notificationHierarchy);
       const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
         proxy as unknown as AndroidCtrlProxyClient,
       );
@@ -383,6 +387,139 @@ describe("TapOnElement extended selectors", () => {
       return { proxy, internals };
     }
 
+    const uniqueIdElement: Element = {
+      ...makeElement(),
+      "resource-id": "com.android.systemui:id/notification_stack_scroller",
+      actions: ["long_click"],
+    };
+    const repeatedIdElement: Element = { ...notificationRows[1], actions: ["long_click"] };
+    const coordinateCommand = "shell input touchscreen swipe 50 25 50 25 1000";
+
+    function expectCoordinateFallback({ proxy, internals }: ReturnType<typeof setup>) {
+      expect(proxy.getActionHistory()).toEqual([]);
+      expect(proxy.getNodeActionHistory()).toEqual([]);
+      expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
+    }
+
+    test("uses one bare-id long click after reading a complete unfiltered unique-id hierarchy", async () => {
+      const { proxy, internals } = setup();
+      const read = spyOn(proxy, "getAccessibilityHierarchy");
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        expect(read).toHaveBeenCalledWith(undefined, undefined, false, undefined, true);
+        expect(proxy.getActionHistory()).toEqual([
+          { action: "long_click", resourceId: uniqueIdElement["resource-id"], timeoutMs: 5000 },
+        ]);
+        expect(proxy.getNodeActionHistory()).toEqual([]);
+        expect(internals.adb.getAllCommands()).toEqual([]);
+      } finally {
+        read.mockRestore();
+      }
+    });
+
+    test("uses a stable test-tag selector for a repeated resource id", async () => {
+      const { proxy, internals } = setup();
+      await internals.executeAndroidLongPress(50, 25, 1000, {
+        ...repeatedIdElement,
+        "test-tag": "message_row_42",
+      });
+      expect(proxy.getNodeActionHistory()).toMatchObject([
+        {
+          action: "long_click",
+          selector: { resourceId: repeatedIdElement["resource-id"], testTag: "message_row_42" },
+        },
+      ]);
+      expect(proxy.getActionHistory()).toEqual([]);
+      expect(proxy.getHierarchyRequestCount()).toBe(0);
+      expect(internals.adb.getAllCommands()).toEqual([]);
+    });
+
+    test("uses coordinates for a repeated resource id without a stable node selector", async () => {
+      const harness = setup();
+      await harness.internals.executeAndroidLongPress(50, 25, 1000, repeatedIdElement);
+      expectCoordinateFallback(harness);
+    });
+
+    test.each([
+      ["null", null],
+      ["error", { ...notificationHierarchy, hierarchy: { error: "capture failed" } }],
+      ["incomplete", { ...notificationHierarchy, ctrlProxyIncomplete: true }],
+      ["truncated", { ...notificationHierarchy, truncationReasons: ["max_children"] }],
+      [
+        "window truncated",
+        { ...notificationHierarchy, windows: [{ id: 1, truncationReasons: ["max_children"] }] },
+      ],
+    ] satisfies [string, ViewHierarchyResult | null][])(
+      "uses coordinates for an unverifiable resource id (%s hierarchy)",
+      async (_name, hierarchy) => {
+        const harness = setup();
+        harness.proxy.setViewHierarchyResult(hierarchy);
+        if (!hierarchy) {
+          harness.proxy.setHierarchyData(null);
+        }
+        await harness.internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        expectCoordinateFallback(harness);
+      },
+    );
+
+    test("uses coordinates when the hierarchy reader throws", async () => {
+      const harness = setup();
+      harness.proxy.setFailureMode("getHierarchy", new Error("capture unavailable"));
+      await harness.internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+      expectCoordinateFallback(harness);
+    });
+
+    test("uses coordinates when the resource id is absent from the hierarchy", async () => {
+      const harness = setup();
+      await harness.internals.executeAndroidLongPress(50, 25, 1000, {
+        ...uniqueIdElement,
+        "resource-id": "com.android.systemui:id/absent_row",
+      });
+      expectCoordinateFallback(harness);
+    });
+
+    test("propagates a stale display from the hierarchy reader without dispatching", async () => {
+      const { proxy, internals } = setup();
+      const stale = new StaleDisplayError({
+        observedGeneration: 1,
+        currentGeneration: 2,
+        retry: "observe",
+      });
+      proxy.setFailureMode("getHierarchy", stale);
+      await expect(internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement)).rejects.toBe(
+        stale,
+      );
+      expect(proxy.getActionHistory()).toEqual([]);
+      expect(proxy.getNodeActionHistory()).toEqual([]);
+      expect(internals.adb.getAllCommands()).toEqual([]);
+    });
+
+    test("does not fall back after an advertised unique-id long click fails", async () => {
+      const { proxy, internals } = setup();
+      proxy.setActionResult(longClickResult(false, "service unavailable"));
+      await expect(
+        internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement),
+      ).rejects.toThrow("Semantic long press failed for the selected element: service unavailable");
+      expect(proxy.getActionHistory()).toHaveLength(1);
+      expect(proxy.getNodeActionHistory()).toEqual([]);
+      expect(internals.adb.getAllCommands()).toEqual([]);
+    });
+
+    test("logs a thrown bare-id action and falls back", async () => {
+      const { proxy, internals } = setup();
+      proxy.setFailureMode("requestAction", new Error("runner disconnected"));
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        expect(warning).toHaveBeenCalledWith(
+          "[TapOnElement] Accessibility long click error: Error: runner disconnected",
+        );
+        expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
     test("uses ACTION_LONG_CLICK with a stable test-tag selector", async () => {
       const { proxy, internals } = setup();
       await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
@@ -395,11 +532,19 @@ describe("TapOnElement extended selectors", () => {
     test("falls back to coordinates when a legacy runner lacks node selector support", async () => {
       const { proxy, internals } = setup();
       proxy.setSupportsNodeActionSelectors(false);
-      await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
-      expect(proxy.getNodeActionHistory()).toEqual([]);
-      expect(internals.adb.getAllCommands()).toEqual([
-        "shell input touchscreen swipe 50 25 50 25 1000",
-      ]);
+      const support = spyOn(proxy, "supportsNodeActionSelectors");
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
+        expect(support).toHaveBeenCalledTimes(1);
+        expect(info).toHaveBeenCalledWith(
+          "[TapOnElement] Runner does not support stable node selectors; using coordinate long press",
+        );
+        expectCoordinateFallback({ proxy, internals });
+      } finally {
+        support.mockRestore();
+        info.mockRestore();
+      }
     });
 
     test("does not fall back after an advertised semantic long click fails", async () => {

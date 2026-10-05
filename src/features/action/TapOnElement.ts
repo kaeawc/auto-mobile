@@ -103,6 +103,7 @@ import {
   isTruthyFlag,
 } from "../utility/elementProperties";
 import {
+  nodeActionTargetError,
   requiresNodeSelector,
   stableNodeSelectorForElement,
   TalkBackTapStrategy,
@@ -5213,15 +5214,30 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
   }
 
+  private semanticAndroidLongPressTargetError(
+    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
+  ): Promise<string | undefined> {
+    return nodeActionTargetError(selector, {
+      supportsNodeActionSelectors: () => this.accessibilityService.supportsNodeActionSelectors(),
+      getAccessibilityHierarchy: () =>
+        this.accessibilityService.getAccessibilityHierarchy(
+          undefined,
+          undefined,
+          false,
+          undefined,
+          true,
+        ),
+    });
+  }
+
   private async trySemanticAndroidLongPress(
     element: Element,
     selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
   ): Promise<boolean> {
     const needsNodeSelector = requiresNodeSelector(selector);
-    if (needsNodeSelector && !(await this.accessibilityService.supportsNodeActionSelectors())) {
-      logger.info(
-        "[TapOnElement] Runner does not support stable node selectors; using coordinate long press",
-      );
+    const targetError = await this.semanticAndroidLongPressTargetError(selector);
+    if (targetError) {
+      logger.info(`[TapOnElement] ${targetError}; using coordinate long press`);
       return false;
     }
 

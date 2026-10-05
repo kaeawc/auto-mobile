@@ -53,3 +53,26 @@ describe("unit timing validator workflow budgets", () => {
     });
   }
 });
+
+const budgetSteps =
+  loadJobs(".github/workflows/pull_request.yml")["node-unit-timing-budget"].steps ?? [];
+
+test("timing budget uploads its summary after enforcement even on failure", () => {
+  const enforceIndex = budgetSteps.findIndex((step) =>
+    step.run?.includes("scripts/validate-bun-test-timings.sh"),
+  );
+  const uploadIndex = budgetSteps.findIndex(
+    (step) => step.with?.name === "node-unit-timing-budget-summary",
+  );
+  expect(enforceIndex).toBeGreaterThanOrEqual(0);
+  expect(uploadIndex).toBeGreaterThan(enforceIndex);
+  const upload = budgetSteps[uploadIndex];
+  expect(upload.uses).toBe("actions/upload-artifact@v6");
+  expect(upload.if).toBe("always() && !cancelled()");
+  expect(upload.with).toEqual({
+    name: "node-unit-timing-budget-summary",
+    path: "scratch/timing-unit-reports/unit-timing-budget-summary.md",
+    "if-no-files-found": "ignore",
+    "retention-days": 7,
+  });
+});

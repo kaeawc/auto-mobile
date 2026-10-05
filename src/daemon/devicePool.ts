@@ -136,6 +136,7 @@ import {
   AndroidRebootCoordinator,
   UnconfirmedRecoveryShutdownError,
   type AndroidEmulatorRecoveryOptions,
+  type AndroidRebootCoordinatorPoolPort,
 } from "./androidRebootCoordinator";
 import {
   AndroidRecoveryRecordLedger,
@@ -934,123 +935,20 @@ export class DevicePool {
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
-    const shutdownReservationsPort: DeviceShutdownReservationsPoolPort = {
-      getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
-      getIntentionalShutdowns: () => this.intentionalShutdowns,
-      assertReadinessReservationOwner: (device, client) =>
-        this.assertReadinessReservationOwner(device, client),
-      assertRuntimeIdentity: (device, identity) =>
-        this.runtimeIdentity.assertRuntimeIdentity(device, identity),
-      assertAndroidRecoveryExclusionForReadinessReservation: (device, identity, name, enforce) =>
-        this.assertAndroidRecoveryExclusionForReadinessReservation(device, identity, name, enforce),
-      reserveShutdownSessionIdentity: (deviceId) => this.reserveShutdownSessionIdentity(deviceId),
-      completeShutdownSessionIdentity: (deviceId, device, identity) =>
-        this.completeShutdownSessionIdentity(deviceId, device, identity),
-      reserveMcpSessionRecoveryLease: (sessionId, device, token) =>
-        this.reserveMcpSessionRecoveryLease(sessionId, device, token),
-      releaseMcpSessionRecoveryLease: (sessionId, token) =>
-        this.releaseMcpSessionRecoveryLease(sessionId, token),
-      getOwnedAutolockSession: (device, client) =>
-        this.autolockManager.getOwnedAutolockSession(device, client),
-    };
+    const shutdownReservationsPort: DeviceShutdownReservationsPoolPort =
+      this.createShutdownReservationsPort();
     this.shutdownReservationCoordinator = createDeviceShutdownReservations(
       shutdownReservationsPort,
       deviceShutdownReservationsFactory,
     );
-    const missingDevicePort: MissingDeviceLivenessPoolPort = {
-      getDevices: () => this.devices,
-      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
-      getAssignmentMutex: () => this.assignmentMutex,
-      getDeviceManager: () => this.deviceManager,
-      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
-      shouldRebootDisconnectedAndroidDevice: (device) =>
-        this.shouldRebootDisconnectedAndroidDevice(device),
-      matchesRuntimeIdentity: (device, booted) =>
-        this.runtimeIdentity.matchesRuntimeIdentity(device, booted),
-      reconcilePooledIdentityResolution: (device, booted) =>
-        this.runtimeIdentity.reconcilePooledIdentityResolution(device, booted),
-      comparePooledIdentityEvidence: (device, observed) =>
-        this.runtimeIdentity.comparePooledIdentityEvidence(device, observed),
-      replacePooledDeviceForRuntimeIdentity: (device, booted) =>
-        this.replacePooledDeviceForRuntimeIdentity(device, booted),
-      finishSessionPreservingRecoveryPreparation: (preparation) =>
-        this.finishSessionPreservingRecoveryPreparation(preparation),
-      tryPreserveSessionForMissingDevice: (device, attempt, incidentId) =>
-        this.tryPreserveSessionForMissingDevice(device, attempt, incidentId),
-      releaseSessionForEvictedDevice: (device, incidentId, observation) =>
-        this.releaseSessionForEvictedDevice(device, incidentId, observation),
-      finishEmulatorLossIncident: (incidentId, outcome) =>
-        this.finishEmulatorLossIncident(incidentId, outcome),
-      removeDisconnectedDevice: (deviceId, mayBeStaleSignal, incidentId) =>
-        this.removeDisconnectedDevice(deviceId, mayBeStaleSignal, incidentId),
-      completeEmulatorLossRecovery: (incidentId, outcome) =>
-        this.completeEmulatorLossRecovery(incidentId, outcome),
-      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
-      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
-      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
-      recordEmulatorLossIncident: (deviceId, path, exit, state) =>
-        this.recordEmulatorLossIncident(deviceId, path, exit, state),
-    };
+    const missingDevicePort: MissingDeviceLivenessPoolPort = this.createMissingDevicePort();
     this.missingDeviceLiveness = createMissingDeviceLiveness(
       missingDevicePort,
       missingDeviceLivenessFactory,
     );
-    const refreshPort: DevicePoolRefreshPort = {
-      getTimer: () => this.timer,
-      getDeviceManager: () => this.deviceManager,
-      getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
-      getCriteriaMatcher: () => this.criteriaMatcher,
-      identityEvidenceForBootedDevice: (device) =>
-        this.runtimeIdentity.identityEvidenceForBootedDevice(device),
-      identityEvidenceFields: (evidence) => identityEvidenceFields(evidence),
-      getDeviceSessionStarts: () => this.deviceSessionStarts,
-      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
-      getSettledLateShutdowns: () => this.settledLateShutdowns,
-      getIntentionalShutdowns: () => this.intentionalShutdowns,
-      seedLastUsedAt: (now) => this.seedLastUsedAt(now),
-      nextDeviceIncarnation: () => this.nextDeviceIncarnation(),
-      setDeviceSessionTracking: (id, now) => this.setDeviceSessionTracking(id, now),
-      clearAutoStartSuppressionForBootedDevice: (device) =>
-        this.clearAutoStartSuppressionForBootedDevice(device),
-      foldObservationIntoPooledEntry: (pooled, device, source) =>
-        this.foldObservationIntoPooledEntry(pooled, device, source),
-      removeMissingDevicesForRefresh: (held, generation, ids, platforms, succeeded, sources) =>
-        this.missingDeviceLiveness.removeMissingDevicesForRefresh(
-          held,
-          generation,
-          ids,
-          platforms,
-          succeeded,
-          sources,
-        ),
-      notifyDeviceReady: (id) => this.notifyDeviceReady(id),
-    };
+    const refreshPort: DevicePoolRefreshPort = this.createRefreshPort();
     this.refreshCoordinator = createDevicePoolRefresh(refreshPort, devicePoolRefreshFactory);
-    const emulatorProcessPort: EmulatorProcessLifecyclePoolPort = {
-      getTimer: () => this.timer,
-      getStartedDeviceProcesses: () => this.startedDeviceProcesses,
-      getStartedDeviceProcessOutput: () => this.startedDeviceProcessOutput,
-      getDevices: () => this.devices,
-      getSessionManager: () => this.sessionManager,
-      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
-      prepareSessionPreservingRecovery: (id, device) =>
-        this.prepareSessionPreservingRecovery(id, device),
-      finishSessionPreservingRecoveryPreparation: (preparation) =>
-        this.finishSessionPreservingRecoveryPreparation(preparation),
-      recordEmulatorLossIncident: (id, path, exit) =>
-        this.recordEmulatorLossIncident(id, path, exit),
-      finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
-      evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
-        this.evictMissingPooledDevice(device, reason, {
-          attemptDeviceLossRecovery: attempt,
-          incidentId,
-          incidentCaptureComplete: captured,
-          recoveryPreparation: preparation,
-        }),
-    };
+    const emulatorProcessPort: EmulatorProcessLifecyclePoolPort = this.createEmulatorProcessPort();
     this.emulatorProcessLifecycle = createEmulatorProcessLifecycle(
       emulatorProcessPort,
       emulatorProcessLifecycleFactory,
@@ -1066,64 +964,14 @@ export class DevicePool {
     );
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
-    this.autolockManager = new DeviceAutolockManager(
-      {
-        getSessionManager: () => this.sessionManager,
-        getDaemonSessionId: () => this.daemonSessionId,
-        getDevice: (id) => this.devices.get(id),
-        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
-        withTargetDeviceDiscovery: (options) => this.withTargetDeviceDiscovery(options),
-        assertRuntimeIdentity: (device, identity) =>
-          this.runtimeIdentity.assertRuntimeIdentity(device, identity),
-        assertNotReservedForShutdown: (device, message) =>
-          this.assertNotReservedForShutdown(device, message),
-        recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
-        notifyTargetDeviceReady: (options) => this.notifyTargetDeviceReady(options),
-        trackStartedDeviceProcess: (device, process) =>
-          this.trackStartedDeviceProcess(device, process),
-        assertIdleDeviceAssignable: (options) => this.assertIdleDeviceAssignable(options),
-        validateOrReloadIdlePooledDevice: (options) =>
-          this.validateOrReloadIdlePooledDevice(options),
-        assertDeviceCleanupComplete: (id) => this.assertDeviceCleanupComplete(id),
-        snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
-        nextLastUsedAt: () => this.nextLastUsedAt(),
-        createSessionOrRestore: (device, snapshot, create) =>
-          this.createSessionOrRestore(device, snapshot, create),
-        stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
-        recordMcpSessionOwnership: (client, session) =>
-          this.recordMcpSessionOwnership(client, session),
-        restoreSessionAssignment: (device, snapshot) =>
-          this.restoreSessionAssignment(device, snapshot),
-        isSessionAssignmentCurrent: (device, session) =>
-          this.isSessionAssignmentCurrent(device, session),
-        getPooledSessionIdentity: (device) => this.pooledSessionIdentities.get(device),
-        getMcpSessionRecoveryDevice: (client) => this.mcpSessionRecoveryDevices.get(client)?.device,
-        isAdbServerResetQuarantined: (id) => this.adbServerResetQuarantinedSessions.has(id),
-      },
-      this.deviceSessionRepository,
-      this.idGenerator,
-    );
+    this.autolockManager = this.createAutolockManager();
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
-    const runtimeIdentityPort: DeviceRuntimeIdentityPoolPort = {
-      getAmbientExecutionId: () => ambientExecutionIdReader?.getExecutionId(),
-      notifyDeviceFramesInvalidated: (deviceId) => this.notifyDeviceFramesInvalidated(deviceId),
-      getDevices: () => this.devices,
-      getDeviceManager: () => this.deviceManager,
-      getRetryExecutor: () => this.retryExecutor,
-      getTimer: () => this.timer,
-      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
-      hasReusableSerial: (device) => this.hasReusableSerial(device),
-      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
-      cancelDeviceExecutions: (deviceId, reason, options) =>
-        this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(deviceId, reason, options) ??
-        Promise.resolve(0),
-      cancelDeviceSessionExecutions: (sessionId, reason, options) =>
-        this.cancelDeviceSessionExecutions(sessionId, reason, options),
-    };
+    const runtimeIdentityPort: DeviceRuntimeIdentityPoolPort =
+      this.createRuntimeIdentityPort(ambientExecutionIdReader);
     this.runtimeIdentity = createDeviceRuntimeIdentity(runtimeIdentityPort, runtimeIdentityFactory);
     this.androidRecoveryRecordLedger = new AndroidRecoveryRecordLedger(
       {
@@ -1133,158 +981,10 @@ export class DevicePool {
       },
       this.timer,
     );
-    this.recoveryCoordinator = new DeviceRecoveryCoordinator({
-      getRecoveringSessionLosses: () => this.recoveringSessionLosses,
-      getPooledDevice: (id) => this.devices.get(id),
-      getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
-      completeJoinedEmulatorLossRecovery: (id, outcome, state) =>
-        this.completeEmulatorLossRecovery(id, outcome, state),
-      getSessionForDevice: (id) => this.sessionManager.getSessionForDevice(id),
-      waitForReleasingSession: (sessionId) =>
-        this.sessionManager.getReleasingSession(sessionId)
-          ? this.sessionManager.waitForSessionRelease(sessionId)
-          : undefined,
-      getAndroidSessionPreservingRecoveryTarget: (id, expected) =>
-        this.getAndroidSessionPreservingRecoveryTarget(id, expected),
-      getSessionPreservingRecoveryTarget: (id, expected) =>
-        this.getSessionPreservingRecoveryTarget(id, expected),
-      isIOSSimulatorContinuityDevice: (device) => this.isIOSSimulatorContinuityDevice(device),
-      performSessionPreservingRecovery: (device, session, incident) =>
-        this.performSessionPreservingRecovery(device, session, incident),
-      finishEmulatorLossIncident: (incident, outcome) =>
-        this.finishEmulatorLossIncident(incident, outcome),
-      recoverSessionBoundAndroidDeviceAfterAdbServerReset: (id, expected) =>
-        this.recoverSessionBoundAndroidDeviceAfterAdbServerReset(id, expected),
-      releaseAdbServerResetCohortReservations: (devices) =>
-        this.releaseAdbServerResetCohortReservations(devices),
-      getTimer: () => this.timer,
-      getAndroidRecoveryRecordLedger: () => this.androidRecoveryRecordLedger,
-      getAdbServerResetQuarantinedSessions: () => this.adbServerResetQuarantinedSessions,
-      getEmulatorLossRecoverySettlements: () => this.emulatorLossRecoverySettlements,
-      hasReleasedDeviceCapture: (sessionId) => this.releasedDeviceCaptures.has(sessionId),
-      refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
-        this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
-      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
-      completeEmulatorLossRecovery: (incidentId, outcome) =>
-        this.completeEmulatorLossRecovery(incidentId, outcome),
-      releaseDisconnectedRecoverySessionWithRetry: (sessionId, deviceId, reason, attempt) =>
-        this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason, attempt),
-      releaseDevice: (deviceId, sessionId) => this.releaseDevice(deviceId, sessionId),
-    });
-    this.sessionPreservingRecovery = new SessionPreservingRecoveryRunner({
-      getRecoveringSessionLoss: (id) => this.recoveringSessionLosses.get(id),
-      startAndroidRecoveryRecord: (id, details, reservations, replace) =>
-        this.startAndroidRecoveryRecord(id, details, reservations, replace),
-      isAndroidEmulatorActiveRelaunchEligible: (device): device is AndroidEmulatorRecoveryDevice =>
-        this.isAndroidEmulatorActiveRelaunchEligible(device),
-      rebootDisconnectedAndroidDevice: (device, incidentId, options) =>
-        this.rebootDisconnectedAndroidDevice(device, incidentId, options),
-      getRecoveryPolicy: () => this.getRecoveryPolicy(),
-      deviceSessionContinuityEnabled: () => this.deviceSessionContinuityEnabled,
-      cancelDeviceSessionExecutions: (id, reason) => this.cancelDeviceSessionExecutions(id, reason),
-      refreshReleasedRecoverySettlementAfterAwait: (record, incidentId) =>
-        this.recoveryCoordinator.refreshReleasedRecoverySettlementAfterAwait(record, incidentId),
-      finalizeReleasedRecoveryAfterAwait: (record, incidentId) =>
-        this.recoveryCoordinator.finalizeReleasedRecoveryAfterAwait(record, incidentId),
-      finalizeRecoveryRecord: (id, record) =>
-        this.recoveryCoordinator.finalizeRecoveryRecord(id, record),
-      finalizeReleasedRecoveryAfterCleanupFailure: (record, incidentId, error) =>
-        this.recoveryCoordinator.finalizeReleasedRecoveryAfterCleanupFailure(
-          record,
-          incidentId,
-          error,
-        ),
-      markAndroidRecoveryReleaseFailure: (record) =>
-        this.recoveryCoordinator.markAndroidRecoveryReleaseFailure(record),
-      completeEmulatorLossRecovery: (incidentId, outcome, state) =>
-        this.completeEmulatorLossRecovery(incidentId, outcome, state),
-      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
-      isPreservedSessionCurrent: (session, id) => this.isPreservedSessionCurrent(session, id),
-      releaseDisconnectedRecoverySessionWithRetry: (sessionId, deviceId, reason) =>
-        this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason),
-      stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
-      getPooledDevice: (id) => this.devices.get(id),
-      removeDevice: (id, awaitCacheCleanup, device) =>
-        this.removeDevice(id, awaitCacheCleanup, device),
-      suppressAutoStartForDevice: (device) => this.suppressAutoStartForDevice(device),
-      getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
-      getFinalizedReleaseReason: (session) =>
-        this.sessionManager.getFinalizedReleaseReason(session),
-      now: () => this.timer.now(),
-    });
-    this.adbResetSessionRecovery = new AdbResetSessionRecovery(
-      {
-        maxDeferredRecoveryShutdowns: MAX_DEFERRED_RECOVERY_SHUTDOWNS,
-        unconfirmedRecoveryShutdownCooldownMs: UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS,
-        getRecoveryRecord: (sessionId) => this.recoveringSessionLosses.get(sessionId),
-        getPooledDevice: (deviceId) => this.devices.get(deviceId),
-        isPreservedSessionCurrent: (session, deviceId) =>
-          this.isPreservedSessionCurrent(session, deviceId),
-        startAndroidRecoveryRecord: (sessionId, details, reservations, replace) =>
-          this.startAndroidRecoveryRecord(sessionId, details, reservations, replace),
-        rebootDisconnectedAndroidDevice: (device, incidentId, options) =>
-          this.rebootDisconnectedAndroidDevice(device, incidentId, options),
-        releaseDisconnectedRecoverySessionWithRetry: (sessionId, deviceId, reason) =>
-          this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason),
-        refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
-          this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
-        completeEmulatorLossRecovery: (incidentId, outcome) =>
-          this.completeEmulatorLossRecovery(incidentId, outcome),
-        settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
-        finalizeReleasedRecoveryAfterAwait: (record, incidentId) =>
-          this.recoveryCoordinator.finalizeReleasedRecoveryAfterAwait(record, incidentId),
-        finalizeReleasedRecoveryAfterCleanupFailure: (record, incidentId, error) =>
-          this.recoveryCoordinator.finalizeReleasedRecoveryAfterCleanupFailure(
-            record,
-            incidentId,
-            error,
-          ),
-        markAndroidRecoveryReleaseFailure: (record) =>
-          this.recoveryCoordinator.markAndroidRecoveryReleaseFailure(record),
-        finalizeRecoveryRecord: (sessionId, record) =>
-          this.recoveryCoordinator.finalizeRecoveryRecord(sessionId, record),
-      },
-      this.timer,
-    );
-    this.adbServerResetQuarantine = createAdbServerResetQuarantine(
-      {
-        getAssignmentMutex: () => this.assignmentMutex,
-        getDevices: () => this.devices,
-        getSessionManager: () => this.sessionManager,
-        getStartedDeviceProcesses: () => this.startedDeviceProcesses,
-        getAdbServerResetTrackedProcesses: () => this.adbServerResetTrackedProcesses,
-        getAdbServerResetRecoveryReservations: () => this.adbServerResetRecoveryReservations,
-        getAndroidStartupLeases: () => this.androidStartupLeases,
-        getRecoveringAndroidImages: () => this.recoveringAndroidImages,
-        getRecoveringAndroidDeviceIds: () => this.recoveringAndroidDeviceIds,
-        getRecoveringSessionLosses: () => this.recoveringSessionLosses,
-        getFailedTerminalRecoveryReleases: () => this.failedTerminalRecoveryReleases,
-        getRecoveryCoordinator: () => this.recoveryCoordinator,
-        getAfterAndroidStartupRecoverySnapshot: () => this.afterAndroidStartupRecoverySnapshot,
-        getDevice: (id) => this.getDevice(id),
-        isPreservedSessionCurrent: (session, deviceId) =>
-          this.isPreservedSessionCurrent(session, deviceId),
-        isAndroidEmulatorActiveRelaunchEligible: (device) =>
-          this.isAndroidEmulatorActiveRelaunchEligible(device),
-        removeDevice: (id, awaitCacheCleanup, expected) =>
-          this.removeDevice(id, awaitCacheCleanup, expected),
-        startAndroidRecoveryRecord: (sessionId, details, reservations, replace) =>
-          this.startAndroidRecoveryRecord(sessionId, details, reservations, replace),
-        recordEmulatorLossIncident: (id, path, exit, state) =>
-          this.recordEmulatorLossIncident(id, path, exit, state),
-        cancelDeviceExecutions: (id, reason) =>
-          this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(id, reason) ??
-          Promise.resolve(0),
-        cancelDeviceSessionExecutions: (id, reason) =>
-          this.cancelDeviceSessionExecutions(id, reason),
-        completeEmulatorLossRecovery: (id, outcome) =>
-          this.completeEmulatorLossRecovery(id, outcome),
-        settleEmulatorLossIncident: (id) => this.settleEmulatorLossIncident(id),
-        finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
-        stopTrackedEmulatorProcess: (id) => this.stopTrackedEmulatorProcess(id),
-      },
-      adbServerResetQuarantineFactory,
-    );
+    this.recoveryCoordinator = this.createRecoveryCoordinator();
+    this.sessionPreservingRecovery = this.createSessionPreservingRecovery();
+    this.adbResetSessionRecovery = this.createAdbResetSessionRecovery();
+    this.adbServerResetQuarantine = this.createAdbResetQuarantine(adbServerResetQuarantineFactory);
     this.emulatorLossLedger = new EmulatorLossIncidentLedger(
       {
         getDevice: (deviceId) => this.getDevice(deviceId),
@@ -1311,106 +1011,51 @@ export class DevicePool {
         this.recoveryPolicy.maxAttempts,
         getDeviceRecoveryWindowMs(),
       );
-    this.androidRebootCoordinator = new AndroidRebootCoordinator(
-      {
-        getDeviceManager: () => this.getDeviceManager(),
-        getTimer: () => this.getTimer(),
-        getRecoveryPolicy: () => this.getRecoveryPolicy(),
-        completeEmulatorLossRecovery: (incidentId, outcome, releasedSessionState) =>
-          this.completeEmulatorLossRecovery(incidentId, outcome, releasedSessionState),
-        recordEmulatorLossRecoveryAttempt: (incidentId, attempt) =>
-          this.recordEmulatorLossRecoveryAttempt(incidentId, attempt),
-        setRecoveringAndroidImage: (avdName, image) =>
-          this.recoveryCoordinator.setRecoveringAndroidImage(avdName, image),
-        addRecoveringAndroidDeviceId: (deviceId) =>
-          this.recoveryCoordinator.addRecoveringAndroidDeviceId(deviceId),
-        setAndroidRecoveryHandoffOwner: (deviceId, owner) =>
-          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
-        clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
-          this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
-        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
-          this.recoveryCoordinator.finishAndroidRecoveryAttempt(
-            avdName,
-            deviceIds,
-            retainImage,
-            owner,
-          ),
-        stopAndroidEmulatorForRecovery: (
-          device,
-          avdName,
-          retainLeaseUntil,
-          allowActiveStop,
-          owner,
+    this.androidRebootCoordinator = this.createAndroidRebootCoordinator();
+    this.disconnectHandler = this.createDisconnectHandler();
+    this.releaseSessionForDisconnectedDevice =
+      releaseSessionForDisconnectedDevice ??
+      (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
+        // The session manager re-evaluates the fence immediately before it
+        // removes the session, after its setup/restoration awaits (#7031).
+        if (!shouldCommit) {
+          await this.sessionManager.releaseSession(sessionId, releaseReason);
+          return true;
+        }
+        const release = await this.sessionManager.releaseSessionUnlessSuperseded(
           sessionId,
-          session,
-        ) =>
-          this.stopAndroidEmulatorForRecovery({
-            device,
-            avdName,
-            retainLeaseUntil,
-            allowActiveStop,
-            handoffOwner: owner,
-            preservedSessionId: sessionId,
-            preservedSession: session,
-          }),
-        rebindSameAvdReplacementSession: (
-          device,
-          avdName,
-          sessionId,
-          session,
-          autolockSessionId,
-          image,
-          owner,
-        ) =>
-          this.rebindSameAvdReplacementSession({
-            device,
-            avdName,
-            preservedSessionId: sessionId,
-            preservedSession: session,
-            preservedAutolockSessionId: autolockSessionId,
-            recoveryImage: image,
-            handoffOwner: owner,
-          }),
-        detachSessionForAndroidRecovery: (device, sessionId, session) =>
-          this.detachSessionForAndroidRecovery(device, sessionId, session),
-        removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-          this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
-        addDevice: (device, image, awaitSessionTracking, evidence) =>
-          this.addDevice(device, image, awaitSessionTracking, evidence),
-        identityEvidenceForBootedDevice: (device) =>
-          this.runtimeIdentity.identityEvidenceForBootedDevice(device),
-        bindRecoveredAndroidDeviceSession: (
-          previousDeviceId,
-          avdName,
-          sessionId,
-          session,
-          ready,
-          image,
-          childProcess,
-          autolockSessionId,
-          owner,
-        ) =>
-          this.bindRecoveredAndroidDeviceSession({
-            previousDeviceId,
-            avdName,
-            preservedSessionId: sessionId,
-            preservedSession: session,
-            ready,
-            recoveryImage: image,
-            childProcess,
-            preservedAutolockSessionId: autolockSessionId,
-            handoffOwner: owner,
-          }),
-        stopEmulatorProcess: (childProcess, retainLeaseUntil) =>
-          this.stopEmulatorProcess(childProcess, retainLeaseUntil),
-        consumeAndroidRecoveryCancellation: (device, recoveryDeviceIds) =>
-          this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds),
-      },
-      this.androidRecoveryRecordLedger,
-      this.criteriaMatcher,
-      this.androidDeviceReboot,
-    );
-    this.disconnectHandler = new DeviceDisconnectHandler({
+          releaseReason,
+          shouldCommit,
+        );
+        return !release.superseded;
+      });
+
+    this.registerSessionReleaseHandlers();
+  }
+
+  private createRuntimeIdentityPort(
+    ambientExecutionIdReader: AmbientExecutionIdReader | undefined,
+  ): DeviceRuntimeIdentityPoolPort {
+    return {
+      getAmbientExecutionId: () => ambientExecutionIdReader?.getExecutionId(),
+      notifyDeviceFramesInvalidated: (deviceId) => this.notifyDeviceFramesInvalidated(deviceId),
+      getDevices: () => this.devices,
+      getDeviceManager: () => this.deviceManager,
+      getRetryExecutor: () => this.retryExecutor,
+      getTimer: () => this.timer,
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
+      hasReusableSerial: (device) => this.hasReusableSerial(device),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      cancelDeviceExecutions: (deviceId, reason, options) =>
+        this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(deviceId, reason, options) ??
+        Promise.resolve(0),
+      cancelDeviceSessionExecutions: (sessionId, reason, options) =>
+        this.cancelDeviceSessionExecutions(sessionId, reason, options),
+    };
+  }
+
+  private createDisconnectHandler(): DeviceDisconnectHandler {
+    return new DeviceDisconnectHandler({
       getPooledDevice: (deviceId) => this.devices.get(deviceId),
       getIntentionalShutdownMarker: (deviceId) => this.intentionalShutdowns.get(deviceId),
       deleteIntentionalShutdownMarker: (deviceId) => {
@@ -1440,23 +1085,9 @@ export class DevicePool {
       androidRediscoveryMatches: (candidate, deviceId, avdName) =>
         this.criteriaMatcher.androidRediscoveryMatches(candidate, deviceId, avdName),
     });
-    this.releaseSessionForDisconnectedDevice =
-      releaseSessionForDisconnectedDevice ??
-      (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
-        // The session manager re-evaluates the fence immediately before it
-        // removes the session, after its setup/restoration awaits (#7031).
-        if (!shouldCommit) {
-          await this.sessionManager.releaseSession(sessionId, releaseReason);
-          return true;
-        }
-        const release = await this.sessionManager.releaseSessionUnlessSuperseded(
-          sessionId,
-          releaseReason,
-          shouldCommit,
-        );
-        return !release.superseded;
-      });
+  }
 
+  private registerSessionReleaseHandlers(): void {
     this.sessionManager.setRecoveryExpiryReleaseHandler({
       release: (sessionId, reason, attempt) => {
         const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
@@ -1504,6 +1135,434 @@ export class DevicePool {
       }
       this.recoveryCoordinator.finalizeReleasedRecoverySession(sessionId);
     });
+  }
+
+  private createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
+    return {
+      getDevices: () => this.devices,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getIntentionalShutdowns: () => this.intentionalShutdowns,
+      assertReadinessReservationOwner: (device, client) =>
+        this.assertReadinessReservationOwner(device, client),
+      assertRuntimeIdentity: (device, identity) =>
+        this.runtimeIdentity.assertRuntimeIdentity(device, identity),
+      assertAndroidRecoveryExclusionForReadinessReservation: (device, identity, name, enforce) =>
+        this.assertAndroidRecoveryExclusionForReadinessReservation(device, identity, name, enforce),
+      reserveShutdownSessionIdentity: (deviceId) => this.reserveShutdownSessionIdentity(deviceId),
+      completeShutdownSessionIdentity: (deviceId, device, identity) =>
+        this.completeShutdownSessionIdentity(deviceId, device, identity),
+      reserveMcpSessionRecoveryLease: (sessionId, device, token) =>
+        this.reserveMcpSessionRecoveryLease(sessionId, device, token),
+      releaseMcpSessionRecoveryLease: (sessionId, token) =>
+        this.releaseMcpSessionRecoveryLease(sessionId, token),
+      getOwnedAutolockSession: (device, client) =>
+        this.autolockManager.getOwnedAutolockSession(device, client),
+    };
+  }
+
+  private createMissingDevicePort(): MissingDeviceLivenessPoolPort {
+    return {
+      getDevices: () => this.devices,
+      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getDeviceManager: () => this.deviceManager,
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
+      shouldRebootDisconnectedAndroidDevice: (device) =>
+        this.shouldRebootDisconnectedAndroidDevice(device),
+      matchesRuntimeIdentity: (device, booted) =>
+        this.runtimeIdentity.matchesRuntimeIdentity(device, booted),
+      reconcilePooledIdentityResolution: (device, booted) =>
+        this.runtimeIdentity.reconcilePooledIdentityResolution(device, booted),
+      comparePooledIdentityEvidence: (device, observed) =>
+        this.runtimeIdentity.comparePooledIdentityEvidence(device, observed),
+      replacePooledDeviceForRuntimeIdentity: (device, booted) =>
+        this.replacePooledDeviceForRuntimeIdentity(device, booted),
+      finishSessionPreservingRecoveryPreparation: (preparation) =>
+        this.finishSessionPreservingRecoveryPreparation(preparation),
+      tryPreserveSessionForMissingDevice: (device, attempt, incidentId) =>
+        this.tryPreserveSessionForMissingDevice(device, attempt, incidentId),
+      releaseSessionForEvictedDevice: (device, incidentId, observation) =>
+        this.releaseSessionForEvictedDevice(device, incidentId, observation),
+      finishEmulatorLossIncident: (incidentId, outcome) =>
+        this.finishEmulatorLossIncident(incidentId, outcome),
+      removeDisconnectedDevice: (deviceId, mayBeStaleSignal, incidentId) =>
+        this.removeDisconnectedDevice(deviceId, mayBeStaleSignal, incidentId),
+      completeEmulatorLossRecovery: (incidentId, outcome) =>
+        this.completeEmulatorLossRecovery(incidentId, outcome),
+      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      recordEmulatorLossIncident: (deviceId, path, exit, state) =>
+        this.recordEmulatorLossIncident(deviceId, path, exit, state),
+    };
+  }
+
+  private createRefreshPort(): DevicePoolRefreshPort {
+    return {
+      getTimer: () => this.timer,
+      getDeviceManager: () => this.deviceManager,
+      getDevices: () => this.devices,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getCriteriaMatcher: () => this.criteriaMatcher,
+      identityEvidenceForBootedDevice: (device) =>
+        this.runtimeIdentity.identityEvidenceForBootedDevice(device),
+      identityEvidenceFields: (evidence) => identityEvidenceFields(evidence),
+      getDeviceSessionStarts: () => this.deviceSessionStarts,
+      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
+      getSettledLateShutdowns: () => this.settledLateShutdowns,
+      getIntentionalShutdowns: () => this.intentionalShutdowns,
+      seedLastUsedAt: (now) => this.seedLastUsedAt(now),
+      nextDeviceIncarnation: () => this.nextDeviceIncarnation(),
+      setDeviceSessionTracking: (id, now) => this.setDeviceSessionTracking(id, now),
+      clearAutoStartSuppressionForBootedDevice: (device) =>
+        this.clearAutoStartSuppressionForBootedDevice(device),
+      foldObservationIntoPooledEntry: (pooled, device, source) =>
+        this.foldObservationIntoPooledEntry(pooled, device, source),
+      removeMissingDevicesForRefresh: (held, generation, ids, platforms, succeeded, sources) =>
+        this.missingDeviceLiveness.removeMissingDevicesForRefresh(
+          held,
+          generation,
+          ids,
+          platforms,
+          succeeded,
+          sources,
+        ),
+      notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+    };
+  }
+
+  private createEmulatorProcessPort(): EmulatorProcessLifecyclePoolPort {
+    return {
+      getTimer: () => this.timer,
+      getStartedDeviceProcesses: () => this.startedDeviceProcesses,
+      getStartedDeviceProcessOutput: () => this.startedDeviceProcessOutput,
+      getDevices: () => this.devices,
+      getSessionManager: () => this.sessionManager,
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      prepareSessionPreservingRecovery: (id, device) =>
+        this.prepareSessionPreservingRecovery(id, device),
+      finishSessionPreservingRecoveryPreparation: (preparation) =>
+        this.finishSessionPreservingRecoveryPreparation(preparation),
+      recordEmulatorLossIncident: (id, path, exit) =>
+        this.recordEmulatorLossIncident(id, path, exit),
+      finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
+      evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
+        this.evictMissingPooledDevice(device, reason, {
+          attemptDeviceLossRecovery: attempt,
+          incidentId,
+          incidentCaptureComplete: captured,
+          recoveryPreparation: preparation,
+        }),
+    };
+  }
+
+  private createAutolockManager(): DeviceAutolockManager {
+    return new DeviceAutolockManager(
+      {
+        getSessionManager: () => this.sessionManager,
+        getDaemonSessionId: () => this.daemonSessionId,
+        getDevice: (id) => this.devices.get(id),
+        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
+        withTargetDeviceDiscovery: (options) => this.withTargetDeviceDiscovery(options),
+        assertRuntimeIdentity: (device, identity) =>
+          this.runtimeIdentity.assertRuntimeIdentity(device, identity),
+        assertNotReservedForShutdown: (device, message) =>
+          this.assertNotReservedForShutdown(device, message),
+        recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
+        notifyTargetDeviceReady: (options) => this.notifyTargetDeviceReady(options),
+        trackStartedDeviceProcess: (device, process) =>
+          this.trackStartedDeviceProcess(device, process),
+        assertIdleDeviceAssignable: (options) => this.assertIdleDeviceAssignable(options),
+        validateOrReloadIdlePooledDevice: (options) =>
+          this.validateOrReloadIdlePooledDevice(options),
+        assertDeviceCleanupComplete: (id) => this.assertDeviceCleanupComplete(id),
+        snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
+        nextLastUsedAt: () => this.nextLastUsedAt(),
+        createSessionOrRestore: (device, snapshot, create) =>
+          this.createSessionOrRestore(device, snapshot, create),
+        stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
+        recordMcpSessionOwnership: (client, session) =>
+          this.recordMcpSessionOwnership(client, session),
+        restoreSessionAssignment: (device, snapshot) =>
+          this.restoreSessionAssignment(device, snapshot),
+        isSessionAssignmentCurrent: (device, session) =>
+          this.isSessionAssignmentCurrent(device, session),
+        getPooledSessionIdentity: (device) => this.pooledSessionIdentities.get(device),
+        getMcpSessionRecoveryDevice: (client) => this.mcpSessionRecoveryDevices.get(client)?.device,
+        isAdbServerResetQuarantined: (id) => this.adbServerResetQuarantinedSessions.has(id),
+      },
+      this.deviceSessionRepository,
+      this.idGenerator,
+    );
+  }
+
+  private createRecoveryCoordinator(): DeviceRecoveryCoordinator {
+    return new DeviceRecoveryCoordinator({
+      getRecoveringSessionLosses: () => this.recoveringSessionLosses,
+      getPooledDevice: (id) => this.devices.get(id),
+      getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
+      completeJoinedEmulatorLossRecovery: (id, outcome, state) =>
+        this.completeEmulatorLossRecovery(id, outcome, state),
+      getSessionForDevice: (id) => this.sessionManager.getSessionForDevice(id),
+      waitForReleasingSession: (sessionId) =>
+        this.sessionManager.getReleasingSession(sessionId)
+          ? this.sessionManager.waitForSessionRelease(sessionId)
+          : undefined,
+      getAndroidSessionPreservingRecoveryTarget: (id, expected) =>
+        this.getAndroidSessionPreservingRecoveryTarget(id, expected),
+      getSessionPreservingRecoveryTarget: (id, expected) =>
+        this.getSessionPreservingRecoveryTarget(id, expected),
+      isIOSSimulatorContinuityDevice: (device) => this.isIOSSimulatorContinuityDevice(device),
+      performSessionPreservingRecovery: (device, session, incident) =>
+        this.performSessionPreservingRecovery(device, session, incident),
+      finishEmulatorLossIncident: (incident, outcome) =>
+        this.finishEmulatorLossIncident(incident, outcome),
+      recoverSessionBoundAndroidDeviceAfterAdbServerReset: (id, expected) =>
+        this.recoverSessionBoundAndroidDeviceAfterAdbServerReset(id, expected),
+      releaseAdbServerResetCohortReservations: (devices) =>
+        this.releaseAdbServerResetCohortReservations(devices),
+      getTimer: () => this.timer,
+      getAndroidRecoveryRecordLedger: () => this.androidRecoveryRecordLedger,
+      getAdbServerResetQuarantinedSessions: () => this.adbServerResetQuarantinedSessions,
+      getEmulatorLossRecoverySettlements: () => this.emulatorLossRecoverySettlements,
+      hasReleasedDeviceCapture: (sessionId) => this.releasedDeviceCaptures.has(sessionId),
+      refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
+        this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
+      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+      completeEmulatorLossRecovery: (incidentId, outcome) =>
+        this.completeEmulatorLossRecovery(incidentId, outcome),
+      releaseDisconnectedRecoverySessionWithRetry: (sessionId, deviceId, reason, attempt) =>
+        this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason, attempt),
+      releaseDevice: (deviceId, sessionId) => this.releaseDevice(deviceId, sessionId),
+    });
+  }
+
+  private createSessionPreservingRecovery(): SessionPreservingRecoveryRunner {
+    return new SessionPreservingRecoveryRunner({
+      getRecoveringSessionLoss: (id) => this.recoveringSessionLosses.get(id),
+      startAndroidRecoveryRecord: (id, details, reservations, replace) =>
+        this.startAndroidRecoveryRecord(id, details, reservations, replace),
+      isAndroidEmulatorActiveRelaunchEligible: (device): device is AndroidEmulatorRecoveryDevice =>
+        this.isAndroidEmulatorActiveRelaunchEligible(device),
+      rebootDisconnectedAndroidDevice: (device, incidentId, options) =>
+        this.rebootDisconnectedAndroidDevice(device, incidentId, options),
+      getRecoveryPolicy: () => this.getRecoveryPolicy(),
+      deviceSessionContinuityEnabled: () => this.deviceSessionContinuityEnabled,
+      cancelDeviceSessionExecutions: (id, reason) => this.cancelDeviceSessionExecutions(id, reason),
+      refreshReleasedRecoverySettlementAfterAwait: (record, incidentId) =>
+        this.recoveryCoordinator.refreshReleasedRecoverySettlementAfterAwait(record, incidentId),
+      finalizeReleasedRecoveryAfterAwait: (record, incidentId) =>
+        this.recoveryCoordinator.finalizeReleasedRecoveryAfterAwait(record, incidentId),
+      finalizeRecoveryRecord: (id, record) =>
+        this.recoveryCoordinator.finalizeRecoveryRecord(id, record),
+      finalizeReleasedRecoveryAfterCleanupFailure: (record, incidentId, error) =>
+        this.recoveryCoordinator.finalizeReleasedRecoveryAfterCleanupFailure(
+          record,
+          incidentId,
+          error,
+        ),
+      markAndroidRecoveryReleaseFailure: (record) =>
+        this.recoveryCoordinator.markAndroidRecoveryReleaseFailure(record),
+      completeEmulatorLossRecovery: (incidentId, outcome, state) =>
+        this.completeEmulatorLossRecovery(incidentId, outcome, state),
+      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+      isPreservedSessionCurrent: (session, id) => this.isPreservedSessionCurrent(session, id),
+      releaseDisconnectedRecoverySessionWithRetry: (sessionId, deviceId, reason) =>
+        this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason),
+      stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
+      getPooledDevice: (id) => this.devices.get(id),
+      removeDevice: (id, awaitCacheCleanup, device) =>
+        this.removeDevice(id, awaitCacheCleanup, device),
+      suppressAutoStartForDevice: (device) => this.suppressAutoStartForDevice(device),
+      getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
+      getFinalizedReleaseReason: (session) =>
+        this.sessionManager.getFinalizedReleaseReason(session),
+      now: () => this.timer.now(),
+    });
+  }
+
+  private createAdbResetSessionRecovery(): AdbResetSessionRecovery {
+    return new AdbResetSessionRecovery(
+      {
+        maxDeferredRecoveryShutdowns: MAX_DEFERRED_RECOVERY_SHUTDOWNS,
+        unconfirmedRecoveryShutdownCooldownMs: UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS,
+        getRecoveryRecord: (sessionId) => this.recoveringSessionLosses.get(sessionId),
+        getPooledDevice: (deviceId) => this.devices.get(deviceId),
+        isPreservedSessionCurrent: (session, deviceId) =>
+          this.isPreservedSessionCurrent(session, deviceId),
+        startAndroidRecoveryRecord: (sessionId, details, reservations, replace) =>
+          this.startAndroidRecoveryRecord(sessionId, details, reservations, replace),
+        rebootDisconnectedAndroidDevice: (device, incidentId, options) =>
+          this.rebootDisconnectedAndroidDevice(device, incidentId, options),
+        releaseDisconnectedRecoverySessionWithRetry: (sessionId, deviceId, reason) =>
+          this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason),
+        refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
+          this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
+        completeEmulatorLossRecovery: (incidentId, outcome) =>
+          this.completeEmulatorLossRecovery(incidentId, outcome),
+        settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+        finalizeReleasedRecoveryAfterAwait: (record, incidentId) =>
+          this.recoveryCoordinator.finalizeReleasedRecoveryAfterAwait(record, incidentId),
+        finalizeReleasedRecoveryAfterCleanupFailure: (record, incidentId, error) =>
+          this.recoveryCoordinator.finalizeReleasedRecoveryAfterCleanupFailure(
+            record,
+            incidentId,
+            error,
+          ),
+        markAndroidRecoveryReleaseFailure: (record) =>
+          this.recoveryCoordinator.markAndroidRecoveryReleaseFailure(record),
+        finalizeRecoveryRecord: (sessionId, record) =>
+          this.recoveryCoordinator.finalizeRecoveryRecord(sessionId, record),
+      },
+      this.timer,
+    );
+  }
+
+  private createAndroidRebootCoordinator(): AndroidRebootCoordinator {
+    return new AndroidRebootCoordinator(
+      {
+        getDeviceManager: () => this.getDeviceManager(),
+        getTimer: () => this.getTimer(),
+        getRecoveryPolicy: () => this.getRecoveryPolicy(),
+        completeEmulatorLossRecovery: (incidentId, outcome, releasedSessionState) =>
+          this.completeEmulatorLossRecovery(incidentId, outcome, releasedSessionState),
+        recordEmulatorLossRecoveryAttempt: (incidentId, attempt) =>
+          this.recordEmulatorLossRecoveryAttempt(incidentId, attempt),
+        setRecoveringAndroidImage: (avdName, image) =>
+          this.recoveryCoordinator.setRecoveringAndroidImage(avdName, image),
+        addRecoveringAndroidDeviceId: (deviceId) =>
+          this.recoveryCoordinator.addRecoveringAndroidDeviceId(deviceId),
+        setAndroidRecoveryHandoffOwner: (deviceId, owner) =>
+          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
+        clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
+          this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
+        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
+          this.recoveryCoordinator.finishAndroidRecoveryAttempt(
+            avdName,
+            deviceIds,
+            retainImage,
+            owner,
+          ),
+        stopAndroidEmulatorForRecovery: (
+          ...[
+            device,
+            avdName,
+            retainLeaseUntil,
+            allowActiveStop,
+            owner,
+            sessionId,
+            session,
+          ]: Parameters<AndroidRebootCoordinatorPoolPort["stopAndroidEmulatorForRecovery"]>
+        ) =>
+          this.stopAndroidEmulatorForRecovery({
+            device,
+            avdName,
+            retainLeaseUntil,
+            allowActiveStop,
+            handoffOwner: owner,
+            preservedSessionId: sessionId,
+            preservedSession: session,
+          }),
+        rebindSameAvdReplacementSession: (
+          ...[device, avdName, sessionId, session, autolockSessionId, image, owner]: Parameters<
+            AndroidRebootCoordinatorPoolPort["rebindSameAvdReplacementSession"]
+          >
+        ) =>
+          this.rebindSameAvdReplacementSession({
+            device,
+            avdName,
+            preservedSessionId: sessionId,
+            preservedSession: session,
+            preservedAutolockSessionId: autolockSessionId,
+            recoveryImage: image,
+            handoffOwner: owner,
+          }),
+        detachSessionForAndroidRecovery: (device, sessionId, session) =>
+          this.detachSessionForAndroidRecovery(device, sessionId, session),
+        removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
+          this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+        addDevice: (device, image, awaitSessionTracking, evidence) =>
+          this.addDevice(device, image, awaitSessionTracking, evidence),
+        identityEvidenceForBootedDevice: (device) =>
+          this.runtimeIdentity.identityEvidenceForBootedDevice(device),
+        bindRecoveredAndroidDeviceSession: (
+          ...[
+            previousDeviceId,
+            avdName,
+            sessionId,
+            session,
+            ready,
+            image,
+            childProcess,
+            autolockSessionId,
+            owner,
+          ]: Parameters<AndroidRebootCoordinatorPoolPort["bindRecoveredAndroidDeviceSession"]>
+        ) =>
+          this.bindRecoveredAndroidDeviceSession({
+            previousDeviceId,
+            avdName,
+            preservedSessionId: sessionId,
+            preservedSession: session,
+            ready,
+            recoveryImage: image,
+            childProcess,
+            preservedAutolockSessionId: autolockSessionId,
+            handoffOwner: owner,
+          }),
+        stopEmulatorProcess: (childProcess, retainLeaseUntil) =>
+          this.stopEmulatorProcess(childProcess, retainLeaseUntil),
+        consumeAndroidRecoveryCancellation: (device, recoveryDeviceIds) =>
+          this.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds),
+      },
+      this.androidRecoveryRecordLedger,
+      this.criteriaMatcher,
+      this.androidDeviceReboot,
+    );
+  }
+
+  private createAdbResetQuarantine(
+    factory: DevicePoolDependencies["adbServerResetQuarantineFactory"],
+  ): AdbServerResetQuarantine {
+    return createAdbServerResetQuarantine(
+      {
+        getAssignmentMutex: () => this.assignmentMutex,
+        getDevices: () => this.devices,
+        getSessionManager: () => this.sessionManager,
+        getStartedDeviceProcesses: () => this.startedDeviceProcesses,
+        getAdbServerResetTrackedProcesses: () => this.adbServerResetTrackedProcesses,
+        getAdbServerResetRecoveryReservations: () => this.adbServerResetRecoveryReservations,
+        getAndroidStartupLeases: () => this.androidStartupLeases,
+        getRecoveringAndroidImages: () => this.recoveringAndroidImages,
+        getRecoveringAndroidDeviceIds: () => this.recoveringAndroidDeviceIds,
+        getRecoveringSessionLosses: () => this.recoveringSessionLosses,
+        getFailedTerminalRecoveryReleases: () => this.failedTerminalRecoveryReleases,
+        getRecoveryCoordinator: () => this.recoveryCoordinator,
+        getAfterAndroidStartupRecoverySnapshot: () => this.afterAndroidStartupRecoverySnapshot,
+        getDevice: (id) => this.getDevice(id),
+        isPreservedSessionCurrent: (session, deviceId) =>
+          this.isPreservedSessionCurrent(session, deviceId),
+        isAndroidEmulatorActiveRelaunchEligible: (device) =>
+          this.isAndroidEmulatorActiveRelaunchEligible(device),
+        removeDevice: (id, awaitCacheCleanup, expected) =>
+          this.removeDevice(id, awaitCacheCleanup, expected),
+        startAndroidRecoveryRecord: (sessionId, details, reservations, replace) =>
+          this.startAndroidRecoveryRecord(sessionId, details, reservations, replace),
+        recordEmulatorLossIncident: (id, path, exit, state) =>
+          this.recordEmulatorLossIncident(id, path, exit, state),
+        cancelDeviceExecutions: (id, reason) =>
+          this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(id, reason) ??
+          Promise.resolve(0),
+        cancelDeviceSessionExecutions: (id, reason) =>
+          this.cancelDeviceSessionExecutions(id, reason),
+        completeEmulatorLossRecovery: (id, outcome) =>
+          this.completeEmulatorLossRecovery(id, outcome),
+        settleEmulatorLossIncident: (id) => this.settleEmulatorLossIncident(id),
+        finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
+        stopTrackedEmulatorProcess: (id) => this.stopTrackedEmulatorProcess(id),
+      },
+      factory,
+    );
   }
 
   /**
@@ -2265,13 +2324,7 @@ export class DevicePool {
           }
 
           if (result.success) {
-            assignments.set(request.sessionId, result.deviceId!);
-            if (result.session) {
-              assignmentsToRollback.set(request.sessionId, {
-                deviceId: result.deviceId!,
-                session: result.session,
-              });
-            }
+            this.recordCriteriaAssignment(request, result, assignments, assignmentsToRollback);
             assignedThisRound++;
             logger.info(
               `[DevicePool] Allocated device ${result.deviceId} to session ${request.sessionId} ` +
@@ -4072,6 +4125,21 @@ export class DevicePool {
       recoveryTarget,
       settledRecoveryLoss,
     );
+  }
+
+  private recordCriteriaAssignment(
+    request: DeviceAllocationRequest,
+    result: Awaited<ReturnType<DevicePool["tryAssignDeviceWithCriteria"]>>,
+    assignments: Map<string, string>,
+    assignmentsToRollback: Map<string, RollbackAssignment>,
+  ): void {
+    assignments.set(request.sessionId, result.deviceId!);
+    if (result.session) {
+      assignmentsToRollback.set(request.sessionId, {
+        deviceId: result.deviceId!,
+        session: result.session,
+      });
+    }
   }
 
   private async tryAssignDeviceWithCriteria(

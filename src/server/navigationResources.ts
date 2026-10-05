@@ -496,21 +496,7 @@ async function getNavigationNodeScreenshotResource(
   }
 }
 
-export function registerNavigationResources(
-  options: {
-    navigationGraph?: NavigationGraphResourceProvider;
-  } = {},
-): void {
-  if (options.navigationGraph) {
-    navigationGraphProvider = options.navigationGraph;
-  }
-
-  attachGraphUpdateListener(getNavigationGraphProvider());
-  // Session-scoped managers (getInstanceForSession) keep their own listener list,
-  // so the global-instance listener above never fires on session-scoped writes.
-  // Register the same debounced callback for every session instance (#4932).
-  NavigationGraphManager.setSessionGraphUpdateListener(scheduleNavigationGraphUpdate);
-
+function registerNavigationGraphResources(): void {
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.APPS,
     "Navigation Apps",
@@ -553,7 +539,9 @@ export function registerNavigationResources(
     "application/json",
     getNavigationBuildDiffResource,
   );
+}
 
+function registerNavigationHistoryResources(): void {
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.HISTORY,
     "Navigation History",
@@ -620,6 +608,25 @@ export function registerNavigationResources(
     "application/json",
     historyHandler,
   );
+}
+
+export function registerNavigationResources(
+  options: {
+    navigationGraph?: NavigationGraphResourceProvider;
+  } = {},
+): void {
+  if (options.navigationGraph) {
+    navigationGraphProvider = options.navigationGraph;
+  }
+
+  attachGraphUpdateListener(getNavigationGraphProvider());
+  // Session-scoped managers (getInstanceForSession) keep their own listener list,
+  // so the global-instance listener above never fires on session-scoped writes.
+  // Register the same debounced callback for every session instance (#4932).
+  NavigationGraphManager.setSessionGraphUpdateListener(scheduleNavigationGraphUpdate);
+
+  registerNavigationGraphResources();
+  registerNavigationHistoryResources();
 
   // Registered before NODE_BY_ID: the base template's `([^/&]+)` node-id capture
   // would otherwise greedily swallow a `?appId=` suffix and win the match (#4933).

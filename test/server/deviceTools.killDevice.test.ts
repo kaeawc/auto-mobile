@@ -1460,6 +1460,90 @@ describe("killDevice handler", () => {
     });
   });
 
+  test("shutdown retires the cache before reservation release and cleans up before notification", async () => {
+    const calls: string[] = [];
+    class OrderedShutdownManager extends SuccessfulKillDeviceManager {
+      override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions) {
+        calls.push("kill");
+        await super.killDevice(device, options);
+      }
+    }
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    manager = new OrderedShutdownManager();
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    manager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: manager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        deviceSessionRepository,
+      }),
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const reserve = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      calls.push("reserve");
+      const reservation = await reserve(...args);
+      if (!reservation) {
+        throw new Error("Expected a shutdown reservation");
+      }
+      return {
+        ...reservation,
+        release: async () => {
+          calls.push("release");
+          await reservation.release();
+        },
+      };
+    };
+    const coordinator = getInstalledAppsCacheWriteCoordinator();
+    const retire = coordinator.retireIncarnation.bind(coordinator);
+    const retirement = spyOn(coordinator, "retireIncarnation").mockImplementation((id) => {
+      calls.push("retire-cache");
+      return retire(id);
+    });
+    setDeviceToolsDependencies({
+      timer,
+      deviceManagerFactory: () => manager,
+      stopAndroidObservers: async () => {
+        calls.push("stop-observers");
+      },
+      clearInstalledAppsForDevice: async () => {
+        calls.push("cleanup");
+      },
+      notifyResourcesChanged: async () => {
+        calls.push("notify");
+      },
+    });
+    try {
+      await ToolRegistry.getTool("killDevice")!.handler({
+        device: { name: image.name, platform: "android", deviceId: image.deviceId! },
+      });
+      expect(calls).toEqual([
+        "reserve",
+        "stop-observers",
+        "kill",
+        "retire-cache",
+        "release",
+        "cleanup",
+        "notify",
+        "release",
+      ]);
+    } finally {
+      retirement.mockRestore();
+    }
+  });
+
   test("a successful kill preserves its result and retires ownership when reservation release rejects", async () => {
     const outcomes: unknown[] = [];
     for (const releaseRejects of [false, true]) {

@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
@@ -42,7 +43,9 @@ function harness() {
     },
   );
   action.observedInteraction = (callback) =>
-    callback({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } });
+    callback(
+      recordObservationRead({ viewHierarchy: hierarchy, screenSize: { width: 500, height: 500 } }),
+    );
   return {
     adb,
     timer,

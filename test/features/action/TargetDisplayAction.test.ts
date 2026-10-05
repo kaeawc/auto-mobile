@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import type WebSocket from "ws";
@@ -699,7 +700,7 @@ describe("explicit action display", () => {
       });
       Object.assign(action, {
         observedInteraction: async (run: (observation: ObserveResult) => Promise<object>) => ({
-          ...(await run(observation)),
+          ...(await run(recordObservationRead(observation))),
           observation,
         }),
         prepareSelectionCapture: async () => null,

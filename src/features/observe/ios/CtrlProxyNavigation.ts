@@ -1,3 +1,4 @@
+import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * CtrlProxy iOSNavigation - Delegate for navigation operations.
  *
@@ -36,18 +37,26 @@ export class CtrlProxyNavigation {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressHomeResult> {
-    return sendCommand<CtrlProxyPressHomeResult>(this.context, {
-      idPrefix: "pressHome",
-      responseType: "press_home",
-      messageType: "request_press_home",
-      params: frameContext === undefined ? undefined : { frameContext },
-      timeoutMs,
-      perf,
-      cancelScreenshotBackoff: false,
-      notConnectedMessage: "Not connected to CtrlProxy",
-      errorLabel: "Press home",
-    });
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>> {
+    return sendIOSPressCommand(
+      this.context,
+      {
+        idPrefix: "pressHome",
+        responseType: "press_home",
+        messageType: "request_press_home",
+        params: frameContext === undefined ? undefined : { frameContext },
+        timeoutMs,
+        abortSignal: signal,
+        perf,
+        onDispatch,
+        cancelScreenshotBackoff: false,
+        notConnectedMessage: "Not connected to CtrlProxy",
+        errorLabel: "Press home",
+      },
+      true,
+    );
   }
 
   /**
@@ -57,14 +66,18 @@ export class CtrlProxyNavigation {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressBackResult> {
-    return sendCommand<CtrlProxyPressBackResult>(this.context, {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>> {
+    return sendIOSPressCommand(this.context, {
       idPrefix: "pressBack",
       responseType: "press_back",
       messageType: "request_press_back",
       params: frameContext === undefined ? undefined : { frameContext },
       timeoutMs,
+      abortSignal: signal,
       perf,
+      onDispatch,
       cancelScreenshotBackoff: false,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Press back",
@@ -100,18 +113,26 @@ export class CtrlProxyNavigation {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressButtonResult> {
-    return sendCommand<CtrlProxyPressButtonResult>(this.context, {
-      idPrefix: "pressButton",
-      responseType: "press_button",
-      messageType: "request_press_button",
-      params: frameContext === undefined ? { action: button } : { action: button, frameContext },
-      timeoutMs,
-      perf,
-      cancelScreenshotBackoff: false,
-      notConnectedMessage: "Not connected to CtrlProxy",
-      errorLabel: "Press button",
-    });
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>> {
+    return sendIOSPressCommand(
+      this.context,
+      {
+        idPrefix: "pressButton",
+        responseType: "press_button",
+        messageType: "request_press_button",
+        params: frameContext === undefined ? { action: button } : { action: button, frameContext },
+        timeoutMs,
+        abortSignal: signal,
+        perf,
+        onDispatch,
+        cancelScreenshotBackoff: false,
+        notConnectedMessage: "Not connected to CtrlProxy",
+        errorLabel: "Press button",
+      },
+      button.toLowerCase() === "home",
+    );
   }
 
   /**
@@ -217,8 +238,9 @@ export class CtrlProxyNavigation {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyRecentAppsResult> {
-    return sendCommand<CtrlProxyRecentAppsResult>(this.context, {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>> {
+    return sendIOSPressCommand(this.context, {
       idPrefix: "recentApps",
       responseType: "recent_apps",
       messageType: "request_recent_apps",
@@ -226,6 +248,7 @@ export class CtrlProxyNavigation {
       timeoutMs,
       abortSignal: signal,
       perf,
+      onDispatch,
       cancelScreenshotBackoff: false,
       errorLabel: "Recent apps",
     });

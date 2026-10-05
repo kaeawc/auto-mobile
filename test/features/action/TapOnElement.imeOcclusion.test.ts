@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { TapOnElement, tapFocusFailure } from "../../../src/features/action/TapOnElement";
@@ -268,7 +269,7 @@ async function executeAt(
   let actionError: unknown;
   tap.observedInteraction = async (action) => {
     try {
-      return { ...(await action(observation)), observation };
+      return { ...(await action(recordObservationRead(observation))), observation };
     } catch (error) {
       actionError = error;
       throw error;

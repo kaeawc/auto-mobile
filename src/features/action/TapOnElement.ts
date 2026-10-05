@@ -1,8 +1,12 @@
 import {
-  freshTalkBackHierarchy,
+  withObservationReadScope,
+  wasHierarchyReadDuringCall,
+} from "../observe/observationReadScope";
+import {
+  freshTapHierarchy,
   ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS,
   ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
-} from "./freshTalkBackHierarchy";
+} from "./freshTapHierarchy";
 import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
@@ -149,7 +153,10 @@ import {
   prepareTargetDisplayAction,
   type RenderedObservationReader,
 } from "./TargetDisplayAction";
-import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import {
+  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+  createDeviceHierarchyCapture,
+} from "../observe/DeviceHierarchyCapture";
 import {
   checkAndroidTapHierarchyChange,
   POST_TAP_REFRESH_TIMEOUT_MS,
@@ -3889,6 +3896,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
+    request?: { requestDeadlineMs?: number },
+  ): Promise<TapOnFocusResult> {
+    return withObservationReadScope(() =>
+      this.executeWithReadScope(options, progress, signal, recovery, request),
+    );
+  }
+
+  private async executeWithReadScope(
+    options: TapOnElementOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
     // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
     recovery?: { throwOnKeyboardOcclusion?: boolean },
     request?: { requestDeadlineMs?: number },
@@ -3960,7 +3979,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 )
               : undefined;
           if (this.device.platform === "android" && isAccessibilityServiceEnabled) {
-            const freshHierarchy = await freshTalkBackHierarchy(
+            const freshHierarchy = await freshTapHierarchy(
               this.tapVerificationRefresh({
                 screenSize: observeResult.screenSize,
                 signal,
@@ -4002,9 +4021,39 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             };
           }
 
-          const searchOutcome = await perf.track("findElement", () =>
+          let searchOutcome = await perf.track("findElement", () =>
             this.searchForElement(options, observeResult, signal),
           );
+          // Search polling, ensureChecked, and opt-in stability already acquire a
+          // current tree. Only a visible cache hit still needs revalidation.
+          if (
+            this.device.platform === "android" &&
+            !isAccessibilityServiceEnabled &&
+            searchOutcome.selection.element &&
+            !wasHierarchyReadDuringCall(viewHierarchy) &&
+            searchOutcome.stats.requestCount === 0 &&
+            options.ensureChecked === undefined &&
+            !this.strategy.shouldRunPreTapStability(options)
+          ) {
+            const freshHierarchy = await freshTapHierarchy(
+              this.tapVerificationRefresh({ screenSize: observeResult.screenSize, signal }),
+              this.timer,
+              signal,
+              {
+                timeoutMs: Math.min(
+                  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+                  request?.requestDeadlineMs === undefined
+                    ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
+                    : request.requestDeadlineMs - this.timer.now(),
+                ),
+                context: "while revalidating a cached observation",
+              },
+            );
+            this.replaceObservationHierarchy(observeResult, freshHierarchy, true);
+            // Discard cached coordinates and use the ordinary search-until loop
+            // when the current screen is still transitioning.
+            searchOutcome = await this.searchForElement(options, observeResult, signal);
+          }
           searchUntilStats = searchOutcome.stats;
           this.replaceObservationHierarchy(
             observeResult,

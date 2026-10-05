@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
 import {
@@ -59,10 +60,12 @@ describe("TapAnyElement", () => {
     );
     tapAny.setRefreshViewHierarchyForTesting(async () => null);
     tapAny.observedInteraction = (action) =>
-      action({
-        viewHierarchy: { hierarchy: { node: {} } },
-        screenSize: { width: 500, height: 500 },
-      });
+      action(
+        recordObservationRead({
+          viewHierarchy: { hierarchy: { node: {} } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
 
     await tapAny.execute({ action: "longPress", duration: LONG_PRESS_HARD_MAX_MS });
     const swipe = adb
@@ -220,7 +223,7 @@ describe("TapAnyElement", () => {
       );
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
       tapAny.observedInteraction = (action) =>
-        action({ viewHierarchy, screenSize: { width: 10, height: 10 } });
+        action(recordObservationRead({ viewHierarchy, screenSize: { width: 10, height: 10 } }));
       tapAny.setRefreshViewHierarchyForTesting(async () => null);
 
       const result = await tapAny.execute({ action: "tap" });
@@ -296,7 +299,12 @@ describe("TapAnyElement Android gesture dispatch", () => {
       },
     );
     tapAny.observedInteraction = (action) =>
-      action({ viewHierarchy: observedHierarchy, screenSize: { width: 500, height: 500 } });
+      action(
+        recordObservationRead({
+          viewHierarchy: observedHierarchy,
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
     let refreshCount = 0;
     tapAny.setRefreshViewHierarchyForTesting(async () => ({
       hierarchy: { node: { marker: `after-${++refreshCount}` } },
@@ -629,10 +637,12 @@ describe("TapAnyElement node long press fallbacks", () => {
       },
     );
     tapAny.observedInteraction = (action) =>
-      action({
-        viewHierarchy: { hierarchy: { node: {} } },
-        screenSize: { width: 500, height: 500 },
-      });
+      action(
+        recordObservationRead({
+          viewHierarchy: { hierarchy: { node: {} } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
     tapAny.setRefreshViewHierarchyForTesting(async () => null);
     return { proxy, adb, tapAny };
   }
@@ -744,10 +754,12 @@ describe("tapAny long press safety", () => {
       },
     );
     action.observedInteraction = (callback) =>
-      callback({
-        viewHierarchy: { hierarchy: { node: element } },
-        screenSize: { width: 500, height: 500 },
-      });
+      callback(
+        recordObservationRead({
+          viewHierarchy: { hierarchy: { node: element } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
     action.setRefreshViewHierarchyForTesting(async () => null);
     return { adb, timer, action, displayLookup };
   }

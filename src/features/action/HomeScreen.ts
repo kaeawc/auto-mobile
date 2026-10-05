@@ -105,9 +105,7 @@ export class HomeScreen extends BaseVisualChange {
       switch (this.device.platform) {
         case "android": {
           alreadyOnHome = await this.isAndroidHomeSurface(previousHierarchy, signal);
-          if (!alreadyOnHome) {
-            await perf.track("homeNavigation", () => this.executeAndroidHome(signal));
-          }
+          await perf.track("homeNavigation", () => this.executeAndroidHome(signal));
           break;
         }
         case "ios":
@@ -139,30 +137,58 @@ export class HomeScreen extends BaseVisualChange {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | undefined> {
-    if (
-      this.device.platform === "android" &&
-      (!previousObservation.viewHierarchy ||
-        !wasHierarchyReadDuringCall(previousObservation.viewHierarchy))
-    ) {
-      const currentObservation = await perf.track("refreshHomeObservation", () =>
-        this.observeScreen.execute({
-          freshness: "fresh",
-          requireFreshExtraction: true,
-          timeoutMs,
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          skipPerformanceAudit: true,
-          skipRecompositionTracking: true,
-          skipBackStack: true,
-          skipCache: true,
-          skipStaleWindowRecovery: true,
-          perf,
-          signal,
-        }),
-      );
-      // The shared visual-change check must compare against the current surface,
-      // not a cached Home tree that would match the post-dispatch Home tree.
-      Object.assign(previousObservation, currentObservation);
+    if (this.device.platform === "android") {
+      const readSignal = combineWithAmbientAbort(signal);
+      throwIfAborted(readSignal);
+      let currentObservation = previousObservation;
+      if (
+        !previousObservation.viewHierarchy ||
+        !wasHierarchyReadDuringCall(previousObservation.viewHierarchy)
+      ) {
+        try {
+          currentObservation = await perf.track("refreshHomeObservation", () =>
+            this.observeScreen.execute({
+              freshness: "fresh",
+              requireFreshExtraction: true,
+              timeoutMs,
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+              skipPerformanceAudit: true,
+              skipRecompositionTracking: true,
+              skipBackStack: true,
+              skipCache: true,
+              skipStaleWindowRecovery: true,
+              perf,
+              signal: readSignal,
+            }),
+          );
+        } catch (error) {
+          throwIfAborted(readSignal);
+          logger.warn(`[HOME] Pre-dispatch hierarchy read failed: ${errorMessage(error)}`, error);
+          // Retain the required envelope metadata, without cached surface evidence.
+          currentObservation = {
+            observationId: previousObservation.observationId,
+            display: previousObservation.display,
+            updatedAt: previousObservation.updatedAt,
+            screenSize: { width: 0, height: 0 },
+            systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+          };
+        }
+      }
+      throwIfAborted(readSignal);
+      if (currentObservation.viewHierarchy?.hierarchy?.error) {
+        currentObservation = { ...currentObservation, viewHierarchy: undefined };
+      }
+      if (currentObservation !== previousObservation) {
+        // Keep the shared baseline object's identity, but replace all its fields.
+        // Unknown reads must not compare a stale Home tree with post-dispatch Home.
+        for (const key of Object.keys(previousObservation)) {
+          Reflect.deleteProperty(previousObservation, key);
+        }
+        for (const [key, value] of Object.entries(currentObservation)) {
+          Reflect.set(previousObservation, key, value);
+        }
+      }
     }
     return previousObservation.viewHierarchy;
   }

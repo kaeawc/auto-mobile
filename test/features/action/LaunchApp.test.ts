@@ -3694,7 +3694,10 @@ describe("LaunchApp", () => {
 
     test("unknown device IDs skip the cold installed check", async () => {
       fakeTimer.enableAutoAdvance();
-      const h = createDeviceHarness({ deviceId: "unrecognized-device", installedApps: [] });
+      const h = createDeviceHarness({
+        deviceId: "unrecognized-device",
+        installedApps: ["com.apple.Preferences"],
+      });
       try {
         const result = await h.iosLaunchApp.execute(userBundleId, false, true);
         expect(result.success).toBe(true);

@@ -20,7 +20,7 @@ import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosColdAppCheckKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import {
   resolveIosLaunchBackend,
@@ -495,7 +495,7 @@ export class LaunchApp extends BaseVisualChange {
           if (
             needsColdStart &&
             !isSystemBundleId &&
-            (simulator || isIosPhysicalUdid(this.device.deviceId))
+            resolveIosColdAppCheckKind(this.device) !== undefined
           ) {
             const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal, true);
             if (missingApp) {

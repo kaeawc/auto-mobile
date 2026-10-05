@@ -90,7 +90,9 @@ function collectStepWarnings(
   tool: string,
   result: Record<string, unknown> | undefined,
 ): string[] {
-  const warnings = result?.warnings;
+  // Structured action responses hoist success/error, but keep warnings in the
+  // payload. Read the same payload as PlanExecutor's diagnostic collector.
+  const warnings = (getStructuredPayload(result) ?? result)?.warnings;
   if (!Array.isArray(warnings)) {
     return [];
   }

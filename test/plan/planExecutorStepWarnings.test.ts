@@ -1,4 +1,14 @@
-import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -9,6 +19,126 @@ import { registerCriticalSectionTools } from "../../src/server/criticalSectionTo
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError } from "../../src/models";
+import {
+  registerInteractionTools,
+  resetTapOnElementFactory,
+  setTapOnElementFactory,
+  tapOnHandler,
+} from "../../src/server/interactionTools";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+
+describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
+  const warning = "The matched element is disabled; the tap may have no effect.";
+  const device = { platform: "android" as const, deviceId: "fake-device", name: "Fake" };
+  let executor: DefaultPlanExecutor;
+  let coordinator: CriticalSectionCoordinator;
+  let restoreTools: () => void;
+  let restoreCoordinator: () => void;
+  let restoreHandlers: () => void;
+  let restoreSuiteTools: () => void;
+
+  beforeAll(() => {
+    restoreSuiteTools = preserveToolRegistry();
+    registerInteractionTools();
+    registerCriticalSectionTools();
+    expect(ToolRegistry.getToolForPlan("tapOn")?.deviceAwareHandler).toBe(tapOnHandler);
+  });
+
+  afterAll(() => restoreSuiteTools());
+
+  beforeEach(() => {
+    restoreTools = preserveToolRegistry();
+    executor = new DefaultPlanExecutor(new FakeTimer());
+    coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+    restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    setTapOnElementFactory(() => ({
+      execute: async (params) => ({
+        success: params.text !== "Missing",
+        action: "tap",
+        element: {
+          text: params.text,
+          enabled: params.text !== "Disabled",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+        },
+        ...(params.text === "Disabled" ? { warnings: [warning] } : {}),
+        ...(params.text === "Missing" ? { error: "Element not found" } : {}),
+      }),
+    }));
+    const tap = ToolRegistry.getToolForPlan("tapOn")!;
+    const section = ToolRegistry.getToolForPlan("criticalSection")!;
+    // Replace only device acquisition/auditing; retain real handlers, internal
+    // dispatch and finalization without device I/O or a file-backed database.
+    const handlers = [tap, section].map((tool) =>
+      spyOn(tool, "handler").mockImplementation(async (params, progress, signal) =>
+        finalizeToolResponse(await tool.deviceAwareHandler!(device, params, progress, signal), {
+          name: tool.name,
+          internal: true,
+        }),
+      ),
+    );
+    restoreHandlers = () => handlers.forEach((handler) => handler.mockRestore());
+  });
+
+  afterEach(() => {
+    restoreHandlers();
+    resetTapOnElementFactory();
+    coordinator.reset();
+    restoreCoordinator();
+    restoreTools();
+  });
+
+  function tapStep(text: string): Plan["steps"][number] {
+    return { tool: "tapOn", params: { device: "A", action: "tap", selector: { text } } };
+  }
+
+  test.each([
+    { outcome: "success", fails: false, optional: false },
+    { outcome: "required failure", fails: true, optional: false },
+    { outcome: "optional section skipped", fails: true, optional: true },
+  ])("$outcome retains the sub-step warning exactly once", async ({ fails, optional }) => {
+    const result = await executor.executePlan(
+      {
+        name: "real-tap-section-warning",
+        steps: [
+          {
+            tool: "criticalSection",
+            optional,
+            params: {
+              device: "A",
+              lock: "real-tap-warning",
+              deviceCount: 1,
+              steps: [
+                tapStep("Primary"),
+                tapStep("Disabled"),
+                tapStep(fails ? "Missing" : "Primary"),
+              ],
+            },
+          },
+        ],
+      },
+      0,
+    );
+    expect(result.success).toBe(!fails || optional);
+    expect(result.warnings).toEqual([
+      { stepIndex: 0, tool: "criticalSection", warnings: [`step 2 (tapOn): ${warning}`] },
+    ]);
+    expect(result.failedStep?.stepIndex).toBe(fails && !optional ? 0 : undefined);
+    expect(result.skippedSteps?.map((step) => step.stepIndex)).toEqual(optional ? [0] : undefined);
+  });
+
+  test("top-level real tapOn warning remains unchanged before a required failure", async () => {
+    const result = await executor.executePlan(
+      {
+        name: "real-tap-top-level-warning",
+        steps: [tapStep("Disabled"), tapStep("Missing")],
+      },
+      0,
+    );
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.stepIndex).toBe(1);
+    expect(result.warnings).toEqual([{ stepIndex: 0, tool: "tapOn", warnings: [warning] }]);
+  });
+});
 
 /**
  * A best-effort epilogue that fails keeps the step successful and reports itself

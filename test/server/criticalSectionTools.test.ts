@@ -1,3 +1,4 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -31,6 +32,144 @@ describe("criticalSection tool", () => {
     CriticalSectionCoordinator.getInstance().reset();
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
+  });
+
+  test("rejects every mismatched sub-step up front before any sub-step runs", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const step = mock(async () => ({ success: true }));
+    ToolRegistry.register("ownerLabelProbe", "Owner probe", z.object({ device: z.string() }), step);
+    const device: BootedDevice = { platform: "android", deviceId: "serial-for-A", name: "A" };
+    try {
+      const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+      await expect(
+        tool.deviceAwareHandler!(device, {
+          lock: "owner",
+          device: "A",
+          deviceCount: 1,
+          steps: [
+            { tool: "ownerLabelProbe", params: { device: "A" } },
+            { tool: "ownerLabelProbe", params: { device: "B" } },
+          ],
+        }),
+      ).rejects.toThrow(ActionableError);
+      expect(step).not.toHaveBeenCalled();
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      await expect(
+        tool.deviceAwareHandler!(device, {
+          lock: "owner",
+          device: "A",
+          deviceCount: 1,
+          steps: [{ tool: "ownerLabelProbe", params: { device: "B" } }],
+        }),
+      ).rejects.toThrow(
+        'steps[0] (ownerLabelProbe): device="B" differs from criticalSection owner device="A"',
+      );
+      expect(step).not.toHaveBeenCalled();
+    } finally {
+      coordinator.forceCleanup("owner");
+      restore();
+    }
+  });
+
+  for (const owner of ["A", undefined]) {
+    test(`runs owner-labeled sub-steps when owner is ${owner ?? "unknown"}`, async () => {
+      const coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+      const step = mock(async () => ({ success: true }));
+      ToolRegistry.register(
+        "sameOwnerProbe",
+        "Owner probe",
+        z.object({ device: z.string() }),
+        step,
+      );
+      try {
+        const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+        await tool.deviceAwareHandler!(
+          { platform: "android", deviceId: "serial-for-A", name: "A" },
+          {
+            lock: "owner",
+            device: owner,
+            deviceCount: 1,
+            steps: [{ tool: "sameOwnerProbe", params: { device: "A" } }],
+          },
+        );
+        expect(step).toHaveBeenCalledTimes(1);
+      } finally {
+        coordinator.forceCleanup("owner");
+        restore();
+      }
+    });
+  }
+
+  test("preserves an already-aborted handler reason without creating timers", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const controller = new AbortController();
+    const reason = new Error("client cancelled");
+    controller.abort(reason);
+    try {
+      const error = await ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+        { platform: "android", deviceId: "A", name: "A" },
+        {
+          lock: "already-aborted",
+          device: "A",
+          deviceCount: 2,
+          steps: [{ tool: "tapOn", params: { device: "A" } }],
+        },
+        undefined,
+        controller.signal,
+      ).then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+      expect(error).toBe(reason);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("abort rejects a parked section with the device loss reason before running steps", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const controller = new AbortController();
+    const loss = new DeviceLostError("A", "disconnected");
+    const step = mock(async () => ({ success: true }));
+    ToolRegistry.register(
+      "abortSectionProbe",
+      "Abort probe",
+      z.object({ device: z.string() }),
+      step,
+    );
+    let error: unknown;
+    const pending = ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+      { platform: "android", deviceId: "A", name: "A" },
+      {
+        lock: "abort",
+        device: "A",
+        deviceCount: 2,
+        steps: [{ tool: "abortSectionProbe", params: { device: "A" } }],
+      },
+      undefined,
+      controller.signal,
+    ).then(undefined, (rejection: unknown) => {
+      error = rejection;
+    });
+    controller.abort(loss);
+    await drainMicrotasks(40);
+    try {
+      expect(error).toBe(loss);
+      expect(step).not.toHaveBeenCalled();
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      coordinator.forceCleanup("abort");
+      await pending;
+      restore();
+    }
   });
 
   const envelopeCases: Array<{

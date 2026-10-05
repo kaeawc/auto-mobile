@@ -1,3 +1,4 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -64,6 +65,67 @@ describe("barrier tool", () => {
       CriticalSectionCoordinator.getInstance().reset();
       restoreCoordinator();
       restoreCoordinator = undefined;
+    }
+  });
+
+  test("preserves an already-aborted handler reason without creating timers", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const controller = new AbortController();
+    const reason = new Error("client cancelled");
+    controller.abort(reason);
+    try {
+      const error = await ToolRegistry.getToolForPlan("barrier")!.deviceAwareHandler!(
+        { platform: "android", deviceId: "A", name: "A" },
+        { lock: "already-aborted", device: "A", deviceCount: 2 },
+        undefined,
+        controller.signal,
+      ).then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+      expect(error).toBe(reason);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("abort rejects a parked handler with the device loss reason and rejects peers", async () => {
+    const timer = injectFakeCoordinator();
+    const tool = ToolRegistry.getToolForPlan("barrier")!;
+    const controller = new AbortController();
+    const loss = new DeviceLostError("A", "disconnected");
+    let error: unknown;
+    let peerError: unknown;
+    let peerPassed = false;
+    const a = tool.deviceAwareHandler!(
+      makeDevice("A"),
+      { lock: "abort", deviceCount: 3 },
+      undefined,
+      controller.signal,
+    ).then(undefined, (rejection: unknown) => {
+      error = rejection;
+    });
+    const b = tool.deviceAwareHandler!(makeDevice("B"), { lock: "abort", deviceCount: 3 }).then(
+      () => {
+        peerPassed = true;
+      },
+      (rejection: unknown) => {
+        peerError = rejection;
+      },
+    );
+    controller.abort(loss);
+    await drainMicrotasks(40);
+    try {
+      expect(error).toBe(loss);
+      expect(peerPassed).toBe(false);
+      expect(peerError).toBeInstanceOf(ActionableError);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      CriticalSectionCoordinator.getInstance().forceCleanup("abort");
+      await Promise.all([a, b]);
     }
   });
 

@@ -1,12 +1,13 @@
 import { Mutex } from "async-mutex";
 import { ActionableError } from "../models";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 
 interface BarrierWaiter {
   deviceId: string;
   resolve: () => void;
-  reject: (error: Error) => void;
+  reject: (error: unknown) => void;
   timerHandle: NodeJS.Timeout;
 }
 
@@ -128,7 +129,9 @@ export class CriticalSectionCoordinator {
     deviceId: string,
     timeout: number = this.BARRIER_TIMEOUT_MS,
     namespace?: string,
+    signal?: AbortSignal,
   ): Promise<() => void> {
+    signal?.throwIfAborted();
     const key = this.scopedKey(lock, namespace);
     logger.debug(`Device ${deviceId} entering critical section "${lock}"`);
 
@@ -138,11 +141,39 @@ export class CriticalSectionCoordinator {
     }
 
     // Wait at barrier
-    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock);
+    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock, signal);
 
     // Acquire the mutex for serial execution
     logger.debug(`Device ${deviceId} acquiring lock "${lock}"`);
-    const release = await this.locks.get(key)!.acquire();
+    signal?.throwIfAborted();
+    // The mutex queue cannot cancel one acquisition. End the caller's wait on
+    // abort, then release a late acquisition without entering the section.
+    let abandoned = false;
+    let acquiredRelease: (() => void) | undefined;
+    const acquisition = this.locks
+      .get(key)!
+      .acquire()
+      .then((release) => {
+        if (abandoned) {
+          release();
+        } else {
+          acquiredRelease = release;
+        }
+        return release;
+      });
+    let release: () => void;
+    try {
+      release = await raceWithDeadline(acquisition, {
+        timer: this.timer,
+        signal,
+        label: `Critical section "${lock}" mutex`,
+      });
+      signal?.throwIfAborted();
+      acquiredRelease = undefined;
+    } finally {
+      abandoned = true;
+      acquiredRelease?.();
+    }
 
     logger.debug(`Device ${deviceId} acquired lock "${lock}"`);
 
@@ -171,10 +202,13 @@ export class CriticalSectionCoordinator {
     deviceCount: number,
     timeout: number = this.BARRIER_TIMEOUT_MS,
     namespace?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted();
     this.registerExpectedDevices(lock, deviceCount, namespace);
     const key = this.scopedKey(lock, namespace);
-    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock);
+    const generation = await this.waitAtBarrier(key, deviceId, timeout, lock, signal);
+    signal?.throwIfAborted();
     this.scheduleCleanup(key, generation);
   }
 
@@ -190,7 +224,9 @@ export class CriticalSectionCoordinator {
     deviceId: string,
     timeout: number,
     label: string,
+    signal?: AbortSignal,
   ): Promise<number> {
+    signal?.throwIfAborted();
     const expectedCount = this.expectedDeviceCounts.get(key);
 
     if (expectedCount === undefined) {
@@ -246,20 +282,30 @@ export class CriticalSectionCoordinator {
 
     // Wait for other devices to arrive
     await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        this.timer.clearTimeout(waiterRecord.timerHandle);
+        signal?.removeEventListener("abort", onAbort);
+        const currentResolvers = this.barrierResolvers.get(key) || [];
+        const index = currentResolvers.indexOf(waiterRecord);
+        if (index > -1) {
+          currentResolvers.splice(index, 1);
+        }
+      };
+      const onAbort = () => waiterRecord.reject(signal?.reason);
       const waiterRecord: BarrierWaiter = {
         deviceId,
-        resolve,
-        reject,
+        resolve: () => {
+          cleanup();
+          resolve();
+        },
+        reject: (error) => {
+          cleanup();
+          arrivedDevices.delete(deviceId);
+          reject(error);
+        },
         timerHandle: this.timer.setTimeout(() => {
-          const currentResolvers = this.barrierResolvers.get(key) || [];
-          const index = currentResolvers.indexOf(waiterRecord);
-          if (index > -1) {
-            currentResolvers.splice(index, 1);
-          }
-          const arrivedCount = this.barrierCounts.get(key)?.size || 0;
-          this.barrierCounts.get(key)?.delete(deviceId);
-
-          reject(
+          const arrivedCount = arrivedDevices.size;
+          waiterRecord.reject(
             new Error(
               `Timeout waiting for critical section "${label}". ` +
                 `${arrivedCount}/${expectedCount} devices arrived after ${timeout}ms. ` +
@@ -271,6 +317,10 @@ export class CriticalSectionCoordinator {
       const resolvers = this.barrierResolvers.get(key) || [];
       resolvers.push(waiterRecord);
       this.barrierResolvers.set(key, resolvers);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+      }
     });
     return generation;
   }
@@ -326,7 +376,7 @@ export class CriticalSectionCoordinator {
       this.timer.clearTimeout(existingTimer);
     }
 
-    for (const waiter of this.barrierResolvers.get(key) || []) {
+    for (const waiter of [...(this.barrierResolvers.get(key) || [])]) {
       this.timer.clearTimeout(waiter.timerHandle);
       waiter.reject(
         new ActionableError(

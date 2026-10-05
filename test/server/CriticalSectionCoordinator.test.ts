@@ -1,4 +1,5 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -18,6 +19,199 @@ describe("CriticalSectionCoordinator", () => {
   afterEach(() => {
     coordinator.reset();
     fakeTimer.reset();
+  });
+
+  describe("abortable coordination", () => {
+    for (const kind of ["barrier", "criticalSection"] as const) {
+      const start = (signal: AbortSignal, device = "A") => {
+        coordinator.registerExpectedDevices("abort-lock", 2);
+        return kind === "barrier"
+          ? coordinator.awaitBarrier("abort-lock", device, 2, 120000, undefined, signal)
+          : coordinator.enterCriticalSection("abort-lock", device, 120000, undefined, signal);
+      };
+
+      test(`${kind} abort removes only its waiter, arrival, timer and listener`, async () => {
+        const controller = new AbortController();
+        const reason = new Error("cancel coordination");
+        const removed = spyOn(controller.signal, "removeEventListener");
+        let error: unknown;
+        let entered = false;
+        const pending = start(controller.signal).then(
+          () => {
+            entered = true;
+          },
+          (rejection: unknown) => {
+            error = rejection;
+          },
+        );
+        controller.abort(reason);
+        await drainMicrotasks(40);
+        try {
+          expect(error).toBe(reason);
+          expect(entered).toBe(false);
+          const state = coordinator as unknown as {
+            barrierCounts: Map<string, Set<string>>;
+            barrierResolvers: Map<string, unknown[]>;
+          };
+          expect(state.barrierCounts.get("abort-lock")?.has("A")).toBe(false);
+          expect(state.barrierResolvers.get("abort-lock")).toHaveLength(0);
+          expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+          expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
+        } finally {
+          coordinator.forceCleanup("abort-lock");
+          await pending;
+          removed.mockRestore();
+        }
+      });
+
+      test(`${kind} rejects an already-aborted signal before arrival`, async () => {
+        const controller = new AbortController();
+        const reason = new Error("already cancelled");
+        controller.abort(reason);
+        let error: unknown;
+        const pending = start(controller.signal).then(undefined, (rejection: unknown) => {
+          error = rejection;
+        });
+        await drainMicrotasks(40);
+        try {
+          expect(error).toBe(reason);
+          expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+        } finally {
+          coordinator.forceCleanup("abort-lock");
+          await pending;
+        }
+      });
+    }
+
+    test("an aborted arrival cannot satisfy peers; a replacement arrival can", async () => {
+      const controller = new AbortController();
+      const reason = new Error("A left");
+      const a = coordinator
+        .awaitBarrier("peers", "A", 3, 120000, undefined, controller.signal)
+        .then(undefined, (error: unknown) => error);
+      let entered = false;
+      const b = coordinator.awaitBarrier("peers", "B", 3, 120000).then(() => {
+        entered = true;
+      });
+      controller.abort(reason);
+      await drainMicrotasks(40);
+      expect(entered).toBe(false);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([120000]);
+      const c = coordinator.awaitBarrier("peers", "C", 3, 120000);
+      await drainMicrotasks(40);
+      try {
+        expect(entered).toBe(false);
+        expect(await a).toBe(reason);
+        await coordinator.awaitBarrier("peers", "D", 3, 120000);
+        await Promise.all([b, c]);
+        expect(entered).toBe(true);
+      } finally {
+        coordinator.forceCleanup("peers");
+      }
+    });
+
+    test("abort after all arrivals but before continuation does not enter", async () => {
+      const controller = new AbortController();
+      const reason = new Error("release raced cancellation");
+      coordinator.registerExpectedDevices("race", 2);
+      const a = coordinator
+        .enterCriticalSection("race", "A", 120000, undefined, controller.signal)
+        .then(
+          (release) => {
+            release();
+            return "entered";
+          },
+          (error: unknown) => error,
+        );
+      const b = coordinator.enterCriticalSection("race", "B", 120000);
+      controller.abort(reason);
+      const release = await b;
+      release();
+      expect(await a).toBe(reason);
+    });
+
+    test("abort while acquiring a mutex settles promptly and releases late acquisition", async () => {
+      coordinator.registerExpectedDevices("mutex", 1);
+      const ownerRelease = await coordinator.enterCriticalSection("mutex", "owner");
+      const controller = new AbortController();
+      const reason = new Error("mutex cancelled");
+      let error: unknown;
+      const pending = coordinator
+        .enterCriticalSection("mutex", "A", 120000, undefined, controller.signal)
+        .then(
+          (release) => {
+            release();
+          },
+          (rejection: unknown) => {
+            error = rejection;
+          },
+        );
+      await drainMicrotasks(40);
+      controller.abort(reason);
+      await drainMicrotasks(40);
+      try {
+        expect(error).toBe(reason);
+        expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+      } finally {
+        ownerRelease();
+        await pending;
+      }
+      const next = await coordinator.enterCriticalSection("mutex", "next");
+      next();
+    });
+
+    test("force cleanup rejects every peer after one waiter aborts", async () => {
+      const controller = new AbortController();
+      const reason = new Error("A cancelled");
+      const a = coordinator
+        .awaitBarrier("all-peers", "A", 4, 120000, undefined, controller.signal)
+        .then(
+          () => "entered",
+          (error: unknown) => error,
+        );
+      const peers = ["B", "C"].map((device) =>
+        coordinator.awaitBarrier("all-peers", device, 4, 120000).then(
+          () => "entered",
+          (error: unknown) => error,
+        ),
+      );
+      controller.abort(reason);
+      coordinator.forceCleanup("all-peers");
+      expect(await a).toBe(reason);
+      for (const peer of peers) {
+        expect(await peer).toBeInstanceOf(ActionableError);
+      }
+      expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+    });
+
+    for (const outcome of ["release", "timeout", "forceCleanup"] as const) {
+      test(`barrier ${outcome} removes its abort listener`, async () => {
+        const controller = new AbortController();
+        const removed = spyOn(controller.signal, "removeEventListener");
+        const pending = coordinator
+          .awaitBarrier("listener", "A", 2, 50, undefined, controller.signal)
+          .then(
+            () => "released",
+            (error: unknown) => error,
+          );
+        if (outcome === "release") {
+          await coordinator.awaitBarrier("listener", "B", 2, 50);
+        }
+        if (outcome === "timeout") {
+          fakeTimer.advanceTime(50);
+        }
+        if (outcome === "forceCleanup") {
+          coordinator.forceCleanup("listener");
+        }
+        const result = await pending;
+        expect(result).toEqual(outcome === "release" ? "released" : expect.any(Error));
+        expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
+        controller.abort(new Error("late abort"));
+        coordinator.forceCleanup("listener");
+        expect(fakeTimer.getPendingTimeouts()).toEqual([]);
+        removed.mockRestore();
+      });
+    }
   });
 
   // Coordination tests never need to control time explicitly: the barrier lifts

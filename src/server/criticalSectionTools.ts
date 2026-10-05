@@ -14,9 +14,8 @@ import { isDeviceLostError } from "./deviceLossOutcome";
 import type { PlanStep } from "../models/Plan";
 
 // Schema for steps inside critical section.
-// Every sub-step MUST declare a target `device` — there is no routing
-// fallback inside a critical section, so an undefined device would silently
-// run on whichever device acquired the lock first.
+// Every sub-step MUST declare a `device` matching the section owner label.
+// Sub-steps execute on that owner device; they never route to another label.
 const criticalSectionStepSchema = z
   .object({
     tool: z.string().describe("Tool name"),
@@ -241,6 +240,36 @@ async function executeCriticalSectionSteps(
   return { executedSteps, warnings };
 }
 
+function validateCriticalSectionSteps(
+  normalizedSteps: PlanStep[],
+  lock: string,
+  ownerLabel?: string,
+): void {
+  // Validate steps to prevent nesting. A nested criticalSection or barrier
+  // would deadlock: the device holding this section's mutex would wait for
+  // peers that cannot enter until it releases.
+  for (const [index, step] of normalizedSteps.entries()) {
+    // Plan routing retains the owner label in params.device. A direct call
+    // without that label keeps its existing pinned-device behavior.
+    if (
+      ownerLabel &&
+      step.params?.device !== undefined &&
+      step.params.device !== null &&
+      step.params.device !== "" &&
+      step.params.device !== ownerLabel
+    ) {
+      throw new ActionableError(
+        `steps[${index}] (${step.tool}): device="${step.params.device}" differs from criticalSection owner device="${ownerLabel}". Put it in its own step for that device or use a separate criticalSection step.`,
+      );
+    }
+    if (step.tool === "criticalSection" || step.tool === "barrier") {
+      throw new ActionableError(
+        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`,
+      );
+    }
+  }
+}
+
 /**
  * Critical section tool handler.
  * Coordinates multiple devices to execute steps serially at a synchronization point.
@@ -259,19 +288,10 @@ const criticalSectionHandler = async (
     `Device ${device.deviceId} entering critical section "${lock}" (expecting ${deviceCount} devices)`,
   );
 
-  // Check for abort before entering
-  throwIfAborted(signal);
+  // Preserve the caller's abort reason before entering coordination.
+  signal?.throwIfAborted();
 
-  // Validate steps to prevent nesting. A nested criticalSection or barrier
-  // would deadlock: the device holding this section's mutex would wait for
-  // peers that cannot enter until it releases.
-  for (const step of normalizedSteps) {
-    if (step.tool === "criticalSection" || step.tool === "barrier") {
-      throw new ActionableError(
-        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`,
-      );
-    }
-  }
+  validateCriticalSectionSteps(normalizedSteps, lock, params.device);
 
   // Register expected device count
   try {
@@ -284,7 +304,13 @@ const criticalSectionHandler = async (
 
   try {
     // Wait at barrier and acquire lock
-    release = await coordinator.enterCriticalSection(lock, device.deviceId, timeout, namespace);
+    release = await coordinator.enterCriticalSection(
+      lock,
+      device.deviceId,
+      timeout,
+      namespace,
+      signal,
+    );
 
     logger.info(
       `Device ${device.deviceId} executing ${normalizedSteps.length} steps in critical section "${lock}"`,
@@ -315,7 +341,7 @@ const criticalSectionHandler = async (
     const errorMsg = errorMessage(error);
     logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMsg}`);
 
-    if (isDeviceLostError(error)) {
+    if (isDeviceLostError(error) || (signal?.aborted && error === signal.reason)) {
       throw error;
     }
     const message = `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`;

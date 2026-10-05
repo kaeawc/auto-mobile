@@ -2,7 +2,7 @@ import { getStructuredPayload } from "../../src/utils/toolUtils";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
@@ -14,6 +14,7 @@ import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { throwIfAborted } from "../../src/utils/toolUtils";
 
 isolateToolRegistry();
 
@@ -890,6 +891,171 @@ describe("criticalSection tool", () => {
       /Critical section "wrap-lock" failed for device dev-wrap: Failed at step 2\/2 \(mockWrapBoom\): kaboom/,
     );
   });
+  describe("optional sub-steps", () => {
+    const fakeDevice: BootedDevice = {
+      platform: "android",
+      deviceId: "optional-device",
+      name: "Optional Device",
+    };
+    let coordinator: CriticalSectionCoordinator;
+    let fakeTimer: FakeTimer;
+    let restoreCoordinator: () => void;
+    const nextStep = mock(async () => ({ success: true }));
+
+    beforeEach(() => {
+      fakeTimer = new FakeTimer();
+      coordinator = CriticalSectionCoordinator.createForTesting(fakeTimer);
+      restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+      nextStep.mockClear();
+      ToolRegistry.register("mockAfterOptional", "next step", z.object({}), nextStep);
+    });
+
+    afterEach(() => {
+      coordinator.reset();
+      fakeTimer.reset();
+      restoreCoordinator();
+      ToolRegistry.unregister("mockOptionalStep");
+      ToolRegistry.unregister("mockAfterOptional");
+    });
+
+    const runSteps = (optional: boolean | undefined, signal?: AbortSignal) => {
+      const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+      const params = tool.schema.parse({
+        lock: "optional-lock",
+        deviceCount: 1,
+        steps: [
+          {
+            tool: "mockOptionalStep",
+            params: { device: "A" },
+            ...(optional === undefined ? {} : { optional }),
+          },
+          { tool: "mockAfterOptional", params: { device: "A" } },
+        ],
+      });
+      return tool.deviceAwareHandler!(fakeDevice, params, undefined, signal);
+    };
+
+    test.each(["returned failure", "MCP failure envelope", "ordinary exception"])(
+      "continues after an optional %s and reports a warning",
+      async (failureKind) => {
+        ToolRegistry.register("mockOptionalStep", "optional step", z.object({}), async () => {
+          if (failureKind === "ordinary exception") {
+            throw new Error("optional failure");
+          }
+          const result = { success: false, error: "optional failure" };
+          return failureKind === "MCP failure envelope"
+            ? { content: [{ type: "text", text: JSON.stringify(result) }] }
+            : result;
+        });
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        const cleanupSpy = spyOn(coordinator, "forceCleanup");
+        try {
+          const response = await runSteps(true);
+          expect(JSON.parse(response.content[0].text)).toEqual({
+            success: true,
+            lock: "optional-lock",
+            deviceId: "optional-device",
+            executedSteps: 2,
+            totalSteps: 2,
+            warnings: [
+              "step 1 (mockOptionalStep): optional step failed; skipped: optional failure",
+            ],
+          });
+          expect(nextStep).toHaveBeenCalledTimes(1);
+          expect(cleanupSpy).not.toHaveBeenCalled();
+          expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining(
+              "optional step mockOptionalStep failed; skipping and continuing: optional failure",
+            ),
+          );
+        } finally {
+          warnSpy.mockRestore();
+          cleanupSpy.mockRestore();
+        }
+      },
+    );
+
+    test.each([
+      { optional: false, throws: false },
+      { optional: undefined, throws: false },
+      { optional: false, throws: true },
+      { optional: undefined, throws: true },
+    ])("keeps required failure wrapping for %j", async ({ optional, throws }) => {
+      ToolRegistry.register("mockOptionalStep", "required step", z.object({}), async () => {
+        if (throws) {
+          throw new Error("required failure");
+        }
+        return { success: false, error: "required failure" };
+      });
+      const response = runSteps(optional);
+      await expect(response).rejects.toThrow(
+        'Critical section "optional-lock" failed for device optional-device: Failed at step 1/2 (mockOptionalStep): required failure',
+      );
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
+    test("does not skip an optional tool that is not found", async () => {
+      await expect(runSteps(true)).rejects.toThrow(
+        'Failed at step 1/2 (mockOptionalStep): Tool "mockOptionalStep" not found in registry',
+      );
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
+    test.each([true, false])("propagates device loss with optional=%s", async (optional) => {
+      const deviceLoss = new DeviceLostError(fakeDevice.deviceId, "device disconnected");
+      ToolRegistry.register("mockOptionalStep", "lost device", z.object({}), async () => {
+        throw deviceLoss;
+      });
+      const error = await runSteps(optional).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(error).toBe(deviceLoss);
+      expect(isDeviceLostError(error)).toBe(true);
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
+    test("does not skip an optional schema validation error", async () => {
+      const schema = z.object({ required: z.string() });
+      const validation = schema.safeParse({});
+      if (validation.success) {
+        throw new Error("Expected a validation error");
+      }
+      ToolRegistry.register("mockOptionalStep", "invalid step", z.object({}), async () => {
+        throw validation.error;
+      });
+      await expect(runSteps(true)).rejects.toThrow(
+        `Critical section "optional-lock" failed for device optional-device: ${validation.error.message}`,
+      );
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
+    test.each(["ordinary exception", "AbortError", "throwIfAborted", "returned failure"])(
+      "propagates cancellation during an optional %s",
+      async (failureKind) => {
+        const controller = new AbortController();
+        ToolRegistry.register("mockOptionalStep", "cancelled step", z.object({}), async () => {
+          controller.abort();
+          if (failureKind === "throwIfAborted") {
+            throwIfAborted(controller.signal);
+          }
+          if (failureKind === "AbortError") {
+            throw new DOMException("cancelled", "AbortError");
+          }
+          if (failureKind === "ordinary exception") {
+            throw new Error("cancelled");
+          }
+          return { success: false, error: "cancelled" };
+        });
+        const message = failureKind === "throwIfAborted" ? "Operation cancelled" : "cancelled";
+        await expect(runSteps(true, controller.signal)).rejects.toThrow(
+          `Critical section "optional-lock" failed for device optional-device: ${message}`,
+        );
+        expect(nextStep).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   // A best-effort epilogue failure (issue #6868) keeps its step successful and
   // reports itself through `warnings`. The critical section retained only the
   // tool name and a success bit, so that outcome — previously the step's whole

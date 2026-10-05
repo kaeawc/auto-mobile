@@ -122,6 +122,46 @@ function formatCriticalSectionError(result: Record<string, unknown>, tool: strin
   );
 }
 
+// PlanExecutor treats failed tool lookup as fatal even for optional steps.
+class CriticalSectionToolNotFoundError extends ActionableError {}
+
+function handleCriticalSectionStepFailure(
+  error: unknown,
+  step: { tool: string; optional?: boolean },
+  context: {
+    deviceId: string;
+    lock: string;
+    stepNumber: number;
+    totalSteps: number;
+    signal?: AbortSignal;
+    warnings: string[];
+  },
+): void {
+  const { deviceId, lock, stepNumber, totalSteps, signal, warnings } = context;
+  if (
+    isDeviceLostError(error) ||
+    (step.optional && (signal?.aborted || error instanceof z.ZodError))
+  ) {
+    throw error;
+  }
+
+  const errorMsg = errorMessage(error);
+  if (step.optional && !(error instanceof CriticalSectionToolNotFoundError)) {
+    warnings.push(`step ${stepNumber} (${step.tool}): optional step failed; skipped: ${errorMsg}`);
+    logger.warn(
+      `Device ${deviceId} optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`,
+    );
+    return;
+  }
+
+  logger.error(
+    `Device ${deviceId} failed at step ${stepNumber}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
+  );
+  throw new ActionableError(
+    `Failed at step ${stepNumber}/${totalSteps} (${step.tool}): ${errorMsg}`,
+  );
+}
+
 async function executeCriticalSectionSteps(
   device: BootedDevice,
   normalizedSteps: PlanStep[],
@@ -145,7 +185,7 @@ async function executeCriticalSectionSteps(
       // as executePlan for tools hidden from MCP discovery.
       const tool = ToolRegistry.getToolForPlan(step.tool);
       if (!tool) {
-        throw new ActionableError(`Tool "${step.tool}" not found in registry`);
+        throw new CriticalSectionToolNotFoundError(`Tool "${step.tool}" not found in registry`);
       }
 
       const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
@@ -166,17 +206,14 @@ async function executeCriticalSectionSteps(
     } catch (error) {
       executedSteps.push({ tool: step.tool, success: false });
 
-      const errorMsg = errorMessage(error);
-      logger.error(
-        `Device ${device.deviceId} failed at step ${i + 1}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
-      );
-
-      if (isDeviceLostError(error)) {
-        throw error;
-      }
-      throw new ActionableError(
-        `Failed at step ${i + 1}/${totalSteps} (${step.tool}): ${errorMsg}`,
-      );
+      handleCriticalSectionStepFailure(error, step, {
+        deviceId: device.deviceId,
+        lock,
+        stepNumber: i + 1,
+        totalSteps,
+        signal,
+        warnings,
+      });
     }
   }
 

@@ -115,6 +115,7 @@ export class Telephony {
         message: this.phoneCallSuccessMessage(options),
       };
     } catch (error) {
+      logger.warn(`[Telephony] Simulated phone call failed: ${errorMessage(error)}`);
       return {
         success: false,
         action: options.action,
@@ -158,6 +159,7 @@ export class Telephony {
         message: `Delivered simulated SMS from ${options.phoneNumber} (${options.message.length} chars)`,
       };
     } catch (error) {
+      logger.warn(`[Telephony] Simulated SMS delivery failed: ${errorMessage(error)}`);
       return {
         success: false,
         phoneNumber: options.phoneNumber,

@@ -1,4 +1,5 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { GetDeepLinks } from "../../../src/features/utility/GetDeepLinks";
 import { DeepLinkManager } from "../../../src/features/utility/DeepLinkManager";
 import { DeepLinkResult } from "../../../src/models";
@@ -86,9 +87,19 @@ describe("GetDeepLinks", () => {
         throw new Error("Deep link query failed");
       };
 
-      const result = await runWithAbortSignal(controller.signal, () =>
-        getDeepLinks.execute("com.example.app"),
-      );
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      let result: DeepLinkResult;
+      try {
+        result = await runWithAbortSignal(controller.signal, () =>
+          getDeepLinks.execute("com.example.app"),
+        );
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          "[GetDeepLinks] Failed to get deep links for com.example.app: Deep link query failed",
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
 
       expect(result).toEqual({
         success: false,

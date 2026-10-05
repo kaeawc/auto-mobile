@@ -93,7 +93,7 @@ export class SelectAllText extends BaseVisualChange {
       return { success: false, error: result.error };
     } catch (error) {
       throwIfAborted(signal);
-      logger.error(`[SelectAllText] CtrlProxy iOS exception: ${error}`);
+      logger.warn(`[SelectAllText] CtrlProxy iOS exception: ${errorMessage(error)}`);
       return { success: false, error: String(error) };
     }
   }

@@ -1,5 +1,6 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { DetectIntentChooser } from "../../../src/features/observe/DetectIntentChooser";
+import { logger } from "../../../src/utils/logger";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {
@@ -194,6 +195,27 @@ describe("DetectIntentChooser", () => {
 
       expect(result.success).toBe(true);
       expect(result.detected).toBe(false);
+    });
+
+    test("logs the underlying intent chooser detection exception once", async () => {
+      const detectionSpy = spyOn(fakeDeepLinkManager, "detectIntentChooser").mockImplementation(
+        () => {
+          throw new Error("chooser hierarchy invalid");
+        },
+      );
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await detectIntentChooser.execute();
+        expect(result.success).toBe(false);
+        expect(result.error).toBe("chooser hierarchy invalid");
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          "[DetectIntentChooser] Failed to detect intent chooser: chooser hierarchy invalid",
+        );
+      } finally {
+        warnSpy.mockRestore();
+        detectionSpy.mockRestore();
+      }
     });
 
     test("should detect various intent chooser indicators", async () => {

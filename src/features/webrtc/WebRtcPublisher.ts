@@ -1,5 +1,6 @@
 import { MediaStreamTrack, RTCPeerConnection, useH264, usePCMU, type RTCIceServer } from "werift";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { BackoffInput } from "../../utils/Backoff";
 import { DEFAULT_RTP_MTU } from "./h264";
@@ -505,9 +506,15 @@ export class WebRtcPublisher {
       // it leaks after the stream was reported stopped.
       if (this.closed || this.pc !== pc) {
         if (session.resourceUrl) {
-          await this.whip.delete(session.resourceUrl).catch(() => {});
+          await this.whip.delete(session.resourceUrl).catch((error) => {
+            logger.warn(
+              `[WebRtcPublisher] Cancelled WHIP session cleanup failed: ${errorMessage(error)}`,
+            );
+          });
         }
-        await pc.close().catch(() => {});
+        await pc.close().catch((error) => {
+          logger.warn(`[WebRtcPublisher] Cancelled peer cleanup rejected: ${errorMessage(error)}`);
+        });
         throw new Error("Publisher closed during establish.");
       }
 
@@ -555,9 +562,17 @@ export class WebRtcPublisher {
         this.candidateSub?.unSubscribe();
         this.candidateSub = null;
         if (resourceUrl) {
-          await this.whip.delete(resourceUrl).catch(() => {});
+          await this.whip.delete(resourceUrl).catch((cleanupError) => {
+            logger.warn(
+              `[WebRtcPublisher] Failed WHIP session cleanup: ${errorMessage(cleanupError)}`,
+            );
+          });
         }
-        await pc.close().catch(() => {});
+        await pc.close().catch((cleanupError) => {
+          logger.warn(
+            `[WebRtcPublisher] Failed peer cleanup rejected: ${errorMessage(cleanupError)}`,
+          );
+        });
       }
       throw error;
     }

@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import type { RTCPeerConnection } from "werift";
 import {
   KEYFRAME_REQUEST_MIN_INTERVAL_MS,
@@ -110,6 +111,98 @@ describe("WebRtcPublisher WHIP endpoint", () => {
 });
 
 describe("WebRtcPublisher establish failure", () => {
+  test.each(["delete", "close"])(
+    "warns with the underlying %s cleanup error without replacing the establish failure",
+    async (operation) => {
+      const pc = new FakePeerConnection();
+      if (operation === "close") {
+        pc.close = async () => {
+          throw new Error("peer cleanup failed");
+        };
+      }
+      const publisher = new WebRtcPublisher(
+        { streamId: "s", whipEndpoint: "https://coord/whip" },
+        {
+          createPeerConnection: () => pc as unknown as RTCPeerConnection,
+          createWhipClient: () =>
+            ({
+              publish: async () => ({
+                answerSdp: "v=0",
+                resourceUrl: "https://coord/whip/s",
+              }),
+              delete: async () => {
+                if (operation === "delete") {
+                  throw new Error("session cleanup failed");
+                }
+              },
+            }) as unknown as WhipClient,
+        },
+      );
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await expect(publisher.start()).rejects.toThrow(
+          "WHIP answer did not include a video m-line.",
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          operation === "delete"
+            ? "[WebRtcPublisher] Failed WHIP session cleanup: session cleanup failed"
+            : "[WebRtcPublisher] Failed peer cleanup rejected: peer cleanup failed",
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    },
+  );
+
+  test.each(["delete", "close"])(
+    "warns with the underlying %s cleanup error when stop wins during publish",
+    async (operation) => {
+      const pc = new FakePeerConnection();
+      const publishing = deferred();
+      const answer = deferred();
+      const publisher = new WebRtcPublisher(
+        { streamId: "s", whipEndpoint: "https://coord/whip" },
+        {
+          createPeerConnection: () => pc as unknown as RTCPeerConnection,
+          createWhipClient: () =>
+            ({
+              publish: async () => {
+                publishing.resolve();
+                await answer.promise;
+                return { answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" };
+              },
+              delete: async () => {
+                if (operation === "delete") {
+                  throw new Error("session cleanup failed");
+                }
+              },
+            }) as unknown as WhipClient,
+        },
+      );
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const start = publisher.start();
+        await publishing.promise;
+        await publisher.stop();
+        if (operation === "close") {
+          pc.close = async () => {
+            throw new Error("peer cleanup failed");
+          };
+        }
+        answer.resolve();
+        await start;
+        expect(publisher.getState()).toBe("stopped");
+        expect(warnSpy).toHaveBeenCalledWith(
+          operation === "delete"
+            ? "[WebRtcPublisher] Cancelled WHIP session cleanup failed: session cleanup failed"
+            : "[WebRtcPublisher] Cancelled peer cleanup rejected: peer cleanup failed",
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    },
+  );
+
   test("closes the peer connection when WHIP publish fails on the last attempt", async () => {
     const pc = new FakePeerConnection();
     const publisher = new WebRtcPublisher(

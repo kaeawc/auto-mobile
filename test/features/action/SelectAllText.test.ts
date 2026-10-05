@@ -2,6 +2,7 @@ import { expect, describe, test, spyOn } from "bun:test";
 import { SelectAllText } from "../../../src/features/action/SelectAllText";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { logger } from "../../../src/utils/logger";
 
 describe("SelectAllText Android", () => {
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2231.
@@ -115,11 +116,19 @@ describe("SelectAllText outcomes", () => {
         throw new Error("socket closed");
       },
     }));
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     const { promise, observedSpy } = runWithoutObservation(selectAllText);
-    const result = await promise;
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("socket closed");
-    observedSpy.mockRestore();
+    try {
+      const result = await promise;
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("socket closed");
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[SelectAllText] CtrlProxy iOS exception: socket closed",
+      );
+    } finally {
+      warnSpy.mockRestore();
+      observedSpy.mockRestore();
+    }
   });
 });

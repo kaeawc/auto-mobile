@@ -15,6 +15,7 @@ import {
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import { LaunchApp, amStartReportedFailure } from "./LaunchApp";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -220,7 +221,10 @@ export class OpenURL extends BaseVisualChange {
         }
       } catch (error) {
         throwIfAborted(signal);
-        logger.error(`[OpenURL] Exception while launching app ${packageName}:`, error);
+        logger.warn(
+          `[OpenURL] Exception while launching app ${packageName}: ${errorMessage(error)}`,
+          error,
+        );
         perf.end();
         return {
           success: false,
@@ -341,7 +345,7 @@ export class OpenURL extends BaseVisualChange {
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } catch (error) {
       throwIfAborted(signal);
-      logger.error(`[OpenURL] simctl openurl failed: ${error}`);
+      logger.warn(`[OpenURL] simctl openurl failed: ${errorMessage(error)}`);
       return {
         success: false,
         url,
@@ -426,7 +430,7 @@ export class OpenURL extends BaseVisualChange {
       };
     } catch (error) {
       throwIfAborted(signal);
-      logger.error(`[OpenURL] devicectl open URL failed: ${error}`);
+      logger.warn(`[OpenURL] devicectl open URL failed: ${errorMessage(error)}`);
       return {
         success: false,
         url,

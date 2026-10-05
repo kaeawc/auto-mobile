@@ -36,7 +36,7 @@ export class GetDeepLinks {
         // Preserve the callee's cancellation error at the tool boundary.
         throw error;
       }
-      logger.error(`[GetDeepLinks] Failed to get deep links for ${appId}: ${error}`);
+      logger.warn(`[GetDeepLinks] Failed to get deep links for ${appId}: ${errorMessage(error)}`);
 
       return {
         success: false,

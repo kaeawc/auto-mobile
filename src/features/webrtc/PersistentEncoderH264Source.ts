@@ -2,6 +2,7 @@ import { connect as netConnect } from "node:net";
 import { createHash } from "node:crypto";
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -1054,7 +1055,12 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       : null;
     // The waiter is installed before connecting so a fast server cannot print
     // the marker in the gap between client connect and the later startup await.
-    streamingStarted?.catch(() => {});
+    streamingStarted?.catch((error) => {
+      // Startup awaits this waiter separately; tracing here prevents an early unhandled rejection.
+      logger.debug(
+        `[PersistentEncoderH264Source] Audio startup waiter rejected: ${errorMessage(error)}`,
+      );
+    });
 
     // Give the first connect the same deadline+abort treatment the reconnect path
     // uses. A half-open forward with a live server would otherwise hang here
@@ -1134,7 +1140,12 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         // Server failure (or teardown) won the race: cancel the bounded connect
         // so a late-resolving local socket is destroyed rather than leaked.
         connectController.abort();
-        void connection.catch(() => {});
+        void connection.catch((error) => {
+          // Teardown or server failure won the race, so cancellation of the losing connect is expected.
+          logger.debug(
+            `[PersistentEncoderH264Source] Losing connection rejected: ${errorMessage(error)}`,
+          );
+        });
       }
       if (this.serverStartupInProgress === server) {
         this.serverStartupInProgress = null;

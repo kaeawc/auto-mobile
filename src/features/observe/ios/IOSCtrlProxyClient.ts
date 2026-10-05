@@ -1,3 +1,4 @@
+import type { IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -482,7 +483,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPressKeyResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
@@ -496,13 +499,17 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressHomeResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>>;
 
   requestPressBack(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressBackResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>>;
 
   requestShake(
     timeoutMs?: number,
@@ -515,14 +522,17 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressButtonResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>>;
 
   requestRecentApps(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyRecentAppsResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>>;
 
   requestRotate(
     orientation: string,
@@ -605,7 +615,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     fingerSpacing?: number,
-  ): Promise<CtrlProxySwipeResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   clearCache(): void;
 
@@ -3798,8 +3810,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPressKeyResult> {
-    return this.keyboard.requestPressKey(key, modifiers, timeoutMs, perf);
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>> {
+    return this.keyboard.requestPressKey(key, modifiers, timeoutMs, perf, signal, onDispatch);
   }
 
   // ===========================================================================
@@ -3810,17 +3824,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressHomeResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>> {
     this.invalidateSdkCapabilities();
-    return this.navigation.requestPressHome(timeoutMs, perf, frameContext);
+    return this.navigation.requestPressHome(timeoutMs, perf, frameContext, signal, onDispatch);
   }
 
   async requestPressBack(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressBackResult> {
-    return this.navigation.requestPressBack(timeoutMs, perf, frameContext);
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>> {
+    return this.navigation.requestPressBack(timeoutMs, perf, frameContext, signal, onDispatch);
   }
 
   async requestShake(
@@ -3836,11 +3854,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressButtonResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>> {
     if (button.toLowerCase() === "home" || button.toLowerCase() === "recent") {
       this.invalidateSdkCapabilities();
     }
-    return this.navigation.requestPressButton(button, timeoutMs, perf, frameContext);
+    return this.navigation.requestPressButton(
+      button,
+      timeoutMs,
+      perf,
+      frameContext,
+      signal,
+      onDispatch,
+    );
   }
 
   async requestRecentApps(
@@ -3848,9 +3875,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyRecentAppsResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>> {
     this.invalidateSdkCapabilities();
-    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext, signal);
+    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext, signal, onDispatch);
   }
 
   async requestRotate(
@@ -4044,7 +4072,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     fingerSpacing?: number,
-  ): Promise<CtrlProxySwipeResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
     return this.gestures.requestMultiFingerSwipe(
       x1,
       y1,
@@ -4055,6 +4085,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeoutMs,
       perf,
       fingerSpacing,
+      signal,
+      onDispatch,
     );
   }
 

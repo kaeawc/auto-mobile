@@ -25,6 +25,13 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import { DELETE_KEYEVENT_CHUNK_SIZE } from "../../../src/features/action/ClearText";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeWindow } from "../../fakes/FakeWindow";
+import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
+import {
+  hasPendingTerminalScreenshot,
+  runWithPostActionCaptureScope,
+} from "../../../src/utils/PostActionCaptureContext";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
@@ -3710,5 +3717,126 @@ describe("SendKeys IME focus regression", () => {
       error,
     });
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("SendKeys post-action capture boundary", () => {
+  class CapturingFocus extends BaseVisualChange {
+    protected override shouldCapturePostActionScreenshot(): boolean {
+      return true;
+    }
+  }
+
+  function captureHarness(device: BootedDevice) {
+    const h = createSendKeysHarness(device);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const events: string[] = [];
+    const before: ObserveResult = {
+      ...focusedAndroidObservation("", {}, 0),
+      screenSize: { width: 100, height: 100 },
+      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+      deviceId: device.deviceId,
+      observationId: "focused-before-command",
+    };
+    const after: ObserveResult = { ...before, observationId: "after-command" };
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(before);
+    const focus = new CapturingFocus(device, h.adb, timer);
+    focus.observeScreen = observe;
+    focus.window = new FakeWindow();
+    const capture = spyOn(observe, "captureScreenshot").mockImplementation(
+      async (_perf, _signal, chosen) => {
+        events.push(`capture:start:${chosen?.observationId}`);
+        await Promise.resolve();
+        events.push(`capture:end:${chosen?.observationId}`);
+      },
+    );
+    const insert = h.client.insert;
+    h.client.insert = async (...args) => {
+      events.push("dispatch");
+      return insert(...args);
+    };
+    const sendKeys = new SendKeys(
+      device,
+      { create: () => h.adb },
+      {
+        executor: new DefaultSendKeysCommandExecutor(
+          device,
+          { create: () => h.adb },
+          harnessObserver,
+          {
+            textClient: h.client,
+            inputKey: { press: async () => ({ success: true }) },
+            timer,
+          },
+        ),
+        timer,
+        timestampProvider: { now: async () => timer.now() },
+        focuser: {
+          focus: async () => {
+            const result = await focus.observedInteraction(
+              async () => ({ success: true, focusVerified: true }),
+              { previousObservation: before, changeExpected: false, skipUiStability: true },
+            );
+            expect(hasPendingTerminalScreenshot(result.observation)).toBe(true);
+            expect(capture).not.toHaveBeenCalled();
+            return { success: true, focusVerified: true };
+          },
+        },
+        observer: {
+          execute: async () => {
+            // Model the final ObserveScreen read's own automatic screenshot.
+            await observe.captureScreenshot(undefined, undefined, after);
+            return after;
+          },
+        },
+      },
+    );
+    return { sendKeys, events, capture, before, after };
+  }
+
+  test.each([androidDevice, iosDevice])(
+    "$platform captures the earlier observed focus before command dispatch",
+    async (device) => {
+      const h = captureHarness(device);
+      try {
+        const result = await runWithPostActionCaptureScope(undefined, () =>
+          h.sendKeys.execute([{ action: "type", text: "hello", mode: "a11y" }], { text: "Name" }),
+        );
+        expect(result.success).toBe(true);
+        expect(result.observation).toBe(h.after);
+        expect(h.events).toEqual([
+          "capture:start:focused-before-command",
+          "capture:end:focused-before-command",
+          "dispatch",
+          "capture:start:after-command",
+          "capture:end:after-command",
+        ]);
+        expect(h.capture).toHaveBeenCalledTimes(2);
+        expect(h.capture.mock.calls[0][2]).toBe(h.before);
+      } finally {
+        h.capture.mockRestore();
+      }
+    },
+  );
+
+  test("a single sendKeys action without earlier focus captures exactly once", async () => {
+    const h = captureHarness(androidDevice);
+    try {
+      const result = await runWithPostActionCaptureScope(undefined, () =>
+        h.sendKeys.execute([{ action: "type", text: "hello", mode: "a11y" }]),
+      );
+      expect(result.success).toBe(true);
+      expect(result.observation).toBe(h.after);
+      expect(h.events).toEqual([
+        "dispatch",
+        "capture:start:after-command",
+        "capture:end:after-command",
+      ]);
+      expect(h.capture).toHaveBeenCalledTimes(1);
+    } finally {
+      h.capture.mockRestore();
+    }
   });
 });

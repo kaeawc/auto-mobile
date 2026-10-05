@@ -1578,6 +1578,32 @@
           "required": ["stepIndex", "tool", "error"],
           "additionalProperties": false
         },
+        "deviceFailures": {
+          "description": "All failing device tracks for multi-device plans, including abort consequences; ordered by cause, plan step index (-1 last), then plan device order",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "failureObservation": {}
+            },
+            "required": ["stepIndex", "tool", "error", "device"],
+            "additionalProperties": false
+          }
+        },
         "error": {
           "type": "string"
         },
@@ -1664,7 +1690,7 @@
           }
         },
         "warnings": {
-          "description": "Best-effort warnings from steps that still succeeded",
+          "description": "Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed",
           "type": "array",
           "items": {
             "type": "object",
@@ -6236,6 +6262,9 @@
                 "disabled",
                 "stripped_by_actions_no_observe"
               ]
+            },
+            "hint": {
+              "type": "string"
             },
             "fromScreen": {
               "type": "object",
@@ -17293,6 +17322,9 @@
                 "stripped_by_actions_no_observe"
               ]
             },
+            "hint": {
+              "type": "string"
+            },
             "fromScreen": {
               "type": "object",
               "properties": {
@@ -22103,6 +22135,9 @@
                 "disabled",
                 "stripped_by_actions_no_observe"
               ]
+            },
+            "hint": {
+              "type": "string"
             },
             "fromScreen": {
               "type": "object",
@@ -29415,6 +29450,9 @@
                 "stripped_by_actions_no_observe"
               ]
             },
+            "hint": {
+              "type": "string"
+            },
             "fromScreen": {
               "type": "object",
               "properties": {
@@ -33087,6 +33125,9 @@
                 "disabled",
                 "stripped_by_actions_no_observe"
               ]
+            },
+            "hint": {
+              "type": "string"
             },
             "fromScreen": {
               "type": "object",

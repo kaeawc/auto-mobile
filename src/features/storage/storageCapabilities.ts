@@ -269,7 +269,16 @@ function appContainersDomain(ctx: StorageCapabilityContext): DomainCapability {
     if (ctx.deviceType === "emulator") {
       return deriveOperation(operation, undefined, []);
     }
-    // Physical Android: needs a debuggable build for run-as.
+    // Physical Android: only private containers need a debuggable build for run-as.
+    if (ctx.debuggableBuild === false) {
+      return {
+        operation,
+        state: "partial",
+        reason:
+          "Private containers require a debuggable app build; externalFiles remains available.",
+        prerequisites: [PREREQ_DEBUGGABLE],
+      };
+    }
     return deriveOperation(operation, undefined, [req(PREREQ_DEBUGGABLE, ctx.debuggableBuild)]);
   };
   return {

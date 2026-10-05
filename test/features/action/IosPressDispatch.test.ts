@@ -2,6 +2,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { InputKey } from "../../../src/features/action/InputKey";
 import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
+import { RecentApps } from "../../../src/features/action/RecentApps";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { CtrlProxyNavigation } from "../../../src/features/observe/ios/CtrlProxyNavigation";
 import { CtrlProxyKeyboard } from "../../../src/features/observe/ios/CtrlProxyKeyboard";
@@ -10,6 +11,8 @@ import { ActionableError, type BootedDevice } from "../../../src/models";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeWindow } from "../../fakes/FakeWindow";
 
 const device: BootedDevice = { deviceId: "physical-iphone", platform: "ios", name: "iPhone" };
 const fingers = [
@@ -35,6 +38,52 @@ async function flushDispatch(): Promise<void> {
   }
 }
 
+test("recentApps execute preserves indeterminate cancellation before post-action observation", async () => {
+  const h = createIosDelegateHarness();
+  const navigation = new CtrlProxyNavigation(h.context);
+  const controller = new AbortController();
+  const client = Object.assign(new FakeIOSCtrlProxy(h.timer), {
+    requestRecentApps: navigation.requestRecentApps.bind(navigation),
+  });
+  const clientSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+    client as unknown as IOSCtrlProxyClient,
+  );
+  const observe = new FakeObserveScreen();
+  observe.setObserveResult({ timestamp: h.timer.now() });
+  const observeSpy = spyOn(observe, "execute").mockImplementation(async (options) => {
+    options?.signal?.throwIfAborted();
+    return { timestamp: h.timer.now() };
+  });
+  const recentApps = new RecentApps(device, null, h.timer);
+  recentApps.observeScreen = observe;
+  recentApps.window = new FakeWindow();
+  try {
+    const outcome = recentApps.execute(undefined, controller.signal).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve();
+    }
+    expect(h.sentMessages).toHaveLength(1);
+    controller.abort(new ActionableError("caller cancelled"));
+    const result = await outcome;
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(String(result.error)).toContain("outcome is indeterminate");
+      expect(String(result.error)).toContain(
+        "Do not retry automatically. Observe before retrying.",
+      );
+    }
+    expect(observeSpy).toHaveBeenCalledTimes(1);
+    expect(h.requestManager.getPendingCount()).toBe(0);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  } finally {
+    clientSpy.mockRestore();
+    observeSpy.mockRestore();
+  }
+});
+
 for (const action of [
   "back",
   "recent",
@@ -44,6 +93,7 @@ for (const action of [
   "home",
   "input/key",
   "multi-finger swipe",
+  "recentApps tool",
 ] as const) {
   describe(`iOS ${action} caller`, () => {
     test.each([
@@ -88,25 +138,27 @@ for (const action of [
       }
       try {
         const pending =
-          action === "input/key"
-            ? new InputKey(
-                device,
-                new FakeAdbClientFactory(),
-                undefined,
-                h.timer,
-                () => client,
-              ).press("enter", 50, undefined, [], {
-                signal: controller.signal,
-                onDispatch: () => dispatchCount++,
-              })
-            : action === "multi-finger swipe"
-              ? new ExecuteGesture(device, null, h.timer).execute(fingers, 300, controller.signal)
-              : new PressButton(device, null, h.timer).press(
-                  action,
-                  50,
+          action === "recentApps tool"
+            ? new RecentApps(device, null, h.timer)["executeIosRecentApps"](controller.signal)
+            : action === "input/key"
+              ? new InputKey(
+                  device,
+                  new FakeAdbClientFactory(),
                   undefined,
-                  controller.signal,
-                );
+                  h.timer,
+                  () => client,
+                ).press("enter", 50, undefined, [], {
+                  signal: controller.signal,
+                  onDispatch: () => dispatchCount++,
+                })
+              : action === "multi-finger swipe"
+                ? new ExecuteGesture(device, null, h.timer).execute(fingers, 300, controller.signal)
+                : new PressButton(device, null, h.timer).press(
+                    action,
+                    50,
+                    undefined,
+                    controller.signal,
+                  );
         const outcome = pending.then(
           (value) => ({ value }),
           (error) => ({ error: error as unknown }),
@@ -150,7 +202,9 @@ for (const action of [
           expect("error" in result).toBe(true);
           if ("error" in result) {
             expect(String(result.error)).toContain(
-              action === "multi-finger swipe" ? "caller cancelled" : "Operation cancelled",
+              action === "multi-finger swipe" || action === "recentApps tool"
+                ? "caller cancelled"
+                : "Operation cancelled",
             );
           }
         } else if (unconfirmed && action !== "home") {
@@ -174,7 +228,15 @@ for (const action of [
           if ("value" in result && action === "multi-finger swipe") {
             expect(result.value).toEqual({ pathLength: 2, duration: 300, platform: "ios" });
           }
-          if ("value" in result && action !== "input/key" && action !== "multi-finger swipe") {
+          if ("value" in result && action === "recentApps tool") {
+            expect(result.value).toEqual({ success: true, method: "ios_swipe", error: undefined });
+          }
+          if (
+            "value" in result &&
+            action !== "input/key" &&
+            action !== "multi-finger swipe" &&
+            action !== "recentApps tool"
+          ) {
             expect(result.value).toEqual({ success: true, button: action, keyCode: -1 });
           }
         } else {

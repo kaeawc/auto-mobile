@@ -1,4 +1,5 @@
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
+import { getEventListeners } from "node:events";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 import { describe, expect, spyOn, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
@@ -71,6 +72,54 @@ const cases: PressCase[] = [
 
 for (const action of cases) {
   describe(`${action.name} dispatch contract`, () => {
+    test.each(["never resolves", "resolves after abort"] as const)(
+      "abort during connect that %s rejects without dispatch or resources",
+      async (connection) => {
+        const h = createIosDelegateHarness();
+        const connecting = Promise.withResolvers<boolean>();
+        h.context.ensureConnected = () => connecting.promise;
+        const controller = new AbortController();
+        const cancellation = new ActionableError("cancelled while connecting");
+        let dispatchCount = 0;
+        let settled = false;
+        let rejection: unknown;
+        const outcome = action
+          .request(h, controller.signal, () => dispatchCount++)
+          .then(
+            () => {
+              settled = true;
+            },
+            (error: unknown) => {
+              settled = true;
+              rejection = error;
+            },
+          );
+        controller.abort(cancellation);
+        // Drain promise continuations without advancing time or completing connection.
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+        const settledBeforeConnection = settled;
+        const listenersAfterAbort = getEventListeners(controller.signal, "abort").length;
+        if (connection === "resolves after abort") {
+          connecting.resolve(true);
+          for (let i = 0; i < 20; i++) {
+            await Promise.resolve();
+          }
+        }
+        expect(settledBeforeConnection).toBe(true);
+        await outcome;
+        expect(rejection).toBe(cancellation);
+        expect(dispatchCount).toBe(0);
+        expect(h.sentMessages).toHaveLength(0);
+        expect(h.requestManager.getPendingCount()).toBe(0);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+        expect(h.timer.getPendingIntervalCount()).toBe(0);
+        expect(listenersAfterAbort).toBe(0);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      },
+    );
+
     test.each(["timeout", "socket close", "abort", "ActionableError abort"] as const)(
       "%s after dispatch is unconfirmed with one send",
       async (failure) => {
@@ -98,6 +147,8 @@ for (const action of cases) {
         expect(dispatchCount).toBe(1);
         expect(h.sentMessages).toHaveLength(1);
         expect(h.requestManager.getPendingCount()).toBe(0);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
       },
     );
 

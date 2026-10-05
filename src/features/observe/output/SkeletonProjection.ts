@@ -526,7 +526,7 @@ function isSelectableForReplay(
   );
 }
 
-function assignDuplicateIndexes(
+export function assignDuplicateIndexes(
   entries: SkeletonAccumulator[],
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
 ): void {

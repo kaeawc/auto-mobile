@@ -266,11 +266,9 @@ describe("diffObserveResult", () => {
     expect(caseFolded.changed.find(({ changes }) => changes.selected)?.selector?.index).toBe(1);
   });
 
-  test("a changed entry whose elementId AND label repeat elsewhere in `next` gets a disambiguating `index` (PR #6242 review PRRT_kwDOP-GF5M6fq3iI)", () => {
-    // Two identical toggle rows sharing both resource-id and label — without an
-    // occurrence index, both `changed` entries would emit the SAME selector, so
-    // tapOn would always hit the first match rather than the one that actually
-    // changed (#6238 already solved this exact ambiguity for `skeleton` rows).
+  test("duplicate inert labels omit an index into the selectable list (#9693)", () => {
+    // These bounded labels have no affordance, so neither belongs to the
+    // skeleton's selectable duplicate group even when checked state changes.
     const baseline = obs({
       "resource-id": "root",
       bounds: { left: 0, top: 0, right: 100, bottom: 200 },
@@ -308,11 +306,10 @@ describe("diffObserveResult", () => {
     const diff = diffObserveResult(baseline, next);
 
     expect(diff.changed).toHaveLength(1);
-    // The SECOND occurrence (index 1) is the one that actually changed.
+    // The second occurrence changed, but cannot carry a selectable index.
     expect(diff.changed[0].selector).toEqual({
       elementId: "toggle",
       label: "Airplane mode",
-      index: 1,
     });
   });
 
@@ -1666,7 +1663,7 @@ describe("diffObserveResult", () => {
 });
 
 describe("diffObserveResult — conservative iOS stable identity (#3318)", () => {
-  test("stable-identity repair indexes a duplicate id-less label in the next tree", () => {
+  test("stable-identity repair omits indexes for fields without focus evidence (#9693)", () => {
     const field = (top: number, value: string) => ({
       className: "XCUIElementTypeTextField",
       "ios-accessibility-label": "Name",
@@ -1678,7 +1675,8 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.changed).toHaveLength(1);
-    expect(diff.changed[0].selector).toMatchObject({ label: "Name", index: 1 });
+    expect(diff.changed[0].selector).toMatchObject({ label: "Name" });
+    expect(diff.changed[0].selector?.index).toBeUndefined();
   });
 
   test("iOS text input edits emit one `changed` entry instead of remove+add", () => {

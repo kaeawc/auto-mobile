@@ -300,6 +300,52 @@ describe("navigation resource session resolution", () => {
     expect((await payload(graphUri)).appId).toBe("new");
   });
 
+  test("unbound subscribers receive sole-session updates but reject ambiguous updates", async () => {
+    const server = await connect({});
+    sessions.sessionIds = ["A"];
+    expect((await payload(graphUri)).appId).toBe("app.a");
+    await a.setCurrentApp("app.a.sole-update");
+    await timer.advanceTimeAsync(1000);
+    expect(
+      server.server.notifications.map((notification) => notification.params?.uri).sort(),
+    ).toEqual([graphUri, "automobile:navigation/history", "automobile:navigation/apps"].sort());
+    server.server.notifications.length = 0;
+    sessions.sessionIds = ["A", "B"];
+    await a.setCurrentApp("app.a");
+    await timer.advanceTimeAsync(1000);
+    expect(server.server.notifications).toHaveLength(0);
+    await ResourceRegistry.notifyResourcesUpdated([
+      graphUri,
+      "automobile:navigation/history",
+      "automobile:navigation/apps",
+    ]);
+    expect(server.server.notifications).toHaveLength(3);
+  });
+
+  test("injected current-app screenshot reads avoid exporting the graph", async () => {
+    const fake = new FakeNavigationGraphManager();
+    fake.setCurrentAppId("injected");
+    fake.addNode({ screenName: "Home", firstSeenAt: 1, lastSeenAt: 1, visitCount: 1 });
+    setNavigationGraphProvider(fake);
+    setNavigationScreenshotProvider({
+      async findExistingScreenshot(appId, screen) {
+        return `${appId}/${screen}`;
+      },
+      async readScreenshot(path) {
+        return Buffer.from(path);
+      },
+    });
+    const exportSummary = spyOn(fake, "exportGraphSummary");
+    try {
+      expect((await read("automobile:navigation/nodes/1/screenshot")).blob).toBe(
+        Buffer.from("injected/Home").toString("base64"),
+      );
+      expect(exportSummary).not.toHaveBeenCalled();
+    } finally {
+      exportSummary.mockRestore();
+    }
+  });
+
   test("overlapping session updates debounce independently and preserve sibling listeners", async () => {
     const first = await connect({ sessionUuid: "A" });
     const second = await connect({ sessionUuid: "B" });

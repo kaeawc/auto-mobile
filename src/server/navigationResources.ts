@@ -12,6 +12,7 @@ import {
 import { NavigationScreenshotManager } from "../features/navigation/NavigationScreenshotManager";
 import { testCoverageAnalyzer } from "../features/navigation/TestCoverageAnalyzer";
 import {
+  NavigationGraph,
   NavigationGraphSummary,
   NavigationGraphSummaryProvider,
   NavigationGraphNodeResource,
@@ -93,9 +94,15 @@ function decodeUriParam(raw: string | undefined): string | undefined {
 type NavigationGraphResourceProvider = NavigationGraphSummaryProvider &
   NavigationGraphNodeResourceProvider &
   NavigationGraphHistoryProvider &
-  NavigationAppListProvider;
+  NavigationAppListProvider &
+  Pick<NavigationGraph, "getCurrentAppId">;
 
 let navigationGraphProvider: NavigationGraphResourceProvider | null = null;
+
+function getActiveNavigationSessions() {
+  const daemonState = DaemonState.getInstance();
+  return daemonState.isInitialized() ? daemonState.getSessionManager().getAllSessions() : [];
+}
 
 function resolveUnscopedNavigationGraphManager(
   context?: ResourceReadContext,
@@ -104,17 +111,14 @@ function resolveUnscopedNavigationGraphManager(
   if (requireCurrentApp && context?.sessionUuid) {
     return NavigationGraphManager.getInstanceForSession(context.sessionUuid);
   }
-  const daemonState = DaemonState.getInstance();
-  if (daemonState.isInitialized()) {
-    const sessions = daemonState.getSessionManager().getAllSessions();
-    if (requireCurrentApp && sessions.length > 1) {
-      throw new Error(
-        "Multiple device sessions are active. Read from a session-bound connection or use an app-scoped ?appId= URI where supported.",
-      );
-    }
-    if (sessions.length === 1) {
-      return NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId);
-    }
+  const sessions = getActiveNavigationSessions();
+  if (requireCurrentApp && sessions.length > 1) {
+    throw new Error(
+      "Multiple device sessions are active. Read from a session-bound connection or use an app-scoped ?appId= URI where supported.",
+    );
+  }
+  if (sessions.length === 1) {
+    return NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId);
   }
   return NavigationGraphManager.getInstance();
 }
@@ -140,6 +144,9 @@ function scheduleNavigationGraphUpdate(sessionUuid?: string): void {
     sessionUuid,
     defaultTimer.setTimeout(() => {
       updateTimeouts.delete(sessionUuid);
+      const sessions = sessionUuid ? getActiveNavigationSessions() : [];
+      // Match unbound reads at delivery time, after the debounce has elapsed.
+      const unboundSessionUuid = sessions.length === 1 ? sessions[0]!.sessionId : undefined;
       void ResourceRegistry.notifyResourcesUpdated(
         [
           NAVIGATION_RESOURCE_URIS.APPS,
@@ -147,6 +154,7 @@ function scheduleNavigationGraphUpdate(sessionUuid?: string): void {
           NAVIGATION_RESOURCE_URIS.HISTORY,
         ],
         sessionUuid,
+        unboundSessionUuid,
       ).catch((error) => {
         logger.warn("[NavigationResources] Failed to notify navigation updates", error);
       });
@@ -484,7 +492,7 @@ async function getNavigationNodeScreenshotResource(
     // appId short-circuits the current-app read, so offline browse never touches
     // the foreground singleton.
     const provider = getNavigationGraphProvider(context, !appId);
-    const resolvedAppId = appId ?? (await provider.exportGraphSummary()).appId;
+    const resolvedAppId = appId ?? provider.getCurrentAppId();
     if (!resolvedAppId) {
       return {
         uri,

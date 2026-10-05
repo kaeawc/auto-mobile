@@ -499,7 +499,11 @@ class ResourceRegistryClass {
   }
 
   // Send resource update notification (only if client is subscribed)
-  async notifyResourceUpdated(uri: string, sessionUuid?: string): Promise<void> {
+  async notifyResourceUpdated(
+    uri: string,
+    sessionUuid?: string,
+    unboundSessionUuid?: string,
+  ): Promise<void> {
     const resource = this.getResource(uri);
     const templateMatch = resource ? undefined : this.matchTemplate(uri);
     if (!resource && !templateMatch) {
@@ -514,7 +518,7 @@ class ResourceRegistryClass {
 
     // Retain every live session (issue #3223), but resolve its own subscriptions.
     for (const server of this.servers) {
-      if (!this.ownsUpdateSession(server, sessionUuid)) {
+      if (!this.ownsUpdateSession(server, sessionUuid, unboundSessionUuid)) {
         continue;
       }
       const subscriptions = this.subscriptions.get(server);
@@ -531,12 +535,20 @@ class ResourceRegistryClass {
     }
   }
 
-  private ownsUpdateSession(server: McpServer, sessionUuid?: string): boolean {
+  private ownsUpdateSession(
+    server: McpServer,
+    sessionUuid?: string,
+    unboundSessionUuid?: string,
+  ): boolean {
     if (!sessionUuid) {
       return true;
     }
     const context = this.readContexts.get(server)?.(new AbortController().signal);
-    return context?.sessionUuid === sessionUuid || context?.ownsSession?.(sessionUuid) === true;
+    return (
+      context?.sessionUuid === sessionUuid ||
+      context?.ownsSession?.(sessionUuid) === true ||
+      (!context?.sessionUuid && unboundSessionUuid === sessionUuid)
+    );
   }
 
   private async notifySubscribedServer(server: McpServer, targetUris: string[]): Promise<void> {
@@ -559,9 +571,14 @@ class ResourceRegistryClass {
   }
 
   // Send notifications for multiple resources
-  async notifyResourcesUpdated(uris: string[], sessionUuid?: string): Promise<void> {
+  // Callers may supply the session that unbound resource reads currently resolve to.
+  async notifyResourcesUpdated(
+    uris: string[],
+    sessionUuid?: string,
+    unboundSessionUuid?: string,
+  ): Promise<void> {
     for (const uri of uris) {
-      await this.notifyResourceUpdated(uri, sessionUuid);
+      await this.notifyResourceUpdated(uri, sessionUuid, unboundSessionUuid);
     }
   }
 

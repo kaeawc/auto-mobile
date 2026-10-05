@@ -13,6 +13,7 @@ import {
   type NavigationGraphService,
 } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
+import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
 import { PressButton } from "../action/PressButton";
@@ -47,6 +48,7 @@ import {
   getElementKey,
   filterUnexhaustedElements,
   tapSelectorFor,
+  tapCoordinatesFor,
 } from "./ExploreElementExtraction";
 
 // Import element scoring functions
@@ -949,13 +951,24 @@ export class Explore extends BaseVisualChange {
         const selector = observation.viewHierarchy
           ? tapSelectorFor(element, observation.viewHierarchy)
           : null;
-        if (!selector) {
-          logger.warn(`[Explore] Element has no tap selector: ${elementKey}`);
+        const coordinates = selector ? null : tapCoordinatesFor(element);
+        if (!selector && !coordinates) {
+          logger.warn(
+            `[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=${element["class"] || "<empty>"}; bounds=${JSON.stringify(element.bounds)}`,
+          );
           return false;
         }
-        const tapOn = new TapOnElement(this.device, this.adb);
-
-        const tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress, signal);
+        const tapResult = selector
+          ? await new TapOnElement(this.device, this.adb).execute(
+              { ...selector, action: "tap" },
+              progress,
+              signal,
+            )
+          : await new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
+              { ...coordinates!, action: "tap" },
+              progress,
+              signal,
+            );
 
         // Reset consecutive back count since we did a tap
         this.consecutiveBackCount = 0;

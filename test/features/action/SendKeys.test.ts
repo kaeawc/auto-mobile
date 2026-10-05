@@ -492,6 +492,8 @@ function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
 
 const priorImeIdForFake = "com.example.keyboard/.Ime";
 const commitImeIdForFake = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
+const typeFocusedInputError =
+  'Android event delivery requires a focused editable field. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.';
 
 describe("SendKeys", () => {
   function imeVerificationHarness(observer: SendKeysObserver) {
@@ -541,8 +543,8 @@ describe("SendKeys", () => {
       success: false,
       completedCommands: 0,
       failedIndex: 0,
-      error: clearResult.error,
-      commands: [{ index: 0, action: "type", success: false, error: clearResult.error }],
+      error: typeFocusedInputError,
+      commands: [{ index: 0, action: "type", success: false, error: typeFocusedInputError }],
     });
     expect(textClient.calls).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -571,17 +573,79 @@ describe("SendKeys", () => {
     },
   );
 
-  test("explicit IME insert rejects absent editable focus on its existing read-back", async () => {
+  test.each(["insert", "replace"] as const)(
+    "explicit IME %s rejects absent editable focus on its existing read-back",
+    async (operation) => {
+      const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
+      const { executor, textClient } = imeVerificationHarness(observer);
+      expect(
+        await executor.type({ action: "type", text: "a", mode: "ime", operation }),
+      ).toMatchObject({
+        success: false,
+        partialApplication: true,
+        error: expect.stringContaining("Android event delivery requires a focused editable field"),
+      });
+      expect(observer.calls).toBe(1);
+      expect(textClient.commitViaImeCalls).toHaveLength(1);
+    },
+  );
+
+  test.each([
+    ["insert", false],
+    ["replace", false],
+    ["insert", true],
+    ["replace", true],
+  ] as const)(
+    "auto %s accepts post-commit focus loss as unverifiable (settle=%s)",
+    async (operation, settle) => {
+      let reads = 0;
+      const { executor, textClient, timer } = imeVerificationHarness({
+        execute: async () => {
+          reads++;
+          return focusedAndroidObservation(
+            "",
+            { focused: reads === 1 || (settle && reads === 2) ? "true" : "false" },
+            0,
+          );
+        },
+      });
+      const result = await executor.type({ action: "type", text: "123456", operation });
+      expect(result).toMatchObject({ success: true, resolvedMode: "ime", committedUnits: 6 });
+      expect(result.error).toBeUndefined();
+      expect(result.partialApplication).toBeUndefined();
+      expect(result.verified).toBeUndefined(); // Same convention as an unreadable IME field.
+      expect(textClient.commitViaImeCalls).toHaveLength(1);
+      expect(textClient.calls.includes("clear")).toBe(operation === "replace");
+      expect(reads).toBe(settle ? 3 : 2);
+      expect(timer.getSleepHistory()).toEqual(settle ? [150] : []);
+    },
+  );
+
+  test("auto replace keeps failing read-back when its pre-check never confirmed editable focus", async () => {
     const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
     const { executor, textClient } = imeVerificationHarness(observer);
-    expect(await executor.type({ action: "type", text: "a", mode: "ime" })).toMatchObject({
+    expect(
+      await executor.type({ action: "type", text: "123456", operation: "replace" }),
+    ).toMatchObject({
       success: false,
       partialApplication: true,
       error: expect.stringContaining("Android event delivery requires a focused editable field"),
     });
-    expect(observer.calls).toBe(1);
+    expect(observer.calls).toBe(2);
     expect(textClient.commitViaImeCalls).toHaveLength(1);
   });
+
+  test.each([undefined, "ime", "eventLast", "eventAll", "eventOnly"] as const)(
+    "type refusal offers mode imeKeyEvents (requested=%s)",
+    async (mode) => {
+      const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
+      const { executor } = imeVerificationHarness(observer);
+      const result = await executor.type({ action: "type", text: "a", mode });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('mode: "imeKeyEvents"');
+      expect(result.error).toContain("types without requiring a focused editable node");
+    },
+  );
 
   test("clear keeps the same failure and read/dispatch counts without editable focus", async () => {
     const observer = createObserver(focusedAndroidObservation("", { focused: "false" }, 0));
@@ -622,7 +686,7 @@ describe("SendKeys", () => {
     const { executor, adb, textClient } = imeVerificationHarness(observer);
     expect(await executor.type({ action: "type", text: "a", mode: "eventOnly" })).toMatchObject({
       success: false,
-      error: "Android event delivery requires a focused editable field",
+      error: typeFocusedInputError,
     });
     expect(observer.calls).toBe(1);
     expect(adb.getExecutedCommands()).toEqual([]);
@@ -3311,7 +3375,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
       expect(result).toMatchObject({
         success: false,
-        error: "Android event delivery requires a focused editable field",
+        error: typeFocusedInputError,
       });
       expect(calls).toEqual([]);
       expect(adb.getExecutedCommands()).toEqual([]);

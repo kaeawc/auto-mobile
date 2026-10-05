@@ -156,12 +156,28 @@ export class Clipboard {
     const before =
       action === "paste" ? await this.readIOSPasteValueBefore(client, signal) : undefined;
     throwIfAborted(signal);
-    const result = await awaitWhileRequestIsLive(
-      client.requestClipboard(action, text, undefined, undefined, signal),
-      signal,
-    );
+    let dispatched = false;
+    let result: Awaited<ReturnType<ClipboardCtrlProxy["requestClipboard"]>>;
+    try {
+      result = await awaitWhileRequestIsLive(
+        client.requestClipboard(action, text, undefined, undefined, signal, () => {
+          // copy sets supplied text and clear is idempotent; only paste risks duplication.
+          dispatched = action === "paste";
+        }),
+        signal,
+      );
+    } catch (error) {
+      if (dispatched) {
+        logger.warn("[Clipboard] iOS paste reply was not confirmed", error);
+        return this.indeterminatePasteResult(errorMessage(error));
+      }
+      throw error;
+    }
 
     if (!result.success) {
+      if (dispatched && !result.acknowledged) {
+        return this.indeterminatePasteResult(result.error);
+      }
       return { success: false, action, error: result.error };
     }
 

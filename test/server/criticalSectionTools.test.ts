@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test }
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
 import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
@@ -1185,6 +1185,72 @@ describe("criticalSection tool", () => {
         expect(nextStep).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe("warnings before a required sub-step failure", () => {
+    let restoreTools: () => void;
+    let restoreCoordinator: () => void;
+    let coordinator: CriticalSectionCoordinator;
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "warning-failure-device",
+      name: "Warning Failure Device",
+    };
+
+    beforeEach(() => {
+      restoreTools = preserveToolRegistry();
+      coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    });
+
+    afterEach(() => {
+      coordinator.reset();
+      restoreCoordinator();
+      restoreTools();
+    });
+
+    test.each([false, true])("keeps earlier warnings with optional skip=%s", async (optional) => {
+      ToolRegistry.register("warningFirst", "warns", z.object({}), async () => ({
+        success: true,
+        warnings: ["keyboard dismissal failed"],
+      }));
+      ToolRegistry.register("warningSecond", "warns or skips", z.object({}), async () =>
+        optional
+          ? { success: false, error: "optional failure" }
+          : { success: true, warnings: ["epilogue failed"] },
+      );
+      ToolRegistry.register("warningThird", "fails", z.object({}), async () => {
+        throw new ActionableError("required failure");
+      });
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      const error: unknown = await section.deviceAwareHandler!(
+        device,
+        section.schema.parse({
+          lock: "warning-failure-lock",
+          deviceCount: 1,
+          steps: [
+            { tool: "warningFirst", params: { device: "A" } },
+            { tool: "warningSecond", params: { device: "A" }, optional },
+            { tool: "warningThird", params: { device: "A" } },
+          ],
+        }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toMatchObject({
+        message:
+          'Critical section "warning-failure-lock" failed for device warning-failure-device: Failed at step 3/3 (warningThird): required failure',
+        warnings: [
+          "step 1 (warningFirst): keyboard dismissal failed",
+          optional
+            ? "step 2 (warningSecond): optional step failed; skipped: optional failure"
+            : "step 2 (warningSecond): epilogue failed",
+        ],
+      });
+    });
   });
 
   // A best-effort epilogue failure (issue #6868) keeps its step successful and

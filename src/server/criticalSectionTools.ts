@@ -126,6 +126,16 @@ function formatCriticalSectionError(result: Record<string, unknown>, tool: strin
 // PlanExecutor treats failed tool lookup as fatal even for optional steps.
 class CriticalSectionToolNotFoundError extends ActionableError {}
 
+/** Retain diagnostics from sub-steps that ran before a required failure. */
+class CriticalSectionStepError extends ActionableError {
+  readonly warnings: string[];
+
+  constructor(message: string, warnings: string[]) {
+    super(message);
+    this.warnings = [...warnings];
+  }
+}
+
 function handleCriticalSectionStepFailure(
   error: unknown,
   step: { tool: string; optional?: boolean },
@@ -158,8 +168,9 @@ function handleCriticalSectionStepFailure(
   logger.error(
     `Device ${deviceId} failed at step ${stepNumber}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
   );
-  throw new ActionableError(
+  throw new CriticalSectionStepError(
     `Failed at step ${stepNumber}/${totalSteps} (${step.tool}): ${errorMsg}`,
+    warnings,
   );
 }
 
@@ -305,9 +316,11 @@ const criticalSectionHandler = async (
     if (isDeviceLostError(error)) {
       throw error;
     }
-    throw new ActionableError(
-      `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
-    );
+    const message = `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`;
+    if (error instanceof CriticalSectionStepError) {
+      throw new CriticalSectionStepError(message, error.warnings);
+    }
+    throw new ActionableError(message);
   } finally {
     // Release the lock if we acquired it
     if (release) {

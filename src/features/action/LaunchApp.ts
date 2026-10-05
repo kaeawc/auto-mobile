@@ -417,6 +417,22 @@ export class LaunchApp extends BaseVisualChange {
     );
   }
 
+  private async checkIosAppNotInstalled(
+    bundleId: string,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<LaunchAppResult | undefined> {
+    const installedAppsResult = await perf.track("checkInstalled", () =>
+      this.installedAppsProvider.listInstalledApps(signal),
+    );
+    this.assertLaunchNotAborted(signal);
+    if (installedAppsResult.successful && !installedAppsResult.apps.includes(bundleId)) {
+      logger.info("App is not installed");
+      return { success: false, packageName: bundleId, error: "App is not installed" };
+    }
+    return undefined;
+  }
+
   /**
    * Launch an iOS app by bundle identifier
    * @param bundleId - The bundle identifier to launch
@@ -441,14 +457,6 @@ export class LaunchApp extends BaseVisualChange {
       const result = await this.observedInteraction(
         async () => {
           this.assertLaunchNotAborted(signal);
-          // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
-          if (!isSystemBundleId) {
-            IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
-          }
-          const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
-
-          let launchResult: { success: boolean; pid?: number; error?: string };
-
           // Clearing app data always implies a fresh process: the app is
           // terminated, its sandbox wiped, then relaunched. Treat it as a cold
           // boot so we go through the terminate → clearCache → launch path.
@@ -463,6 +471,24 @@ export class LaunchApp extends BaseVisualChange {
             deviceAppLauncher: this.deviceAppLauncher,
           });
           const simulator = backend.kind === "simulator";
+
+          // Reject missing simulator apps before termination, data clearing, or
+          // CtrlProxy targeting. An unsuccessful listing is inconclusive.
+          if (needsColdStart && !isSystemBundleId && simulator) {
+            const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal);
+            if (missingApp) {
+              perf.end();
+              return missingApp;
+            }
+          }
+
+          // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
+          if (!isSystemBundleId) {
+            IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
+          }
+          const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
+
+          let launchResult: { success: boolean; pid?: number; error?: string };
 
           if (needsColdStart) {
             // Cold boot: use simctl (simulator) / devicectl (device) directly.
@@ -547,18 +573,10 @@ export class LaunchApp extends BaseVisualChange {
             // simulators — simctl listapps is slow (~2s) and returns nothing for
             // a physical device, where devicectl's launch error is authoritative.
             if (!launchResult.success && !isSystemBundleId && simulator) {
-              const installedAppsResult = await perf.track("checkInstalled", () =>
-                this.installedAppsProvider.listInstalledApps(signal),
-              );
-              this.assertLaunchNotAborted(signal);
-              if (installedAppsResult.successful && !installedAppsResult.apps.includes(bundleId)) {
-                logger.info("App is not installed");
+              const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal);
+              if (missingApp) {
                 perf.end();
-                return {
-                  success: false,
-                  packageName: bundleId,
-                  error: "App is not installed",
-                };
+                return missingApp;
               }
             }
           }

@@ -32,6 +32,7 @@ import { type StoppedSegment, writeSegmentManifest } from "./segmentManifest";
 import {
   getVideoRecordingMetadata as defaultGetVideoRecordingMetadata,
   getVideoRecordingStatus as defaultGetVideoRecordingStatus,
+  rollbackVideoRecordingStart as defaultRollbackVideoRecordingStart,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
@@ -43,6 +44,8 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import type { Plan } from "../models/Plan";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
+import { runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -86,6 +89,8 @@ export interface VideoRecorder {
   stopVideoRecording: typeof defaultStopVideoRecording;
   getVideoRecordingStatus?: typeof defaultGetVideoRecordingStatus;
   getVideoRecordingMetadata?: typeof defaultGetVideoRecordingMetadata;
+  /** Force-stops and discards a recording without pulling it; used when the plan was cancelled. */
+  rollbackVideoRecordingStart?: typeof defaultRollbackVideoRecordingStart;
 }
 
 /**
@@ -128,6 +133,13 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_IOS_VIDEO_MAX_DURATION_SECONDS = 300;
 // Allow small timestamp skew between backend completion and the orchestrator stop attempt.
 const IOS_VIDEO_PLAN_END_TOLERANCE_MS = 100;
+/**
+ * Bound on discarding a cancelled plan's recording (#9885). The discard is a
+ * device-side `pkill -9 screenrecord` plus `rm -f` and a host process reap, which
+ * takes well under a second when the device answers; this caps a wedged device so a
+ * cancelled `executePlan` still returns promptly.
+ */
+const CANCELLED_VIDEO_DISCARD_TIMEOUT_MS = 5_000;
 
 const getDeviceType = (device: BootedDevice): "emulator" | "simulator" | "device" => {
   if (device.platform === "android") {
@@ -301,6 +313,7 @@ export class PlanExecutionOrchestrator {
       stopVideoRecording: defaultStopVideoRecording,
       getVideoRecordingStatus: defaultGetVideoRecordingStatus,
       getVideoRecordingMetadata: defaultGetVideoRecordingMetadata,
+      rollbackVideoRecordingStart: defaultRollbackVideoRecordingStart,
     };
   }
 
@@ -669,6 +682,9 @@ export class PlanExecutionOrchestrator {
           // drive the Android plan path with fakes (production passes the real manager).
           startVideoRecording: this.videoRecorder.startVideoRecording,
           stopVideoRecording: this.videoRecorder.stopVideoRecording,
+          ...(this.videoRecorder.rollbackVideoRecordingStart
+            ? { rollbackVideoRecordingStart: this.videoRecorder.rollbackVideoRecordingStart }
+            : {}),
         });
         await session.startFirstSegment();
         state.androidSession = session;
@@ -727,6 +743,12 @@ export class PlanExecutionOrchestrator {
   }
 
   private async finalizeVideo(video: VideoState): Promise<FinalizedVideo> {
+    if (this.signal?.aborted) {
+      const discard = this.cancelledVideoDiscard(video);
+      if (discard) {
+        return this.discardCancelledVideo(discard);
+      }
+    }
     if (video.androidSession) {
       return this.finalizeWithFallback(
         "Finalizing segmented video recording",
@@ -802,6 +824,51 @@ export class PlanExecutionOrchestrator {
       videoRecordingIds: [],
       ...(video.warnings?.length ? { videoWarnings: [...new Set(video.warnings)] } : {}),
     };
+  }
+
+  /**
+   * A plan cancelled by a session release no longer owns its device, and every
+   * adb call under the cancelled request signal fails at once, so a graceful
+   * stop-and-pull can only burn its waits (about 13.5 s measured, #9885). Stop the
+   * capture and delete the device file on a short, non-aborted budget instead,
+   * and skip the pull.
+   */
+  private async discardCancelledVideo(discard: {
+    run: () => Promise<void>;
+    warnings: string[];
+  }): Promise<FinalizedVideo> {
+    const warnings = [...discard.warnings];
+    this.perfLog("Plan cancelled; discarding video recording without a pull");
+    try {
+      // Teardown must not inherit the aborted request signal, or it would fail before it started.
+      await runWithAbortSignal(undefined, () =>
+        raceWithDeadline(discard.run, {
+          timer: this.timer,
+          timeoutMs: CANCELLED_VIDEO_DISCARD_TIMEOUT_MS,
+          label: "Cancelled plan video discard",
+        }),
+      );
+      warnings.push("Plan was cancelled; its video recording was stopped and discarded");
+    } catch (error) {
+      logger.warn(`Failed to discard video of a cancelled plan: ${errorMessage(error)}`, error);
+      warnings.push(`Failed to discard video of a cancelled plan: ${errorMessage(error)}`);
+    }
+    return { videoFilePaths: [], videoRecordingIds: [], videoWarnings: [...new Set(warnings)] };
+  }
+
+  /** How to discard this plan's recording without a pull, or undefined when no discard seam exists. */
+  private cancelledVideoDiscard(
+    video: VideoState,
+  ): { run: () => Promise<void>; warnings: string[] } | undefined {
+    const warnings = video.warnings ?? [];
+    const { androidSession, iosRecordingId } = video;
+    const rollback = this.videoRecorder.rollbackVideoRecordingStart;
+    if (androidSession) {
+      return { run: () => androidSession.abort(), warnings };
+    }
+    return iosRecordingId && rollback
+      ? { run: () => rollback(iosRecordingId), warnings }
+      : undefined;
   }
 
   private async recoverCompletedIosVideo(

@@ -2,13 +2,21 @@ package dev.jasonpearson.automobile.sdk.anr
 
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
+import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.SdkConstants
+import dev.jasonpearson.automobile.sdk.events.BatchDeliveryScheduler
 import dev.jasonpearson.automobile.sdk.logging.FakeSdkLogger
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -26,6 +34,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowActivityManager.ApplicationExitInfoBuilder
+import org.robolectric.shadows.ShadowBroadcastPendingResult
+import org.robolectric.util.ReflectionHelpers
+import org.robolectric.util.ReflectionHelpers.ClassParameter
 
 /**
  * Unit tests for [AutoMobileAnr] availability gating and safe initialization. ANR detection is
@@ -368,6 +379,287 @@ class AutoMobileAnrTest {
     assertEquals(0, secondLaunch.attempts)
   }
 
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `unacknowledged ordered ANR preserves cursor and next initialize resends`() {
+    installAckCapableCtrlProxy()
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(0L, storedTimestamp())
+    sender.respond(0)
+    assertEquals(0L, storedTimestamp())
+    assertNull(storedIds())
+    AutoMobileAnr.initialize(sender)
+    sender.respond(0)
+    assertEquals(2, sender.ordered.size)
+    assertEquals(0, sender.attempts)
+    assertEquals(
+      sender.ordered[0].getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
+      sender.ordered[1].getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
+    )
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `accepted ANR persists both cursor fields and is not sent again`() {
+    installAckCapableCtrlProxy()
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(0L, storedTimestamp())
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(20L, storedTimestamp())
+    assertEquals(setOf(identity(123, context.packageName)), storedIds())
+    AutoMobileAnr.initialize(sender)
+    assertEquals(1, sender.ordered.size)
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `initialize returns before acknowledgement and overlapping initialize sends once`() {
+    val timer = ackScheduler()
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(1, sender.ordered.size)
+    assertEquals(1, timer.tasks.size)
+    assertEquals(0L, storedTimestamp())
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertTrue(timer.tasks.isEmpty())
+    assertEquals(20L, storedTimestamp())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `timeout leaves cursor unchanged and late acceptance cannot advance it`() {
+    val timer = ackScheduler()
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    timer.fireTimeout()
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(0L, storedTimestamp())
+    assertNull(storedIds())
+    assertEquals(1, sender.ordered.size)
+    assertTrue(timer.tasks.isEmpty())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `first unacknowledged ANR stops newer ANRs from advancing cursor`() {
+    ackScheduler()
+    addAnr(timestamp = 30L, pid = 102)
+    addAnr(timestamp = 20L, pid = 101)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(listOf(101), sender.orderedEvents.map { it.pid })
+    sender.respond(-1)
+    assertEquals(0L, storedTimestamp())
+    assertEquals(1, sender.ordered.size)
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `accepted prefix persists before next send and rejected suffix retries alone`() {
+    ackScheduler()
+    addAnr(timestamp = 30L, pid = 102)
+    addAnr(timestamp = 20L, pid = 101)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(20L, storedTimestamp())
+    assertEquals(listOf(101, 102), sender.orderedEvents.map { it.pid })
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_INVALID_PAYLOAD)
+    assertEquals(20L, storedTimestamp())
+    AutoMobileAnr.initialize(sender)
+    assertEquals(listOf(101, 102, 102), sender.orderedEvents.map { it.pid })
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `accepted equal timestamp prefix retries only unacknowledged identity`() {
+    ackScheduler()
+    addAnr(timestamp = 20L, pid = 101)
+    addAnr(timestamp = 20L, pid = 102)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    val acceptedPid = sender.orderedEvents.first().pid
+    assertEquals(setOf(identity(acceptedPid, context.packageName)), storedIds())
+    sender.respond(0)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(sender.orderedEvents[1].pid, sender.orderedEvents[2].pid)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(2, storedIds()?.size)
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `never acknowledging receiver costs one send and one timeout per start`() {
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    repeat(5) { start ->
+      val timer = ackScheduler()
+      AutoMobileAnr.initialize(sender)
+      assertEquals(start + 1, sender.ordered.size)
+      assertEquals(1, timer.tasks.size)
+      timer.fireTimeout()
+      assertTrue(timer.tasks.isEmpty())
+      assertEquals(0L, storedTimestamp())
+      AutoMobileAnr.reset()
+    }
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `reset cancels pending timeout and ignores stale callback after new scan`() {
+    val timer = ackScheduler()
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    AutoMobileAnr.reset()
+    assertTrue(timer.tasks.isEmpty())
+    ackScheduler()
+    AutoMobileAnr.initialize(sender)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(0L, storedTimestamp())
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    assertEquals(20L, storedTimestamp())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `legacy CtrlProxy uses plain send and advances without waiting`() {
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(1, sender.attempts)
+    assertTrue(sender.ordered.isEmpty())
+    assertEquals(20L, storedTimestamp())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `ack arrival wins over timeout while scheduler dispatch is queued`() {
+    val timer = ackScheduler()
+    timer.queueResults = true
+    addAnr(timestamp = 20L)
+    val sender = OrderedBroadcastContext(context)
+    AutoMobileAnr.initialize(sender)
+    sender.respond(SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
+    timer.fireTimeout()
+    assertEquals(0L, storedTimestamp())
+    timer.completions.removeAt(0).run()
+    assertEquals(20L, storedTimestamp())
+    assertTrue(timer.completions.isEmpty())
+  }
+
+  @Test
+  @Config(sdk = [Build.VERSION_CODES.R])
+  fun `ordered send exception stops scan without retry or advancing cursor`() {
+    val timer = ackScheduler()
+    addAnr(timestamp = 20L)
+    addAnr(timestamp = 30L)
+    val sender = OrderedBroadcastContext(context, fail = true)
+    AutoMobileAnr.initialize(sender)
+    assertEquals(1, sender.ordered.size)
+    assertEquals(0L, storedTimestamp())
+    assertTrue(timer.tasks.isEmpty())
+  }
+
+  private fun installAckCapableCtrlProxy() {
+    val info =
+      PackageInfo().apply {
+        packageName = SdkConstants.CTRL_PROXY_PACKAGE
+        applicationInfo =
+          ApplicationInfo().apply {
+            packageName = SdkConstants.CTRL_PROXY_PACKAGE
+            metaData =
+              Bundle().apply {
+                putBoolean(SdkEventBatchBroadcastContract.META_DATA_ACK_SUPPORTED, true)
+              }
+          }
+      }
+    shadowOf(context.packageManager).installPackage(info)
+  }
+
+  private fun ackScheduler(): FakeDeliveryScheduler {
+    installAckCapableCtrlProxy()
+    return FakeDeliveryScheduler().also {
+      ReflectionHelpers.setField(AutoMobileAnr, "deliveryScheduler", it)
+    }
+  }
+
+  private class FakeDeliveryScheduler : BatchDeliveryScheduler {
+    val tasks = mutableListOf<Runnable>()
+    val completions = mutableListOf<Runnable>()
+    var queueResults = false
+
+    override fun schedule(task: Runnable, delayMs: Long): () -> Unit {
+      assertEquals(5_000L, delayMs)
+      tasks.add(task)
+      return { tasks.remove(task) }
+    }
+
+    override fun execute(task: Runnable) {
+      if (queueResults) completions.add(task) else task.run()
+    }
+
+    fun fireTimeout() {
+      tasks.removeAt(0).run()
+    }
+  }
+
+  private class OrderedBroadcastContext(base: Context, private val fail: Boolean = false) :
+    BroadcastContext(base) {
+    val ordered = mutableListOf<Intent>()
+    private val receivers = mutableListOf<BroadcastReceiver>()
+    val orderedEvents: List<SdkAnrEvent>
+      get() = ordered.map {
+        SdkEventSerializer.anrEventFromJson(
+          it.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!
+        )!!
+      }
+
+    override fun sendOrderedBroadcast(
+      intent: Intent,
+      receiverPermission: String?,
+      resultReceiver: BroadcastReceiver?,
+      scheduler: Handler?,
+      initialCode: Int,
+      initialData: String?,
+      initialExtras: Bundle?,
+    ) {
+      assertEquals(0, initialCode)
+      assertEquals(SdkConstants.CTRL_PROXY_PACKAGE, intent.`package`)
+      assertEquals(AutoMobileAnr.ACTION_ANR, intent.action)
+      assertEquals(
+        SdkEventSerializer.EventTypes.ANR,
+        intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE),
+      )
+      ordered.add(intent)
+      if (fail) throw IllegalStateException("Test ordered send failure")
+      receivers.add(requireNotNull(resultReceiver))
+    }
+
+    fun respond(code: Int) {
+      val receiver = receivers.removeAt(0)
+      val pendingResult: BroadcastReceiver.PendingResult =
+        ReflectionHelpers.callStaticMethod(
+          ShadowBroadcastPendingResult::class.java,
+          "create",
+          ClassParameter.from(Int::class.javaPrimitiveType!!, code),
+          ClassParameter.from(String::class.java, null),
+          ClassParameter.from(Bundle::class.java, null),
+          ClassParameter.from(Boolean::class.javaPrimitiveType!!, true),
+        )
+      ReflectionHelpers.setField(receiver, "mPendingResult", pendingResult)
+      receiver.onReceive(this, null)
+    }
+  }
+
   private fun addAnr(
     timestamp: Long,
     pid: Int = 123,
@@ -400,7 +692,7 @@ class AutoMobileAnrTest {
   private fun identity(pid: Int, processName: String): String =
     "$pid:${processName.length}:$processName"
 
-  private class BroadcastContext(
+  private open class BroadcastContext(
     base: Context,
     private val fail: Boolean = false,
     private val failOnAttempts: Set<Int> = emptySet(),

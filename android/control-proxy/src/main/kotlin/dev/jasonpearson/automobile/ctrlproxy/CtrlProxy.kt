@@ -1313,38 +1313,58 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
     }
 
+  private val anrBroadcastHandler =
+    SdkAnrBroadcastHandler(
+      enqueue = { event ->
+        !serviceScope
+          .launch {
+            broadcastAnrEvent(
+              timestamp = event.timestamp,
+              pid = event.pid,
+              processName = event.processName,
+              importance = event.importance,
+              trace = event.trace,
+              reason = event.reason,
+              packageName = event.applicationId ?: "unknown",
+              appVersion = event.appVersion,
+              deviceModel = event.deviceInfo?.model ?: "unknown",
+              deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
+              osVersion = event.deviceInfo?.osVersion ?: "unknown",
+              sdkInt = event.deviceInfo?.sdkInt ?: 0,
+            )
+          }
+          .isCancelled
+      },
+      log =
+        object : SdkEventBatchBroadcastHandler.LogSink {
+          override fun debug(message: String) {
+            Log.d(TAG, message)
+          }
+
+          override fun warn(message: String) {
+            Log.w(TAG, message)
+          }
+        },
+    )
+
   private val anrReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileAnr.ACTION_ANR) {
-          return
-        }
-
+        if (intent == null || intent.action != AutoMobileAnr.ACTION_ANR) return
         try {
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.anrEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(TAG, "Received ANR: pid=${event.pid} from ${event.applicationId}")
+          val ordered = isOrderedBroadcast
+          val setBroadcastResult = this::setResultCode
+          anrBroadcastHandler.handle(
+            intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
+            object : SdkEventBatchBroadcastHandler.ResultSink {
+              override val isOrdered = ordered
 
-              serviceScope.launch {
-                broadcastAnrEvent(
-                  timestamp = event.timestamp,
-                  pid = event.pid,
-                  processName = event.processName,
-                  importance = event.importance,
-                  trace = event.trace,
-                  reason = event.reason,
-                  packageName = event.applicationId ?: "unknown",
-                  appVersion = event.appVersion,
-                  deviceModel = event.deviceInfo?.model ?: "unknown",
-                  deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-                  osVersion = event.deviceInfo?.osVersion ?: "unknown",
-                  sdkInt = event.deviceInfo?.sdkInt ?: 0,
-                )
+              override fun setResultCode(code: Int) {
+                setBroadcastResult(code)
               }
-            }
-          }
+            },
+            deliveryId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
+          )
         } catch (e: Exception) {
           Log.e(TAG, "Error handling ANR broadcast", e)
         }

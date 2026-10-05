@@ -1,3 +1,4 @@
+import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { warmedTests } from "../helpers/warmedTests";
 import {
   afterAll,
@@ -1539,6 +1540,76 @@ describe("VideoRecordingRepository latest ordering", () => {
   });
   afterEach(async () => {
     await db.destroy();
+  });
+
+  bunTest("getVideoRecordingStatus is owner-scoped and read-only", async () => {
+    const repo = new VideoRecordingRepository(db);
+    const timer = new FakeTimer();
+    await setVideoRecordingManagerDependencies({
+      recordingRepository: repo,
+      configRepository: new FakeVideoRecordingConfigRepository(),
+      highlightClient: new FakeHighlightClient(),
+      timer,
+      videoRecorderService: new VideoRecorderService({
+        backend: new FakeVideoCaptureBackend(),
+        idGenerator: new FakeIdGenerator(),
+        archiveRoot: "/unused",
+        now: () => new Date(timer.now()),
+      }),
+    });
+    try {
+      await videoRecordingManager.getVideoRecordingStatus("missing", { ownerSessionUuid: "owner" });
+      const base: VideoRecordingRecord = {
+        recordingId: "owned-completed",
+        deviceId: "device",
+        platform: "android",
+        ownerSessionUuid: "owner",
+        status: "completed",
+        fileName: "video.mp4",
+        filePath: "/unused/video.mp4",
+        format: "mp4",
+        sizeBytes: 10,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        lastAccessedAt: "2026-01-01T00:00:00.000Z",
+        config: DEFAULT_VIDEO_RECORDING_CONFIG,
+      };
+      await repo.insertRecording(base);
+      await repo.insertRecording({
+        ...base,
+        recordingId: "owned-interrupted",
+        status: "interrupted",
+      });
+      await repo.insertRecording({ ...base, recordingId: "owned-recording", status: "recording" });
+      expect(
+        await videoRecordingManager.getVideoRecordingStatus("owned-completed", {
+          ownerSessionUuid: "owner",
+        }),
+      ).toBe("completed");
+      expect(
+        await videoRecordingManager.getVideoRecordingStatus("owned-interrupted", {
+          ownerSessionUuid: "owner",
+        }),
+      ).toBe("interrupted");
+      expect(
+        await videoRecordingManager.getVideoRecordingStatus("owned-recording", {
+          ownerSessionUuid: "owner",
+        }),
+      ).toBe("recording");
+      expect(
+        await videoRecordingManager.getVideoRecordingStatus("owned-completed", {
+          ownerSessionUuid: "other",
+        }),
+      ).toBeUndefined();
+      expect(
+        await videoRecordingManager.getVideoRecordingStatus("missing", {
+          ownerSessionUuid: "owner",
+        }),
+      ).toBeUndefined();
+      expect(await repo.getRecording("owned-completed")).toEqual(base);
+    } finally {
+      resetVideoRecordingManagerDependencies();
+    }
   });
 
   bunTest.each(["database", "fake"])(

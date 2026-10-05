@@ -764,33 +764,40 @@ describe("videoRecording tool segmentation branch", () => {
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("a failed manager-owned rotation is force-cleaned before a fresh recording", async () => {
-    const originalStop = fakeBackend.stop.bind(fakeBackend);
-    let stops = 0;
-    fakeBackend.stop = async (handle) => {
-      if (++stops === 1) {
+  test.each(["handle", "device"])(
+    "zero-segment %s stop carries the original cause without a manifest",
+    async (path) => {
+      fakeBackend.stop = async () => {
         throw new Error("device disconnected during stop");
-      }
-      return originalStop(handle);
-    };
-    await handler()(androidDevice, { action: "start", platform: "android", maxDuration: 600 });
-    await segmentTimer.advanceTimeAsync(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
-    await waitFor(
-      () => segmentTimer.getPendingTimeoutCount() === 1,
-      "manager stop failure halts rotation",
-    );
-    // No segment completed: the tool keeps its existing empty-result error, but
-    // the session still finalizes, force-cleans its capture, and drops its registry entry.
-    await expect(handler()(androidDevice, { action: "stop", platform: "android" })).rejects.toThrow(
-      "Failed to stop video recordings",
-    );
-    expect(fakeBackend.forceStopCalls).toEqual([fakeBackend.startResults[0]]);
-    expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
-    await handler()(androidDevice, { action: "start", platform: "android" });
-    expect(
-      parse(await handler()(androidDevice, { action: "stop", platform: "android" })).count,
-    ).toBe(1);
-  });
+      };
+      const started = parse(
+        await handler()(androidDevice, { action: "start", platform: "android", maxDuration: 600 }),
+      );
+      const handle = (started.recordings as Array<Record<string, unknown>>)[0]
+        .recordingId as string;
+      expect(typeof handle).toBe("string");
+      await segmentTimer.advanceTimeAsync(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
+      await waitFor(() => segmentTimer.getPendingTimeoutCount() >= 1, "manager stop failure");
+      await drainMicrotasks(50);
+      const failure = await handler()(androidDevice, {
+        action: "stop",
+        platform: "android",
+        ...(path === "handle" ? { recordingId: handle } : {}),
+      }).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain(
+        path === "handle"
+          ? "Failed to stop segmented video recording:"
+          : "Failed to stop video recordings:",
+      );
+      expect((failure as Error).message).toContain("device disconnected during stop");
+      expect((failure as Error).message).toContain(handle);
+      expect(fakeBackend.forceStopCalls).toEqual([]);
+      expect(fakeBackend.stopCalls).toEqual([]); // overridden backend, no discard
+      const files = await fsPromises.readdir(archiveRoot, { recursive: true });
+      expect(files.some((file) => file.endsWith("segments.json"))).toBe(false);
+    },
+  );
 
   test("a rotation stop failure returns partial video, drops the registry entry, and permits a fresh plain recording", async () => {
     let starts = 0;

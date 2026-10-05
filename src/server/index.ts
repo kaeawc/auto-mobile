@@ -1616,7 +1616,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // The SDK's request-handler result alias is narrower than its exported
       // CallToolResult type, though this text-only error result satisfies the
       // protocol schema.
-      return shapeToolCallError(textState.timeoutError(errorMessage(error)) ?? error, {
+      return shapeToolCallError(textState.timeoutError(error) ?? error, {
         toolName: name,
         source: "MCP",
       }) as McpToolCallResult;

@@ -6540,7 +6540,11 @@ export class UnixSocketServer {
   }
 
   private textForwardFailure(key: string, toolName: string, error: unknown) {
-    const indeterminate = getLiveTextRequestState(key)?.timeoutError(errorMessage(error));
+    // On request-deadline expiry DaemonClient.scheduleRequestTimeout fires first,
+    // so proxy/CLI callers get a plain McpTimeoutError. The primary text path
+    // clamps transport to deadline - TEXT_REQUEST_RESPONSE_MARGIN_MS and returns
+    // its indeterminate result early.
+    const indeterminate = getLiveTextRequestState(key)?.timeoutError(error);
     if (indeterminate) {
       return shapeToolCallError(indeterminate, { toolName, source: "MCP" });
     }

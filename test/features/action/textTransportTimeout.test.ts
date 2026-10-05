@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { resolveTextCtrlProxyTimeoutMs } from "../../../src/features/action/textTransportTimeout";
+import {
+  TextRequestState,
+  resolveTextCtrlProxyTimeoutMs,
+} from "../../../src/features/action/textTransportTimeout";
 
 test.each([
   [0, 5000],
@@ -23,4 +26,41 @@ test.each([
   [-1, 0],
 ])("remaining budget %s clamps to %s", (budget, expected) => {
   expect(resolveTextCtrlProxyTimeoutMs("a".repeat(1000), budget)).toBe(expected);
+});
+
+test("outstanding text marks a request deadline indeterminate", () => {
+  const state = new TextRequestState();
+  state.dispatched();
+  expect(state.timeoutError("request expired")?.retryable).toBe(false);
+});
+
+test.each([true, false])(
+  "completed text confirmed=%s does not relabel unrelated errors",
+  (confirmed) => {
+    const state = new TextRequestState();
+    const complete = state.dispatched();
+    complete(confirmed);
+    expect(state.timeoutError("later observation failed")).toBeUndefined();
+  },
+);
+
+test("only the unconfirmed command's own thrown error remains indeterminate", () => {
+  const state = new TextRequestState();
+  const error = new Error("lost reply");
+  state.dispatched()(false, error);
+  expect(state.timeoutError(error)?.retryable).toBe(false);
+  expect(state.timeoutError(new Error(error.message))).toBeUndefined();
+  state.dispatched()(true);
+  expect(state.timeoutError(new Error("later step failed"))).toBeUndefined();
+});
+
+test("dispatch completion is idempotent while another command remains pending", () => {
+  const state = new TextRequestState();
+  const complete = state.dispatched();
+  const other = state.dispatched();
+  complete(true);
+  complete(true);
+  expect(state.timeoutError("expired")?.retryable).toBe(false);
+  other(true);
+  expect(state.timeoutError("expired")).toBeUndefined();
 });

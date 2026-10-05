@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
 import { getAbortSignal, getRequestContext, runWithAbortSignal } from "../../utils/AbortContext";
 
@@ -47,23 +48,29 @@ export class TextIndeterminateError extends ActionableError {
 /** Request-local evidence; only iOS text transports mark dispatch here. */
 export class TextRequestState {
   private pending = 0;
-  private unconfirmed = false;
+  private readonly unconfirmedErrors = new WeakSet<Error>();
 
-  dispatched(): (confirmed: boolean) => void {
+  dispatched(): (confirmed: boolean, error?: unknown) => void {
     this.pending++;
     let completed = false;
-    return (confirmed) => {
+    return (confirmed, error) => {
       if (completed) {
         return;
       }
       completed = true;
       this.pending--;
-      this.unconfirmed ||= !confirmed;
+      // Completed results carry their own indeterminate marker. Only the same
+      // thrown Error may relabel a failure after this command is no longer pending.
+      if (!confirmed && error instanceof Error) {
+        this.unconfirmedErrors.add(error);
+      }
     };
   }
 
-  timeoutError(reason: string): TextIndeterminateError | undefined {
-    return this.pending > 0 || this.unconfirmed ? new TextIndeterminateError(reason) : undefined;
+  timeoutError(error: unknown): TextIndeterminateError | undefined {
+    return this.pending > 0 || (error instanceof Error && this.unconfirmedErrors.has(error))
+      ? new TextIndeterminateError(errorMessage(error))
+      : undefined;
   }
 }
 

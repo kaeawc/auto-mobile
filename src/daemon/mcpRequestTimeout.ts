@@ -463,7 +463,10 @@ function resolveTapAnyOrdinaryTapBudgetMs(request: DaemonRequest): number | unde
 }
 
 /** Platform is unavailable here: budget iOS conservatively, only raising existing floors. */
-function resolveTextToolBudgetMs(request: DaemonRequest): number {
+function resolveTextToolBudgetMs(
+  request: DaemonRequest,
+  existingFloorMs = DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+): number {
   if (request.method !== "tools/call") {
     return 0;
   }
@@ -487,17 +490,17 @@ function resolveTextToolBudgetMs(request: DaemonRequest): number {
         : record?.value;
     return typeof text === "string" ? resolveTextCtrlProxyTimeoutMs(text) : 0;
   });
+  const excessMs = timeouts.reduce(
+    (budget, timeout) => budget + Math.max(0, timeout - DEFAULT_TEXT_REQUEST_TIMEOUT_MS),
+    0,
+  );
   // Keep compatibility for short text, including caller-supplied request budgets.
-  if (!timeouts.some((timeout) => timeout > DEFAULT_TEXT_REQUEST_TIMEOUT_MS)) {
+  if (excessMs === 0) {
     return 0;
   }
-  return timeouts.reduce(
-    (budget, timeout) =>
-      Math.min(
-        MAX_SETTIMEOUT_DELAY_MS,
-        budget + (timeout > 0 ? timeout + TEXT_MCP_REQUEST_HEADROOM_MS : 0),
-      ),
-    0,
+  return Math.min(
+    MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    existingFloorMs + excessMs + TEXT_MCP_REQUEST_HEADROOM_MS,
   );
 }
 
@@ -511,7 +514,7 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
   return Math.max(
     base,
-    resolveTextToolBudgetMs(request),
+    resolveTextToolBudgetMs(request, floor),
     floor ?? 0,
     devicePreparationBudget ?? 0,
     tapOnLongPressBudget ?? 0,

@@ -292,9 +292,7 @@ describe("iOS text uses the actual request context", () => {
       expect(h.requestManager.getPendingCount()).toBe(1);
       h.advanceTime(1);
       expect(await pending).toMatchObject({ success: false, retryable: false, totalTimeMs: 2000 });
-      expect(state.timeoutError("request expired")?.message).toContain(
-        "Do not retry automatically.",
-      );
+      expect(state.timeoutError("later observation failed")).toBeUndefined();
       expect(h.sentMessages).toHaveLength(1);
     },
   );
@@ -318,7 +316,7 @@ describe("iOS text uses the actual request context", () => {
     const result = await pending;
     expect(result.retryable).toBe(dispatched ? false : undefined);
     expect(result.error?.includes("Do not retry automatically.")).toBe(dispatched);
-    expect(state.timeoutError("expired") !== undefined).toBe(dispatched);
+    expect(state.timeoutError("later unrelated failure")).toBeUndefined();
     expect(h.sentMessages).toHaveLength(dispatched ? 1 : 0);
   });
 

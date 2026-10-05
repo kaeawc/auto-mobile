@@ -37,7 +37,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     options: SendCommandOptions<BaseResult>,
   ): Promise<BaseResult> {
     let dispatched = false;
-    let completeDispatch: ((confirmed: boolean) => void) | undefined;
+    let completeDispatch: ((confirmed: boolean, error?: unknown) => void) | undefined;
     const startMs = this.context.timer.now();
     const unconfirmed = (reason: string, totalTimeMs: number): BaseResult => ({
       success: false,
@@ -63,7 +63,7 @@ export class CtrlProxyText extends SharedTextDelegate {
       completeDispatch?.(result.retryable !== false);
       return result;
     } catch (error) {
-      completeDispatch?.(false);
+      completeDispatch?.(false, error);
       logger.warn("[CtrlProxyText] Text transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }

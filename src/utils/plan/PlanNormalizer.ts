@@ -18,7 +18,7 @@ export class PlanNormalizer {
    * @returns Normalized PlanStep
    */
   static normalizeStep(step: any, index: number): PlanStep {
-    logger.info(`Processing step ${index}:`, JSON.stringify(step, null, 2));
+    logger.debug(`Processing step ${index}:`, JSON.stringify(step, null, 2));
 
     const toolName = step.tool || step.command;
 
@@ -58,7 +58,8 @@ export class PlanNormalizer {
       normalizedStep.optional = true;
     }
 
-    logger.info(`Normalized step ${index}:`, JSON.stringify(normalizedStep, null, 2));
+    logger.info(`Normalized step ${index}: ${toolName}`);
+    logger.debug(`Normalized step ${index}:`, JSON.stringify(normalizedStep, null, 2));
     return normalizedStep;
   }
 

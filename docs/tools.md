@@ -581,8 +581,9 @@ content description, or placeholder. `selectionStrategy` is `first` (default)
 or `random`. `description` labels the highlight, and `timeoutMs` bounds the
 highlight request (default 5000 ms).
 
-`explore` accepts `maxInteractions` (default 50), `resetToHome` to return home
-periodically (default false), `resetInterval` (default 15 interactions), and
+`explore` accepts positive integer `maxInteractions` (default 200), a positive
+`timeoutMs` (default 300000 ms), `resetToHome` to return home
+periodically (default false), positive integer `resetInterval` (default 15 interactions), and
 `dryRun` to explore without performing interactions.
 
 `navigateTo.targetScreen` names the target screen in the learned graph.

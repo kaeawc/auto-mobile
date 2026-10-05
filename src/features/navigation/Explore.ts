@@ -81,6 +81,8 @@ import {
   validateNavigation,
 } from "./ExploreValidateMode";
 
+export const DEFAULT_MAX_INTERACTIONS = 200;
+
 interface ExplorationLoopContext {
   options: ExploreOptions;
   maxInteractions: number;
@@ -130,7 +132,6 @@ export class Explore extends BaseVisualChange {
   private static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
   private static readonly MAX_PERMISSION_DIALOG_TAP_ATTEMPTS = 3;
   private static readonly MAX_LOOP_ITERATIONS = 3;
-  private static readonly DEFAULT_MAX_INTERACTIONS = 200;
   private static readonly DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly DEFAULT_RESET_INTERVAL = 15;
   private static readonly MAX_OUT_OF_APP_ATTEMPTS = 5;
@@ -180,7 +181,7 @@ export class Explore extends BaseVisualChange {
       }
 
       // Set defaults
-      const maxInteractions = options.maxInteractions ?? Explore.DEFAULT_MAX_INTERACTIONS;
+      const maxInteractions = options.maxInteractions ?? DEFAULT_MAX_INTERACTIONS;
       const timeoutMs = options.timeoutMs ?? Explore.DEFAULT_TIMEOUT_MS;
       const strategy = options.strategy ?? "weighted";
       const mode = options.mode ?? "hybrid";
@@ -475,7 +476,7 @@ export class Explore extends BaseVisualChange {
   ): Promise<ExploreDryRunResult> {
     const strategy = options.strategy ?? "weighted";
     const mode = options.mode ?? "hybrid";
-    const maxInteractions = options.maxInteractions ?? Explore.DEFAULT_MAX_INTERACTIONS;
+    const maxInteractions = options.maxInteractions ?? DEFAULT_MAX_INTERACTIONS;
 
     if (progress) {
       await progress(0, maxInteractions, "Starting exploration dry run...");

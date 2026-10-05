@@ -84,61 +84,7 @@ export class HierarchyCollector {
       logger.debug("Accessibility service availability cached as: true");
 
       if (hierarchy) {
-        result.viewHierarchy = hierarchy;
-
-        // Primary detection path (#7534): the real `ViewHierarchy` swallows
-        // lost CtrlProxy connectivity/binding into a RESOLVED error-shaped
-        // `Hierarchy` rather than throwing, so the `catch` block below is
-        // largely dead code for this failure class in production. Read the
-        // typed signal off the resolved result instead. This call and the
-        // `catch` block below are mutually exclusive within this one
-        // try/catch, so `onAvailabilityLost` cannot fire twice for a single
-        // `collect()` call.
-        this.reportTransportFailureIfAny(device.platform, hierarchy);
-
-        // Use the updatedAt from the view hierarchy if available (from accessibility service)
-        if (hierarchy.updatedAt) {
-          result.updatedAt = hierarchy.updatedAt;
-          logger.debug(`Using updatedAt from view hierarchy: ${hierarchy.updatedAt}`);
-        }
-
-        const focusedElement = viewHierarchy.findFocusedElement(hierarchy);
-        if (focusedElement) {
-          result.focusedElement = focusedElement;
-          logger.debug(
-            `Found focused element: ${focusedElement.text || focusedElement["resource-id"] || "no text/id"}`,
-          );
-        }
-
-        const accessibilityFocusedElement =
-          viewHierarchy.findAccessibilityFocusedElement(hierarchy);
-        if (accessibilityFocusedElement) {
-          result.accessibilityFocusedElement = accessibilityFocusedElement;
-          logger.debug(
-            `Found accessibility-focused element: ${accessibilityFocusedElement.text || accessibilityFocusedElement["resource-id"] || accessibilityFocusedElement["content-desc"] || "no text/id/desc"}`,
-          );
-        }
-
-        // Intent chooser detection (inlined; logs but does not append a structured error on failure)
-        try {
-          const intentChooserDetected = hierarchy.intentChooserDetected;
-          result.intentChooserDetected = intentChooserDetected;
-          if (intentChooserDetected) {
-            logger.debug("[ObserveScreen] Intent chooser dialog detected in view hierarchy");
-          }
-        } catch (intentError) {
-          logger.warn(`[ObserveScreen] Failed to detect intent chooser: ${intentError}`);
-          // Don't fail the observation if intent chooser detection fails
-        }
-
-        if (hierarchy.notificationPermissionDetected !== undefined) {
-          result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
-          if (hierarchy.notificationPermissionDetected) {
-            logger.debug(
-              "[ObserveScreen] Notification permission dialog detected in view hierarchy",
-            );
-          }
-        }
+        this.attachHierarchy(result, hierarchy, viewHierarchy, device);
       }
 
       logger.debug(`View hierarchy retrieval took ${timer.now() - viewHierarchyStart}ms`);
@@ -186,6 +132,74 @@ export class HierarchyCollector {
           cause: errorStr,
         });
       }
+    }
+  }
+
+  private attachHierarchy(
+    result: ObserveResult,
+    hierarchy: ViewHierarchyResult,
+    viewHierarchy: ViewHierarchy,
+    device: BootedDevice,
+  ): void {
+    result.viewHierarchy = hierarchy;
+
+    // Primary detection path (#7534): the real `ViewHierarchy` swallows
+    // lost CtrlProxy connectivity/binding into a RESOLVED error-shaped
+    // `Hierarchy` rather than throwing, so the `catch` block in collect() is
+    // largely dead code for this failure class in production. Read the
+    // typed signal off the resolved result instead. This call and the
+    // `catch` block in collect() are mutually exclusive within this one
+    // try/catch, so `onAvailabilityLost` cannot fire twice for a single
+    // `collect()` call.
+    this.reportTransportFailureIfAny(device.platform, hierarchy);
+
+    // Use the updatedAt from the view hierarchy if available (from accessibility service)
+    if (hierarchy.updatedAt) {
+      result.updatedAt = hierarchy.updatedAt;
+      logger.debug(`Using updatedAt from view hierarchy: ${hierarchy.updatedAt}`);
+    }
+
+    this.attachFocusedElements(result, hierarchy, viewHierarchy);
+
+    // Intent chooser detection (inlined; logs but does not append a structured error on failure)
+    try {
+      const intentChooserDetected = hierarchy.intentChooserDetected;
+      result.intentChooserDetected = intentChooserDetected;
+      if (intentChooserDetected) {
+        logger.debug("[ObserveScreen] Intent chooser dialog detected in view hierarchy");
+      }
+    } catch (intentError) {
+      logger.warn(`[ObserveScreen] Failed to detect intent chooser: ${intentError}`);
+      // Don't fail the observation if intent chooser detection fails
+    }
+
+    if (hierarchy.notificationPermissionDetected !== undefined) {
+      result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
+      if (hierarchy.notificationPermissionDetected) {
+        logger.debug("[ObserveScreen] Notification permission dialog detected in view hierarchy");
+      }
+    }
+  }
+
+  private attachFocusedElements(
+    result: ObserveResult,
+    hierarchy: ViewHierarchyResult,
+    viewHierarchy: ViewHierarchy,
+  ): void {
+    const focusedElement = viewHierarchy.findFocusedElement(hierarchy);
+    if (focusedElement) {
+      result.focusedElement = focusedElement;
+      logger.debug(
+        `Found focused element: ${focusedElement.text || focusedElement["resource-id"] || "no text/id"}`,
+      );
+    }
+
+    const accessibilityFocusedElement = viewHierarchy.findAccessibilityFocusedElement(hierarchy);
+    if (accessibilityFocusedElement) {
+      result.accessibilityFocusedElement = accessibilityFocusedElement;
+      logger.debug(
+        `Found accessibility-focused element: ${accessibilityFocusedElement.text || accessibilityFocusedElement["resource-id"] || accessibilityFocusedElement["content-desc"] || "no text/id/desc"}`,
+      );
     }
   }
 

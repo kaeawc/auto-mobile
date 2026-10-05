@@ -11,9 +11,22 @@ import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
@@ -21,7 +34,38 @@ import kotlinx.coroutines.flow.flow
  * Uses ContentProvider.call() to communicate with SDK-instrumented apps and ContentObserver to
  * receive push notifications when changes occur.
  */
-class StorageSubscriptionManager(private val context: Context) {
+class StorageSubscriptionManager(
+  private val context: Context,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  scope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
+  private val backgroundCalls: BackgroundCalls = ContentResolverCalls(context, ioDispatcher),
+  private val cleanupTimeoutMs: Long = 1_000L,
+) {
+
+  /**
+   * Suspendable boundary for background provider calls, including deterministic cancellation tests.
+   */
+  fun interface BackgroundCalls {
+    suspend fun call(uri: Uri, method: String, extras: Bundle): Bundle?
+  }
+
+  private class ContentResolverCalls(
+    private val context: Context,
+    private val dispatcher: CoroutineDispatcher,
+  ) : BackgroundCalls {
+    override suspend fun call(uri: Uri, method: String, extras: Bundle): Bundle? =
+      runInterruptible(dispatcher) { context.contentResolver.call(uri, method, null, extras) }
+  }
+
+  // Only local bookkeeping takes this lock. No target-app provider call may hold it.
+  private val lifecycleLock = Any()
+  @Volatile private var destroyed = false
+  private val fetchScope =
+    CoroutineScope(
+      scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + ioDispatcher
+    )
+  // Cleanup must survive both fetch cancellation and cancellation of the owning service scope.
+  private val cleanupContext = scope.coroutineContext.minusKey(Job) + ioDispatcher
 
   companion object {
     private const val TAG = "StorageSubscriptionMgr"
@@ -39,8 +83,8 @@ class StorageSubscriptionManager(private val context: Context) {
   /** State for a package being observed. */
   private data class PackageObserverState(
     val observer: ContentObserver,
-    // Thread-safe: mutated on IO (subscribe/unsubscribe) and read on the main
-    // looper (ContentObserver.onChange -> fetchChangesForPackage). See #3600.
+    val signals: Channel<Unit>,
+    val worker: Job,
     val subscriptions: MutableSet<String> = ConcurrentHashMap.newKeySet(), // file names
   )
 
@@ -48,8 +92,8 @@ class StorageSubscriptionManager(private val context: Context) {
     val events: ArrayDeque<PreferenceChangeEvent> = ArrayDeque()
   )
 
-  // Mutated from Dispatchers.IO (subscribe/unsubscribe) and the main looper
-  // (ContentObserver.onChange, destroy). ConcurrentHashMap avoids the
+  // Mutated from request and fetch workers and the main looper (destroy).
+  // ConcurrentHashMap avoids the
   // resize-under-concurrent-put corruption / ConcurrentModificationException a
   // plain HashMap would hit here (#3600).
   private val subscriptions =
@@ -345,7 +389,13 @@ class StorageSubscriptionManager(private val context: Context) {
    */
   fun subscribe(packageName: String, fileName: String): Result<StorageSubscription> {
     val subscriptionId = "$packageName:$fileName"
-    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    val lock =
+      synchronized(lifecycleLock) {
+        if (destroyed) {
+          return Result.failure(StorageError.SdkError("Storage subscription manager is destroyed"))
+        }
+        subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+      }
     return synchronized(lock) { subscribeLocked(packageName, fileName, subscriptionId) }
   }
 
@@ -374,7 +424,18 @@ class StorageSubscriptionManager(private val context: Context) {
 
         // Do not claim success until the local observer is active. Otherwise a registration
         // failure leaves an entry that makes later retries falsely report an existing observer.
-        val observerRegistration = registerPackageObserver(packageName, fileName)
+        val observerRegistration =
+          synchronized(lifecycleLock) {
+            if (destroyed) {
+              Result.failure(StorageError.SdkError("Storage subscription manager is destroyed"))
+            } else {
+              registerPackageObserver(packageName, fileName).also { registration ->
+                if (registration.isSuccess) {
+                  subscriptions[subscriptionId] = SubscriptionState(subscription)
+                }
+              }
+            }
+          }
         val observerRegistrationError = observerRegistration.exceptionOrNull()
         if (observerRegistrationError != null) {
           try {
@@ -383,12 +444,6 @@ class StorageSubscriptionManager(private val context: Context) {
             Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
           }
           return Result.failure(observerRegistrationError)
-        }
-
-        // Track the subscription after the observer exists, so a retry can repair a failed setup.
-        val existing = subscriptions.putIfAbsent(subscriptionId, SubscriptionState(subscription))
-        if (existing != null) {
-          return Result.success(existing.subscription)
         }
 
         Log.d(TAG, "Subscribed to $subscriptionId")
@@ -411,7 +466,11 @@ class StorageSubscriptionManager(private val context: Context) {
    */
   fun unsubscribe(packageName: String, fileName: String): Boolean {
     val subscriptionId = "$packageName:$fileName"
-    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    val lock =
+      synchronized(lifecycleLock) {
+        if (destroyed) return true
+        subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+      }
     return synchronized(lock) { unsubscribeLocked(packageName, fileName, subscriptionId) }
   }
 
@@ -420,8 +479,10 @@ class StorageSubscriptionManager(private val context: Context) {
     fileName: String,
     subscriptionId: String,
   ): Boolean {
-    if (!subscriptions.containsKey(subscriptionId)) {
-      return true
+    synchronized(lifecycleLock) {
+      if (subscriptions.remove(subscriptionId) == null) return true
+      changeEventBuffers.remove(eventBufferKey(packageName, fileName))
+      unregisterPackageObserverIfUnused(packageName, fileName)
     }
 
     try {
@@ -432,13 +493,6 @@ class StorageSubscriptionManager(private val context: Context) {
     } catch (e: Exception) {
       Log.w(TAG, "Error unsubscribing from SDK (may be expected if app was uninstalled)", e)
     }
-
-    // Remove the subscription
-    subscriptions.remove(subscriptionId)
-    changeEventBuffers.remove(eventBufferKey(packageName, fileName))
-
-    // Unregister package observer if no more subscriptions for this package
-    unregisterPackageObserverIfUnused(packageName, fileName)
 
     Log.d(TAG, "Unsubscribed from $subscriptionId")
     return true
@@ -637,19 +691,67 @@ class StorageSubscriptionManager(private val context: Context) {
 
   /** Cleans up all subscriptions and observers. Call when the service is destroyed. */
   fun destroy() {
-    // Unsubscribe from all. Resolve ids through the same canonical parse the inbound
-    // unsubscribe_storage dispatch uses, so the "packageName:fileName" format has one inverse.
-    subscriptions.keys.toList().forEach { subscriptionId ->
-      StorageSubscription.parseId(subscriptionId)?.let { (packageName, fileName) ->
-        unsubscribe(packageName, fileName)
+    val remoteSubscriptions: List<StorageSubscription>
+    val observers: List<PackageObserverState>
+    synchronized(lifecycleLock) {
+      if (destroyed) return
+      destroyed = true
+      remoteSubscriptions = subscriptions.values.map { it.subscription }
+      observers = packageObservers.values.toList()
+      subscriptions.clear()
+      subscriptionLocks.clear()
+      packageObservers.clear()
+      changeEventBuffers.clear()
+      changeEventSignal.close()
+    }
+    fetchScope.cancel()
+    for (state in observers) {
+      state.signals.close()
+      try {
+        context.contentResolver.unregisterContentObserver(state.observer)
+      } catch (e: Exception) {
+        Log.w(TAG, "Error unregistering ContentObserver during destroy", e)
       }
     }
+    if (remoteSubscriptions.isEmpty()) return
 
-    // Clear any remaining state
-    subscriptions.clear()
-    packageObservers.clear()
-    changeEventBuffers.clear()
-    changeEventSignal.close()
+    val cleanupScope = CoroutineScope(cleanupContext + SupervisorJob())
+    cleanupScope.launch {
+      try {
+        val completed =
+          withTimeoutOrNull(cleanupTimeoutMs) {
+            for (subscription in remoteSubscriptions) {
+              // This sibling is deliberately outside withTimeout's child hierarchy: a Binder call
+              // may ignore interruption. Bound the await, without joining a stuck provider thread.
+              val call = cleanupScope.async {
+                val uri = Uri.parse("content://${subscription.packageName}$AUTHORITY_SUFFIX")
+                val extras = Bundle().apply { putString("fileName", subscription.fileName) }
+                backgroundCalls.call(uri, "unsubscribeFromFile", extras)
+              }
+              try {
+                call.await()
+              } catch (e: CancellationException) {
+                throw e
+              } catch (e: Exception) {
+                Log.w(
+                  TAG,
+                  "Best-effort SDK unsubscribe failed for ${subscription.subscriptionId}",
+                  e,
+                )
+              } finally {
+                call.cancel()
+              }
+            }
+            true
+          }
+        if (completed == null) {
+          // Local state is already gone; abandoning remote cleanup is safe during teardown.
+          Log.d(TAG, "Timed out best-effort storage unsubscribe during destroy")
+        }
+      } finally {
+        cleanupScope.cancel()
+      }
+    }
   }
 
   // Create-or-merge and remove-if-unused run through ConcurrentHashMap.compute so the
@@ -671,20 +773,26 @@ class StorageSubscriptionManager(private val context: Context) {
       val authority = packageName + AUTHORITY_SUFFIX
       val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
 
+      val signals = Channel<Unit>(Channel.CONFLATED)
       val observer =
         object : ContentObserver(handler) {
           override fun onChange(selfChange: Boolean) {
             super.onChange(selfChange)
             Log.d(TAG, "ContentObserver notified for $packageName")
-            fetchChangesForPackage(packageName)
+            if (!destroyed) signals.trySend(Unit)
           }
         }
 
       try {
         context.contentResolver.registerContentObserver(changesUri, false, observer)
         Log.d(TAG, "Registered ContentObserver for $packageName")
+        val worker = fetchScope.launch {
+          for (ignored in signals) fetchChangesForPackage(packageName, signals)
+        }
         PackageObserverState(
           observer,
+          signals,
+          worker,
           ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
         )
       } catch (e: Exception) {
@@ -705,6 +813,8 @@ class StorageSubscriptionManager(private val context: Context) {
       state.subscriptions.remove(fileName)
 
       if (state.subscriptions.isEmpty()) {
+        state.signals.close()
+        state.worker.cancel()
         try {
           context.contentResolver.unregisterContentObserver(state.observer)
           Log.d(TAG, "Unregistered ContentObserver for $packageName")
@@ -719,12 +829,17 @@ class StorageSubscriptionManager(private val context: Context) {
     }
   }
 
-  private fun fetchChangesForPackage(packageName: String) {
-    val state = packageObservers[packageName] ?: return
+  private suspend fun fetchChangesForPackage(packageName: String, signals: Channel<Unit>) {
+    // A notification during registration must wait for the local subscription to be committed.
+    // Release this local lock before making any provider call.
+    val state = synchronized(lifecycleLock) { packageObservers[packageName] } ?: return
+    if (destroyed || state.signals !== signals) return
     val authority = packageName + AUTHORITY_SUFFIX
     val uri = Uri.parse("content://$authority")
 
     for (fileName in state.subscriptions.toList()) {
+      coroutineContext.ensureActive()
+      if (destroyed || packageObservers[packageName] !== state) return
       val subscriptionId = "$packageName:$fileName"
       val subState = subscriptions[subscriptionId] ?: continue
 
@@ -734,7 +849,8 @@ class StorageSubscriptionManager(private val context: Context) {
             putString("fileName", fileName)
             putLong("sinceSequence", subState.lastSequence)
           }
-        val result = context.contentResolver.call(uri, "getChanges", null, extras)
+        val result = backgroundCalls.call(uri, "getChanges", extras)
+        coroutineContext.ensureActive()
 
         if (result != null && result.getBoolean("success", false)) {
           val responseJson = result.getString("result") ?: "{}"
@@ -755,7 +871,7 @@ class StorageSubscriptionManager(private val context: Context) {
                   previousValueType = change.previousValueType,
                 )
 
-              if (!enqueueChangeEvent(event)) {
+              if (!enqueueChangeEvent(event, subState)) {
                 Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
                 return
               }
@@ -763,17 +879,18 @@ class StorageSubscriptionManager(private val context: Context) {
             }
           }
         }
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching changes for $packageName:$fileName", e)
       }
     }
   }
 
-  private fun enqueueChangeEvent(event: PreferenceChangeEvent): Boolean {
+  private fun enqueueChangeEvent(event: PreferenceChangeEvent, state: SubscriptionState): Boolean {
     val subscriptionId = "${event.packageName}:${event.fileName}"
-    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
-    synchronized(lock) {
-      if (!subscriptions.containsKey(subscriptionId)) {
+    synchronized(lifecycleLock) {
+      if (destroyed || subscriptions[subscriptionId] !== state) {
         return true
       }
       val bufferKey = eventBufferKey(event.packageName, event.fileName)

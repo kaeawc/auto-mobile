@@ -8,8 +8,8 @@ import org.junit.Test
  * Unit tests for [StorageSubscription.parseId], the single canonical inverse of the
  * `"$packageName:$fileName"` subscriptionId format. Pure JVM — no Android, no Robolectric.
  *
- * This helper is shared by the inbound `unsubscribe_storage` dispatch and
- * [StorageSubscriptionManager.destroy], so pinning its behavior here guarantees both sites agree.
+ * This helper is used by the inbound `unsubscribe_storage` dispatch, so pinning its behavior here
+ * guarantees that dispatch agrees with the IDs created by [StorageSubscriptionManager].
  */
 class StorageSubscriptionTest {
 

@@ -1,3 +1,4 @@
+import { logger } from "../../../src/utils/logger";
 import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import { createTapAt, observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -70,6 +71,136 @@ function createAndroidTapAtWithClient(
 }
 
 describe("TapAtCoordinate", () => {
+  describe("device-lock annotation", () => {
+    test.each([true, false])("matches the base annotation for secure=%s", async (secure) => {
+      const deviceLock = { locked: true, keyguardShowing: true, secure };
+      const before = { ...observation(10, 10), deviceLock };
+      const { tapAt, observeScreen, adb, androidDispatches } = createTapAt(androidDevice);
+      // A post-action unlock must not erase the action-start evidence.
+      observeScreen.setObserveSequence([before, observation(10, 10)]);
+      const timestampRead = spyOn(adb, "getDeviceTimestampMs");
+      const lockRead = spyOn(adb, "getDeviceLock");
+      const foregroundRead = spyOn(adb, "getForegroundApp");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await tapAt.execute({ x: 1, y: 2 });
+        // Baseline counts recorded on the pre-fix source: no additional lock/device read.
+        expect(observeScreen.getExecuteCallCount()).toBe(2);
+        expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(0);
+        expect(timestampRead).toHaveBeenCalledTimes(1);
+        expect(lockRead).toHaveBeenCalledTimes(0);
+        expect(foregroundRead).toHaveBeenCalledTimes(0);
+        expect(adb.getExecutedCommands()).toEqual([]);
+        expect(androidDispatches).toHaveLength(1);
+        const actualWarnings = [...warn.mock.calls];
+        warn.mockClear();
+        const base = createTapAt(androidDevice);
+        base.observeScreen.setObserveResult(before);
+        const expected = await base.tapAt.observedInteraction(async () => ({ success: true }), {
+          changeExpected: false,
+          previousObservation: before,
+        });
+        expect(result.success).toBe(true);
+        expect(result).toMatchObject({
+          deviceLock,
+          deviceLockWarning: expected.deviceLockWarning,
+        });
+        expect(actualWarnings).toEqual(warn.mock.calls);
+        expect(actualWarnings).toHaveLength(1);
+      } finally {
+        timestampRead.mockRestore();
+        lockRead.mockRestore();
+        foregroundRead.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test.each([androidDevice, iosDevice])(
+      "omits lock keys for unlocked Android / iOS: %s",
+      async (device) => {
+        const { tapAt, observeScreen } = createTapAt(device);
+        observeScreen.setObserveResult({
+          ...observation(10, 10),
+          deviceLock: { locked: device.platform === "ios", keyguardShowing: true, secure: true },
+        });
+        const result = await tapAt.execute({ x: 1, y: 2 });
+        expect(result.success).toBe(true);
+        expect(Object.hasOwn(result, "deviceLock")).toBe(false);
+        expect(Object.hasOwn(result, "deviceLockWarning")).toBe(false);
+      },
+    );
+
+    test("explicit display retains the same annotation", async () => {
+      const deviceLock = { locked: true, keyguardShowing: true, secure: true };
+      const { tapAt, observeScreen } = createTapAt(
+        androidDevice,
+        10,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => ({ display: { key: "0" } }),
+      );
+      observeScreen.setObserveResult({
+        ...observation(10, 10),
+        display: { key: "0", role: "unknown", generation: 0 },
+        deviceLock,
+      });
+      const result = await tapAt.execute({ x: 1, y: 2, display: "active" });
+      expect(result).toMatchObject({
+        success: true,
+        deviceLock,
+        deviceLockWarning: expect.stringContaining("PIN/pattern/password"),
+      });
+    });
+
+    test.each(["stale snapshot", "invalid coordinates"])(
+      "annotates returned %s failures like the base class",
+      async (scenario) => {
+        const deviceLock = { locked: true, keyguardShowing: true, secure: false };
+        const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
+        observeScreen.setObserveResult({ ...observation(10, 10), deviceLock });
+        const result = await tapAt.execute(
+          scenario === "stale snapshot"
+            ? { x: 1, y: 2, snapshotId: "missing-snapshot" }
+            : { x: 100, y: 2 },
+        );
+        expect(result).toMatchObject({
+          success: false,
+          deviceLock,
+          deviceLockWarning: expect.stringContaining("swipe lock"),
+        });
+        expect(androidDispatches).toHaveLength(0);
+      },
+    );
+
+    test("retry retains initial pre-dispatch lock evidence", async () => {
+      const deviceLock = { locked: true, keyguardShowing: true, secure: true };
+      let calls = 0;
+      const client: CoordinateTapClient = {
+        requestTapCoordinates: async () =>
+          ++calls === 1
+            ? { success: false, error: "Stale frame context for input/tap" }
+            : { success: true },
+      };
+      const { tapAt, observeScreen, adb, timer } = createAndroidTapAtWithClient(
+        [
+          { ...observation(10, 10, "epoch:1"), deviceLock },
+          observation(10, 10, "epoch:2"),
+          observation(10, 10, "epoch:3"),
+        ],
+        client,
+      );
+      timer.enableAutoAdvance();
+      const result = await tapAt.execute({ x: 1, y: 2 });
+      expect(result).toMatchObject({ success: true, deviceLock });
+      expect(calls).toBe(2);
+      expect(observeScreen.getExecuteCallCount()).toBe(3);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+  });
+
   test.each(["tap", "doubleTap"] as const)(
     "%s ignores a poisoned persistent Android window cache",
     async (action) => {

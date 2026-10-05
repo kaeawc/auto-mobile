@@ -276,6 +276,128 @@ interface SendCommandBaseOptions {
 
 export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
 
+function notConnectedCommandResult<T>(options: SendCommandOptions<T>, defaultMessage: string): T {
+  if (options.notConnectedError) {
+    return options.notConnectedError();
+  }
+  return {
+    success: false,
+    totalTimeMs: 0,
+    error: options.notConnectedMessage ?? defaultMessage,
+  } as T;
+}
+
+function commandEarlyResult<T>(
+  context: DelegateContext,
+  options: SendCommandOptions<T>,
+  connected: boolean,
+): { result: T } | undefined {
+  if (!connected) {
+    return { result: notConnectedCommandResult(options, "Not connected") };
+  }
+
+  if (context.isCommandSupported && !context.isCommandSupported(options.messageType)) {
+    const error = context.unsupportedCommandError
+      ? context.unsupportedCommandError(options.messageType)
+      : `${options.messageType} is not supported by the connected device service`;
+    if (options.unsupportedCommandError) {
+      return { result: options.unsupportedCommandError(options.messageType, error) };
+    }
+    return {
+      result: {
+        success: false,
+        totalTimeMs: 0,
+        error,
+      } as T,
+    };
+  }
+
+  if (options.abortSignal?.aborted) {
+    // The caller's own deadline already fired while ensureConnected() was
+    // resolving (#6249) — do not register or dispatch a request the caller
+    // has already given up on.
+    logger.debug(
+      `[sendCommand] ${options.messageType} aborted before dispatch (deadline expired while connecting)`,
+    );
+    return { result: notConnectedCommandResult(options, "Request aborted before dispatch") };
+  }
+
+  return undefined;
+}
+
+function registerCommandAbort<T>(
+  context: DelegateContext,
+  options: SendCommandOptions<T>,
+  requestId: string,
+): (() => void) | undefined {
+  let abortListener: (() => void) | undefined;
+  if (options.abortSignal) {
+    abortListener = () => {
+      const reason = options.abortSignal?.reason;
+      context.requestManager.reject(
+        requestId,
+        reason instanceof Error ? reason : new Error("Operation cancelled"),
+      );
+    };
+    options.abortSignal.addEventListener("abort", abortListener, { once: true });
+    if (options.abortSignal.aborted) {
+      abortListener();
+    }
+  }
+
+  return abortListener;
+}
+
+function commitCommand<T>(
+  ws: WebSocket,
+  msg: string,
+  options: SendCommandOptions<T>,
+  requestId: string,
+): void {
+  // Capability, caller fence, and cancellation share this synchronous pre-send step.
+  // No await may separate these checks from sending the first committing message.
+  options.beforeSend?.();
+  options.abortSignal?.throwIfAborted();
+  ws.send(msg);
+  options.onDispatch?.(requestId);
+}
+
+function dispatchCommand<T>(
+  context: DelegateContext,
+  options: SendCommandOptions<T>,
+  requestId: string,
+  msg: string,
+  responseErrorFactory: (error: string, totalTimeMs: number) => T,
+): void {
+  try {
+    if (!options.abortSignal?.aborted) {
+      const ws = context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      if (
+        options.requiredCapability &&
+        context.isCommandSupported?.(options.requiredCapability) !== true
+      ) {
+        context.requestManager.resolve(requestId, {
+          ...responseErrorFactory(
+            `${options.requiredCapability} is not confirmed by the connected device service`,
+            0,
+          ),
+          unsupportedCapability: options.requiredCapability,
+        });
+      } else {
+        commitCommand(ws, msg, options, requestId);
+      }
+    }
+  } catch (error) {
+    context.requestManager.reject(
+      requestId,
+      error instanceof Error ? error : new Error(String(error)),
+    );
+  }
+}
+
 export async function sendCommand<T>(
   context: DelegateContext,
   options: SendCommandOptions<T>,
@@ -290,46 +412,9 @@ export async function sendCommand<T>(
       ? await options.perf.track("ensureConnected", () => context.ensureConnected(options.perf))
       : await context.ensureConnected();
 
-  if (!connected) {
-    if (options.notConnectedError) {
-      return options.notConnectedError();
-    }
-    return {
-      success: false,
-      totalTimeMs: 0,
-      error: options.notConnectedMessage ?? "Not connected",
-    } as T;
-  }
-
-  if (context.isCommandSupported && !context.isCommandSupported(options.messageType)) {
-    const error = context.unsupportedCommandError
-      ? context.unsupportedCommandError(options.messageType)
-      : `${options.messageType} is not supported by the connected device service`;
-    if (options.unsupportedCommandError) {
-      return options.unsupportedCommandError(options.messageType, error);
-    }
-    return {
-      success: false,
-      totalTimeMs: 0,
-      error,
-    } as T;
-  }
-
-  if (options.abortSignal?.aborted) {
-    // The caller's own deadline already fired while ensureConnected() was
-    // resolving (#6249) — do not register or dispatch a request the caller
-    // has already given up on.
-    logger.debug(
-      `[sendCommand] ${options.messageType} aborted before dispatch (deadline expired while connecting)`,
-    );
-    if (options.notConnectedError) {
-      return options.notConnectedError();
-    }
-    return {
-      success: false,
-      totalTimeMs: 0,
-      error: options.notConnectedMessage ?? "Request aborted before dispatch",
-    } as T;
+  const earlyResult = commandEarlyResult(context, options, connected);
+  if (earlyResult) {
+    return earlyResult.result;
   }
 
   const requestId = context.requestManager.generateId(options.idPrefix);
@@ -359,56 +444,12 @@ export async function sendCommand<T>(
     responseErrorFactory,
   );
 
-  let abortListener: (() => void) | undefined;
-  if (options.abortSignal) {
-    abortListener = () => {
-      const reason = options.abortSignal?.reason;
-      context.requestManager.reject(
-        requestId,
-        reason instanceof Error ? reason : new Error("Operation cancelled"),
-      );
-    };
-    options.abortSignal.addEventListener("abort", abortListener, { once: true });
-    if (options.abortSignal.aborted) {
-      abortListener();
-    }
-  }
+  const abortListener = registerCommandAbort(context, options, requestId);
 
   const msg = context.serializeRequest
     ? context.serializeRequest({ type: options.messageType, requestId, ...options.params })
     : createMessage(options.messageType, requestId, options.params);
-  try {
-    if (!options.abortSignal?.aborted) {
-      const ws = context.getWebSocket();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        throw new Error("WebSocket not connected");
-      }
-      if (
-        options.requiredCapability &&
-        context.isCommandSupported?.(options.requiredCapability) !== true
-      ) {
-        context.requestManager.resolve(requestId, {
-          ...responseErrorFactory(
-            `${options.requiredCapability} is not confirmed by the connected device service`,
-            0,
-          ),
-          unsupportedCapability: options.requiredCapability,
-        });
-      } else {
-        // Capability, caller fence, and cancellation share this synchronous pre-send step.
-        // No await may separate these checks from sending the first committing message.
-        options.beforeSend?.();
-        options.abortSignal?.throwIfAborted();
-        ws.send(msg);
-        options.onDispatch?.(requestId);
-      }
-    }
-  } catch (error) {
-    context.requestManager.reject(
-      requestId,
-      error instanceof Error ? error : new Error(String(error)),
-    );
-  }
+  dispatchCommand(context, options, requestId, msg, responseErrorFactory);
 
   try {
     return await (options.perf

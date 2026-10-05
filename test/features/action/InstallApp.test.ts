@@ -1417,10 +1417,15 @@ describe("InstallApp", () => {
         "Performing Streamed Install\nFailure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
       );
       expect(fakeAdb.wasCommandExecuted("install-existing")).toBe(false);
+      const commands = fakeAdb.getExecutedCommands();
+      expect(commands.slice(commands.indexOf(`uninstall ${packageName}`))).toEqual([
+        `uninstall ${packageName}`,
+        command,
+      ]);
     });
 
     test("thrown reinstall preserves the cause and reports that the app was removed", async () => {
-      configureDowngrade();
+      const command = configureDowngrade();
       const error = Object.assign(new Error("adb: device offline"), {
         stdout: "Performing Streamed Install",
         stderr: "Failure [INSTALL_FAILED_INVALID_APK]",
@@ -1436,6 +1441,11 @@ describe("InstallApp", () => {
       await expect(execution).rejects.toThrow("Performing Streamed Install");
       await expect(execution).rejects.toThrow("Failure [INSTALL_FAILED_INVALID_APK]");
       await expect(execution).rejects.toHaveProperty("cause", error);
+      const commands = fakeAdb.getExecutedCommands();
+      expect(commands.slice(commands.indexOf(`uninstall ${packageName}`))).toEqual([
+        `uninstall ${packageName}`,
+        command,
+      ]);
     });
 
     test("cancellation during reinstall still reports the completed uninstall", async () => {
@@ -1877,6 +1887,62 @@ describe("InstallApp", () => {
     expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
     expect(simctl.getMethodCalls("uninstallApp")).toEqual([]);
   });
+
+  test.each([false, true])(
+    "resolves a pre-existing iOS bundle after listing (baseline retry: %s)",
+    async (retry) => {
+      const calls: string[] = [];
+      let listings = 0;
+      const bundleId = "com.example.app";
+      const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+        timer: fakeTimer,
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        plist: {
+          ...fakePlist(bundleId),
+          extractRawFile: async () => {
+            calls.push("resolve bundle");
+            return bundleId;
+          },
+        },
+        cacheInvalidator: {
+          invalidate: () => {
+            calls.push("invalidate");
+          },
+        },
+        installedAppsRepository: Object.assign(new FakeInstalledAppsRepository(), {
+          markDeviceStale: async () => {
+            calls.push("stale");
+          },
+        }),
+        iosInstallBackendResolver: () => ({
+          kind: "simulator",
+          listApps: async () => {
+            calls.push("list");
+            if (listings++ === 0 && retry) {
+              throw new Error("transient listing failure");
+            }
+            return [{ bundleId }];
+          },
+          installApp: async () => {
+            calls.push("install");
+          },
+        }),
+      });
+      const result = await installApp.execute("/tmp/MyApp.app");
+      expect(result).toMatchObject({ success: true, packageName: bundleId, upgrade: true });
+      expect(result.warning).toBeUndefined();
+      expect(calls).toEqual([
+        "list",
+        ...(retry ? ["list"] : []),
+        "install",
+        "invalidate",
+        "stale",
+        "list",
+        "resolve bundle",
+      ]);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    },
+  );
 
   test("keeps iOS simulator install successful when post-install listing fails", async () => {
     const simctl = new SequencedFakeSimctl();

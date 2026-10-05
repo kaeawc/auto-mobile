@@ -781,6 +781,28 @@ async function readAndroidPreferenceEntry(
     return { type: "string", value: stringNode._ ?? "" };
   }
 
+  const scalarEntry = readAndroidScalarPreferenceEntry(map, key);
+  if (scalarEntry) {
+    return scalarEntry;
+  }
+
+  const longNode = findNamedNode(map.long, key);
+  if (longNode) {
+    return { type: "long", value: parseLongValue(longNode.$?.value ?? "") };
+  }
+
+  const stringSetNode = findNamedNode(map.set, key);
+  if (stringSetNode) {
+    return { type: "stringSet", value: readAndroidStringSetValues(stringSetNode) };
+  }
+
+  return null;
+}
+
+function readAndroidScalarPreferenceEntry(
+  map: NonNullable<AndroidPreferencesXmlDocument["map"]>,
+  key: string,
+): AndroidPreferenceEntry | null {
   const booleanNode = findNamedNode(map.boolean, key);
   if (booleanNode) {
     return { type: "bool", value: parsePreferenceValue(booleanNode.$?.value ?? "", "bool") };
@@ -794,16 +816,6 @@ async function readAndroidPreferenceEntry(
   const floatNode = findNamedNode(map.float, key);
   if (floatNode) {
     return { type: "float", value: parsePreferenceValue(floatNode.$?.value ?? "", "float") };
-  }
-
-  const longNode = findNamedNode(map.long, key);
-  if (longNode) {
-    return { type: "long", value: parseLongValue(longNode.$?.value ?? "") };
-  }
-
-  const stringSetNode = findNamedNode(map.set, key);
-  if (stringSetNode) {
-    return { type: "stringSet", value: readAndroidStringSetValues(stringSetNode) };
   }
 
   return null;

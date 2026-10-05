@@ -25,6 +25,11 @@ import {
 } from "../../src/server/observationResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { z } from "zod/v4";
+import { settleEmbeddedObservationInResponse } from "../../src/server/embeddedObservationSettle";
+import { RealSettleObserve } from "../../src/features/observe/SettleObserve";
+import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeScreenshotStateStore } from "../fakes/FakeScreenshotStateStore";
 import {
   observationOutputSchema,
   observationSummarySchema,
@@ -1457,6 +1462,81 @@ describe("finalizeToolResponse", () => {
       expect(
         JSON.parse(finalized.content[0].text).observation.screenshotCaptureAttempted,
       ).toBeUndefined();
+    });
+
+    test("an adopted async action screenshot URI joins the adopted capture's stored evidence", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screenshots = new FakeScreenshotStateStore(timer);
+      const action = {
+        ...sameScreenObserve(),
+        deviceId: "async-device",
+        observationId: "action-capture",
+        screenshotCaptureAttempted: true,
+      };
+      const fake = new FakeObserveScreen();
+      let cached = action;
+      const reads = spyOn(fake, "execute").mockImplementation(async (options) => {
+        // Same cached timestamp unless the gate requests a fresh extraction.
+        if (options?.requireFreshExtraction) {
+          const timestamp = Number(cached.updatedAt) + 1;
+          cached = {
+            ...action,
+            updatedAt: timestamp,
+            viewHierarchy: { ...action.viewHierarchy!, updatedAt: timestamp },
+            observationId: `adopted-${timestamp}`,
+            screenshotCaptureAttempted: false,
+          };
+        }
+        return cached;
+      });
+      const capture = spyOn(fake, "captureScreenshot").mockImplementation(
+        async (_perf, _signal, observation) => {
+          if (!observation) {
+            throw new Error("Expected the adopted observation");
+          }
+          observation.screenshotCaptureAttempted = true;
+          screenshots.updateForObservation(
+            observation.deviceId,
+            observation.observationId,
+            "/fake/adopted.png",
+          );
+        },
+      );
+      try {
+        const response = createStructuredToolResponse({ success: true, observation: action });
+        await settleEmbeddedObservationInResponse(response, {
+          name: "tapOn",
+          internal: false,
+          createSettleObserve: () => new RealSettleObserve(fake, timer),
+        });
+        const adopted = response.structuredContent!.observation;
+        expect(adopted.screenshotCaptureAttempted).toBe(true);
+        expect(capture).toHaveBeenCalledTimes(1);
+        expect(capture.mock.calls[0][2]?.observationId).toBe(adopted.observationId);
+        expect(reads.mock.calls.every(([options]) => options?.skipScreenshot === true)).toBe(true);
+        const finalized = finalizeToolResponse(response, { name: "tapOn" });
+        const emitted = structuredPayload(finalized).observation;
+        expect(emitted.observationScreenshotResourceUri).toBe(
+          buildObservationScreenshotUri(action.deviceId, adopted.observationId),
+        );
+        expect(matchObservationScreenshotUri(emitted.observationScreenshotResourceUri)).toEqual({
+          deviceId: action.deviceId,
+          observationId: adopted.observationId,
+        });
+        expect(screenshots.getPathForObservation(action.deviceId, adopted.observationId)).toBe(
+          "/fake/adopted.png",
+        );
+        expect(
+          screenshots.getPathForObservation(action.deviceId, action.observationId),
+        ).toBeUndefined();
+        expect(
+          JSON.parse(finalized.content[0].text).observation.observationScreenshotResourceUri,
+        ).toBe(emitted.observationScreenshotResourceUri);
+      } finally {
+        reads.mockRestore();
+        capture.mockRestore();
+      }
     });
 
     test("a skip-screenshot post-action observation omits the dangling screenshot URI", () => {

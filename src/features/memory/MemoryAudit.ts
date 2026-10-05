@@ -143,22 +143,11 @@ export class MemoryAudit {
     };
   }
 
-  /**
-   * Validate metrics against thresholds
-   */
-  private validateMetrics(
+  private validateHeapGrowth(
     metrics: MemoryMetrics,
-    thresholds: {
-      heapGrowthThresholdMb: number;
-      nativeHeapGrowthThresholdMb: number;
-      gcCountThreshold: number;
-      gcDurationThresholdMs: number;
-      unreachableObjectsThreshold: number;
-    },
-    baseline: any, // MemoryBaseline | null
-  ): MemoryViolation[] {
-    const violations: MemoryViolation[] = [];
-
+    thresholds: { heapGrowthThresholdMb: number; nativeHeapGrowthThresholdMb: number },
+    violations: MemoryViolation[],
+  ): void {
     // Check Java heap growth
     if (metrics.javaHeapGrowthMb > thresholds.heapGrowthThresholdMb) {
       violations.push({
@@ -186,6 +175,25 @@ export class MemoryAudit {
         contributionWeight: 0.85, // Native heap leaks are serious
       });
     }
+  }
+
+  /**
+   * Validate metrics against thresholds
+   */
+  private validateMetrics(
+    metrics: MemoryMetrics,
+    thresholds: {
+      heapGrowthThresholdMb: number;
+      nativeHeapGrowthThresholdMb: number;
+      gcCountThreshold: number;
+      gcDurationThresholdMs: number;
+      unreachableObjectsThreshold: number;
+    },
+    baseline: any, // MemoryBaseline | null
+  ): MemoryViolation[] {
+    const violations: MemoryViolation[] = [];
+
+    this.validateHeapGrowth(metrics, thresholds, violations);
 
     // Check GC count
     if (metrics.gcCount > thresholds.gcCountThreshold) {

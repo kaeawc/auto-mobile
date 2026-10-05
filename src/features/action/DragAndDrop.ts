@@ -21,7 +21,10 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
@@ -324,6 +327,15 @@ export class DragAndDrop extends BaseVisualChange {
       return { success: false, duration: 0, distance: 0, error: validationError };
     }
 
+    return this.executeObservedDrag(options, perf, progress, signal);
+  }
+
+  private async executeObservedDrag(
+    options: DragAndDropOptions,
+    perf: PerformanceTracker,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<DragAndDropResult> {
     try {
       const pressDurationMs = this.getPressDurationMs(options);
       const dragDurationMs = this.getDragDurationMs(options);

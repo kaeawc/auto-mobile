@@ -303,59 +303,20 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
-    const indeterminateResult = (reason: string): SwipeResult => ({
-      success: false,
-      x1,
-      y1,
-      x2,
-      y2,
-      duration: gestureOptions?.duration || 300,
-      error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
-    });
-
-    // Try accessibility scroll actions if container is known and has resource-id
     if (containerElement && containerElement["resource-id"]) {
-      // `direction` is the FINGER direction; see scrollActionForFingerDirection.
-      const scrollAction = scrollActionForFingerDirection(direction);
-
-      logger.info(
-        `[SwipeOn] Attempting ACTION_SCROLL (${scrollAction}) on container: ${containerElement["resource-id"]}`,
-      );
-
-      try {
-        throwIfAborted(signal);
-        const result = await this.accessibilityService.requestAction(
-          scrollAction,
-          containerElement["resource-id"],
-          5000,
-          perf || new NoOpPerformanceTracker(),
-        );
-
-        if (result.success) {
-          logger.info("[SwipeOn] ACTION_SCROLL succeeded");
-          return {
-            success: true,
-            x1,
-            y1,
-            x2,
-            y2,
-            duration: gestureOptions?.duration || 300,
-          };
-        }
-        if (result.dispatched && result.acknowledged !== true) {
-          logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${result.error}`);
-          return indeterminateResult(result.error ?? "unknown error");
-        }
-        logger.warn(
-          `[SwipeOn] ACTION_SCROLL failed: ${result.error}, falling back to two-finger swipe`,
-        );
-      } catch (error) {
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-        logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${error}`);
-        return indeterminateResult(String(error));
+      const scrollResult = await this.attemptAccessibilityScroll({
+        x1,
+        y1,
+        x2,
+        y2,
+        direction,
+        containerElement,
+        gestureOptions,
+        perf,
+        signal,
+      });
+      if (scrollResult) {
+        return scrollResult;
       }
     } else {
       logger.debug("[SwipeOn] No container with resource-id, skipping ACTION_SCROLL");
@@ -393,6 +354,83 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     } else {
       throw new ActionableError(`Two-finger swipe failed: ${a11yResult.error || "Unknown error"}`);
     }
+  }
+
+  private async attemptAccessibilityScroll({
+    x1,
+    y1,
+    x2,
+    y2,
+    direction,
+    containerElement,
+    gestureOptions,
+    perf,
+    signal,
+  }: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    direction: SwipeDirection;
+    containerElement: Element;
+    gestureOptions?: FencedGestureOptions;
+    perf?: PerformanceTracker;
+    signal?: AbortSignal;
+  }): Promise<SwipeResult | undefined> {
+    const indeterminateResult = (reason: string): SwipeResult => ({
+      success: false,
+      x1,
+      y1,
+      x2,
+      y2,
+      duration: gestureOptions?.duration || 300,
+      error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
+    });
+
+    // `direction` is the FINGER direction; see scrollActionForFingerDirection.
+    const scrollAction = scrollActionForFingerDirection(direction);
+
+    logger.info(
+      `[SwipeOn] Attempting ACTION_SCROLL (${scrollAction}) on container: ${containerElement["resource-id"]}`,
+    );
+
+    try {
+      throwIfAborted(signal);
+      const result = await this.accessibilityService.requestAction(
+        scrollAction,
+        containerElement["resource-id"],
+        5000,
+        perf || new NoOpPerformanceTracker(),
+      );
+
+      if (result.success) {
+        logger.info("[SwipeOn] ACTION_SCROLL succeeded");
+        return {
+          success: true,
+          x1,
+          y1,
+          x2,
+          y2,
+          duration: gestureOptions?.duration || 300,
+        };
+      }
+      if (result.dispatched && result.acknowledged !== true) {
+        logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${result.error}`);
+        return indeterminateResult(result.error ?? "unknown error");
+      }
+      logger.warn(
+        `[SwipeOn] ACTION_SCROLL failed: ${result.error}, falling back to two-finger swipe`,
+      );
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
+      throwIfAborted(signal);
+      logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${error}`);
+      return indeterminateResult(String(error));
+    }
+
+    return undefined;
   }
 
   buildGestureOptions(

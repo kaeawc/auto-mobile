@@ -519,7 +519,7 @@ export class BaseVisualChange {
    * lock state (so an agent can branch on `secure`) plus a human-readable
    * warning. Android-only: `deviceLock` is only collected on Android observe.
    */
-  private annotateDeviceLock(result: any, previousObserveResult: ObserveResult | null): void {
+  protected annotateDeviceLock(result: any, previousObserveResult: ObserveResult | null): void {
     if (!result || this.device.platform !== "android") {
       return;
     }

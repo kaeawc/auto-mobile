@@ -439,7 +439,8 @@ export class TapAtCoordinate extends BaseVisualChange {
           this.staleDisplay(transitionRevision.observedGeneration),
         );
       }
-      return await this.observedInteraction(
+      let preDispatchObservation: ObserveResult | null = null;
+      const result = await this.observedInteraction(
         async () => {
           // Validate against the latest available frame immediately before dispatch.
           // Observe defaults to skipWaitForFresh=true, so cache validity matters here.
@@ -448,6 +449,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             signal,
             perf,
           });
+          preDispatchObservation = observeResult;
           if (this.currentActionRevision() !== transitionRevision.revision) {
             return withStaleDisplay(
               { success: false, x: inputPoint(options).x, y: inputPoint(options).y, action },
@@ -529,6 +531,10 @@ export class TapAtCoordinate extends BaseVisualChange {
           },
         },
       );
+      // Preserve the initial pre-action evidence, including across a fresh frame retry,
+      // just as observedInteraction does for tools with a base pre-observation.
+      this.annotateDeviceLock(result, preDispatchObservation);
+      return result;
     } catch (error) {
       logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
       const point = dispatchedCoordinates ?? failurePoint(options, this.device.platform);

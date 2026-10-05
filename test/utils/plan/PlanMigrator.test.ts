@@ -934,3 +934,121 @@ describe("PlanMigrator complete step migration results", () => {
     }).toMatchSnapshot();
   });
 });
+
+describe("PlanMigrator field precedence", () => {
+  test("preserves field migration and warning order on combined legacy input", () => {
+    const metadata = { name: "metadata name", description: "description", mcpVersion: "0.0.1" };
+    const input = {
+      planName: "legacy name",
+      generated: "captured time",
+      appId: "app",
+      metadata,
+      steps: [],
+    };
+    const { plan, report } = migratePlan(input);
+    expect(plan).toBe(input);
+    expect(plan.metadata).toBe(metadata);
+    expect(plan).toEqual({
+      name: "legacy name",
+      description: "description",
+      mcpVersion: "0.0.1",
+      metadata: {
+        name: "metadata name",
+        createdAt: "captured time",
+        appId: "app",
+        version: "1.0.0",
+      },
+      steps: [],
+    });
+    expect(report.warnings.map((warning) => warning.message)).toEqual([
+      "Renamed planName to name.",
+      "Moved metadata.description to plan description.",
+      "Mapped generated timestamp to metadata.createdAt.",
+      "Removed deprecated generated field.",
+      "Moved top-level appId to metadata.appId.",
+      "Removed deprecated top-level appId field.",
+      "Moved metadata.mcpVersion to top-level mcpVersion.",
+      "Defaulted missing metadata.version to 1.0.0.",
+    ]);
+    expect(report.appliedMigrations).toEqual(["plan-fields"]);
+  });
+  test("keeps existing fields while removing deprecated generated and appId values", () => {
+    const input = {
+      name: "current",
+      planName: "ignored",
+      description: "current description",
+      mcpVersion: "99.99.99",
+      generated: 123,
+      appId: null,
+      metadata: {
+        name: "ignored",
+        description: "ignored",
+        mcpVersion: "0.0.1",
+        createdAt: "existing",
+        appId: "existing",
+        version: "2",
+      },
+      steps: [],
+    };
+    const { plan, report } = migratePlan(input);
+    expect(plan.metadata).toEqual({
+      name: "ignored",
+      description: "ignored",
+      mcpVersion: "0.0.1",
+      createdAt: "existing",
+      appId: "existing",
+      version: "2",
+    });
+    expect(plan.planName).toBe("ignored");
+    expect(plan.generated).toBeUndefined();
+    expect(plan.appId).toBeUndefined();
+    expect(report.warnings).toEqual([
+      { message: "Removed deprecated generated field." },
+      { message: "Removed deprecated top-level appId field." },
+    ]);
+  });
+  test("keeps explicit tool, label, params and optional while removing legacy fields", () => {
+    const step = {
+      tool: "observe",
+      command: "tapOn",
+      label: "explicit",
+      description: "ignored",
+      optional: true,
+      timeout: 1,
+      params: { timeout: 2 },
+    };
+    const { plan, report } = migratePlan({
+      name: "current",
+      mcpVersion: "99.99.99",
+      metadata: { createdAt: "existing", version: "1" },
+      steps: [step],
+    });
+    expect(plan.steps[0]).toBe(step);
+    expect(step).toEqual({
+      tool: "observe",
+      label: "explicit",
+      optional: true,
+      params: { timeout: 2 },
+    });
+    expect(report.warnings).toEqual([
+      { message: "Removed deprecated command field.", stepIndex: 0 },
+      { message: "Removed deprecated step description field.", stepIndex: 0 },
+    ]);
+    expect(report.appliedMigrations).toEqual(["step-fields"]);
+  });
+  test("migrates step metadata before returning for a non-string tool", () => {
+    const step = { tool: 42, command: "ignored", description: "label", inline: "untouched" };
+    const { report } = migratePlan({
+      name: "current",
+      mcpVersion: "99.99.99",
+      metadata: { createdAt: "existing", version: "1" },
+      steps: [step],
+    });
+    expect(step).toEqual({ tool: 42, label: "label", inline: "untouched" });
+    expect(report.warnings).toEqual([
+      { message: "Removed deprecated command field.", stepIndex: 0 },
+      { message: "Mapped step description to label.", stepIndex: 0 },
+      { message: "Removed deprecated step description field.", stepIndex: 0 },
+    ]);
+  });
+});

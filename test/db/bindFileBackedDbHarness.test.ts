@@ -1,17 +1,27 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { bindFileBackedDbHarness, type FileBackedDbHarness } from "./withFileBackedDb";
 
 const env: NodeJS.ProcessEnv = { EXISTING: "registration-time" };
 const created: string[] = [];
 const removed: string[] = [];
 let getHarness: () => FileBackedDbHarness;
-let firstHarness: FileBackedDbHarness;
+const seenHarnesses = new Set<FileBackedDbHarness>();
 const unavailable = "File-backed DB harness is only available between beforeEach and afterEach";
 
-// These cleanup assertions intentionally use Bun's sequential in-file test
-// ordering. No concurrent tests: the following test observes the previous
-// test's afterEach, and afterAll observes the last test's cleanup.
+// Reset fake state before binding and assert cleanup after the binder's hook,
+// so each test verifies its own lifecycle regardless of randomized order.
 describe("bindFileBackedDbHarness", () => {
+  beforeEach(() => {
+    expect(getHarness).toThrow(unavailable);
+    expect(removed).toEqual(created);
+    created.length = 0;
+    removed.length = 0;
+    for (const key of Object.keys(env)) {
+      delete env[key];
+    }
+    env.EXISTING = "test-time";
+  });
+
   getHarness = bindFileBackedDbHarness({
     env,
     mkdtemp: async (prefix) => {
@@ -30,12 +40,25 @@ describe("bindFileBackedDbHarness", () => {
   beforeAll(() => {
     expect(getHarness).toThrow(unavailable);
     expect(created).toEqual([]);
+  });
+
+  beforeEach(() => {
+    const harness = getHarness();
+    expect(seenHarnesses.has(harness)).toBe(false);
+    seenHarnesses.add(harness);
     // The snapshot must reflect beforeEach time, not binder registration time.
-    env.EXISTING = "test-time";
+    expect(env).toEqual({ EXISTING: "test-time" });
+  });
+
+  afterEach(() => {
+    expect(getHarness).toThrow(unavailable);
+    expect(env).toEqual({ EXISTING: "test-time" });
+    expect(created).toHaveLength(1);
+    expect(removed).toEqual(created);
   });
 
   test("returns the current harness and tracks temp dirs with injected fakes", async () => {
-    firstHarness = getHarness();
+    const firstHarness = getHarness();
     expect(getHarness()).toBe(firstHarness);
     env.EXISTING = "changed";
     env.ADDED = "new";
@@ -44,19 +67,21 @@ describe("bindFileBackedDbHarness", () => {
     expect(removed).toEqual([]);
   });
 
-  test("uses a fresh harness after restoring env and removing the previous temp dir", async () => {
-    expect(getHarness()).not.toBe(firstHarness);
+  test("restores deleted env keys and removes its own temp dir", async () => {
     expect(env).toEqual({ EXISTING: "test-time" });
     expect(removed).toEqual(created);
     delete env.EXISTING;
     env.ADDED = "second";
-    await getHarness().makeTempDbDir("binder-second-");
+    const dir = await getHarness().makeTempDbDir("binder-second-");
+    expect(created).toEqual([dir]);
+    expect(removed).toEqual([]);
   });
 
   afterAll(() => {
     expect(getHarness).toThrow(unavailable);
     expect(env).toEqual({ EXISTING: "test-time" });
-    expect(created).toHaveLength(2);
+    expect(seenHarnesses.size).toBe(2);
+    expect(created).toHaveLength(1);
     expect(removed).toEqual(created);
   });
 });

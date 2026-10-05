@@ -145,6 +145,18 @@ interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
   retryExecutor?: RetryExecutor;
 }
 
+interface ScreenshotObservationStreamOptions {
+  screenshotBase64: string;
+  screenWidth: number;
+  screenHeight: number;
+  metadata?: ScreenshotMetadata;
+  captureSequence?: number;
+  coordinateSpace?: CoordinateSpace;
+  nativeScale?: number;
+  frameContext?: string;
+  rotation?: number;
+}
+
 /** Validate the platform version before it becomes a wire/cache key. */
 function iosBuildVersion(raw: string): { versionCode: number; versionKey?: string } | null {
   const trimmed = raw.trim();
@@ -4336,17 +4348,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /**
    * Push screenshot update to the device data stream for IDE plugins.
    */
-  private pushScreenshotToObservationStream(
-    screenshotBase64: string,
-    screenWidth: number,
-    screenHeight: number,
-    metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
-    captureSequence?: number,
-    coordinateSpace?: CoordinateSpace,
-    nativeScale?: number,
-    frameContext?: string,
-    rotation?: number,
-  ): void {
+  private pushScreenshotToObservationStream({
+    screenshotBase64,
+    screenWidth,
+    screenHeight,
+    metadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
+    captureSequence,
+    coordinateSpace,
+    nativeScale,
+    frameContext,
+    rotation,
+  }: ScreenshotObservationStreamOptions): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
@@ -4413,17 +4425,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           const binding = result.captureBinding;
           const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1170;
           const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2532;
-          this.pushScreenshotToObservationStream(
-            result.data,
+          this.pushScreenshotToObservationStream({
+            screenshotBase64: result.data,
             screenWidth,
             screenHeight,
-            result,
-            binding?.captureSequence,
-            binding?.coordinateSpace,
-            binding?.nativeScale,
-            result.frameContext,
-            result.rotation,
-          );
+            metadata: result,
+            captureSequence: binding?.captureSequence,
+            coordinateSpace: binding?.coordinateSpace,
+            nativeScale: binding?.nativeScale,
+            frameContext: result.frameContext,
+            rotation: result.rotation,
+          });
         },
         {
           getKeepAliveIntervalMs: () => {

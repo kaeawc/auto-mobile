@@ -150,6 +150,6 @@
 7	src/devices/DeviceSessionManager.ts	eslint(max-depth)
 7	src/features/action/TapOnElement.ts	eslint(complexity)
 7	src/features/observe/android/CtrlProxyHierarchy.ts	eslint(max-depth)
+7	src/features/observe/ios/IOSCtrlProxyClient.ts	eslint(max-params)
 7	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	eslint(max-depth)
 8	src/features/observe/android/AndroidCtrlProxyClient.ts	eslint(max-params)
-8	src/features/observe/ios/IOSCtrlProxyClient.ts	eslint(max-params)

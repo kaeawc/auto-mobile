@@ -1,4 +1,4 @@
-import { Plan, PlanStep } from "../../models/Plan";
+import { Plan, PlanStep, PlanDeviceDefinition } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../SystemTimer";
@@ -14,6 +14,24 @@ interface BarrierLockUsage {
   // Per-device occurrence count, used to catch a device scheduled more times
   // than there are generations for it to participate in.
   deviceOccurrences: Map<string, number>;
+}
+
+interface DeviceLabelErrors {
+  missingLabels: Array<{ index: number; tool: string }>;
+  invalidLabels: Array<{ index: number; tool: string; device: string }>;
+  missingInCriticalSection: Array<{ parentIndex: number; subIndex: number; tool: string }>;
+  invalidInCriticalSection: Array<{
+    parentIndex: number;
+    subIndex: number;
+    tool: string;
+    device: string;
+  }>;
+}
+
+interface CriticalSectionOccurrence {
+  stepIndex: number;
+  device: unknown;
+  deviceCount: unknown;
 }
 
 /**
@@ -79,16 +97,7 @@ export class PlanValidator {
 
     if (hasDefinitions) {
       for (const device of definitions) {
-        if (!device.label || device.label.trim() === "") {
-          throw new ActionableError(
-            `Invalid device label: ${JSON.stringify(device.label)}. Device labels must be non-empty strings.`,
-          );
-        }
-        if (!device.platform || (device.platform !== "android" && device.platform !== "ios")) {
-          throw new ActionableError(
-            `Invalid device platform for ${device.label}: ${JSON.stringify(device.platform)}.`,
-          );
-        }
+        this.validateDeviceDefinition(device);
       }
     }
 
@@ -114,6 +123,19 @@ export class PlanValidator {
     }
   }
 
+  private static validateDeviceDefinition(device: PlanDeviceDefinition): void {
+    if (!device.label || device.label.trim() === "") {
+      throw new ActionableError(
+        `Invalid device label: ${JSON.stringify(device.label)}. Device labels must be non-empty strings.`,
+      );
+    }
+    if (!device.platform || (device.platform !== "android" && device.platform !== "ios")) {
+      throw new ActionableError(
+        `Invalid device platform for ${device.label}: ${JSON.stringify(device.platform)}.`,
+      );
+    }
+  }
+
   /**
    * Validates that every step has a device label when the devices field is
    * present. criticalSection follows the same rule for its outer step, and
@@ -127,19 +149,12 @@ export class PlanValidator {
     }
 
     const deviceSet = new Set(normalizePlanDevices(plan.devices).labels);
-    const missingLabels: Array<{ index: number; tool: string }> = [];
-    const invalidLabels: Array<{ index: number; tool: string; device: string }> = [];
-    const missingInCriticalSection: Array<{
-      parentIndex: number;
-      subIndex: number;
-      tool: string;
-    }> = [];
-    const invalidInCriticalSection: Array<{
-      parentIndex: number;
-      subIndex: number;
-      tool: string;
-      device: string;
-    }> = [];
+    const labelErrors: DeviceLabelErrors = {
+      missingLabels: [],
+      invalidLabels: [],
+      missingInCriticalSection: [],
+      invalidInCriticalSection: [],
+    };
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
@@ -155,44 +170,16 @@ export class PlanValidator {
       // step -- lock/deviceCount/device sitting directly on the step rather
       // than nested under params -- is resolved correctly instead of
       // reporting a spurious missing-device error (#6215 review).
-      const device = this.effectiveField(step, "device");
-      if (device === undefined || device === null || device === "") {
-        missingLabels.push({ index: i, tool: step.tool });
-      } else if (typeof device !== "string" || !deviceSet.has(device)) {
-        invalidLabels.push({ index: i, tool: step.tool, device: String(device) });
-      }
+      this.recordStepDeviceLabel(step, i, deviceSet, labelErrors);
 
       // Additionally, criticalSection sub-steps must each declare a device.
       if (step.tool === "criticalSection") {
-        const subSteps = step.params?.steps;
-        if (Array.isArray(subSteps)) {
-          for (let j = 0; j < subSteps.length; j++) {
-            const sub = subSteps[j];
-            if (!sub || typeof sub !== "object") {
-              continue;
-            }
-            const subParams = (sub as { params?: Record<string, unknown> }).params;
-            const subDevice = subParams?.device;
-            const subTool = String((sub as { tool?: unknown }).tool ?? "unknown");
-
-            if (subDevice === undefined || subDevice === null || subDevice === "") {
-              missingInCriticalSection.push({
-                parentIndex: i,
-                subIndex: j,
-                tool: subTool,
-              });
-            } else if (typeof subDevice !== "string" || !deviceSet.has(subDevice)) {
-              invalidInCriticalSection.push({
-                parentIndex: i,
-                subIndex: j,
-                tool: subTool,
-                device: String(subDevice),
-              });
-            }
-          }
-        }
+        this.recordCriticalSectionDeviceLabels(step, i, deviceSet, labelErrors);
       }
     }
+
+    const { missingLabels, invalidLabels, missingInCriticalSection, invalidInCriticalSection } =
+      labelErrors;
 
     // Report all validation errors
     const errors: string[] = [];
@@ -233,6 +220,65 @@ export class PlanValidator {
 
     if (errors.length > 0) {
       throw new ActionableError(errors.join("\n"));
+    }
+  }
+
+  private static recordStepDeviceLabel(
+    step: PlanStep,
+    i: number,
+    deviceSet: Set<string>,
+    labelErrors: DeviceLabelErrors,
+  ): void {
+    const device = this.effectiveField(step, "device");
+    if (device === undefined || device === null || device === "") {
+      labelErrors.missingLabels.push({ index: i, tool: step.tool });
+    } else if (typeof device !== "string" || !deviceSet.has(device)) {
+      labelErrors.invalidLabels.push({ index: i, tool: step.tool, device: String(device) });
+    }
+  }
+
+  private static recordCriticalSectionDeviceLabels(
+    step: PlanStep,
+    i: number,
+    deviceSet: Set<string>,
+    labelErrors: DeviceLabelErrors,
+  ): void {
+    const subSteps = step.params?.steps;
+    if (!Array.isArray(subSteps)) {
+      return;
+    }
+    for (let j = 0; j < subSteps.length; j++) {
+      this.recordCriticalSectionSubstepLabel(subSteps[j], i, j, deviceSet, labelErrors);
+    }
+  }
+
+  private static recordCriticalSectionSubstepLabel(
+    sub: unknown,
+    i: number,
+    j: number,
+    deviceSet: Set<string>,
+    labelErrors: DeviceLabelErrors,
+  ): void {
+    if (!sub || typeof sub !== "object") {
+      return;
+    }
+    const subParams = (sub as { params?: Record<string, unknown> }).params;
+    const subDevice = subParams?.device;
+    const subTool = String((sub as { tool?: unknown }).tool ?? "unknown");
+
+    if (subDevice === undefined || subDevice === null || subDevice === "") {
+      labelErrors.missingInCriticalSection.push({
+        parentIndex: i,
+        subIndex: j,
+        tool: subTool,
+      });
+    } else if (typeof subDevice !== "string" || !deviceSet.has(subDevice)) {
+      labelErrors.invalidInCriticalSection.push({
+        parentIndex: i,
+        subIndex: j,
+        tool: subTool,
+        device: String(subDevice),
+      });
     }
   }
 
@@ -399,12 +445,22 @@ export class PlanValidator {
    * surfacing them as a 30-second timeout at runtime.
    */
   private static validateCriticalSectionLocks(plan: Plan): void {
-    interface LockOccurrence {
-      stepIndex: number;
-      device: unknown;
-      deviceCount: unknown;
+    const lockUsage = this.collectCriticalSectionLockUsage(plan);
+    const errors: string[] = [];
+
+    for (const [lock, occurrences] of lockUsage.entries()) {
+      this.validateCriticalSectionLock(lock, occurrences, errors);
     }
-    const lockUsage = new Map<string, LockOccurrence[]>();
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
+  }
+
+  private static collectCriticalSectionLockUsage(
+    plan: Plan,
+  ): Map<string, CriticalSectionOccurrence[]> {
+    const lockUsage = new Map<string, CriticalSectionOccurrence[]>();
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
@@ -425,52 +481,60 @@ export class PlanValidator {
       lockUsage.set(lock, occurrences);
     }
 
-    const errors: string[] = [];
+    return lockUsage;
+  }
 
-    for (const [lock, occurrences] of lockUsage.entries()) {
-      const deviceCounts = new Set(
-        occurrences.map((o) => o.deviceCount).filter((c) => typeof c === "number"),
+  private static validateCriticalSectionLock(
+    lock: string,
+    occurrences: CriticalSectionOccurrence[],
+    errors: string[],
+  ): void {
+    const deviceCounts = new Set(
+      occurrences.map((o) => o.deviceCount).filter((c) => typeof c === "number"),
+    );
+
+    if (deviceCounts.size > 1) {
+      const detail = occurrences
+        .map((o) => `step ${o.stepIndex} deviceCount=${String(o.deviceCount)}`)
+        .join(", ");
+      errors.push(
+        `criticalSection lock "${lock}" has inconsistent deviceCount values: ${detail}. All steps sharing a lock must declare the same deviceCount.`,
       );
-
-      if (deviceCounts.size > 1) {
-        const detail = occurrences
-          .map((o) => `step ${o.stepIndex} deviceCount=${String(o.deviceCount)}`)
-          .join(", ");
-        errors.push(
-          `criticalSection lock "${lock}" has inconsistent deviceCount values: ${detail}. All steps sharing a lock must declare the same deviceCount.`,
-        );
-        continue;
-      }
-
-      const declaredCount =
-        deviceCounts.size === 1 ? (deviceCounts.values().next().value as number) : undefined;
-
-      if (declaredCount !== undefined && occurrences.length !== declaredCount) {
-        errors.push(
-          `criticalSection lock "${lock}" declares deviceCount=${declaredCount} but ${occurrences.length} step${occurrences.length === 1 ? "" : "s"} reference${occurrences.length === 1 ? "s" : ""} it. Every participating device needs its own criticalSection step with this lock.`,
-        );
-      }
-
-      const devicesSeen = new Map<string, number[]>();
-      for (const o of occurrences) {
-        if (typeof o.device !== "string" || o.device.length === 0) {
-          continue;
-        }
-        const list = devicesSeen.get(o.device) ?? [];
-        list.push(o.stepIndex);
-        devicesSeen.set(o.device, list);
-      }
-      for (const [device, indices] of devicesSeen.entries()) {
-        if (indices.length > 1) {
-          errors.push(
-            `criticalSection lock "${lock}" is entered twice by device "${device}" (steps ${indices.join(", ")}). Each device can participate in a given lock at most once.`,
-          );
-        }
-      }
+      return;
     }
 
-    if (errors.length > 0) {
-      throw new ActionableError(errors.join("\n"));
+    const declaredCount =
+      deviceCounts.size === 1 ? (deviceCounts.values().next().value as number) : undefined;
+
+    if (declaredCount !== undefined && occurrences.length !== declaredCount) {
+      errors.push(
+        `criticalSection lock "${lock}" declares deviceCount=${declaredCount} but ${occurrences.length} step${occurrences.length === 1 ? "" : "s"} reference${occurrences.length === 1 ? "s" : ""} it. Every participating device needs its own criticalSection step with this lock.`,
+      );
+    }
+
+    this.validateCriticalSectionDevices(lock, occurrences, errors);
+  }
+
+  private static validateCriticalSectionDevices(
+    lock: string,
+    occurrences: CriticalSectionOccurrence[],
+    errors: string[],
+  ): void {
+    const devicesSeen = new Map<string, number[]>();
+    for (const o of occurrences) {
+      if (typeof o.device !== "string" || o.device.length === 0) {
+        continue;
+      }
+      const list = devicesSeen.get(o.device) ?? [];
+      list.push(o.stepIndex);
+      devicesSeen.set(o.device, list);
+    }
+    for (const [device, indices] of devicesSeen.entries()) {
+      if (indices.length > 1) {
+        errors.push(
+          `criticalSection lock "${lock}" is entered twice by device "${device}" (steps ${indices.join(", ")}). Each device can participate in a given lock at most once.`,
+        );
+      }
     }
   }
 

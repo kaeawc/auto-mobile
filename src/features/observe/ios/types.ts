@@ -339,6 +339,8 @@ export interface CtrlProxyActionResult {
   action?: string;
   totalTimeMs?: number;
   error?: string;
+  /** Runner note on a successful action, e.g. a semantic link tap that chose the first of several candidate owners. */
+  warning?: string;
   /** Host-side dispatch/confirmation metadata; absent for other action helpers. */
   dispatched?: boolean;
   acknowledged?: boolean;

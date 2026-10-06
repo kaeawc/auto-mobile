@@ -105,10 +105,19 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       }
     }
 
+  /**
+   * Replace the rule list. The host re-sends its whole list on every change and on every reconnect,
+   * so a rule the store already holds keeps its use counter instead of being re-armed from the
+   * incoming `remaining` (issue #10060). Identity is the host-assigned `mockId` (never reused
+   * within a daemon run) plus an unchanged definition; a changed rule, or a new app process, starts
+   * with a fresh counter.
+   */
   fun setRules(dtos: List<NetworkMockRuleDto>) {
+    val previousById = rules.associateBy { it.mockId }
     val compiledRules = buildList {
       for (dto in dtos) {
         try {
+          val previous = previousById[dto.mockId]?.takeIf { it.isSameDefinitionAs(dto) }
           add(
             CompiledMockRule(
               mockId = dto.mockId,
@@ -116,7 +125,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
               pathRegex = Regex(dto.path),
               method = dto.method,
               limit = dto.limit,
-              remaining = dto.remaining?.let { AtomicInteger(it) },
+              remaining =
+                if (previous != null) previous.remaining
+                else dto.remaining?.let { AtomicInteger(it) },
               statusCode = dto.statusCode,
               responseHeaders = dto.responseHeaders,
               responseBody = dto.responseBody,
@@ -133,6 +144,12 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     rules = compiledRules
     AutoMobileSDK.logger.d(TAG) { "Updated mock rules: ${compiledRules.size} active" }
   }
+
+  private fun CompiledMockRule.isSameDefinitionAs(dto: NetworkMockRuleDto): Boolean =
+    limit == dto.limit &&
+      method == dto.method &&
+      hostRegex.pattern == dto.host &&
+      pathRegex.pattern == dto.path
 
   fun setErrorSimulation(
     enabled: Boolean,

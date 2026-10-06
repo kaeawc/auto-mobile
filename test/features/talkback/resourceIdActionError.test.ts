@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { resourceIdActionError } from "../../../src/features/talkback/resourceIdActionError";
+import {
+  isNodeNotFoundReply,
+  resourceIdActionError,
+} from "../../../src/features/talkback/resourceIdActionError";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import type { ViewHierarchyResult } from "../../../src/models";
@@ -70,5 +73,15 @@ describe("resource-ID action guard", () => {
       ),
     ).toMatchObject({ success: false, method: "accessibility-action" });
     expect(driver.actionHistory).toEqual([]);
+  });
+});
+
+describe("node-not-found reply classification", () => {
+  test("only CtrlProxy's lookup-miss reply counts", () => {
+    expect(isNodeNotFoundReply("Element not found with resource-id: app:id/row")).toBe(true);
+    expect(isNodeNotFoundReply("Element not found with NodeSelector(testTag=row)")).toBe(true);
+    expect(isNodeNotFoundReply("performAction returned false")).toBe(false);
+    expect(isNodeNotFoundReply("Accessibility action is unavailable: long_click")).toBe(false);
+    expect(isNodeNotFoundReply(undefined)).toBe(false);
   });
 });

@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.annotation.VisibleForTesting
 import dev.jasonpearson.automobile.sdk.AutoMobileNotifications
 import dev.jasonpearson.automobile.sdk.NotificationAction
+import dev.jasonpearson.automobile.sdk.NotificationPostResult
 import dev.jasonpearson.automobile.sdk.NotificationStyle
 import org.json.JSONArray
 
@@ -32,7 +33,7 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
       val actionsJson = intent.getStringExtra(AutoMobileNotifications.EXTRA_ACTIONS)
       val actions = parseActions(actionsJson)
 
-      val success =
+      val result =
         AutoMobileNotifications.postWithContext(
           context,
           title,
@@ -43,12 +44,24 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
           channelId,
         )
 
-      resultCode = if (success) RESULT_SUCCESS else RESULT_ERROR
+      resultCode = resultCodeFor(result)
     } catch (e: Exception) {
       Log.e(TAG, "Failed to handle notification request", e)
       resultCode = RESULT_ERROR
     }
   }
+
+  /**
+   * Maps a post outcome to the broadcast result code the host reads: 1 posted, 2 posted but the
+   * bigPicture image could not be loaded, 0 not posted.
+   */
+  @VisibleForTesting
+  internal fun resultCodeFor(result: NotificationPostResult): Int =
+    when (result) {
+      NotificationPostResult.POSTED -> RESULT_SUCCESS
+      NotificationPostResult.POSTED_WITHOUT_IMAGE -> RESULT_POSTED_WITHOUT_IMAGE
+      NotificationPostResult.FAILED -> RESULT_ERROR
+    }
 
   @VisibleForTesting
   internal fun parseActions(actionsJson: String?): List<NotificationAction> {
@@ -74,6 +87,7 @@ class AutoMobileNotificationReceiver : BroadcastReceiver() {
   companion object {
     private const val TAG = "AutoMobileNotifReceiver"
     private const val RESULT_SUCCESS = 1
+    private const val RESULT_POSTED_WITHOUT_IMAGE = 2
     private const val RESULT_ERROR = 0
   }
 }

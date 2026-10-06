@@ -407,6 +407,41 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
         }
 
+        // Issue #10060: the host re-sends its whole rule list on every change and reconnect; an
+        // exhausted rule must stay exhausted when the same rule is re-sent.
+        func testNetworkMockRuleStoreKeepsConsumedCounterWhenOtherRulesChange() {
+            func rule(_ mockId: String, path: String, limit: Int?) -> NetworkMockRuleDTO {
+                NetworkMockRuleDTO(
+                    mockId: mockId,
+                    host: "api\\.example\\.com",
+                    path: path,
+                    method: "*",
+                    limit: limit,
+                    remaining: limit,
+                    statusCode: 401,
+                    responseHeaders: [:],
+                    responseBody: "",
+                    contentType: "application/json"
+                )
+            }
+            let store = NetworkMockRuleStore()
+            let login = rule("mock-1", path: "^/login$", limit: 1)
+            store.setRules([login])
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+
+            store.setRules([login, rule("mock-2", path: "^/profile$", limit: nil)])
+
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/profile", method: "GET"))
+
+            // A changed definition under the same id is a different rule and starts fresh.
+            store.setRules([rule("mock-1", path: "^/login$", limit: 2)])
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+        }
+
         func testNetworkMockRuleStoreHonorsErrorSimulationLimitAndExpiry() {
             let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
             let store = NetworkMockRuleStore(dateProvider: dateProvider)

@@ -21,6 +21,7 @@ import {
   type DeviceInfo,
   type Platform,
 } from "../../src/models";
+import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -2525,7 +2526,11 @@ describe("DeviceBootService", () => {
       devices.startDevice = async (device, timeoutMs) => {
         starts++;
         if ((await truthfulBooted("ios")).some((booted) => booted.deviceId === device.deviceId)) {
-          throw new ActionableError(`ios device '${device.name}' is already running`);
+          throw new DeviceAlreadyRunningError(
+            `ios device '${device.name}' is already running`,
+            "ios",
+            device.deviceId,
+          );
         }
         return await originalStartDevice(device, timeoutMs);
       };
@@ -2552,6 +2557,7 @@ describe("DeviceBootService", () => {
       return {
         devices,
         timer,
+        matcher,
         lifecycleCoordinator,
         newService,
         starts: () => starts,
@@ -2768,6 +2774,132 @@ describe("DeviceBootService", () => {
       expect(test.starts()).toBe(1);
       expect(abandoned?.aborted).toBe(true);
       expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    /** Hangs only the first cache-bypassing re-check; later reads answer truthfully. */
+    function hangFirstRecheck(test: ReturnType<typeof setup>) {
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      let hung = false;
+      test.devices.getBootedDevicesDetailed = async (platform, options) => {
+        if (options?.bypassIosDeviceListCache === true && !hung) {
+          hung = true;
+          return await new Promise<never>(() => {});
+        }
+        return await answer(platform, options);
+      };
+    }
+
+    function bootSiblingSimulator(test: ReturnType<typeof setup>) {
+      test.devices.setBootedDevices("ios", [
+        { name: iosImage.name, platform: "ios", deviceId: udid },
+      ]);
+    }
+
+    it("adopts the simulator a sibling booted when the slow re-check fell through to the boot path's already-running refusal", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+      hangFirstRecheck(test);
+      const boot = test.newService().boot({ platform: "ios" });
+      await flushMicrotasks();
+      expect(test.starts()).toBe(0);
+
+      test.timer.advanceTime(5_000);
+      const result = await boot;
+
+      expect(test.starts()).toBe(1);
+      expect(result.source).toBe("booted");
+      expect(result.device.deviceId).toBe(udid);
+      expect(result.sourceImage).toEqual(iosImage);
+      expect(result.processHandle).toBeUndefined();
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("adopts behind a recovery policy without letting it treat the sibling's boot as a failed one", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+      hangFirstRecheck(test);
+      const recoveryFailures: unknown[] = [];
+      const recovery: DeviceBootRecovery = {
+        run: async (_target, boot) => {
+          try {
+            return await boot();
+          } catch (error) {
+            recoveryFailures.push(error);
+            throw error;
+          }
+        },
+      };
+      const boot = service(
+        test.devices,
+        test.matcher,
+        recovery,
+        test.timer,
+        test.lifecycleCoordinator,
+      ).boot({ platform: "ios" });
+      await flushMicrotasks();
+
+      test.timer.advanceTime(5_000);
+
+      expect((await boot).source).toBe("booted");
+      expect(recoveryFailures).toEqual([]);
+    });
+
+    it("does not adopt on an untyped error that merely carries the already-running text", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+      hangFirstRecheck(test);
+      test.devices.startDevice = async (device) => {
+        throw new ActionableError(`ios device '${device.name}' is already running`);
+      };
+      const boot = test
+        .newService()
+        .boot({ platform: "ios" })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      test.timer.advanceTime(5_000);
+      const failure = await boot;
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect(failure).not.toBeInstanceOf(DeviceAlreadyRunningError);
+      expect((failure as Error).message).toContain("already running");
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("rethrows the already-running refusal when the follow-up read cannot find the simulator", async () => {
+      const test = setup();
+      hangFirstRecheck(test);
+      test.devices.startDevice = async (device) => {
+        throw new DeviceAlreadyRunningError(
+          `ios device '${device.name}' is already running`,
+          "ios",
+          device.deviceId,
+        );
+      };
+      const boot = test
+        .newService()
+        .boot({ platform: "ios" })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      test.timer.advanceTime(5_000);
+      const failure = await boot;
+
+      expect(failure).toBeInstanceOf(DeviceAlreadyRunningError);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("never adopts on the typed refusal of an explicit cold boot", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+
+      const failure = await test
+        .newService()
+        .boot({ platform: "ios", preferRunning: false })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(DeviceAlreadyRunningError);
+      expect(test.freshChecks()).toBe(0);
     });
 
     it("still lets a caller abort cancel a hung simulator re-check", async () => {

@@ -270,6 +270,9 @@ test("hidden startDevice registers an output schema with closed readiness checks
   registerDeviceTools();
   const tool = ToolRegistry.getTool("startDevice")!;
   expect(tool.hidden).toBe(true);
+  // Hidden from tools/list but still a valid plan step (#10153 review): the Kotlin plan
+  // validator's tool names come from the catalog, which therefore lists it.
+  expect(ToolRegistry.getToolForPlan("startDevice")).toBe(tool);
   expect(tool.outputSchema).toBeDefined();
   const readiness = {
     level: "automationReady",

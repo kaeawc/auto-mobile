@@ -68,4 +68,25 @@ describe("ToolRegistry reachability", () => {
       );
     }
   });
+
+  test("a hidden tool is a valid plan step and only the catalog generator lists it", () => {
+    ToolRegistry.register(
+      "hiddenStep",
+      "Hidden but plan-executable",
+      z.object({}),
+      async () => ({}),
+      { hidden: true },
+    );
+
+    expect(ToolRegistry.getToolForPlan("hiddenStep")).toBeDefined();
+    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).toEqual([]);
+    expect(
+      ToolRegistry.getToolDefinitions({ includeUnavailable: true }).map((tool) => tool.name),
+    ).toEqual([]);
+    const catalog = ToolRegistry.getToolDefinitions({
+      includeUnavailable: true,
+      includeHidden: true,
+    });
+    expect(catalog.map((tool) => tool._meta)).toEqual([{ "automobile/hidden": true }]);
+  });
 });

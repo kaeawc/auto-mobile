@@ -81,8 +81,8 @@ describe("PlanExecutionOrchestrator allocation failure with a caller-held device
     expect(sessions.getSession("base")?.assignedDevice).toBe("a");
   };
 
-  test("fails at once, naming the shortfall, when another session holds the other device", async () => {
-    await pool.bindOrReuseDeviceSession("other-client", "b", "android");
+  test("fails at once, naming the shortfall, when the only other device is offline", async () => {
+    pool.getDevice("b")!.status = "error";
 
     const result = await orchestrate();
 
@@ -90,14 +90,13 @@ describe("PlanExecutionOrchestrator allocation failure with a caller-held device
     expect(result.error).toContain("needs 2 device(s)");
     expect(result.error).toContain("0 matching device(s) are idle");
     expect(result.error).toContain("calling session already holds a");
+    expect(result.error).toContain("b is offline");
     expect(timer.now()).toBe(0);
     expectNothingLeaked();
-    expect(pool.getDevice("b")?.sessionId).toBe("other-client");
   });
 
-  test("a wait on a running plan's device ends with the request's remaining budget", async () => {
+  test("a wait on another session's device ends with the request's remaining budget and names the holder", async () => {
     await pool.bindOrReuseDeviceSession("plan-base", "b", "android");
-    sessions.setDeviceLabels("plan-base", { A: "plan-base" });
 
     // 60 s left on the request, so the 300 s allocation timeout is bounded to 55 s.
     const run = orchestrate({ deadlineMs: 60_000 });
@@ -116,6 +115,7 @@ describe("PlanExecutionOrchestrator allocation failure with a caller-held device
     await drainUntilQuiescent(timer);
     expect(outcome?.success).toBe(false);
     expect(outcome?.error).toContain("Timed out allocating devices after 5");
+    expect(outcome?.error).toContain("b is held by session plan-base");
     expect(timer.now()).toBeLessThan(60_000);
     expectNothingLeaked();
     expect(pool.getDevice("b")?.sessionId).toBe("plan-base");

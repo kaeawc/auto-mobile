@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 interface ToolDefinition {
   name: string;
   inputSchema: { properties?: Record<string, unknown> };
+  _meta?: { "automobile/hidden"?: boolean };
 }
 
 // Injected plan state is not a user-facing tool option.
@@ -96,7 +97,13 @@ function readDocumentation(directory: string): { path: string; content: string }
 }
 
 beforeAll(() => {
-  tools = JSON.parse(readFileSync(join(root, "schemas/tool-definitions.json"), "utf8"));
+  // Hidden tools (`startDevice`) are in the catalog only so plan validators accept them as
+  // steps; they are deliberately not part of the documented, discoverable tool surface.
+  tools = (
+    JSON.parse(
+      readFileSync(join(root, "schemas/tool-definitions.json"), "utf8"),
+    ) as ToolDefinition[]
+  ).filter((tool) => tool._meta?.["automobile/hidden"] !== true);
   const docs = readDocumentation(join(root, "docs"));
   documentedWordsByTool = wordsByTool(
     docs.flatMap((doc) =>

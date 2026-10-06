@@ -374,6 +374,13 @@ interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
 
 interface ToolListingOptions {
   includeUnavailable?: boolean;
+  /**
+   * Also list tools hidden from discovery (`hidden: true`). Only the generated static catalog
+   * sets this: a hidden tool such as `startDevice` is still runnable as a plan step, so plan
+   * validators that derive their tool names from the catalog must know it. It carries
+   * `_meta["automobile/hidden"]` so the proxy never advertises it.
+   */
+  includeHidden?: boolean;
   /** Override the process default for one connection-scoped tools/list response. */
   suppressOutputSchema?: boolean;
 }
@@ -541,6 +548,18 @@ function isJSONTextFailureContent(content: unknown): boolean {
   }
 }
 
+/**
+ * An executePlan response that failed without a single planned step: the orchestrator reports
+ * `totalSteps: 0` only when it failed before the plan ran (rejected plan, failed allocation).
+ */
+function isPlanNeverRanResponse(response: unknown): boolean {
+  if (!isRecord(response)) {
+    return false;
+  }
+  const payload = getStructuredPayload(response);
+  return isRecord(payload) && payload.success === false && payload.totalSteps === 0;
+}
+
 function isToolResponseFailure(response: unknown): boolean {
   if (!isRecord(response)) {
     return false;
@@ -626,6 +645,12 @@ export interface PlanLifecycleInput {
    * a nested `executePlan` must neither clean up nor release them (#10172).
    */
   nestedInPlan?: boolean;
+  /**
+   * The executePlan response reports a failure with no steps (`totalSteps: 0`): the plan failed
+   * before it ran anything (plan rejected, device allocation failed), so a session the CALLER
+   * passed in was never used by it and is left alone rather than auto-released (#10153).
+   */
+  planNeverRan?: boolean;
   // Injected teardown for the server-side per-transport SessionToolBinding
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
@@ -1686,6 +1711,9 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
         const releaseSessionUuid = baseSessionUuid ?? sessionUuid;
+        // A plan that never ran must not take the device away from a session the caller
+        // acquired and passed in (#10153); sessions the plan made for its labels still go.
+        const keepCallerSession = input.planNeverRan === true && baseSessionUuid !== undefined;
         // Track exactly which sessions this release actually frees so the
         // server-side transport binding is torn down for each (issue #4611 Gap
         // D) — coupled to the REAL release, never cleared optimistically.
@@ -1694,7 +1722,15 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           releasedSessionUuids.push(...(await releaseDeviceLabelSessions(releaseSessionUuid)));
         }
 
-        const session = releaseSessionUuid ? sessionManager.getSession(releaseSessionUuid) : null;
+        const session =
+          releaseSessionUuid && !keepCallerSession
+            ? sessionManager.getSession(releaseSessionUuid)
+            : null;
+        if (keepCallerSession) {
+          logger.info(
+            `[PlanLifecycle] executePlan failed before running; keeping caller session ${releaseSessionUuid}`,
+          );
+        }
         if (session) {
           const deviceId = session.assignedDevice;
           // Await the release so its onSessionRelease callbacks (CtrlProxy binding +
@@ -1973,13 +2009,17 @@ export class ToolRegistryClass {
   private toolReachable(
     tool: RegisteredTool,
     context: "list" | "call" | "plan" | "register",
-    options: { includeUnavailable?: boolean } = {},
+    options: Pick<ToolListingOptions, "includeUnavailable" | "includeHidden"> = {},
   ): boolean {
     switch (context) {
       case "list":
       case "register":
-        // `includeUnavailable` skips availability gates, but never discovery hiding.
-        return !tool.hidden && (options.includeUnavailable === true || this.isToolAvailable(tool));
+        // `includeUnavailable` skips availability gates, but never discovery hiding;
+        // only the static catalog generator opts hidden tools in (`includeHidden`).
+        return (
+          (!tool.hidden || options.includeHidden === true) &&
+          (options.includeUnavailable === true || this.isToolAvailable(tool))
+        );
       case "call":
         // Hidden tools remain directly callable; availability gates still apply.
         return this.isToolAvailable(tool);
@@ -2097,8 +2137,8 @@ export class ToolRegistryClass {
               selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid,
           },
           captures(async () => {
+            let response: any | undefined;
             try {
-              let response: any | undefined;
               if (!resolvedTarget.shouldResolveDevice) {
                 if (!options.nonDeviceHandler) {
                   throw new ActionableError(`Tool ${name} requires a device.`);
@@ -2157,7 +2197,13 @@ export class ToolRegistryClass {
                 : "";
               throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
             } finally {
-              await this.runPlanLifecycle(name, handlerArgs, resolvedTarget, selectionContext);
+              await this.runPlanLifecycle(
+                name,
+                handlerArgs,
+                resolvedTarget,
+                selectionContext,
+                isPlanNeverRanResponse(response),
+              );
             }
           }),
         );
@@ -2203,6 +2249,7 @@ export class ToolRegistryClass {
     args: Record<string, unknown>,
     resolvedTarget: ExecutionTargetContext,
     callContext: ReturnType<typeof getToolSelectionContext>,
+    planNeverRan: boolean,
   ): Promise<void> {
     return this.planLifecycleManager.afterExecution({
       name,
@@ -2215,6 +2262,7 @@ export class ToolRegistryClass {
       // Read from the context captured when this call began: it is this request's own async
       // chain, never process state shared with a concurrent plan (#10172).
       nestedInPlan: callContext?.planRequest !== undefined,
+      planNeverRan,
       sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
       sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
     });
@@ -2554,6 +2602,7 @@ export class ToolRegistryClass {
           "anthropic/alwaysLoad"?: boolean;
           "automobile/debugOnly"?: boolean;
           "automobile/embeddedSdkOnly"?: boolean;
+          "automobile/hidden"?: boolean;
           "automobile/planOnly"?: boolean;
           ui?: { resourceUri: string };
         };
@@ -2587,6 +2636,9 @@ export class ToolRegistryClass {
       }
       if (tool.embeddedSdkOnly) {
         definition._meta = { ...definition._meta, "automobile/embeddedSdkOnly": true };
+      }
+      if (tool.hidden) {
+        definition._meta = { ...definition._meta, "automobile/hidden": true };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {

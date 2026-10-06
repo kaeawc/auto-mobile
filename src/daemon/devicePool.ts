@@ -1,6 +1,5 @@
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
   InMemoryDeviceHealthMarkers,
@@ -2212,6 +2211,7 @@ export class DevicePool {
         throw new ActionableError(
           `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${result.attempts} attempts).\n` +
             refreshFailureContext(refreshFailure) +
+            this.describeCallerHeldShortfall(ticket) +
             `Required: ${requiredCount} devices\n` +
             `Device pool status:\n` +
             `  Total devices: ${currentStats.total}\n` +
@@ -2377,6 +2377,7 @@ export class DevicePool {
           throw new ActionableError(
             `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
               refreshFailureContext(refreshFailure) +
+              this.describeCallerHeldShortfall(ticket) +
               `Required: ${requiredCount} devices\n` +
               `Suggestions:\n` +
               `  - Boot additional simulators or emulators that match the plan requirements\n` +
@@ -2465,18 +2466,17 @@ export class DevicePool {
    * Fail fast when a request that includes a session already holding a device
    * (a plan's base session, #10153) cannot be met by waiting. A plan allocation
    * needs one idle matching device for every label even when a label resolves to
-   * the caller's own session, so with every other matching device held by a live
-   * session that is not part of a plan the wait could only end at the allocation
-   * timeout (the call then outlives the client's own timeout). Devices that are
-   * merely booting, being released, reserved, in cleanup, or held by a running
-   * plan's sessions are still waited for, and every queue round re-evaluates.
+   * the caller's own session. Waiting is pointless only when no OTHER matching
+   * device exists that could ever become free: every other device is absent,
+   * offline (error), quarantined, or the wrong platform for the label. A usable
+   * device held by any live session or plan (an agent's session, a single-device
+   * JUnit-runner plan, a multi-device plan) is waited for, bounded by the
+   * request's allocation deadline, and every queue round re-evaluates.
    */
   private assertCallerHeldDeviceDoesNotBlockRequest(
     ticket: (typeof this.multiDeviceAllocationQueue)[number],
   ): void {
-    const callerHeld = ticket.requests
-      .map((request) => this.getDeviceHeldBySession(request.sessionId))
-      .filter((device): device is PooledDevice => device !== undefined);
+    const callerHeld = this.getCallerHeldDevices(ticket);
     if (callerHeld.length === 0) {
       return;
     }
@@ -2485,7 +2485,7 @@ export class DevicePool {
       return;
     }
     const ownIds = new Set(ticket.requests.map((request) => request.sessionId));
-    const blockers = new Map<string, PooledDevice>();
+    const unusable = new Map<string, PooledDevice>();
     for (const request of unmet) {
       if (this.hasPendingAndroidRecoveryMatching(request.criteria)) {
         return;
@@ -2494,26 +2494,73 @@ export class DevicePool {
         if (this.mayBecomeAvailableToRequest(device, ownIds)) {
           return;
         }
-        blockers.set(device.id, device);
+        unusable.set(device.id, device);
       }
     }
-    const idleCount = this.getDevicesMatchingAnyRequest(ticket.requests).filter((device) =>
-      this.isIdleDeviceEligible(device),
-    ).length;
     const heldIds = new Set(callerHeld.map((device) => device.id));
-    const others = [...blockers.values()].filter((device) => !heldIds.has(device.id));
+    const others = [...unusable.values()].filter((device) => !heldIds.has(device.id));
     const othersNote =
       others.length > 0
-        ? `: ${others.map((device) => `${device.id} is held by session ${device.sessionId}`).join("; ")}`
+        ? `: ${others.map((device) => `${device.id} is ${this.describeUnusableDevice(device)}`).join("; ")}`
         : "";
     throw new ActionableError(
       `Cannot allocate devices for this plan: it needs ${ticket.requests.length} device(s) ` +
-        `and ${idleCount} matching device(s) are idle. The calling session already holds ` +
+        `and ${this.countIdleMatchingDevices(ticket)} matching device(s) are idle. The calling session already holds ` +
         `${callerHeld.map((device) => `${device.id} (session ${device.sessionId})`).join(", ")}, ` +
-        `and no other matching device is free or about to be freed by a running plan${othersNote}.\n` +
+        `and no other matching device exists that could become free${othersNote}.\n` +
         `Suggestions:\n` +
-        `  - Release the session that holds another device, or start another emulator or simulator\n` +
+        `  - Start another emulator or simulator that matches the plan\n` +
         `  - Reduce the number of devices required in the test plan`,
+    );
+  }
+
+  private getCallerHeldDevices(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): PooledDevice[] {
+    return ticket.requests
+      .map((request) => this.getDeviceHeldBySession(request.sessionId))
+      .filter((device): device is PooledDevice => device !== undefined);
+  }
+
+  private countIdleMatchingDevices(ticket: (typeof this.multiDeviceAllocationQueue)[number]) {
+    return this.getDevicesMatchingAnyRequest(ticket.requests).filter((device) =>
+      this.isIdleDeviceEligible(device),
+    ).length;
+  }
+
+  private describeUnusableDevice(device: PooledDevice): string {
+    return device.status === "error" ? "offline" : "quarantined";
+  }
+
+  /**
+   * Allocation timeout detail for a request whose caller already holds a device:
+   * who holds each other matching device and the shortfall. Uses only the session
+   * ids the fail-fast error already exposes. Empty when the caller holds nothing.
+   */
+  private describeCallerHeldShortfall(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): string {
+    const callerHeld = this.getCallerHeldDevices(ticket);
+    if (callerHeld.length === 0) {
+      return "";
+    }
+    const heldIds = new Set(callerHeld.map((device) => device.id));
+    const ownIds = new Set(ticket.requests.map((request) => request.sessionId));
+    const others = this.getDevicesMatchingAnyRequest(ticket.requests).filter(
+      (device) => !heldIds.has(device.id) && !this.isIdleDeviceEligible(device),
+    );
+    const holders = others.map((device) => {
+      if (device.status === "busy" && device.sessionId && !ownIds.has(device.sessionId)) {
+        return `${device.id} is held by session ${device.sessionId}`;
+      }
+      const reserved = device.status !== "error" && !this.getDeviceHealthMarker(device.id);
+      return `${device.id} is ${reserved ? "reserved" : this.describeUnusableDevice(device)}`;
+    });
+    return (
+      `Shortfall: the plan needs ${ticket.requests.length} device(s) and ` +
+      `${this.countIdleMatchingDevices(ticket)} matching device(s) are idle. The calling session ` +
+      `already holds ${callerHeld.map((device) => `${device.id} (session ${device.sessionId})`).join(", ")}` +
+      `${holders.length > 0 ? `; ${holders.join("; ")}` : ""}.\n`
     );
   }
 
@@ -2548,37 +2595,19 @@ export class DevicePool {
   }
 
   /**
-   * Whether waiting can plausibly give this request the device. Only a device
-   * held by one of the request's own sessions, or by a live session that is not
-   * running (or queued to run) a plan, will stay held until that session ends.
+   * Whether waiting can plausibly give this request the device: a usable device
+   * that is not held by one of the request's own sessions. A device held by any
+   * other live session or plan may be released before the deadline; only an
+   * offline (error) or quarantined device cannot become free by waiting.
    */
   private mayBecomeAvailableToRequest(device: PooledDevice, ownIds: ReadonlySet<string>): boolean {
-    const holderId = device.sessionId;
-    if (holderId && ownIds.has(holderId)) {
+    if (device.sessionId && ownIds.has(device.sessionId)) {
       return false;
     }
-    if (device.status !== "busy" || !holderId || this.isReservedForAssignment(device)) {
-      return true;
+    if (device.status === "error") {
+      return false;
     }
-    const session = this.sessionManager.getSession(holderId);
-    return (
-      !session ||
-      isSessionReleasing(this.sessionManager, holderId, session) ||
-      Boolean(device.autolockSessionId) ||
-      this.sessionManager.hasDeviceCleanupInProgress(device.id) ||
-      this.isPlanParticipantSession(holderId)
-    );
-  }
-
-  /** A session of a plan that is allocating or running: it frees its device when the plan ends. */
-  private isPlanParticipantSession(sessionId: string): boolean {
-    return (
-      this.multiDeviceAllocationQueue.some((waiter) =>
-        waiter.requests.some((request) => request.sessionId === sessionId),
-      ) ||
-      this.sessionManager.getDeviceLabels(sessionId) !== undefined ||
-      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) !== sessionId
-    );
+    return device.status === "busy" || !this.getDeviceHealthMarker(device.id);
   }
 
   private async executeMultiDeviceAllocation<T>(

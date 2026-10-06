@@ -44,6 +44,9 @@ const RAW_DEFINITIONS: RawToolDefinition[] = toolDefinitionsJson as RawToolDefin
 const DEBUG_ONLY_META_KEY = "automobile/debugOnly";
 const EMBEDDED_SDK_ONLY_META_KEY = "automobile/embeddedSdkOnly";
 const PLAN_ONLY_META_KEY = "automobile/planOnly";
+// Hidden from discovery but plan-executable (`startDevice`): in the catalog so plan validators
+// accept it as a step, never advertised by the proxy.
+const HIDDEN_META_KEY = "automobile/hidden";
 
 function isConnectedFallbackAvailable(
   tool: RawToolDefinition,
@@ -63,8 +66,9 @@ function toolDefinitions(
   const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
   return RAW_DEFINITIONS.filter(
     (tool) =>
-      connectedDaemonOptions === false ||
-      isConnectedFallbackAvailable(tool, connectedDaemonOptions),
+      tool._meta?.[HIDDEN_META_KEY] !== true &&
+      (connectedDaemonOptions === false ||
+        isConnectedFallbackAvailable(tool, connectedDaemonOptions)),
   ).map((tool) => {
     const meta: Record<string, unknown> = {
       ...(tool._meta ?? {}),

@@ -129,8 +129,8 @@ describe("recorded-tool labelled plan: schema validation before allocation (#100
     expect(validator.validateYaml(labelledPlanYaml()).errors ?? []).toEqual([]);
   });
 
-  test("it fails at once with the caller-held shortfall when another session holds the other device", async () => {
-    await pool.bindOrReuseDeviceSession("other-client", "b", "android");
+  test("it fails at once with the caller-held shortfall when the only other device is offline", async () => {
+    pool.getDevice("b")!.status = "error";
 
     const result = await orchestrate(labelledPlanYaml());
 
@@ -142,7 +142,7 @@ describe("recorded-tool labelled plan: schema validation before allocation (#100
     expect(sessions.getDeviceLabels("base")).toBeUndefined();
     expect(sessions.getSession("base:B")).toBeNull();
     expect(pool.getDevice("a")?.sessionId).toBe("base");
-    expect(pool.getDevice("b")?.sessionId).toBe("other-client");
+    expect(pool.getDevice("b")?.status).toBe("error");
   });
 
   test("a plan the schema rejects reports validation, not allocation, and allocates nothing", async () => {

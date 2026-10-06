@@ -33,20 +33,22 @@ describe("getStaticToolDefinitions", () => {
 
   test("cold wire payload equals committed definitions with only the established omissions", () => {
     delete process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS;
-    const expected = committedDefinitions.map((tool) => {
-      const definition: Record<string, unknown> = { ...tool };
-      delete definition.outputSchema;
-      const meta: Record<string, unknown> = { ...tool._meta };
-      delete meta["automobile/debugOnly"];
-      delete meta["automobile/embeddedSdkOnly"];
-      delete meta["automobile/planOnly"];
-      if (Object.keys(meta).length) {
-        definition._meta = meta;
-      } else {
-        delete definition._meta;
-      }
-      return definition;
-    });
+    const expected = committedDefinitions
+      .filter((tool) => !(tool._meta as Record<string, unknown> | undefined)?.["automobile/hidden"])
+      .map((tool) => {
+        const definition: Record<string, unknown> = { ...tool };
+        delete definition.outputSchema;
+        const meta: Record<string, unknown> = { ...tool._meta };
+        delete meta["automobile/debugOnly"];
+        delete meta["automobile/embeddedSdkOnly"];
+        delete meta["automobile/planOnly"];
+        if (Object.keys(meta).length) {
+          definition._meta = meta;
+        } else {
+          delete definition._meta;
+        }
+        return definition;
+      });
     expect(getStaticToolDefinitions()).toEqual(expected);
   });
 
@@ -86,6 +88,18 @@ describe("getStaticToolDefinitions", () => {
       expect(typeof tool.name).toBe("string");
       expect(tool.name.length).toBeGreaterThan(0);
       expect(typeof tool.inputSchema).toBe("object");
+    }
+  });
+});
+
+// A hidden tool such as `startDevice` is a valid plan step, so the committed catalog the Kotlin
+// plan validator derives its tool names from lists it; the proxy must still never advertise it.
+describe("hidden plan-executable tools in the committed catalog", () => {
+  test("startDevice is in the catalog but in no static tools/list", () => {
+    const entry = committedDefinitions.find((tool) => tool.name === "startDevice");
+    expect(entry?._meta).toEqual({ "automobile/hidden": true });
+    for (const tools of [getStaticToolDefinitions(), getConnectedStaticToolDefinitions()]) {
+      expect(tools.some((tool) => tool.name === "startDevice")).toBe(false);
     }
   });
 });

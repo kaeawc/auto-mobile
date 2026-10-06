@@ -6,8 +6,9 @@ package dev.jasonpearson.automobile.validation
  * The current tool names are not maintained here. The build's `generatePlanToolNames` task reads
  * every `name` in `schemas/tool-definitions.json` into the bundled `plan-tool-names.txt` resource,
  * so the allowlist follows the tool registry by construction and the published artifact does not
- * need the repository at runtime. The daemon applies no static allowlist of its own (an unknown
- * tool is reported by the plan executor), so no tool in the schema is excluded.
+ * need the repository at runtime. The catalog includes hidden tools the daemon still runs as plan
+ * steps (`startDevice`). The daemon applies no static allowlist of its own (an unknown tool is
+ * reported by the plan executor), so no tool in the schema is excluded.
  */
 object ValidTools {
   /**

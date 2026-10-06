@@ -43,11 +43,18 @@ class ValidToolsTest {
         "restoreDeviceSnapshot",
         "doctor",
         "pressKey",
-        "startDevice",
       )
     for (tool in removed) {
       assertEquals(1, unknownToolErrors(tool).size, "$tool no longer exists and has no migration")
     }
+  }
+
+  @Test
+  fun `a hidden tool the daemon still runs as a plan step is accepted`() {
+    // startDevice is hidden from tools/list but plan-executable (ToolRegistry.getToolForPlan), so
+    // the catalog lists it and the validator must not report it as unknown.
+    assertTrue("startDevice" in schemaToolNames, "the catalog lists hidden plan-executable tools")
+    assertEquals(emptyList(), unknownToolErrors("startDevice"))
   }
 
   @Test

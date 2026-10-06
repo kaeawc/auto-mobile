@@ -589,7 +589,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     // Consume the snapshot before cleanup so a failed restore is never retried implicitly.
     span.snapshot = undefined;
     try {
-      if (snapshot && span.safeToRestore) {
+      if (snapshot && !span.safeToRestore) {
+        const recovery =
+          snapshot.prior === null
+            ? 'run "keyboard listImes" and select an enabled IME, or restart the daemon.'
+            : `run "keyboard setIme ${snapshot.prior}" or restart the daemon.`;
+        throw new ImeRestorationError(
+          `Original keyboard restoration was skipped after an unacknowledged cancellation; ${recovery}`,
+        );
+      }
+      if (snapshot) {
         await this.restoreIme(snapshot.prior, snapshot.wasEnabled, snapshot.priorSubtype);
       }
     } catch (error) {
@@ -1412,13 +1421,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       this.checkAbort(signal);
       const result = await this.textClient.commitViaIme(
         text,
-        prior,
+        this.imeSpan ? null : prior,
         signal,
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
       safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
       commitResult = result;
-      if (result.success && mode === "ime" && text.length > 0) {
+      if (result.success && mode === "ime") {
         const error = await this.verifyImeCommit(text, routing);
         if (error !== undefined) {
           return {
@@ -1469,6 +1478,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     routing: ImeCommitRouting,
   ): Promise<string | undefined> {
+    if (text.length === 0) {
+      return undefined;
+    }
     const { signal, display } = routing;
     const multiSegment = imeCommitSegmentCount(text) > 1;
     try {

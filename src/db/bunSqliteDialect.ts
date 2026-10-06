@@ -46,6 +46,22 @@ const DEFAULT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
  */
 export const DEFAULT_OPTIMIZE_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * Every transaction on the app connection is opened with `BEGIN IMMEDIATE`
+ * (issue #10042). A plain (deferred) `BEGIN` that reads before it writes pins a
+ * WAL read snapshot; when a peer daemon sharing the database file commits before
+ * that first write, SQLite fails the write at once with `SQLITE_BUSY_SNAPSHOT` —
+ * `busy_timeout` does not apply to a snapshot upgrade and #shouldRetry never
+ * retries inside a transaction. `IMMEDIATE` takes the write lock up front, so
+ * cross-process contention waits on `busy_timeout` at `BEGIN` instead.
+ *
+ * Applies to all transactions because every call site writes (read-then-write
+ * storage/navigation/retention transactions and write-first ones alike); none is
+ * read-only, so no reader is serialized. A future read-only transaction would
+ * need an access-mode carve-out (Kysely `setAccessMode("read only")`).
+ */
+export const BEGIN_TRANSACTION_SQL = "begin immediate";
+
 type BunStatement = ReturnType<BunDatabase["prepare"]>;
 
 /**
@@ -266,7 +282,7 @@ export class BunSqliteConnectionState {
     await this.#acquire("txn", owner);
 
     try {
-      await this.executeQuery(CompiledQuery.raw("begin"), owner);
+      await this.executeQuery(CompiledQuery.raw(BEGIN_TRANSACTION_SQL), owner);
     } catch (error) {
       this.#transactionOwner = null;
       this.#pump();

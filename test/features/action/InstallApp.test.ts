@@ -456,7 +456,7 @@ describe("InstallApp", () => {
   test("marks the Android installed-apps cache stale after a successful install", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
 
     fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
     fakeHost.setCommandResponse(
@@ -545,7 +545,7 @@ describe("InstallApp", () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
 
     fakeLocator.setTool(null);
 
@@ -587,7 +587,7 @@ describe("InstallApp", () => {
     const apkPath = "/tmp/app-debug.apk";
     const repo = new FakeInstalledAppsRepository();
     const adb = new PackageDiscoveryFailureAdb();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
     fakeLocator.setTool(null);
     adb.setCommandResponse(
       "shell pm list packages --user 0",
@@ -626,7 +626,7 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.unused\n"));
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(iosSimulatorDevice.deviceId, 0, "com.example.old", false, 1_000);
+    await repo.seedInstalledApp(iosSimulatorDevice.deviceId, 0, "com.example.old", false, 1_000);
 
     const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
       hostExecutor: fakeHost,
@@ -1345,7 +1345,7 @@ describe("InstallApp", () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.app", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.app", false, 1_000);
 
     fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
     fakeHost.setCommandResponse(

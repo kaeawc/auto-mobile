@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,7 +64,28 @@ class ReadyNamespaceManager extends DaemonManager {
 }
 
 const dirs: string[] = [];
+
+// A manager that reaches start() opens a daemon launch log under the resolved
+// AutoMobile data dir, which must never be the developer's real ~/.auto-mobile.
+let isolatedDataDir: string | undefined;
+let originalDataDir: string | undefined;
+
+beforeEach(() => {
+  originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+  isolatedDataDir = mkdtempSync(join(tmpdir(), "namespace-unit-data-"));
+  process.env.AUTOMOBILE_DATA_DIR = isolatedDataDir;
+});
+
 afterEach(() => {
+  if (originalDataDir === undefined) {
+    delete process.env.AUTOMOBILE_DATA_DIR;
+  } else {
+    process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+  }
+  if (isolatedDataDir !== undefined) {
+    rmSync(isolatedDataDir, { recursive: true, force: true });
+    isolatedDataDir = undefined;
+  }
   for (const dir of dirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }

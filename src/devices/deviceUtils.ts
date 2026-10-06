@@ -242,6 +242,18 @@ export interface PlatformDeviceManager {
   killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<BootedDevice | void>;
 
   /**
+   * Among the given Android serials, which `adb devices` still lists as
+   * `offline` rather than absent. An offline emulator is invisible to
+   * {@link getBootedDevices} yet its process may still be running, so the
+   * shutdown wait uses this to avoid confirming disappearance too early
+   * (#10074). Optional: managers without an ADB transport omit it.
+   */
+  getAndroidOfflineDeviceIds?(
+    candidateIds: Iterable<string>,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<Set<string>>;
+
+  /**
    * Delete an already-resolved platform device representation.
    *
    * Android destruction is keyed by the exact AVD name resolved from a booted

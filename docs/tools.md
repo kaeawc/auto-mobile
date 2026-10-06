@@ -1171,7 +1171,11 @@ false; Android only).
 when opening the URL displays an intent chooser.
 
 `sqlQuery.databasePath` selects the database path; for iOS SDK databases, use the
-absolute registered path reported by the App Databases resource.
+absolute registered path reported by the App Databases resource. On Android,
+`sqlQuery` rows and the table-data resource return integers within ±(2^53 - 1) as
+JSON numbers; an integer outside that range is returned as its exact decimal
+string, and the response lists the zero-based columns that hold such strings in
+`bigIntegerColumns` so they can be told apart from TEXT.
 `getDataStore.adapterName` and `listDataStores.adapterName` select the name under
 which the host app registered its AutoMobile SDK DataStore adapter.
 
@@ -1774,7 +1778,12 @@ snapshots to the step debug trace; multi-device plans ignore this capture option
 lifts. `criticalSection.deviceCount` specifies the devices required at its
 barrier before serial execution.
 
-`recordSteps.planName` names the plan for `action: "end"`.
+`recordSteps.planName` names the plan for `action: "end"`. The end response
+carries a `warnings` list when a call was skipped (a file-staging call with a
+host `sourcePath`, or a param over 64 KiB) or recorded in a weakened form:
+`resetKeychain` is recorded with `confirm: false`, so a replay stops at that
+step until you set `confirm: true` in the plan by hand. A recording whose calls
+were all skipped fails with an error that lists them.
 `exportPlan.recordingId` identifies the recording to export, and `planName`
 names the exported plan.
 

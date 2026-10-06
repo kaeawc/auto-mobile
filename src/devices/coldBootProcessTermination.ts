@@ -187,6 +187,49 @@ export type OwnedTermination =
   | { state: "survived"; gone: Promise<void> }
   | { state: "unobservable" };
 
+export interface OwnedEmulatorTerminationOptions {
+  /** Marks the AVD's lease as held by a process that survived both signals. */
+  markHeldByUnkillableProcess?: (pid: number | undefined) => void;
+  isProcessRunning?: (pid: number) => boolean;
+}
+
+/**
+ * Terminates an emulator this request started (never an adopted one) with the
+ * SIGTERM -> bounded wait -> SIGKILL escalation. A survivor is marked on the
+ * lease and watched until its pid is gone; its owner must keep the AVD's
+ * lifecycle lease held until `gone` settles (#9901), which the watch's liveness
+ * re-check bounds (#9920). Shared by every owner of a started emulator handle:
+ * the boot service's owned boot and a cancelled launch alike (#10075).
+ */
+export async function terminateOwnedEmulatorProcess(
+  handle: ChildProcess,
+  label: string,
+  timer: TerminationTimer,
+  options: OwnedEmulatorTerminationOptions = {},
+): Promise<OwnedTermination> {
+  const { exited, confirmed } = terminateColdBootProcess(handle, label, timer);
+  try {
+    if (await confirmed) {
+      return { state: "confirmed" };
+    }
+  } catch (error) {
+    // The exit could not even be observed, so nothing can be held on: the lease is
+    // released at once and the owner's own failure stays the one surfaced.
+    logger.warn(
+      `[startDevice] Could not observe exit of emulator process ${handle.pid ?? "unknown"}: ${errorMessage(error)}`,
+      error,
+    );
+    return { state: "unobservable" };
+  }
+  logger.warn(
+    `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${label} survived ` +
+      "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it is gone",
+  );
+  const gone = watchSurvivingProcess(handle, exited, label, timer, options.isProcessRunning);
+  options.markHeldByUnkillableProcess?.(handle.pid);
+  return { state: "survived", gone };
+}
+
 /** What the request saw of a termination: `pending` when it stopped waiting for it. */
 export type OwnedTerminationWait = OwnedTermination["state"] | "pending";
 

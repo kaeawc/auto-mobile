@@ -11,6 +11,14 @@ async function createTestImage(
   return image.getBuffer("image/png");
 }
 
+async function compareOk(a: Buffer, b: Buffer) {
+  const result = await ScreenshotUtils.compareImages(a, b);
+  if (!result.compared) {
+    throw new Error(`comparison unexpectedly failed: ${result.error}`);
+  }
+  return result;
+}
+
 describe("ScreenshotUtils", function () {
   describe("Image Dimensions", function () {
     test("should get image dimensions correctly", async function () {
@@ -38,7 +46,7 @@ describe("ScreenshotUtils", function () {
     });
 
     test("should detect identical images with 100% similarity", async function () {
-      const result = await ScreenshotUtils.compareImages(identicalImage1, identicalImage2);
+      const result = await compareOk(identicalImage1, identicalImage2);
 
       expect(result.similarity).toBe(100);
       expect(result.pixelDifference).toBe(0);
@@ -46,7 +54,7 @@ describe("ScreenshotUtils", function () {
     });
 
     test("should detect completely different images with low similarity", async function () {
-      const result = await ScreenshotUtils.compareImages(identicalImage1, differentImage);
+      const result = await compareOk(identicalImage1, differentImage);
 
       expect(result.similarity).toBeLessThan(50);
       expect(result.pixelDifference).toBeGreaterThan(0);
@@ -56,7 +64,7 @@ describe("ScreenshotUtils", function () {
     test("should handle comparison of different sized images", async function () {
       const largeImage = await createTestImage(200, 200, { r: 255, g: 255, b: 255 });
 
-      const result = await ScreenshotUtils.compareImages(identicalImage1, largeImage);
+      const result = await compareOk(identicalImage1, largeImage);
 
       expect(result.similarity).toBe(100);
       expect(result.totalPixels).toBe(10000); // Should use smaller dimensions
@@ -67,9 +75,9 @@ describe("ScreenshotUtils", function () {
 
       const result = await ScreenshotUtils.compareImages(identicalImage1, invalidBuffer);
 
-      expect(result.similarity).toBe(0);
-      expect(result.pixelDifference).toBe(-1);
-      expect(result.totalPixels).toBe(0);
+      // A failed comparison is distinguishable from "completely different" (#10185).
+      expect(result.compared).toBe(false);
+      expect(result).not.toHaveProperty("similarity");
     });
   });
 

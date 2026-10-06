@@ -241,11 +241,23 @@ interface WebRtcSubscriptionLookup {
   existingLeaseOnly?: boolean;
 }
 
+/**
+ * Records that count as active for an unaddressed lookup. A record whose initial
+ * start failed is retired: it stays in `streams` only so its lease holders can
+ * read the failure by `streamId`, and never competes with a live stream.
+ */
+function unaddressedStreamCandidates(): WebRtcStreamRecord[] {
+  const all = [...streams.values()];
+  const active = all.filter((record) => !record.initialStartFailed);
+  return active.length > 0 ? active : all;
+}
+
 function addressedStreamRecord(streamId?: string): WebRtcStreamRecord | undefined {
   if (streamId !== undefined) {
     return streams.get(streamId);
   }
-  return streams.size === 1 ? streams.values().next().value : undefined;
+  const candidates = unaddressedStreamCandidates();
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function leaseStreamRecord(input: WebRtcSubscriptionLookup): WebRtcStreamRecord | undefined {
@@ -805,6 +817,21 @@ async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   }
 }
 
+/** Cache parameter sets and stamp the first IDR from NALs the source's splitter released. */
+function observeMediaNals(record: WebRtcStreamRecord, nals: Buffer[]): void {
+  for (const nal of nals) {
+    const type = nalUnitType(nal);
+    if (type === NAL_TYPE_SPS) {
+      record.cachedSps = Buffer.from(nal);
+    } else if (type === NAL_TYPE_PPS) {
+      record.cachedPps = Buffer.from(nal);
+    }
+    if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
+      record.telemetry.firstIdr = dependencies.now().toISOString();
+    }
+  }
+}
+
 /**
  * Prepare a local capture before the WHIP session. Source output is retained by
  * the manager and delivered to the publisher once its RTP writer exists; this
@@ -845,18 +872,18 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
           );
           return;
         }
-        for (const nal of nals) {
-          const type = nalUnitType(nal);
-          if (type === NAL_TYPE_SPS) {
-            record.cachedSps = Buffer.from(nal);
-          } else if (type === NAL_TYPE_PPS) {
-            record.cachedPps = Buffer.from(nal);
-          }
-          if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
-            record.telemetry.firstIdr = dependencies.now().toISOString();
-          }
-        }
+        observeMediaNals(record, nals);
         record.publisher.writeH264Chunk(chunk);
+      },
+      // The source delivered one complete length-framed packet (Android persistent encoder), so
+      // release the NAL the splitters hold for a next start code instead of waiting for the
+      // encoder's next output (issue #10150).
+      onEncodedAccessUnit: () => {
+        if (record.source !== source) {
+          return;
+        }
+        observeMediaNals(record, record.mediaParser.flush());
+        record.publisher.endOfH264Packet();
       },
       onAudioData: (chunk) => {
         if (record.source === source) {
@@ -919,9 +946,15 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
 }
 
 function assertNewStreamIdAvailable(streamId: string): void {
-  if (streams.has(streamId)) {
+  const existing = streams.get(streamId);
+  if (!existing) {
+    return;
+  }
+  if (!existing.initialStartFailed) {
     throw new ActionableError(`WebRTC stream ${streamId} already active. Stop it first.`);
   }
+  // A retired record is already torn down; an explicit retry of the same id replaces it.
+  discardDeadRecord(existing);
 }
 
 /**
@@ -942,13 +975,50 @@ function discardDeadRecord(record: WebRtcStreamRecord): void {
 /** Stop live media components while retaining best-effort cleanup semantics. */
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
   setLifecycleState(record, "stopping");
-  // A stuck capture must not prevent the publisher from closing its transport.
+  await stopSourceAndPublisher(record);
+}
+
+/** A stuck capture must not prevent the publisher from closing its transport. */
+async function stopSourceAndPublisher(record: WebRtcStreamRecord): Promise<void> {
   await Promise.all([
     stopSource(record),
     record.publisher.stop().catch((error) => {
       logger.warn(`[WebRtcStream] publisher stop failed: ${errorMessage(error)}`, error);
     }),
   ]);
+}
+
+/**
+ * Retire a record whose initial start (capture start or first WHIP publish)
+ * failed terminally: it can never recover, because the publisher is closed for
+ * good and nothing restarts the source. The single teardown path for both
+ * failure sites (#7555 capture, #10149 publish).
+ *
+ * `initialStartFailed` is set synchronously, before any await, so a start that
+ * races the teardown builds a fresh stream instead of re-leasing this one. The
+ * record is then discarded once no more than `discardAtOrBelowLeases` leases
+ * remain; a record that keeps its leases stays queryable (status/await/stop) so
+ * their holders can read the failure, and lease expiry or stop cleans it up
+ * (both are idempotent after this teardown). A teardown failure is logged and
+ * never leaves the record half-retired.
+ */
+async function retireFailedInitialStart(
+  record: WebRtcStreamRecord,
+  discardAtOrBelowLeases: number,
+): Promise<void> {
+  record.initialStartFailed = true;
+  try {
+    await stopSourceAndPublisher(record);
+  } catch (error) {
+    logger.warn(
+      `[WebRtcStream] cleanup of failed initial start ${record.streamId} failed: ${errorMessage(error)}`,
+      error,
+    );
+  } finally {
+    if (record.leases.size <= discardAtOrBelowLeases) {
+      discardDeadRecord(record);
+    }
+  }
 }
 
 async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
@@ -967,9 +1037,10 @@ async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
       error,
       record.failure ? "degraded" : "failed",
     );
-    await record.publisher.stop().catch((stopError) => {
-      logger.debug(`[WebRtcStream] publisher cleanup failed: ${stopError}`);
-    });
+    // The creator's descriptor was returned before this publish settled, so its
+    // lease can only learn of the failure through status/await: keep the record
+    // queryable while any lease is held, and discard it only when none remain.
+    await retireFailedInitialStart(record, 0);
   }
 }
 
@@ -1052,20 +1123,10 @@ export async function startWebRtcStream(
     );
     if (streams.get(streamId) === record) {
       markFailure(record, record.failure?.code ?? "capture_start_failed", error, "degraded");
-      record.initialStartFailed = true;
-      await stopSource(record);
-      await record.publisher.stop().catch((stopError) => {
-        logger.warn(
-          `[WebRtcStream] publisher cleanup failed: ${errorMessage(stopError)}`,
-          stopError,
-        );
-      });
       // The initial start never became live, so this record can never recover
       // (prepareAndPublish/onBeforeEstablish never ran to restart the source).
       // A lone caller needs no retained failure lookup; raced leases do.
-      if (record.leases.size <= 1) {
-        discardDeadRecord(record);
-      }
+      await retireFailedInitialStart(record, 1);
     }
     return { ...describeRecord(record, leaseId), state: "stopped" };
   }
@@ -1326,11 +1387,12 @@ function resolveStreamRecord(streamId?: string): WebRtcStreamRecord {
     return record;
   }
 
-  if (streams.size === 0) {
+  const candidates = unaddressedStreamCandidates();
+  if (candidates.length === 0) {
     throw new ActionableError("No active WebRTC streams. Provide a streamId.");
   }
-  if (streams.size > 1) {
+  if (candidates.length > 1) {
     throw new ActionableError("Multiple active WebRTC streams. Provide a streamId.");
   }
-  return streams.values().next().value as WebRtcStreamRecord;
+  return candidates[0];
 }

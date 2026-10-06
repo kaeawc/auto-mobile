@@ -420,8 +420,10 @@ describe("NavigationGraphManager", () => {
 
     test("should find direct path to adjacent screen", async () => {
       await manager.recordNavigationEvent(createEvent("Screen1", 1000));
+      manager.recordToolCall("tapOn", { text: "Screen2" });
       await manager.recordNavigationEvent(createEvent("Screen2", 2000));
       // Go back to Screen1 to test path finding
+      manager.recordToolCall("pressButton", { button: "back" });
       await manager.recordNavigationEvent(createEvent("Screen1", 3000));
 
       const result = await manager.findPath("Screen2");
@@ -434,9 +436,12 @@ describe("NavigationGraphManager", () => {
     test("should find multi-hop path", async () => {
       // Create navigation: Home -> Settings -> Advanced
       await manager.recordNavigationEvent(createEvent("Home", 1000));
+      manager.recordToolCall("tapOn", { text: "Settings" });
       await manager.recordNavigationEvent(createEvent("Settings", 2000));
+      manager.recordToolCall("tapOn", { text: "Advanced" });
       await manager.recordNavigationEvent(createEvent("Advanced", 3000));
       // Go back to Home
+      manager.recordToolCall("pressButton", { button: "back" });
       await manager.recordNavigationEvent(createEvent("Home", 4000));
 
       const result = await manager.findPath("Advanced");
@@ -458,9 +463,11 @@ describe("NavigationGraphManager", () => {
         }),
       );
 
-      const getEdgesSpy = spyOn(NavigationRepository.prototype, "getEdges").mockResolvedValue(
-        edges,
-      );
+      // findPath reads one edge per distinct transition (#10194), not every traversal row.
+      const getEdgesSpy = spyOn(
+        NavigationRepository.prototype,
+        "getDistinctEdges",
+      ).mockResolvedValue(edges);
 
       const result = await manager.findPath("Screen40").finally(() => getEdgesSpy.mockRestore());
 
@@ -474,14 +481,18 @@ describe("NavigationGraphManager", () => {
     });
 
     test("should prefer a shorter path over an earlier longer path", async () => {
+      const go = async (destination: string, timestamp: number): Promise<void> => {
+        manager.recordToolCall("tapOn", { text: destination });
+        await manager.recordNavigationEvent(createEvent(destination, timestamp));
+      };
       await manager.recordNavigationEvent(createEvent("Home", 1000));
-      await manager.recordNavigationEvent(createEvent("A", 1100));
-      await manager.recordNavigationEvent(createEvent("B", 1200));
-      await manager.recordNavigationEvent(createEvent("Target", 1300));
-      await manager.recordNavigationEvent(createEvent("Home", 1400));
-      await manager.recordNavigationEvent(createEvent("Shortcut", 1500));
-      await manager.recordNavigationEvent(createEvent("Target", 1600));
-      await manager.recordNavigationEvent(createEvent("Home", 1700));
+      await go("A", 1100);
+      await go("B", 1200);
+      await go("Target", 1300);
+      await go("Home", 1400);
+      await go("Shortcut", 1500);
+      await go("Target", 1600);
+      await go("Home", 1700);
 
       const result = await manager.findPath("Target");
 
@@ -847,12 +858,23 @@ describe("NavigationGraphManager", () => {
     test("should return edges leading to a screen", async () => {
       await manager.recordNavigationEvent(createEvent("Home", 1000));
       await manager.recordNavigationEvent(createEvent("Settings", 2000));
+      await manager.recordNavigationEvent(createEvent("Profile", 3000));
+      await manager.recordNavigationEvent(createEvent("Settings", 4000));
+
+      const edges = await manager.getEdgesTo("Settings");
+      expect(edges.map((e) => e.from).sort()).toEqual(["Home", "Profile"]);
+      edges.forEach((e) => expect(e.to).toBe("Settings"));
+    });
+
+    test("should return one edge per distinct transition however often it was traversed", async () => {
+      await manager.recordNavigationEvent(createEvent("Home", 1000));
+      await manager.recordNavigationEvent(createEvent("Settings", 2000));
       await manager.recordNavigationEvent(createEvent("Home", 3000));
       await manager.recordNavigationEvent(createEvent("Settings", 4000));
 
       const edges = await manager.getEdgesTo("Settings");
-      expect(edges).toHaveLength(2);
-      edges.forEach((e) => expect(e.to).toBe("Settings"));
+      expect(edges).toHaveLength(1);
+      expect(edges[0].from).toBe("Home");
     });
   });
 });
@@ -897,8 +919,8 @@ function createCountingDBEdge(
     app_id: "com.test.app",
     to,
     to_screen: to,
-    tool_name: null,
-    tool_args: null,
+    tool_name: "tapOn",
+    tool_args: "{}",
     timestamp: 1000,
     created_at: "2026-01-01T00:00:00.000Z",
   } as DBNavigationEdge;

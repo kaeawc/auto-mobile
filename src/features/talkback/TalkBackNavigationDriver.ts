@@ -9,13 +9,11 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
 
 /**
- * Extended driver interface for TalkBack navigation that adds tap and action capabilities.
- * This interface is used by TalkBackTapStrategy to perform element activation after navigation.
+ * Extended driver interface for TalkBack navigation that adds coordinate tap capabilities to the
+ * focus-navigation reads and accessibility actions. This interface is used by TalkBackTapStrategy
+ * to perform element activation after navigation.
  */
 export interface TalkBackNavigationDriver extends FocusNavigationDriver {
-  /** Full, unfiltered tree for global-ID safety. Drivers without this capability use coordinates. */
-  getAccessibilityHierarchy?(): Promise<ViewHierarchyResult | null>;
-
   /**
    * Request a tap at specific coordinates via accessibility service.
    * @param x - X coordinate
@@ -35,19 +33,6 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
     y: number,
     onDispatch?: () => void,
   ): Promise<A11yTapCoordinatesResult>;
-
-  /**
-   * Request an accessibility action on an element.
-   * @param action - The action to perform (e.g., "click", "long_click")
-   * @param resourceId - Optional resource ID of the target element
-   */
-  requestAction(action: string, resourceId?: string): Promise<A11yActionResult>;
-
-  /** Request an accessibility action using stable fields observed from a node. */
-  requestNodeAction(action: string, selector: AccessibilityNodeSelector): Promise<A11yActionResult>;
-
-  /** Whether the connected runner can resolve stable node selectors. */
-  supportsNodeActionSelectors(): Promise<boolean>;
 }
 
 /**
@@ -77,40 +62,6 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
     return this.accessibilityService.requestCurrentFocus();
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    durationMs: number,
-    signal?: AbortSignal,
-  ) {
-    return this.accessibilityService.requestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      durationMs,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async getScreenSize() {
-    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      true,
-    );
-    if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
-      throw new Error("CtrlProxy did not provide screen dimensions for TalkBack navigation");
-    }
-    return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
-  }
-
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -136,15 +87,33 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
     return this.accessibilityService.requestDoubleTapCoordinates(x, y, onDispatch);
   }
 
-  async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {
-    return this.accessibilityService.requestAction(action, resourceId);
+  async requestAction(
+    action: string,
+    resourceId?: string,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.accessibilityService.requestAction(
+      action,
+      resourceId,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
+    signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestNodeAction(action, selector);
+    return this.accessibilityService.requestNodeAction(
+      action,
+      selector,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   async supportsNodeActionSelectors(): Promise<boolean> {

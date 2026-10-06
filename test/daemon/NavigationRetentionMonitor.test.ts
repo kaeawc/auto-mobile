@@ -38,6 +38,7 @@ function fakeRetention(options: { onPrune?: () => void; throwOnce?: boolean } = 
         edgeObservationsDeleted: 0,
         suggestionObservationsDeleted: 0,
         buildKeysDeleted: 0,
+        edgeTraversalsDeleted: 0,
         prunedAt: now,
       };
     },
@@ -91,6 +92,7 @@ describe("NavigationRetentionMonitor", () => {
           edgeObservationsDeleted: 0,
           suggestionObservationsDeleted: 0,
           buildKeysDeleted: 0,
+          edgeTraversalsDeleted: 0,
           prunedAt: now,
         };
       },

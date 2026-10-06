@@ -762,6 +762,169 @@ describe("SystemConfigurationAdapter", () => {
       expect(result.zoneId).toBe("Asia/Tokyo");
       expect(result.method).toBe("setprop persist.sys.timezone");
       expect(adb.wasCommandExecuted("setprop persist.sys.timezone 'Asia/Tokyo'")).toBe(true);
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'Asia/Tokyo'")).toBe(false);
+    });
+
+    it("falls back to cmd alarm when setprop is refused and verifies its read-back", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell getprop persist.sys.timezone", [
+        execResult("America/Chicago"),
+        execResult("Asia/Tokyo"),
+      ]);
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error(
+          "Failed to set property 'persist.sys.timezone' to 'Asia/Tokyo'.\nSee dmesg for error reason.",
+        ),
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+      expect(result).toMatchObject({
+        success: true,
+        previousZoneId: "America/Chicago",
+        method: "cmd alarm set-timezone",
+      });
+      expect(result).not.toHaveProperty("warning");
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'Asia/Tokyo'")).toBe(true);
+    });
+
+    it("reports read-back mismatch when cmd alarm silently ignores an unknown zone", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell getprop persist.sys.timezone", execResult("America/Chicago"));
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Not/AZone'",
+        new Error(
+          "Failed to set property 'persist.sys.timezone' to 'Not/AZone'.\nSee dmesg for error reason.",
+        ),
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+      const result = await adapter.setTimeZone("Not/AZone");
+      expect(result).toMatchObject({
+        success: false,
+        error:
+          "Read-back verification failed: expected \"Not/AZone\" but got \"America/Chicago\" Failed to set time zone: Failed to set property 'persist.sys.timezone' to 'Not/AZone'.\nSee dmesg for error reason..",
+      });
+      expect(adb.wasCommandExecuted("setprop persist.sys.timezone 'America/Chicago'")).toBe(false);
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'Not/AZone'")).toBe(true);
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'America/Chicago'")).toBe(false);
+    });
+
+    it("retains a failed fallback cause after a no-op setprop", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell getprop persist.sys.timezone", execResult("America/Chicago"));
+      adb.setCommandError("shell cmd alarm set-timezone 'Asia/Tokyo'", new Error("alarm denied"));
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+
+      expect(result.error).toBe(
+        'Read-back verification failed: expected "Asia/Tokyo" but got "America/Chicago" Failed to set time zone: cmd alarm set-timezone: alarm denied.',
+      );
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'Asia/Tokyo'")).toBe(true);
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'America/Chicago'")).toBe(false);
+    });
+
+    it("reports both errors when setprop and cmd alarm fail", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell getprop persist.sys.timezone", execResult("America/Chicago"));
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error("setprop denied"),
+      );
+      adb.setCommandError("shell cmd alarm set-timezone 'Asia/Tokyo'", new Error("alarm denied"));
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+      expect(result).toMatchObject({
+        success: false,
+        error:
+          'Read-back verification failed: expected "Asia/Tokyo" but got "America/Chicago" Failed to set time zone: setprop denied; cmd alarm set-timezone: alarm denied.',
+      });
+    });
+
+    it("restores the previous zone through cmd alarm when restore setprop is refused", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell getprop persist.sys.timezone", [
+        execResult("America/Chicago"),
+        execResult("America/New_York"),
+        execResult("America/New_York"),
+        execResult("America/New_York"),
+        execResult("America/Chicago"),
+      ]);
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error("set denied"),
+      );
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'America/Chicago'",
+        new Error("restore denied"),
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+      expect(result).toMatchObject({
+        success: false,
+        error:
+          'Read-back verification failed: expected "Asia/Tokyo" but got "America/New_York". Restored the previous time zone ("America/Chicago"). Failed to set time zone: set denied.',
+      });
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'America/Chicago'")).toBe(true);
+    });
+
+    it("does not retry a write when the first read-back is unreadable", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error("set denied"),
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining("indeterminate"),
+      });
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'Asia/Tokyo'")).toBe(false);
+    });
+
+    it("includes the setprop cause when the first read-back is unreadable", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error("write denied"),
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+
+      expect(result.error).toEqual(
+        expect.stringContaining("Time zone change outcome is indeterminate"),
+      );
+      expect(result.error).toEqual(
+        expect.stringContaining("Failed to set time zone: write denied."),
+      );
+      expect(adb.wasCommandExecuted("cmd alarm set-timezone 'Asia/Tokyo'")).toBe(false);
+    });
+
+    it("retains both write failures when the fallback read-back is unreadable", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponseSequence("shell getprop persist.sys.timezone", [
+        execResult("America/Chicago"),
+        execResult("America/New_York"),
+        execResult(""),
+      ]);
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error("write denied"),
+      );
+      adb.setCommandError("shell cmd alarm set-timezone 'Asia/Tokyo'", new Error("alarm busy"));
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
+
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+
+      expect(result.error).toContain("Time zone change outcome is indeterminate");
+      expect(result.error).toContain('"Asia/Tokyo" was sent');
+      expect(result.error).toContain('previously "America/Chicago"');
+      expect(result.error).toContain("Do not retry automatically");
+      expect(result.error).toContain(
+        "Failed to set time zone: write denied; cmd alarm set-timezone: alarm busy.",
+      );
     });
 
     it("returns the previous time zone when read-back confirms the change", async () => {
@@ -800,15 +963,13 @@ describe("SystemConfigurationAdapter", () => {
       );
     });
 
-    it("returns false when the time-zone read-back is null", async () => {
+    it("reports an unreadable time-zone read-back as indeterminate, not as not applied", async () => {
       const adb = new FakeAdbClient();
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
       const result = await adapter.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe(
-        'Read-back verification failed: expected "Asia/Tokyo" but got "null"',
-      );
+      expect(result.error).toContain("Time zone change outcome is indeterminate");
     });
 
     it("surfaces setprop failures for time-zone changes", async () => {
@@ -817,11 +978,15 @@ describe("SystemConfigurationAdapter", () => {
         "shell setprop persist.sys.timezone 'Asia/Tokyo'",
         new Error("device offline"),
       );
+      adb.setCommandResult("shell getprop persist.sys.timezone", "America/Chicago");
+      adb.setCommandError("shell cmd alarm set-timezone 'Asia/Tokyo'", new Error("alarm offline"));
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
       const result = await adapter.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe("Failed to set time zone: device offline");
+      expect(result.error).toBe(
+        'Read-back verification failed: expected "Asia/Tokyo" but got "America/Chicago" Failed to set time zone: device offline; cmd alarm set-timezone: alarm offline.',
+      );
     });
 
     it("shell-quotes the time-zone id to avoid injection", async () => {

@@ -24,6 +24,9 @@ import { ToolRegistry, type RegisteredTool } from "../../src/server/toolRegistry
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { PortManager } from "../../src/utils/PortManager";
 import { ActionableError, type BootedDevice } from "../../src/models";
+import { NavigationRepository } from "../../src/db/navigationRepository";
+import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
+import { createTestDatabase } from "../db/testDbHelper";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -928,6 +931,59 @@ describe("navigation tool session graph selection", () => {
     } finally {
       observationSpy.mockRestore();
       managerSpy.mockRestore();
+    }
+  });
+});
+
+describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
+  const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+  const APP = "com.example.app";
+
+  beforeEach(() => {
+    ToolRegistry.clearTools();
+    setDebugModeEnabled(true);
+    registerNavigationTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    setDebugModeEnabled(false);
+  });
+
+  test("lists one transition and one edge count for N identical traversal rows", async () => {
+    const db = await createTestDatabase();
+    const repository = new NavigationRepository(db);
+    const manager = NavigationGraphManager.createForTesting(
+      repository,
+      new TestCoverageRepository(undefined, db),
+    );
+    await repository.getOrCreateApp(APP);
+    const traversals = Array.from({ length: 10 }, (_, index) => ({
+      app_id: APP,
+      from_screen: "Home",
+      to_screen: "Settings",
+      tool_name: "tapOn",
+      tool_args: JSON.stringify({ text: "Settings" }),
+      timestamp: 1_000 + index,
+    }));
+    await db.insertInto("navigation_edges").values(traversals).execute();
+    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(manager);
+
+    try {
+      const handler = (ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }).tools.get(
+        "getNavigationGraph",
+      )!.deviceAwareHandler!;
+
+      const response = await handler(device, { platform: "android", appId: APP });
+
+      const result = JSON.parse(response.content[0].text);
+      expect(result).toMatchObject({ edgeCount: 1, knownEdges: 1, unknownEdges: 0 });
+      expect(result.transitions).toEqual([
+        { from: "Home", to: "Settings", type: "tool", tool: "tapOn", args: { text: "Settings" } },
+      ]);
+    } finally {
+      managerSpy.mockRestore();
+      await db.destroy();
     }
   });
 });

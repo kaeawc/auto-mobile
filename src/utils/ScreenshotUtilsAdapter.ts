@@ -1,5 +1,6 @@
 import { ScreenshotUtils as ScreenshotUtilsImpl } from "./screenshot/ScreenshotUtils";
 import { ScreenshotUtils } from "./interfaces/ScreenshotUtils";
+import type { ScreenshotComparisonResult } from "./screenshot/ScreenshotComparator";
 
 // Re-export the interface for consumers
 export type { ScreenshotUtils };
@@ -40,12 +41,7 @@ class ScreenshotUtilsAdapter implements ScreenshotUtils {
     buffer2: Buffer,
     threshold?: number,
     fastMode?: boolean,
-  ): Promise<{
-    similarity: number;
-    pixelDifference: number;
-    totalPixels: number;
-    filePath?: string;
-  }> {
+  ): Promise<ScreenshotComparisonResult> {
     return ScreenshotUtilsImpl.compareImages(buffer1, buffer2, threshold, fastMode);
   }
 }

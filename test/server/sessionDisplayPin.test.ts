@@ -1350,3 +1350,28 @@ test("registered tapAny missing pin reports typed details without dispatch", asy
   });
   expect(dispatches).toBe(0);
 });
+
+test.each([
+  ["show", "inside"],
+  ["showVariants", "inside"],
+  ["update", undefined],
+  ["dismiss", undefined],
+  ["awaitEvent", undefined],
+  ["status", undefined],
+])("overlay %s takes the session display pin only when it shows", async (action, expected) => {
+  sessions.updateSessionCache("one", { displayPin: "inner" });
+  const seen: unknown[] = [];
+  await runSessionDisplayPin({
+    name: "overlay",
+    acceptsDisplay: true,
+    device,
+    args: { action },
+    sessionUuid: "one",
+    store: sessions,
+    invoke: (args) => {
+      seen.push(args.display);
+      return createStructuredToolResponse({ success: true });
+    },
+  });
+  expect(seen).toEqual([expected]);
+});

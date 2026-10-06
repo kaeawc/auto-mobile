@@ -1,5 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError, BootedDevice } from "../../models";
+import { ActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -236,10 +236,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         // though the process has exited, file writes may still be in progress.
         logger.info(`[VideoCapture] Waiting 1 second for file to finalize on device`);
         await this.timer.sleep(1000);
-        retainDeviceFile = !(await this.waitForDeviceFileToFinalize(
-          adb,
-          backendHandle.deviceTempPath,
-        ));
+        retainDeviceFile = !(await this.waitForDeviceFileToFinalize(adb, backendHandle));
         if (retainDeviceFile) {
           throw new ActionableError(
             `Device recording ${handle.recordingId} did not finish writing before the finalization deadline. ` +
@@ -322,14 +319,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     pid: number,
     signal: 2 | 9,
   ): Promise<"signalled" | "not-ours"> {
-    // `; true` keeps the exit status 0 when the process is gone (no /proc entry), so
-    // only a transport failure throws.
-    const probe = await adb.executeCommand(
-      `shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`,
-      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
-      undefined,
-      true,
-    );
+    const probe = await this.readDeviceRecorderCmdline(adb, pid);
     if (!isOwnRecorderCmdline(probe.stdout, backendHandle.deviceTempPath)) {
       logger.warn(
         `[VideoCapture] Device pid ${pid} is no longer this recording's screenrecord; not signalling it`,
@@ -338,6 +328,19 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     await adb.executeCommand(`shell kill -${signal} ${pid}`, SIGNAL_RECORDER_COMMAND_TIMEOUT_MS);
     return "signalled";
+  }
+
+  /**
+   * Reads `/proc/<pid>/cmdline`. `; true` keeps the exit status 0 when the process is
+   * gone (no /proc entry), so only a transport failure throws.
+   */
+  private readDeviceRecorderCmdline(adb: AdbExecutor, pid: number): Promise<ExecResult> {
+    return adb.executeCommand(
+      `shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`,
+      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+      undefined,
+      true,
+    );
   }
 
   /** Returns a failure description, or undefined when the recorder was handled or skipped. */
@@ -458,8 +461,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    */
   private async waitForDeviceFileToFinalize(
     adb: AdbExecutor,
-    deviceTempPath: string,
+    backendHandle: AndroidBackendHandle,
   ): Promise<boolean> {
+    const deviceTempPath = backendHandle.deviceTempPath;
     let lastSize = -1;
     let observedFile = false;
     let observedNonEmptyFile = false;
@@ -482,7 +486,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       return false;
     }
     if (observedFile) {
-      if (!(await this.confirmDeviceScreenrecordExited(adb))) {
+      if (!(await this.confirmDeviceScreenrecordExited(adb, backendHandle))) {
         return false;
       }
       throw new ActionableError(
@@ -495,7 +499,21 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     return true;
   }
 
-  private async confirmDeviceScreenrecordExited(adb: AdbExecutor): Promise<boolean> {
+  /**
+   * Confirms THIS recording's recorder has exited. With a known device pid the answer
+   * comes from that pid alone (#10019): an unrelated `screenrecord` on the device (a
+   * released plan's recorder, Android Studio, a second daemon) must not keep this
+   * recording retained. Only a recording whose pid was never learned falls back to the
+   * device-wide `pidof`, which cannot tell recorders apart.
+   */
+  private async confirmDeviceScreenrecordExited(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+  ): Promise<boolean> {
+    const pid = backendHandle.devicePid?.pid;
+    if (pid !== undefined) {
+      return this.confirmDeviceRecorderPidExited(adb, backendHandle, pid);
+    }
     try {
       // pidof exits 1 for no matches. Preserve its status explicitly rather
       // than masking command/transport failures with `|| true`.
@@ -510,6 +528,24 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       );
     } catch (error) {
       logger.warn("[VideoCapture] Could not confirm device screenrecord exit", error);
+      return false;
+    }
+  }
+
+  private async confirmDeviceRecorderPidExited(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+    pid: number,
+  ): Promise<boolean> {
+    try {
+      const result = await this.readDeviceRecorderCmdline(adb, pid);
+      if (result.error) {
+        return false;
+      }
+      // Gone, or reused by something that is not this recording's screenrecord.
+      return !isOwnRecorderCmdline(result.stdout, backendHandle.deviceTempPath);
+    } catch (error) {
+      logger.warn(`[VideoCapture] Could not confirm device recorder pid ${pid} exit`, error);
       return false;
     }
   }

@@ -54,6 +54,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.overlay.AndroidOverlayDisplays
+import dev.jasonpearson.automobile.ctrlproxy.overlay.BitmapOverlayImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
@@ -62,6 +63,7 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetStore
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
@@ -1009,13 +1011,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var overlayController: OverlayController
-  private val overlayResultSink = OverlayResultSink { requestId, success, error ->
-    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-      resultBroadcaster.guard(requestId, "overlay_result") {
-        webSocketServer.broadcastWithPerf { _ -> overlayResultFrame(requestId, success, error) }
+  private val overlayResultSink =
+    object : OverlayResultSink {
+      override suspend fun send(requestId: String?, success: Boolean, error: String?) =
+        sendWithMissingAssets(requestId, success, error, emptyList())
+
+      override suspend fun sendWithMissingAssets(
+        requestId: String?,
+        success: Boolean,
+        error: String?,
+        missingAssets: List<String>,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "overlay_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              overlayResultFrame(requestId, success, error, missingAssets)
+            }
+          }
+        }
       }
     }
-  }
   // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
   // main-thread clear or lookup never touches the disk.
@@ -1027,6 +1042,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
       fileWorker = Dispatchers.IO.asExecutor(),
     )
+  }
+  // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
+  private val overlayImages by lazy {
+    OverlayImageCache(overlayAssets, BitmapOverlayImageDecoder()).also {
+      overlayAssets.setChangeListener(it::invalidate)
+    }
   }
   private val overlayAssetController by lazy {
     OverlayAssetController(
@@ -1709,6 +1730,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               },
             displays = overlayDisplays,
             clearAssets = { overlayAssets.clear() },
+            hasAsset = { overlayAssets.lookup(it) != null },
+            images = overlayImages,
           )
         // Service start: drop anything a previous process left in the cache directory.
         overlayAssets.purgeLeftovers()
@@ -5906,7 +5929,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       val root = rootInActiveWindow
-      val owner = selector?.let { findNodeBySelector(root, it) }
+      val owner = selector?.let { sel -> findNodeInDisplayWindows { findNodeBySelector(it, sel) } }
       if (selector != null && owner == null) {
         throw IllegalStateException("Selected link owner is no longer present")
       }
@@ -6007,8 +6030,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("findNode")
-      val root = rootInActiveWindow
-      val targetNode =
+      val targetNode = findNodeInDisplayWindows { root ->
         if (effectiveSelector != null) {
           findNodeBySelector(root, effectiveSelector)
         } else if (resourceId != null) {
@@ -6016,6 +6038,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } else {
           null
         }
+      }
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -7041,21 +7064,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
     collectFocusableNodes(root, focusableNodes)
 
-    // Find current node's position and return the previous one
-    var previousNode: android.view.accessibility.AccessibilityNodeInfo? = null
-    for (node in focusableNodes) {
-      if (isSameNode(node, currentNode)) {
-        // Recycle all nodes except the previous one
-        focusableNodes.forEach { n -> if (n != previousNode) n.recycle() }
-        return previousNode
-      }
-      previousNode?.recycle()
-      previousNode = node
-    }
-
-    // If current node not found, recycle all
-    focusableNodes.forEach { it.recycle() }
-    return null
+    // Find current node's position and return the previous one. Each copy is released exactly once.
+    return selectPreviousFocusable(focusableNodes) { isSameNode(it, currentNode) }
   }
 
   /** Collect all focusable and editable nodes in document order (pre-order traversal). */
@@ -7091,6 +7101,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       node1.viewIdResourceName == node2.viewIdResourceName &&
       node1.text?.toString() == node2.text?.toString()
   }
+
+  /**
+   * Search the active window's root first, then the other windows the hierarchy extractor reports
+   * for the active display (topmost first), for the first node [find] returns. The extractor's own
+   * window enumeration is reused so node actions and focus read-back cannot disagree with
+   * `observe`; the active window goes first so a bare id prefers the app over an IME/system window.
+   */
+  private fun findNodeInDisplayWindows(
+    find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?
+  ): AccessibilityNodeInfo? =
+    findNodeAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
+
+  private fun displayWindowsOrEmpty(): List<AccessibilityWindowInfo> =
+    try {
+      viewHierarchyExtractor.selectDisplayWindows(this).windows
+    } catch (e: Exception) {
+      // Best-effort widening: on failure fall back to the active window alone, today's behaviour.
+      Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
+      emptyList()
+    }
 
   private fun findNodeBySelector(
     root: android.view.accessibility.AccessibilityNodeInfo?,
@@ -8150,8 +8180,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("findFocus")
-      val rootNode = rootInActiveWindow
-      val focusedNode = rootNode?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+      val focusedNode = findNodeInDisplayWindows {
+        it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+      }
       perfProvider.endOperation("findFocus")
 
       if (focusedNode == null) {

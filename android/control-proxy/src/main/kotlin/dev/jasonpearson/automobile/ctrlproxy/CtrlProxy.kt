@@ -54,6 +54,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.overlay.AndroidOverlayDisplays
+import dev.jasonpearson.automobile.ctrlproxy.overlay.BitmapOverlayImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
@@ -62,6 +63,7 @@ import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetStore
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
@@ -970,13 +972,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var overlayController: OverlayController
-  private val overlayResultSink = OverlayResultSink { requestId, success, error ->
-    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-      resultBroadcaster.guard(requestId, "overlay_result") {
-        webSocketServer.broadcastWithPerf { _ -> overlayResultFrame(requestId, success, error) }
+  private val overlayResultSink =
+    object : OverlayResultSink {
+      override suspend fun send(requestId: String?, success: Boolean, error: String?) =
+        sendWithMissingAssets(requestId, success, error, emptyList())
+
+      override suspend fun sendWithMissingAssets(
+        requestId: String?,
+        success: Boolean,
+        error: String?,
+        missingAssets: List<String>,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "overlay_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              overlayResultFrame(requestId, success, error, missingAssets)
+            }
+          }
+        }
       }
     }
-  }
   // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
   // main-thread clear or lookup never touches the disk.
@@ -988,6 +1003,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
       fileWorker = Dispatchers.IO.asExecutor(),
     )
+  }
+  // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
+  private val overlayImages by lazy {
+    OverlayImageCache(overlayAssets, BitmapOverlayImageDecoder()).also {
+      overlayAssets.setChangeListener(it::invalidate)
+    }
   }
   private val overlayAssetController by lazy {
     OverlayAssetController(
@@ -1663,6 +1684,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               },
             displays = overlayDisplays,
             clearAssets = { overlayAssets.clear() },
+            hasAsset = { overlayAssets.lookup(it) != null },
+            images = overlayImages,
           )
         // Service start: drop anything a previous process left in the cache directory.
         overlayAssets.purgeLeftovers()

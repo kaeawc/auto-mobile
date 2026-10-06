@@ -30,10 +30,9 @@ import { SYSTEM_TRAY_PACKAGE } from "../../../server/system-tray/notificationHin
  * only window type that represents genuine app content. The wire `WindowInfo`
  * CtrlProxy actually emits (`android/control-proxy/.../models/WindowInfo.kt`,
  * mapped from `AccessibilityWindowInfo.type` in `ViewHierarchyExtractor.kt`)
- * carries only `id`/`type`/`isActive`/`isFocused`/`bounds` - critically, no
- * per-window `packageName` (see the real fixture,
- * `test/fixtures/observe/android-home.json`, whose `viewHierarchy.windows`
- * has this exact shape).
+ * carries `id`/`type`/`isActive`/`isFocused`/`bounds` and, from newer APKs only,
+ * the window root's `packageName` (older captures such as the real fixture
+ * `test/fixtures/observe/android-home.json` omit it).
  *
  * Every other type is chrome, not app content, and must be excluded even
  * when it is the focused window - most importantly `TYPE_INPUT_METHOD` (2):
@@ -58,9 +57,8 @@ function isCandidateAppWindow(window: ViewHierarchyWindowInfo, appId: string): b
   if (!window.bounds || window.type !== ACCESSIBILITY_WINDOW_TYPE_APPLICATION) {
     return false;
   }
-  // packageName is never populated by the real Android accessibility window
-  // list, but keep the check for forward-compat with a future/other source
-  // that does populate it (e.g. a merged uiautomator window list).
+  // Older APKs omit the per-window package, so an absent one still qualifies;
+  // newer APKs report it and exclude another app's window (e.g. split-screen).
   return window.packageName === undefined || window.packageName === appId;
 }
 

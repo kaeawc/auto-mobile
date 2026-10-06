@@ -108,6 +108,7 @@ import {
 } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
+import { overlayTapUnderSystemBar } from "./overlayTapUnderSystemBars";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
   getToggleContentDescription,
@@ -4375,6 +4376,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               screenSize,
               "Matched element has no unobstructed visible tap area. " +
                 "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+            );
+          }
+          const underBar =
+            this.device.platform === "android"
+              ? overlayTapUnderSystemBar(viewHierarchy, tapPoint)
+              : undefined;
+          if (underBar) {
+            throw new ActionableError(
+              `Cannot tap (${tapPoint.x}, ${tapPoint.y}): the point is under the ${underBar} and the touch would not reach the AutoMobile overlay control there. ` +
+                "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
             );
           }
           const tapBounds = tapElement.bounds;

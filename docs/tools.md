@@ -687,8 +687,15 @@ the id from that device's host records; successful dismiss-all clears that devic
 After an event arrives, each shown entry also reports `pendingCount`, `lastSequence`
 (the highest accepted sequence), and cumulative overflow `droppedCount`. Before any
 event, these optional fields are omitted to preserve existing responses.
+Each shown entry also includes `pages` (pager id to zero-based page index), flat
+`state`, and `lastKnown: true` from its latest accepted `overlay_event`. These
+snapshots survive event consumption, host updates, and failed show attempts; a successful new show clears them
+until another event arrives. Requested state is never reported as observed state.
+Accepted events are pushed once to telemetry under category `overlay`, with
+owning device/session ids, event id, kind, name, sequence, pages and state. This
+telemetry is push-only, with no database persistence or historical backfill.
 A device-side `dismissed` event removes shown presence across that device's host
-sessions. `page_changed` events change only event bookkeeping, not host mutation
+sessions. `page_changed` events update the last known snapshot and event bookkeeping, preserving host mutation
 status. Raw transport disconnects are not observed; session release, device removal,
 and device unbinding clear the corresponding buffers and host status.
 

@@ -1056,7 +1056,7 @@ run_timing_gate_with_recheck_times() {
   cat > "$BATS_TEST_TMPDIR/expected-output.txt" <<'EOF'
 Source changes detected; measuring complete unit-lane reports.
 Rechecking 1 file(s) over the 100ms budget: 3 isolated run(s) each, median enforced.
-Recheck cleared suite.slow: median 11.00ms over 3 isolated runs (first sample 200.00ms).
+Recheck cleared suite.slow: configured median guaranteed <= 100ms after 2 isolated runs (early stop: majority under budget; first sample 200.00ms).
 EOF
   head -n 3 "$summary_output" > "$BATS_TEST_TMPDIR/original-output.txt"
   cmp "$BATS_TEST_TMPDIR/expected-output.txt" "$BATS_TEST_TMPDIR/original-output.txt"
@@ -1069,7 +1069,7 @@ EOF
   run_timing_gate_with_recheck_times "0.010 0.012 0.011" closed
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/timings.recheck.d/verdict.txt")" -eq 0 ]
-  grep -Fxq 'Recheck cleared suite.slow: median 11.00ms over 3 isolated runs (first sample 200.00ms).' \
+  grep -Fxq 'Recheck cleared suite.slow: configured median guaranteed <= 100ms after 2 isolated runs (early stop: majority under budget; first sample 200.00ms).' \
     "$BATS_TEST_TMPDIR/timings.recheck.d/summary.txt"
 }
 
@@ -1148,7 +1148,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"Rechecking 1 file(s)"* ]]
   [[ "$output" == *"Recheck cleared suite.slow"* ]]
-  [[ "$output" == *"median 11.00ms over 3 isolated runs"* ]]
+  [[ "$output" == *"configured median guaranteed <= 100ms after 2 isolated runs"* ]]
 }
 
 @test "timing gate enforces the median rather than the worst recheck sample" {
@@ -1188,7 +1188,7 @@ EOF
   seed_outlier_report
   run_timing_gate_with_recheck_times "0.010 0.010 0.010"
   [ "$status" -eq 0 ]
-  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
+  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 2 ]
   ! grep -q -- "--test-name-pattern" "$BUN_ARGS_FILE"
 }
 
@@ -1289,11 +1289,11 @@ repeat_stub_times() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Rechecking 24 file(s)"* ]]
   [[ "$output" != *"Test exceeded"* ]]
-  # Worst first, but no offender is deferred: all 24 files get three samples.
-  [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  [ "$(grep -c "suite7\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  [ "$(grep -c "suite8\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  [ "$(grep -c "suite23\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
+  # Worst first, but no offender is deferred: all 24 files get a passing majority.
+  [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -c "suite7\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -c "suite8\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -c "suite23\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
 }
 
 @test "timing gate still fails offenders the recheck reproduces in isolation" {
@@ -1485,7 +1485,7 @@ repeat_stub_times() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Rechecking 1 file(s)"* ]]
   [[ "$output" == *"Recheck cleared suite.slow"* ]]
-  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
+  [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 2 ]
 }
 
 # An offender in a test file THIS change touched can be the regression the gate
@@ -1537,9 +1537,9 @@ seed_changed_offender_report() {
   [ "$(grep -c -- "$OFFENDER_FILE" "$BUN_ARGS_FILE")" -eq 3 ]
   [[ "$output" == *"Test exceeded 100ms: testLaneClassification.case (median 150.00ms of 3 isolated runs)"* ]]
   # Unchanged offenders are still rechecked after it.
-  [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  [ "$(grep -c "suite1\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
-  [ "$(grep -c "suite2\.test\.ts" "$BUN_ARGS_FILE")" -eq 3 ]
+  [ "$(grep -c "suite0\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -c "suite1\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -c "suite2\.test\.ts" "$BUN_ARGS_FILE")" -eq 2 ]
 }
 
 @test "timing gate fails closed when recheck time expires before all offenders are verified" {
@@ -1747,9 +1747,9 @@ EOF
     TIMING_CHANGED_FILES='src/example.ts\n' \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
-  [ "$(wc -l < "$mode_log")" -eq 3 ]
-  [ "$(grep -c '^false$' "$mode_log")" -eq 3 ]
-  [ "$(grep -c -- '--timeout 1234 --no-orphans --preload' "$BUN_ARGS_FILE")" -eq 3 ]
+  [ "$(wc -l < "$mode_log")" -eq 2 ]
+  [ "$(grep -c '^false$' "$mode_log")" -eq 2 ]
+  [ "$(grep -c -- '--timeout 1234 --no-orphans --preload' "$BUN_ARGS_FILE")" -eq 2 ]
 }
 
 @test "timing gate bounds an in-flight recheck by the remaining budget and reports its file" {
@@ -1889,16 +1889,17 @@ EOF
     [ -s "$summary" ]
     grep -Fq 'First sample: 200.00ms' "$summary"
     grep -Fq 'Budget: 100ms; configured re-runs: 3' "$summary"
-    grep -Fq 'Completed samples: 3 of 3' "$summary"
     if [[ "$times" == "0.010 0.012 0.011" ]]; then
       [ "$status" -eq 0 ]
-      grep -Fq 'Re-run samples: 10.00ms / 12.00ms / 11.00ms' "$summary"
-      grep -Fq 'Median: 11.00ms' "$summary"
+      grep -Fq 'Completed samples: 2 of 3 (early stop: majority under budget)' "$summary"
+      grep -Fq 'Re-run samples: 10.00ms / 12.00ms' "$summary"
+      grep -Fq 'Median: guaranteed <= 100ms' "$summary"
       grep -Fq 'Verdict: PASS (cleared)' "$summary"
       grep -Fq 'Overall verdict: PASS' "$summary"
     else
       [ "$status" -eq 1 ]
       grep -Fq 'Re-run samples: 10.00ms / 150.00ms / 160.00ms' "$summary"
+      grep -Fq 'Completed samples: 3 of 3' "$summary"
       grep -Fq 'Median: 150.00ms' "$summary"
       grep -Fq 'Verdict: FAIL (median over budget)' "$summary"
       grep -Fq 'Overall verdict: FAIL' "$summary"
@@ -1999,4 +2000,48 @@ EOF
   [ ! -e "$BATS_TEST_TMPDIR/timings.recheck.d/unit-timing-budget-summary.md" ]
   [ ! -e "$report_dir/unit-timing-budget-summary.md" ]
   [ ! -e "$GITHUB_STEP_SUMMARY" ]
+}
+
+@test "timing gate early stop skips the third run only after a passing majority" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.100 0.900"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB_RECHECK_INDEX")" -eq 2 ]
+  [[ "$output" == *"Completed samples: 2 of 3 (early stop: majority under budget)"* ]]
+  rm -f "$STUB_RECHECK_INDEX"
+  run_timing_gate_with_recheck_times "0.010 0.150 0.020"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB_RECHECK_INDEX")" -eq 3 ]
+  [[ "$output" == *"median 20.00ms over 3 isolated runs"* ]]
+  [[ "$output" != *"Runner stall suspected"* ]]
+}
+
+@test "timing gate even run counts never early stop" {
+  seed_outlier_report
+  BUN_TEST_TIMING_RECHECK_RUNS=4 run_timing_gate_with_recheck_times "0.010 0.010 0.010 0.150"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB_RECHECK_INDEX")" -eq 4 ]
+  [[ "$output" != *"early stop"* ]]
+}
+
+@test "timing gate suspects widespread stalls but fails closed on budget exhaustion" {
+  seed_loaded_runner_report 3
+  run env PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' BUN_TEST_TIMING_STALL_MIN_OFFENDERS=3 \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=1 BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=1 \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Runner stall suspected: 3 distinct over-budget tests across 3 file(s)"* ]]
+  [[ "$output" == *"Could not verify within the 1s recheck budget"*"Runner stall suspected; re-run the job on a quieter runner."* ]]
+  grep -Fq 'Runner stall suspected' "$report_dir/unit-timing-budget-summary.md"
+  [[ "$output" != *"Recheck cleared"* ]]
+}
+
+@test "timing gate validates the stall threshold as a canonical positive integer" {
+  for threshold in 0 03 invalid; do
+    BUN_TEST_TIMING_STALL_MIN_OFFENDERS="$threshold" run_timing_gate_with_recheck_times "0.010"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"BUN_TEST_TIMING_STALL_MIN_OFFENDERS must be a positive integer without leading zeros"* ]]
+  done
 }

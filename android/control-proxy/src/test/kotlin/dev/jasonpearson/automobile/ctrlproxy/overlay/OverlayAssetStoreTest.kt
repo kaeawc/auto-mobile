@@ -222,16 +222,23 @@ class OverlayAssetStoreTest {
   }
 
   @Test
-  fun `clear drops assets and orphans and leaves a usable store`() {
+  fun `clear drops assets and leaves a usable store`() {
     put("a")
     put("b")
-    files.stored["orphan-from-last-process"] = ByteArray(4)
     store.clear()
     assertEquals(0, store.count)
     assertEquals(0L, store.totalByteCount)
     assertTrue(files.stored.isEmpty())
     assertNull(store.lookup("a"))
     assertTrue(put("a") is OverlayAssetPutResult.Stored)
+  }
+
+  @Test
+  fun `purging leftovers removes a previous process's files`() {
+    files.stored["orphan-from-last-process"] = ByteArray(4)
+    store.purgeLeftovers()
+    assertTrue(files.stored.isEmpty())
+    assertEquals(1, files.deleteAllCalls)
   }
 
   @Test

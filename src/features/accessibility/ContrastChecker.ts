@@ -18,6 +18,19 @@ import { resolveImageBackend } from "../../utils/image/backend/resolveImageBacke
 const BASELINE_DENSITY_DPI = 160;
 /** WCAG large text (18pt regular, 14pt bold) is about 24dp of text height on Android. */
 const LARGE_TEXT_MIN_HEIGHT_DP = 24;
+/**
+ * Without a reported text size the box height is only a proxy, and only for a box
+ * that holds a single line. Two lines of 14sp text need about 40dp, and 48dp is
+ * the touch-target size of a button or list row, so a box this tall (or taller) is
+ * never taken as proof of large text.
+ */
+const LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP = 40;
+
+/** The text size in px the capture reported for this element, or null when absent or unusable. */
+function reportedTextSizePx(element: Element): number | null {
+  const size: unknown = element.textSize;
+  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : null;
+}
 
 interface RGB {
   r: number;
@@ -604,6 +617,7 @@ export class ContrastChecker {
       text: element.text,
       bounds: element.bounds,
       class: element.class,
+      textSize: reportedTextSizePx(element),
       wcagLevel,
       // The large-text threshold depends on density, so results are density-specific.
       density: density && density > 0 ? density : null,
@@ -1225,18 +1239,31 @@ export class ContrastChecker {
   }
 
   /**
-   * WCAG large text is 18pt (14pt bold), about 24dp of text height on Android.
-   * `bounds` are physical pixels, so the height is converted to dp with the
+   * WCAG large text is 18pt (14pt bold), about 24dp of text size on Android.
+   * Dimensions are physical pixels, so they are converted to dp with the
    * observation's density first (same class as the touch-target fix, #6127). A
    * missing or non-positive density is "unknown": treat the text as normal size
    * (the strict threshold) rather than guessing a density.
+   *
+   * The capture's `textSize` (px, `AccessibilityNodeInfo` extra rendering info,
+   * API 30+) is authoritative when present. Otherwise the box height stands in only
+   * for a box that fits a single line (#10039): a 48dp button or a two-line
+   * TextView is not evidence of large text, so those get the strict ratio. Bold is
+   * not reported, so the 14pt-bold allowance is never granted.
    */
   private isLargeText(element: Element, density?: number): boolean {
     if (!density || density <= 0) {
       return false;
     }
+    const textSizePx = reportedTextSizePx(element);
+    if (textSizePx !== null) {
+      return (textSizePx * BASELINE_DENSITY_DPI) / density >= LARGE_TEXT_MIN_HEIGHT_DP;
+    }
     const heightPx = element.bounds.bottom - element.bounds.top;
-    return (heightPx * BASELINE_DENSITY_DPI) / density >= LARGE_TEXT_MIN_HEIGHT_DP;
+    const heightDp = (heightPx * BASELINE_DENSITY_DPI) / density;
+    return (
+      heightDp >= LARGE_TEXT_MIN_HEIGHT_DP && heightDp < LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP
+    );
   }
 
   private isSimilarColor(color: RGB, other: RGB): boolean {

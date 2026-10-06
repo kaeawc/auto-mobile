@@ -4,11 +4,13 @@
  * cap, and descendant-labelled clickable containers. Each is covered alone
  * elsewhere; these pin how they compose on real captured hierarchies.
  *
- * Hierarchies are committed device captures. The 100x50 PNGs under
- * fixtures/screenshots are small stand-ins for the screenshot: every phone-sized
- * text bound lies outside them, so the sampler clamps to the same pixel and each
- * text is a deterministic contrast failure. That is what these tests need (a
- * contrast failure per text node); they do not assert pixel ratios.
+ * Hierarchies are committed device captures. The screenshot is a uniform grey
+ * raster the size of the capture, served through the ContrastChecker's
+ * ImageBackend seam: text and background are the same colour, so each text node
+ * that the screenshot can show is a deterministic contrast failure. That is what
+ * these tests need (a contrast failure per text node); they do not assert pixel
+ * ratios. (A raster smaller than the capture no longer yields measurements:
+ * bounds outside the image are not evaluated, #10220.)
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
@@ -20,6 +22,8 @@ import {
 import { MAX_ACCESSIBILITY_VIOLATIONS } from "../../../../src/features/accessibility/WcagAudit";
 import { InMemoryScreenshotStateStore } from "../../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
+import { ContrastChecker } from "../../../../src/features/accessibility/ContrastChecker";
+import { FakeImageBackend } from "../../../fakes/FakeImageBackend";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../../src/models";
 import type {
@@ -75,9 +79,18 @@ function auditorWithCaptureFor(capturedObservationId: string): AccessibilityAudi
   const store = new InMemoryScreenshotStateStore(new FakeTimer());
   store.update(androidDevice.deviceId, screenshot);
   store.updateForObservation(androidDevice.deviceId, capturedObservationId, screenshot);
+  const backend = new FakeImageBackend();
+  backend.setRawPixelsResult({
+    width: 1080,
+    height: 2400,
+    data: Buffer.alloc(1080 * 2400 * 4, 0x80),
+  });
   return new AccessibilityAuditor({
     device: androidDevice,
     getConfig: () => config,
+    contrastChecker: new ContrastChecker({}, new FakeTimer(), backend, {
+      readFile: async () => Buffer.from("synthetic screenshot"),
+    }),
     screenshotPathResolver: (observationId) =>
       resolveObservationScreenshotPath(
         store.getPathForObservation(androidDevice.deviceId, observationId),
@@ -150,8 +163,14 @@ describe("contrast violations feed the cap, and summary counts reconcile", () =>
     expect(truncated.total).toBe(
       Object.values(result.summary.byType).reduce((sum, n) => sum + n, 0),
     );
-    // The capped list never claims a clean pass the full set would not.
-    expect(result.summary.notEvaluated).toBeUndefined();
+    // The capped list never claims a clean pass the full set would not: the seven app labels
+    // under the open keyboard are reported as not evaluated, not measured against keyboard pixels.
+    expect(result.summary.notEvaluated).toEqual([
+      {
+        check: "insufficient-contrast",
+        reason: expect.stringMatching(/^7 text elements are covered by the keyboard/),
+      },
+    ]);
   });
 });
 

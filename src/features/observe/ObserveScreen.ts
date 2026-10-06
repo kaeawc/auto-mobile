@@ -95,7 +95,10 @@ import {
 import { HierarchyCollector } from "./collectors/HierarchyCollector";
 import { DeviceStateCollector } from "./collectors/DeviceStateCollector";
 import { findAppWindowBounds, PerformanceAuditor } from "./audits/PerformanceAuditor";
-import { AccessibilityAuditor, resolveLatestScreenshotPath } from "./audits/AccessibilityAuditor";
+import {
+  AccessibilityAuditor,
+  resolveObservationScreenshotPath,
+} from "./audits/AccessibilityAuditor";
 import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { appendObserveError } from "./ObserveError";
 import { resolveScreenshotMode, type ScreenshotMode } from "./automaticScreenshotPolicy";
@@ -818,11 +821,10 @@ export class RealObserveScreen implements ObserveScreen {
       dependencies?.accessibilityAuditor ??
       new AccessibilityAuditor({
         device,
-        // Prefer the recorder-backed cached path before falling back to disk scan.
-        screenshotPathResolver: () =>
-          resolveLatestScreenshotPath(
-            () => getScreenshotStateStore().getPath(this.device.deviceId),
-            this.device.deviceId,
+        // Only this observation's capture; never the device-wide latest (#10037).
+        screenshotPathResolver: (observationId) =>
+          resolveObservationScreenshotPath(
+            getScreenshotStateStore().getPathForObservation(this.device.deviceId, observationId),
           ),
       });
     this.accessibilityStateDetector =

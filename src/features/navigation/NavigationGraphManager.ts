@@ -46,6 +46,7 @@ import {
 import type {
   NavigationNodeProvenanceRow,
   NavigationEdgeProvenanceRow,
+  NavigationEdgeTarget,
 } from "../../db/navigationRepository";
 
 // Re-export types for convenience
@@ -1828,6 +1829,19 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   /**
+   * Distinct outgoing transitions of a screen for graph walks that only need
+   * adjacency; unlike getEdgesFrom this does not hydrate interactions, modals or
+   * scroll positions, so it cannot throw on a malformed edge payload.
+   */
+  public async getEdgeTargetsFrom(screenName: string): Promise<NavigationEdgeTarget[]> {
+    if (!this.currentAppId) {
+      return [];
+    }
+
+    return this.repository.getEdgeTargetsFrom(this.currentAppId, screenName);
+  }
+
+  /**
    * Get all edges to a specific screen.
    */
   public async getEdgesTo(screenName: string): Promise<NavigationEdge[]> {
@@ -1887,6 +1901,12 @@ export class NavigationGraphManager implements NavigationGraphService {
     const appId = this.currentAppId;
     if (appId) {
       await this.repository.clearAppGraph(appId);
+      // The node ids held by the SDK-correlation window were just deleted; drop it
+      // before the epoch check so a superseded clear cannot leave a fingerprint write
+      // (correlateActiveNavigation) targeting a dead node (FK violation).
+      if (this.activeNavigation?.appId === appId) {
+        this.activeNavigation = null;
+      }
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentScreen = null;
       logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${appId}`);

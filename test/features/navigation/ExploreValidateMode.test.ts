@@ -17,6 +17,7 @@ import {
   findElementMatchingEdge,
   resolveEdgeTarget,
   addPendingEdge,
+  isRecordedBackEdgeTarget,
 } from "../../../src/features/navigation/ExploreValidateMode";
 
 describe("ExploreValidateMode", () => {
@@ -676,6 +677,32 @@ describe("ExploreValidateMode", () => {
         const edge = interactionEdge(toolName, { ...args });
 
         expect(resolveEdgeTarget([homeTab(), openSettings()], edge).status).toBe("not-validatable");
+      });
+    }
+  });
+
+  describe("isRecordedBackEdgeTarget", () => {
+    const target = (toolName: string | null, toolArgs: string | null) => ({
+      toScreen: "Home",
+      toolName,
+      toolArgs,
+    });
+
+    test("recognises a stored pressButton back payload", () => {
+      expect(isRecordedBackEdgeTarget(target("pressButton", '{"button":"back"}'))).toBe(true);
+    });
+
+    for (const [name, toolName, toolArgs] of [
+      ["another button", "pressButton", '{"button":"home"}'],
+      ["another tool with button=back args", "tapOn", '{"button":"back"}'],
+      ["no tool", null, null],
+      ["no payload", "pressButton", null],
+      ["a malformed payload", "pressButton", "{not json"],
+      ["a non-object payload", "pressButton", "42"],
+      ["a null payload", "pressButton", "null"],
+    ] as const) {
+      test(`${name} is not a Back edge and never throws`, () => {
+        expect(isRecordedBackEdgeTarget(target(toolName, toolArgs))).toBe(false);
       });
     }
   });

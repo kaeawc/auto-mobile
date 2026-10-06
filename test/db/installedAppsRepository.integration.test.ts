@@ -17,21 +17,108 @@ describe("InstalledAppsRepository", () => {
     await db.destroy();
   });
 
-  test("upsertInstalledApp and listInstalledApps", async () => {
+  // Seeds a row the way a committed rebuild would. upsertInstalledApp cannot do
+  // this: it only patches a device that already has a snapshot (#10041).
+  async function seed(
+    deviceId: string,
+    userId: number,
+    packageName: string,
+    isSystem: boolean,
+    timestampMs: number,
+  ): Promise<void> {
+    await db
+      .insertInto("installed_apps")
+      .values({
+        device_id: deviceId,
+        user_id: userId,
+        package_name: packageName,
+        is_system: isSystem ? 1 : 0,
+        installed_at: timestampMs,
+        last_verified_at: timestampMs,
+      })
+      .execute();
+  }
+
+  test("upsertInstalledApp inserts a new package into an existing snapshot", async () => {
+    await seed("device-1", 0, "com.other.app", false, 900);
     await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 1000);
 
-    const apps = await repo.listInstalledApps("device-1");
+    const apps = (await repo.listInstalledApps("device-1")).filter(
+      (app) => app.package_name === "com.example.app",
+    );
     expect(apps).toHaveLength(1);
     expect(apps[0].device_id).toBe("device-1");
     expect(apps[0].user_id).toBe(0);
-    expect(apps[0].package_name).toBe("com.example.app");
     expect(apps[0].is_system).toBe(0);
     expect(apps[0].installed_at).toBe(1000);
     expect(apps[0].last_verified_at).toBe(1000);
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(2);
+  });
+
+  test("upsertInstalledApp is a no-op on a device with no snapshot (#10041)", async () => {
+    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 1000);
+
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
+    expect(await repo.getCacheVerifiedAt("device-1")).toBeNull();
+  });
+
+  test("upsertInstalledApp does not seed a work profile's packages into an empty device", async () => {
+    await repo.upsertInstalledApp("device-1", 10, "com.work.app", false, 1000);
+    await repo.upsertInstalledApp("device-1", 10, "com.work.other", false, 1000);
+
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
+    expect(await repo.getProfileCacheVerifiedAt("device-1", 10)).toBeNull();
+  });
+
+  test("upsertInstalledApp only considers its own device's snapshot (#10041)", async () => {
+    await seed("device-2", 0, "com.app2", false, 1000);
+
+    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 2000);
+
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
+    expect(await repo.listInstalledApps("device-2")).toHaveLength(1);
+  });
+
+  test("upsertInstalledApp inserts after a committed rebuild and not after the snapshot is cleared", async () => {
+    await repo.replaceInstalledApps("device-1", [
+      {
+        device_id: "device-1",
+        user_id: 0,
+        package_name: "com.app1",
+        is_system: 0,
+        installed_at: 1000,
+        last_verified_at: 1000,
+      },
+      {
+        device_id: "device-1",
+        user_id: 0,
+        package_name: "com.app2",
+        is_system: 0,
+        installed_at: 1000,
+        last_verified_at: 1000,
+      },
+    ]);
+    await repo.upsertInstalledApp("device-1", 0, "com.app3", false, 1500);
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(3);
+
+    await repo.clearDeviceSession("device-1");
+    await repo.upsertInstalledApp("device-1", 0, "com.app4", false, 2000);
+
+    expect(await repo.listInstalledApps("device-1")).toHaveLength(0);
+    expect(await repo.getCacheVerifiedAt("device-1")).toBeNull();
+  });
+
+  test("upsertInstalledApp on a stale snapshot keeps the device stale", async () => {
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await repo.markDeviceStale("device-1");
+
+    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 5000);
+
+    expect(await repo.getCacheVerifiedAt("device-1")).toBe(0);
   });
 
   test("upsertInstalledApp updates existing entry on conflict", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 1000);
+    await seed("device-1", 0, "com.example.app", false, 1000);
     await repo.upsertInstalledApp("device-1", 0, "com.example.app", true, 2000);
 
     const apps = await repo.listInstalledApps("device-1");
@@ -48,8 +135,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("replaceInstalledApps replaces all apps for a device", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.old.app", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.another.app", false, 1000);
+    await seed("device-1", 0, "com.old.app", false, 1000);
+    await seed("device-1", 0, "com.another.app", false, 1000);
 
     await repo.replaceInstalledApps("device-1", [
       {
@@ -68,7 +155,7 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("replaceInstalledApps with empty array clears all apps", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.example.app", false, 1000);
+    await seed("device-1", 0, "com.example.app", false, 1000);
 
     await repo.replaceInstalledApps("device-1", []);
 
@@ -77,8 +164,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("replaceInstalledApps does not affect other devices", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-2", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-2", 0, "com.app2", false, 1000);
 
     await repo.replaceInstalledApps("device-1", []);
 
@@ -89,8 +176,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("removeInstalledApp removes specific app", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app2", false, 1000);
 
     await repo.removeInstalledApp("device-1", 0, "com.app1");
 
@@ -100,8 +187,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("removeInstalledAppForDevice removes app across all users", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 10, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 10, "com.app1", false, 1000);
 
     await repo.removeInstalledAppForDevice("device-1", "com.app1");
 
@@ -110,8 +197,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("getCacheVerifiedAt returns the oldest last_verified_at on the device", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 2000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app2", false, 2000);
 
     const verifiedAt = await repo.getCacheVerifiedAt("device-1");
     expect(verifiedAt).toBe(1000);
@@ -153,30 +240,30 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("getCacheVerifiedAt ignores other devices", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 5000);
-    await repo.upsertInstalledApp("device-2", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 5000);
+    await seed("device-2", 0, "com.app2", false, 1000);
 
     expect(await repo.getCacheVerifiedAt("device-1")).toBe(5000);
   });
 
   test("getProfileCacheVerifiedAt returns the profile's oldest row", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 4000);
-    await repo.upsertInstalledApp("device-1", 10, "com.app3", false, 3000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app2", false, 4000);
+    await seed("device-1", 10, "com.app3", false, 3000);
 
     expect(await repo.getProfileCacheVerifiedAt("device-1", 0)).toBe(1000);
     expect(await repo.getProfileCacheVerifiedAt("device-1", 10)).toBe(3000);
   });
 
   test("getProfileCacheVerifiedAt returns null for an unknown profile", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
 
     expect(await repo.getProfileCacheVerifiedAt("device-1", 11)).toBeNull();
   });
 
   test("markDeviceStale sets last_verified_at to 0 for all apps on device", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 2000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app2", false, 2000);
 
     await repo.markDeviceStale("device-1");
 
@@ -187,8 +274,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("markProfileStale only affects the specified user", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 10, "com.app2", false, 2000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 10, "com.app2", false, 2000);
 
     await repo.markProfileStale("device-1", 0);
 
@@ -200,8 +287,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("touchDevice updates last_verified_at for all apps on device", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app2", false, 1000);
 
     await repo.touchDevice("device-1", 5000);
 
@@ -212,8 +299,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("clearDeviceSession deletes all apps for device", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-1", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-1", 0, "com.app2", false, 1000);
 
     await repo.clearDeviceSession("device-1");
 
@@ -222,8 +309,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("clearDeviceSession does not affect other devices", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-2", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-2", 0, "com.app2", false, 1000);
 
     await repo.clearDeviceSession("device-1");
 
@@ -232,8 +319,8 @@ describe("InstalledAppsRepository", () => {
   });
 
   test("setSessionTracking and clearOldDaemonSessions", async () => {
-    await repo.upsertInstalledApp("device-1", 0, "com.app1", false, 1000);
-    await repo.upsertInstalledApp("device-2", 0, "com.app2", false, 1000);
+    await seed("device-1", 0, "com.app1", false, 1000);
+    await seed("device-2", 0, "com.app2", false, 1000);
 
     // Set session tracking for device-1
     await repo.setSessionTracking("session-A", "device-1", 1000);

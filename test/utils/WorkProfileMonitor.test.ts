@@ -25,6 +25,21 @@ function packageListResult(): ExecResult {
   };
 }
 
+// Stands in for the primary-profile snapshot a committed rebuild wrote. A work
+// profile refresh only patches an existing snapshot (#10041).
+async function seedPrimarySnapshot(repo: FakeInstalledAppsRepository): Promise<void> {
+  await repo.replaceInstalledApps("emulator-5554", [
+    {
+      device_id: "emulator-5554",
+      user_id: 0,
+      package_name: "com.example.primary",
+      is_system: 0,
+      installed_at: 500,
+      last_verified_at: 500,
+    },
+  ]);
+}
+
 describe("WorkProfileMonitor", () => {
   let timer: FakeTimer;
   let adb: FakeAdbExecutor;
@@ -93,23 +108,36 @@ describe("WorkProfileMonitor", () => {
   });
 
   test("refreshes profile packages via ADB", async () => {
+    await seedPrimarySnapshot(repo);
     timer.setCurrentTime(1000);
     monitor.setProfileHasAccessibilityService(10, false);
 
     await monitor.refreshProfile(10);
 
     // Check that packages were added to repository
-    const apps = await repo.listInstalledApps("emulator-5554");
+    const apps = (await repo.listInstalledApps("emulator-5554")).filter((a) => a.user_id === 10);
     expect(apps).toHaveLength(2);
     expect(apps.map((a) => a.package_name).sort()).toEqual([
       "com.example.app1",
       "com.example.app2",
     ]);
-    expect(apps[0].user_id).toBe(10);
 
     // Check lastRefreshMs was updated
     const state = monitor.getProfileStates()[0];
     expect(state.lastRefreshMs).toBe(1000);
+  });
+
+  test("does not turn an empty cache into a work-profile-only snapshot (#10041)", async () => {
+    timer.setCurrentTime(1000);
+    monitor.setProfileHasAccessibilityService(10, false);
+
+    await monitor.refreshProfile(10);
+
+    // listApps must rebuild every profile from the device, not serve profile 10 alone.
+    expect(await repo.listInstalledApps("emulator-5554")).toHaveLength(0);
+    expect(await repo.getCacheVerifiedAt("emulator-5554")).toBeNull();
+    // The refresh itself still ran.
+    expect(monitor.getProfileStates()[0].lastRefreshMs).toBe(1000);
   });
 
   test("polls only stale profiles (without accessibility service)", async () => {
@@ -128,6 +156,7 @@ describe("WorkProfileMonitor", () => {
   });
 
   test("continues refreshing profiles after one profile fails", async () => {
+    await seedPrimarySnapshot(repo);
     adb.setCommandError("pm list packages --user 10", new Error("ADB command failed"));
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     monitor.setProfileHasAccessibilityService(10, false);
@@ -142,8 +171,8 @@ describe("WorkProfileMonitor", () => {
     expect(adb.wasCommandExecuted("pm list packages --user 10")).toBe(true);
     expect(adb.wasCommandExecuted("pm list packages --user 11")).toBe(true);
     const apps = await repo.listInstalledApps("emulator-5554");
-    expect(apps.length).toBeGreaterThan(0);
-    expect(apps.every((app) => app.user_id === 11)).toBe(true);
+    expect(apps.some((app) => app.user_id === 11)).toBe(true);
+    expect(apps.some((app) => app.user_id === 10)).toBe(false);
     expect(warning).toHaveBeenCalledWith(
       "[WORK_PROFILE_MONITOR] Failed to refresh profile 10: Failed to refresh packages for work profile 10: ADB command failed",
     );

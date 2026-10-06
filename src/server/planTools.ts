@@ -142,6 +142,20 @@ const executePlanResultSchema = z
       )
       .optional()
       .describe("Failed optional steps that were skipped while execution continued"),
+    toolResults: z
+      .array(
+        z.object({
+          stepIndex: z.number().int(),
+          tool: z.string(),
+          device: z.string().optional(),
+          result: z.record(z.string(), z.unknown()),
+          truncated: z.boolean().optional(),
+        }),
+      )
+      .optional()
+      .describe(
+        "Completed steps' tool payloads in plan step order (stepIndex is the plan step index), without bulky fields (observation, view hierarchies, screenshots, tap diagnostics, warnings); capped per step and per plan, with truncated:true when a payload was narrowed. Executed only; failed and skipped steps are in failedStep/skippedSteps.",
+      ),
   })
   .passthrough();
 

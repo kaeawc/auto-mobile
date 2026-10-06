@@ -1,5 +1,5 @@
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
-import { waitForTimeoutError } from "../utils/plan/waitForTimeout";
+import { waitForTimeoutDiagnostics, waitForTimeoutError } from "../utils/plan/waitForTimeout";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -108,6 +108,35 @@ function collectStepWarnings(
   return warnings
     .filter((warning): warning is string => typeof warning === "string")
     .map((warning) => `step ${stepNumber} (${tool}): ${warning}`);
+}
+
+/**
+ * A sub-step that answered but failed (`success: false` or a `waitFor` timeout) fails the section,
+ * like a top-level step. Its own warnings and a timeout's bounded diagnostics are pushed onto
+ * `warnings` first so they reach the plan's `warnings` through CriticalSectionStepError (#10024
+ * parity: PlanExecutor.buildToolAnsweredFailure does the same for a top-level step).
+ */
+function throwIfSubStepFailed(
+  stepNumber: number,
+  tool: string,
+  toolResult: Record<string, unknown> | undefined,
+  warnings: string[],
+): void {
+  const payload = getStructuredPayload(toolResult) ?? toolResult;
+  const failure =
+    toolResult?.success === false
+      ? formatCriticalSectionError(toolResult, tool)
+      : waitForTimeoutError(payload, tool);
+  if (failure === null) {
+    return;
+  }
+  warnings.push(...collectStepWarnings(stepNumber, tool, toolResult));
+  const diagnostics = waitForTimeoutDiagnostics(payload);
+  // The duration alone is already in the error text; only add a line that says more.
+  if (diagnostics && Object.keys(diagnostics).some((key) => key !== "awaitDuration")) {
+    warnings.push(`step ${stepNumber} (${tool}): waitFor timeout: ${JSON.stringify(diagnostics)}`);
+  }
+  throw new ActionableError(failure);
 }
 
 function criticalSectionSuccess(
@@ -237,17 +266,7 @@ async function executeCriticalSectionSteps(
       // Internal tool calls can return an MCP envelope whose JSON payload
       // contains the actual success/error fields.
       const toolResult = unwrapCriticalSectionResult(result, step.tool);
-      if (toolResult?.success === false) {
-        const errorMsg = formatCriticalSectionError(toolResult, step.tool);
-        throw new ActionableError(errorMsg);
-      }
-      const timeoutError = waitForTimeoutError(
-        getStructuredPayload(toolResult) ?? toolResult,
-        step.tool,
-      );
-      if (timeoutError) {
-        throw new ActionableError(timeoutError);
-      }
+      throwIfSubStepFailed(i + 1, step.tool, toolResult, warnings);
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
       // Nothing evaluates step-level `expectations` yet (#9925); say so rather than

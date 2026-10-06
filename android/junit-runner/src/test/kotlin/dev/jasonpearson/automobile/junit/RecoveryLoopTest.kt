@@ -129,9 +129,10 @@ class RecoveryLoopTest {
 
   @Test
   fun `resume pins to the same device that was recovered`() {
-    // Failure response includes device "emulator-5554"
+    // The daemon reports the device the plan ran on as the payload's top-level deviceId;
+    // `failedStep.device` is only a plan device LABEL (multi-device plans), never an id (#10089).
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", device = "emulator-5554")
+      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554")
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -156,16 +157,18 @@ class RecoveryLoopTest {
 
   @Test
   fun `FailedStepContext is populated correctly`() {
+    // The daemon tags each completed step with its plan step index (a skipped optional step
+    // leaves a gap), so steps 0 and 2 completed, step 1 was skipped and step 3 failed (#10090).
     val toolResults =
       JsonArray(
         listOf(
-          JsonObject(mapOf("toolName" to JsonPrimitive("observe"))),
-          JsonObject(mapOf("toolName" to JsonPrimitive("tapOn"))),
+          JsonObject(mapOf("stepIndex" to JsonPrimitive(0), "tool" to JsonPrimitive("observe"))),
+          JsonObject(mapOf("stepIndex" to JsonPrimitive(2), "tool" to JsonPrimitive("tapOn"))),
         )
       )
     fakeDaemonClient.responses.add(
       buildFailureResponse(
-        failedStepIndex = 2,
+        failedStepIndex = 3,
         failedTool = "swipe",
         error = "No scrollable container",
         toolResults = toolResults,
@@ -179,11 +182,13 @@ class RecoveryLoopTest {
 
     assertEquals(1, fakeAgent.recoveryCalls.size)
     val context = fakeAgent.recoveryCalls[0]
-    assertEquals(2, context.failedStepIndex)
+    assertEquals(3, context.failedStepIndex)
     assertEquals("swipe", context.failedTool)
     assertEquals("No scrollable container", context.error)
     assertEquals(2, context.succeededSteps.size)
+    assertEquals(0, context.succeededSteps[0].stepIndex)
     assertEquals("observe", context.succeededSteps[0].tool)
+    assertEquals(2, context.succeededSteps[1].stepIndex)
     assertEquals("tapOn", context.succeededSteps[1].tool)
   }
 
@@ -228,6 +233,7 @@ class RecoveryLoopTest {
     error: String = "Element not found",
     toolResults: JsonArray? = null,
     device: String? = null,
+    deviceId: String? = null,
   ): DaemonResponse {
     val failedStepFields =
       mutableMapOf<String, JsonElement>(
@@ -247,6 +253,9 @@ class RecoveryLoopTest {
       )
     if (toolResults != null) {
       payload["toolResults"] = toolResults
+    }
+    if (deviceId != null) {
+      payload["deviceId"] = JsonPrimitive(deviceId)
     }
     return buildDaemonResponse(JsonObject(payload))
   }

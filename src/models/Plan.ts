@@ -4,6 +4,7 @@ import type {
   ExecutePlanDebugInfo,
   PlanDeviceFailure,
   PlanSkippedStep,
+  PlanStepToolResult,
   PlanStepWarnings,
 } from "./ExecutePlanResult";
 
@@ -78,6 +79,8 @@ export interface PlanExecutionResult {
   warnings?: PlanStepWarnings[];
   /** Failed optional steps, in plan step order, promoted out of the trace. */
   skippedSteps?: PlanSkippedStep[];
+  /** Bounded tool payloads of completed steps, in plan step order (issue #10090). */
+  toolResults?: PlanStepToolResult[];
 }
 
 export interface DeviceExecutionResult {

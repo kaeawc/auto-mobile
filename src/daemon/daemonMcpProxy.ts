@@ -3237,11 +3237,14 @@ export class DaemonMcpProxy {
   /**
    * The live client for an operation closure. A socket close can land between
    * ensureConnected() resolving and the closure running (#6389); report that as
-   * a recoverable DaemonUnavailableError rather than a TypeError on null.
+   * a recoverable DaemonUnavailableError rather than a TypeError on null. No
+   * client means no request frame was written, so the failure is typed as not
+   * delivered: a non-idempotent tool may then be retried on the reconnected
+   * client instead of being reported as outcome-unknown (#9996).
    */
   private requireClient(): DaemonClientLike {
     if (!this.client) {
-      throw new DaemonUnavailableError("Daemon socket connection is not established");
+      throw new DaemonRequestNotDeliveredError("Daemon socket connection is not established");
     }
     return this.client;
   }

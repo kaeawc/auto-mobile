@@ -2915,6 +2915,12 @@
           "type": "string",
           "minLength": 1
         },
+        "userId": {
+          "description": "Android sharedPreferences only: user whose copy of the app to read/write (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The result reports the userId used.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -15392,6 +15398,10 @@
           "required": ["id", "window", "root"],
           "additionalProperties": false
         },
+        "display": {
+          "description": "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
+          "type": "string"
+        },
         "id": {
           "description": "Overlay id required for update, dismiss or awaitEvent; must equal spec.id on update",
           "type": "string",
@@ -15489,6 +15499,12 @@
                 "type": "string",
                 "enum": ["show", "update", "dismiss"]
               },
+              "displayId": {
+                "description": "Android logical display the overlay was shown on; absent for the default display",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
               "success": {
                 "type": "boolean"
               },
@@ -15538,6 +15554,12 @@
             "lastAction": {
               "type": "string",
               "enum": ["show", "update", "dismiss"]
+            },
+            "displayId": {
+              "description": "Android logical display the overlay was shown on; absent for the default display",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "success": {
               "type": "boolean"
@@ -26043,6 +26065,12 @@
           "description": "Preference key or Android system property name",
           "type": "string",
           "minLength": 1
+        },
+        "userId": {
+          "description": "Android sharedPreferences only: user whose copy of the app to read/write (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The result reports the userId used.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "value": {
           "description": "Value to write",

@@ -674,6 +674,28 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `show_overlay displayId is optional on the wire and round trips`() {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    // Absent stays absent: a request from a host that predates display targeting is unchanged.
+    val absent = """{"type":"show_overlay","requestId":"r1","spec":$spec}"""
+    val decoded = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(absent))
+    assertEquals(null, decoded.displayId)
+    assertEquals(absent, json.encodeToString<WebSocketRequest>(decoded))
+    // An explicit null decodes as the default display, and is not echoed back.
+    val explicitNull = """{"type":"show_overlay","requestId":"r1","spec":$spec,"displayId":null}"""
+    assertEquals(
+      decoded,
+      assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(explicitNull)),
+    )
+    // Same literal as the TypeScript wire fixture in ctrlProxyProtocol.test.ts.
+    val explicit = """{"type":"show_overlay","requestId":"r1","spec":$spec,"displayId":2}"""
+    val request = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(explicit))
+    assertEquals(2, request.displayId)
+    assertEquals(explicit, json.encodeToString<WebSocketRequest>(request))
+  }
+
+  @Test
   fun `overlay asset requests round trip byte identical shared literals`() {
     val put =
       """{"type":"put_overlay_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""

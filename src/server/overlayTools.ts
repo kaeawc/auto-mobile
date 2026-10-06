@@ -18,6 +18,8 @@ import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchema
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import { overlayDisplayUnsupportedMessage } from "../features/observe/android/CtrlProxyOverlays";
+import { OVERLAY_DISPLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import type {
   OverlayDismiss,
   OverlayResult,
@@ -26,11 +28,19 @@ import type {
 import { overlaySpecSchema, type OverlaySpec } from "../features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../features/overlay/overlayValidation";
 import {
+  resolveOverlayDisplayId,
+  type OverlayDisplayDependencies,
+} from "../features/overlay/overlayDisplay";
+import {
   InMemoryOverlayStatusStore,
   type OverlayStatusStore,
   type OverlayScope,
 } from "../features/overlay/OverlayStatusStore";
 import type { Timer } from "../utils/SystemTimer";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
@@ -111,6 +121,12 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .describe(
           "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
         ),
+      display: z
+        .string()
+        .optional()
+        .describe(
+          "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
+        ),
       id: z
         .string()
         .min(1)
@@ -145,9 +161,18 @@ export const overlaySchema = addDeviceTargetingToSchema(
     })
     .strict(),
 ).superRefine((value, ctx) => {
-  const fields = ["spec", "id", "state", "all", "eventName", "kind", "afterSequence"] as const;
+  const fields = [
+    "spec",
+    "id",
+    "state",
+    "all",
+    "display",
+    "eventName",
+    "kind",
+    "afterSequence",
+  ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec"],
+    show: ["spec", "display"],
     update: ["id", "spec", "state"],
     dismiss: ["id", "all"],
     status: [],
@@ -223,6 +248,12 @@ const lastResultSchema = z.object({
   id: z.string().optional(),
   all: z.literal(true).optional(),
   lastAction: z.enum(["show", "update", "dismiss"]),
+  displayId: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe("Android logical display the overlay was shown on; absent for the default display"),
   success: z.boolean(),
   error: z.string().optional(),
   totalTimeMs: z.number().optional(),
@@ -285,10 +316,16 @@ export interface OverlayEventLifecycle {
 }
 type OverlayClient = Pick<
   AndroidCtrlProxyClient,
-  "requestShowOverlay" | "requestUpdateOverlay" | "requestDismissOverlay" | "onOverlayEvent"
+  | "requestShowOverlay"
+  | "requestUpdateOverlay"
+  | "requestDismissOverlay"
+  | "onOverlayEvent"
+  | "supportsCommand"
 >;
 export interface OverlayToolDependencies {
   clientFactory?: (device: BootedDevice) => OverlayClient;
+  adbFactory?: AdbClientFactory;
+  lastRenderedObservation?: OverlayDisplayDependencies["lastRenderedObservation"];
   store?: OverlayStatusStore;
   clock?: Pick<Timer, "now">;
   timer?: Timer;
@@ -303,9 +340,15 @@ let unsubscribeOverlayLifecycle: (() => void) | undefined;
 async function mutate(
   client: OverlayClient,
   args: z.infer<typeof overlaySchema>,
+  displayId?: number,
 ): Promise<OverlayResult> {
   if (args.action === "show") {
-    return client.requestShowOverlay(args.spec as OverlaySpec, args.timeoutMs);
+    return client.requestShowOverlay(
+      args.spec as OverlaySpec,
+      args.timeoutMs,
+      undefined,
+      displayId,
+    );
   }
   if (args.action === "update") {
     const update: OverlayUpdate =
@@ -316,6 +359,34 @@ async function mutate(
   }
   const target: OverlayDismiss = args.all ? { all: true } : { id: args.id! };
   return client.requestDismissOverlay(target, args.timeoutMs);
+}
+
+/**
+ * Resolves `display` (already explicit-or-pinned) to a logical display id and refuses, before
+ * anything is sent, when the device cannot honour it. Only show carries a display.
+ */
+async function showDisplayId(
+  client: OverlayClient,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+): Promise<number | undefined> {
+  if (args.action !== "show" || args.display === undefined) {
+    return undefined;
+  }
+  const displayId = await resolveOverlayDisplayId(device, args.display, {
+    adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+    lastRenderedObservation: dependencies.lastRenderedObservation,
+  });
+  // Id 0 is the default display: it needs neither the wire field nor the capability, and the
+  // result schema leaves displayId absent for it, so it is never carried forward as 0.
+  if (!displayId) {
+    return undefined;
+  }
+  if (!(await client.supportsCommand(OVERLAY_DISPLAY_CAPABILITY))) {
+    throw new ActionableError(overlayDisplayUnsupportedMessage(displayId));
+  }
+  return displayId;
 }
 
 function clearMutationEvents(
@@ -351,7 +422,7 @@ async function performMutation(
     store: OverlayStatusStore;
     events: OverlayEventCoordinator;
     clientFactory: (device: BootedDevice) => OverlayClient;
-  },
+  } & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
   device: BootedDevice,
   args: Omit<z.infer<typeof overlaySchema>, "action"> & { action: OverlayMutation },
   scope: OverlayScope,
@@ -366,8 +437,10 @@ async function performMutation(
     events.show(scope, target.id!, client);
   }
   let result: OverlayResult;
+  let displayId: number | undefined;
   try {
-    result = await mutate(client, args);
+    displayId = await showDisplayId(client, device, args, dependencies);
+    result = await mutate(client, args, displayId);
   } catch (error) {
     logger.warn("[overlay] Request failed", error);
     result = {
@@ -379,7 +452,7 @@ async function performMutation(
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
   }
-  const lastResult = store.record(scope, args.action, target, result);
+  const lastResult = store.record(scope, args.action, target, result, displayId);
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);
   }
@@ -508,7 +581,13 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       }
     }
     return performMutation(
-      { store, events, clientFactory },
+      {
+        store,
+        events,
+        clientFactory,
+        adbFactory: dependencies.adbFactory,
+        lastRenderedObservation: dependencies.lastRenderedObservation,
+      },
       device,
       { ...args, action: args.action },
       scope,

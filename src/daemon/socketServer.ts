@@ -195,6 +195,10 @@ import {
   type DaemonGenerationIdentity,
 } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
+import {
+  processGenerationRecordFields,
+  recordedProcessGenerationToken,
+} from "./processGenerationFields";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
   createDeviceSessionErrorResolver,
@@ -4234,7 +4238,7 @@ export class UnixSocketServer {
   ): Promise<{ accepted: boolean; reason?: string }> {
     if (
       !this.daemonGenerationMatches(params) ||
-      params.processGenerationToken !== this.processGenerationToken ||
+      recordedProcessGenerationToken(params) !== this.processGenerationToken ||
       params.processStartedAt !== this.identityProcessStartedAt
     ) {
       return { accepted: false, reason: "generation_changed" };
@@ -4756,9 +4760,7 @@ export class UnixSocketServer {
           reportedSockets: this.identitySockets,
           effectiveDebug: isDebugModeEnabled(),
           options: this.startupOptions,
-          ...(this.processGenerationToken === undefined
-            ? {}
-            : { processGenerationToken: this.processGenerationToken }),
+          ...processGenerationRecordFields(this.processGenerationToken),
           activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
             scope: "global",
           }),

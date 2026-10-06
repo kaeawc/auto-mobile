@@ -103,6 +103,11 @@ import {
   type ProcessGenerationTokenComparison,
 } from "./processGeneration";
 import {
+  processGenerationRecordFields,
+  recordedProcessGenerationToken,
+  type ProcessGenerationRecordFields,
+} from "./processGenerationFields";
+import {
   formatLockContent,
   parseLockContent,
   releaseExclusiveLock,
@@ -794,7 +799,7 @@ export class DaemonManager implements DaemonManagerLike {
         ppid: 0,
         command: "",
         startedAt: owner.processStartedAt ?? owner.startedAt,
-        processGenerationToken: owner.processGenerationToken,
+        processGenerationToken: recordedProcessGenerationToken(owner),
       });
     }
     return candidates.filter((candidate) => {
@@ -2157,7 +2162,7 @@ export class DaemonManager implements DaemonManagerLike {
     candidate: DaemonProcessRecord,
   ): boolean {
     const tokenVerdict = this.compareRecordedTokens(
-      status.processGenerationToken,
+      recordedProcessGenerationToken(status),
       candidate.processGenerationToken,
     );
     if (tokenVerdict !== "incomparable") {
@@ -2219,15 +2224,22 @@ export class DaemonManager implements DaemonManagerLike {
       return false;
     }
     if (expected.processGenerationToken !== undefined) {
-      // Only a token from the same comparable scheme can prove a different
-      // generation; an unreadable or older-scheme token is never proof.
-      return (
-        candidate.processGenerationToken !== undefined &&
-        compareProcessGenerationTokens(
-          expected.processGenerationToken,
-          candidate.processGenerationToken,
-        ) === "different"
+      // An unreadable token is never proof of a different generation.
+      if (candidate.processGenerationToken === undefined) {
+        return false;
+      }
+      const verdict = compareProcessGenerationTokens(
+        expected.processGenerationToken,
+        candidate.processGenerationToken,
       );
+      // Only a token from the same comparable scheme proves a different
+      // generation or the same one. An older-scheme token (a daemon that wrote a
+      // legacy `darwin:` token, replaced by one that reads `darwin-utc:`) is
+      // neither, so the birth-time rule below decides, exactly as in the two
+      // `matches*` helpers.
+      if (verdict !== "incomparable") {
+        return verdict === "different";
+      }
     }
     return (
       expected.startedAt !== undefined &&
@@ -2400,7 +2412,7 @@ export class DaemonManager implements DaemonManagerLike {
       ppid: 0,
       command: status.entryScript ?? "",
       startedAt: status.processStartedAt ?? status.startedAt,
-      processGenerationToken: status.processGenerationToken,
+      processGenerationToken: recordedProcessGenerationToken(status),
     };
   }
 
@@ -2975,6 +2987,7 @@ export class DaemonManager implements DaemonManagerLike {
       "startedAt",
       "processStartedAt",
       "processGenerationToken",
+      "processGenerationTokenUtc",
       "version",
       "buildId",
       "entryScript",
@@ -3050,9 +3063,7 @@ export class DaemonManager implements DaemonManagerLike {
           ppid: 0,
           command: status.entryScript ?? "",
           startedAt: status.processStartedAt ?? status.startedAt,
-          ...(status.processGenerationToken === undefined
-            ? {}
-            : { processGenerationToken: status.processGenerationToken }),
+          processGenerationToken: recordedProcessGenerationToken(status),
         };
         const waitResult = await this.waitForStop(
           status.pid!,
@@ -3193,9 +3204,7 @@ export class DaemonManager implements DaemonManagerLike {
         ppid: 0,
         command: "",
         startedAt: status.processStartedAt ?? generation.startedAt,
-        ...(generation.processGenerationToken === undefined
-          ? {}
-          : { processGenerationToken: generation.processGenerationToken }),
+        processGenerationToken: generation.processGenerationToken,
       },
       undefined,
       "Live acceptance",
@@ -3214,7 +3223,7 @@ export class DaemonManager implements DaemonManagerLike {
       const result: unknown = await client.callDaemonMethod(DAEMON_PREPARE_RESTART_METHOD, {
         pid: expected.pid,
         startedAt: expected.startedAt,
-        processGenerationToken: expected.processGenerationToken,
+        ...processGenerationRecordFields(recordedProcessGenerationToken(expected)),
         version: expected.version,
         buildId: expected.buildId,
         entryScript: expected.entryScript,
@@ -3305,7 +3314,7 @@ export class DaemonManager implements DaemonManagerLike {
       const result: unknown = await client.callDaemonMethod(DAEMON_RESTART_ADMITTED_METHOD, {
         pid: expected.pid,
         startedAt: expected.startedAt,
-        processGenerationToken: expected.processGenerationToken,
+        ...processGenerationRecordFields(recordedProcessGenerationToken(expected)),
         version: expected.version,
         buildId: expected.buildId,
         entryScript: expected.entryScript,
@@ -3629,7 +3638,7 @@ export class DaemonManager implements DaemonManagerLike {
       ppid: 0,
       command: "",
       startedAt: owner.processStartedAt ?? owner.startedAt,
-      processGenerationToken: owner.processGenerationToken,
+      processGenerationToken: recordedProcessGenerationToken(owner),
     });
   }
 
@@ -4167,9 +4176,7 @@ export class DaemonManager implements DaemonManagerLike {
         // Birth time, not daemon construction time: the process-table matcher
         // compares against the OS birth timestamp within a 2s tolerance.
         startedAt: pidData.processStartedAt ?? pidData.startedAt,
-        ...(pidData.processGenerationToken === undefined
-          ? {}
-          : { processGenerationToken: pidData.processGenerationToken }),
+        processGenerationToken: recordedProcessGenerationToken(pidData),
       };
       return candidates.some(
         (candidate) =>
@@ -4228,7 +4235,11 @@ export class DaemonManager implements DaemonManagerLike {
    * any unreadable token answers false, so uncertainty keeps the PID trusted as
    * the recorded daemon exactly as before.
    */
-  private isRecycledPid(record: { pid: number; processGenerationToken?: unknown }): boolean {
+  private isRecycledPid(
+    record: {
+      pid: number;
+    } & ProcessGenerationRecordFields,
+  ): boolean {
     const readToken = this.processLivenessChecker.readProcessGenerationToken;
     return (
       readToken !== undefined &&
@@ -4242,10 +4253,11 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /** Alive by PID AND still the recorded generation (never a recycled PID). */
-  private isRecordedDaemonRunning(record: {
-    pid: number;
-    processGenerationToken?: unknown;
-  }): boolean {
+  private isRecordedDaemonRunning(
+    record: {
+      pid: number;
+    } & ProcessGenerationRecordFields,
+  ): boolean {
     return this.isProcessRunning(record.pid) && !this.isRecycledPid(record);
   }
 

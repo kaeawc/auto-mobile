@@ -2,15 +2,21 @@ import { readFileSync } from "node:fs";
 import { logger } from "../utils/logger";
 import { runDaemonProcessCommand, type DaemonProcessCommandRunner } from "./DaemonLauncher";
 import type { DaemonGenerationIdentity } from "./liveAcceptanceCapability";
+import {
+  DARWIN_UTC_PROCESS_GENERATION_PREFIX,
+  recordedProcessGenerationToken,
+} from "./processGenerationFields";
 
 const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
 /**
  * Darwin token prefix for `ps lstart` rendered with the time zone pinned to UTC.
  * The earlier `darwin:` prefix carried the reader's LOCAL wall time, so the same
  * live process printed a different string under a different `TZ`. Tokens from
- * the two schemes are never comparable (see `compareProcessGenerationTokens`).
+ * the two schemes are never comparable (see `compareProcessGenerationTokens`),
+ * and the new scheme is published under its own record field
+ * (`processGenerationFields.ts`) so builds that read the old one never see it.
  */
-const DARWIN_PROCESS_GENERATION_PREFIX = "darwin-utc";
+const DARWIN_PROCESS_GENERATION_PREFIX = DARWIN_UTC_PROCESS_GENERATION_PREFIX;
 /** The retired, time-zone-dependent Darwin prefix: never proof of anything. */
 const LEGACY_DARWIN_PROCESS_GENERATION_PREFIX = "darwin";
 /**
@@ -47,10 +53,12 @@ export function daemonGenerationMatches(
   expected: DaemonGenerationIdentity,
   claimed: Record<string, unknown>,
 ): boolean {
+  // A client of a build that predates the zone-free Darwin field echoes no token
+  // for such a daemon, which is the legacy-client case above.
+  const claimedToken = recordedProcessGenerationToken(claimed);
   return (
     LEGACY_DAEMON_GENERATION_FIELDS.every((field) => claimed[field] === expected[field]) &&
-    (claimed.processGenerationToken === undefined ||
-      claimed.processGenerationToken === expected.processGenerationToken)
+    (claimedToken === undefined || claimedToken === expected.processGenerationToken)
   );
 }
 

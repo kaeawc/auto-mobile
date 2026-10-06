@@ -8,6 +8,11 @@ import {
   readProcessGenerationTokenForPid,
   writePidFileDataAtomicSync,
 } from "./daemonFiles";
+import {
+  processGenerationRecordFields,
+  recordedProcessGenerationToken,
+  type ProcessGenerationRecordFields,
+} from "./processGenerationFields";
 import type { SocketOwnerLiveness, SocketOwnerStatus } from "./socketServer";
 import type { PidFileData, SupersededSocketOwner } from "./types";
 import { logger } from "../utils/logger";
@@ -252,7 +257,7 @@ export class IncumbentOwnerGuard {
     return true;
   }
 
-  private isLiveForeign<T extends { pid: number; processGenerationToken?: string }>(
+  private isLiveForeign<T extends { pid: number } & ProcessGenerationRecordFields>(
     record: T | null,
   ): record is T {
     return (
@@ -272,9 +277,7 @@ export class IncumbentOwnerGuard {
 function supersededOwnerFromRecord(record: PidFileData): SupersededSocketOwner {
   return {
     pid: record.pid,
-    ...(record.processGenerationToken === undefined
-      ? {}
-      : { processGenerationToken: record.processGenerationToken }),
+    ...processGenerationRecordFields(recordedProcessGenerationToken(record)),
   };
 }
 
@@ -283,14 +286,12 @@ function parseSupersededOwner(value: unknown): SupersededSocketOwner | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
-  const { pid, processGenerationToken } = value as Record<string, unknown>;
+  const carried = value as Record<string, unknown>;
+  const { pid } = carried;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
     return null;
   }
-  return {
-    pid,
-    ...(typeof processGenerationToken === "string" ? { processGenerationToken } : {}),
-  };
+  return { pid, ...processGenerationRecordFields(recordedProcessGenerationToken(carried)) };
 }
 
 function sameOwnerRecord(a: PidFileData | null, b: PidFileData | null): boolean {

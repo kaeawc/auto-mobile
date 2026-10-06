@@ -15,6 +15,7 @@ import {
   readDarwinProcessGenerationToken,
   readLinuxProcessGenerationToken,
 } from "./processGeneration";
+import { recordedProcessGenerationToken } from "./processGenerationFields";
 import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
@@ -658,7 +659,7 @@ export function readProcessGenerationTokenForPid(pid: number): string | undefine
 /**
  * Whether a PID record names a process generation that has DEFINITELY exited
  * while its PID is now held by another process. Only a recorded
- * `processGenerationToken` that differs from a token actually read from the live
+ * process generation token (either record field) that differs from a token actually read from the live
  * PID is proof. Every uncertain input (no recorded token, no readable live
  * token, a reader failure, a record carrying only a wall-clock birth time)
  * returns false so the caller keeps treating the PID as the recorded process;
@@ -670,12 +671,12 @@ export function readProcessGenerationTokenForPid(pid: number): string | undefine
  */
 export function isConfirmedRecycledProcess(
   pid: number,
-  record: { processGenerationToken?: unknown },
+  record: { processGenerationToken?: unknown; processGenerationTokenUtc?: unknown },
   readProcessGenerationToken: (pid: number) => string | undefined,
   source: string,
 ): boolean {
-  const recordedToken = record.processGenerationToken;
-  if (typeof recordedToken !== "string") {
+  const recordedToken = recordedProcessGenerationToken(record);
+  if (recordedToken === undefined) {
     // Fully legacy or birth-time-only records have no opaque token to compare
     // (the direct cross-platform PID probes expose only opaque tokens), so
     // uncertainty must preserve the recorded process as live.

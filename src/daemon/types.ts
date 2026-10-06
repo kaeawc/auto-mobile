@@ -336,10 +336,20 @@ export interface DaemonStatus {
    */
   processStartedAt?: number;
   /**
-   * Stable OS-derived identity for this process generation. Optional so PID
-   * records written before generation tokens remain readable.
+   * Stable OS-derived identity for this process generation (Linux, or a legacy
+   * `darwin:` token from an older daemon). Optional so PID records written
+   * before generation tokens remain readable. Read through
+   * `recordedProcessGenerationToken`, never directly: Darwin publishes its
+   * zone-free token under {@link processGenerationTokenUtc} instead.
    */
   processGenerationToken?: string;
+  /**
+   * Zone-free Darwin (`darwin-utc:`) generation token. A separate field so a
+   * daemon build that predates it sees no token rather than a `darwin:`-vs-
+   * `darwin-utc:` mismatch it would read as a recycled PID (see
+   * `processGenerationFields.ts`).
+   */
+  processGenerationTokenUtc?: string;
   /** Daemon version */
   version?: string;
   /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
@@ -378,6 +388,8 @@ export interface SupersededSocketOwner {
   pid: number;
   /** Token compared with the live PID's, so a recycled PID still reads as dead. */
   processGenerationToken?: string;
+  /** Zone-free Darwin token; see {@link PidFileData.processGenerationTokenUtc}. */
+  processGenerationTokenUtc?: string;
 }
 
 export interface PidFileData {
@@ -408,10 +420,19 @@ export interface PidFileData {
    */
   processStartedAt?: number;
   /**
-   * Stable OS-derived identity for this process generation. Optional for
-   * backward compatibility with PID files written before this field existed.
+   * Stable OS-derived identity for this process generation (Linux, or a legacy
+   * `darwin:` token from an older daemon). Optional for backward compatibility
+   * with PID files written before this field existed. Read through
+   * `recordedProcessGenerationToken`, never directly.
    */
   processGenerationToken?: string;
+  /**
+   * Zone-free Darwin (`darwin-utc:`) generation token, published INSTEAD of
+   * {@link processGenerationToken} on Darwin so older builds, which compare that
+   * field strictly against their own time-zone-dependent token, see no token
+   * and keep treating this daemon as live (see `processGenerationFields.ts`).
+   */
+  processGenerationTokenUtc?: string;
   /** Daemon version */
   version: string;
   /**

@@ -22,7 +22,13 @@ import { ActionableError } from "../../src/models";
 import { darwinProcessGenerationToken } from "../../src/daemon/processGeneration";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { LSTART_AMERICA_CHICAGO, LSTART_UTC, legacyLocalToken } from "./psLstartFixtures";
+import {
+  CAPTURED_START_EPOCH_MS,
+  LSTART_AMERICA_CHICAGO,
+  LSTART_UTC,
+  legacyLocalToken,
+  renderLstart,
+} from "./psLstartFixtures";
 
 class NamespaceProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   records: DaemonProcessRecord[] = [];
@@ -109,9 +115,15 @@ function harness(defaultNamespace = false) {
   timer.enableAutoAdvance();
   const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
   let exits = true;
+  // When set, a signal hands the PID to a successor instead of freeing it.
+  let onSignalHandOff: ((pid: number) => void) | undefined;
   const signaler: DaemonProcessSignaler = {
     signal(pid, signal) {
       signals.push({ pid, signal });
+      if (onSignalHandOff) {
+        onSignalHandOff(pid);
+        return;
+      }
       if (exits) {
         processes.livePids.delete(pid);
         identity.record = null;
@@ -129,13 +141,17 @@ function harness(defaultNamespace = false) {
     processGenerationToken: `generation-${pid}`,
     version: "test",
   });
+  // The PID and record fields the next spawned daemon publishes; a test sets it
+  // to model a successor that reuses the previous daemon's PID.
+  let spawnedPid = 202;
+  let spawnedRecord: Partial<PidFileData> = {};
   const spawner: DaemonProcessSpawner = {
     spawn(_command, args, options): ChildProcess {
       calls.push({ args: [...args], options });
       const child = new FakeChildProcess(timer);
-      child.pid = 202;
-      identity.record = makeRecord(202);
-      processes.livePids.add(202);
+      child.pid = spawnedPid;
+      identity.record = { ...makeRecord(spawnedPid), ...spawnedRecord };
+      processes.livePids.add(spawnedPid);
       return child as ChildProcess;
     },
   };
@@ -224,6 +240,13 @@ function harness(defaultNamespace = false) {
     },
     refuseExit: () => {
       exits = false;
+    },
+    setSpawnedDaemon: (pid: number, record: Partial<PidFileData>) => {
+      spawnedPid = pid;
+      spawnedRecord = record;
+    },
+    handOffPidOnSignal: (handOff: (pid: number) => void) => {
+      onSignalHandOff = handOff;
     },
   };
 }
@@ -718,6 +741,121 @@ describe("a LIVE daemon whose record carries a token from an older scheme (issue
 
     expect(h.calls).toHaveLength(0);
     expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(true);
+  });
+});
+
+describe("a LIVE older-build daemon (legacy darwin: record) matched against a LISTED candidate (issue #10116 review F2/F3)", () => {
+  // The record is what an older daemon wrote: `darwin:<local wall time>` plus its
+  // own `Date.now() - uptime` birth time. The process table candidate is what this
+  // build reads: `darwin-utc:<UTC wall time>` and the exact UTC start. The tokens
+  // are incomparable, so birth time (2 s tolerance) decides who is who.
+  const OLD_BUILD_TOKEN = legacyLocalToken(LSTART_AMERICA_CHICAGO);
+  const LIVE_TOKEN = darwinProcessGenerationToken(LSTART_UTC)!;
+  const SUCCESSOR_START = CAPTURED_START_EPOCH_MS + 60_000;
+  const SUCCESSOR_TOKEN = darwinProcessGenerationToken(renderLstart(SUCCESSOR_START, "UTC"))!;
+
+  function liveOlderDaemon(h: ReturnType<typeof harness>): DaemonStatus {
+    h.addOwn(true);
+    const record = h.identity.record!;
+    // `processStartedAt` is millisecond-precise; `lstart` truncates to the second.
+    record.startedAt = CAPTURED_START_EPOCH_MS + 900;
+    record.processStartedAt = CAPTURED_START_EPOCH_MS + 400;
+    record.processGenerationToken = OLD_BUILD_TOKEN;
+    const observed: DaemonStatus = {
+      ...record,
+      running: true,
+      reportedSocketPath: h.socket,
+      reportedPidFilePath: h.pidPath,
+    };
+    h.identity.owner = observed;
+    const candidate = h.processes.records.find((listed) => listed.pid === 201)!;
+    candidate.startedAt = CAPTURED_START_EPOCH_MS;
+    candidate.processGenerationToken = LIVE_TOKEN;
+    h.processes.tokens.set(201, LIVE_TOKEN);
+    writeFileSync(h.pidPath, JSON.stringify(record));
+    return observed;
+  }
+
+  /** A daemon that reuses PID 201 after the older one exits. */
+  function successor(birthMs: number): Partial<PidFileData> {
+    return {
+      startedAt: birthMs + 500,
+      processStartedAt: birthMs,
+      processGenerationToken: undefined,
+      processGenerationTokenUtc: SUCCESSOR_TOKEN,
+    };
+  }
+
+  test("status still reports the daemon running", async () => {
+    const h = harness();
+    liveOlderDaemon(h);
+
+    await expect(h.manager.status(false)).resolves.toMatchObject({ running: true, pid: 201 });
+  });
+
+  test("stop of the observed generation verifies it by birth time and signals it", async () => {
+    const h = harness();
+    const observed = liveOlderDaemon(h);
+
+    await h.manager.stop(undefined, observed);
+
+    expect(h.signals).toEqual([{ pid: 201, signal: "SIGTERM" }]);
+  });
+
+  test("restart replaces it", async () => {
+    const h = harness();
+    liveOlderDaemon(h);
+
+    await expect(h.manager.restart()).resolves.toBe("restarted");
+
+    expect(h.signals).toEqual([{ pid: 201, signal: "SIGTERM" }]);
+    expect((await h.manager.status(false)).pid).toBe(202);
+  });
+
+  test("restart whose replacement reuses the PID is a replacement when its birth time differs", async () => {
+    const h = harness();
+    liveOlderDaemon(h);
+    h.setSpawnedDaemon(201, successor(SUCCESSOR_START));
+    h.processes.tokens.set(201, SUCCESSOR_TOKEN);
+
+    await expect(h.manager.restart()).resolves.toBe("restarted");
+
+    expect(h.signals).toEqual([{ pid: 201, signal: "SIGTERM" }]);
+  });
+
+  test("restart whose same-PID successor is born within the tolerance is not a replacement", async () => {
+    const h = harness();
+    liveOlderDaemon(h);
+    h.setSpawnedDaemon(201, successor(CAPTURED_START_EPOCH_MS + 1_000));
+    h.processes.tokens.set(201, SUCCESSOR_TOKEN);
+
+    await expect(h.manager.restart()).rejects.toThrow(
+      "Restart did not replace the namespace's previous daemon generation.",
+    );
+  });
+
+  test("stop recognises a same-PID replacement that appears before the first exit poll", async () => {
+    const h = harness();
+    const observed = liveOlderDaemon(h);
+    h.processes.tokens.set(201, SUCCESSOR_TOKEN);
+    h.handOffPidOnSignal(() => {
+      h.identity.record = { ...h.identity.record!, ...successor(SUCCESSOR_START) };
+      h.processes.records = [
+        {
+          pid: 201,
+          ppid: 1,
+          command: "auto-mobile --daemon-mode",
+          startedAt: SUCCESSOR_START,
+          processGenerationToken: SUCCESSOR_TOKEN,
+        },
+      ];
+    });
+
+    await h.manager.stop(undefined, observed);
+
+    // The replacement is never signalled again, and its record is left in place.
+    expect(h.signals).toEqual([{ pid: 201, signal: "SIGTERM" }]);
     expect(existsSync(h.pidPath)).toBe(true);
   });
 });

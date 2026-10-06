@@ -35,7 +35,7 @@ describe("isConfirmedRecycledProcess (issue #10108)", () => {
     expect(
       isConfirmedRecycledProcess(
         10,
-        { processGenerationToken: UTC_TOKEN },
+        { processGenerationTokenUtc: UTC_TOKEN },
         () => "darwin-utc:Tue Oct 6 09:30:00 2026",
         "test",
       ),
@@ -57,7 +57,7 @@ describe("isConfirmedRecycledProcess (issue #10108)", () => {
     expect(
       isConfirmedRecycledProcess(
         10,
-        { processGenerationToken: UTC_TOKEN },
+        { processGenerationTokenUtc: UTC_TOKEN },
         () => LOCAL_TOKEN,
         "test",
       ),

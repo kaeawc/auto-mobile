@@ -77,6 +77,7 @@ import {
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
+import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
@@ -1721,9 +1722,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
+      ...processGenerationRecordFields(this.processGenerationToken),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -1750,9 +1749,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
+      ...processGenerationRecordFields(this.processGenerationToken),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),

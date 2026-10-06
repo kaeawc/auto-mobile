@@ -260,6 +260,34 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
       expect(guard.asSocketOwnerLiveness().getOwnerStatus()).toBe("dead");
     });
 
+    test("a zone-free Darwin token that differs from the live PID's reads as dead", () => {
+      const { guard, file } = makeGuard({
+        readProcessGenerationToken: () => "darwin-utc:Tue Oct 6 09:30:00 2026",
+      });
+      file.data = {
+        ...record(INCUMBENT_PID),
+        processGenerationTokenUtc: "darwin-utc:Tue Oct 6 07:35:51 2026",
+      };
+
+      guard.captureIncumbentBeforeOverwrite();
+
+      expect(guard.asSocketOwnerLiveness().getOwnerStatus()).toBe("dead");
+    });
+
+    test("a legacy darwin: token from an older build is incomparable with the live token and reads as live", () => {
+      const { guard, file } = makeGuard({
+        readProcessGenerationToken: () => "darwin-utc:Tue Oct 6 07:35:51 2026",
+      });
+      file.data = {
+        ...record(INCUMBENT_PID),
+        processGenerationToken: "darwin:Tue Oct 6 02:35:51 2026",
+      };
+
+      guard.captureIncumbentBeforeOverwrite();
+
+      expect(guard.asSocketOwnerLiveness().getOwnerStatus()).toBe("live");
+    });
+
     test("an identical token still reads as live", () => {
       const { guard, file } = makeGuard({ readProcessGenerationToken: () => "generation-1" });
       file.data = tokenRecord("generation-1");
@@ -407,6 +435,30 @@ describe("IncumbentOwnerGuard (issue #6232)", () => {
       running.add(INCUMBENT_PID);
 
       const next = nextStartGuard(file, running, () => "generation-2");
+      next.captureIncumbentBeforeOverwrite();
+
+      expect(next.asSocketOwnerLiveness().getOwnerStatus()).toBe("dead");
+    });
+
+    test("a carried zone-free Darwin token survives the early record and still proves a recycled PID dead", () => {
+      const { guard, file, running } = makeGuard();
+      file.data = {
+        ...record(INCUMBENT_PID),
+        processGenerationTokenUtc: "darwin-utc:Tue Oct 6 07:35:51 2026",
+      };
+      running.delete(INCUMBENT_PID);
+      guard.captureIncumbentBeforeOverwrite();
+      const early = failedStartLeaves(guard);
+      file.data = early;
+      running.delete(SELF_PID);
+      running.add(INCUMBENT_PID);
+
+      // Carried under the zone-free field, never the legacy one older builds compare.
+      expect(early.supersededOwner).toEqual({
+        pid: INCUMBENT_PID,
+        processGenerationTokenUtc: "darwin-utc:Tue Oct 6 07:35:51 2026",
+      });
+      const next = nextStartGuard(file, running, () => "darwin-utc:Tue Oct 6 09:30:00 2026");
       next.captureIncumbentBeforeOverwrite();
 
       expect(next.asSocketOwnerLiveness().getOwnerStatus()).toBe("dead");

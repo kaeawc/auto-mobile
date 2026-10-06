@@ -3,6 +3,7 @@ import { ActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { runOutsideRequestContext } from "../../utils/AbortContext";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -75,6 +76,9 @@ const PULL_RETRY_DELAY_MS = 500;
 // Budget for each of the two device commands (own-process check, then kill) that
 // signal the recorder by pid.
 const SIGNAL_RECORDER_COMMAND_TIMEOUT_MS = 4000;
+// Bound for the whole failed-start cleanup (cmdline probe, kill, temp-file removal). It runs
+// detached from the request that started the recording, so it needs its own limit.
+const FAILED_START_CLEANUP_TIMEOUT_MS = 10000;
 // How long a fresh recorder must stay alive before `start` reports a recording (#10186).
 // A recorder that cannot run (an unsupported `--size`, no encoder, a device that dropped
 // off adb, a full /sdcard) exits promptly, but how promptly was not measured on a device;
@@ -875,7 +879,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       physicalDisplayId: effectivePhysicalId,
     } = await startScreenrecordProcess(adb, args, config, device, physicalDisplayId, {
       timer: this.timer,
-      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStart(adb, deviceTempPath, pid),
+      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStartDetached(adb, deviceTempPath, pid),
     });
 
     const backendHandle: AndroidBackendHandle = {
@@ -896,6 +900,34 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       physicalDisplayId: effectivePhysicalId,
       backendHandle,
     };
+  }
+
+  /**
+   * Runs {@link cleanupFailedAndroidStart} detached from the request that started the
+   * recording. A start fails most often because that request was cancelled, and `AdbClient`
+   * defaults every call to the ambient request signal, so inside the request context each
+   * cleanup command would throw at once and the recorder and temp file would be left behind.
+   * Outside it the cleanup runs under its own bounded timeout instead.
+   */
+  private async cleanupFailedAndroidStartDetached(
+    adb: AdbExecutor,
+    deviceTempPath: string,
+    devicePid: DeviceRecorderPid,
+  ): Promise<void> {
+    try {
+      await runOutsideRequestContext(() =>
+        raceWithDeadline(this.cleanupFailedAndroidStart(adb, deviceTempPath, devicePid), {
+          timer: this.timer,
+          timeoutMs: FAILED_START_CLEANUP_TIMEOUT_MS,
+          label: "Failed video start cleanup",
+        }),
+      );
+    } catch (error) {
+      logger.warn(
+        `[VideoCapture] Failed-start cleanup did not finish: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   /**

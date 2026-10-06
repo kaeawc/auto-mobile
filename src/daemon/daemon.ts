@@ -255,6 +255,12 @@ const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
 const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+// How long device-disconnect cleanup waits for a recording's stop before releasing the device.
+// An iOS recording started with `resolution` is re-encoded by ffmpeg on stop, which an
+// unattended stop bounds by up to 10 minutes; the device and its session must not wait that
+// long. This is the stream-copy post-process budget (and the former fixed bound). The stop
+// keeps running in the background under its own unattended ceiling.
+const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
@@ -3081,6 +3087,36 @@ export class Daemon {
       return false;
     }
     this.stoppingRecordings.add(recordingId);
+    const stopped = this.stopOrInterruptRecordingAfterDeviceDisconnect(
+      recordingId,
+      deviceId,
+    ).finally(() => this.stoppingRecordings.delete(recordingId));
+    const stillStopping = new Error("recording stop still running");
+    try {
+      return await raceWithDeadline(stopped, {
+        timer: this.timer,
+        timeoutMs: DISCONNECT_RECORDING_STOP_WAIT_MS,
+        label: "Stop recording after device disconnect",
+        timeoutError: () => stillStopping,
+      });
+    } catch (error) {
+      if (error !== stillStopping) {
+        throw error;
+      }
+      // The capture itself ended with the device; what is left is post-processing, bounded by
+      // the unattended stop's own ceiling. The recording stays in `stoppingRecordings` until
+      // it finishes, so releasing the device neither waits for it nor starts a second stop.
+      logger.warn(
+        `[Daemon] Recording ${recordingId} is still finishing after device ${deviceId} disconnected; releasing the device without waiting`,
+      );
+      return true;
+    }
+  }
+
+  private async stopOrInterruptRecordingAfterDeviceDisconnect(
+    recordingId: string,
+    deviceId: string,
+  ): Promise<boolean> {
     try {
       await stopVideoRecordingUnattended(recordingId);
       logger.warn(
@@ -3092,8 +3128,6 @@ export class Daemon {
         `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`,
       );
       return await this.interruptRecordingAfterDeviceDisconnect(recordingId, deviceId);
-    } finally {
-      this.stoppingRecordings.delete(recordingId);
     }
   }
 

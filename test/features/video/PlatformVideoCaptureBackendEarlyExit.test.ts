@@ -9,6 +9,8 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
+import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import type { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -312,5 +314,107 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
       expect(message).toContain("LAST-LINE");
       expect(message.length).toBeLessThan(2000);
     });
+  });
+});
+
+/**
+ * A fake adb client that, like the real `AdbClient` (`signal ?? getAbortSignal()`), fails at
+ * once when the explicit signal, or else the ambient request signal, is already aborted.
+ */
+class AmbientAbortAdbClient extends FakeAdbClient {
+  override async executeCommand(
+    ...args: Parameters<FakeAdbClient["executeCommand"]>
+  ): ReturnType<FakeAdbClient["executeCommand"]> {
+    (args[4] ?? getAbortSignal())?.throwIfAborted();
+    return super.executeCommand(...args);
+  }
+
+  override async spawn(...args: Parameters<FakeAdbClient["spawn"]>) {
+    (args[1]?.signal ?? getAbortSignal())?.throwIfAborted();
+    return super.spawn(...args);
+  }
+}
+
+describe("PlatformVideoCaptureBackend cancelled start cleanup (#10217)", () => {
+  let client: AmbientAbortAdbClient;
+  let timer: FakeTimer;
+  let backend: PlatformVideoCaptureBackend;
+
+  beforeEach(() => {
+    client = new AmbientAbortAdbClient();
+    timer = new FakeTimer();
+    backend = new PlatformVideoCaptureBackend(new FakeAdbClientFactory(client), timer, {
+      async codec() {
+        return "h264";
+      },
+    });
+    client.setSpawnRunning(LAUNCH);
+    client.setSpawnStdout(LAUNCH, "4321\n");
+    client.setCommandResult(PROBE, OUR_CMDLINE);
+  });
+
+  function startConfig(abortSignal: AbortSignal): VideoCaptureConfig {
+    return {
+      recordingId: RECORDING_ID,
+      outputDirectory: "/nonexistent/recordings",
+      outputPath: "/nonexistent/recordings/video.mp4",
+      fileName: "video.mp4",
+      startedAt: "1970-01-01T00:00:00.000Z",
+      qualityPreset: "low",
+      targetBitrateKbps: 1000,
+      maxThroughputMbps: 5,
+      fps: 15,
+      maxArchiveSizeMb: 100,
+      format: "mp4",
+      device: { platform: "android", deviceId: "cancel-device", name: "Pixel" },
+      abortSignal,
+    };
+  }
+
+  /** Cancels the request once the recorder is launched, as its host `adb shell` then dies. */
+  async function cancelAfterLaunch(
+    started: Promise<RecordingHandle>,
+    controller: AbortController,
+  ): Promise<unknown> {
+    // Let the buffered launch stdout reach the pid reader.
+    await defaultTimer.sleep(0);
+    controller.abort();
+    const recorder = client.getSpawnedProcesses()[0];
+    recorder.signalCode = "SIGTERM";
+    recorder.emit("exit", null, "SIGTERM");
+    return started.catch((caught: unknown) => caught);
+  }
+
+  test("a start cancelled after the recorder launched still stops it by pid and removes its temp file", async () => {
+    const controller = new AbortController();
+    const started = runWithAbortSignal(controller.signal, () =>
+      backend.start(startConfig(controller.signal)),
+    );
+
+    const error = await cancelAfterLaunch(started, controller);
+
+    // The caller still sees its own cancellation, not a cleanup failure.
+    expect((error as Error).name).toBe("AbortError");
+    expect(client.getAllCommands()).toContain("shell kill -9 4321");
+    expect(
+      client.getSpawnCalls().some((argv) => argv.join(" ") === `shell rm ${DEVICE_FILE}`),
+    ).toBe(true);
+  });
+
+  test("a cleanup that hangs is abandoned at its own bound and the cancellation still surfaces", async () => {
+    client.setHangingCommand("cat /proc/4321/cmdline");
+    const controller = new AbortController();
+    const started = runWithAbortSignal(controller.signal, () =>
+      backend.start(startConfig(controller.signal)),
+    );
+    const settled = cancelAfterLaunch(started, controller);
+
+    await defaultTimer.sleep(0);
+    await defaultTimer.sleep(0);
+    timer.advanceTime(10_000);
+    const error = await settled;
+
+    expect((error as Error).name).toBe("AbortError");
+    expect(client.getAllCommands()).not.toContain("shell kill -9 4321");
   });
 });

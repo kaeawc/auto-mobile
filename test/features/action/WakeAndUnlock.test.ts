@@ -1295,6 +1295,28 @@ describe("iOS fast swipe with an unconfirmed outcome (structured marker, not err
     expect(swipes).toBe(2);
     expect(outcome.result?.unlocked).toBe(true);
   });
+
+  // The runner's typed deadline error (#10084), worded by CommandError.deadlineExceeded.
+  test("a swipe the runner dropped for a passed deadline never started, so the fallback swipe is safe", async () => {
+    const { swipes, outcome } = await run({
+      success: false,
+      error: "Command request_swipe exceeded deadline at 1234ms (gesture was not started)",
+    });
+
+    expect(swipes).toBe(2);
+    expect(outcome.result?.unlocked).toBe(true);
+  });
+
+  test("a swipe the runner finished after its deadline may have landed, so no fallback swipe follows", async () => {
+    const { swipes, outcome } = await run({
+      success: false,
+      error:
+        "Command request_swipe exceeded deadline at 1234ms (gesture completed after its deadline; outcome is indeterminate)",
+    });
+
+    expect(swipes).toBe(1);
+    expect(outcome.error).toBeUndefined();
+  });
 });
 
 // Validate the actual fake-backed branch results before and after finalization.

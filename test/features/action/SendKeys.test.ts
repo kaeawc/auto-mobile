@@ -28,6 +28,7 @@ import {
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
   DefaultSendKeysCommandExecutor,
+  IME_COMMIT_READ_BACK_SETTLE_MS,
   SendKeys,
   type SendKeysCommandExecutor,
   type SendKeysInputKey,
@@ -2425,6 +2426,68 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(imeAndSettings).toContain(`shell ime set --user 10 ${priorImeId}`);
     expect(imeAndSettings).toContain(`shell ime disable --user 10 ${commitImeId}`);
     expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
+  });
+
+  // #10066 (pinned foreground user) x #9888 (case read-back): an auto IME attempt that cannot
+  // activate falls back to eventAll after restoring the keyboard, and the fallback's typing must
+  // still verify letter case exactly once.
+  test("auto IME on a non-zero foreground user restores that user's IME, then the eventAll fallback runs the case read-back once", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(34);
+    adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+    adb.setCommandResponse("shell ime list --user 10 -a -s", {
+      stdout: `${priorImeId}\n${commitImeId}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponse("shell ime list --user 10 -s", {
+      stdout: `${priorImeId}\n`,
+      stderr: "",
+    });
+    // Activation read-back still shows the prior IME, so activation fails verification and the
+    // restore then has to act on the same user.
+    adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
+      stdout: priorImeId,
+      stderr: "",
+    });
+    const textClient = createTextClient();
+    const reads: number[] = [];
+    const observer = createObserver();
+    observer.execute = async () => {
+      reads.push(reads.length);
+      // The IME or field rewrote the case: the requested "Abc" shows as "abc".
+      return focusedAndroidObservation("abc", {}, 0);
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      observer,
+      { textClient: textClient.client, timer },
+    );
+
+    const result = await executor.type({ action: "type", text: "Abc" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(textClient.commitViaImeCalls).toEqual([]);
+    const commands = adb.getExecutedCommands();
+    const imeAndSettings = commands.filter((command) => /^shell (ime|settings) /.test(command));
+    expect(imeAndSettings).toContain(`shell ime set --user 10 ${commitImeId}`);
+    // The readback already shows the prior IME, so the restore needs no `ime set`; it still
+    // undoes the enable and clears the subtype for the pinned user, never for user 0.
+    expect(imeAndSettings).toContain(`shell ime disable --user 10 ${commitImeId}`);
+    expect(imeAndSettings).toContain(
+      "shell settings --user 10 delete secure selected_input_method_subtype",
+    );
+    expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
+    expect(commands).toContain("shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A");
+    // The case read-back ran once: one warning, from one bounded series of settled re-reads.
+    expect(result.warning?.match(/rewrote the letter case/g)).toHaveLength(1);
+    expect(result.warning).toContain('eventAll typed "Abc"');
+    expect(timer.getSleepHistory().filter((ms) => ms === IME_COMMIT_READ_BACK_SETTLE_MS)).toEqual([
+      IME_COMMIT_READ_BACK_SETTLE_MS,
+      IME_COMMIT_READ_BACK_SETTLE_MS,
+    ]);
   });
 
   test.each([

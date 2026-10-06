@@ -263,6 +263,9 @@ function cannotRetrySwipe(fast: { error?: string; outcomeIndeterminate?: boolean
     (message !== undefined &&
       (/runner_busy|iOS runner is busy executing/i.test(message) ||
         /exceeded execution bound[\s\S]*XCUITest call is still executing/i.test(message) ||
+        // The runner's deadline error (#10084). "gesture was not started" is safe to retry; a
+        // gesture that completed after its deadline may already have unlocked the screen.
+        /gesture completed after its deadline/i.test(message) ||
         (!message.startsWith("iOS lock-screen swipe timed out after ") &&
           /swipe timed out|request.*timed out/i.test(message))))
   );

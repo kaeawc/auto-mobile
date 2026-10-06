@@ -138,6 +138,68 @@ describe("CtrlProxy overlays", () => {
     },
   );
 
+  describe("display targeting", () => {
+    const withDisplay = [
+      "full_command_set_v1",
+      "request_id_echo_v1",
+      "show_overlay",
+      "overlay_display_id_v1",
+    ];
+    const withoutFlag = withDisplay.filter((command) => command !== "overlay_display_id_v1");
+
+    async function sendShow(
+      commands: string[] | null,
+      displayId: number | undefined,
+    ): Promise<Record<string, unknown> | undefined> {
+      const { client, socket } = await harness(commands);
+      const sent: Record<string, unknown>[] = [];
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        sent.push(JSON.parse(String(data)));
+      });
+      try {
+        void client.requestShowOverlay(spec, 5000, undefined, displayId).catch(() => undefined);
+        for (let turn = 0; turn < 10; turn++) {
+          await Promise.resolve();
+        }
+        return sent[0];
+      } finally {
+        send.mockRestore();
+      }
+    }
+
+    test("an explicit display is sent as displayId", async () => {
+      expect(await sendShow(withDisplay, 2)).toMatchObject({ type: "show_overlay", displayId: 2 });
+    });
+
+    test.each([undefined, 0])("display %p omits the field, as before targeting", async (id) => {
+      for (const commands of [withDisplay, withoutFlag]) {
+        const message = await sendShow(commands, id);
+        expect(message?.type).toBe("show_overlay");
+        expect(Object.hasOwn(message ?? {}, "displayId")).toBe(false);
+      }
+    });
+
+    test.each([
+      ["without the flag", withoutFlag],
+      ["with only the gesture flag", [...withoutFlag, "gesture_display_id_v1"]],
+      ["on a legacy handshake without the flag", ["show_overlay", "gesture_display_id_v1"]],
+    ])("%s refuses before sending rather than defaulting", async (_name, commands) => {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expect(client.requestShowOverlay(spec, 5000, undefined, 2)).rejects.toBeInstanceOf(
+          ActionableError,
+        );
+        await expect(client.requestShowOverlay(spec, 5000, undefined, 2)).rejects.toThrow(
+          "overlay_display_id_v1",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    });
+  });
+
   test.each(
     [[], ["full_command_set_v1"], ["full_command_set_v1", "update_overlay", "dismiss_overlay"]].map(
       (commands) => ({ commands }),

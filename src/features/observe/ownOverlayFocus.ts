@@ -23,21 +23,24 @@ export const INTERACTIVE_OVERLAY_WINDOW_TYPE = "interactive_overlay";
  * still the app. That divergence is the tool's own window, not a stale
  * wrong-window capture.
  *
- * Both signals must agree: the capture's package is CtrlProxy's, and the
- * accessibility window list shows an overlay-type window that is focused or
- * active. The package alone is not enough — CtrlProxy also owns an activity,
- * whose window is a genuine app window; a lone CtrlProxy-labelled capture with no
- * overlay window stays subject to the ordinary identity check.
+ * An overlay-type window that is focused or active must exist. Newer APKs
+ * report each window's own root package, which is authoritative: the window must
+ * be CtrlProxy's. Older APKs omit it, so those entries fall back to the
+ * capture's package being CtrlProxy's. The capture package alone is never
+ * enough — CtrlProxy also owns an activity, whose window is a genuine app
+ * window; a lone CtrlProxy-labelled capture with no overlay window stays subject
+ * to the ordinary identity check.
  */
 export function isOwnOverlayFocused(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): boolean {
-  if (hierarchy?.packageName !== CTRL_PROXY_PACKAGE) {
+  if (!hierarchy) {
     return false;
   }
   return (hierarchy.windows ?? []).some(
     (window) =>
       window.type === ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY &&
-      (window.isFocused === true || window.isActive === true),
+      (window.isFocused === true || window.isActive === true) &&
+      (window.packageName ?? hierarchy.packageName) === CTRL_PROXY_PACKAGE,
   );
 }

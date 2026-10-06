@@ -60,4 +60,54 @@ describe("isOwnOverlayFocused (#10000)", () => {
     expect(isOwnOverlayFocused({ packageName: CTRL_PROXY_PACKAGE })).toBe(false);
     expect(isOwnOverlayFocused(undefined)).toBe(false);
   });
+
+  test("a focused overlay window that reports the CtrlProxy package is the own overlay", () => {
+    expect(
+      isOwnOverlayFocused({
+        packageName: CTRL_PROXY_PACKAGE,
+        windows: [
+          { id: 1, type: 1, isFocused: false, packageName: "com.example.app", bounds },
+          { id: 2, type: 4, isFocused: true, packageName: CTRL_PROXY_PACKAGE, bounds },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  test("the window's own package overrides a CtrlProxy-labelled capture", () => {
+    expect(
+      isOwnOverlayFocused({
+        packageName: CTRL_PROXY_PACKAGE,
+        windows: [
+          { id: 2, type: 4, isFocused: true, packageName: "com.example.screenreader", bounds },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  test("the window's own package identifies the overlay even when the capture is labelled otherwise", () => {
+    expect(
+      isOwnOverlayFocused({
+        packageName: "com.example.app",
+        windows: [{ id: 2, type: 4, isActive: true, packageName: CTRL_PROXY_PACKAGE, bounds }],
+      }),
+    ).toBe(true);
+  });
+
+  test("a CtrlProxy-package window that is not an overlay type does not count", () => {
+    expect(
+      isOwnOverlayFocused({
+        packageName: CTRL_PROXY_PACKAGE,
+        windows: [{ id: 1, type: 1, isFocused: true, packageName: CTRL_PROXY_PACKAGE, bounds }],
+      }),
+    ).toBe(false);
+  });
+
+  test("entries without a window package behave as before (older APKs)", () => {
+    expect(
+      isOwnOverlayFocused({
+        packageName: "com.example.app",
+        windows: [{ id: 2, type: 4, isFocused: true, bounds }],
+      }),
+    ).toBe(false);
+  });
 });

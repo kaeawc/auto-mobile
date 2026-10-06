@@ -11,6 +11,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import java.util.Random
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -55,6 +56,52 @@ class ViewHierarchyExtractorTest {
     assertFalse(serialized.contains("Inner"))
     assertEquals(2, hierarchy.windows?.single()?.displayId)
     assertEquals("panel-cover", hierarchy.windows?.single()?.panelUniqueId)
+  }
+
+  @Test
+  fun `window entries report the package of their root node`() {
+    val app = fakeWindow(1, 0, fakeNode(packageName = "app.main", text = "Main"))
+    val overlay =
+      fakeWindow(
+        2,
+        1,
+        fakeNode(packageName = "dev.jasonpearson.automobile.ctrlproxy", text = "Overlay"),
+        type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+        focused = true,
+      )
+
+    val hierarchy =
+      extractor.extractFromAllWindows(listOf(app, overlay), null, disableAllFiltering = true)
+
+    assertEquals(
+      mapOf(1 to "app.main", 2 to "dev.jasonpearson.automobile.ctrlproxy"),
+      hierarchy.windows?.associate { it.id to it.packageName },
+    )
+  }
+
+  @Test
+  fun `window entry package round trips and is omitted from the wire when null`() {
+    val withPackage = WindowInfo(id = 2, type = 4, isFocused = true, packageName = "app.main")
+    val withoutPackage = WindowInfo(id = 3, type = 1)
+
+    // encodeDefaults = true: the null package must still be dropped by @EncodeDefault(NEVER).
+    val wire = Json {
+      ignoreUnknownKeys = true
+      encodeDefaults = true
+    }
+    val encodedWith = wire.encodeToString(WindowInfo.serializer(), withPackage)
+    val encodedWithout = wire.encodeToString(WindowInfo.serializer(), withoutPackage)
+
+    assertTrue(encodedWith.contains("\"packageName\":\"app.main\""))
+    assertFalse(encodedWithout.contains("packageName"))
+    assertEquals(withPackage, wire.decodeFromString(WindowInfo.serializer(), encodedWith))
+    assertEquals(withoutPackage, wire.decodeFromString(WindowInfo.serializer(), encodedWithout))
+    // An older APK's entry, which never sent the field, still decodes.
+    assertNull(
+      wire
+        .decodeFromString(WindowInfo.serializer(), """{"id":3,"type":1,"isActive":false}""")
+        .packageName
+    )
   }
 
   @Test
@@ -2390,12 +2437,14 @@ class ViewHierarchyExtractorTest {
           )
         val children = if (limited) childOne else "[$childOne,$childTwo]"
         val reasons = if (limited) ",\"truncationReasons\":[\"max_nodes\"]" else ""
-        // Only the additive attribution is removed; every legacy field and its order is checked.
+        // Only the additive attribution (truncation reasons, window package) is removed; every
+        // legacy field and its order is checked.
+        assertEquals("example.app", result.windows!!.single().packageName)
         val legacy =
           result.copy(
             updatedAt = 0,
             userId = 0,
-            windows = result.windows!!.map { it.copy(truncationReasons = null) },
+            windows = result.windows.map { it.copy(truncationReasons = null, packageName = null) },
           )
         val expected =
           """{"updatedAt":0,"packageName":"example.app","userId":0,"hierarchy":{"node":{"text":"Root","windowId":1,"displayId":0,"resource-id":"root","view-id":"root","bounds":{"left":0,"top":100,"right":1080,"bottom":200},"visible-to-user":true,"node":$children}},"windows":[{"id":1,"displayId":0,"type":1,"windowLayer":0,"isFocused":true,"bounds":{"left":0,"top":0,"right":1080,"bottom":2400}}],"intentChooserDetected":false,"notificationPermissionDetected":false$reasons}"""

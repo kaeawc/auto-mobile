@@ -825,6 +825,28 @@ export class DeviceBootService {
       : result;
   }
 
+  /**
+   * Whether bootImage should re-check for a now-running device once its
+   * lifecycle lease settles. Explicit cold-boot intent is never turned into
+   * adoption (#7197). Android only does so behind an in-flight cold boot; iOS
+   * has no marker, because a sibling boot of the same UDID holds the stable
+   * lease this call is about to queue on, so its re-check always applies (#9902).
+   */
+  private shouldAdoptAfterLease(
+    context: BootDeadlineContext,
+    image: DeviceInfo,
+    preferRunning: boolean | undefined,
+    hasInFlightColdBoot: boolean,
+  ): boolean {
+    // The daemon's externally managed lease is held through its later
+    // reservation/session handoff, which tolerates this shared-cold-boot
+    // re-check via throwIfFreshStartAlreadyBound in deviceTools.
+    const holdsLease =
+      context.ownsLifecycleLease || this.dependencies.allowExternalLeaseAdoptionRecheck === true;
+    const explicitColdBoot = preferRunning === false && !image.isRunning;
+    return holdsLease && !explicitColdBoot && (image.platform === "ios" || hasInFlightColdBoot);
+  }
+
   private async bootMatchedImage(
     image: DeviceInfo,
     context: BootDeadlineContext,
@@ -834,12 +856,20 @@ export class DeviceBootService {
     exactTarget?: boolean,
   ): Promise<DeviceBootResult> {
     // A cached `isRunning: false` overlay can go stale: an externally started
-    // same-name AVD (or several) may already be live. iOS keeps trusting the
-    // cached flag because its identity (UDID) cannot silently collide the
-    // same way; android always re-discovers with a fresh cache-bypassing
-    // sweep before trusting the overlay (#7178).
+    // same-name AVD (or several) may already be live. android always
+    // re-discovers with a fresh cache-bypassing sweep before trusting the
+    // overlay (#7178). iOS keeps trusting the cached flag here because its
+    // identity (UDID) cannot silently collide the same way, but bootImage
+    // re-checks the simulator after its UDID lease settles (#9902), so a
+    // sibling acquisition that booted it meanwhile is adopted, not re-booted.
     if (!image.isRunning && image.platform !== "android") {
-      return this.bootImage(image, context, progress, false);
+      return this.bootImage(
+        image,
+        context,
+        progress,
+        false,
+        this.shouldAdoptAfterLease(context, image, preferRunning, false),
+      );
     }
     const booted = await this.discoverBootedDevices(
       image.platform,
@@ -862,33 +892,20 @@ export class DeviceBootService {
       image.platform === "android" &&
       hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name);
     const explicitlyRequestedColdBoot = preferRunning === false && !image.isRunning;
-    // The daemon's externally managed lease is held through its later
-    // reservation/session handoff, which tolerates this shared-cold-boot
-    // re-check via throwIfFreshStartAlreadyBound in deviceTools.
-    const canAdoptAfterLease =
-      (context.ownsLifecycleLease ||
-        this.dependencies.allowExternalLeaseAdoptionRecheck === true) &&
-      !explicitlyRequestedColdBoot;
+    const adoptAfterLease = this.shouldAdoptAfterLease(
+      context,
+      image,
+      preferRunning,
+      hasInFlightColdBoot,
+    );
     if (!running) {
-      return this.bootImage(
-        image,
-        context,
-        progress,
-        false,
-        hasInFlightColdBoot && canAdoptAfterLease,
-      );
+      return this.bootImage(image, context, progress, false, adoptAfterLease);
     }
     if (hasInFlightColdBoot || explicitlyRequestedColdBoot) {
       // An in-flight owner may finish while this selector reservation waits to
       // bind the AVD's stable identity. Re-check only that case after binding:
       // explicit cold-boot intent must never be turned into adoption (#7197).
-      return this.bootImage(
-        image,
-        context,
-        progress,
-        false,
-        hasInFlightColdBoot && canAdoptAfterLease,
-      );
+      return this.bootImage(image, context, progress, false, adoptAfterLease);
     }
     const result = await this.waitForRunningDevice(
       enrichBootedDevice(running, image),
@@ -1082,6 +1099,39 @@ export class DeviceBootService {
     };
   }
 
+  /**
+   * The image's live device once its lifecycle lease settled, if another
+   * acquisition (or an outside actor) booted it while this one was queued.
+   * Android defers to a still-in-flight cold boot; iOS needs no marker because
+   * a sibling boot of the same UDID holds the stable lease this call just won.
+   */
+  private async findRunningImageAfterLease(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+  ): Promise<BootedDevice | undefined> {
+    const phase = "re-checking the running device after the shared lifecycle lease settled";
+    if (image.platform === "android") {
+      const booted = await this.discoverBootedDevices(image.platform, context, phase, true, true);
+      const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
+      return running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)
+        ? running
+        : undefined;
+    }
+    // Bypass the simulator-list cache: the cached list is what made this image
+    // look stopped, and `startDevice` itself bypasses it before refusing a boot.
+    const discovery = await this.runPhase(context, phase, (signal) =>
+      this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
+        bypassIosDeviceListCache: true,
+        signal,
+      }),
+    );
+    // An unanswered inventory proves nothing; fall through to the boot path,
+    // whose own running-state check reports an unreadable simulator list.
+    return discovery.succeededPlatforms.has("ios")
+      ? findBootedDeviceMatchingImage(image, discovery.devices)
+      : undefined;
+  }
+
   private async bootImage(
     image: DeviceInfo,
     context: BootDeadlineContext,
@@ -1101,22 +1151,15 @@ export class DeviceBootService {
       },
       async () => await this.revalidateImageIdentity(image, context),
     );
-    if (adoptRunningAfterLease && image.platform === "android") {
-      const booted = await this.discoverBootedDevices(
-        image.platform,
-        context,
-        "re-checking the running device after the shared lifecycle lease settled",
-        true,
-        true,
-      );
-      const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
-      if (running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)) {
+    if (adoptRunningAfterLease) {
+      const running = await this.findRunningImageAfterLease(image, context);
+      if (running) {
         const adopted = await this.waitForRunningDevice(
           enrichBootedDevice(running, image),
           context,
           progress,
         );
-        // Another launch for this AVD may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
+        // Another launch for this device may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
         return { ...adopted, sourceImage: image };
       }
     }

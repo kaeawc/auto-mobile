@@ -2106,12 +2106,157 @@ const NOTIFICATION_ROW_RESOURCE_ID = "com.android.systemui:id/expandableNotifica
 // clearAll takes between swipes.
 const SYSTEM_TRAY_DISMISS_SETTLE_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100;
 
-/** How many rows match the criteria in a hierarchy (used to compare before/after a dismiss). */
-export const countNotificationMatches = (
+// A row's relative timestamp ("now", "1 min") and its expand/collapse affordance
+// ("Expand" / "Collapse") change while the shade settles, so neither is part of
+// the row's identity.
+const NOTIFICATION_ROW_VOLATILE_TEXT_ID = /\/(time|time_divider|chronometer|date)$|expand_button/;
+
+const isVolatileRowTextNode = (node: ViewHierarchyNode): boolean => {
+  const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- Classifies a SystemUI layout node; user element selection uses the resolver.
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  return NOTIFICATION_ROW_VOLATILE_TEXT_ID.test(resourceId);
+};
+
+const collectStableRowTexts = (node: ViewHierarchyNode): string[] => {
+  if (!node) {
+    return [];
+  }
+  return [
+    ...(isVolatileRowTextNode(node) ? [] : extractNodeTextCandidates(node)),
+    ...getDirectChildNodes(node).flatMap(collectStableRowTexts),
+  ];
+};
+
+/**
+ * Identity of a notification row. CtrlProxy exposes no notification key and row
+ * bounds shift when siblings leave, so a row is identified by its own
+ * non-volatile texts (title, body, app label). Null when the row has no text.
+ */
+const notificationRowSignature = (node: ViewHierarchyNode): string | null => {
+  const texts = collectStableRowTexts(node);
+  return texts.length > 0 ? JSON.stringify(texts) : null;
+};
+
+const countRowsWithSignature = (viewHierarchy: ViewHierarchyResult, signature: string): number =>
+  collectNotificationCandidates(viewHierarchy).filter(
+    (candidate) => notificationRowSignature(candidate.node) === signature,
+  ).length;
+
+// The parts of a row that name the notification rather than report its state:
+// title and app label. A body, a progress readout or a media position changes
+// while the notification stays the same one, so those are not identity. The
+// hierarchy exposes no notification key (every row's package is SystemUI), so
+// title and app label are the most stable parts CtrlProxy gives us.
+const NOTIFICATION_ROW_NAME_TEXT_ID = /\/(title|big_title|conversation_text|app_name_text)$/;
+
+const collectRowNameTexts = (node: ViewHierarchyNode): string[] => {
+  if (!node) {
+    return [];
+  }
+  const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- Classifies a SystemUI layout node; user element selection uses the resolver.
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  return [
+    ...(NOTIFICATION_ROW_NAME_TEXT_ID.test(resourceId) ? extractNodeTextCandidates(node) : []),
+    ...getDirectChildNodes(node).flatMap(collectRowNameTexts),
+  ];
+};
+
+/** App label plus title of a row; null when the row exposes neither. */
+const notificationRowNameKey = (node: ViewHierarchyNode): string | null => {
+  const texts = collectRowNameTexts(node);
+  return texts.length > 0 ? JSON.stringify(texts) : null;
+};
+
+/** Where a swiped row sat and what its siblings read, to find it again afterwards. */
+interface NotificationRowFootprint {
+  /** Title and app label of the swiped row; null when it exposes neither. */
+  nameKey: string | null;
+  /** Top edge of the swiped row; null when it had no parsed bounds. */
+  top: number | null;
+  height: number;
+  /** Every full-text signature present before the swipe. */
+  signaturesBefore: ReadonlySet<string>;
+}
+
+const captureRowFootprint = (
   viewHierarchy: ViewHierarchyResult,
+  match: SystemTrayNotificationMatch,
+): NotificationRowFootprint => {
+  const bounds = match.candidate.element?.bounds;
+  const signatures = collectNotificationCandidates(viewHierarchy).flatMap((candidate) => {
+    const signature = notificationRowSignature(candidate.node);
+    return signature === null ? [] : [signature];
+  });
+  return {
+    nameKey: notificationRowNameKey(match.candidate.node),
+    top: bounds ? bounds.top : null,
+    height: bounds ? Math.max(0, bounds.bottom - bounds.top) : 0,
+    signaturesBefore: new Set(signatures),
+  };
+};
+
+/**
+ * True when a row that names the same notification as the swiped one is still
+ * at or near its original position with text it did not have before the swipe:
+ * an ongoing notification whose body (progress, timer, media position) changed
+ * as it snapped back. Rows that read exactly as they did before are accounted
+ * for by the signature count, so they never count here.
+ */
+const hasTextChangedSurvivor = (
+  viewHierarchy: ViewHierarchyResult,
+  footprint: NotificationRowFootprint,
+): boolean => {
+  const { nameKey, top, height, signaturesBefore } = footprint;
+  if (nameKey === null) {
+    return false;
+  }
+  return collectNotificationCandidates(viewHierarchy).some((candidate) => {
+    if (notificationRowNameKey(candidate.node) !== nameKey) {
+      return false;
+    }
+    const signature = notificationRowSignature(candidate.node);
+    if (signature !== null && signaturesBefore.has(signature)) {
+      return false;
+    }
+    const candidateBounds = candidate.element?.bounds;
+    // Without bounds on either side nothing can rule the row out, so it counts.
+    return top === null || !candidateBounds || Math.abs(candidateBounds.top - top) <= height;
+  });
+};
+
+/** What the swiped row looked like before the swipe, to compare against after it. */
+export interface NotificationDismissBaseline {
+  match: SystemTrayNotificationMatch;
+  /** Criteria matches before the swipe; the comparison for a row with no identity. */
+  matchCountBefore: number;
+  /** Identity of the swiped row; null when it is not a text-bearing row of the shade. */
+  rowSignature: string | null;
+  /** Rows sharing that identity before the swipe. */
+  rowCountBefore: number;
+  /** Stable parts and position of the swiped row, to spot it again with new text. */
+  footprint: NotificationRowFootprint;
+}
+
+export const captureNotificationDismissBaseline = (
+  viewHierarchy: ViewHierarchyResult,
+  match: SystemTrayNotificationMatch,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-): number => findNotificationMatches(viewHierarchy, criteria, appMatchTexts).length;
+): NotificationDismissBaseline => {
+  const signature = notificationRowSignature(match.candidate.node);
+  const rowCountBefore = signature === null ? 0 : countRowsWithSignature(viewHierarchy, signature);
+  return {
+    match,
+    matchCountBefore: findNotificationMatches(viewHierarchy, criteria, appMatchTexts).length,
+    // A swiped node that is not one of the shade's rows (composite or root
+    // fallback match) has no identity to track; those compare criteria counts.
+    rowSignature: rowCountBefore > 0 ? signature : null,
+    rowCountBefore,
+    footprint: captureRowFootprint(viewHierarchy, match),
+  };
+};
 
 // SystemUI only advertises the accessibility "dismiss" action on rows that can
 // be swiped away, so a row that lists actions without it is ongoing or
@@ -2142,7 +2287,7 @@ export type NotificationDismissVerification =
  */
 export const verifyNotificationDismissed = async (
   device: BootedDevice,
-  swiped: { match: SystemTrayNotificationMatch; matchCountBefore: number },
+  swiped: NotificationDismissBaseline,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   observation: ObserveResult,
@@ -2154,9 +2299,23 @@ export const verifyNotificationDismissed = async (
     if (!hierarchy || !detector.isTrayOpen(hierarchy)) {
       return "indeterminate";
     }
-    return countNotificationMatches(hierarchy, criteria, appMatchTexts) < swiped.matchCountBefore
-      ? "dismissed"
-      : "present";
+    // The swiped row's own identity decides when it has one: a new matching
+    // notification arriving mid-settle, or an unrelated matching row leaving,
+    // must not flip the outcome. Only shade rows are counted then, so a
+    // root-text fallback match (a status-bar icon, whole-screen text) cannot
+    // inflate the post-swipe count once no rows are left.
+    const { rowSignature } = swiped;
+    if (rowSignature === null) {
+      const remaining = findNotificationMatches(hierarchy, criteria, appMatchTexts).length;
+      return remaining < swiped.matchCountBefore ? "dismissed" : "present";
+    }
+    if (countRowsWithSignature(hierarchy, rowSignature) >= swiped.rowCountBefore) {
+      return "present";
+    }
+    // No row reads exactly as the swiped one did, but an ongoing notification
+    // snaps back with new body text: it is still the same notification when a
+    // row with its title and app label remains at its position.
+    return hasTextChangedSurvivor(hierarchy, swiped.footprint) ? "present" : "dismissed";
   };
   let verified = observation;
   let outcome = classify(verified);

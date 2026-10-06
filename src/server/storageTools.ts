@@ -223,6 +223,24 @@ function assertUserIdSupported(device: BootedDevice, userId: number | undefined)
   }
 }
 
+/**
+ * `userId` only steers the direct-file (run-as) fallback. When the SDK route handled the call
+ * it edited the connected app process's copy, so say that instead of reporting a plain success
+ * that looks like it honoured the requested user.
+ */
+function sdkRouteIgnoredUserIdWarning(
+  device: BootedDevice,
+  userId: number | undefined,
+): string | undefined {
+  return device.platform === "android" && userId !== undefined
+    ? `userId ${userId} was not applied: the SDK route is not user-scoped and edited the connected app process's copy. Only the direct-file fallback (SDK route disabled) targets a specific user.`
+    : undefined;
+}
+
+function optionalWarning(warning: string | undefined): { warning?: string } {
+  return warning === undefined ? {} : { warning };
+}
+
 function resolveStorageName(args: { name?: string; fileName?: string }): string {
   return args.name ?? args.fileName!;
 }
@@ -468,7 +486,7 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
     const warning = preferenceSetWarning(
       usedDirectFileFallback
         ? directFileFallbackRelaunchWarning(args.appId, storageName)
-        : undefined,
+        : sdkRouteIgnoredUserIdWarning(device, args.userId),
       effectiveValueDiffers,
     );
     return createJSONToolResponse({
@@ -531,9 +549,11 @@ async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueA
       name: storageName,
       ...(resolvedStore ? { resolvedStore } : {}),
       key: args.key,
-      ...(usedDirectFileFallback
-        ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-        : {}),
+      ...optionalWarning(
+        usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(args.appId, storageName)
+          : sdkRouteIgnoredUserIdWarning(device, args.userId),
+      ),
     });
   } catch (error) {
     if (error instanceof ActionableError) {
@@ -582,9 +602,11 @@ async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValu
       appId: args.appId,
       name: storageName,
       ...(resolvedStore ? { resolvedStore } : {}),
-      ...(usedDirectFileFallback
-        ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-        : {}),
+      ...optionalWarning(
+        usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(args.appId, storageName)
+          : sdkRouteIgnoredUserIdWarning(device, args.userId),
+      ),
     });
   } catch (error) {
     if (error instanceof ActionableError) {

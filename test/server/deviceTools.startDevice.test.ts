@@ -1916,6 +1916,12 @@ describe("startDevice handler", () => {
         deadline ? "Timed out waiting for" : "cancelled before emulator kill dispatch",
       );
       const retainsMarker = abortAt !== "before-call" && !deadline;
+      // A kill command that itself rejected never stopped the emulator, so once it
+      // settles a later fresh observation lifts the retained marker (#9626). An
+      // accepted kill (the abort hit the wait) stays fenced: the emulator is dying.
+      const liftsAfterRejectedCommand =
+        abortAt === "during-discovery" || abortAt === "orphaned-command";
+      const staysFenced = retainsMarker && !liftsAfterRejectedCommand;
       expect(killCalls).toBe(abortAt === "before-call" ? 0 : 1);
       expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
       expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(retainsMarker);
@@ -1935,21 +1941,31 @@ describe("startDevice handler", () => {
       expect(acquired).toBe(true);
       (await nextLease).release();
       fakeDeviceUtils.getBootedDevicesDetailed = discover;
+      if (abortAt === "during-discovery") {
+        // The rejected command settled before any refresh generation observed the
+        // device, so the marker is retained until a later fresh observation.
+        expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(true);
+      }
       if (pendingCommand) {
         await pool.refreshDevices();
+        // Still pending (or timed out): a fresh observation must not lift the fence.
         expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(retainsMarker);
         rejectKill(new Error("late discovery cancellation"));
         for (let attempt = 0; attempt < 30; attempt++) {
           await Promise.resolve();
         }
         expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
+        if (retainsMarker) {
+          // The settlement alone never lifts the fence; only a later refresh does.
+          expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(true);
+        }
       }
       await pool.refreshDevices();
-      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(retainsMarker);
+      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(staysFenced);
       expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
         androidDevice.deviceId,
       );
-      if (retainsMarker) {
+      if (staysFenced) {
         return;
       }
       expect(() => pool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
@@ -1962,6 +1978,122 @@ describe("startDevice handler", () => {
       });
     },
   );
+
+  it("leaves no marker or reservation when System UI recovery is cancelled between kill and relaunch", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    await pool.initializeWithDevices([androidDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      androidDevice.deviceId,
+      "android",
+      androidImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setBootedResult(androidDevice);
+    fakeMatcher.setImageResult(androidImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    fakeDeviceUtils.startDevice = async () => {
+      controller.abort(new Error("cancelled before AVD relaunch"));
+      throw controller.signal.reason;
+    };
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" }, controller.signal)).rejects.toThrow(
+      "cancelled before AVD relaunch",
+    );
+
+    // The emulator was confirmed stopped: nothing stays pooled, fenced or reserved.
+    expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
+    expect(pool.getIdleDevices()).toEqual([]);
+    expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(false);
+    expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
+    expect(daemonSessionManager.getSession("owner-session")).toBeNull();
+  });
+
+  it("retires the replacement and leaves no marker when System UI recovery is cancelled after relaunch", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    const recoveryImage = {
+      ...androidImage,
+      deviceId: "emulator-5556",
+    };
+    const pooledAnrDevice = { ...androidDevice };
+    const replacementProcess = new FakeExitChildProcess();
+    fakeDeviceUtils.setBootedDevices("android", [pooledAnrDevice]);
+    await pool.initializeWithDevices([pooledAnrDevice]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      pooledAnrDevice.deviceId,
+      "android",
+      recoveryImage,
+    );
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
+    fakeDeviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    fakeMatcher.setBootedResult(pooledAnrDevice);
+    fakeMatcher.setImageResult(recoveryImage);
+    const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.killDevice = async (device, options) => {
+      await originalKillDevice(device, options);
+      fakeDeviceUtils.setBootedDevices("android", []);
+    };
+    let readinessAttempts = 0;
+    setDeviceToolsDependencies({
+      timer,
+      ensureCtrlProxyReady: async () => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+        controller.abort(new Error("cancelled after AVD relaunch"));
+        throw controller.signal.reason;
+      },
+    });
+    registerDeviceTools();
+
+    await expect(callStartDevice({ platform: "android" }, controller.signal)).rejects.toThrow(
+      "cancelled after AVD relaunch",
+    );
+
+    expect(replacementProcess.killed).toBe(true);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(pool.getDevice(pooledAnrDevice.deviceId)).toBeNull();
+    expect(pool.getIdleDevices()).toEqual([]);
+    for (const serial of [recoveryImage.deviceId!, pooledAnrDevice.deviceId]) {
+      expect(await pool.isShutdownReserved(serial)).toBe(false);
+      expect(await pool.isShutdownReservationHeld(serial)).toBe(false);
+    }
+  });
 
   it("releases the session when confirmed System UI recovery cannot restart the AVD", async () => {
     const timer = new FakeTimer();

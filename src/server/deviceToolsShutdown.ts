@@ -742,6 +742,78 @@ async function getCompleteShutdownDiscovery(context: ShutdownObserverRecoveryCon
   }
 }
 
+/**
+ * The online-only discovery cannot see an emulator whose adb transport is
+ * `offline`: the serial vanishes from it while the process keeps running
+ * (#10074). Before an Android serial's absence counts as disappearance, ask adb
+ * whether the serial is still attached in that state. Returns why disappearance
+ * is NOT yet confirmed, or undefined when the serial is gone from `adb devices`.
+ * A manager without the probe keeps the previous online-only behaviour.
+ */
+async function androidOfflineHoldDetail(
+  context: ShutdownDiscoveryContext,
+): Promise<string | undefined> {
+  const { deviceManager, device, timer, deadlineMs, requestAbortSignal, timeoutMs } = context;
+  const probe = deviceManager.getAndroidOfflineDeviceIds?.bind(deviceManager);
+  if (device.platform !== "android" || !probe) {
+    return undefined;
+  }
+  try {
+    const offline = await runWithinShutdownDeadline(
+      device,
+      timer,
+      deadlineMs,
+      "adb device-state read did not complete",
+      {
+        requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
+        operation: async (signal, remainingMs) =>
+          await probe([device.deviceId], { signal, timeoutMs: remainingMs }),
+        timeoutMs,
+      },
+    );
+    return offline.has(device.deviceId) ? "adb still lists the device as offline" : undefined;
+  } catch (error) {
+    if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
+      throw error;
+    }
+    // An unreadable state list cannot prove the serial left `adb devices`; keep
+    // polling until the deadline rather than retire ownership of a live emulator.
+    logger.warn(
+      `[DeviceTools] adb device-state probe failed while confirming ${device.deviceId} stopped: ${errorMessage(error)}`,
+      error,
+    );
+    return "adb device states could not be read to confirm the serial is gone";
+  }
+}
+
+type ShutdownDiscoveryJudgement =
+  | { settled: true; replacement: BootedDevice | undefined }
+  | { settled: false; detail: string };
+
+async function judgeShutdownDiscovery(
+  context: ShutdownDiscoveryContext,
+  discovery: BootedDeviceDiscovery,
+): Promise<ShutdownDiscoveryJudgement> {
+  const { device } = context;
+  const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
+  const matchingDevice = findDiscoveredDevice(discovery, device);
+  if (platformWasDiscovered && !matchingDevice) {
+    const offlineHoldDetail = await androidOfflineHoldDetail(context);
+    return offlineHoldDetail === undefined
+      ? { settled: true, replacement: undefined }
+      : { settled: false, detail: offlineHoldDetail };
+  }
+  if (matchingDevice && isConfirmedDeviceReplacement(device, matchingDevice)) {
+    return { settled: true, replacement: matchingDevice };
+  }
+  return {
+    settled: false,
+    detail: platformWasDiscovered
+      ? "the device is still reported as booted"
+      : "platform discovery did not succeed",
+  };
+}
+
 export async function waitForDeviceShutdown(
   context: ShutdownDiscoveryContext,
   skipAndroidNameEnrichment = false,
@@ -753,18 +825,11 @@ export async function waitForDeviceShutdown(
       throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);
     }
     const discovery = await getShutdownDiscovery(context, skipAndroidNameEnrichment);
-    const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
-    const matchingDevice = findDiscoveredDevice(discovery, device);
-    if (platformWasDiscovered && !matchingDevice) {
-      return undefined;
+    const judgement = await judgeShutdownDiscovery(context, discovery);
+    if (judgement.settled) {
+      return judgement.replacement;
     }
-    if (matchingDevice && isConfirmedDeviceReplacement(device, matchingDevice)) {
-      return matchingDevice;
-    }
-
-    lastDiscoveryDetail = platformWasDiscovered
-      ? "the device is still reported as booted"
-      : "platform discovery did not succeed";
+    lastDiscoveryDetail = judgement.detail;
     const remainingMs = deadlineMs - timer.now();
     if (remainingMs <= 0) {
       throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);

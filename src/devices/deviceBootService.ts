@@ -2,12 +2,13 @@ import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 import {
   awaitTerminationWithinRequest,
   terminateColdBootProcess,
-  watchSurvivingProcess,
+  terminateOwnedEmulatorProcess,
   type OwnedTermination,
   type OwnedTerminationWait,
 } from "./coldBootProcessTermination";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type {
   DeviceMatchCriteria,
   FormFactor,
@@ -419,6 +420,11 @@ interface BootDeadlineContext {
    * settles only once its AVD is free, so the lease outlives them (#9920).
    */
   pendingTerminations: Promise<void>[];
+  /**
+   * The termination of a cancelled launch's child when this service cannot hold the lease for it.
+   * The start phase rejects on the abort regardless, so the boot awaits this before it rejects.
+   */
+  unheldLaunchTermination?: Promise<OwnedTermination>;
   /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
   freshProvision?: boolean;
 }
@@ -1295,6 +1301,12 @@ export class DeviceBootService {
     );
     try {
       return await this.bootImageOnceWithOwnedLaunchTracking(image, context, progress, provisioned);
+    } catch (error) {
+      // The start phase rejects on an abort without waiting for a cancelled launch's child, so a
+      // service that cannot hold the lease confirms that child's exit before its caller sees the
+      // failure (and may release a lease it owns).
+      await context.unheldLaunchTermination;
+      throw error;
     } finally {
       releaseInFlightAndroidColdBoot?.();
     }
@@ -1308,10 +1320,7 @@ export class DeviceBootService {
   ): Promise<DeviceBootResult> {
     let disposeStartHandleCancellation = () => {};
     const handle = await this.runPhase(context, "starting the device", async (signal) => {
-      const started = await this.dependencies.deviceManager.startDevice(
-        image,
-        this.remaining(context, "starting the device"),
-      );
+      const started = await this.startDeviceOwningCancelledLaunch(image, context);
       const cancelStarted = () => {
         if (started) {
           // No lease ordering is possible here: the phase already rejected. Still escalate so
@@ -1407,35 +1416,16 @@ export class DeviceBootService {
     image: DeviceInfo,
     context: BootDeadlineContext,
   ): Promise<OwnedTermination> {
-    const { exited, confirmed } = terminateColdBootProcess(handle, image.name, this.timer);
-    try {
-      if (await confirmed) {
-        return { state: "confirmed" };
-      }
-    } catch (error) {
-      // The exit could not even be observed, so nothing can be held on: the lease is
-      // released at once and the boot's own failure stays the one surfaced.
-      logger.warn(
-        `[startDevice] Could not observe exit of emulator process ${handle.pid ?? "unknown"}: ${errorMessage(error)}`,
-        error,
-      );
-      return { state: "unobservable" };
+    const outcome = await terminateOwnedEmulatorProcess(handle, image.name, this.timer, {
+      markHeldByUnkillableProcess: (pid) =>
+        context.lifecycleLease?.markHeldByUnkillableProcess?.(pid),
+      isProcessRunning: this.dependencies.isProcessRunning,
+    });
+    if (outcome.state === "survived") {
+      context.unconfirmedProcessExits.push(outcome.gone);
+      this.dependencies.retainLeaseUntil?.(outcome.gone);
     }
-    logger.warn(
-      `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${image.name} survived ` +
-        "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it is gone",
-    );
-    const gone = watchSurvivingProcess(
-      handle,
-      exited,
-      image.name,
-      this.timer,
-      this.dependencies.isProcessRunning,
-    );
-    context.lifecycleLease?.markHeldByUnkillableProcess?.(handle.pid);
-    context.unconfirmedProcessExits.push(gone);
-    this.dependencies.retainLeaseUntil?.(gone);
-    return { state: "survived", gone };
+    return outcome;
   }
 
   /**
@@ -1450,10 +1440,7 @@ export class DeviceBootService {
     termination: Promise<OwnedTermination>,
     context: BootDeadlineContext,
   ): Promise<OwnedTerminationWait> {
-    const canHold =
-      this.dependencies.cleanupMayOutliveRequest === true &&
-      (context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined);
-    if (!canHold) {
+    if (!this.canHoldCleanup(context)) {
       return (await termination).state;
     }
     const wait = await awaitTerminationWithinRequest(termination, {
@@ -1462,14 +1449,84 @@ export class DeviceBootService {
       signal: context.signal,
     });
     if (wait === "pending") {
-      const settled = termination.then(
-        (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
-        () => undefined,
-      );
-      context.pendingTerminations.push(settled);
-      this.dependencies.retainLeaseUntil?.(settled);
+      this.holdLeaseUntilSettled(termination, context);
     }
     return wait;
+  }
+
+  /**
+   * Whether the cleanup of an emulator this boot started may outlive the request:
+   * a long-lived owner (`cleanupMayOutliveRequest`) with a lease it can hold.
+   */
+  private canHoldCleanup(context: BootDeadlineContext): boolean {
+    return (
+      this.dependencies.cleanupMayOutliveRequest === true &&
+      (context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined)
+    );
+  }
+
+  /**
+   * Keeps the AVD's lifecycle lease held until `termination` has settled (and, for a
+   * survivor, until it is finally gone): the request stopped waiting for it.
+   */
+  private holdLeaseUntilSettled(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): void {
+    const settled = termination.then(
+      (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
+      () => undefined,
+    );
+    context.pendingTerminations.push(settled);
+    this.dependencies.retainLeaseUntil?.(settled);
+  }
+
+  /**
+   * Starts the device, and when the launch is cancelled after the emulator was
+   * spawned (a cancel during its startup validation), takes the child from the
+   * cancellation error: it terminates it with the same SIGTERM -> bounded wait ->
+   * SIGKILL escalation as any other owned handle and holds the lease until the exit
+   * is confirmed. The phase rejects on the abort regardless, so this must register
+   * its hold before returning (#10075).
+   */
+  private async startDeviceOwningCancelledLaunch(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await this.dependencies.deviceManager.startDevice(
+        image,
+        this.remaining(context, "starting the device"),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        this.ownCancelledLaunchTermination(
+          this.terminateOwnedHandle(error.process, image, context),
+          context,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * A service that can hold the lease keeps it until the termination settles and
+   * lets the phase reject at once. One that cannot (a lease it neither owns nor can
+   * retain, or a one-shot owner) records the termination on the context and `boot`
+   * awaits it before the failure reaches the caller, so the caller never releases its
+   * lease while the child is still shutting down. A child that survives SIGKILL is the
+   * one case left uncovered there, as in `awaitOwnedCleanup`: it is logged and the
+   * caller's lease is released.
+   */
+  private ownCancelledLaunchTermination(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): void {
+    if (this.canHoldCleanup(context)) {
+      this.holdLeaseUntilSettled(termination, context);
+      return;
+    }
+    context.unheldLaunchTermination = termination;
   }
 
   private async reportProgress(

@@ -358,12 +358,13 @@ describe("resolveDeviceDataRoot", () => {
   });
 
   test("anchors a trimmed relative device set at the injected launch directory", () => {
+    const launchDirectory = "/launch";
     expect(
       resolveDeviceDataRoot(SIM_UDID, "/home/tester", {
         [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "  relative/devices  ",
-        [DAEMON_LAUNCH_CWD_ENV]: "/launch",
+        [DAEMON_LAUNCH_CWD_ENV]: launchDirectory,
       }),
-    ).toBe(path.join("/launch", "relative/devices", SIM_UDID));
+    ).toBe(path.resolve(launchDirectory, "relative", "devices", SIM_UDID));
   });
 
   test.each(["", "  \t "])("ignores an empty device set %s", (configured) => {

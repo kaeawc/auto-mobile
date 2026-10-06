@@ -348,22 +348,52 @@ export class ExecuteGesture extends BaseVisualChange {
     const fence = options.displayFence;
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
-
-    const result = await perf.track("xctestSwipe", async () => {
-      throwIfAborted(signal);
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      return await client.requestSwipe(
-        x1,
-        y1,
-        x2,
-        y2,
-        duration,
-        Math.min(5_000, options.timeoutMs ?? 5_000),
-        perf,
-        options.lockScreen === true ? { lockScreen: true } : undefined,
-      );
+    let dispatched = false;
+    const indeterminateResult = (reason: string): SwipeResult => ({
+      success: false,
+      outcomeIndeterminate: true,
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The swipe may have been applied. Do not retry automatically.`,
     });
+
+    let result: Awaited<ReturnType<IOSCtrlProxyClient["requestSwipe"]>>;
+    try {
+      result = await perf.track("xctestSwipe", async () => {
+        throwIfAborted(signal);
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence?.assertCurrent();
+        return await client.requestSwipe(
+          x1,
+          y1,
+          x2,
+          y2,
+          duration,
+          Math.min(5_000, options.timeoutMs ?? 5_000),
+          perf,
+          options.lockScreen === true ? { lockScreen: true } : undefined,
+          signal,
+          () => {
+            dispatched = true;
+          },
+        );
+      });
+    } catch (error) {
+      // An ActionableError (runner refusal, stale display) is a definite answer, not a lost reply.
+      if (!dispatched || error instanceof ActionableError) {
+        throw error;
+      }
+      logger.warn(`[SWIPE] CtrlProxy iOS swipe outcome indeterminate: ${errorMessage(error)}`);
+      return indeterminateResult(errorMessage(error));
+    }
+    // Only a runner reply (success or refusal) is acknowledged; a sent swipe without one may have run.
+    if (!result.success && (result.dispatched ?? dispatched) && result.acknowledged !== true) {
+      logger.warn(`[SWIPE] CtrlProxy iOS swipe outcome indeterminate: ${result.error}`);
+      return indeterminateResult(result.error ?? "unknown error");
+    }
     throwIfAborted(signal);
 
     if (result.success) {
@@ -486,15 +516,13 @@ export class ExecuteGesture extends BaseVisualChange {
         // Single finger path - convert to simple swipe using CtrlProxy iOS
         const points = path as Point[];
         if (points.length >= 2) {
-          const start = points[0];
-          const end = points[points.length - 1];
-
-          throwIfAborted(signal);
-          const client = IOSCtrlProxyClient.getInstance(this.device);
-          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-          fence?.assertCurrent();
-          await client.requestSwipe(start.x, start.y, end.x, end.y, duration);
-          throwIfAborted(signal);
+          await this.executeIOSSingleFingerSwipe(
+            points[0],
+            points[points.length - 1],
+            duration,
+            signal,
+            fence,
+          );
         }
       }
     }
@@ -504,6 +532,35 @@ export class ExecuteGesture extends BaseVisualChange {
       duration,
       platform: "ios",
     };
+  }
+
+  private async executeIOSSingleFingerSwipe(
+    start: Point,
+    end: Point,
+    duration: number,
+    signal?: AbortSignal,
+    fence?: DisplayFence,
+  ): Promise<void> {
+    throwIfAborted(signal);
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence?.assertCurrent();
+    const result = await client.requestSwipe(
+      start.x,
+      start.y,
+      end.x,
+      end.y,
+      duration,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
+    this.throwIfIosGestureUnconfirmed(result);
+    throwIfAborted(signal);
+    if (!result.success) {
+      throw new ActionableError(`iOS gesture failed: ${result.error ?? "unknown error"}`);
+    }
   }
 
   private async executeIOSMultiFingerSwipe(
@@ -528,15 +585,28 @@ export class ExecuteGesture extends BaseVisualChange {
       swipe.fingerSpacing,
       signal,
     );
-    if (!result.success && result.dispatched && result.acknowledged === false) {
-      throw new ActionableError(
-        `Gesture outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The gesture may have been applied. Do not retry automatically. Observe before retrying.`,
-      );
-    }
+    this.throwIfIosGestureUnconfirmed(result);
     throwIfAborted(signal);
     if (!result.success) {
       throw new ActionableError(
         `iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`,
+      );
+    }
+  }
+
+  /**
+   * A gesture written to the runner whose reply never arrived may already have run, so it is
+   * indeterminate rather than a plain failure. A runner refusal is acknowledged and stays one.
+   */
+  private throwIfIosGestureUnconfirmed(result: {
+    success: boolean;
+    error?: string;
+    dispatched?: boolean;
+    acknowledged?: boolean;
+  }): void {
+    if (!result.success && result.dispatched && result.acknowledged === false) {
+      throw new ActionableError(
+        `Gesture outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The gesture may have been applied. Do not retry automatically. Observe before retrying.`,
       );
     }
   }

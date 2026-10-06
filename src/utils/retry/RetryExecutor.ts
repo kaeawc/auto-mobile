@@ -1,5 +1,6 @@
 import { type BackoffInput, delayForAttempt } from "../Backoff";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { logger } from "../logger";
 
 /**
  * Configuration for retry behavior.
@@ -153,6 +154,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
         // Preserve the cancellation reason before shouldRetry classifies the
         // stale operation error as terminal.
         if (signal?.aborted) {
+          logger.warn("Retry operation aborted after an attempt failed", err);
           return {
             success: false,
             error: retryAbortError(signal),
@@ -167,6 +169,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
         }
         if (!shouldRetry(lastError, attempt)) {
           // shouldRetry returned false - stop retrying
+          logger.warn("Retry operation stopped after a non-retryable failure", err);
           return {
             success: false,
             error: lastError,
@@ -179,6 +182,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
         onRetry?.(lastError, attempt, delay);
 
         if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
+          logger.warn("Retry operation aborted while waiting to retry", err);
           return {
             success: false,
             error: retryAbortError(signal),
@@ -189,6 +193,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
       }
     }
 
+    logger.warn("Retry operation exhausted all attempts", lastError);
     return {
       success: false,
       error: lastError,

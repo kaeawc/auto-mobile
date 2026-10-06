@@ -203,8 +203,12 @@ private fun RenderOverlayPager(
         interact(OverlayInteraction.PagerMotion(source.id, page, scrolling))
       }
   }
+  val fill = overlayPageFill(node.style.source)
+  val pageModifier =
+    Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
+      .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   HorizontalPager(pager, modifier) { page ->
-    Box(Modifier.fillMaxSize()) { RenderOverlayNode(node.children[page], interact) }
+    Box(pageModifier) { RenderOverlayNode(node.children[page], interact) }
   }
 }
 

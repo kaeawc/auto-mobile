@@ -130,6 +130,63 @@ describe("variant carousel composition", () => {
         .placement,
     ).toEqual({ type: "floating", gravity: "topStart", offset: { x: 3, y: -4 } });
   });
+  describe("control row stays reachable (#10086)", () => {
+    const labelled = [{ ...image, label: "Red A" }, { ...image, label: "Green B" }, image];
+    for (const presentation of ["fullscreen", "floating"] as const) {
+      test(`${presentation}: every control row pads into the system bars and cutout`, () => {
+        for (const page of pages({ id: "panel", variants: labelled, presentation })) {
+          const row = children(page).at(-1)!;
+          expect(row.safeAreaPadding).toEqual({
+            types: ["systemBars", "cutout"],
+            edges: ["top", "bottom", "start", "end"],
+          });
+        }
+      });
+      test(`${presentation}: the control row has a background and readable text`, () => {
+        for (const page of pages({ id: "panel", variants: labelled, presentation })) {
+          const row = children(page).at(-1)!;
+          expect(row.style?.background).toBe("#CC000000");
+          expect(row.style?.width).toBe("fill");
+          for (const control of children(row)) {
+            expect(control).toMatchObject({ type: "text", style: { color: "#FFFFFFFF" } });
+          }
+        }
+      });
+    }
+    test("the pick control stays last so the selection payload is still validated against it", () => {
+      const spec = composeVariantCarousel({ id: "panel", variants: labelled });
+      expect(parseVariantSelection(spec, { index: 1, label: "Green B" })).toEqual({
+        selection: { index: 1, label: "Green B" },
+      });
+    });
+    test("floating asks the pager to wrap so the window is as tall as the controls", () => {
+      const floating = composeVariantCarousel({
+        id: "panel",
+        variants: labelled,
+        presentation: "floating",
+        gravity: "center",
+        offset: { x: 0, y: 100 },
+      });
+      expect(floating.root).toMatchObject({ style: { width: "wrap", height: "wrap" } });
+      expect(floating.window.placement).toEqual({
+        type: "floating",
+        gravity: "center",
+        offset: { x: 0, y: 100 },
+      });
+      const fullscreen = composeVariantCarousel({ id: "panel", variants: labelled });
+      expect(fullscreen.root).toMatchObject({ style: { width: "fill", height: "fill" } });
+    });
+    test("twelve maximum-length labels still fit the spec budgets in both presentations", () => {
+      const variants = Array.from({ length: MAX_VARIANTS }, () => ({
+        ...image,
+        label: "x".repeat(MAX_VARIANT_LABEL_LENGTH),
+      }));
+      for (const presentation of ["fullscreen", "floating"] as const) {
+        const spec = composeVariantCarousel({ id: "panel", variants, presentation });
+        expect(Buffer.byteLength(JSON.stringify(spec))).toBeLessThan(MAX_OVERLAY_SPEC_BYTES);
+      }
+    });
+  });
   test("opacity passes through and stays omitted when absent", () => {
     const input = { id: "panel", variants: [image] };
     expect(composeVariantCarousel(input).window).not.toHaveProperty("opacity");

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
-import { isOwnOverlayFocused } from "../../../src/features/observe/ownOverlayFocus";
+import {
+  isOwnOverlayFocused,
+  ownOverlayWindows,
+} from "../../../src/features/observe/ownOverlayFocus";
 
 const bounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
 
@@ -100,6 +103,16 @@ describe("isOwnOverlayFocused (#10000)", () => {
         windows: [{ id: 1, type: 1, isFocused: true, packageName: CTRL_PROXY_PACKAGE, bounds }],
       }),
     ).toBe(false);
+  });
+
+  test("ownOverlayWindows lists unfocused own overlay windows and skips other packages (#10086)", () => {
+    const own = { id: 2, type: 4, packageName: CTRL_PROXY_PACKAGE, bounds };
+    const other = { id: 3, type: 4, packageName: "com.example.screenreader", bounds };
+    const app = { id: 1, type: 1, packageName: CTRL_PROXY_PACKAGE, bounds };
+    expect(
+      ownOverlayWindows({ packageName: "com.example.app", windows: [app, own, other] }),
+    ).toEqual([own]);
+    expect(ownOverlayWindows(undefined)).toEqual([]);
   });
 
   test("entries without a window package behave as before (older APKs)", () => {

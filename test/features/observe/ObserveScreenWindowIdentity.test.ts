@@ -465,6 +465,48 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       expect(hasWrongWindowEvidence(result)).toBe(true);
     });
 
+    test("the window's own package decides: a focused overlay window reporting CtrlProxy is the overlay", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy([
+          { id: 1, type: 1, isFocused: false, packageName: playground, bounds: screenBounds },
+          {
+            id: 2,
+            type: 4,
+            isFocused: true,
+            isActive: true,
+            packageName: CTRL_PROXY_PACKAGE,
+            bounds: screenBounds,
+          },
+        ]),
+        playground,
+      );
+
+      expect(result.freshness?.isFresh).toBe(true);
+      expect(hasWrongWindowEvidence(result)).toBe(false);
+      expect(result.activeWindow?.appId).toBe(playground);
+      expect(result.activeWindow?.type).toBe("interactive_overlay");
+    });
+
+    test("a focused overlay window reporting another package stays a wrong-window capture even when the capture is labelled CtrlProxy", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy([
+          {
+            id: 2,
+            type: 4,
+            isFocused: true,
+            isActive: true,
+            packageName: "com.example.screenreader",
+            bounds: screenBounds,
+          },
+        ]),
+        playground,
+      );
+
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.category).toBe("window_identity");
+      expect(hasWrongWindowEvidence(result)).toBe(true);
+    });
+
     test("another app's focused overlay window is still a wrong-window capture", async () => {
       const hierarchy = createHierarchyForTest({
         ...calendarHierarchy(now),

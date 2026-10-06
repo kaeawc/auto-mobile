@@ -81,40 +81,60 @@ function variantContent(
   return { type: "image", ...image.data, style: { width: "fill", height: "fill" } };
 }
 
+// The control row sits at the window edge, which on a device is usually under a system bar: the
+// status bar for a top-gravity floating window, the navigation bar for fullscreen (#10086). The
+// row keeps its background behind the bars and pads its content into the safe area, so the
+// controls stay reachable, readable over any app, and inside the window's own bounds.
+const CONTROL_BACKGROUND = "#CC000000";
+const CONTROL_TEXT_COLOR = "#FFFFFFFF";
+
+function controlText(
+  text: string,
+  testTag: string,
+  onTap?: NonNullable<OverlayNode["onTap"]>,
+): OverlayNode {
+  return {
+    type: "text",
+    text,
+    testTag,
+    style: { color: CONTROL_TEXT_COLOR, textSize: 20 },
+    ...(onTap === undefined ? {} : { onTap }),
+  };
+}
+
 function control(variant: Pick<OverlayVariant, "label">, index: number): OverlayNode {
   return {
     type: "row",
     testTag: `variant-${index}-control`,
-    style: { spacing: 12 },
+    safeAreaPadding: {
+      types: ["systemBars", "cutout"],
+      edges: ["top", "bottom", "start", "end"],
+    },
+    style: {
+      spacing: 12,
+      width: "fill",
+      arrangement: "center",
+      background: CONTROL_BACKGROUND,
+      padding: { top: 8, bottom: 8, start: 16, end: 16 },
+    },
     children: [
       ...(variant.label === undefined
         ? []
-        : [{ type: "text" as const, text: variant.label, testTag: `variant-${index}-label` }]),
-      {
-        type: "text",
-        text: "◀",
-        testTag: `variant-${index}-prev`,
-        onTap: [{ type: "setPage", pager: VARIANT_PAGER_ID, page: "prev" }],
-      },
-      { type: "text", text: "{page}/{pageCount}", testTag: `variant-${index}-counter` },
-      {
-        type: "text",
-        text: "▶",
-        testTag: `variant-${index}-next`,
-        onTap: [{ type: "setPage", pager: VARIANT_PAGER_ID, page: "next" }],
-      },
-      {
-        type: "text",
-        text: "✓",
-        testTag: `variant-${index}-pick`,
-        onTap: [
-          {
-            type: "emit",
-            name: "selected",
-            payload: { index, ...(variant.label === undefined ? {} : { label: variant.label }) },
-          },
-        ],
-      },
+        : [controlText(variant.label, `variant-${index}-label`)]),
+      controlText("◀", `variant-${index}-prev`, [
+        { type: "setPage", pager: VARIANT_PAGER_ID, page: "prev" },
+      ]),
+      controlText("{page}/{pageCount}", `variant-${index}-counter`),
+      controlText("▶", `variant-${index}-next`, [
+        { type: "setPage", pager: VARIANT_PAGER_ID, page: "next" },
+      ]),
+      controlText("✓", `variant-${index}-pick`, [
+        {
+          type: "emit",
+          name: "selected",
+          payload: { index, ...(variant.label === undefined ? {} : { label: variant.label }) },
+        },
+      ]),
     ],
   };
 }

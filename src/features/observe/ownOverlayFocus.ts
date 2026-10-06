@@ -1,5 +1,8 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
+import type {
+  ViewHierarchyResult,
+  ViewHierarchyWindowInfo,
+} from "../../models/ViewHierarchyResult";
 
 /**
  * AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY — the window type of the
@@ -34,13 +37,22 @@ export const INTERACTIVE_OVERLAY_WINDOW_TYPE = "interactive_overlay";
 export function isOwnOverlayFocused(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): boolean {
-  if (!hierarchy) {
-    return false;
-  }
-  return (hierarchy.windows ?? []).some(
+  return ownOverlayWindows(hierarchy).some(
+    (window) => window.isFocused === true || window.isActive === true,
+  );
+}
+
+/**
+ * CtrlProxy's own interactive-overlay windows in a capture, focused or not. The
+ * window's own package wins when the APK reports it; older APKs fall back to the
+ * capture's package.
+ */
+export function ownOverlayWindows(
+  hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
+): ViewHierarchyWindowInfo[] {
+  return (hierarchy?.windows ?? []).filter(
     (window) =>
       window.type === ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY &&
-      (window.isFocused === true || window.isActive === true) &&
-      (window.packageName ?? hierarchy.packageName) === CTRL_PROXY_PACKAGE,
+      (window.packageName ?? hierarchy?.packageName) === CTRL_PROXY_PACKAGE,
   );
 }

@@ -331,7 +331,10 @@ describe("PostNotification", () => {
   });
 
   test("resolves relative bigPicture image path from daemon launch cwd", async () => {
-    const launchDir = path.join(path.sep, "fake-host", "launch-cwd");
+    // path.resolve anchors the root with the current drive on Windows, matching what the
+    // source's path.resolve produces for a relative imagePath; a drive-less rooted path would
+    // not match the FakeFileSystem key there.
+    const launchDir = path.resolve(path.sep, "fake-host", "launch-cwd");
     const imagePath = path.join(launchDir, "fixtures", "pic.png");
     const fileSystem = new FakeFileSystem();
     fileSystem.setBinaryFile(imagePath, PNG_BYTES);

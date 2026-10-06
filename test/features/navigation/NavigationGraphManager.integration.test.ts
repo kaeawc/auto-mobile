@@ -458,9 +458,11 @@ describe("NavigationGraphManager", () => {
         }),
       );
 
-      const getEdgesSpy = spyOn(NavigationRepository.prototype, "getEdges").mockResolvedValue(
-        edges,
-      );
+      // findPath reads one edge per distinct transition (#10194), not every traversal row.
+      const getEdgesSpy = spyOn(
+        NavigationRepository.prototype,
+        "getDistinctEdges",
+      ).mockResolvedValue(edges);
 
       const result = await manager.findPath("Screen40").finally(() => getEdgesSpy.mockRestore());
 
@@ -847,12 +849,23 @@ describe("NavigationGraphManager", () => {
     test("should return edges leading to a screen", async () => {
       await manager.recordNavigationEvent(createEvent("Home", 1000));
       await manager.recordNavigationEvent(createEvent("Settings", 2000));
+      await manager.recordNavigationEvent(createEvent("Profile", 3000));
+      await manager.recordNavigationEvent(createEvent("Settings", 4000));
+
+      const edges = await manager.getEdgesTo("Settings");
+      expect(edges.map((e) => e.from).sort()).toEqual(["Home", "Profile"]);
+      edges.forEach((e) => expect(e.to).toBe("Settings"));
+    });
+
+    test("should return one edge per distinct transition however often it was traversed", async () => {
+      await manager.recordNavigationEvent(createEvent("Home", 1000));
+      await manager.recordNavigationEvent(createEvent("Settings", 2000));
       await manager.recordNavigationEvent(createEvent("Home", 3000));
       await manager.recordNavigationEvent(createEvent("Settings", 4000));
 
       const edges = await manager.getEdgesTo("Settings");
-      expect(edges).toHaveLength(2);
-      edges.forEach((e) => expect(e.to).toBe("Settings"));
+      expect(edges).toHaveLength(1);
+      expect(edges[0].from).toBe("Home");
     });
   });
 });

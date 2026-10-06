@@ -15,25 +15,31 @@ export interface PredictionActionContext {
   fromScreen: string;
   toolName: string;
   toolArgs: Record<string, any>;
+  /**
+   * The graph the action's `appId` / `fromScreen` were read from. The outcome compares the
+   * landing screen on this same graph, so a session-bound device is judged on its session's
+   * graph rather than the global one (#10197).
+   */
+  navigationGraph?: NavigationGraphLike;
 }
 
 interface PredictionHistoryStore {
   recordOutcome: PredictionHistoryRepository["recordOutcome"];
 }
 
-interface NavigationGraphLike {
+export interface NavigationGraphLike {
   getCurrentScreen(): string | null;
 }
 
 export class PredictionAnalyzer {
   private elementParser = new DefaultElementParser();
   private historyRepository: PredictionHistoryStore;
-  private navigationGraph: NavigationGraphLike;
+  private navigationGraph: NavigationGraphLike | undefined;
   private timer: Timer;
 
   constructor(
     historyRepository: PredictionHistoryStore = new PredictionHistoryRepository(),
-    navigationGraph: NavigationGraphLike = NavigationGraphManager.getInstance(),
+    navigationGraph?: NavigationGraphLike,
     timer: Timer = defaultTimer,
   ) {
     this.historyRepository = historyRepository;
@@ -60,7 +66,10 @@ export class PredictionAnalyzer {
       return;
     }
 
-    const actualScreen = this.navigationGraph.getCurrentScreen();
+    // Resolved per call: the context's graph, else an injected one, else the global manager.
+    const navigationGraph =
+      context.navigationGraph ?? this.navigationGraph ?? NavigationGraphManager.getInstance();
+    const actualScreen = navigationGraph.getCurrentScreen();
     if (!actualScreen) {
       return;
     }

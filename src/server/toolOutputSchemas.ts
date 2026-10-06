@@ -575,6 +575,14 @@ export const accessibilityStateSchema = z
         activity: z.string(),
       })
       .optional(),
+    // Present on the `accessibility` tool's state check only when a feature flag changes what
+    // the action tools assume. `enabled` stays the device's reading (#10222).
+    detectionOverride: z
+      .object({
+        mode: z.enum(["forced-on", "auto-detect-off"]),
+        effectiveEnabled: z.boolean(),
+      })
+      .optional(),
   })
   .passthrough();
 

@@ -131,9 +131,11 @@ fun AutoMobileDesktopApp(
 
   val desktopSessionBinding = remember { mutableStateOf<DesktopDaemonSessionBinding?>(null) }
   var refreshAfterDaemonRecovery by remember { mutableStateOf<suspend () -> Boolean>({ true }) }
+  // Resolved once, not per recomposition: the path lookup is process-wide cached (#10238) but the
+  // root must not call into it at all on the UI thread.
+  val usesUnixSocket = graph.autoMobileClient.transportName == "Unix Socket"
   val desktopSocketPath =
-    if (graph.autoMobileClient.transportName == "Unix Socket") DaemonSocketPaths.socketPath()
-    else null
+    remember(usesUnixSocket) { if (usesUnixSocket) DaemonSocketPaths.socketPath() else null }
   val desktopSessionState =
     rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding) {
       refreshAfterDaemonRecovery()
@@ -283,7 +285,10 @@ fun AutoMobileDesktopApp(
   val workspaceControlClientProvider: () -> AutoMobileClient? =
     remember(graph) {
       if (graph.autoMobileClient.transportName == "Unix Socket") {
-        { McpDaemonClient(DaemonSocketPaths.socketPath()) }
+        // Resolve once: this provider runs per input action on the pane's dispatch thread.
+        val socketPath = DaemonSocketPaths.socketPath()
+        val provider: () -> AutoMobileClient? = { McpDaemonClient(socketPath) }
+        provider
       } else {
         { null }
       }

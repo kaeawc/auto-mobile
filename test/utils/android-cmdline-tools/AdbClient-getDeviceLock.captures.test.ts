@@ -61,7 +61,8 @@ describe("getDeviceLock over captured `dumpsys window policy` dumps (#10182)", (
   it.each(UNLOCKED)("%s: an unlocked, awake device is not locked", async (name) => {
     const { lock, commands } = await lockFor(capture(name));
     expect(lock).toEqual({ locked: false, keyguardShowing: false, secure: false });
-    expect(commands).toEqual(["adb shell dumpsys window policy"]);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatch(/(?:^|[/\\])adb shell dumpsys window policy$/);
   });
 
   it.each(ASLEEP)("%s: asleep with no keyguard showing is not locked", async (name) => {

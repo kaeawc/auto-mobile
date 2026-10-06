@@ -116,6 +116,42 @@ describe("BaseVisualChange post-action observation", () => {
     },
   );
 
+  test.each(["ios", "android"] as const)(
+    "%s partial-application failure observes when the caller opts in",
+    async (platform) => {
+      const action = createVisualChange(platform);
+      fakeObserveScreen.setObserveResult(makeObserve());
+      const failure = {
+        success: false,
+        retryable: false,
+        partialApplication: true,
+        error: "Boomerang partially applied",
+      };
+      const result = await action.observedInteraction(async () => failure, {
+        previousObservation: makeObserve(),
+        changeExpected: false,
+        skipUiStability: true,
+        observePartialApplication: true,
+      });
+      expect(result.retryable).toBe(false);
+      expect(result.partialApplication).toBe(true);
+      expect(fakeObserveScreen.getCallCount("execute")).toBe(1);
+    },
+  );
+
+  test("iOS unconfirmed text still skips observation when the opt-in is set", async () => {
+    const action = createVisualChange("ios");
+    fakeObserveScreen.setObserveResult(makeObserve());
+    const failure = { success: false, retryable: false, error: "Unconfirmed text" };
+    await action.observedInteraction(async () => failure, {
+      previousObservation: makeObserve(),
+      changeExpected: false,
+      skipUiStability: true,
+      observePartialApplication: true,
+    });
+    expect(fakeObserveScreen.getCallCount("execute")).toBe(0);
+  });
+
   test("retries a stale observation on the [50,100,200,400] backoff and caps at four attempts", async () => {
     const instance = createVisualChange("ios");
     // Every observation reports not-fresh, so shouldRetry stays true until the cap.

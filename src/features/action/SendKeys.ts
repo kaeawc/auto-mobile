@@ -469,15 +469,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           error: validationError,
         };
       }
-      const routing = await this.resolveAutoPasswordMode(
-        requestedMode,
-        operation,
-        command.text,
-        signal,
-        display,
-      );
+      const routing = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
       resolvedMode = routing.mode;
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
+      // After the mode update, so a refusal reports the key-event route it was checked for.
+      await this.verifyPasswordRouting(routing, command.text, signal);
       const autoImeFallback = getAutoImeFallback(
         operation,
         requestedMode,
@@ -810,21 +806,36 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
-    text: string,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<{ mode: AndroidSendKeysTypingMode; focusedInputVerified: boolean }> {
+  ): Promise<{
+    mode: AndroidSendKeysTypingMode;
+    focusedInputVerified: boolean;
+    verifyPasswordDeliverable: boolean;
+  }> {
     if (this.device.platform !== "android" || requestedMode !== "auto") {
-      return { mode: this.resolveMode(requestedMode), focusedInputVerified: false };
+      return {
+        mode: this.resolveMode(requestedMode),
+        focusedInputVerified: false,
+        verifyPasswordDeliverable: false,
+      };
     }
     const password = await this.isFocusedAndroidPasswordField(operation, signal, display);
-    if (password && operation === "insert") {
-      await this.requirePasswordTextDeliverable(text, signal);
-    }
     return {
       mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
       focusedInputVerified: password !== undefined,
+      verifyPasswordDeliverable: password === true && operation === "insert",
     };
+  }
+
+  private async verifyPasswordRouting(
+    routing: { verifyPasswordDeliverable: boolean },
+    text: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (routing.verifyPasswordDeliverable) {
+      await this.requirePasswordTextDeliverable(text, signal);
+    }
   }
 
   /**

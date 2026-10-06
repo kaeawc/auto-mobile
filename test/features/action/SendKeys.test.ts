@@ -1928,6 +1928,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(result.error).toContain(codePoint);
       expect(result.error).toContain('operation: "replace"');
       expect(result.error).not.toContain(text);
+      // The refusal names the key-event route it was checked for, not the IME it never used.
+      expect(result.resolvedMode).toBe("eventAll");
+      expect(result).not.toHaveProperty("backend");
+      expect(result).not.toHaveProperty("capability");
+      expect(result).not.toHaveProperty("keyboard");
       expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input key"))).toEqual([]);
       expect(textClient.calls).toEqual([]);
       expect(textClient.commitViaImeCalls).toEqual([]);
@@ -4061,9 +4066,11 @@ describe("SendKeys post-action capture boundary", () => {
 });
 
 describe("SendKeys Android non-idempotent outcomes", () => {
-  // Auto typing into a password field never reaches insert with undeliverable text: it is
-  // refused before dispatch (#9941), covered by "auto password typing refuses undeliverable text".
-  const modes = ["a11y", "eventLast", "eventAll", "autoOlder"] as const;
+  const CARET_PRIMER_TEXT = "x";
+  // autoPassword types deliverable text into a password field whose caret is marked unsafe, so
+  // the eventAll route still reaches insert. Undeliverable text never gets that far: it is refused
+  // before dispatch (#9941), covered by "auto password typing refuses undeliverable text".
+  const modes = ["a11y", "eventLast", "eventAll", "autoPassword", "autoOlder"] as const;
   for (const mode of modes) {
     test.each(["timeout", "disconnect", "abort", "refusal", "notConnected", "success", "preAbort"])(
       `${mode}: insert %s`,
@@ -4075,6 +4082,9 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         const attempts: string[] = [];
         h.client.supportsImeCommit = async () => false;
         h.client.insert = async (value, options) => {
+          if (value === CARET_PRIMER_TEXT) {
+            return { success: true, caretPlaced: false };
+          }
           attempts.push(value);
           const pending = text.requestInsertText(value, 5000, undefined, undefined, {
             abortSignal: options?.abortSignal,
@@ -4096,7 +4106,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
           }
           return pending;
         };
-        const observation = focusedAndroidObservation("", {}, 1);
+        const observation = focusedAndroidObservation(
+          "",
+          mode === "autoPassword" ? { password: "true" } : {},
+          1,
+        );
         const observer = createObserver(observation);
         const executor = new DefaultSendKeysCommandExecutor(
           android,
@@ -4120,33 +4134,40 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         });
         const command = {
           action: "type" as const,
-          text: "é😀a",
+          text: mode === "autoPassword" ? "abc" : "é😀a",
           mode: mode.startsWith("auto")
             ? ("auto" as const)
             : (mode as "a11y" | "eventLast" | "eventAll"),
         };
+        // An earlier insert in the same call that reports no caret placement makes key events
+        // unsafe from then on, so the autoPassword eventAll route falls back to insert.
+        const primer =
+          mode === "autoPassword"
+            ? [{ action: "type" as const, text: CARET_PRIMER_TEXT, mode: "a11y" as const }]
+            : [];
+        const lead = primer.length;
         if (failure === "preAbort") {
           controller.abort();
           await expect(
-            sendKeys.execute([command], undefined, undefined, controller.signal),
+            sendKeys.execute([...primer, command], undefined, undefined, controller.signal),
           ).rejects.toThrow();
           expect(attempts).toHaveLength(0);
         } else {
           const result = await sendKeys.execute(
-            [command, command],
+            [...primer, command, command],
             undefined,
             undefined,
             controller.signal,
           );
           if (["timeout", "disconnect", "abort"].includes(failure)) {
             expect(result).toMatchObject({ success: false, retryable: false });
-            expect(result.commands[0]).toMatchObject({
+            expect(result.commands[lead]).toMatchObject({
               retryable: false,
               partialApplication: true,
             });
             expect(result.error).toContain("outcome is indeterminate");
             expect(result.error).toContain("may have been entered");
-            expect(result.commands).toHaveLength(1);
+            expect(result.commands).toHaveLength(lead + 1);
             expect(attempts).toHaveLength(1);
             expect(
               h.adb.getExecutedCommands().filter((value) => value.includes("input keyevent")),
@@ -4157,7 +4178,7 @@ describe("SendKeys Android non-idempotent outcomes", () => {
           } else {
             expect(result.success).toBe(false);
             expect(result.retryable).toBeUndefined();
-            expect(result.commands[0].partialApplication).toBeUndefined();
+            expect(result.commands[lead].partialApplication).toBeUndefined();
             expect(result.error).not.toContain("indeterminate");
             expect(attempts).toHaveLength(1);
           }

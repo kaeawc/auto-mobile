@@ -152,6 +152,13 @@ interface ObservedChangeOptions {
   changeExpected: boolean;
   /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
   foregroundAppMayChange?: boolean;
+  /**
+   * A non-retryable failed block that reports `partialApplication` (a boomerang whose return leg
+   * failed after the forward swipe landed) still gets the post-action observation on iOS, as on
+   * Android, so the caller sees where the content ended up. Unconfirmed text, which also reports
+   * `retryable: false`, keeps returning before any post-action read.
+   */
+  observePartialApplication?: boolean;
   /** Hardware navigation and URL dispatch do not resolve coordinates from the prior tree. */
   usesObservationForResolution?: boolean;
   /** Bind pre/post captures to the panel prepared by the action. */
@@ -479,7 +486,8 @@ export class BaseVisualChange {
     if (
       this.device.platform === "ios" &&
       blockResult?.success === false &&
-      blockResult.retryable === false
+      blockResult.retryable === false &&
+      !(options.observePartialApplication && blockResult.partialApplication === true)
     ) {
       perf.end();
       return blockResult;

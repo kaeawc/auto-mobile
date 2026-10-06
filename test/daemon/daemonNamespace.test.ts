@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
@@ -82,11 +82,18 @@ const dirs: string[] = [];
 // AutoMobile data dir, which must never be the developer's real ~/.auto-mobile.
 let isolatedDataDir: string | undefined;
 let originalDataDir: string | undefined;
+let originalLogDir: string | undefined;
 
 beforeEach(() => {
   originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
-  isolatedDataDir = mkdtempSync(join(tmpdir(), "namespace-unit-data-"));
+  originalLogDir = process.env.AUTOMOBILE_LOG_DIR;
+  const scratchDataDir = join(process.cwd(), "scratch/data");
+  mkdirSync(scratchDataDir, { recursive: true });
+  isolatedDataDir = mkdtempSync(join(scratchDataDir, "namespace-unit-data-"));
   process.env.AUTOMOBILE_DATA_DIR = isolatedDataDir;
+  // Launch logs honor this override before DATA_DIR; isolate both even when the
+  // caller already supplied a scratch log directory for the whole test process.
+  process.env.AUTOMOBILE_LOG_DIR = join(isolatedDataDir, "logs");
 });
 
 afterEach(() => {
@@ -94,6 +101,11 @@ afterEach(() => {
     delete process.env.AUTOMOBILE_DATA_DIR;
   } else {
     process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+  }
+  if (originalLogDir === undefined) {
+    delete process.env.AUTOMOBILE_LOG_DIR;
+  } else {
+    process.env.AUTOMOBILE_LOG_DIR = originalLogDir;
   }
   if (isolatedDataDir !== undefined) {
     rmSync(isolatedDataDir, { recursive: true, force: true });

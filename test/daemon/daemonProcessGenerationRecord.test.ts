@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { IncumbentOwnerGuard } from "../../src/daemon/incumbentOwnerGuard";
 import type { PidFileData } from "../../src/daemon/types";
 import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { closeDatabase } from "../../src/db/database";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -65,15 +65,22 @@ function captureRecords(daemon: Daemon): PidFileData[] {
 describe("Daemon PID record process generation fields (issue #10116 review F1)", () => {
   let originalDbPath: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await closeDatabase();
     resetDbWriteBarrier();
     // The record names the DB path. Resolving it must not default to the real DB;
     // this temp path is only ever named, never opened.
     originalDbPath = process.env.AUTOMOBILE_DB_PATH;
-    process.env.AUTOMOBILE_DB_PATH = join(tmpdir(), "daemon-process-generation-record.db");
+    process.env.AUTOMOBILE_DB_PATH = join(
+      process.cwd(),
+      "scratch/data/daemon-process-generation-record.db",
+    );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // PID-record construction caches getDatabasePath() even without opening a DB.
+    // Clear that lifecycle before restoring the env so later suites cannot use it.
+    await closeDatabase();
     if (originalDbPath === undefined) {
       delete process.env.AUTOMOBILE_DB_PATH;
     } else {

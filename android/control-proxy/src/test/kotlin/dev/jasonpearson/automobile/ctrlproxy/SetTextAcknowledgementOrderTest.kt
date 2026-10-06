@@ -122,13 +122,17 @@ class SetTextAcknowledgementOrderTest {
   fun `performInsertText reports caret warnings after attempting selection`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val body = functionBody(source, "private fun performInsertText(")
-    val selection = body.indexOf("val selectionSucceeded")
+    val selection = body.indexOf("val selectionReturned")
     val selectionAction = body.indexOf("targetNode.performAction(", startIndex = selection)
+    val selectionDecision = body.indexOf("val selectionSucceeded", startIndex = selectionAction)
     val outcome = body.indexOf("insertTextOutcome(")
     val broadcast = body.indexOf("broadcastInsertTextResult(", startIndex = outcome)
     assertTrue(
       "outcome must follow the selection attempt",
-      selectionAction > selection && outcome > selectionAction,
+      selection >= 0 &&
+        selectionAction > selection &&
+        selectionDecision > selectionAction &&
+        outcome > selectionDecision,
     )
     assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
     val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")

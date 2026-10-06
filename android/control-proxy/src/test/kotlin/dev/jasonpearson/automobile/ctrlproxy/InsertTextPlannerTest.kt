@@ -6,6 +6,77 @@ import org.junit.Test
 // These inputs model reported accessibility node states; they are unverified against a device.
 class InsertTextPlannerTest {
   @Test
+  fun `false selection return with observed planned caret succeeds in both modes`() {
+    val plan = InsertTextPlan("hello world", 11, false)
+    val placed =
+      insertTextSelectionSucceeded(
+        true,
+        true,
+        false,
+        plan,
+        InsertTextSnapshot(plan.updatedText, false, 11, 11),
+      )
+    for (acceptsCaretNotPlaced in listOf(false, true)) {
+      assertEquals(
+        InsertTextOutcome(true, null, null, null, false),
+        insertTextOutcome(true, true, placed, null, acceptsCaretNotPlaced),
+      )
+    }
+  }
+
+  @Test
+  fun `false selection return with different caret preserves failure and warning`() {
+    val plan = InsertTextPlan("hello world", 11, false)
+    for ((start, end) in listOf(0 to 0, 11 to 0, 0 to 11, -1 to -1)) {
+      val placed =
+        insertTextSelectionSucceeded(
+          true,
+          true,
+          false,
+          plan,
+          InsertTextSnapshot(plan.updatedText, false, start, end),
+        )
+      assertEquals(false, placed)
+      for (acceptsCaretNotPlaced in listOf(false, true)) {
+        assertEquals(
+          insertTextOutcome(true, true, false, null, acceptsCaretNotPlaced),
+          insertTextOutcome(true, true, placed, null, acceptsCaretNotPlaced),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `false selection return requires matching text and a refreshed snapshot`() {
+    val plan = InsertTextPlan("hello world", 11, false)
+    for (observed in listOf(null, InsertTextSnapshot("other text", false, 11, 11))) {
+      assertEquals(false, insertTextSelectionSucceeded(true, true, false, plan, observed))
+    }
+  }
+
+  @Test
+  fun `true selection return preserves success without observed caret`() {
+    val plan = InsertTextPlan("hello world", 11, false)
+    val placed = insertTextSelectionSucceeded(true, true, true, plan, null)
+    assertEquals(true, placed)
+    for (acceptsCaretNotPlaced in listOf(false, true)) {
+      assertEquals(
+        InsertTextOutcome(true, null, "preceding warning", null, false),
+        insertTextOutcome(true, true, placed, "preceding warning", acceptsCaretNotPlaced),
+      )
+    }
+  }
+
+  @Test
+  fun `no selection action preserves observed offset rule and set text failure`() {
+    val plan = InsertTextPlan("hello world", 11, false)
+    val observed = InsertTextSnapshot("stale text", false, 11, 11)
+    assertEquals(true, insertTextSelectionSucceeded(true, false, false, plan, observed))
+    assertEquals(false, insertTextSelectionSucceeded(false, false, false, plan, observed))
+    assertEquals(false, insertTextSelectionSucceeded(false, true, true, plan, observed))
+  }
+
+  @Test
   fun `unreported selection in empty field inserts at zero`() {
     assertEquals(
       InsertTextPlan("abc", 3, true),

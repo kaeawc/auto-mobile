@@ -57,6 +57,21 @@ internal data class InsertTextOutcome(
   val partialApplication: Boolean,
 )
 
+internal fun insertTextSelectionSucceeded(
+  setTextSucceeded: Boolean,
+  selectionAttempted: Boolean,
+  selectionReturned: Boolean,
+  plan: InsertTextPlan,
+  observed: InsertTextSnapshot?,
+): Boolean =
+  setTextSucceeded &&
+    ((selectionAttempted && selectionReturned) ||
+      observed != null &&
+        // A rejected action needs matching text; preserve the no-action offset-only rule.
+        (!selectionAttempted || observed.text == plan.updatedText) &&
+        observed.selectionStart == plan.caret &&
+        observed.selectionEnd == plan.caret)
+
 internal fun insertTextOutcome(
   setTextSucceeded: Boolean,
   selectionAttempted: Boolean,

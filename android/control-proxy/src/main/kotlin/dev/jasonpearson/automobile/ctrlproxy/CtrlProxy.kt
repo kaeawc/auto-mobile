@@ -5540,7 +5540,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           afterSetText != null &&
           android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in
             targetNode.actionList.map { it.id }
-      val selectionSucceeded =
+      val selectionReturned =
         if (selectionAttempted) {
           val selectionArguments =
             android.os.Bundle().apply {
@@ -5558,18 +5558,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
             selectionArguments,
           )
-        } else {
-          // If selection is unavailable, trust only an observed caret at the planned offset.
-          setTextSucceeded &&
-            afterSetText != null &&
-            afterSetText.selectionStart == plan.caret &&
-            afterSetText.selectionEnd == plan.caret
-        }
+        } else false
+      // A widget may reject SET_SELECTION when SET_TEXT already placed the caret correctly.
+      val observedSelection =
+        if (selectionAttempted && !selectionReturned) readMutationSnapshot() else afterSetText
+      val selectionSucceeded =
+        insertTextSelectionSucceeded(
+          setTextSucceeded,
+          selectionAttempted,
+          selectionReturned,
+          plan,
+          observedSelection,
+        )
       AutoMobileLog.d(
         TAG,
-        "insertText selectionAttempted=$selectionAttempted selectionReturned=${selectionAttempted && selectionSucceeded}",
+        "insertText selectionAttempted=$selectionAttempted selectionReturned=$selectionReturned",
       )
-      // Record immediately after failed placement; refresh is for the next insert's first plan.
+      // Record the reported selection after placement, including the rejected-action refresh.
       val afterSelection =
         if (afterSetText != null)
           InsertTextSnapshot(

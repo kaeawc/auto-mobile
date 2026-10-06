@@ -8,6 +8,7 @@ import {
 } from "./coldBootProcessTermination";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type {
   DeviceMatchCriteria,
   FormFactor,
@@ -1308,10 +1309,7 @@ export class DeviceBootService {
   ): Promise<DeviceBootResult> {
     let disposeStartHandleCancellation = () => {};
     const handle = await this.runPhase(context, "starting the device", async (signal) => {
-      const started = await this.dependencies.deviceManager.startDevice(
-        image,
-        this.remaining(context, "starting the device"),
-      );
+      const started = await this.startDeviceOwningCancelledLaunch(image, context);
       const cancelStarted = () => {
         if (started) {
           // No lease ordering is possible here: the phase already rejected. Still escalate so
@@ -1462,14 +1460,53 @@ export class DeviceBootService {
       signal: context.signal,
     });
     if (wait === "pending") {
-      const settled = termination.then(
-        (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
-        () => undefined,
-      );
-      context.pendingTerminations.push(settled);
-      this.dependencies.retainLeaseUntil?.(settled);
+      this.holdLeaseUntilSettled(termination, context);
     }
     return wait;
+  }
+
+  /**
+   * Keeps the AVD's lifecycle lease held until `termination` has settled (and, for a
+   * survivor, until it is finally gone): the request stopped waiting for it.
+   */
+  private holdLeaseUntilSettled(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): void {
+    const settled = termination.then(
+      (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
+      () => undefined,
+    );
+    context.pendingTerminations.push(settled);
+    this.dependencies.retainLeaseUntil?.(settled);
+  }
+
+  /**
+   * Starts the device, and when the launch is cancelled after the emulator was
+   * spawned (a cancel during its startup validation), takes the child from the
+   * cancellation error: it terminates it with the same SIGTERM -> bounded wait ->
+   * SIGKILL escalation as any other owned handle and holds the lease until the exit
+   * is confirmed. The phase rejects on the abort regardless, so this must register
+   * its hold before returning (#10075).
+   */
+  private async startDeviceOwningCancelledLaunch(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await this.dependencies.deviceManager.startDevice(
+        image,
+        this.remaining(context, "starting the device"),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        this.holdLeaseUntilSettled(
+          this.terminateOwnedHandle(error.process, image, context),
+          context,
+        );
+      }
+      throw error;
+    }
   }
 
   private async reportProgress(

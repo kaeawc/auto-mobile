@@ -22,6 +22,7 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -435,6 +436,9 @@ export interface ShutdownIdentityReservation {
 }
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
+
+/** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
+const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
 
 /** Evidence belongs only to the entry captured before this target's discovery. */
 export interface TargetDeviceDiscoverySnapshot {
@@ -1243,6 +1247,8 @@ export class DevicePool {
           sources,
         ),
       notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+      liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
+        this.recoveryCoordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
     };
   }
 
@@ -1313,6 +1319,11 @@ export class DevicePool {
 
   private createRecoveryCoordinator(): DeviceRecoveryCoordinator {
     return new DeviceRecoveryCoordinator({
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
+      getAndroidOfflineDeviceIds: async (deviceIds) =>
+        (await this.deviceManager.getAndroidOfflineDeviceIds?.(deviceIds, {
+          timeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+        })) ?? new Set<string>(),
       getRecoveringSessionLosses: () => this.recoveringSessionLosses,
       getPooledDevice: (id) => this.devices.get(id),
       getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
@@ -1451,12 +1462,13 @@ export class DevicePool {
           this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
         clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
           this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
-        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
+        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner, lateShutdown) =>
           this.recoveryCoordinator.finishAndroidRecoveryAttempt(
             avdName,
             deviceIds,
             retainImage,
             owner,
+            lateShutdown,
           ),
         stopAndroidEmulatorForRecovery: (
           ...[
@@ -2741,8 +2753,11 @@ export class DevicePool {
           return undefined;
         }
       }
-      const childProcess = await runWithAbortSignal(signal, () =>
-        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      const childProcess = await this.startCoordinatedDeviceProcess(
+        device,
+        deadlineMs,
+        signal,
+        retainLeaseUntil,
       );
       return await action(childProcess, signal, retainLeaseUntil);
     } finally {
@@ -2755,6 +2770,29 @@ export class DevicePool {
         lifecycleLease.release();
       }
       this.timer.clearTimeout(timeoutHandle);
+    }
+  }
+
+  /**
+   * Starts the device under the coordinated lease. A launch cancelled after the
+   * emulator spawned carries its child on the error; stop it here so the lease is
+   * held until the exit is confirmed (#10075), since `action` never runs for it.
+   */
+  private async startCoordinatedDeviceProcess(
+    device: DeviceInfo,
+    deadlineMs: number,
+    signal: AbortSignal,
+    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await runWithAbortSignal(signal, () =>
+        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        await this.cancelCoordinatedDeviceStart(device, error.process, retainLeaseUntil);
+      }
+      throw error;
     }
   }
 
@@ -3918,7 +3956,17 @@ export class DevicePool {
           // A same-AVD replacement still holds the image's locks; a different
           // AVD reusing the old serial must be preserved without another kill.
           const stillPresent = devices.some((device) => device.name === avdName);
-          if (!stillPresent) {
+          // The online-only list also lacks an emulator that dropped to adb `offline`
+          // mid-kill while its process still runs (#10100).
+          if (
+            !stillPresent &&
+            !(await this.isAndroidSerialHeldOffline(
+              avdName,
+              matchingAvd.deviceId,
+              signal,
+              deadlineMs,
+            ))
+          ) {
             logger.info(
               `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
             );
@@ -3946,6 +3994,48 @@ export class DevicePool {
         retainLeaseUntil(shutdown);
       }
       throw new UnconfirmedRecoveryShutdownError(avdName, error);
+    }
+  }
+
+  /**
+   * Whether adb still lists the killed emulator's serial as `offline` (or its
+   * state could not be read), so its absence from the online-only discovery does
+   * not yet confirm the AVD stopped. The same "offline or probe failed means
+   * unconfirmed" rule as the recovery-reservation lift (#10076).
+   */
+  private async isAndroidSerialHeldOffline(
+    avdName: string,
+    deviceId: string,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<boolean> {
+    const probe = this.deviceManager.getAndroidOfflineDeviceIds?.bind(this.deviceManager);
+    if (!probe) {
+      return false;
+    }
+    try {
+      const offline = await probe([deviceId], {
+        signal,
+        timeoutMs: Math.max(
+          1,
+          Math.min(ANDROID_OFFLINE_PROBE_TIMEOUT_MS, deadlineMs - this.timer.now()),
+        ),
+      });
+      signal.throwIfAborted();
+      if (offline.has(deviceId)) {
+        logger.info(
+          `[DevicePool] Android AVD '${avdName}' is absent from the booted list but adb still lists ${deviceId} as offline; shutdown not yet confirmed`,
+        );
+      }
+      return offline.has(deviceId);
+    } catch (error) {
+      signal.throwIfAborted();
+      // An unreadable state list cannot prove the serial left `adb devices`.
+      logger.warn(
+        `[DevicePool] adb device-state probe failed while confirming '${avdName}' stopped: ${errorMessage(error)}`,
+        error,
+      );
+      return true;
     }
   }
 

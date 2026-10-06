@@ -8,6 +8,8 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -521,6 +523,132 @@ describe("DeviceBootService owned cold-boot termination (#9901)", () => {
     expect(outcome.error()).toBeUndefined();
     expect(t.emulator.signals).toEqual([]);
     expect(t.retained).toHaveLength(0);
+    const nextGranted = t.nextRequestForAvd();
+    await settle();
+    expect(nextGranted()).toBe(true);
+  });
+});
+
+// #10075: a launch cancelled after the emulator spawned (during its startup validation)
+// hands the child to the owner on the cancellation error, so the same confirm-exit
+// ordering applies to the launch phase as to a boot that fails after launch.
+describe("DeviceBootService cancelled-launch termination (#10075)", () => {
+  /** A fake `startDevice` that behaves like the real client: it rejects on abort, carrying the child. */
+  function cancelLaunchOnAbort(t: ReturnType<typeof setup>, childAtCancel: ChildProcess | null) {
+    t.devices.startDevice = async () => {
+      const signal = getAbortSignal();
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new EmulatorLaunchCancelledError(image.name, childAtCancel);
+    };
+  }
+
+  it("terminates the child, escalates, and holds the lease until its exit is confirmed", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    cancelLaunchOnAbort(t, t.emulator.process);
+    const outcome = track(t.boot(undefined, controller.signal));
+    await settle();
+
+    controller.abort(new Error("request cancelled"));
+    await settle();
+
+    // The caller is returned to at once; the cleanup carries on holding the lease.
+    expect(outcome.settled()).toBe(true);
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    const nextGranted = t.nextRequestForAvd();
+    await settle();
+    expect(nextGranted()).toBe(false);
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    expect(t.emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(nextGranted()).toBe(false);
+
+    t.emulator.exit();
+    await settle();
+    expect(nextGranted()).toBe(true);
+  });
+
+  it("releases the lease as soon as a SIGTERM-only exit is confirmed", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    cancelLaunchOnAbort(t, t.emulator.process);
+    track(t.boot(undefined, controller.signal));
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+    const nextGranted = t.nextRequestForAvd();
+    await settle();
+    expect(nextGranted()).toBe(false);
+
+    t.emulator.exit();
+    await settle();
+
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    expect(nextGranted()).toBe(true);
+  });
+
+  it("keeps the lease and reports the pid for an emulator that never exits", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    cancelLaunchOnAbort(t, t.emulator.process);
+    track(t.boot(undefined, controller.signal));
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    const next = t.nextRequestForAvd();
+    await settle();
+
+    expect(t.emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(next()).toBe(false);
+    expect(String((t.refusals[0] as Error).message)).toContain(`held by unkillable process ${PID}`);
+
+    t.liveness.running = false;
+    t.timer.advanceTime(SURVIVOR_RECHECK_MS);
+    await settle();
+    const afterGone = t.nextRequestForAvd();
+    await settle();
+    expect(afterGone()).toBe(true);
+  });
+
+  it("hands a survivor to an injected lease's owner instead of releasing it", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    const lease = await t.coordinator.reserve(
+      { kind: "stable", platform: "android", stableId: image.name },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+    cancelLaunchOnAbort(t, t.emulator.process);
+    track(t.boot(lease, controller.signal));
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+
+    expect(t.retained.length).toBeGreaterThan(0);
+  });
+
+  it("sends no signal when the launch was cancelled before anything spawned", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    cancelLaunchOnAbort(t, null);
+    track(t.boot(undefined, controller.signal));
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+
+    expect(t.emulator.signals).toEqual([]);
     const nextGranted = t.nextRequestForAvd();
     await settle();
     expect(nextGranted()).toBe(true);

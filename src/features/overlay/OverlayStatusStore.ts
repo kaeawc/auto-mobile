@@ -42,11 +42,20 @@ interface StoredOverlayStatus extends OverlayScope {
   lastResult: OverlayLastResult;
 }
 
+/**
+ * Upper bound on remembered (session, device) scopes. Release and device-removal hooks normally
+ * clear scopes; the cap bounds growth if a hook is missed, evicting the least recently recorded.
+ */
+export const MAX_OVERLAY_STATUS_SCOPES = 128;
+
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryOverlayStatusStore implements OverlayStatusStore {
   private readonly scopes = new Map<string, StoredOverlayStatus>();
 
-  constructor(private readonly clock: Pick<Timer, "now"> = defaultTimer) {}
+  constructor(
+    private readonly clock: Pick<Timer, "now"> = defaultTimer,
+    private readonly maxScopes: number = MAX_OVERLAY_STATUS_SCOPES,
+  ) {}
 
   status(scope: OverlayScope): OverlayStatus {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
@@ -81,8 +90,20 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     };
     stored.lastResult = entry;
     this.updatePresence(stored, entry);
-    this.scopes.set(key, stored);
+    this.remember(key, stored);
     return { ...entry };
+  }
+
+  /** Re-insert so Map order tracks recency, then evict the oldest scopes past the cap. */
+  private remember(key: string, stored: StoredOverlayStatus): void {
+    this.scopes.delete(key);
+    this.scopes.set(key, stored);
+    for (const oldest of this.scopes.keys()) {
+      if (this.scopes.size <= this.maxScopes) {
+        break;
+      }
+      this.scopes.delete(oldest);
+    }
   }
 
   private updatePresence(stored: StoredOverlayStatus, entry: OverlayLastResult): void {

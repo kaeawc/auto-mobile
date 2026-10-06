@@ -2,10 +2,16 @@ package dev.jasonpearson.automobile.desktop.core.failures
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.McpResourceContent
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeResourceResponse
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.time.Clock
 import dev.jasonpearson.automobile.desktop.core.time.SystemClock
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.serializer
@@ -70,19 +76,33 @@ class EmptyFailuresDataSource : FailuresDataSource {
   }
 }
 
-/** MCP data source that reads from the MCP server */
-class McpFailuresDataSource(private val clientProvider: () -> AutoMobileClient) :
-  FailuresDataSource {
+/**
+ * MCP data source that reads from the MCP server.
+ *
+ * [AutoMobileClient.readResource] is a blocking socket round trip with no deadline of its own, and
+ * these suspend functions are called from the Compose UI thread. Each read therefore runs on
+ * [ioDispatcher] via [runInterruptible] (cancellation, e.g. the dashboard leaving composition,
+ * interrupts the blocked read) and under a [readTimeoutMs] ceiling so a stalled daemon cannot pin
+ * an IO thread forever (#10142).
+ */
+class McpFailuresDataSource(
+  private val clientProvider: () -> AutoMobileClient,
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  private val readTimeoutMs: Long = DEFAULT_READ_RESOURCE_TIMEOUT_MS,
+) : FailuresDataSource {
   private val json = Json { ignoreUnknownKeys = true }
 
   override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
     return try {
-      val client = clientProvider()
-      val contents = client.readResource("automobile:failures")
-      val response = decodeResourceResponse(json, contents, serializer<FailuresResponse>())
+      val response =
+        readOffMainThread("automobile:failures") { contents ->
+          decodeResourceResponse(json, contents, serializer<FailuresResponse>())
+        }
       Result.Success(response.groups.map { it.toModel() })
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to load failures: ${e.message}")
     }
@@ -93,11 +113,12 @@ class McpFailuresDataSource(private val clientProvider: () -> AutoMobileClient) 
     aggregation: TimeAggregation,
   ): Result<TimelineData> {
     return try {
-      val client = clientProvider()
       val uri =
         "automobile:failures/timeline?dateRange=${dateRange.toQueryParam()}&aggregation=${aggregation.toQueryParam()}"
-      val contents = client.readResource(uri)
-      val response = decodeResourceResponse(json, contents, serializer<TimelineResponse>())
+      val response =
+        readOffMainThread(uri) { contents ->
+          decodeResourceResponse(json, contents, serializer<TimelineResponse>())
+        }
       Result.Success(
         TimelineData(
           dataPoints =
@@ -115,9 +136,32 @@ class McpFailuresDataSource(private val clientProvider: () -> AutoMobileClient) 
       )
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to load timeline: ${e.message}")
     }
+  }
+
+  /**
+   * Blocking read plus decode on [ioDispatcher]. The timeout wraps the context switch, so it runs
+   * on the caller's clock; on expiry the interrupt unblocks the read and the call fails with a
+   * typed [McpConnectionException] instead of hanging.
+   */
+  private suspend fun <T> readOffMainThread(
+    uri: String,
+    decode: (List<McpResourceContent>) -> T,
+  ): T {
+    // Resolve the client on the caller's thread: the provider may read UI-owned state.
+    val client = clientProvider()
+    return withTimeoutOrNull(readTimeoutMs) {
+      runInterruptible(ioDispatcher) { decode(client.readResource(uri)) }
+    } ?: throw McpConnectionException("Timed out after ${readTimeoutMs}ms reading $uri")
+  }
+
+  companion object {
+    /** Matches the daemon's default request deadline and the failures stream socket watchdog. */
+    const val DEFAULT_READ_RESOURCE_TIMEOUT_MS = 30_000L
   }
 }
 

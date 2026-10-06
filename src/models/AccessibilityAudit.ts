@@ -122,7 +122,8 @@ export interface AccessibilityAuditSummary {
 
   /**
    * Checks that could not run for this observation (for example contrast when
-   * the observation has no screenshot), so a missing check is not read as a pass.
+   * the observation has no screenshot, or text covered by the keyboard or another window or
+   * outside the screenshot), so a missing check is not read as a pass.
    */
   notEvaluated?: Array<{ check: ViolationType; reason: string }>;
 

@@ -2490,20 +2490,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.startScreenshotBackoff();
   }
 
-  private syncNetworkStateToDevice(): void {
+  /**
+   * Push THIS device's mock rules and error simulation from the host store.
+   * Runs on every (re)connect, and after a session release clears the store so
+   * the device drops what that session installed (issue #10061).
+   */
+  public syncNetworkStateToDevice(): void {
     try {
       const state = NetworkState.getInstance();
+      const deviceId = this.device.deviceId;
 
-      // Always sync mock rules on reconnect — buildNetworkMockRules uses limit
-      // (not remaining) so the device-side store reinitializes fresh counts.
-      // Sending an empty list clears stale rules that may linger from a
-      // previous connection.
-      const rules = buildNetworkMockRules(state);
+      // Always sync mock rules on reconnect, scoped to this device. The device
+      // store keeps consumption per mockId across a re-push (#10060). Sending an
+      // empty list clears stale rules that may linger from a previous connection.
+      const rules = buildNetworkMockRules(state, deviceId);
       this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })));
 
       // Always re-sync error simulation state (including disabled) so the
       // device doesn't keep stale simulation config from a previous connection
-      const sim = state.simulation;
+      const sim = state.getSimulation(deviceId);
       this.sendMessage(
         serializeCtrlProxyRequest(
           ctrlProxyRequests.setNetworkErrorSimulation({
@@ -5637,6 +5642,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         error: message.error,
         requestId: message.requestId,
         timestamp: message.timestamp,
+        ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
+          ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
+          : {}),
       })),
 
     highlight_response: (message) =>
@@ -6165,6 +6173,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
     } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
+      // The app may be back in front without a navigation event (#10193). The signal names this
+      // device: on the shared global manager another device's tick must not switch the app.
+      if (navigationPackage) {
+        this.getNavigationGraphManager()
+          .recordAppForeground(navigationPackage, this.device.deviceId)
+          .catch((error) =>
+            logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
+          );
+      }
     } else {
       // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
       // non-SDK apps never emit navigation_event, so this is the only path that gives
@@ -6677,8 +6694,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private enqueueNavigationGraphWrite(event: NavigationEvent): Promise<void> {
+  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
     const navigationGraphManager = this.getNavigationGraphManager();
+    // Stamp the device that received the event: the manager's telemetry must not read the
+    // recorder's ambient context, which another device's client may have set (#10195).
+    const event: NavigationEvent = { ...received, deviceId: this.device.deviceId };
     const navWrite = this.navigationWriteTail.then(
       () => navigationGraphManager.recordNavigationEvent(event),
       () => navigationGraphManager.recordNavigationEvent(event),

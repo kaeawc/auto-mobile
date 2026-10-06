@@ -1,0 +1,6 @@
+$ adb -s emulator-5600 install --user 0 -r /Users/jason/kaeawc/auto-mobile/.claude/worktrees/gh-issues-iteration-bc319f/scratch/mt36/apk/playground-v1.apk
+--- stdout
+Performing Streamed Install
+--- stderr
+adb: failed to install /Users/jason/kaeawc/auto-mobile/.claude/worktrees/gh-issues-iteration-bc319f/scratch/mt36/apk/playground-v1.apk: Failure [INSTALL_FAILED_VERSION_DOWNGRADE: Downgrade detected: Update version code 1 is older than current 2]
+exit=1

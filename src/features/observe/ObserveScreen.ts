@@ -116,9 +116,12 @@ import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLo
 import {
   computeFreshness,
   inheritWrongWindowEvidence,
+  maxObservationAgeMs,
   recordWrongWindowEvidence,
 } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
+import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import { INTERACTIVE_OVERLAY_WINDOW_TYPE, isOwnOverlayFocused } from "./ownOverlayFocus";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   ALERT_TITLE_RESOURCE_ID,
@@ -329,6 +332,28 @@ function isStatusBarOnlyCandidate(
     (observed === undefined
       ? hierarchy?.ctrlProxyIncomplete === true
       : SYSTEM_UI_WINDOW_PACKAGES.has(observed))
+  );
+}
+
+/**
+ * A focused window that legitimately differs from the resumed activity: a
+ * system-UI panel (a window, not an ActivityRecord), or the product's own
+ * focusable overlay, which owns focus while the app stays resumed behind it
+ * (issue #10000). Neither is a stale wrong-window capture. The overlay case is
+ * judged from the capture's own windows, so it only counts when the capture is
+ * current (`ownOverlayEvidenceCurrent`): a stale capture taken while the overlay
+ * had focus says nothing about the device now.
+ */
+function isExpectedFocusDivergence(
+  hierarchy: ObserveResult["viewHierarchy"],
+  observed: string,
+  foreground: string,
+  ownOverlayEvidenceCurrent: boolean,
+): boolean {
+  return (
+    SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
+    SYSTEM_UI_WINDOW_PACKAGES.has(foreground) ||
+    (ownOverlayEvidenceCurrent && isOwnOverlayFocused(hierarchy))
   );
 }
 
@@ -1602,6 +1627,7 @@ export class RealObserveScreen implements ObserveScreen {
             foregroundIdentity,
             { sampled: false, identity: undefined, activityAttributionMismatch: false },
             getConfirmedFrameworkErrorDialog,
+            minTimestamp,
             signal,
           )
         : undefined;
@@ -1870,7 +1896,7 @@ export class RealObserveScreen implements ObserveScreen {
       // Predictive UI (opt-in via config)
       if (!observerMode && serverConfig.isPredictiveUiEnabled()) {
         try {
-          const predictions = await this.predictiveUIState.generate(result);
+          const predictions = await this.predictiveUIState.generate(result, this.device);
           this.attachPredictions(result, predictions);
         } catch (error) {
           logger.warn(`[PredictiveUIState] Failed to generate predictions: ${error}`);
@@ -1901,11 +1927,13 @@ export class RealObserveScreen implements ObserveScreen {
         postCaptureForeground,
         signal,
       );
+      await this.attributeFocusedOwnOverlayToForeground(result, foregroundIdentity, minTimestamp);
       const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
         result,
         foregroundIdentity,
         postCaptureForeground,
         getConfirmedFrameworkErrorDialog,
+        minTimestamp,
         signal,
       );
       result.freshness = computeFreshness({
@@ -3695,6 +3723,7 @@ export class RealObserveScreen implements ObserveScreen {
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
     getConfirmedFrameworkErrorDialog: () => Promise<boolean>,
+    minTimestamp: number,
     signal?: AbortSignal,
   ): Promise<{ observed: string; foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
@@ -3702,7 +3731,14 @@ export class RealObserveScreen implements ObserveScreen {
     if (!foreground || !observed) {
       return undefined;
     }
-    if (SYSTEM_UI_WINDOW_PACKAGES.has(observed) || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
+    if (
+      isExpectedFocusDivergence(
+        result.viewHierarchy,
+        observed,
+        foreground,
+        this.isOwnOverlayEvidenceCurrent(result, minTimestamp),
+      )
+    ) {
       return undefined;
     }
     const confirmed = await this.resolvePostCaptureForegroundIdentity(
@@ -3718,6 +3754,60 @@ export class RealObserveScreen implements ObserveScreen {
       return undefined;
     }
     return { observed, foreground };
+  }
+
+  /**
+   * Whether the capture is recent enough for its own "overlay holds focus" claim
+   * to describe the device now. That claim is read from the very capture being
+   * validated, so it cannot vouch for itself: a stale capture taken while a
+   * text-field overlay had focus would otherwise be accepted as fresh and
+   * relabelled with whatever app is in front today. The independent evidence is
+   * the capture's own device stamp against the request (`minTimestamp`) and the
+   * freshness age budget; with no stamp the claim cannot be dated and is not
+   * trusted.
+   */
+  private isOwnOverlayEvidenceCurrent(result: ObserveResult, minTimestamp: number): boolean {
+    const stamp = this.resolveObservationTimestampMs(result);
+    if (stamp === undefined || (minTimestamp > 0 && stamp < minTimestamp)) {
+      return false;
+    }
+    const ageBasis = this.resolveHostReceivedAtMs(result) ?? stamp;
+    return this.timer.now() - ageBasis <= maxObservationAgeMs();
+  }
+
+  /**
+   * While CtrlProxy's own interactive overlay holds window focus, name the app
+   * behind it as the active app (issue #10000) and keep the overlay's presence
+   * visible through `activeWindow.type`. The device-confirmed resumed app is the
+   * attribution source; with no ground truth, or a SystemUI surface on top, the
+   * window is left as captured.
+   */
+  private async attributeFocusedOwnOverlayToForeground(
+    result: ObserveResult,
+    foregroundIdentity: Promise<string | undefined>,
+    minTimestamp: number,
+  ): Promise<void> {
+    const activeWindow = result.activeWindow;
+    if (
+      activeWindow?.appId !== CTRL_PROXY_PACKAGE ||
+      !isOwnOverlayFocused(result.viewHierarchy) ||
+      !this.isOwnOverlayEvidenceCurrent(result, minTimestamp)
+    ) {
+      return;
+    }
+    const foreground = await foregroundIdentity;
+    if (
+      !foreground ||
+      foreground === CTRL_PROXY_PACKAGE ||
+      SYSTEM_UI_WINDOW_PACKAGES.has(foreground)
+    ) {
+      return;
+    }
+    result.activeWindow = {
+      ...activeWindow,
+      appId: foreground,
+      type: activeWindow.type ?? INTERACTIVE_OVERLAY_WINDOW_TYPE,
+    };
   }
 
   /**

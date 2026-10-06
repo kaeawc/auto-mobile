@@ -64,6 +64,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",
+    // test/helpers/capturedH264Stream.ts reads the real x264 sample stream for the
+    // packet-boundary tests (issue #10150).
+    "android/desktop-core/src/test/resources/sample.h264",
   ] as const;
 
   interface TurboConfig {

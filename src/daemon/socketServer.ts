@@ -20,6 +20,7 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { dropMcpRecording } from "../server/mcpRecordingManager";
+import { isToolUnavailableWireError } from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
@@ -30,6 +31,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_TOOL_UNAVAILABLE_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -287,13 +289,14 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
   }
 }
 
-function mcpRequestFailureDetails(
+export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
 ): Pick<DaemonResponse, "code" | "overloadFailure" | "requestFailureCause"> {
   return {
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -2151,7 +2154,12 @@ export class UnixSocketServer {
     }
     const controller = session.requestCancellations.get(targetId);
     if (!controller) {
-      // Already answered (a timeout racing the response) or never seen: nothing to cancel.
+      // Already answered (a timeout racing the response) or never seen: nothing to cancel. Leave a
+      // trace: a cancel that reaches the daemon after the work finished otherwise looks identical to
+      // one that was never sent, which hid a client delivering its cancel late (#10151).
+      logger.debug(
+        `[SocketCancel] socketSession=${session.sessionId} cancel for request ${targetId} found no in-flight request (already answered or never seen)`,
+      );
       return { id: request.id, type: "mcp_response", success: true, result: { cancelled: false } };
     }
     session.requestCancellations.delete(targetId);

@@ -35,14 +35,40 @@ enum GestureExecutionBound {
     static let responseReserveMs: Int64 = 500
 }
 
-/// Only request_swipe carries a wire deadline today. Tap/drag/pinch can legitimately
-/// run long and have no wire deadline; extending the bound to them is a follow-up.
+/// Only request_swipe's wire deadline bounds execution. Tap/drag/pinch can legitimately
+/// run long, so every other command's wire `timeoutMs` only gates whether it may START
+/// (see `queuedCommandDisposition`); it never cuts a running command short.
 func gestureExecutionBoundMs(deadlineMs: Int64?, executionStartedAtMs: Int64) -> Int64? {
     guard let deadlineMs else { return nil }
     return max(
         GestureExecutionBound.minBoundMs,
         deadlineMs - executionStartedAtMs - GestureExecutionBound.responseReserveMs
     )
+}
+
+/// Absolute monotonic time after which the host has stopped waiting for a command, taken from
+/// the optional wire `timeoutMs` (#10084). Nil when absent or non-positive, so an old host that
+/// sends nothing keeps today's behaviour.
+func commandExpiryMs(timeoutMs: Int64?, receivedAtMs: Int64) -> Int64? {
+    guard let timeoutMs, timeoutMs > 0 else { return nil }
+    let (expiry, overflow) = receivedAtMs.addingReportingOverflow(timeoutMs)
+    return overflow ? Int64.max : expiry
+}
+
+enum QueuedCommandDisposition: Equatable {
+    case run
+    case expired(expiresAtMs: Int64)
+    case connectionClosed
+}
+
+/// Pre-execution check for a command that waited in the serial chain (#10084). A command whose
+/// sender is gone, or whose host-side wait has already ended, must not touch the device.
+func queuedCommandDisposition(
+    expiresAtMs: Int64?, nowMs: Int64, isConnectionOpen: Bool
+) -> QueuedCommandDisposition {
+    guard isConnectionOpen else { return .connectionClosed }
+    if let expiresAtMs, nowMs >= expiresAtMs { return .expired(expiresAtMs: expiresAtMs) }
+    return .run
 }
 
 private enum GestureExecutionWinner: Sendable {
@@ -411,14 +437,20 @@ final class WebSocketServer: @unchecked Sendable {
 
     private func handleMessage(_ data: Data, connectionId: Int) {
         guard let connection = connections.value(forId: connectionId) else { return }
-        dispatchCommand(data, responder: connection)
+        dispatchCommand(
+            data, responder: connection,
+            isConnectionOpen: { [weak self] in self?.connections.value(forId: connectionId) != nil }
+        )
     }
 
     /// Enqueues one command onto the serial task-chain so it runs off the accept `queue` —
     /// a slow XCUITest walk / screenshot / SDK call cannot starve `/health` or new accepts
     /// (issue #5374) — while `await previous?.value` keeps commands strictly ordered.
     /// `responder` is captured strongly so it outlives the hop; enqueuing is non-blocking.
-    func dispatchCommand(_ data: Data, responder: any WebSocketResponding) {
+    func dispatchCommand(
+        _ data: Data, responder: any WebSocketResponding,
+        isConnectionOpen: @escaping @Sendable () -> Bool = { true }
+    ) {
         // Network.framework delivers this call on the server queue, never the main actor.
         // Inspect the envelope and swipe budget here; malformed requests still take the
         // normal queued decode/error path. Keep send outside the lock and task-chain.
@@ -434,6 +466,10 @@ final class WebSocketServer: @unchecked Sendable {
             let (deadline, overflow) = receivedAtMs.addingReportingOverflow(Int64(timeout))
             return overflow ? Int64.max : deadline
         }
+        // Every other command may carry the host's wait budget too. It only decides whether the
+        // command may still start; swipe keeps its own handler-level deadline error (#10084).
+        let startExpiryMs = deadlineMs == nil
+            ? commandExpiryMs(timeoutMs: envelope?["timeoutMs"] as? Int64, receivedAtMs: receivedAtMs) : nil
         let decision = commandState.withLock { state -> CommandAdmissionDecision in
             let decision = admissionDecision(
                 inFlight: state.inFlight, nowMs: monotonicNowMs(), budgetMs: busyBudgetMs
@@ -443,6 +479,14 @@ final class WebSocketServer: @unchecked Sendable {
             state.tail = Task { [weak self] in
                 await previous?.value
                 guard let self else { return }
+                let disposition = queuedCommandDisposition(
+                    expiresAtMs: startExpiryMs, nowMs: self.monotonicNowMs(),
+                    isConnectionOpen: isConnectionOpen()
+                )
+                guard disposition == .run else {
+                    self.dropQueuedCommand(disposition, type: type, requestId: requestId, responder: responder)
+                    return
+                }
                 self.commandState.withLock { state in
                     state.inFlight = InFlightRunnerCommand(
                         type: type, requestId: requestId, startedAtMs: self.monotonicNowMs(),
@@ -467,6 +511,30 @@ final class WebSocketServer: @unchecked Sendable {
             } catch {
                 print("[WebSocketServer] Failed to encode runner_busy response: \(error)")
             }
+        }
+    }
+
+    /// Answers a queued command that must not start. A closed connection gets no reply; an
+    /// expired one gets the typed deadline error (a late reply is ignored by the host).
+    private func dropQueuedCommand(
+        _ disposition: QueuedCommandDisposition, type: String, requestId: String?,
+        responder: any WebSocketResponding
+    ) {
+        switch disposition {
+        case .run:
+            break
+        case .connectionClosed:
+            print("[WebSocketServer] Dropped queued \(type) requestId=\(requestId ?? "nil"): connection closed")
+        case let .expired(expiresAtMs):
+            print("[WebSocketServer] Dropped queued \(type) requestId=\(requestId ?? "nil"): deadline passed")
+            responder.send(
+                ErrorResponse.build(
+                    requestId: requestId,
+                    error: CommandError.deadlineExceeded(
+                        command: type, deadlineMs: expiresAtMs, gestureCompleted: false
+                    )
+                )
+            )
         }
     }
 

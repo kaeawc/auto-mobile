@@ -402,6 +402,29 @@ final class ClipboardResolutionTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - paste (#10083)
+
+    func testPasteProceedsWhenLivePasteboardReadIsUnavailable() {
+        // Unavailable is only reachable after `hasStrings` was true, so the pasteboard is non-empty.
+        XCTAssertNoThrow(try GesturePerformer.resolveClipboardPaste(readResult: .unavailable))
+    }
+
+    func testPasteProceedsWhenLivePasteboardHasText() {
+        XCTAssertNoThrow(try GesturePerformer.resolveClipboardPaste(readResult: .value("external")))
+    }
+
+    func testPasteIsRefusedAsEmptyWhenPasteboardHasNoString() {
+        XCTAssertThrowsError(try GesturePerformer.resolveClipboardPaste(readResult: .empty)) { error in
+            XCTAssertEqual(error.localizedDescription, "Clipboard is empty")
+        }
+    }
+
+    func testPasteIsRefusedAsEmptyWhenLivePasteboardValueIsEmptyString() {
+        XCTAssertThrowsError(try GesturePerformer.resolveClipboardPaste(readResult: .value(""))) { error in
+            XCTAssertEqual(error.localizedDescription, "Clipboard is empty")
+        }
+    }
 }
 
 final class GesturePerformerSemanticLinkTests: XCTestCase {

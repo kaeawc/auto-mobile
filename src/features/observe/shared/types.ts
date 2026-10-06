@@ -76,6 +76,12 @@ export interface ActionTimingResult extends BaseResult {
 export interface DelegateContext {
   /** Platform-specific serialization at the request construction boundary. */
   serializeRequest?(message: Record<string, unknown>): string;
+  /**
+   * Extra wire fields that tell the service how long the host will wait for `messageType`, so a
+   * command queued behind a slow one is not started after the host has given up (#10084).
+   * Called once from `sendCommand` with the effective timeout; the request's own params win.
+   */
+  wireDeadlineParams?(messageType: string, timeoutMs: number): Record<string, unknown>;
   /** Get the current WebSocket connection (may be null if not connected) */
   getWebSocket(): WebSocket | null;
   /** RequestManager for correlating requests and responses */

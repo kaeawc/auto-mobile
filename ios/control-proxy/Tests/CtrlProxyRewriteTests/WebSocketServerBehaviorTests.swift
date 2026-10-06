@@ -1,5 +1,6 @@
 @testable import CtrlProxyRewrite
 import Foundation
+import os
 import XCTest
 
 /// Behavioral tests for the queue-confined `WebSocketServer` orchestration, driven
@@ -110,6 +111,144 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         release.signal()
         wait(for: [firstFinished, secondFinished], timeout: 2, enforceOrder: true)
         XCTAssertEqual(decodeObject(second.captured[0])?["success"] as? Bool, true)
+    }
+
+    // MARK: - Queued command start gate (#10084)
+
+    func testCommandExpiryUsesOptionalPositiveWireTimeout() {
+        XCTAssertEqual(commandExpiryMs(timeoutMs: 5000, receivedAtMs: 1000), 6000)
+        XCTAssertNil(commandExpiryMs(timeoutMs: nil, receivedAtMs: 1000))
+        XCTAssertNil(commandExpiryMs(timeoutMs: 0, receivedAtMs: 1000))
+        XCTAssertNil(commandExpiryMs(timeoutMs: -5, receivedAtMs: 1000))
+        XCTAssertEqual(commandExpiryMs(timeoutMs: Int64.max, receivedAtMs: 1000), Int64.max)
+    }
+
+    func testQueuedCommandDispositionRunsDropsExpiredAndClosed() {
+        XCTAssertEqual(queuedCommandDisposition(expiresAtMs: nil, nowMs: 9_000_000, isConnectionOpen: true), .run)
+        XCTAssertEqual(queuedCommandDisposition(expiresAtMs: 6000, nowMs: 5999, isConnectionOpen: true), .run)
+        XCTAssertEqual(
+            queuedCommandDisposition(expiresAtMs: 6000, nowMs: 6000, isConnectionOpen: true),
+            .expired(expiresAtMs: 6000)
+        )
+        XCTAssertEqual(
+            queuedCommandDisposition(expiresAtMs: nil, nowMs: 0, isConnectionOpen: false), .connectionClosed
+        )
+        XCTAssertEqual(
+            queuedCommandDisposition(expiresAtMs: 6000, nowMs: 7000, isConnectionOpen: false), .connectionClosed
+        )
+    }
+
+    func testQueuedCommandPastItsWireDeadlineIsNotExecutedAndGetsDeadlineError() {
+        let started = expectation(description: "blocking performer started")
+        let blockerDone = expectation(description: "blocker response")
+        let dropped = expectation(description: "expired command answered")
+        let release = DispatchSemaphore(value: 0)
+        let clock = FakeMonotonicClock()
+        let handled = ValueBox<String>()
+        let blocker = CapturingResponder(onEach: { blockerDone.fulfill() })
+        let queued = CapturingResponder(onEach: { dropped.fulfill() })
+        let server = makeTestServer(
+            handler: { request in
+                handled.append(request.requestId ?? "nil")
+                if request.requestId == "blocker" {
+                    started.fulfill()
+                    release.wait()
+                }
+                return WebSocketResponse.success(type: "set_text_result", requestId: request.requestId, totalTimeMs: 0)
+            },
+            monotonicNowMs: { clock.now() }
+        )
+
+        server.dispatchCommand(
+            Data(#"{"type":"request_set_text","requestId":"blocker","text":"hello"}"#.utf8), responder: blocker
+        )
+        wait(for: [started], timeout: 2)
+        clock.advance(by: 1000)
+        server.dispatchCommand(
+            Data(#"{"type":"request_rotate","requestId":"rotate","orientation":"landscape","timeoutMs":5000}"#.utf8), responder: queued
+        )
+        clock.advance(by: 7000)
+        release.signal()
+        wait(for: [blockerDone, dropped], timeout: 2)
+
+        XCTAssertEqual(handled.values, ["blocker"], "the expired rotate must never reach the handler")
+        let response = decodeObject(queued.captured[0])
+        XCTAssertEqual(response?["requestId"] as? String, "rotate")
+        XCTAssertEqual(response?["success"] as? Bool, false)
+        XCTAssertTrue((response?["error"] as? String ?? "").contains("gesture was not started"))
+    }
+
+    func testQueuedCommandWithoutWireTimeoutStillRunsAfterALongWait() {
+        let started = expectation(description: "blocking performer started")
+        let secondDone = expectation(description: "legacy command answered")
+        let release = DispatchSemaphore(value: 0)
+        let clock = FakeMonotonicClock()
+        let handled = ValueBox<String>()
+        let second = CapturingResponder(onEach: { secondDone.fulfill() })
+        let server = makeTestServer(
+            handler: { request in
+                handled.append(request.requestId ?? "nil")
+                if request.requestId == "blocker" {
+                    started.fulfill()
+                    release.wait()
+                }
+                return WebSocketResponse.success(type: "set_text_result", requestId: request.requestId, totalTimeMs: 0)
+            },
+            monotonicNowMs: { clock.now() }
+        )
+
+        server.dispatchCommand(
+            Data(#"{"type":"request_set_text","requestId":"blocker","text":"hello"}"#.utf8),
+            responder: CapturingResponder()
+        )
+        wait(for: [started], timeout: 2)
+        clock.advance(by: 1000)
+        server.dispatchCommand(Data(#"{"type":"request_rotate","requestId":"legacy","orientation":"landscape"}"#.utf8), responder: second)
+        clock.advance(by: 7000)
+        release.signal()
+        wait(for: [secondDone], timeout: 2)
+
+        XCTAssertEqual(handled.values, ["blocker", "legacy"])
+    }
+
+    func testQueuedCommandIsNotExecutedWhenItsConnectionClosedWhileWaiting() {
+        let started = expectation(description: "blocking performer started")
+        let blockerDone = expectation(description: "blocker response")
+        let release = DispatchSemaphore(value: 0)
+        let handled = ValueBox<String>()
+        let open = OSAllocatedUnfairLock(initialState: true)
+        let queued = CapturingResponder()
+        let server = makeTestServer(handler: { request in
+            handled.append(request.requestId ?? "nil")
+            if request.requestId == "blocker" {
+                started.fulfill()
+                release.wait()
+            }
+            return WebSocketResponse.success(type: "set_text_result", requestId: request.requestId, totalTimeMs: 0)
+        })
+
+        server.dispatchCommand(
+            Data(#"{"type":"request_set_text","requestId":"blocker","text":"hello"}"#.utf8),
+            responder: CapturingResponder(onEach: { blockerDone.fulfill() })
+        )
+        wait(for: [started], timeout: 2)
+        server.dispatchCommand(
+            Data(#"{"type":"request_press_button","requestId":"press","action":"home","timeoutMs":5000}"#.utf8),
+            responder: queued, isConnectionOpen: { open.withLock { $0 } }
+        )
+        open.withLock { $0 = false }
+        release.signal()
+        wait(for: [blockerDone], timeout: 2)
+        // A follow-up command on the same chain only runs after the dropped one was skipped.
+        let followUpDone = expectation(description: "follow-up response")
+        server.dispatchCommand(
+            Data(#"{"type":"request_rotate","requestId":"after","orientation":"landscape"}"#.utf8),
+            responder: CapturingResponder(onEach: { followUpDone.fulfill() })
+        )
+        wait(for: [followUpDone], timeout: 2)
+
+        XCTAssertEqual(handled.values, ["blocker", "after"])
+        XCTAssertTrue(queued.captured.isEmpty, "nothing is written to a closed connection")
     }
 
     func testDispatchCommandEncodesAndSendsResponse() {

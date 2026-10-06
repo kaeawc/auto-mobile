@@ -45,6 +45,10 @@ import {
 import { displayTransitions } from "../features/observe/DisplayTransition";
 import type { VideoRecordingDisplayTransition, VideoRecordingPanel } from "../models";
 import { VisualHighlightClient } from "../features/debug/VisualHighlight";
+import {
+  PidFileLiveDaemonSessionIdProvider,
+  readLiveDaemonPidFileSync,
+} from "../daemon/daemonFiles";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
 // Per-platform single-recording caps chosen by resolveMaxDurationSeconds. Android >180s is
@@ -189,6 +193,12 @@ interface VideoRecordingManagerDependencies {
    * missing file.
    */
   statFileSize: (filePath: string) => Promise<number>;
+  /**
+   * Daemon session ids of OTHER live daemons sharing this database (issue
+   * #10043). The startup sweep only interrupts recordings no live peer owns.
+   * May throw when liveness cannot be established; the sweep then fails closed.
+   */
+  resolveLivePeerDaemonSessionIds: () => ReadonlySet<string>;
   resolveAndroidDisplay: (
     device: BootedDevice,
     request?: string,
@@ -443,9 +453,14 @@ async function performVideoRecordingStateInitialization(
     return;
   }
 
+  const orphaned = await listOrphanedRecordings(deps);
+  if (orphaned.length === 0) {
+    return;
+  }
+
   const endedAt = deps.now().toISOString();
 
-  for (const record of active) {
+  for (const record of orphaned) {
     const sizeBytes = await getFileSize(record.filePath);
     const durationMs = calculateDurationMs(record.startedAt, endedAt);
     await deps.recordingRepository.updateRecording(record.recordingId, {
@@ -457,7 +472,50 @@ async function performVideoRecordingStateInitialization(
     });
   }
 
-  logger.info(`[VideoRecording] Marked ${active.length} recording(s) as interrupted after restart`);
+  logger.info(
+    `[VideoRecording] Marked ${orphaned.length} recording(s) as interrupted after restart`,
+  );
+}
+
+/**
+ * The `recording` rows this daemon may prove are orphaned (issue #10043): rows
+ * that no other live daemon owns. A live peer's row must stay `recording` so its
+ * implicit stop still resolves and eviction cannot delete a file it is writing.
+ * Fails closed: when peer liveness cannot be established nothing is interrupted
+ * (a later daemon start sweeps again) rather than risk rewriting a live row.
+ */
+async function listOrphanedRecordings(
+  deps: VideoRecordingManagerDependencies,
+): Promise<VideoRecordingRecord[]> {
+  let livePeerDaemonSessionIds: ReadonlySet<string>;
+  try {
+    livePeerDaemonSessionIds = deps.resolveLivePeerDaemonSessionIds();
+  } catch (error) {
+    logger.warn(
+      `[VideoRecording] Skipping restart interruption sweep; live peer daemons unknown: ${errorMessage(error)}`,
+      error,
+    );
+    return [];
+  }
+  return deps.recordingRepository.listRecordingsWithoutLivePeerOwner(livePeerDaemonSessionIds);
+}
+
+/**
+ * Live daemons other than this process, from the shared pid-file registry. This
+ * process's own record is dropped by pid: its rows predate the first video use
+ * in this process, so they are a previous incarnation's, not a live peer's.
+ */
+function defaultResolveLivePeerDaemonSessionIds(): ReadonlySet<string> {
+  return new PidFileLiveDaemonSessionIdProvider({
+    readPidFile: (pidFilePath) => {
+      const read = readLiveDaemonPidFileSync(pidFilePath);
+      const pid =
+        read.status === "present" && typeof read.data === "object" && read.data !== null
+          ? (read.data as { pid?: unknown }).pid
+          : undefined;
+      return pid === process.pid ? { status: "absent" } : read;
+    },
+  }).collectLiveDaemonSessionIds();
 }
 
 async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDependencies> {
@@ -471,6 +529,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       now: () => new Date(),
       retentionPolicy: resolveVideoRetentionPolicy(),
       statFileSize: getFileSize,
+      resolveLivePeerDaemonSessionIds: defaultResolveLivePeerDaemonSessionIds,
       resolveAndroidDisplay: defaultResolveAndroidDisplay,
     };
   }
@@ -494,6 +553,8 @@ export async function setVideoRecordingManagerDependencies(
     now: deps.now ?? current.now,
     retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
     statFileSize: deps.statFileSize ?? current.statFileSize,
+    resolveLivePeerDaemonSessionIds:
+      deps.resolveLivePeerDaemonSessionIds ?? current.resolveLivePeerDaemonSessionIds,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? current.resolveAndroidDisplay,
   };
   resetVideoRecordingManagerState();
@@ -511,6 +572,8 @@ async function initialVideoRecordingDependencies(
     now: deps.now ?? (() => new Date()),
     retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
     statFileSize: deps.statFileSize ?? getFileSize,
+    resolveLivePeerDaemonSessionIds:
+      deps.resolveLivePeerDaemonSessionIds ?? defaultResolveLivePeerDaemonSessionIds,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? defaultResolveAndroidDisplay,
   };
 }
@@ -668,8 +731,13 @@ async function resolveActiveRecordingId(
     return recordingId;
   }
 
-  const { recordingRepository } = deps;
-  const active = await recordingRepository.listRecordings({ status: "recording" });
+  // Implicit discovery only considers captures this process is running: a
+  // `recording` row owned by a peer daemon is not ours to stop (issue #10043).
+  const { recordingRepository, videoRecorderService } = deps;
+  const ownedIds = new Set(videoRecorderService.listActiveRecordingIds());
+  const active = (await recordingRepository.listRecordings({ status: "recording" })).filter(
+    (record) => ownedIds.has(record.recordingId),
+  );
 
   if (active.length === 0) {
     throw new ActionableError("No active video recording found. Provide recordingId.");

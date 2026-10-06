@@ -22,6 +22,7 @@ type VideoRecordingRepositoryContract = Pick<
   | "updateRecording"
   | "getRecording"
   | "listRecordings"
+  | "listRecordingsWithoutLivePeerOwner"
   | "getLatestRecording"
   | "touchRecording"
   | "deleteRecording"
@@ -29,6 +30,13 @@ type VideoRecordingRepositoryContract = Pick<
 
 export class FakeVideoRecordingRepository implements VideoRecordingRepositoryContract {
   private readonly records = new Map<string, VideoRecordingRecord>();
+  // owner session uuid -> owning daemon session id (the device_sessions link).
+  private readonly sessionDaemons = new Map<string, string>();
+
+  /** Declare which daemon owns a device session (mirrors `device_sessions`). */
+  setSessionDaemon(sessionUuid: string, daemonSessionId: string): void {
+    this.sessionDaemons.set(sessionUuid, daemonSessionId);
+  }
 
   async insertRecording(record: VideoRecordingRecord): Promise<void> {
     // Mirror the real upsert: an overwrite preserves the original created_at (#3498).
@@ -105,6 +113,21 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     }
 
     return results;
+  }
+
+  async listRecordingsWithoutLivePeerOwner(
+    livePeerDaemonSessionIds: ReadonlySet<string>,
+  ): Promise<VideoRecordingRecord[]> {
+    return (await this.listRecordings({ status: "recording" })).filter((record) => {
+      if (livePeerDaemonSessionIds.size === 0) {
+        return true;
+      }
+      if (record.ownerSessionUuid === undefined) {
+        return false;
+      }
+      const daemon = this.sessionDaemons.get(record.ownerSessionUuid);
+      return daemon === undefined || !livePeerDaemonSessionIds.has(daemon);
+    });
   }
 
   async getLatestRecording(): Promise<VideoRecordingRecord | null> {

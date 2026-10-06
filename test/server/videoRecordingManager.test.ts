@@ -412,6 +412,21 @@ describe("videoRecordingManager", () => {
     },
   );
 
+  test("implicit stop resolves to this process's recording, ignoring a peer daemon's row (#10043)", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const peerRow = await fakeRepository.getRecording(active.recordingId);
+    await fakeRepository.insertRecording({
+      ...peerRow!,
+      recordingId: "peer-recording",
+      deviceId: "peer-device",
+    });
+
+    const stopped = await stopVideoRecording();
+
+    expect(stopped.metadata.recordingId).toBe(active.recordingId);
+    expect((await fakeRepository.getRecording("peer-recording"))?.status).toBe("recording");
+  });
+
   test("manual stop clears auto-stop timeout", async () => {
     const active = await startVideoRecording({
       device: testDevice,

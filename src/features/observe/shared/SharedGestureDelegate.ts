@@ -97,33 +97,63 @@ export class SharedGestureDelegate {
     displayId?: number,
     beforeSend?: () => void,
   ): Promise<BaseResult> {
-    const displayParams = this.gestureDisplayParams(displayId);
-    return sendCommand<BaseResult>(this.context, {
+    return sendCommand<BaseResult>(
+      this.context,
+      this.tapCommandOptions({
+        x,
+        y,
+        duration,
+        timeoutMs,
+        perf,
+        frameContext,
+        signal,
+        onDispatch,
+        displayId,
+        beforeSend,
+      }),
+    );
+  }
+
+  /** The tap wire request, shared so a platform can wrap its dispatch contract around it. */
+  protected tapCommandOptions(tap: {
+    x: number;
+    y: number;
+    duration: number;
+    timeoutMs: number;
+    perf?: PerformanceTracker;
+    frameContext?: string;
+    signal?: AbortSignal;
+    onDispatch?: () => void;
+    displayId?: number;
+    beforeSend?: () => void;
+  }): SendCommandOptions<BaseResult> {
+    const displayParams = this.gestureDisplayParams(tap.displayId);
+    return {
       idPrefix: "tap",
       responseType: "tap_coordinates",
       messageType: "request_tap_coordinates",
       params: this.gestureParams("request_tap_coordinates", {
-        x: this.coord(x),
-        y: this.coord(y),
-        duration,
-        frameContext,
+        x: this.coord(tap.x),
+        y: this.coord(tap.y),
+        duration: tap.duration,
+        frameContext: tap.frameContext,
         ...displayParams,
         ...this.tapDiagnosticParams(),
       }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
-      timeoutMs,
-      perf,
+      timeoutMs: tap.timeoutMs,
+      perf: tap.perf,
       errorLabel: "Tap",
       // The caller's own outer deadline may already have fired while
       // `ensureConnected()` was resolving a reconnect/auto-setup (which is
       // not itself cancellable) -- `sendCommand` checks this right after that
       // await and before dispatch, so an already-abandoned tap is never sent
       // to the device after the caller has given up (issue #6306 review).
-      abortSignal: signal,
-      beforeSend,
-      onDispatch,
-    });
+      abortSignal: tap.signal,
+      beforeSend: tap.beforeSend,
+      onDispatch: tap.onDispatch,
+    };
   }
 
   /** Normalize the existing string slot and keep the lock-screen opt-in iOS-only. */

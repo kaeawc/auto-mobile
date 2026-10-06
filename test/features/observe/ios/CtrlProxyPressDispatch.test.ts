@@ -25,6 +25,20 @@ interface PressCase {
 
 const cases: PressCase[] = [
   {
+    name: "coordinate tap",
+    request: (h, s, d) =>
+      new CtrlProxyGestures(h.context).requestTapCoordinates(
+        1,
+        2,
+        50,
+        50,
+        undefined,
+        undefined,
+        s,
+        d,
+      ),
+  },
+  {
     name: "home",
     home: true,
     request: (h, s, d) =>

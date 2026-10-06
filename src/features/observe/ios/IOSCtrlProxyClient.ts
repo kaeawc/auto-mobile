@@ -423,7 +423,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyTapResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
 
   requestDrag(
     x1: number,
@@ -3680,6 +3681,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegated Public Methods - Gestures
   // ===========================================================================
 
+  // oxlint-disable-next-line max-params -- Positional tap signature shared with the delegate.
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -3688,7 +3690,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyTapResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
     return this.gestures.requestTapCoordinates(
       x,
       y,
@@ -3697,6 +3700,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       perf,
       frameContext,
       signal,
+      onDispatch,
     );
   }
 

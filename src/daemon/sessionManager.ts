@@ -2,6 +2,10 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
+import {
+  restoreScreenReaderState,
+  type ScreenReaderRestoreState,
+} from "../features/accessibility/ScreenReaderRestore";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
@@ -131,10 +135,37 @@ interface PendingRotationRestore {
 export interface RotationRestorer {
   restore(state: RotationSessionState, signal?: AbortSignal): Promise<void>;
 }
+/** TalkBack/VoiceOver state recorded before the first `accessibility` toggle in a session (#10146). */
+export type ScreenReaderSessionState = ScreenReaderRestoreState;
+interface PendingScreenReaderRestore {
+  state: ScreenReaderSessionState;
+  removed: boolean;
+  controller: AbortController;
+  clear: () => void;
+  result: Promise<{ pending: Promise<void> | null }>;
+}
+
+export interface ScreenReaderRestorer {
+  restore(state: ScreenReaderSessionState, signal?: AbortSignal): Promise<void>;
+}
 export interface DeviceStateRestorerFactories {
   networkCondition: (device: BootedDevice) => NetworkConditionRestorer;
   clock: (device: BootedDevice) => ClockRestorer;
   rotation?: (device: BootedDevice) => RotationRestorer;
+  screenReader?: (device: BootedDevice) => ScreenReaderRestorer;
+}
+
+/** The injected screen-reader restorer, else the real TalkBack/VoiceOver one. */
+function screenReaderRestorerFactoryFrom(
+  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
+): (device: BootedDevice) => ScreenReaderRestorer {
+  const injected = typeof factories === "function" ? undefined : factories.screenReader;
+  return (
+    injected ??
+    ((device) => ({
+      restore: (state, signal) => restoreScreenReaderState(device, state, signal),
+    }))
+  );
 }
 
 /** Narrow seam for restoring the device-wide network condition on release. */
@@ -173,6 +204,7 @@ export interface SessionCacheData {
   networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
   clock?: ClockSessionState;
   rotation?: RotationSessionState;
+  screenReader?: ScreenReaderSessionState; // Screen-reader state before the session's first toggle, restored on release (#10146)
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
   /**
    * Highest {@link DeviceReadinessLevel} actually achieved by
@@ -846,6 +878,13 @@ export class SessionManager {
   >();
   private readonly rotationRemovalGenerations = new Map<string, number>();
   private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
+  private readonly screenReaderRestorerFactory: (device: BootedDevice) => ScreenReaderRestorer;
+  private readonly pendingScreenReaderRestores = new Map<
+    string,
+    Map<ScreenReaderSessionState, PendingScreenReaderRestore>
+  >();
+  private readonly screenReaderRemovalGenerations = new Map<string, number>();
+  private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release">;
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
@@ -1069,6 +1108,9 @@ export class SessionManager {
         restore: (state, signal) =>
           new Rotate(device, null, this.timer).restoreRotationSettings(state, signal),
       }));
+    this.screenReaderRestorerFactory = screenReaderRestorerFactoryFrom(
+      networkConditionRestorerFactory,
+    );
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -2306,6 +2348,9 @@ export class SessionManager {
     const pendingRotationRestoration = existing.cacheData.rotation
       ? (await this.getPendingRotationRestoration(existing, null)).pending
       : null;
+    const pendingScreenReaderRestoration = existing.cacheData.screenReader
+      ? (await this.getPendingScreenReaderRestoration(existing, null)).pending
+      : null;
     const previousDevice = existing.assignedDevice;
     const pendingRebindCleanup = [
       pendingKeepScreenAwakeRestoration,
@@ -2313,6 +2358,7 @@ export class SessionManager {
       pendingNetworkRestoration,
       pendingClockRestoration,
       pendingRotationRestoration,
+      pendingScreenReaderRestoration,
     ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
     if (pendingRebindCleanup.length > 0) {
       this.trackPendingDeviceCleanup(previousDevice, pendingRebindCleanup);
@@ -3004,6 +3050,9 @@ export class SessionManager {
     const pendingRotationRestoration = session.cacheData.rotation
       ? (await this.getPendingRotationRestoration(session, pendingSetups)).pending
       : null;
+    const pendingScreenReaderRestoration = session.cacheData.screenReader
+      ? (await this.getPendingScreenReaderRestoration(session, pendingSetups)).pending
+      : null;
     return [
       pendingSetups,
       pendingRestoration,
@@ -3011,6 +3060,7 @@ export class SessionManager {
       pendingNetworkRestoration,
       pendingClockRestoration,
       pendingRotationRestoration,
+      pendingScreenReaderRestoration,
     ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
   }
 
@@ -3872,6 +3922,162 @@ export class SessionManager {
     this.pendingRotationRestores.delete(deviceId);
   }
 
+  /** Sequence restoration after any still-draining setup; deduplicate by owned slot (#10146). */
+  private async getPendingScreenReaderRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups) {
+      const deviceId = session.assignedDevice;
+      const generation = this.screenReaderRemovalGenerations.get(deviceId) ?? 0;
+      return {
+        pending: pendingSetups.then(async () => {
+          if ((this.screenReaderRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            delete session.cacheData.screenReader;
+            return;
+          }
+          const result = await this.getPendingScreenReaderRestoration(session, null);
+          await result.pending;
+        }),
+      };
+    }
+    const state = session.cacheData.screenReader;
+    if (!state) {
+      return { pending: null };
+    }
+    const deviceId = session.assignedDevice;
+    let targets = this.pendingScreenReaderRestores.get(deviceId);
+    const existing = targets?.get(state);
+    if (existing) {
+      return existing.result;
+    }
+    if (!targets) {
+      targets = new Map();
+      this.pendingScreenReaderRestores.set(deviceId, targets);
+    }
+    const result = Promise.withResolvers<{ pending: Promise<void> | null }>();
+    const target: PendingScreenReaderRestore = {
+      state,
+      removed: false,
+      controller: new AbortController(),
+      result: result.promise,
+      clear: () => {
+        if (session.cacheData.screenReader === state) {
+          delete session.cacheData.screenReader;
+        }
+      },
+    };
+    // Publish the join point before starting any asynchronous restore work.
+    targets.set(state, target);
+    void this.startScreenReaderRestoration(deviceId, target).then(result.resolve, result.reject);
+    return target.result;
+  }
+
+  private async startScreenReaderRestoration(
+    deviceId: string,
+    target: PendingScreenReaderRestore,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const device: BootedDevice = { name: deviceId, deviceId, platform: target.state.platform };
+    const restore = async () => {
+      target.controller.signal.throwIfAborted();
+      await this.screenReaderRestorerFactory(device).restore(
+        target.state,
+        target.controller.signal,
+      );
+      target.controller.signal.throwIfAborted();
+      target.clear();
+      const targets = this.pendingScreenReaderRestores.get(deviceId);
+      if (targets?.get(target.state) === target) {
+        targets.delete(target.state);
+        if (targets.size === 0) {
+          this.pendingScreenReaderRestores.delete(deviceId);
+        }
+      }
+    };
+    const restoration = restore().then(
+      () => ({ outcome: "restored" as const }),
+      (error: unknown) => ({ outcome: "failed" as const, error }),
+    );
+    const timeout = new Error("Screen reader restoration timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+      label: "Screen reader restoration",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw toActionableError(error, "Screen reader restoration failed");
+    });
+    if (result.outcome === "restored") {
+      return { pending: null };
+    }
+    logger.warn(
+      `Screen reader restore ${result.outcome}; quarantining ${device.deviceId}`,
+      result.outcome === "failed" ? result.error : timeout,
+    );
+    const pending = raceWithDeadline(
+      this.retryScreenReaderRestore(device.deviceId, target, restoration, restore),
+      {
+        timer: this.timer,
+        signal: target.controller.signal,
+        label: "Pending screen reader restoration",
+      },
+    ).catch((error: unknown) => {
+      if (!target.removed) {
+        throw toActionableError(error, "Screen reader restoration failed");
+      }
+      // Proven removal retires ownership; no restoration may reach a replacement.
+      logger.debug(`Retired screen reader restoration on removed device ${device.deviceId}`);
+    });
+    return { pending };
+  }
+
+  /** Same setup drain, deadline, retry delay and pool quarantine as rotation restoration. */
+  private async retryScreenReaderRestore(
+    deviceId: string,
+    target: PendingScreenReaderRestore,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    restore: () => Promise<void>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(`Failed to restore screen reader on ${deviceId}`, result.error);
+    while (!target.removed) {
+      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      if (target.removed) {
+        return;
+      }
+      try {
+        await restore();
+        return;
+      } catch (error) {
+        logger.warn(
+          `Screen reader restore retry failed on ${deviceId}; device remains quarantined`,
+          error,
+        );
+      }
+    }
+  }
+
+  /** Removal retires in-memory ownership; no retries may target a replacement device. */
+  retireScreenReaderRestoration(deviceId: string): void {
+    const targets = this.pendingScreenReaderRestores.get(deviceId);
+    this.screenReaderRemovalGenerations.set(
+      deviceId,
+      (this.screenReaderRemovalGenerations.get(deviceId) ?? 0) + 1,
+    );
+    for (const target of targets?.values() ?? []) {
+      target.removed = true;
+      target.controller.abort();
+      target.clear();
+    }
+    this.pendingScreenReaderRestores.delete(deviceId);
+  }
+
   /**
    * Returned wrapped, never bare (see `getPendingBiometricRestoration`): sequence
    * the network restore after any still-draining setup so it never restores
@@ -4630,6 +4836,53 @@ export class SessionManager {
   }
   runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return this.runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
+  }
+
+  /** Tracked setup retains this exact session even after a bounded release times out (#10146). */
+  trackScreenReaderSessionSetup(
+    session: Session,
+    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
+  ): Promise<void> {
+    const deviceId = session.assignedDevice;
+    const generation = this.screenReaderRemovalGenerations.get(deviceId) ?? 0;
+    return this.trackSessionSetup(session, async () => {
+      try {
+        await createSetup(() => {
+          if ((this.screenReaderRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            throw new ActionableError(
+              "Cannot change the screen reader: device was removed during session setup.",
+            );
+          }
+        });
+      } finally {
+        if ((this.screenReaderRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+          delete session.cacheData.screenReader;
+        } else if (
+          this.sessions.get(session.sessionId) !== session &&
+          session.cacheData.screenReader
+        ) {
+          // The toggle can finish after a bounded release gave up on this session.
+          // Hand the restore to device quarantine so the tool request can settle.
+          const restoration = this.getPendingScreenReaderRestoration(session, null).then(
+            async ({ pending }) => {
+              await pending;
+            },
+          );
+          this.trackPendingDeviceCleanup(deviceId, [restoration]);
+        }
+      }
+    });
+  }
+
+  /** Write-once: the first toggle's pre-change state is the one release restores. */
+  setScreenReader(session: Session, state: ScreenReaderSessionState): void {
+    session.cacheData.screenReader ??= state;
+  }
+  getScreenReader(sessionId: string): ScreenReaderSessionState | undefined {
+    return this.getSession(sessionId)?.cacheData.screenReader;
+  }
+  runScreenReaderMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return this.runDeviceStateMutationExclusive(this.screenReaderMutationQueues, sessionId, fn);
   }
 
   /**

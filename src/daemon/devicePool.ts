@@ -1871,6 +1871,7 @@ export class DevicePool {
     this.notifyDeviceFramesInvalidated(deviceId);
     this.sessionManager.retireClockRestoration(deviceId);
     this.sessionManager.retireRotationRestoration(deviceId);
+    this.sessionManager.retireScreenReaderRestoration(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);

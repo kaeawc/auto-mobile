@@ -327,11 +327,13 @@ const tapOnSearchUntilSchema = z
 
 const screenReaderNavigationSchema = z
   .object({
-    reachable: z.boolean().describe("Whether swipe cursor navigation reached the target"),
+    reachable: z.boolean().describe("Whether the accessibility cursor was moved onto the target"),
     traversalOrder: z.array(elementSchema).describe("Focused nodes in cursor traversal order"),
     focusTrapDetected: z
       .boolean()
-      .describe("Whether cursor navigation got stuck or failed to converge"),
+      .describe(
+        "Always false: a cursor that cannot be moved onto the target fails the call instead",
+      ),
   })
   .passthrough();
 
@@ -561,7 +563,8 @@ export const freshnessSchema = z
   })
   .passthrough();
 
-// Unavailable Android status reads return service + reason without asserting enabled.
+// Unavailable status reads (TalkBack on Android, VoiceOver on iOS) return service + reason
+// without asserting enabled.
 export const accessibilityStateSchema = z
   .object({
     enabled: z.boolean().optional(),

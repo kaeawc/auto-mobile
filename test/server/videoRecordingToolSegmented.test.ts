@@ -1,5 +1,14 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -160,7 +169,11 @@ describe("videoRecording tool segmentation branch", () => {
     setSegmentedSessionTimer(segmentTimer);
   });
 
+  let writeFileSpy: ReturnType<typeof spyOn<typeof fsPromises, "writeFile">> | undefined;
+
   afterEach(() => {
+    writeFileSpy?.mockRestore();
+    writeFileSpy = undefined;
     displayTransitions.reset("tool-foldable");
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
@@ -979,11 +992,28 @@ describe("videoRecording tool segmentation branch", () => {
         const id = recordingId ?? `segment-${segmentStops.length}`;
         segmentStops.push(id);
         return {
-          metadata: makeSegmentMetadata(id),
+          metadata: {
+            ...makeSegmentMetadata(id),
+            ...(segmentStops.length === 2 && { warnings: ["segment 1 warning"] }),
+          },
           evictedRecordingIds: [],
         };
       },
     });
+
+    // Observe the auto-stop's manifest write; the spy still performs the real write. The
+    // deferred adopts the write's own promise, so awaiting it waits for the bytes to land.
+    const manifestWritten = Promise.withResolvers<void>();
+    const realWriteFile = fsPromises.writeFile.bind(fsPromises);
+    writeFileSpy = spyOn(fsPromises, "writeFile").mockImplementation(
+      (...args: Parameters<typeof fsPromises.writeFile>) => {
+        const write = realWriteFile(...args);
+        if (String(args[0]).endsWith("segments.json")) {
+          manifestWritten.resolve(write);
+        }
+        return write;
+      },
+    );
 
     // Fire-and-forget usage: start a segmented recording with a maxDuration bound and
     // never call stop. The session-level auto-stop must fire AND clean itself out of the
@@ -1011,6 +1041,23 @@ describe("videoRecording tool segmentation branch", () => {
 
     // Auto-stop cleared the session's timers and removed it from the registry.
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+
+    // The auto-stop persists the same manifest a caller-driven stop would (#10018): both
+    // segments in order, with the warning the second segment carried.
+    const manifestPath = path.join(fakeSegmentDir, "segments.json");
+    // The write is real I/O, so wait for its own completion rather than polling event-loop
+    // turns: a turn cap can run out before the thread pool answers on a loaded runner.
+    await manifestWritten.promise;
+    const manifest = JSON.parse(await fsPromises.readFile(manifestPath, "utf8")) as {
+      sessionId: string;
+      segmentCount: number;
+      segments: Array<{ index: number; recordingId: string; warnings?: string[] }>;
+    };
+    expect(manifest.sessionId).toBe("first");
+    expect(manifest.segmentCount).toBe(2);
+    expect(manifest.segments.map((segment) => segment.index)).toEqual([0, 1]);
+    expect(manifest.segments[0].recordingId).toBe("first");
+    expect(manifest.segments[1].warnings).toEqual(["segment 1 warning"]);
 
     // A new recording starts on the SAME device (the QA runner's next test case).
     await handler()(androidDevice, {

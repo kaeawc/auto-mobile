@@ -354,19 +354,14 @@ describe("WcagAudit", function () {
       failureMode: "report",
       useBaseline: false,
     };
+    // The capture reports a 50px text size (`textSize`, px), so size is judged from the
+    // text, not from the box (#10039).
     const elements: Element[] = [
-      { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Large Text" },
+      { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Large Text", textSize: 50 },
     ];
 
-    async function contrastViolations(density?: number) {
-      const result = await audit.audit(
-        elements,
-        hierarchy,
-        screenshot,
-        "com.test",
-        config,
-        density,
-      );
+    async function contrastViolations(density?: number, subject: Element[] = elements) {
+      const result = await audit.audit(subject, hierarchy, screenshot, "com.test", config, density);
       return result.violations.filter((v) => v.type === "insufficient-contrast");
     }
 
@@ -384,6 +379,27 @@ describe("WcagAudit", function () {
     it("uses the strict threshold when density is unknown or zero", async function () {
       expect(await contrastViolations(undefined)).toHaveLength(1);
       expect(await contrastViolations(0)).toHaveLength(1);
+    });
+
+    it("keeps the strict 4.5:1 threshold for a 48dp-tall box whose text size is small", async function () {
+      // A 14sp label in a 48dp button: the box is tall, the text is not large.
+      const smallTextInTapTarget: Element[] = [
+        { bounds: { left: 0, top: 0, right: 100, bottom: 48 }, text: "Label", textSize: 14 },
+      ];
+      const violations = await contrastViolations(160, smallTextInTapTarget);
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0].details?.requiredRatio).toBe(4.5);
+    });
+
+    it("does not infer large text from a tap-target-sized box when no text size is reported", async function () {
+      const boxOnly: Element[] = [
+        { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Large Text" },
+      ];
+      const violations = await contrastViolations(160, boxOnly);
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0].details?.requiredRatio).toBe(4.5);
     });
   });
 

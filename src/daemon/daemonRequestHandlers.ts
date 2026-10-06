@@ -373,7 +373,7 @@ function isProxyOwnedSession(session: Session): boolean {
  * whatever its token or lease state, before any ownership or policy logic runs, so the refusal
  * changes nothing on the session (#10054). Requests without the keeper marker are unaffected.
  */
-function refuseCliKeeperOnProxySession(
+export function refuseCliKeeperOnProxySession(
   livenessOwnerKind: string | undefined,
   session: Session,
 ): DaemonMethodResult | undefined {

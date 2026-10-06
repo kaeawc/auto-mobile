@@ -160,12 +160,11 @@ describe("Rotate", () => {
 
       expect(await budgetedRotate["readLiveRotationWithSettleWait"]("portrait", signal)).toBe(0);
 
-      const reads = fakeAdb.getCommandCalls();
-      expect(reads.map((read) => read.command)).toEqual([
-        "shell dumpsys window displays",
-        "shell dumpsys window displays",
-        "shell dumpsys window displays",
-      ]);
+      // A bare settle-wait outside an execute() call re-reads the natural axes per sample.
+      const reads = fakeAdb
+        .getCommandCalls()
+        .filter((read) => read.command === "shell dumpsys window displays");
+      expect(reads).toHaveLength(3);
       expect(reads.map((read) => read.timeoutMs)).toEqual([3000, 2850, 2700]);
       expect(reads.every((read) => read.signal === signal)).toBe(true);
     });

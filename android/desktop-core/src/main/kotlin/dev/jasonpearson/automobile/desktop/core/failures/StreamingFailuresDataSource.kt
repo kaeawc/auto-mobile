@@ -8,29 +8,45 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamSocketClien
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresTimelineRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.runInterruptible
 
 /**
  * Streaming-enabled data source for failures that uses Unix domain sockets for efficient real-time
  * updates and notifications.
  */
 class StreamingFailuresDataSource(
-  private val socketClient: FailuresStreamClient = FailuresStreamSocketClient()
+  private val socketClient: FailuresStreamClient = FailuresStreamSocketClient(),
+  private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : FailuresDataSource, StreamingFailuresDataSourceInterface {
 
-  // Cursor state for polling
+  // Cursor state for polling. Only touched on the caller's context, never inside [onIo].
   private var lastNotificationTimestamp: Long? = null
   private var lastNotificationId: Long? = null
 
+  /**
+   * Runs one blocking socket round trip on [ioDispatcher]. The client calls are blocking connect +
+   * write + readLine (bounded only by the 30 s watchdog), and these functions are called from the
+   * Compose UI thread, so they must never run there (#10142). [runInterruptible] makes coroutine
+   * cancellation (the dashboard leaving composition) interrupt the blocked read instead of leaving
+   * it to run out the watchdog.
+   */
+  private suspend fun <T> onIo(block: () -> T): T = runInterruptible(ioDispatcher, block = block)
+
   override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
     return try {
-      val response = socketClient.pollGroups(FailuresGroupsRequest())
+      val response = onIo { socketClient.pollGroups(FailuresGroupsRequest()) }
       val groups = response.groups?.map { it.toModel() } ?: emptyList()
       Result.Success(groups)
     } catch (e: McpConnectionException) {
       Result.Error(e, "Failures stream socket not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to load failures: ${e.message}")
     }
@@ -41,13 +57,12 @@ class StreamingFailuresDataSource(
     aggregation: TimeAggregation,
   ): Result<TimelineData> {
     return try {
-      val response =
-        socketClient.pollTimeline(
-          FailuresTimelineRequest(
-            dateRange = dateRange.toQueryParam(),
-            aggregation = aggregation.toQueryParam(),
-          )
+      val request =
+        FailuresTimelineRequest(
+          dateRange = dateRange.toQueryParam(),
+          aggregation = aggregation.toQueryParam(),
         )
+      val response = onIo { socketClient.pollTimeline(request) }
 
       val dataPoints =
         response.dataPoints?.map {
@@ -62,6 +77,8 @@ class StreamingFailuresDataSource(
       Result.Success(TimelineData(dataPoints, previousTotals))
     } catch (e: McpConnectionException) {
       Result.Error(e, "Failures stream socket not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to load timeline: ${e.message}")
     }
@@ -74,14 +91,13 @@ class StreamingFailuresDataSource(
     severity: FailureSeverity? = null,
   ): Result<FailureGroupsWithTotals> {
     return try {
-      val response =
-        socketClient.pollGroups(
-          FailuresGroupsRequest(
-            dateRange = dateRange?.toQueryParam(),
-            type = type?.toQueryParam(),
-            severity = severity?.toQueryParam(),
-          )
+      val request =
+        FailuresGroupsRequest(
+          dateRange = dateRange?.toQueryParam(),
+          type = type?.toQueryParam(),
+          severity = severity?.toQueryParam(),
         )
+      val response = onIo { socketClient.pollGroups(request) }
 
       val groups = response.groups?.map { it.toModel() } ?: emptyList()
       val totals =
@@ -92,6 +108,8 @@ class StreamingFailuresDataSource(
       Result.Success(FailureGroupsWithTotals(groups, totals))
     } catch (e: McpConnectionException) {
       Result.Error(e, "Failures stream socket not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to load failures: ${e.message}")
     }
@@ -106,16 +124,15 @@ class StreamingFailuresDataSource(
     limit: Int? = null,
   ): Result<List<FailureNotification>> {
     return try {
-      val response =
-        socketClient.pollNotifications(
-          FailuresNotificationsRequest(
-            sinceTimestamp = lastNotificationTimestamp,
-            sinceId = lastNotificationId,
-            type = type?.toQueryParam(),
-            acknowledged = false,
-            limit = limit,
-          )
+      val request =
+        FailuresNotificationsRequest(
+          sinceTimestamp = lastNotificationTimestamp,
+          sinceId = lastNotificationId,
+          type = type?.toQueryParam(),
+          acknowledged = false,
+          limit = limit,
         )
+      val response = onIo { socketClient.pollNotifications(request) }
 
       // Update cursor
       response.lastTimestamp?.let { lastNotificationTimestamp = it }
@@ -125,6 +142,8 @@ class StreamingFailuresDataSource(
       Result.Success(notifications)
     } catch (e: McpConnectionException) {
       Result.Error(e, "Failures stream socket not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to poll notifications: ${e.message}")
     }
@@ -141,10 +160,12 @@ class StreamingFailuresDataSource(
     if (ids.isEmpty()) return Result.Success(0)
 
     return try {
-      val response = socketClient.acknowledge(ids)
+      val response = onIo { socketClient.acknowledge(ids) }
       Result.Success(response.acknowledgedCount ?: 0)
     } catch (e: McpConnectionException) {
       Result.Error(e, "Failures stream socket not available: ${e.message}")
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       Result.Error(e, "Failed to acknowledge notifications: ${e.message}")
     }
@@ -157,7 +178,12 @@ class StreamingFailuresDataSource(
   override fun notificationsFlow(): Flow<Result<List<FailureNotification>>> =
     notificationsFlowWithParams()
 
-  /** Create a flow that polls for new notifications at regular intervals with custom parameters. */
+  /**
+   * Create a flow that polls for new notifications with custom parameters. The loop is
+   * poll-then-delay, so a slow poll delays the next one rather than stacking a second request, and
+   * cancelling the collector interrupts an in-flight poll. Emissions stay on the collector's
+   * context; only the socket call runs on the IO dispatcher.
+   */
   fun notificationsFlowWithParams(
     pollIntervalMs: Long = 2000,
     type: FailureType? = null,
@@ -177,8 +203,8 @@ class StreamingFailuresDataSource(
     failureGroupsFlowWithParams()
 
   /**
-   * Create a flow that polls for updated failure groups at regular intervals with custom
-   * parameters.
+   * Create a flow that polls for updated failure groups with custom parameters. Same
+   * poll-then-delay, non-stacking, cancel-interrupts contract as [notificationsFlowWithParams].
    */
   fun failureGroupsFlowWithParams(
     pollIntervalMs: Long = 5000,

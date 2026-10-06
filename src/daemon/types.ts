@@ -128,6 +128,23 @@ export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
  * owns. Liveness flows harness -> proxy -> daemon only, so the keeper is refused (#10054).
  */
 export const DAEMON_LIVENESS_OWNER_IS_PROXY_CODE = "liveness_owner_is_proxy";
+/**
+ * The daemon registers the requested tool but its availability gate (debug-only,
+ * embedded-SDK-only, plan-only) rejects the call. Carried as the response `code`
+ * so the proxy never mistakes a gated tool for a stale daemon (issue #10177); a
+ * reconnect cannot change a gate. Daemons that predate it send no code.
+ */
+export const DAEMON_TOOL_UNAVAILABLE_CODE = "daemon_tool_unavailable";
+
+/** True for an error carrying the gate marker (a daemon response `code`, or the proxy's own error). */
+export function isGatedToolErrorCode(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_TOOL_UNAVAILABLE_CODE
+  );
+}
 
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 

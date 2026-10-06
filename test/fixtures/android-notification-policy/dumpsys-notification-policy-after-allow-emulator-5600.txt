@@ -1,0 +1,58 @@
+# grep -c mPolicyAccess: 0
+859:   Condition providers:
+860:     Allowed condition providers:
+861:       com.google.android.apps.diagnosticstool:com.google.android.apps.safetyhub:dev.jasonpearson.automobile.playground:com.google.intelligence.sense:com.google.android.apps.wellbeing:com.google.android.dialer:com.google.android.gms:com.google.android.settings.intelligence:com.google.android.GoogleCamera (user: 0 isPrimary: true)
+862:       com.google.android.as:com.google.android.apps.nexuslauncher (user: 0 isPrimary: false)
+863:     Has user set:
+864:       userId=0 value={com.google.android.apps.diagnosticstool, com.google.android.as/com.google.android.apps.miphone.aiai.common.notification.service.AiAiNotificationAssistantService, com.does.not.exist, com.google.android.apps.safetyhub, dev.jasonpearson.automobile.playground, com.google.android.as, com.google.intelligence.sense, com.google.android.apps.wellbeing, com.google.android.dialer, com.google.android.gms, com.google.android.apps.nexuslauncher, com.google.android.settings.intelligence, com.google.android.GoogleCamera}
+865:     All condition providers (2) enabled for current profiles:
+866:       ComponentInfo{com.google.android.apps.wellbeing/com.google.android.apps.wellbeing.azr.impl.AzrConditionProviderService}
+867:       ComponentInfo{com.google.android.gms/com.google.android.location.settings.DrivingConditionProvider}
+868:     Live condition providers (5):
+869:       ComponentInfo{android/com.android.server.notification.CountdownConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@ec40c4b SYSTEM
+870:       ComponentInfo{android/com.android.server.notification.ScheduleConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@23a4628 SYSTEM
+871:       ComponentInfo{android/com.android.server.notification.EventConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@f203f41 SYSTEM
+872:       ComponentInfo{android/com.android.server.notification.CustomManualConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@146ece6 SYSTEM
+873:       ComponentInfo{com.google.android.apps.wellbeing/com.google.android.apps.wellbeing.azr.impl.AzrConditionProviderService} (user 0): android.service.notification.IConditionProvider$Stub$Proxy@5411057
+874:     Snoozed condition providers (1):
+875:       User: 0
+876:         com.google.android.gms/com.google.android.location.settings.DrivingConditionProvider
+877:     mRecords(0):
+878:     mSystemConditionProviders: {schedule, event, custom_manual, countdown}
+879:     EventConditionProvider:
+880:       mConnected=true
+881:       mRegistered=false
+882:       mBootComplete=true
+883:       mNextAlarmTime=0
+884:       mSubscriptions=
+885:       mTrackers=
+886:         user=0
+887:           mCallback=null
+888:           mRegistered=false
+889:           u=0
+890:     ScheduleConditionProvider:
+891:       mConnected=true
+892:       mRegistered=false
+893:       mSubscriptions=
+894:       snoozed due to alarm: 
+895:       mNextAlarmTime=0
+896:     CustomManualConditionProvider: ENABLED
+897:     CountdownConditionProvider:
+898:       mConnected=true
+899:       mTime=0
+900: 
+# lines naming the playground package:
+840:    2026-10-05T19:50:04.987683 - config: dev.jasonpearson.automobile.playground|removeAutomaticZenRules (ORIGIN_SYSTEM) no changes
+841:    2026-10-05T19:50:04.988049 - set_zen_mode: off,dev.jasonpearson.automobile.playground|removeAutomaticZenRules
+843:    2026-10-05T19:50:17.236213 - config: dev.jasonpearson.automobile.playground|removeAutomaticZenRules (ORIGIN_SYSTEM) no changes
+844:    2026-10-05T19:50:17.236414 - set_zen_mode: off,dev.jasonpearson.automobile.playground|removeAutomaticZenRules
+846:    2026-10-05T19:50:40.968768 - config: dev.jasonpearson.automobile.playground|removeAutomaticZenRules (ORIGIN_SYSTEM) no changes
+847:    2026-10-05T19:50:40.968888 - set_zen_mode: off,dev.jasonpearson.automobile.playground|removeAutomaticZenRules
+849:    2026-10-05T19:50:53.454161 - config: dev.jasonpearson.automobile.playground|removeAutomaticZenRules (ORIGIN_SYSTEM) no changes
+850:    2026-10-05T19:50:53.454960 - set_zen_mode: off,dev.jasonpearson.automobile.playground|removeAutomaticZenRules
+852:    2026-10-05T19:50:59.062707 - config: dev.jasonpearson.automobile.playground|removeAutomaticZenRules (ORIGIN_SYSTEM) no changes
+853:    2026-10-05T19:50:59.062838 - set_zen_mode: off,dev.jasonpearson.automobile.playground|removeAutomaticZenRules
+855:    2026-10-05T21:32:29.403756 - config: dev.jasonpearson.automobile.playground|removeAutomaticZenRules (ORIGIN_SYSTEM) no changes
+856:    2026-10-05T21:32:29.454484 - set_zen_mode: off,dev.jasonpearson.automobile.playground|removeAutomaticZenRules
+861:      com.google.android.apps.diagnosticstool:com.google.android.apps.safetyhub:dev.jasonpearson.automobile.playground:com.google.intelligence.sense:com.google.android.apps.wellbeing:com.google.android.dialer:com.google.android.gms:com.google.android.settings.intelligence:com.google.android.GoogleCamera (user: 0 isPrimary: true)
+864:      userId=0 value={com.google.android.apps.diagnosticstool, com.google.android.as/com.google.android.apps.miphone.aiai.common.notification.service.AiAiNotificationAssistantService, com.does.not.exist, com.google.android.apps.safetyhub, dev.jasonpearson.automobile.playground, com.google.android.as, com.google.intelligence.sense, com.google.android.apps.wellbeing, com.google.android.dialer, com.google.android.gms, com.google.android.apps.nexuslauncher, com.google.android.settings.intelligence, com.google.android.GoogleCamera}

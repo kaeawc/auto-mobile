@@ -57,19 +57,34 @@ describe("SetAndroidNotificationPolicyAccess", () => {
     expect(result.error).toContain("SecurityException");
   });
 
-  test("disallow_dnd succeeds despite error-looking stderr (best-effort)", async () => {
+  test("disallow_dnd fails on SecurityException output (no longer best-effort, #10011)", async () => {
     const factory = new FakeAdbClientFactory();
     const client = factory.getFakeClient();
     client.setCommandResult(
       "shell cmd notification disallow_dnd 'com.example.app'",
       "",
-      "java.lang.SecurityException: ignored",
+      "java.lang.SecurityException: denied",
     );
 
     const action = new SetAndroidNotificationPolicyAccess(androidDevice, factory);
     const result = await action.execute("com.example.app", { allowed: false });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("SecurityException");
+  });
+
+  test("disallow_dnd succeeds on clean output", async () => {
+    const factory = new FakeAdbClientFactory();
+    factory
+      .getFakeClient()
+      .setCommandResult("shell cmd notification disallow_dnd 'com.example.app'", "");
+
+    const result = await new SetAndroidNotificationPolicyAccess(androidDevice, factory).execute(
+      "com.example.app",
+      { allowed: false },
+    );
+
+    expect(result).toEqual({ success: true, appId: "com.example.app" });
   });
 
   test.each([false, true])("adb rejection returns failure for mode %s", async (mode) => {

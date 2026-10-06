@@ -434,16 +434,20 @@ test("two devices and sessions share the byte cap without evicting live paths", 
 });
 
 test("count capacity refuses a new file and never drops a live file", async () => {
-  for (let i = 0; i < 4096; i++) {
+  // A small injected cap exercises the same admission path as the production 4096 without
+  // building and sweeping 4096 fake files (~10 ms, the slowest test in this file).
+  const countCap = 16;
+  protection = new BoundedScreenshotPathProtection(timer, undefined, countCap);
+  for (let i = 0; i < countCap; i++) {
     files.add(`crop-count-${i}.png`, 1, 0);
   }
   await expect(writeFrame("crop-count-overflow.png", 1)).rejects.toMatchObject({
-    countCap: 4096,
-    liveCount: 4096,
+    countCap,
+    liveCount: countCap,
     earliestExpiresAt: 600_000,
   });
   expect(files.existsSync("/screenshots/crop-count-0.png")).toBe(true);
-  expect(files.existsSync("/screenshots/crop-count-4095.png")).toBe(true);
+  expect(files.existsSync(`/screenshots/crop-count-${countCap - 1}.png`)).toBe(true);
 });
 
 test("post-write overshoot rolls back only the new unpublished frame", async () => {

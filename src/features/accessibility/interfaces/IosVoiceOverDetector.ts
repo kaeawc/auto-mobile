@@ -1,6 +1,9 @@
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import type { IOSCtrlProxy } from "../../observe/ios";
 
+export const VOICEOVER_STATE_UNKNOWN_WARNING =
+  "AutoMobile could not determine the current VoiceOver state; used the default gesture. VoiceOver may be enabled.";
+
 /**
  * Interface for iOS VoiceOver detection
  * Detects and caches VoiceOver state on iOS devices via CtrlProxy

@@ -215,6 +215,8 @@ function decodeImeActionResult(message: WebSocketMessage): unknown {
     action: (message as { action?: string }).action,
     totalTimeMs: message.totalTimeMs ?? 0,
     error: message.error,
+    // action_result carries the semantic-link owner-ambiguity note here (#10082).
+    warning: message.warning,
     perfTiming: message.perfTiming,
   };
 }

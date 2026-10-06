@@ -1,4 +1,5 @@
 import { isSessionReleasing } from "../sessionReleaseState";
+import { refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
@@ -269,6 +270,15 @@ function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: str
     sessionManager.getSession(sessionId) ?? sessionManager.getReleasingSession(sessionId);
   if (!session || isSessionReleasing(sessionManager, sessionId, session)) {
     throw new ActionableError(`Session not found: ${sessionId}`);
+  }
+  const refusal = refuseCliKeeperOnProxySession(CLI_KEEPER_LIVENESS_OWNER_KIND, session);
+  if (refusal) {
+    throw new ActionableError(
+      heartbeatFailureMessage(
+        sessionId,
+        Object.assign(new Error(refusal.error), { code: refusal.code }),
+      ),
+    );
   }
   sessionManager.recordHeartbeat(sessionId);
 }

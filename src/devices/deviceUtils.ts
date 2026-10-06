@@ -4,6 +4,7 @@ import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
@@ -239,6 +240,18 @@ export interface PlatformDeviceManager {
    * @returns Promise that resolves when the device has been stopped
    */
   killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<BootedDevice | void>;
+
+  /**
+   * Among the given Android serials, which `adb devices` still lists as
+   * `offline` rather than absent. An offline emulator is invisible to
+   * {@link getBootedDevices} yet its process may still be running, so the
+   * shutdown wait uses this to avoid confirming disappearance too early
+   * (#10074). Optional: managers without an ADB transport omit it.
+   */
+  getAndroidOfflineDeviceIds?(
+    candidateIds: Iterable<string>,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<Set<string>>;
 
   /**
    * Delete an already-resolved platform device representation.
@@ -966,7 +979,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
     if (isRunning) {
-      throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
+      throw new DeviceAlreadyRunningError(
+        `${device.platform} device '${device.name}' is already running`,
+        device.platform,
+        device.deviceId,
+      );
     }
 
     switch (device.platform) {

@@ -336,8 +336,14 @@ function confidence(signals: CandidateSignals): ScreenIdentity["confidence"] {
   return "low";
 }
 
+/**
+ * `fallbackScreen` is the observation's screen size, the same fallback the
+ * observe diff passes to {@link isIosKeyboardVisible} when the hierarchy carries
+ * no usable `screenWidth`/`screenHeight`, so the identity cannot disagree with it.
+ */
 export function deriveIosScreenIdentity(
   viewHierarchy: ViewHierarchyResult | undefined,
+  fallbackScreen?: { width?: number; height?: number },
 ): ScreenIdentity | undefined {
   const root = rootNode(viewHierarchy);
   if (!root) {
@@ -351,7 +357,7 @@ export function deriveIosScreenIdentity(
     selectedTab: findSelectedTab(root),
     ...modal,
     focusedElementId: findFocusedElementId(root),
-    keyboardVisible: isIosKeyboardVisible(viewHierarchy) || undefined,
+    keyboardVisible: isIosKeyboardVisible(viewHierarchy, fallbackScreen) || undefined,
   };
 
   const hasUsefulSignal = Boolean(

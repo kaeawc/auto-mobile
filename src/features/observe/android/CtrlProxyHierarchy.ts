@@ -64,6 +64,17 @@ class HierarchyRunnerError extends Error {
   }
 }
 
+/**
+ * Whether the reply to a sync request answers its caller only and must not replace the
+ * client's shared default-display state (cached hierarchy, screen geometry, device
+ * stream). Observer reads always do; an owner read does when it targets a non-default
+ * logical display. A request with no `displayId`, or `displayId: 0`, keeps owning the
+ * shared cache (#10106).
+ */
+function isolatedHierarchyRequest(request: { observerMode: boolean; displayId?: number }): boolean {
+  return request.observerMode || (request.displayId !== undefined && request.displayId !== 0);
+}
+
 type HierarchyLookupResult = AccessibilityHierarchyResponse & {
   /** Internal cache-serving policy; never exposed as verification freshness. */
   withinCacheServeWindow?: boolean;
@@ -180,6 +191,16 @@ export class CtrlProxyHierarchy {
     );
   }
 
+  /**
+   * A legacy APK does not echo request ids, so a reply can be some other display's push. When the
+   * frame names its display and it is not the requested one, it must not answer the request. A
+   * frame that carries no `displayId` cannot be checked and is accepted.
+   */
+  private matchesRequestedDisplay(hierarchy: CachedHierarchy, displayId?: number): boolean {
+    const replyDisplayId = hierarchy.hierarchy.displayId;
+    return displayId === undefined || replyDisplayId === undefined || replyDisplayId === displayId;
+  }
+
   private matchesFreshHierarchy(
     hierarchy: CachedHierarchy,
     minTimestamp: number,
@@ -189,9 +210,11 @@ export class CtrlProxyHierarchy {
       staleRequestId?: string | null;
       allowStaleResponse: boolean;
       observerMode?: boolean;
+      displayId?: number;
     },
   ): boolean {
     return (
+      this.matchesRequestedDisplay(hierarchy, request.displayId) &&
       this.evaluateMinTimestamp(hierarchy, minTimestamp, useDeviceTimestamp).isFresh &&
       this.matchesHierarchyRequest(
         hierarchy,
@@ -212,8 +235,19 @@ export class CtrlProxyHierarchy {
     );
   }
 
-  private unmarkObserverRequest(observerMode: boolean, requestId?: string): void {
-    if (observerMode && requestId) {
+  private markIsolatedRequest(
+    requestId: string,
+    request: { observerMode: boolean; preserveDisplayState: boolean; displayId?: number },
+  ): void {
+    this.context.markObserverHierarchyRequest?.(requestId, {
+      // An owner read of a non-default display always answers its caller only (#10106).
+      isolateResponse:
+        !request.observerMode || request.preserveDisplayState || request.displayId !== undefined,
+    });
+  }
+
+  private unmarkObserverRequest(isolated: boolean, requestId?: string): void {
+    if (isolated && requestId) {
       this.context.unmarkObserverHierarchyRequest?.(requestId);
     }
   }
@@ -1098,32 +1132,33 @@ export class CtrlProxyHierarchy {
       // so the caller keeps its stale-cache fallback (see
       // getAccessibilityHierarchy) — nothing is discarded here.
       const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
-      let freshData: CachedHierarchy | null;
-      try {
-        freshData = await perf.track("waitForPush", () =>
-          this.waitForFreshData(
-            effectiveTimeoutMs,
-            startTime,
-            false,
-            signal,
-            correlationRequestId,
-            {
-              dispatchSocket,
-              // A stale nudge has a separate id and stream push; it cannot finish a suppressed
-              // caller and release the primary response's token before that response arrives.
-              allowStaleResponse:
-                !request.onRequestId &&
-                !observerMode &&
-                !disableAllFiltering &&
-                displayId === undefined,
-              observerMode,
-              diagnostics,
-            },
+      const freshData = await this.awaitSyncReply(
+        () =>
+          perf.track("waitForPush", () =>
+            this.waitForFreshData(
+              effectiveTimeoutMs,
+              startTime,
+              false,
+              signal,
+              correlationRequestId,
+              {
+                dispatchSocket,
+                // A stale nudge has a separate id and stream push; it cannot finish a suppressed
+                // caller and release the primary response's token before that response arrives.
+                allowStaleResponse:
+                  !request.onRequestId &&
+                  !observerMode &&
+                  !disableAllFiltering &&
+                  displayId === undefined,
+                observerMode,
+                displayId,
+                diagnostics,
+              },
+            ),
           ),
-        );
-      } finally {
-        this.unmarkObserverRequest(observerMode, correlationRequestId);
-      }
+        correlationRequestId,
+        observerMode,
+      );
 
       if (freshData) {
         const duration = this.context.timer.now() - startTime;
@@ -1385,6 +1420,31 @@ export class CtrlProxyHierarchy {
   }
 
   /**
+   * Run a sync reply wait and release its isolation marker when no reply can follow. An observer
+   * request always releases. An owner read of another display keeps its marker through a timeout
+   * or abort so the late reply is still recognised as isolated and dropped; only a runner error
+   * frame (which answers the request) releases it. `handleHierarchyUpdate` consumes the marker
+   * with the reply, a socket close clears it, and the client caps how many it retains.
+   */
+  private async awaitSyncReply(
+    wait: () => Promise<CachedHierarchy | null>,
+    requestId: string | undefined,
+    observerMode: boolean,
+  ): Promise<CachedHierarchy | null> {
+    let releaseMarker = observerMode;
+    try {
+      return await wait();
+    } catch (error) {
+      releaseMarker ||= error instanceof HierarchyRunnerError;
+      throw error;
+    } finally {
+      if (releaseMarker) {
+        this.unmarkObserverRequest(true, requestId);
+      }
+    }
+  }
+
+  /**
    * Wait for fresh data to arrive via WebSocket.
    */
   private async waitForFreshData(
@@ -1397,12 +1457,13 @@ export class CtrlProxyHierarchy {
       dispatchSocket?: WebSocket | null;
       allowStaleResponse: boolean;
       observerMode?: boolean;
+      displayId?: number;
       diagnostics?: HierarchySyncDiagnostics;
     } = {
       allowStaleResponse: true,
     },
   ): Promise<CachedHierarchy | null> {
-    const { dispatchSocket, allowStaleResponse, observerMode } = options;
+    const { dispatchSocket, allowStaleResponse, observerMode, displayId } = options;
     const diagnostics = options.diagnostics ?? {};
     const combinedSignal = combineWithAmbientAbort(signal);
     // Reject dispatch on a socket that closed or was replaced during ADB fallback.
@@ -1424,6 +1485,7 @@ export class CtrlProxyHierarchy {
         staleRequestId,
         allowStaleResponse,
         observerMode,
+        displayId,
       });
 
     return new Promise<CachedHierarchy | null>((resolve, reject) => {
@@ -1615,12 +1677,11 @@ export class CtrlProxyHierarchy {
     }
 
     const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
+    const isolated = isolatedHierarchyRequest({ observerMode, displayId });
     try {
       onRequestId?.(requestId);
-      if (observerMode) {
-        this.context.markObserverHierarchyRequest?.(requestId, {
-          isolateResponse: preserveDisplayState || displayId !== undefined,
-        });
+      if (isolated) {
+        this.markIsolatedRequest(requestId, { observerMode, preserveDisplayState, displayId });
       }
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering, displayId }),
@@ -1631,7 +1692,7 @@ export class CtrlProxyHierarchy {
       );
       return requestId;
     } catch (error) {
-      if (observerMode) {
+      if (isolated) {
         // A failed send cannot produce a correlated frame.
         this.context.unmarkObserverHierarchyRequest?.(requestId);
       }

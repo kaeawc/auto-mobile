@@ -6,6 +6,7 @@ import {
   type FocusNavigationDriverFactory,
 } from "../../../src/features/talkback/FocusNavigationExecutor";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import type { Element } from "../../../src/models/Element";
 import { FakeFocusNavigationDriver } from "../../fakes/FakeFocusNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -149,6 +150,67 @@ describe("FocusNavigationExecutor (accessibility-focus actions, #10209)", () => 
       expect(failure!.message).not.toContain("screen changed");
     });
 
+    test("a cursor that shows up on the third read-back still succeeds, polling no further", async () => {
+      const { driver, executor, timer } = setup(traversal(12), 0);
+      driver.autoFocusOnAction = false;
+      // The device applies the request late: two stale reads, then the cursor is on the target.
+      driver.onFocusAction = () => {
+        const stale = {
+          elements: driver.elements,
+          focusedIndex: 0,
+          totalCount: 12,
+          totalTimeMs: 1,
+        };
+        driver.queueTraversalResult(stale);
+        driver.queueTraversalResult(stale);
+        driver.focusedIndex = 10;
+      };
+      const observed: Array<string | undefined> = [];
+
+      await expect(
+        executor.navigateToElement(
+          "device-1",
+          { resourceId: "e10" },
+          { onFocusObserved: (focus) => observed.push(focus?.["resource-id"]) },
+        ),
+      ).resolves.toBe(true);
+
+      expect(driver.getFocusRequestCount()).toBe(1);
+      expect(timer.getSleepHistory()).toEqual([100, 100, 100]);
+      expect(observed).toEqual(["e0", "e10"]);
+    });
+
+    test("a cursor that never arrives fails after the bounded poll, with one request and no tap", async () => {
+      const { driver, executor, timer } = setup(traversal(3), 0);
+      driver.autoFocusOnAction = false;
+
+      const failure = await failureOf(executor.navigateToElement("device-1", { resourceId: "e2" }));
+
+      expect(failure).not.toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("did not move onto the target");
+      expect(failure!.message).toContain("No tap was sent");
+      expect(driver.getFocusRequestCount()).toBe(1);
+      expect(timer.getSleepHistory()).toEqual([100, 100, 100, 100, 100]);
+    });
+
+    test("a request whose time budget runs out mid-poll stops polling and says the cursor moved", async () => {
+      const { driver, executor, timer } = setup(traversal(3), 0);
+      driver.autoFocusOnAction = false;
+
+      const failure = await failureOf(
+        runWithAbortSignal(
+          undefined,
+          () => executor.navigateToElement("device-1", { resourceId: "e2" }),
+          { getDeadlineMs: () => 250, textState: { dispatched: () => () => {} } },
+        ),
+      );
+
+      expect(failure!.message).toContain("Request time budget exhausted during focus navigation.");
+      expect(failure!.message).toContain("partially applied: 1 accessibility-focus request");
+      // Reads at 100 ms and 200 ms; the wait that reaches 300 ms is past the deadline.
+      expect(timer.getSleepHistory()).toEqual([100, 100, 100]);
+    });
+
     test("a screen that changed during navigation with the cursor unmoved is a failure naming it", async () => {
       const { driver, executor } = setup(traversal(3), 0);
       driver.autoFocusOnAction = false;
@@ -208,6 +270,41 @@ describe("FocusNavigationExecutor (accessibility-focus actions, #10209)", () => 
       expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
       expect(failure!.message).toContain("shared by 2 elements");
       expect(driver.getFocusRequestCount()).toBe(0);
+    });
+
+    test("a test tag shared by several rows cannot be addressed, so the cursor is never moved to row 0", async () => {
+      const { driver, executor } = setup([], null);
+      const rows: Element[] = [0, 1, 2].map((index) => ({
+        bounds: makeElement("row", index).bounds,
+        "test-tag": "row",
+      }));
+      driver.setElements(rows, null);
+
+      const failure = await failureOf(
+        executor.navigateToElement("device-1", { testTag: "row", bounds: rows[2]!.bounds }),
+      );
+
+      expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain(`test tag "row" is shared by 3 elements`);
+      expect(driver.getFocusRequestCount()).toBe(0);
+      expect(driver.focusedIndex).toBeNull();
+    });
+
+    test("a test tag shared across different resource ids still addresses the one matching node", async () => {
+      const { driver, executor } = setup([], null);
+      const rows: Element[] = [0, 1, 2].map((index) => ({
+        bounds: makeElement("row", index).bounds,
+        "resource-id": `row${index}`,
+        "test-tag": "row",
+      }));
+      driver.setElements(rows, null);
+
+      await expect(
+        executor.navigateToElement("device-1", { resourceId: "row1", bounds: rows[1]!.bounds }),
+      ).resolves.toBe(true);
+
+      expect(driver.getFocusRequestCount()).toBe(1);
+      expect(driver.focusedIndex).toBe(1);
     });
 
     test("a runner without node selectors cannot be asked to focus a test-tag target", async () => {

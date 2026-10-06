@@ -68,6 +68,26 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     expect(driver.actionHistory).toEqual([]);
   });
 
+  test("rows sharing a test tag use the precise tap and never move the cursor to the first row (#10209)", async () => {
+    const { driver, tap } = harness();
+    const tagged: Element[] = rows.map((row, index) => ({
+      bounds: row.bounds,
+      text: `Row ${index}`,
+      "test-tag": "row",
+    }));
+    driver.setElements(tagged, 0);
+
+    await tap.executeAndroidTap("tap", 50, 345, 500, tagged[3], undefined, {
+      screenReaderNavigation: true,
+    });
+
+    expect(driver.focusHistory).toEqual([]);
+    expect(driver.focusedIndex).toBe(0);
+    // The precise tap: a focus touch at the element, then one activation.
+    expect(driver.tapHistory.length).toBeGreaterThan(0);
+    expect(driver.doubleTapHistory).toHaveLength(1);
+  });
+
   test("a refused focus action fails the call and sends no tap (#10209)", async () => {
     const { driver, tap } = harness();
     driver.focusResult = {

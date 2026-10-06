@@ -144,13 +144,17 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
   }
 
   private addresses(request: FocusRequest, element: Element): boolean {
+    // Like the device's node lookup, every field the request names must match the node.
     const resourceId = request.selector?.resourceId ?? request.resourceId;
-    const nodeId = element["resource-id"];
-    if (resourceId && nodeId && (nodeId === resourceId || nodeId.endsWith(`:id/${resourceId}`))) {
-      return true;
-    }
     const testTag = request.selector?.testTag;
-    return Boolean(testTag && element["test-tag"] === testTag);
+    if (!resourceId && !testTag) {
+      return false;
+    }
+    const nodeId = element["resource-id"];
+    const idMatches =
+      !resourceId ||
+      Boolean(nodeId && (nodeId === resourceId || nodeId.endsWith(`:id/${resourceId}`)));
+    return idMatches && (!testTag || element["test-tag"] === testTag);
   }
 
   private getElementKey(element: Element): string | null {

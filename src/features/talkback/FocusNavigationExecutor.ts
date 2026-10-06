@@ -19,6 +19,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import type { AccessibilityNodeSelector, A11yActionResult } from "../observe/android/types";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import {
+  ambiguousTestTagError,
   nodeActionTargetError,
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -234,6 +235,8 @@ export function screenFingerprint(elements: readonly Element[]): string {
 
 export class FocusNavigationExecutor {
   private static readonly DEFAULT_FOCUS_SETTLE_MS = 100;
+  /** How long after the request the cursor may take to show up on the target. */
+  private static readonly FOCUS_READBACK_BOUND_MS = 500;
 
   private matcher: FocusElementMatcher;
   private timer: Timer;
@@ -313,22 +316,52 @@ export class FocusNavigationExecutor {
       );
     }
 
-    await this.requestFocus(driver, target, options, progress);
-    const settleMs = Math.max(
-      0,
-      options.focusSettleMs ?? FocusNavigationExecutor.DEFAULT_FOCUS_SETTLE_MS,
+    await this.requestFocus(driver, target, before.orderedElements, options, progress);
+    const after = await this.readCursorAfterFocusRequest(
+      driver,
+      targetSelector,
+      options,
+      progress.focusRequests,
     );
-    if (settleMs > 0) {
-      await awaitWhileRequestIsLive(this.timer.sleep(settleMs), signal);
-    }
-    assertFocusNavigationLive(signal, this.timer, progress.focusRequests);
-
-    const after = await this.verifyNavigationState(driver, targetSelector, true, signal);
     options.onFocusObserved?.(after.currentFocus, after.orderedElements);
     if (after.reachedTarget) {
       return true;
     }
     throw this.unreachedTargetError(before, after, targetSelector);
+  }
+
+  /**
+   * Read the cursor back after a focus request. TalkBack applies the request asynchronously, so a
+   * slow device may still show the old cursor on the first read: poll every settle interval until
+   * the cursor is on the target or the readback bound is spent, stopping at the first read that
+   * shows it. Cancellation and the request deadline are checked before every read.
+   */
+  private async readCursorAfterFocusRequest(
+    driver: FocusNavigationDriver,
+    targetSelector: FocusElementSelector,
+    options: NavigationOptions,
+    focusRequests: number,
+  ): Promise<NavigationVerification> {
+    const { signal } = options;
+    const stepMs = Math.max(
+      0,
+      options.focusSettleMs ?? FocusNavigationExecutor.DEFAULT_FOCUS_SETTLE_MS,
+    );
+    const maxReads =
+      stepMs > 0
+        ? Math.max(1, Math.ceil(FocusNavigationExecutor.FOCUS_READBACK_BOUND_MS / stepMs))
+        : 1;
+    let after: NavigationVerification;
+    for (let read = 1; ; read += 1) {
+      if (stepMs > 0) {
+        await awaitWhileRequestIsLive(this.timer.sleep(stepMs), signal);
+      }
+      assertFocusNavigationLive(signal, this.timer, focusRequests);
+      after = await this.verifyNavigationState(driver, targetSelector, true, signal);
+      if (after.reachedTarget || read >= maxReads) {
+        return after;
+      }
+    }
   }
 
   /**
@@ -338,6 +371,7 @@ export class FocusNavigationExecutor {
   private async requestFocus(
     driver: FocusNavigationDriver,
     target: Element,
+    traversal: readonly Element[],
     options: NavigationOptions,
     progress: { focusRequests: number },
   ): Promise<void> {
@@ -349,7 +383,9 @@ export class FocusNavigationExecutor {
           "moved onto it without a touch gesture.",
       );
     }
-    const targetError = await nodeActionTargetError(selector, driver, target);
+    const targetError =
+      ambiguousTestTagError(selector, traversal) ??
+      (await nodeActionTargetError(selector, driver, target));
     if (targetError) {
       throw new FocusNavigationUnavailableError(
         `The TalkBack cursor cannot be moved onto the target: ${targetError}.`,

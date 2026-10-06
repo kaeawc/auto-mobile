@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.DragResult
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.OverlayScalar
@@ -489,6 +490,31 @@ class CtrlProxyMessageHandlerTest {
     assertEquals(
       dev.jasonpearson.automobile.protocol.InsertTextState("éx", false, 2, 2),
       lastCall.second.last(),
+    )
+  }
+
+  @Test
+  fun `dispatches the optional IME commit budget`() = runTest {
+    dispatch(
+      """{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}"""
+    )
+    assertEquals(
+      "requestCommitText" to
+        listOf<Any?>("commit-1", "long text", null, ImeTextDelivery.COMMIT, 14_500L),
+      lastCall,
+    )
+    dispatch("""{"type":"request_commit_text","requestId":"commit-2","text":"short"}""")
+    assertEquals(
+      "requestCommitText" to listOf<Any?>("commit-2", "short", null, ImeTextDelivery.COMMIT, null),
+      lastCall,
+    )
+    dispatch(
+      """{"type":"request_commit_text","requestId":"commit-3","text":"abc","delivery":"keyEvents","timeoutMs":9000}"""
+    )
+    assertEquals(
+      "requestCommitText" to
+        listOf<Any?>("commit-3", "abc", null, ImeTextDelivery.KEY_EVENTS, 9_000L),
+      lastCall,
     )
   }
 

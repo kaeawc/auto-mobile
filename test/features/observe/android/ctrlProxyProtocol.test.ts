@@ -22,6 +22,27 @@ import {
   normalizeCtrlProxyMilliseconds,
 } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 
+describe("IME commit budget serialization", () => {
+  test("includes the optional budget and preserves legacy omission", () => {
+    const request: CtrlProxyRequest = {
+      type: "request_commit_text",
+      requestId: "commit-1",
+      text: "long text",
+      timeoutMs: 14_500,
+    };
+    expect(serializeCtrlProxyRequest(request)).toBe(
+      '{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}',
+    );
+    expect(
+      serializeCtrlProxyRequest({
+        type: "request_commit_text",
+        requestId: "commit-1",
+        text: "long text",
+      }),
+    ).toBe('{"type":"request_commit_text","requestId":"commit-1","text":"long text"}');
+  });
+});
+
 describe("Android millisecond serialization", () => {
   const gestures = (value: number): CtrlProxyRequest[] => [
     { type: "request_tap_coordinates", requestId: "ms", x: 1.5, y: 2.5, duration: value },

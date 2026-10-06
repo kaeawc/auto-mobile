@@ -233,6 +233,7 @@ data class RequestCommitText(
   val text: String,
   val priorImeId: String? = null,
   val delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
+  val timeoutMs: Long? = null,
 ) : WebSocketRequest()
 
 @Serializable

@@ -149,6 +149,12 @@ describe("DeviceLockRepository device identity", () => {
 });
 
 describe("device_locks device_identity migration", () => {
+  beforeAll(async () => {
+    // Warm the partial-chain template outside the per-test timing budget.
+    const template = await createTestDatabase({ throughMigration: "2026_07_24_000_device_locks" });
+    await template.destroy();
+  });
+
   test("keeps legacy rows with a null identity, never replayed, and is idempotent", async () => {
     const db = await createTestDatabase({ throughMigration: "2026_07_24_000_device_locks" });
     try {

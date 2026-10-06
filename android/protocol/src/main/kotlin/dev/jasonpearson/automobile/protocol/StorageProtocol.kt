@@ -145,6 +145,12 @@ sealed class StorageResponse {
   data class SubscriptionResult(
     val fileName: String,
     val subscribed: Boolean,
+    /**
+     * Identifies the inspected app's in-memory storage driver. Its change listeners, queues and
+     * sequence counter die with the app process, so a different token than the one a subscriber saw
+     * earlier means the app restarted (#10069). Null from older SDKs.
+     */
+    val processToken: String? = null,
   ) : StorageResponse()
 
   /** Response for getChanges request. */
@@ -153,6 +159,8 @@ sealed class StorageResponse {
   data class Changes(
     val fileName: String,
     val changes: List<StorageChangeEvent>,
+    /** Same token as [SubscriptionResult.processToken]; null from older SDKs. */
+    val processToken: String? = null,
   ) : StorageResponse()
 
   /** Response for getListenedFiles request. */

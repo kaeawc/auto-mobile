@@ -25,13 +25,14 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
-import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
+import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { dropMcpRecording } from "./mcpRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
+import { ToolUnavailableError } from "./toolUnavailableError";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
@@ -922,9 +923,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       const registeredTool = ToolRegistry.getRegisteredTool(name);
-      const hint = registeredTool
-        ? ToolRegistry.getToolAvailabilityGateReasons(registeredTool).join("; ")
-        : getRemovedToolHint(name);
+      if (registeredTool) {
+        // Registered but gated: say so structurally so the daemon proxy does not
+        // mistake this for a stale daemon and reset the shared connection (#10177).
+        throw new ToolUnavailableError(
+          name,
+          ToolRegistry.getToolAvailabilityGateReasons(registeredTool),
+        );
+      }
+      const hint = getRemovedToolHint(name);
       throw new ActionableError(`Unknown tool: ${name}${hint ? `. ${hint}` : ""}`);
     }
 
@@ -1239,7 +1246,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         executionTracker.endExecution(execution.id);
       }
     };
-    const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
+    const requestSignal = combineRequestAbortSignals(
+      execution.abortController.signal,
+      extra.signal,
+    );
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
         ? {

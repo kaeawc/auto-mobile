@@ -150,11 +150,18 @@
             let host: NSRegularExpression
             let path: NSRegularExpression
             let method: String
+            let limit: Int?
             var remaining: Int?
             let statusCode: Int
             let responseHeaders: [String: String]
             let responseBody: String
             let contentType: String
+
+            /// Same `mockId` and an unchanged definition: the host re-sent a rule this store already holds.
+            func isSameDefinition(as other: CompiledRule) -> Bool {
+                mockId == other.mockId && limit == other.limit && method == other.method
+                    && host.pattern == other.host.pattern && path.pattern == other.path.pattern
+            }
         }
 
         private struct State: Sendable {
@@ -176,6 +183,9 @@
             self.dateProvider = dateProvider
         }
 
+        /// Replace the rule list. The host re-sends its whole list on every change and reconnect, so a rule
+        /// this store already holds keeps its use counter instead of being re-armed from the incoming
+        /// `remaining` (issue #10060). A changed rule, or a new app process, starts with a fresh counter.
         func setRules(_ dtos: [NetworkMockRuleDTO]) {
             let compiled = dtos.compactMap { dto -> CompiledRule? in
                 do {
@@ -186,6 +196,7 @@
                         host: host,
                         path: path,
                         method: dto.method,
+                        limit: dto.limit,
                         remaining: dto.remaining ?? dto.limit,
                         statusCode: dto.statusCode,
                         responseHeaders: dto.responseHeaders,
@@ -198,7 +209,17 @@
                 }
             }
 
-            state.withLock { $0.rules = compiled }
+            state.withLock { state in
+                let previous = state.rules
+                state.rules = compiled.map { rule in
+                    guard let held = previous.first(where: { $0.isSameDefinition(as: rule) }) else {
+                        return rule
+                    }
+                    var carried = rule
+                    carried.remaining = held.remaining
+                    return carried
+                }
+            }
         }
 
         public func setFaultRules(_ dtos: [NetworkFaultRuleDTO]) {

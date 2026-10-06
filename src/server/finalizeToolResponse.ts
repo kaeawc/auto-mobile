@@ -349,6 +349,15 @@ export interface FinalizeToolResponseContext {
    * is large enough to risk client-side truncation.
    */
   artifactMode?: ObservationArtifactMode;
+  /**
+   * Whether this response will actually be handed to the client (issue #10081).
+   * `false` when the request was already cancelled or timed out, so the response
+   * is thrown away. A discarded response must not advance the diff baseline, the
+   * display revision or the "last inline-sent" action-metadata snapshot: the next
+   * delivered response would otherwise be reduced against blocks the client never
+   * received. Reads are unaffected. Defaults to `true`.
+   */
+  delivered?: boolean;
 }
 
 type ObservationDiffMode = "diff" | "full";
@@ -784,19 +793,30 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         ...writeObservationArtifact(ctx, sanitizedPayload),
       };
     } else {
-      const observation = sanitizedPayload.observation;
-      sanitizedPayload = {
-        ...sanitizedPayload,
-        observation:
-          isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
-            ? writeObserveDiffBodyArtifact(ctx, observation)
-            : writeObservationArtifact(ctx, observation),
-      };
+      const inlinePayload = sanitizedPayload;
+      const observation = inlinePayload.observation;
+      sanitizedPayload = artifactWriteOrInline(
+        ctx,
+        "observation",
+        () => ({
+          ...inlinePayload,
+          observation:
+            isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
+              ? writeObserveDiffBodyArtifact(ctx, observation)
+              : writeObservationArtifact(ctx, observation),
+        }),
+        inlinePayload,
+      );
     }
   }
 
   if (artifactMode(ctx) === "always") {
-    sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
+    sanitizedPayload ??= artifactWriteOrInline(
+      ctx,
+      "response",
+      () => artifactNonObservationPayload(ctx, payload),
+      undefined,
+    );
   }
 
   // Hard ceiling (issue #6870). Spilling `observation` bounds only the
@@ -840,9 +860,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   if (!sanitizedPayload) {
-    if (canRecordActionMetadata(ctx)) {
-      recordInlineActionMetadata(payload, ctx, actionMetadataDeviceId(payload, ctx.name));
-    }
+    commitDeliveredActionMetadata(ctx, payload, payload);
     return response;
   }
 
@@ -852,25 +870,88 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload,
     envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
   );
-  if (canRecordActionMetadata(ctx)) {
-    recordInlineActionMetadata(sanitizedPayload, ctx, actionMetadataDeviceId(payload, ctx.name));
-  }
-  if (pendingBaselineUpdate) {
-    ctx.baselineStore!.set(
-      pendingBaselineUpdate.sessionUuid,
-      pendingBaselineUpdate.observation,
-      renderedDisplayRevision,
-    );
-  } else if (ctx.sessionUuid && renderedDisplayRevision !== undefined) {
-    ctx.baselineStore?.setDisplayRevision?.(
-      ctx.sessionUuid,
-      renderedDisplayRevision,
-      renderedDisplayKey,
-      renderedDisplayGeneration,
-    );
-  }
+  commitDeliveredActionMetadata(ctx, payload, sanitizedPayload);
+  commitDeliveredBaseline(ctx, pendingBaselineUpdate, {
+    revision: renderedDisplayRevision,
+    key: renderedDisplayKey,
+    generation: renderedDisplayGeneration,
+  });
 
   return response;
+}
+
+/**
+ * Tools whose artifact write failure stays loud. They are read-only: nothing has
+ * happened on the device, so an error result invites at most a harmless re-read.
+ */
+const READ_ONLY_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["observe", "getNetworkGraph"]);
+
+/**
+ * Run an artifact write whose failure must not erase a completed action (#10080).
+ *
+ * For a tool that can mutate the device the action has already run, so throwing
+ * here would return `isError` for work that happened and invite a duplicate retry
+ * (the same rule the hard-ceiling spill follows, #6870). On failure warn and serve
+ * `inline` instead. Read-only tools keep the loud failure.
+ */
+function artifactWriteOrInline<T>(
+  ctx: FinalizeToolResponseContext,
+  what: string,
+  write: () => T,
+  inline: T,
+): T {
+  if (READ_ONLY_ARTIFACT_TOOLS.has(ctx.name)) {
+    return write();
+  }
+  try {
+    return write();
+  } catch (error) {
+    logger.warn(
+      `finalizeToolResponse: could not write the ${what} artifact for ${ctx.name}; serving it inline: ${errorMessage(error)}`,
+      error,
+    );
+    return inline;
+  }
+}
+
+/** Skipped for a response the client will never receive (#10081). */
+function commitDeliveredActionMetadata(
+  ctx: FinalizeToolResponseContext,
+  originalPayload: Record<string, unknown>,
+  servedPayload: Record<string, unknown>,
+): void {
+  if (ctx.delivered !== false && canRecordActionMetadata(ctx)) {
+    recordInlineActionMetadata(
+      servedPayload,
+      ctx,
+      actionMetadataDeviceId(originalPayload, ctx.name),
+    );
+  }
+}
+
+/** Skipped for a response the client will never receive (#10081). */
+function commitDeliveredBaseline(
+  ctx: FinalizeToolResponseContext,
+  pending: { sessionUuid: string; observation: ObserveResult } | undefined,
+  display: {
+    revision: number | undefined;
+    key: string | undefined;
+    generation: number | undefined;
+  },
+): void {
+  if (ctx.delivered === false) {
+    return;
+  }
+  if (pending) {
+    ctx.baselineStore!.set(pending.sessionUuid, pending.observation, display.revision);
+  } else if (ctx.sessionUuid && display.revision !== undefined) {
+    ctx.baselineStore?.setDisplayRevision?.(
+      ctx.sessionUuid,
+      display.revision,
+      display.key,
+      display.generation,
+    );
+  }
 }
 
 /** Only these independently compared blocks are omitted; join keys and screen identity stay inline. */

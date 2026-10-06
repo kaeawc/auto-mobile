@@ -158,6 +158,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
         startScreen: "Home",
         targetScreen: "Detail",
       }),
+      recordEdgeReplayOutcome: () => {},
       getKnownScreens: async () => ["Home", "Detail"],
     } as unknown as NavigationGraphService;
     const uiStateSetup: UIStateSetup = {

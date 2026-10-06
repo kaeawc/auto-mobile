@@ -20,6 +20,7 @@ import {
   TestExecutionStatus,
   TestStepRecord,
 } from "../db/testExecutionRepository";
+import { PlanPartitioner } from "../utils/plan/PlanPartitioner";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 import { decodePlanContent } from "../utils/plan/planYaml";
@@ -124,6 +125,12 @@ export interface PlanExecutionDependencies {
 interface VideoState {
   warnings?: string[];
   androidSession?: AndroidSegmentedPlanVideoSession;
+  /**
+   * True when the Android session rotates segments from its own timer rather than from the
+   * per-step hook. Multi-device plans run their tracks concurrently and never call the step
+   * hook, so only the session's timer can rotate ahead of screenrecord's 180 s cap (#10026).
+   */
+  androidTimerDriven?: boolean;
   iosRecordingId?: string;
 }
 
@@ -751,7 +758,12 @@ export class PlanExecutionOrchestrator {
             ? { rollbackVideoRecordingStart: this.videoRecorder.rollbackVideoRecordingStart }
             : {}),
         });
-        await session.startFirstSegment();
+        // Sequential plans rotate between steps (never mid-step). A partitioned plan's tracks
+        // run concurrently, so no step boundary is quiescent and executeDeviceTrack never calls
+        // the hook; the session's own timer rotates instead, and one session-level timer cannot
+        // be raced by several tracks.
+        state.androidTimerDriven = PlanPartitioner.isMultiDevicePlan(plan);
+        await (state.androidTimerDriven ? session.start() : session.startFirstSegment());
         state.androidSession = session;
         this.perfLog("Android segmented video recording started");
       } else {
@@ -801,7 +813,7 @@ export class PlanExecutionOrchestrator {
     if (this.request.captureObserveSteps) {
       options.captureObserveSteps = this.request.captureObserveSteps;
     }
-    if (video.androidSession) {
+    if (video.androidSession && !video.androidTimerDriven) {
       options.onBeforePlanStep = video.androidSession.onBeforePlanStep;
     }
     return Object.keys(options).length > 0 ? options : undefined;

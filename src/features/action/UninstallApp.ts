@@ -35,6 +35,7 @@ import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
@@ -129,7 +130,7 @@ export class UninstallApp {
 
     switch (this.device.platform) {
       case "ios":
-        return perf.track("iOSUninstall", () => this.executeiOS(packageName));
+        return perf.track("iOSUninstall", () => this.executeiOS(packageName, signal));
       case "android":
         return perf.track("androidUninstall", () =>
           this.executeAndroid(packageName, keepData, userId, signal),
@@ -144,11 +145,17 @@ export class UninstallApp {
    * Uninstall an iOS app by bundle identifier
    * @param bundleId - The bundle identifier to uninstall
    */
-  private async executeiOS(bundleId: string): Promise<UninstallAppResult> {
+  private async executeiOS(bundleId: string, signal?: AbortSignal): Promise<UninstallAppResult> {
+    // The explicit request signal and the ambient one both mean "the caller left".
+    const abortSignal = combineWithAmbientAbort(signal);
     // Set only once the pre-uninstall listing actually showed the app. An error
     // before that point (e.g. the listing throwing) leaves install state unknown,
     // so the catch below omits `wasInstalled` rather than asserting it.
     let observedInstalled = false;
+    // Set just before `simctl uninstall` is dispatched. From then on the device
+    // state may have changed whatever the outcome (a killed client does not undo
+    // an uninstall CoreSimulator already accepted), so the cache must go stale.
+    let uninstallDispatched = false;
     try {
       // Check if app is installed. Keep the cache disabled so the pre-uninstall
       // check always reflects live device state (the previous executor-arg path
@@ -161,6 +168,9 @@ export class UninstallApp {
       // success no-op (issue #5621). Consume the detailed result so a failed
       // listing is reported as a failure instead.
       const preCheck = await listApps.executeIosDetailedResult();
+      // A listing that failed because the request was cancelled is a cancellation,
+      // not an "unknown install state" failure.
+      throwIfAborted(abortSignal);
       if (!preCheck.successful) {
         return {
           success: false,
@@ -188,16 +198,24 @@ export class UninstallApp {
       }
 
       observedInstalled = true;
+      // Nothing destructive has been dispatched yet: a cancelled request stops
+      // here with the app still installed (issue #10077).
+      throwIfAborted(abortSignal);
+      uninstallDispatched = true;
       await resolveIosDeviceBackend(this.device.deviceId, {
         simctl: this.simctl,
         deviceAppUninstaller: this.deviceAppUninstaller,
-      }).uninstallApp(bundleId);
+      }).uninstallApp(bundleId, abortSignal);
       await this.markInstalledAppsCacheStale();
+      uninstallDispatched = false;
 
       // Verify the app was uninstalled. A listing that fails here is
       // inconclusive rather than a contradiction: the uninstall command itself
       // already succeeded, so trust it and only log the lost verification.
       const verification = await listApps.executeIosDetailedResult();
+      // Parity with Android: a cancelled verification is cancellation, never a
+      // silent "trusting the uninstall command" success.
+      throwIfAborted(abortSignal);
       if (!verification.successful) {
         logger.warn(
           `[UninstallApp] Could not verify removal of ${bundleId}: the post-uninstall listing failed; trusting the uninstall command`,
@@ -228,6 +246,12 @@ export class UninstallApp {
         keepData: false, // iOS doesn't support keeping data during uninstall
       };
     } catch (error) {
+      if (uninstallDispatched) {
+        // Indeterminate or failed uninstall (e.g. killed at the timeout): the app
+        // may already be gone, so the installed-apps cache cannot stay fresh.
+        await this.markInstalledAppsCacheStale();
+      }
+      throwIfAborted(abortSignal);
       logger.warn(`[UninstallApp] iOS uninstall failed: ${errorMessage(error)}`);
       return {
         success: false,

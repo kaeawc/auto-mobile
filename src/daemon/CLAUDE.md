@@ -89,14 +89,19 @@ fakeTimer.advance(10000);
 
 ## Outbound write bound
 
-RPC sockets cap queued bytes at 1 MiB, allowing one larger frame when the queue
-is empty; a following write over the cap is rejected. The bound is bytes-only:
-bytes measure memory, and each frame is ~100+ bytes, so a frame-count cap adds
-state without tightening memory. Rejection calls `onFlushed` once with
-`DaemonSocketQueueOverflowError` (`reason: "queue_overflow"`, `queuedBytes`,
-`limitBytes`), then destroys the socket. Once a write returns false, inbound data,
-`drain`, or a successful write callback leaving `writableLength` zero refreshes
-idle; write calls do not.
+RPC sockets cap the bytes queued BEHIND the frame at the head of the outbound
+queue at 16 MiB (`src/daemon/outboundWriteGuard.ts`); the head frame is never
+counted while it drains, so a response over 1 MiB (a base64 screenshot) does not
+make the next heartbeat reply or notification destroy a reading client. A frame
+onto an empty queue is always admitted; a write that would push the bytes behind
+the head over the cap is rejected. The bound is bytes-only: bytes measure memory.
+Rejection calls `onFlushed` once with `DaemonSocketQueueOverflowError`
+(`reason: "queue_overflow"`, `queuedBytes`, `limitBytes`), then destroys the
+socket. A stall watchdog on the injected timer (armed above 1 MiB queued) destroys
+a reader whose queue freed no bytes for 60 s, logging the reason; progress is seen
+per completed frame, so it must outlast one large frame's drain. Once a write
+returns false, inbound data, `drain`, or a successful write callback leaving
+`writableLength` zero refreshes idle; write calls do not.
 
 ## Device health marker
 

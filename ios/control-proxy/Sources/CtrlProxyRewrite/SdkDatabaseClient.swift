@@ -4,6 +4,11 @@ import Foundation
 /// The shared endpoint resolver verifies simulator identity before any database data
 /// is decoded. Fixed endpoint/transport injection retains the existing test seam.
 public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
+    /// How long a relayed request waits for the SDK's answer. Sent with `/db/execute` as
+    /// `relayTimeoutMs` so the SDK stops waiting on a locked database, and never starts a write, before
+    /// this runs out (#10166).
+    static let requestTimeout: TimeInterval = 2
+
     private let baseURL: URL
     private let endpointResolver: SdkEndpointResolver?
     private let transport: any HTTPRequesting
@@ -15,7 +20,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
         let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 2
+        config.timeoutIntervalForRequest = Self.requestTimeout
         config.timeoutIntervalForResource = 5
         config.waitsForConnectivity = false
         self.init(
@@ -41,12 +46,13 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         async throws -> SdkExecuteSqlResult
     {
         try await post(
-            path: "/db/execute",
+            path: Self.executePath,
             body: ExecuteSqlRequest(
                 databasePath: databasePath,
                 query: query,
                 sessionId: sessionId,
-                mutationToken: mutationToken
+                mutationToken: mutationToken,
+                relayTimeoutMs: Int(Self.requestTimeout * 1000)
             )
         )
     }
@@ -132,6 +138,9 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
             throw SdkDatabaseError.wrongSimulator(expectedUdid: expected, actualUdid: actual)
         } catch let error as SdkDatabaseError {
             throw error
+        } catch let error as URLError where path == Self.executePath && Self.mayHaveReachedTheSdk(error) {
+            // `/db/execute` can carry a write; after a send, silence is not failure.
+            throw SdkDatabaseError.outcomeIndeterminate
         } catch {
             throw SdkDatabaseError.unavailable("\(Self.unavailableMessage): \(error.localizedDescription)")
         }
@@ -139,6 +148,13 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
 
     /// The SDK's `busy_lock` wire code (HTTP 503), kept in step with `SdkDatabaseRouteHandler.busyCode`.
     static let busyCode = "busy_lock"
+
+    private static let executePath = "/db/execute"
+
+    /// Timeout and a dropped connection both happen after the request left the runner.
+    private static func mayHaveReachedTheSdk(_ error: URLError) -> Bool {
+        error.code == .timedOut || error.code == .networkConnectionLost
+    }
 
     private static let unavailableMessage =
         "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
@@ -153,6 +169,7 @@ private struct ExecuteSqlRequest: Codable {
     let query: String
     let sessionId: String?
     let mutationToken: String?
+    let relayTimeoutMs: Int
 }
 
 private struct DatabasePathRequest: Codable {

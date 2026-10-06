@@ -252,6 +252,14 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     public func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {
+        executeSQL(databasePath: databasePath, query: query, deadline: nil)
+    }
+
+    /// `deadline` is a `SdkDatabaseBudget.now()` instant after which the runner's relay has given up
+    /// on the request. A statement that needs the write connection never starts, and never waits on
+    /// the app's lock, past it: otherwise it could commit after the caller was told it failed and a
+    /// retry would apply it twice (#10166).
+    func executeSQL(databasePath: String, query: String, deadline: TimeInterval?) -> SQLExecutionResult {
         operationLock.lock()
         defer { operationLock.unlock() }
 
@@ -286,6 +294,11 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             )
         }
 
+        if classification.requiresWriteConnection {
+            guard let waitMs = writeWaitMs(deadline: deadline) else { return Self.busyResult() }
+            sqlite3_busy_timeout(db, waitMs)
+        }
+
         if classification.returnsRows {
             return executeQuery(db: db, query: trimmed, includeRowsAffected: !classification.readOnly)
         } else {
@@ -294,6 +307,15 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     // MARK: - Internal Helpers
+
+    /// How long a write may wait for the app's lock: the write budget, cut to what is left before
+    /// `deadline`. Nil when the deadline has already passed.
+    private func writeWaitMs(deadline: TimeInterval?) -> Int32? {
+        guard let deadline else { return busyBudget.writeMs }
+        let remaining = deadline - SdkDatabaseBudget.now()
+        guard remaining > 0 else { return nil }
+        return min(busyBudget.writeMs, Int32(min(remaining * 1000, Double(Int32.max)).rounded(.up)))
+    }
 
     /// Returns the cached connection for `path` while the file at `path` is still the file it was
     /// opened on. A deleted or replaced file (#10164) closes both cached connections for the path and

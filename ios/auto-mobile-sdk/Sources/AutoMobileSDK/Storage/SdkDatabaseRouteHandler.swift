@@ -11,12 +11,21 @@
         let query: String
         let sessionId: String?
         let mutationToken: String?
+        /// How long the runner waits for this response. Optional: older runners do not send it.
+        let relayTimeoutMs: Int?
 
-        init(databasePath: String, query: String, sessionId: String? = nil, mutationToken: String? = nil) {
+        init(
+            databasePath: String,
+            query: String,
+            sessionId: String? = nil,
+            mutationToken: String? = nil,
+            relayTimeoutMs: Int? = nil
+        ) {
             self.databasePath = databasePath
             self.query = query
             self.sessionId = sessionId
             self.mutationToken = mutationToken
+            self.relayTimeoutMs = relayTimeoutMs
         }
 
         init(from decoder: Decoder) throws {
@@ -25,6 +34,7 @@
             query = try container.decode(String.self, forKey: .query)
             sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
             mutationToken = try container.decodeIfPresent(String.self, forKey: .mutationToken)
+            relayTimeoutMs = try container.decodeIfPresent(Int.self, forKey: .relayTimeoutMs)
         }
     }
 
@@ -234,7 +244,9 @@
             }, diagnostic: result.diagnostic))
         }
 
-        func handleExecuteSql(body: Data) -> SdkRouteResponse {
+        /// `receivedAt` is when the server accepted the request, before any queueing, so time spent
+        /// waiting behind other database work counts against the relay's timeout.
+        func handleExecuteSql(body: Data, receivedAt: TimeInterval = SdkDatabaseBudget.now()) -> SdkRouteResponse {
             guard let driver = DatabaseInspector.shared.getDriver() else {
                 return error(statusCode: 503, code: "db_inspection_disabled")
             }
@@ -261,7 +273,7 @@
             {
                 return error(statusCode: 403, code: "mutation_not_authorized")
             }
-            let result = driver.executeSQL(databasePath: request.databasePath, query: request.query)
+            let result = execute(request, driver: driver, receivedAt: receivedAt)
             if result.diagnostic?.code == Self.busyCode {
                 return error(statusCode: 503, code: Self.busyCode)
             }
@@ -321,6 +333,26 @@
                 return (result.tables, result.diagnostic)
             }
             return (driver.getTables(databasePath: databasePath), nil)
+        }
+
+        private func execute(
+            _ request: SdkExecuteSqlRequest,
+            driver: DatabaseDriver,
+            receivedAt: TimeInterval
+        )
+            -> SQLExecutionResult
+        {
+            guard let sqlite = driver as? SQLiteDatabaseDriver else {
+                return driver.executeSQL(databasePath: request.databasePath, query: request.query)
+            }
+            return sqlite.executeSQL(
+                databasePath: request.databasePath,
+                query: request.query,
+                deadline: SdkDatabaseBudget.mutationDeadline(
+                    receivedAt: receivedAt,
+                    relayTimeoutMs: request.relayTimeoutMs
+                )
+            )
         }
 
         private func classify(_ request: SdkExecuteSqlRequest, driver: DatabaseDriver) -> SQLClassification {

@@ -100,6 +100,10 @@
         private var bindPlanner = SdkBindPlanner()
         private let listenerFactory: (UInt16) throws -> any SdkHierarchyListener
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
+        /// Database and preference routes run here, not on `queue`: a statement waiting on the app's lock
+        /// must not stop `/health` and the hierarchy routes from answering (#10166). Serial, so work
+        /// on one database keeps its order.
+        private let storageQueue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.storage")
         private weak var tracker: (any SdkHierarchyServing)?
         private let databaseRouteHandler = SdkDatabaseRouteHandler()
         private let preferenceRouteHandler = SdkPreferenceRouteHandler()
@@ -350,13 +354,18 @@
             case .highlight:
                 handleHighlight(connection, initialData: requestData)
             case .dbExecute:
+                let receivedAt = SdkDatabaseBudget.now()
                 handleBodyRoute(connection, initialData: requestData) {
-                    self.databaseRouteHandler.handleExecuteSql(body: $0)
+                    self.databaseRouteHandler.handleExecuteSql(body: $0, receivedAt: receivedAt)
                 }
             case .dbList:
-                sendRouteResponse(connection, databaseRouteHandler.handleListDatabases())
+                storageQueue.async {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+                }
             case .dbCapabilities:
-                sendRouteResponse(connection, databaseRouteHandler.handleCapabilities())
+                storageQueue.async {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
+                }
             case .dbTables:
                 handleBodyRoute(connection, initialData: requestData) {
                     self.databaseRouteHandler.handleListTables(body: $0)
@@ -563,7 +572,9 @@
             route: @escaping @Sendable (Data) -> SdkRouteResponse
         ) {
             withRequestBody(connection, initialData: initialData) { server, body in
-                server.sendRouteResponse(connection, route(body ?? Data()))
+                server.storageQueue.async {
+                    server.sendRouteResponse(connection, route(body ?? Data()))
+                }
             }
         }
 

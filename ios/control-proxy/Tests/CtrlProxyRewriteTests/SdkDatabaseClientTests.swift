@@ -115,6 +115,48 @@ final class SdkDatabaseClientTests: XCTestCase {
         )
     }
 
+    // MARK: - #10166: a write that was sent and not answered is indeterminate, not failed
+
+    func testExecuteSqlTimeoutAfterSendIsIndeterminateNotUnavailable() async {
+        for outcome in [StubOutcome.timedOut, .connectionLost] {
+            let stub = StubHTTPTransport([outcome])
+            await assertThrows(
+                { _ = try await self.makeClient(stub).executeSQL(databasePath: "/db", query: "INSERT", sessionId: nil)
+                },
+                { if case .outcomeIndeterminate = $0 { return true } else { return false } },
+                "a timeout on /db/execute must be indeterminate (\(outcome))"
+            )
+        }
+        let message = SdkDatabaseError.outcomeIndeterminate.localizedDescription
+        XCTAssertFalse(message.contains("embed the AutoMobile SDK"), message)
+        XCTAssertTrue(message.contains("indeterminate"), message)
+        XCTAssertTrue(message.contains("Do not retry automatically"), message)
+    }
+
+    func testReadOnlyEndpointTimeoutStaysUnavailable() async {
+        let stub = StubHTTPTransport([.timedOut])
+        await assertThrows(
+            { _ = try await self.makeClient(stub).listTables(databasePath: "/db") },
+            {
+                if case let .unavailable(m) = $0 { return m.hasPrefix("database inspection unavailable") }
+                else { return false } },
+            "idempotent reads keep the existing unavailable mapping"
+        )
+    }
+
+    func testExecuteSqlSendsTheRelayTimeoutSoTheSdkCanStopBeforeIt() async throws {
+        let stub = StubHTTPTransport(
+            status: 200,
+            body: Data(#"{"queryType":"SELECT","columns":[],"rows":[],"rowsAffected":0}"#.utf8)
+        )
+        _ = try await makeClient(stub).executeSQL(databasePath: "/db", query: "SELECT 1", sessionId: nil)
+
+        let request = try XCTUnwrap(stub.recordedRequests.first)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(json["relayTimeoutMs"] as? Int, 2000)
+        XCTAssertEqual(SdkDatabaseClient.requestTimeout, 2, "the SDK's default assumes a 2 s relay timeout")
+    }
+
     func testExecuteSqlBadResponseOnNonHTTP() async {
         let stub = StubHTTPTransport([.nonHTTPResponse])
         await assertThrows(

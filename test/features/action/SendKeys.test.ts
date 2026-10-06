@@ -4617,6 +4617,155 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.timer.getSleepHistory().slice(0, 1)).toEqual([150]);
       expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
     });
+
+    // #9953 x #9948 composition: an empty field legitimately stays empty after the clear, so it
+    // is never an "unchanged clear".
+    describe("a replace on an empty field whose clear leaves it empty", () => {
+      const emptyFields: Array<[string, (h: ReturnType<typeof harness>) => void]> = [
+        ["empty text", () => {}],
+        [
+          "placeholder hint text",
+          (h) => {
+            h.seq.observer.execute = async (options) => {
+              h.seq.options.push(options);
+              h.order.push("read");
+              return focusedAndroidObservation("Type here", { "hint-text": "Type here" }, 0);
+            };
+          },
+        ],
+      ];
+
+      test.each(emptyFields)(
+        "eventLast with only a tail key event: %s gives no warning and one read before the key",
+        async (_name, arrange) => {
+          const h = harness(
+            [""],
+            [{ text: null, isShowingHintText: false, selectionStart: -1, selectionEnd: -1 }],
+          );
+          arrange(h);
+          const result = await h.executor.type({
+            action: "type",
+            text: "0",
+            operation: "replace",
+            mode: "eventLast",
+          });
+          expect(result).toMatchObject({ success: true, resolvedMode: "eventLast" });
+          expect(result.warning).toBeUndefined();
+          // Focus check + pre-clear read only: no settle polls, no post-type read.
+          expect(h.seq.reads()).toBe(2);
+          expect(h.timer.getSleepHistory()).toEqual([]);
+          expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
+        },
+      );
+
+      test("eventLast with a prefix replaces it directly with no clear and no read of the field", async () => {
+        const h = harness(
+          [""],
+          [{ text: null, isShowingHintText: false, selectionStart: -1, selectionEnd: -1 }],
+        );
+        const result = await h.executor.type({
+          action: "type",
+          text: "abc0",
+          operation: "replace",
+          mode: "eventLast",
+        });
+        expect(result).toMatchObject({ success: true });
+        expect(result.warning).toBeUndefined();
+        expect(h.order).not.toContain("clear");
+        expect(h.calls).toContain("replace:abc");
+        expect(h.seq.reads()).toBe(1);
+      });
+
+      test("eventAll adds no post-type read for an unchanged-clear check", async () => {
+        // Focus check, pre-clear, then the single letter-case read-back ("Émile" has letters).
+        const h = harness([""]);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Émile",
+          operation: "replace",
+          mode: "eventAll",
+        });
+        expect(result.success).toBe(true);
+        expect(result.warning).toBeUndefined();
+        expect(h.seq.reads()).toBe(3);
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      });
+    });
+
+    describe("a replace on a password field (#9941 pre-flight is insert-only)", () => {
+      const secretText = "hunter2-old";
+      const passwordHarness = () => {
+        const h = harness([""]);
+        h.seq.observer.execute = async (options) => {
+          h.seq.options.push(options);
+          h.order.push("read");
+          return focusedAndroidObservation(secretText, { password: "true" }, 0);
+        };
+        return h;
+      };
+
+      const warnedText = (calls: unknown[][]) =>
+        calls.map((call) => call.map((part) => String(part)).join(" ")).join("\n");
+
+      test("auto replace still routes to a11y replace: one routing read, no clear, no refusal", async () => {
+        const h = passwordHarness();
+        const result = await h.executor.type({
+          action: "type",
+          text: "contraseña1!A",
+          operation: "replace",
+        });
+        expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+        expect(h.calls).toContain("replace:contraseña1!A");
+        expect(h.order).toEqual(["read"]);
+      });
+
+      test("explicit eventAll replace verifies nothing it can read and never echoes the old value", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const info = spyOn(logger, "info").mockImplementation(() => {});
+        const debug = spyOn(logger, "debug").mockImplementation(() => {});
+        try {
+          const h = passwordHarness();
+          const result = await h.executor.type({
+            action: "type",
+            text: "Pass1",
+            operation: "replace",
+            mode: "eventAll",
+          });
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeUndefined();
+          // Focus check, pre-clear (unreadable password), then the letter-case read-back.
+          expect(h.seq.reads()).toBe(3);
+          expect(h.order.filter((entry) => entry === "clear")).toHaveLength(1);
+          const logged = warnedText([...warn.mock.calls, ...info.mock.calls, ...debug.mock.calls]);
+          expect(logged).toContain("Focused text is unreadable before the clear");
+          expect(logged).not.toContain(secretText);
+          expect(JSON.stringify(result)).not.toContain(secretText);
+        } finally {
+          warn.mockRestore();
+          info.mockRestore();
+          debug.mockRestore();
+        }
+      });
+
+      test("explicit eventLast replace with an empty prefix does not read or echo the old value", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const h = passwordHarness();
+          const result = await h.executor.type({
+            action: "type",
+            text: "0",
+            operation: "replace",
+            mode: "eventLast",
+          });
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeUndefined();
+          expect(h.seq.reads()).toBe(2);
+          expect(warnedText(warn.mock.calls)).not.toContain(secretText);
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    });
   });
 
   describe("#9887 eventLast proves the caret from the pre- and post-insert state", () => {

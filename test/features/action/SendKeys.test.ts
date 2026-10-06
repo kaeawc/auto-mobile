@@ -1894,6 +1894,101 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
+  test("auto password typing refuses undeliverable text before typing anything (#9941)", async () => {
+    const cases = [
+      { text: "contraseña1", apiLevel: 36, codePoint: "U+00F1" },
+      { text: "Passw0rd!", apiLevel: 30, codePoint: "U+0050" },
+      { text: "пароль", apiLevel: 36, codePoint: "U+043F" },
+    ];
+    for (const { text, apiLevel, codePoint } of cases) {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(apiLevel);
+      const textClient = createTextClient({
+        commitViaIme: async () => ({ success: false, error: "password input rejected" }),
+      });
+      textClient.client.insert = async (value) => {
+        textClient.calls.push(`insert:${value}`);
+        return {
+          success: false,
+          error: "Cannot insert text into a password field without exposing its original value",
+        };
+      };
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation("", { password: "true" })),
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text });
+
+      expect(result.success).toBe(false);
+      expect(result.partialApplication).toBeUndefined();
+      expect(result.error).toContain("Nothing was typed");
+      expect(result.error).toContain(codePoint);
+      expect(result.error).toContain('operation: "replace"');
+      expect(result.error).not.toContain(text);
+      expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input key"))).toEqual([]);
+      expect(textClient.calls).toEqual([]);
+      expect(textClient.commitViaImeCalls).toEqual([]);
+    }
+  });
+
+  test("auto password typing lists a bounded set of distinct undeliverable characters", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(36);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("", { password: "true" })),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({ action: "type", text: "ñññáéíóúü" });
+
+    expect(result.error).toContain("7 distinct character(s)");
+    expect(result.error).toContain("U+00F1, U+00E1, U+00E9, U+00ED, U+00F3 and 2 more");
+  });
+
+  test("auto password typing still delivers key-event text and uppercase on API 31+", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(31);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("", { password: "true" })),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({ action: "type", text: "Pw1" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(adb.getExecutedCommands()).toContain(
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_P",
+    );
+  });
+
+  test("auto password replace is not pre-checked and sets the whole value", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(30);
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("secret", { password: "true" })),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "contraseña1!A",
+      operation: "replace",
+    });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+    expect(textClient.calls).toContain("replace:contraseña1!A");
+  });
+
   test("explicit IME mode retains password rejection", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -3965,7 +4060,9 @@ describe("SendKeys post-action capture boundary", () => {
 });
 
 describe("SendKeys Android non-idempotent outcomes", () => {
-  const modes = ["a11y", "eventLast", "eventAll", "autoPassword", "autoOlder"] as const;
+  // Auto typing into a password field never reaches insert with undeliverable text: it is
+  // refused before dispatch (#9941), covered by "auto password typing refuses undeliverable text".
+  const modes = ["a11y", "eventLast", "eventAll", "autoOlder"] as const;
   for (const mode of modes) {
     test.each(["timeout", "disconnect", "abort", "refusal", "notConnected", "success", "preAbort"])(
       `${mode}: insert %s`,
@@ -3998,11 +4095,7 @@ describe("SendKeys Android non-idempotent outcomes", () => {
           }
           return pending;
         };
-        const observation = focusedAndroidObservation(
-          "",
-          mode === "autoPassword" ? { password: "true" } : {},
-          1,
-        );
+        const observation = focusedAndroidObservation("", {}, 1);
         const observer = createObserver(observation);
         const executor = new DefaultSendKeysCommandExecutor(
           android,

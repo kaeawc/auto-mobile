@@ -1295,6 +1295,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       args: typeof args === "object" && args !== null ? args : undefined,
       internal: internalCall,
       signal,
+      timer,
       createSettleObserve: () => (device ? this.createSettleObserve(device, timer) : undefined),
     });
 

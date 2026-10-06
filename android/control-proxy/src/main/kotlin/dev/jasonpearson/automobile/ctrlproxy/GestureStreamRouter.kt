@@ -67,9 +67,10 @@ internal class GestureStreamRouter(
       gesture.disconnected = true
       sessions.remove(gestureId)
       pendingEndRequests.remove(gestureId)?.forEach { pending ->
-        // Unattributed ends retain the existing disconnect behavior: no reply.
+        // The owner and any other disconnected requester cannot be answered. An unattributed end
+        // (not from a socket) cannot be the owner's, so it is answered like any other waiter.
         val requester = pending.requester
-        if (requester != null && requester !== owner && requester.isConnected) {
+        if (requester == null || (requester !== owner && requester.isConnected)) {
           onResult(pending.requestId, false, "Gesture owner disconnected")
         }
       }

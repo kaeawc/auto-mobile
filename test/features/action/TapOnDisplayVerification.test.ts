@@ -20,6 +20,10 @@ import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionRe
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 
 const device = {
   deviceId: "tap-display-verification",
@@ -87,6 +91,8 @@ function harness(
     productionCapture?: boolean;
     manualTimer?: boolean;
     vision?: boolean;
+    /** true: TalkBack on, null: state unknown; default off. */
+    talkBack?: boolean | null;
   } = {},
 ) {
   const transitions = new FakeDisplayTransitionReader();
@@ -129,7 +135,17 @@ function harness(
   capture.read = (_index, request) => ({ ...(request.displayId === 2 ? current : decoy) });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
+  const detector = new FakeAccessibilityDetector();
+  if (options.talkBack === true) {
+    detector.setDetectionResult(device.deviceId, true);
+  } else if (options.talkBack === null) {
+    detector.setDefaultResult(null);
+  }
+  const talkBackDriver = new FakeTalkBackNavigationDriver();
   const action = new TapOnElement(device, executor, {
+    accessibilityDetector: detector,
+    talkBackStrategy: new TalkBackTapStrategy({ timer }),
+    talkBackDriverFactory: { createDriver: () => talkBackDriver },
     screenshotCapturer: screenshots,
     visionConfig: {
       enabled: options.vision ?? false,
@@ -176,6 +192,7 @@ function harness(
   );
   return {
     action,
+    executor,
     capture,
     screenshots,
     timer,
@@ -185,6 +202,7 @@ function harness(
     client,
     capability,
     observation,
+    talkBackDriver,
     setDefault: (next: ViewHierarchyResult) => {
       decoy = next;
     },
@@ -650,13 +668,49 @@ describe("tapOn display verification", () => {
     });
     h.action.observedInteraction = async (run, options) => {
       const result = await run(h.observation());
-      floor = options.observationTimestampProvider?.();
+      floor = options.observationHostTimestampProvider?.();
       expect(options.display).toBe("external");
       return { ...result, observation: h.observation() };
     };
     expect((await h.execute({ ensureChecked: true })).success).toBe(true);
     expect(floor).toBe(200);
   });
+
+  for (const skewMs of [0, -20_000, 5_000]) {
+    test(`ensureChecked floor is the tap time in the device clock with one device read (skew ${skewMs}ms, #9879)`, async () => {
+      const h = harness(true, { checked: false });
+      let deviceClockReads = 0;
+      h.executor.getDeviceTimestampMs = async () => {
+        deviceClockReads++;
+        return h.timer.now() + skewMs;
+      };
+      let tapDeviceStamp = 0;
+      h.onDispatch(() => {
+        h.timer.setCurrentTime(200);
+        tapDeviceStamp = h.timer.now() + skewMs;
+        h.setCurrent(hierarchy({ checked: true }));
+      });
+      let floor: number | undefined;
+      const interaction = h.action.observedInteraction.bind(h.action);
+      h.action.observedInteraction = async (run, options) => {
+        const result = await interaction(run, options);
+        floor = options.observationHostTimestampProvider?.();
+        return result;
+      };
+      const floorsBefore = h.observe.getExecuteMinTimestamps().length;
+
+      expect((await h.execute({ ensureChecked: true })).success).toBe(true);
+
+      // Exactly the action-start read: nothing is read from the device after the tap.
+      expect(deviceClockReads).toBe(1);
+      expect(floor).toBe(200);
+      // The first post-action read is floored at the tap time in the device clock
+      // (host tap time plus the skew measured at action start), so a push stamped
+      // right after the tap (tap + 1) is accepted rather than forcing a fresh wait.
+      const [, postActionFloor] = h.observe.getExecuteMinTimestamps().slice(floorsBefore);
+      expect(postActionFloor).toBe(tapDeviceStamp);
+    });
+  }
 
   test("remaining display options reject before observation or dispatch in original order", async () => {
     const h = harness(false);
@@ -677,6 +731,36 @@ describe("tapOn display verification", () => {
     expect(h.observe.getExecuteCallCount()).toBe(0);
     expect(h.dispatches).toEqual([]);
     expect(h.capture.requests).toEqual([]);
+  });
+
+  test("explicit display clips against the panel's captured size, not a stale observation size (#6523)", async () => {
+    const h = harness(true);
+    const wide = hierarchy({ left: 120 });
+    h.setCurrent(wide);
+    h.capture.read = () => wide;
+    // The observation carries a stale 100x100 size, but the panel's capture is 200x200.
+    h.observe.setObserveResult(() => ({
+      ...h.observation(),
+      screenSize: { width: 100, height: 100 },
+    }));
+    const result = await h.execute({});
+    expect(result.success).toBe(true);
+    // Centre of the 120..180 element on the 200-wide panel; the stale size would clip it away.
+    expect(h.dispatches).toEqual([{ displayId: 2, x: 150, y: 60 }]);
+  });
+
+  test("explicit display ensureChecked refresh re-sizes the tap from the refreshed capture (#6523)", async () => {
+    const h = harness(true, { checked: false });
+    // The cached observation is a 100x100 capture; the pre-tap ensureChecked refresh
+    // returns the panel's current 200x200 capture where the toggle sits at x=120..180.
+    const stale = { ...hierarchy({ checked: false }), screenWidth: 100, screenHeight: 100 };
+    const fresh = hierarchy({ checked: false, left: 120 });
+    h.setCurrent(stale);
+    h.capture.read = (index) => (index === 0 ? stale : fresh);
+    const result = await h.execute({ ensureChecked: true, preTapStability: false });
+    // Post-tap verification of the (static) fake toggle fails; delivery is what matters here.
+    expect(result.error).not.toContain("no visible tap area");
+    expect(h.dispatches[0]).toEqual({ displayId: 2, x: 150, y: 60 });
   });
 
   test("default tap keeps refresh captures on the default path", async () => {
@@ -1011,5 +1095,44 @@ describe("tapOn targeted display resolution", () => {
     expect(h.capture.requests.length).toBeGreaterThan(1);
     expect(h.capture.requests.every((request) => request.displayId === undefined)).toBe(true);
     expect(h.dispatches).toEqual([]);
+  });
+});
+
+describe("tapOn explicit display with TalkBack (#9905)", () => {
+  for (const ctrlProxy of [true, false]) {
+    for (const action of ["tap", "doubleTap", "longPress"] as const) {
+      test(`TalkBack on refuses ${action} on a non-default display before any gesture (${ctrlProxy ? "CtrlProxy" : "adb"})`, async () => {
+        const h = harness(ctrlProxy, { talkBack: true });
+        const result = await h.execute({ action });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("TalkBack coordinate activation cannot target display 2");
+        expect(result.error).toContain("no gesture was dispatched");
+        expect(h.dispatches).toEqual([]);
+        expect(h.talkBackDriver.tapHistory).toEqual([]);
+        expect(h.talkBackDriver.doubleTapHistory).toEqual([]);
+        expect(
+          h.executor.getExecutedCommands().some((command) => command.includes("touchscreen")),
+        ).toBe(false);
+      });
+    }
+  }
+
+  test("TalkBack off keeps the raw display dispatch and carries no TalkBack warning", async () => {
+    const h = harness(true, { talkBack: false });
+    const result = await h.execute({});
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+    expect(h.dispatches).toHaveLength(1);
+    expect(h.dispatches[0]).toMatchObject({ displayId: 2 });
+    expect(h.talkBackDriver.tapHistory).toEqual([]);
+  });
+
+  test("TalkBack state unknown keeps the raw display dispatch with the unknown-state warning", async () => {
+    const h = harness(true, { talkBack: null });
+    const result = await h.execute({});
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([TALKBACK_STATE_UNKNOWN_WARNING]);
+    expect(h.dispatches).toHaveLength(1);
+    expect(h.talkBackDriver.tapHistory).toEqual([]);
   });
 });

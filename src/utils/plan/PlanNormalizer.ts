@@ -11,21 +11,19 @@ export class PlanNormalizer {
   }
 
   /**
-   * Normalize a raw step object into a PlanStep
-   * Handles conversion of 'command' to 'tool' and moves parameters into params object
-   * @param step Raw step data from YAML
-   * @param index Step index for error messages
-   * @returns Normalized PlanStep
+   * Pure, log-free core of {@link normalizeStep}: the tool name (`tool`, else the legacy
+   * `command`) and the merged params (inline step fields, overridden by an explicit `params`
+   * object). Returns undefined when the step is not an object or names no tool, so callers that
+   * must never throw (e.g. the request-deadline resolver) can reuse the exact merge rule.
    */
-  static normalizeStep(step: any, index: number): PlanStep {
-    logger.debug(`Processing step ${index}:`, JSON.stringify(step, null, 2));
-
-    const toolName = step.tool || step.command;
-
-    if (!toolName || typeof toolName !== "string") {
-      throw new Error(`Invalid step at index ${index}: missing or invalid tool/command name`);
+  static toolAndParams(step: unknown): { tool: string; params: Record<string, any> } | undefined {
+    if (!PlanNormalizer.isRecord(step)) {
+      return undefined;
     }
-
+    const toolName = step.tool || step.command;
+    if (!toolName || typeof toolName !== "string") {
+      return undefined;
+    }
     const inlineParams: Record<string, any> = {};
     Object.keys(step).forEach((key) => {
       if (
@@ -38,16 +36,30 @@ export class PlanNormalizer {
         inlineParams[key] = step[key];
       }
     });
-
     const paramsFromStep = PlanNormalizer.isRecord(step.params) ? step.params : {};
+    // Prefer explicit params over inline fields.
+    return { tool: toolName, params: { ...inlineParams, ...paramsFromStep } };
+  }
 
-    // Create normalized step - prefer explicit params over inline fields
+  /**
+   * Normalize a raw step object into a PlanStep
+   * Handles conversion of 'command' to 'tool' and moves parameters into params object
+   * @param step Raw step data from YAML
+   * @param index Step index for error messages
+   * @returns Normalized PlanStep
+   */
+  static normalizeStep(step: any, index: number): PlanStep {
+    logger.debug(`Processing step ${index}:`, JSON.stringify(step, null, 2));
+
+    const parts = PlanNormalizer.toolAndParams(step);
+    if (!parts) {
+      throw new Error(`Invalid step at index ${index}: missing or invalid tool/command name`);
+    }
+    const toolName = parts.tool;
+
     const normalizedStep: PlanStep = {
       tool: toolName,
-      params: {
-        ...inlineParams,
-        ...paramsFromStep,
-      },
+      params: parts.params,
     };
 
     if (typeof step.label === "string") {

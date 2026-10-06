@@ -148,6 +148,7 @@ import {
   dispatchIosCoordinateTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { executeTouchscreenInput } from "./touchscreenInput";
 import {
   refreshTargetDisplayHierarchy,
@@ -206,6 +207,8 @@ const IOS_STATUS_BAR_CLASSES = new Set([
 /** Internal action context; never part of the public tapOn schema. */
 type ResolvedAndroidTapOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
+  /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
+  onActivationWarning?: (warning: string) => void;
   onResolvedElement?: (
     element: Element,
     selection?: ElementSelectionResult,
@@ -371,6 +374,10 @@ function appendDisabledElementWarning(
 /**
  * Command to tap on UI element containing specified text
  */
+function warningsField(warnings: string[]): { warnings?: string[] } {
+  return warnings.length ? { warnings } : {};
+}
+
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
   private readonly refreshedDisplayTransitions: Pick<
     DisplayTransitionTracker,
@@ -3592,7 +3599,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     }
     const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
-    const dispatchAction = await this.androidDisplayDispatch(options, context);
+    const displayWarnings: string[] = [];
+    const dispatchAction = await this.androidDisplayDispatch(options, {
+      ...context,
+      onWarnings: (warnings) => displayWarnings.push(...warnings),
+    });
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -3616,6 +3627,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       action: options.action,
       element,
       selectedElement,
+      ...warningsField(displayWarnings),
     };
   }
 
@@ -3625,17 +3637,36 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
       signal?: AbortSignal;
       onDispatched: () => void;
+      onWarnings?: (warnings: string[]) => void;
     },
   ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-    return androidDisplayTapDispatch(
+    // Same TalkBack detection as the default route; unknown state keeps the raw gesture.
+    const warnings: string[] = [];
+    const talkBackEnabled = await this.strategy.isAccessibilityServiceEnabled((warning) =>
+      warnings.push(warning),
+    );
+    const dispatch = await androidDisplayTapDispatch(
       this.accessibilityService,
       this.adb,
       {
         action: options.action === "focus" ? "tap" : options.action,
         duration: options.duration,
       },
-      { ...context, timer: this.timer },
+      {
+        target: context.target,
+        signal: context.signal,
+        onDispatched: context.onDispatched,
+        timer: this.timer,
+        talkBack: talkBackEnabled
+          ? {
+              strategy: this.talkBackStrategy,
+              driver: this.talkBackDriverFactory.createDriver(this.device),
+            }
+          : undefined,
+      },
     );
+    context.onWarnings?.(warnings);
+    return dispatch;
   }
 
   private selectElementOnDisplay(
@@ -3765,7 +3796,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           previousObservation: target.observation,
           signal,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => tapTimestamp }
+            ? { observationHostTimestampProvider: () => tapTimestamp }
             : {}),
         },
       );
@@ -4436,7 +4467,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => ensureCheckedTapTimestamp }
+            ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),
           predictionContext: {
             toolName: "tapOn",
@@ -4575,7 +4606,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ResolvedAndroidTapOptions & { onActivationWarning?: (warning: string) => void },
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
-    const { displayFence: fence, resolvedHierarchy } = options ?? {};
+    const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
       typeof isTalkBackEnabled === "boolean"
@@ -4587,6 +4618,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (element["hierarchy-source"] === "uiautomator") {
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
         displayFence: fence,
+        onActivationWarning,
       });
       return undefined;
     }
@@ -4623,6 +4655,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, false, {
       displayFence: fence,
       resolvedHierarchy,
+      onActivationWarning,
     });
     return undefined;
   }
@@ -4660,12 +4693,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
         displayFence: fence,
+        onActivationWarning: context.onActivationWarning,
       });
       this.reportTalkBackActivationWarning(result, context, action);
       return;
     }
     await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
       displayFence: fence,
+      onActivationWarning: context.onActivationWarning,
     });
   }
 
@@ -4704,9 +4739,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         fenceOptions,
       );
     } else if (action === "doubleTap") {
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
-      await this.timer.sleep(200);
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
+      await dispatchAndroidDoubleTap({
+        // DocumentsUI rows use ADB input recovery, which has no single-gesture form.
+        client: isAndroidDocumentsUiRow(element) ? undefined : this.accessibilityService,
+        point: { x, y },
+        timer: this.timer,
+        signal,
+        assertCurrent: () => fence?.assertCurrent(),
+        onWarning: fenceOptions.onActivationWarning,
+        tap: () =>
+          this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence }),
+      });
     }
   }
 
@@ -5079,7 +5122,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
       if (!longPressResult.success) {
         if (longPressResult.semanticActionFailure) {
-          throw new Error(
+          throw new ActionableError(
             `Semantic long press failed for the selected element: ${longPressResult.error ?? "unknown error"}`,
           );
         }

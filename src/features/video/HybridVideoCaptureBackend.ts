@@ -2,6 +2,7 @@ import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
+  type ForceStopOptions,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -79,7 +80,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     return this.backendFor(hybridHandle.backend).stop(hybridHandle.handle);
   }
 
-  async forceStop(handle: RecordingHandle): Promise<void> {
+  async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
     const hybridHandle = handle.backendHandle as HybridBackendHandle | undefined;
     if (!hybridHandle || hybridHandle.kind !== "hybrid") {
       throw new Error("Missing backend handle for hybrid video recording.");
@@ -88,7 +89,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     if (!backend.forceStop) {
       throw new Error("Selected video capture backend does not support force stopping recordings.");
     }
-    await backend.forceStop(hybridHandle.handle);
+    await backend.forceStop(hybridHandle.handle, options);
   }
 
   private backendKind(backend: VideoCaptureBackend): HybridBackendKind {

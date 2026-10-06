@@ -817,6 +817,73 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("syncNetworkMockRulesIfAvailable reports noCapability when the app lacks network_mocking", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities", "set_network_mock_rules"],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, false);
+
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("noCapability");
+        const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
+        expect(sentTypes).not.toContain("set_network_mock_rules");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncNetworkMockRulesIfAvailable reports sent only when the socket accepted the rules", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities", "set_network_mock_rules"],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("sent");
+
+        const sendSpy = spyOn(testClient, "sendMessage").mockReturnValue(false);
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("failed");
+        sendSpy.mockImplementation(() => {
+          throw new Error("send exploded");
+        });
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("failed");
+        warnSpy.mockRestore();
+        sendSpy.mockRestore();
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("syncs SDK-backed state after capability detection", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();

@@ -7,12 +7,16 @@ import {
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TapAnyElementOptions } from "../../models/TapAnyElementOptions";
 import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { DOUBLE_TAP_GAP_MS, LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { isStaleFrameContextRejection, LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
+import type { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import type { TalkBackNavigationDriver } from "../talkback/TalkBackNavigationDriver";
+import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
 export interface CoordinateTapClient<Dispatch = never> {
@@ -30,9 +34,7 @@ export interface CoordinateTapClient<Dispatch = never> {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
-export function isStaleFrameContextRejection(error: string | undefined): boolean {
-  return typeof error === "string" && error.toLowerCase().includes("stale frame context");
-}
+export { isStaleFrameContextRejection };
 
 export function indeterminateTapError(error: string | undefined): ActionableError {
   return new ActionableError(
@@ -148,6 +150,61 @@ export async function dispatchIosCoordinateTap(
   }
 }
 
+export interface TalkBackDisplayTapContext {
+  strategy: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
+  driver: TalkBackNavigationDriver;
+}
+
+/** TalkBack-on tap on the default display: the strategies the implicit-display routes use. */
+function talkBackDisplayTapDispatch(
+  options: Pick<TapAnyElementOptions, "action" | "duration">,
+  context: {
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+    onDispatched: () => void;
+    talkBack: TalkBackDisplayTapContext;
+  },
+): (point: { x: number; y: number }) => Promise<void> {
+  const { target, signal, talkBack } = context;
+  const fence = {
+    assertCurrent: () => {
+      throwIfAborted(signal);
+      target.assertCurrent();
+    },
+  };
+  return async ({ x, y }) => {
+    fence.assertCurrent();
+    const action = options.action;
+    const durationMs = action === "longPress" ? (options.duration ?? 800) : 50;
+    const result =
+      action === "tap"
+        ? await talkBack.strategy.executePreciseTap(x, y, talkBack.driver, fence)
+        : await talkBack.strategy.executeCoordinateFallback(
+            x,
+            y,
+            action,
+            durationMs,
+            talkBack.driver,
+            {
+              displayFence: fence,
+            },
+          );
+    if (result.success || result.focusCompleted) {
+      context.onDispatched();
+    }
+    throwIfAborted(signal);
+    if (!result.success) {
+      throw new ActionableError(
+        `TalkBack coordinate tap failed: ${result.error ?? "activation was not confirmed"}${
+          result.focusCompleted
+            ? " Focus touch was delivered; activation failed. Do not retry automatically."
+            : ""
+        }`,
+      );
+    }
+  };
+}
+
 /** Shared tapOn/tapAny routing; non-default panels require an advertised CtrlProxy capability. */
 export async function androidDisplayTapDispatch(
   client: CoordinateTapClient<() => void> & {
@@ -159,10 +216,26 @@ export async function androidDisplayTapDispatch(
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
     onDispatched: () => void;
-    timer?: Pick<Timer, "sleep">;
+    timer?: Pick<Timer, "sleep" | "now">;
+    /** Receives a caution when the sequential fallback starts the taps outside the double-tap window. */
+    onWarning?: (warning: string) => void;
+    /**
+     * Present only when TalkBack is on. A raw coordinate gesture would only move
+     * accessibility focus, and the shared driver cannot address a non-default display, so a
+     * non-default display is refused before any dispatch (#9905) and the default display
+     * uses the same TalkBack coordinate strategies as the implicit-display routes.
+     */
+    talkBack?: TalkBackDisplayTapContext;
   },
 ): Promise<(point: { x: number; y: number }) => Promise<void>> {
   const { target, signal, timer = defaultTimer } = context;
+  const refusal = context.talkBack ? talkBackDisplayRefusal(target.displayId) : undefined;
+  if (refusal) {
+    throw refusal;
+  }
+  if (context.talkBack) {
+    return talkBackDisplayTapDispatch(options, { ...context, talkBack: context.talkBack });
+  }
   const useCtrlProxy = await supportsCtrlProxyGestureDisplay(client, target.displayId);
   const dispatch = async ({ x, y }: { x: number; y: number }, onTapDelivered: () => void) => {
     throwIfAborted(signal);
@@ -225,11 +298,20 @@ export async function androidDisplayTapDispatch(
       context.onDispatched();
     };
     try {
-      await dispatch(point, onTapDelivered);
       if (options.action === "doubleTap") {
-        await awaitWhileRequestIsLive(timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-        throwIfAborted(signal);
-        target.assertCurrent();
+        await dispatchAndroidDoubleTap({
+          // The panel must be routable before a single-gesture double tap may target it.
+          client: useCtrlProxy ? client : undefined,
+          point,
+          displayId: target.displayId === 0 ? undefined : target.displayId,
+          timer,
+          signal,
+          assertCurrent: target.assertCurrent,
+          onTapDelivered,
+          onWarning: context.onWarning,
+          tap: () => dispatch(point, onTapDelivered),
+        });
+      } else {
         await dispatch(point, onTapDelivered);
       }
     } catch (error) {

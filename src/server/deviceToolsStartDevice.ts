@@ -155,6 +155,8 @@ const bootAndPrepareDevice = async (
     lifecycleLease,
     allowExternalLeaseAdoptionRecheck: true,
     lifecycleCoordinator: deps.lifecycleCoordinator,
+    // An owned emulator that survives SIGKILL keeps the lease held until it exits (#9901).
+    retainLeaseUntil: (settlement) => state.coldBootSettlements.push(settlement),
     onAndroidColdBootTrackingChanged: () => {
       void deps.notifyDeviceInventoryResourcesChanged(false).catch((error) => {
         logger.warn(

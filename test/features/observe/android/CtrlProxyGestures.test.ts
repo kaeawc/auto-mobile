@@ -902,6 +902,54 @@ describe("CtrlProxyGestures atomic double tap", () => {
     expect(requestManager.getPendingCount()).toBe(0);
   });
 
+  it("forwards the frame fence, display id and pre-send fence with the single request", async () => {
+    const { context, sent, requestManager } = createFakeContext({ isCommandSupported: () => true });
+    const beforeSend = spyOn({ fence: () => {} }, "fence");
+    const promise = new CtrlProxyGestures(context).requestDoubleTapCoordinates(10, 20, undefined, {
+      frameContext: "epoch:7",
+      displayId: 2,
+      beforeSend,
+    });
+    await flush();
+    expect(beforeSend).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sent[0])).toMatchObject({
+      type: "request_tap_coordinates",
+      doubleTap: true,
+      frameContext: "epoch:7",
+      displayId: 2,
+    });
+    requestManager.resolve(JSON.parse(sent[0]).requestId, { success: true, totalTimeMs: 400 });
+    expect(await promise).toMatchObject({ success: true });
+  });
+
+  it("omits the display id for the default display", async () => {
+    const { context, sent, requestManager } = createFakeContext({ isCommandSupported: () => true });
+    const promise = new CtrlProxyGestures(context).requestDoubleTapCoordinates(10, 20, undefined, {
+      displayId: 0,
+    });
+    await flush();
+    expect(JSON.parse(sent[0])).not.toHaveProperty("displayId");
+    requestManager.resolve(JSON.parse(sent[0]).requestId, { success: true, totalTimeMs: 1 });
+    await promise;
+  });
+
+  it("a lost reply (timeout) is reported unacknowledged so it is never mistaken for a refusal", async () => {
+    const { context, timer, requestManager } = createFakeContext({
+      isCommandSupported: () => true,
+    });
+    const onDispatch = spyOn({ sent: () => {} }, "sent");
+    const promise = new CtrlProxyGestures(context).requestDoubleTapCoordinates(10, 20, onDispatch);
+    await flush();
+    timer.advanceTime(DEFAULT_GESTURE_REQUEST_TIMEOUT_MS);
+    expect(await promise).toMatchObject({
+      success: false,
+      error: `Double tap timed out after ${DEFAULT_GESTURE_REQUEST_TIMEOUT_MS}ms`,
+      acknowledged: false,
+    });
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    expect(requestManager.getPendingCount()).toBe(0);
+  });
+
   it("never degrades to a single tap when an older runner lacks the capability", async () => {
     const { context, sent, requestManager } = createFakeContext({
       isCommandSupported: (name) => name !== "tap_double_v1",

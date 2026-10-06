@@ -4,6 +4,7 @@
 
 export { VideoCaptureFinalizationError, VideoRecorderService } from "./VideoRecorderService";
 export type {
+  ForceStopOptions,
   VideoCaptureBackend,
   VideoCaptureConfig,
   RecordingHandle,

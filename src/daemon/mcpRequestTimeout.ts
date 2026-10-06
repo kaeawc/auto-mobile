@@ -35,6 +35,7 @@ import {
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
 } from "../features/action/textTransportTimeout";
 import * as yaml from "js-yaml";
+import { decodePlanYamlContent } from "../utils/plan/planYaml";
 import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -869,7 +870,7 @@ function addPlanStepBudgets(
 
 function parsePlanContentForBudget(planContent: string): Record<string, unknown> | undefined {
   try {
-    return asRecord(yaml.load(planContent, PLAN_YAML_LOAD_OPTIONS));
+    return asRecord(yaml.load(decodePlanYamlContent(planContent), PLAN_YAML_LOAD_OPTIONS));
   } catch (error) {
     // Invalid YAML is surfaced by executePlan itself as a structured error; the request
     // deadline just falls back to the floor.

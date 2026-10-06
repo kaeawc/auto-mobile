@@ -21,6 +21,7 @@ import {
 import { PlanPartitioner } from "../utils/plan/PlanPartitioner";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
+import { decodePlanYamlContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
 import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
@@ -472,7 +473,7 @@ export class PlanExecutionOrchestrator {
 
     if (yamlContent.startsWith("base64:")) {
       this.perfLog("Decoding base64 plan content");
-      yamlContent = Buffer.from(yamlContent.substring(7), "base64").toString("utf-8");
+      yamlContent = decodePlanYamlContent(yamlContent);
       this.perfLog(`Base64 content decoded (${yamlContent.length} bytes)`);
     }
 

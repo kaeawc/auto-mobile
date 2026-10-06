@@ -752,7 +752,13 @@ describe("SendKeys", () => {
     ).toMatchObject({ success: true });
     expect(observer.options).toEqual([
       { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
-      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+      },
     ]);
   });
 
@@ -797,7 +803,13 @@ describe("SendKeys", () => {
         (options) => options?.freshness === "fresh" && options.minTimestamp === undefined,
       ),
     ).toEqual([
-      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+      },
     ]);
   });
 
@@ -2442,6 +2454,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         signal: undefined,
         freshness: "fresh",
         skipScreenshot: true,
+        hierarchyOnly: true,
       });
       expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
       expect(textClient.calls.includes("clear")).toBe(operation === "replace");
@@ -2516,6 +2529,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       signal: undefined,
       freshness: "fresh",
       skipScreenshot: true,
+      hierarchyOnly: true,
     });
     expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
     expect(timer.getPendingTimeoutCount()).toBe(0);

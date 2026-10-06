@@ -174,7 +174,7 @@ export const postNotificationHandler = async (device: BootedDevice, args: PostNo
     });
 
     const message = result.success
-      ? `Posted notification${result.method ? ` via ${result.method}` : ""}`
+      ? `Posted notification${result.method ? ` via ${result.method}` : ""}${result.warning ? ` (warning: ${result.warning})` : ""}`
       : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
 
     const response = createJSONToolResponse({

@@ -1,8 +1,11 @@
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  postNotificationHandler,
   postNotificationSchema,
   registerNotificationTools,
+  resetPostNotificationFactory,
+  setPostNotificationFactory,
 } from "../../src/server/notificationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -129,6 +132,29 @@ describe("notification tools", () => {
     expect(schema.if).toBeUndefined();
     expect(schema.then).toBeUndefined();
     expect(schema.required).not.toContain("appId");
+  });
+
+  test("surfaces a postNotification warning in the message and payload (#10014)", async () => {
+    setPostNotificationFactory(() => ({
+      execute: async () => ({
+        success: true,
+        supported: true,
+        method: "sdk" as const,
+        warning: "imagePath was ignored",
+      }),
+    }));
+    try {
+      const response = await postNotificationHandler(
+        { name: "Fake", deviceId: "fake", platform: "android" },
+        { title: "T", body: "B", imagePath: "./hero.png" },
+      );
+      const payload = JSON.parse(response.content[0].text);
+      expect(payload.success).toBe(true);
+      expect(payload.warning).toBe("imagePath was ignored");
+      expect(payload.message).toBe("Posted notification via sdk (warning: imagePath was ignored)");
+    } finally {
+      resetPostNotificationFactory();
+    }
   });
 });
 

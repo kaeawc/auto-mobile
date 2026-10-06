@@ -6,6 +6,123 @@ setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIG_PATH="$PATH"
   export PATH="${MOCK_BIN}:${PATH}"
+  export ADB_LOG_FILE="${MOCK_BIN}/adb.log"
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+if [[ "$*" == *"dumpsys window policy" ]]; then
+  printf 'isKeyguardShowing=false\n'
+fi
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+}
+
+@test "dismisses a showing keyguard and verifies it cleared" {
+  export KEYGUARD_COUNT_FILE="${MOCK_BIN}/keyguard-count"
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ADB_LOG_FILE"
+if [[ "$*" == *"dumpsys window policy" ]]; then
+  count=0
+  [[ -f "$KEYGUARD_COUNT_FILE" ]] && count="$(<"$KEYGUARD_COUNT_FILE")"
+  count=$((count + 1))
+  printf '%s' "$count" > "$KEYGUARD_COUNT_FILE"
+  if (( count == 1 )); then printf 'mShowingLockscreen=true\n'; else printf 'mShowingLockscreen=false\n'; fi
+fi
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+
+  run env AUTOMOBILE_KEYGUARD_RETRY_SLEEP_SECONDS=0 bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  grep -Fq -- '-s emulator-5554 shell wm dismiss-keyguard' "$ADB_LOG_FILE"
+  grep -Fq -- '-s emulator-5554 shell input keyevent 82' "$ADB_LOG_FILE"
+  [ "$(grep -c 'dumpsys window policy' "$ADB_LOG_FILE")" -ge 2 ]
+}
+
+@test "already-unlocked boot does not send extra keyguard dismiss commands" {
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ADB_LOG_FILE"
+if [[ "$*" == *"dumpsys window policy" ]]; then printf 'isKeyguardShowing=false\n'; fi
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+
+  run bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  if grep -Eq 'wm dismiss-keyguard|input keyevent 82' "$ADB_LOG_FILE"; then
+    echo "already-unlocked boot sent an unnecessary dismissal command" >&2
+    return 1
+  fi
+}
+
+@test "unreadable keyguard state warns and continues boot with policy diagnostics" {
+  export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${MOCK_BIN}/diagnostics"
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ADB_LOG_FILE"
+if [[ "$*" == *"dumpsys window policy" ]]; then printf 'Window policy dump without keyguard state\n'; fi
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+
+  run env AUTOMOBILE_KEYGUARD_RETRIES=2 AUTOMOBILE_KEYGUARD_RETRY_SLEEP_SECONDS=0 \
+    AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR}" bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: Android keyguard state remains unreadable; continuing boot"* ]]
+  [[ "$output" != *"error: Android keyguard"* ]]
+  [[ "$output" == *"emulator-5554"* ]]
+  [ "$(grep -c 'dumpsys window policy' "$ADB_LOG_FILE")" -eq 4 ]
+  [ "$(<"${AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR}/keyguard-window-policy.txt")" = "Window policy dump without keyguard state" ]
+}
+
+@test "keyguard that never clears fails with bounded retries and policy diagnostics" {
+  export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${MOCK_BIN}/diagnostics"
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ADB_LOG_FILE"
+if [[ "$*" == *"dumpsys window policy" ]]; then printf 'mShowingLockscreen=true\n'; fi
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+  cat > "${MOCK_BIN}/collect-emulator-diagnostics.sh" <<'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+  # boot-emulator resolves this collector beside itself; use a temp copy of
+  # the script tree so the failure path stays hermetic.
+  mkdir -p "${MOCK_BIN}/scripts/android"
+  cp scripts/android/boot-emulator.sh "${MOCK_BIN}/scripts/android/boot-emulator.sh"
+  cp "${MOCK_BIN}/collect-emulator-diagnostics.sh" "${MOCK_BIN}/scripts/android/collect-emulator-diagnostics.sh"
+  chmod +x "${MOCK_BIN}/scripts/android/collect-emulator-diagnostics.sh"
+
+  run env AUTOMOBILE_KEYGUARD_RETRIES=2 AUTOMOBILE_KEYGUARD_RETRY_SLEEP_SECONDS=0 \
+    AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR}" \
+    bash "${MOCK_BIN}/scripts/android/boot-emulator.sh"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"keyguard did not become verified-unlocked"* ]]
+  [ "$(grep -c 'dumpsys window policy' "$ADB_LOG_FILE")" -eq 4 ]
+  [ "$(<"${AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR}/keyguard-window-policy.txt")" = "mShowingLockscreen=true" ]
 }
 
 teardown() {

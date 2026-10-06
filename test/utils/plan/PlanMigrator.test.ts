@@ -3,6 +3,29 @@ import { migratePlan, migratePlanStep } from "../../../src/utils/plan/PlanMigrat
 import { getMcpServerVersion, releaseVersion } from "../../../src/utils/mcpVersion";
 
 describe("PlanMigrator", () => {
+  test.each([
+    { tool: "highlight", id: "login" },
+    { tool: "highlight", params: { id: "login" } },
+    { command: "highlight", id: "login" },
+  ])("migrates legacy highlight id: %j", (step) => {
+    const migrated = migratePlanStep(step, 0);
+    expect(migrated).toEqual({ tool: "highlight", params: { elementId: "login" } });
+    expect(migratePlanStep(migrated, 0)).toEqual(migrated);
+  });
+
+  test("explicit highlight elementId wins over legacy id", () => {
+    expect(
+      migratePlanStep({ tool: "highlight", id: "old", params: { elementId: "new" } }, 0),
+    ).toEqual({ tool: "highlight", params: { elementId: "new" } });
+  });
+
+  test("tapOn still migrates id into selector and inline description into label", () => {
+    expect(migratePlanStep({ tool: "tapOn", id: "login", description: "Tap login" }, 0)).toEqual({
+      tool: "tapOn",
+      label: "Tap login",
+      params: { action: "tap", selector: { elementId: "login" } },
+    });
+  });
   describe("version metadata (dev-build SHA stamp)", () => {
     // Regression: dev builds report a git-SHA-stamped version (`0.0.39+g<sha>[.dirty]`).
     // The runtime target version is stamped, and PlanSerializer persists the same

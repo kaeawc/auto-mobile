@@ -74,8 +74,10 @@ export class TextRequestState {
   }
 }
 
-export function getTextRequestDeadlineMs(): number | undefined {
-  const deadlineMs = getRequestContext()?.getDeadlineMs?.();
+export function getTextRequestDeadlineMs(
+  getDeadlineMs = getRequestContext()?.getDeadlineMs,
+): number | undefined {
+  const deadlineMs = getDeadlineMs?.();
   return deadlineMs === undefined ? undefined : deadlineMs - TEXT_REQUEST_RESPONSE_MARGIN_MS;
 }
 

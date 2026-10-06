@@ -2683,7 +2683,10 @@ export class RealObserveScreen implements ObserveScreen {
             `[iOS] SDK screen identity refresh failed; using hierarchy identity: ${error}`,
           );
         }
-        const hierarchyScreenIdentity = deriveIosScreenIdentity(result.viewHierarchy);
+        const hierarchyScreenIdentity = deriveIosScreenIdentity(
+          result.viewHierarchy,
+          result.screenSize,
+        );
         result.screenIdentity = hierarchyScreenIdentity?.components.modalClass
           ? hierarchyScreenIdentity
           : (sdkScreenIdentity ?? hierarchyScreenIdentity);

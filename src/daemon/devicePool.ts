@@ -3956,7 +3956,17 @@ export class DevicePool {
           // A same-AVD replacement still holds the image's locks; a different
           // AVD reusing the old serial must be preserved without another kill.
           const stillPresent = devices.some((device) => device.name === avdName);
-          if (!stillPresent) {
+          // The online-only list also lacks an emulator that dropped to adb `offline`
+          // mid-kill while its process still runs (#10100).
+          if (
+            !stillPresent &&
+            !(await this.isAndroidSerialHeldOffline(
+              avdName,
+              matchingAvd.deviceId,
+              signal,
+              deadlineMs,
+            ))
+          ) {
             logger.info(
               `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
             );
@@ -3984,6 +3994,48 @@ export class DevicePool {
         retainLeaseUntil(shutdown);
       }
       throw new UnconfirmedRecoveryShutdownError(avdName, error);
+    }
+  }
+
+  /**
+   * Whether adb still lists the killed emulator's serial as `offline` (or its
+   * state could not be read), so its absence from the online-only discovery does
+   * not yet confirm the AVD stopped. The same "offline or probe failed means
+   * unconfirmed" rule as the recovery-reservation lift (#10076).
+   */
+  private async isAndroidSerialHeldOffline(
+    avdName: string,
+    deviceId: string,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<boolean> {
+    const probe = this.deviceManager.getAndroidOfflineDeviceIds?.bind(this.deviceManager);
+    if (!probe) {
+      return false;
+    }
+    try {
+      const offline = await probe([deviceId], {
+        signal,
+        timeoutMs: Math.max(
+          1,
+          Math.min(ANDROID_OFFLINE_PROBE_TIMEOUT_MS, deadlineMs - this.timer.now()),
+        ),
+      });
+      signal.throwIfAborted();
+      if (offline.has(deviceId)) {
+        logger.info(
+          `[DevicePool] Android AVD '${avdName}' is absent from the booted list but adb still lists ${deviceId} as offline; shutdown not yet confirmed`,
+        );
+      }
+      return offline.has(deviceId);
+    } catch (error) {
+      signal.throwIfAborted();
+      // An unreadable state list cannot prove the serial left `adb devices`.
+      logger.warn(
+        `[DevicePool] adb device-state probe failed while confirming '${avdName}' stopped: ${errorMessage(error)}`,
+        error,
+      );
+      return true;
     }
   }
 

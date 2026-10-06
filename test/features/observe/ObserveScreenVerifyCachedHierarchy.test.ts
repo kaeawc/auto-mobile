@@ -13,6 +13,7 @@ import type { RealObserveScreen } from "../../../src/features/observe/ObserveScr
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
@@ -88,7 +89,11 @@ function synced(
 
 function setup(
   hierarchies: ViewHierarchyResult[],
-  overrides: { backStackActivity?: string; foreground?: string } = {},
+  overrides: {
+    backStackActivity?: string;
+    foreground?: string;
+    hierarchyCapture?: FakeHierarchyCapture;
+  } = {},
 ): { screen: RealObserveScreen; hierarchy: FakeViewHierarchy } {
   const timer = new FakeTimer();
   timer.setCurrentTime(NOW);
@@ -101,6 +106,7 @@ function setup(
     new FakeAdbClientFactory(adb),
     {
       viewHierarchy: hierarchy,
+      ...(overrides.hierarchyCapture ? { hierarchyCapture: overrides.hierarchyCapture } : {}),
       backStack: {
         execute: async () => ({
           depth: 1,
@@ -245,7 +251,9 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
   });
 
   test("session-free observer reads never verify", async () => {
-    const { screen, hierarchy } = setup([cachedHit(), synced()]);
+    // Observer mode reads through the injected capture, never a real CtrlProxy client.
+    const capture = new FakeHierarchyCapture(cachedHit);
+    const { screen, hierarchy } = setup([cachedHit(), synced()], { hierarchyCapture: capture });
 
     await screen.execute({
       ...EXPLICIT_OBSERVE,
@@ -254,6 +262,7 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
       verifyCachedHierarchy: true,
     });
 
+    expect(capture.requests).toHaveLength(1);
     expect(hierarchy.getReadOptions().filter((options) => options !== undefined)).toEqual([]);
   });
 });

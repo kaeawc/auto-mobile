@@ -74,11 +74,13 @@ describe("Android doctor ANDROID_HOME check (#10127)", () => {
 
   test("does not fail when the SDK is at the typical location without env vars", async () => {
     const detection = macDetection();
-    detection.addExistingFile("/Users/test/Library/Android/sdk");
+    // The source builds the typical location with path.join, which uses the host separator.
+    const typicalSdk = join("/Users/test", "Library/Android/sdk");
+    detection.addExistingFile(typicalSdk);
     const result = await checkAndroidHome({}, { ...baseDependencies, systemDetection: detection });
     expect(result.status).toBe("warn");
-    expect(result.value).toBe("/Users/test/Library/Android/sdk");
-    expect(result.recommendation).toContain("export ANDROID_HOME=/Users/test/Library/Android/sdk");
+    expect(result.value).toBe(typicalSdk);
+    expect(result.recommendation).toContain(`export ANDROID_HOME=${typicalSdk}`);
   });
 
   test("does not fail when only cmdline-tools detection finds the SDK", async () => {

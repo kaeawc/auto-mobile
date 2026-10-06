@@ -22,7 +22,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const repoRoot = join(import.meta.dir, "..", "..");
 
 function readRepoFile(relativePath: string): string {
-  return readFileSync(join(repoRoot, relativePath), "utf-8");
+  // Normalise CRLF: a Windows checkout with autocrlf converts shell scripts.
+  return readFileSync(join(repoRoot, relativePath), "utf-8").replaceAll("\r\n", "\n");
 }
 
 /** The argv the process sees: everything after the runtime and the entry script. */
@@ -291,10 +292,10 @@ describe("MCP client config templates and entrypoints", () => {
   });
 
   describe("external launchers that name a mode flag first", () => {
-    // Pinned from android/junit-runner DaemonSocketClient.kt (buildDaemonCommand and its
-    // .withX() option appends), android/desktop-core DesktopDaemonLifecycle.kt, ios
-    // XCTestRunner DaemonManager+Launch.swift, scripts/install.sh (AUTO_MOBILE_CMD) and
-    // docs: `<runner> <package> --daemon <subcommand> [flags]` and `--cli <tool> ...`.
+    // Pinned from the Android junit-runner module's DaemonSocketClient.kt (buildDaemonCommand
+    // and its .withX() option appends), the Android desktop-core module's
+    // DesktopDaemonLifecycle.kt, the iOS XCTestRunner's DaemonManager+Launch.swift,
+    // scripts/install.sh (AUTO_MOBILE_CMD) and docs: `<runner> <package> --daemon <subcommand> [flags]` and `--cli <tool> ...`.
     const launcherArgv: Array<[string, string[]]> = [
       ["--daemon start", ["--daemon", "start"]],
       ["--daemon restart", ["--daemon", "restart"]],

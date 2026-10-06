@@ -1756,13 +1756,22 @@ EOF
 @test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
-  # Each invocation fits 1s; their sequence cannot fit a single 1s deadline.
+  # Each invocation fits the 2s deadline (1.5s); their 4.5s sequence cannot. A
+  # per-invocation watchdog would let all three finish and exit 0, so the 124
+  # below proves the one deadline spans the whole sequence. The margins are
+  # wide so a loaded runner's slow startup or late watchdog wake-up does not
+  # change which side of the deadline each invocation lands on.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=0.7 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ "$(wc -l < "$record")" -lt 3 ]
+  # The fake chunk only creates the record once it starts. On a loaded runner
+  # the deadline can expire before the first chunk begins, and zero chunks
+  # still satisfies "the sequence was cut short", so a missing file counts as 0.
+  started=0
+  if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
+  [ "$started" -lt 3 ]
   [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
 }
 

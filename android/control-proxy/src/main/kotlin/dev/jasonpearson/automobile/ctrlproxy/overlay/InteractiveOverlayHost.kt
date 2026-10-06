@@ -177,7 +177,11 @@ class DefaultInteractiveOverlayHost(
 
   private fun showOnMain(request: InteractiveOverlayRequest): Boolean {
     if (destroyed || isBlocked()) return false
-    val target = windowFor(request.displayId)
+    val current = window
+    // An in-place update keeps the window's own display target; a fresh context per update would
+    // be created on every non-default-display request only to be discarded.
+    val inPlace = current?.takeIf { it.displayId == request.displayId }
+    val target = inPlace?.target ?: windowFor(request.displayId)
     val params =
       interactiveOverlayLayoutParams(
         request.placement,
@@ -188,9 +192,7 @@ class DefaultInteractiveOverlayHost(
     if (touchThroughToken != null) {
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     }
-    val current = window
-    return if (current != null && current.displayId == request.displayId)
-      updateInPlace(current, request, params)
+    return if (inPlace != null) updateInPlace(inPlace, request, params)
     else addWindow(target, request, params, replacing = current)
   }
 

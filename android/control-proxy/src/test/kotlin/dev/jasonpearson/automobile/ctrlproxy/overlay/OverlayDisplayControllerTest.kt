@@ -142,6 +142,21 @@ class OverlayDisplayControllerTest {
     }
 
   @Test
+  fun `a lost window on a listed display that cannot take one is abandoned not left windowless`() =
+    runTest {
+      connected += 2
+      controller.show("a", spec(), displayId = 2)
+      host.isShowing = false // The platform detached it and the host cleared it.
+      host.failure = IllegalArgumentException("Unknown or disconnected display: 2")
+      controller.onDisplayTransition(2, removed = false)
+      assertNull(controller.activeRuntime)
+      assertFalse(controller.isShowing)
+      assertTeardown()
+      assertEquals(1, events.size)
+      assertEquals(listOf("show", "show"), host.calls)
+    }
+
+  @Test
   fun `another display's transition does not touch the overlay`() = runTest {
     connected += 2
     controller.show("a", spec(), displayId = 2)

@@ -317,10 +317,25 @@ class OverlayController(
       // Still attached: a retryable platform failure, so keep the window and runtime as they are.
       check(!host.isShowing) { "Overlay host failed to re-layout window" }
     }
-    if (host.show(request)) return
+    if (restoreWindow(request)) return
     if (lifecycle.isBlocked()) notifyDetached() // Locked meanwhile: hidden, restored on unlock.
     else abandon(runtime)
   }
+
+  /**
+   * A display can still be listed yet unable to take a window (its window context fails), which
+   * makes the host throw instead of returning false. That is the same "cannot come back" outcome:
+   * report it as false so the caller abandons rather than leaving the runtime windowless.
+   */
+  private suspend fun restoreWindow(request: InteractiveOverlayRequest): Boolean =
+    try {
+      host.show(request)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay window could not be restored", error)
+      false
+    }
 
   /** Terminal teardown for a window that cannot be shown again: exactly one `dismissed` event. */
   private suspend fun abandon(runtime: OverlayRuntime) {

@@ -111,12 +111,22 @@ describe("overlay display targeting", () => {
     expect(client.getOverlayHistory()).toMatchObject([{ displayId: 2 }]);
   });
 
-  test("the default display needs no capability and is recorded as display 0", async () => {
+  test("the default display needs no capability and records no displayId", async () => {
     client.setSupportedCommands([]);
     const payload = await call({ action: "show", spec, display: "cover" });
     expect(payload.success).toBe(true);
-    expect(client.getOverlayHistory()).toMatchObject([{ displayId: 0 }]);
-    expect(payload.lastResult?.displayId).toBe(0);
+    expect(client.getOverlayHistory()[0].displayId).toBeUndefined();
+    expect(payload.lastResult).toBeDefined();
+    expect(Object.hasOwn(payload.lastResult ?? {}, "displayId")).toBe(false);
+    const status = await call({ action: "status" });
+    expect(status.overlays?.map((entry) => Object.hasOwn(entry, "displayId"))).toEqual([false]);
+  });
+
+  test("a session pin that resolves to the default display records no displayId", async () => {
+    const payload = await callPinned({ action: "show", spec }, "cover");
+    expect(payload.success).toBe(true);
+    expect(client.getOverlayHistory()[0].displayId).toBeUndefined();
+    expect(Object.hasOwn(payload.lastResult ?? {}, "displayId")).toBe(false);
   });
 
   test("session pin applies when display is omitted", async () => {
@@ -127,7 +137,8 @@ describe("overlay display targeting", () => {
 
   test("explicit display beats the session pin", async () => {
     await callPinned({ action: "show", spec, display: "cover" }, "inner");
-    expect(client.getOverlayHistory()).toMatchObject([{ displayId: 0 }]);
+    expect(client.getOverlayHistory()).toHaveLength(1);
+    expect(client.getOverlayHistory()[0].displayId).toBeUndefined();
   });
 
   test("a session pin never injects display into update, dismiss or status", async () => {

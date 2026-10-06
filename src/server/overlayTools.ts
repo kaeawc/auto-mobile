@@ -267,8 +267,12 @@ async function showDisplayId(
     adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
     lastRenderedObservation: dependencies.lastRenderedObservation,
   });
-  // Id 0 is the default display; it needs neither the wire field nor the capability.
-  if (displayId && !(await client.supportsCommand(OVERLAY_DISPLAY_CAPABILITY))) {
+  // Id 0 is the default display: it needs neither the wire field nor the capability, and the
+  // result schema leaves displayId absent for it, so it is never carried forward as 0.
+  if (!displayId) {
+    return undefined;
+  }
+  if (!(await client.supportsCommand(OVERLAY_DISPLAY_CAPABILITY))) {
     throw new ActionableError(overlayDisplayUnsupportedMessage(displayId));
   }
   return displayId;

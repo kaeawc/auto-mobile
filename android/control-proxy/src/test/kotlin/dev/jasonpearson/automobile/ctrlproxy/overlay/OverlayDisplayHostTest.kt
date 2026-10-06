@@ -117,7 +117,17 @@ class OverlayDisplayHostTest {
     assertTrue(host.replace(sheet(2)))
     assertEquals(1, inner.added.size)
     assertEquals(1, inner.updated.size)
-    assertEquals(listOf(2), displays.opened.distinct())
+    assertEquals(listOf(2), displays.opened) // the in-place update reuses the window's target
+  }
+
+  @Test
+  fun `repeated same display updates open the display window context once`() = runTest {
+    val inner = displays.connect(2)
+    host.show(sheet(2))
+    repeat(3) { assertTrue(host.replace(sheet(2))) }
+    assertEquals(listOf(2), displays.opened)
+    assertEquals(1, inner.added.size)
+    assertEquals(3, inner.updated.size)
   }
 
   @Test

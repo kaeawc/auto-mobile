@@ -106,6 +106,42 @@ describe("ToolExecutionContext", () => {
     expect(consumeSetupTiming("device-1")).toBeNull();
   });
 
+  test("setup timing falls back for direct mode and unassigned sessions", async () => {
+    const directTiming = [{ name: "direct", durationMs: 2 }];
+    storeSetupTiming("timing-direct-device", directTiming, "direct-session", undefined);
+    expect(consumeSetupTiming("timing-direct-device", "direct-session", undefined)).toBe(
+      directTiming,
+    );
+    expect(consumeSetupTiming("timing-direct-device", "direct-session", undefined)).toBeNull();
+
+    await sessionManager.createSession("timing-unassigned", "another-device", "android");
+    const unassignedTiming = [{ name: "unassigned", durationMs: 4 }];
+    storeSetupTiming("device-1", unassignedTiming, "timing-unassigned", sessionManager);
+    expect(consumeSetupTiming("device-1", "timing-unassigned", sessionManager)).toBe(
+      unassignedTiming,
+    );
+    expect(consumeSetupTiming("device-1", "timing-unassigned", sessionManager)).toBeNull();
+  });
+
+  test("fallback setup timing is isolated and evicted oldest first at its cap", async () => {
+    await sessionManager.createSession("timing-resolved", "device-1", "android");
+    await sessionManager.createSession("timing-unassigned-owner", "another-device", "android");
+    const fallbackTiming = [{ name: "fallback", durationMs: 1 }];
+    storeSetupTiming("device-1", fallbackTiming, "timing-unassigned-owner", sessionManager);
+    expect(consumeSetupTiming("device-1", "timing-resolved", sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1", "timing-unassigned-owner", sessionManager)).toBe(
+      fallbackTiming,
+    );
+
+    const firstTiming = [{ name: "first", durationMs: 1 }];
+    storeSetupTiming("timing-cap-0", firstTiming);
+    for (let index = 1; index <= 256; index += 1) {
+      storeSetupTiming(`timing-cap-${index}`, [{ name: "entry", durationMs: index }]);
+    }
+    expect(consumeSetupTiming("timing-cap-0")).toBeNull();
+    expect(consumeSetupTiming("timing-cap-256")).not.toBeNull();
+  });
+
   test("released sessions discard pending setup timing, including late writes", async () => {
     await sessionManager.createSession("timing-release", "device-1", "android");
     const timing = [{ name: "setup", durationMs: 5 }];

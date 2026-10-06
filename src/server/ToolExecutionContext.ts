@@ -28,8 +28,12 @@ import { serverConfig } from "../utils/ServerConfig";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 
-/** Legacy fallback only for callers that have no session. */
-const sessionlessSetupTimingsByDevice = new Map<string, TimingData>();
+/** Fallback timings are tagged to prevent unresolved sessions crossing owners. */
+const sessionlessSetupTimingsByDevice = new Map<
+  string,
+  { timing: TimingData; sessionId?: string }
+>();
+const SESSIONLESS_SETUP_TIMING_CAP = 256;
 
 const MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS = 5;
 const DEVICE_ACQUISITION_SETUP_DEADLINE_MS = 300_000;
@@ -48,12 +52,31 @@ export function storeSetupTiming(
 ): void {
   if (sessionId) {
     const session = sessionManager?.getSession(sessionId);
-    if (session?.assignedDevice === deviceId) {
+    if (session && session.assignedDevice === deviceId) {
       session.cacheData.pendingSetupTiming = timing;
+      return;
     }
-    return;
+    if (sessionManager && !session) {
+      return;
+    }
   }
-  sessionlessSetupTimingsByDevice.set(deviceId, timing);
+  sessionlessSetupTimingsByDevice.delete(deviceId);
+  sessionlessSetupTimingsByDevice.set(deviceId, { timing, sessionId });
+  if (sessionlessSetupTimingsByDevice.size > SESSIONLESS_SETUP_TIMING_CAP) {
+    const oldestDeviceId = sessionlessSetupTimingsByDevice.keys().next().value;
+    if (oldestDeviceId !== undefined) {
+      sessionlessSetupTimingsByDevice.delete(oldestDeviceId);
+    }
+  }
+}
+
+function consumeFallbackSetupTiming(deviceId: string, sessionId?: string): TimingData | null {
+  const fallback = sessionlessSetupTimingsByDevice.get(deviceId);
+  if (!fallback || fallback.sessionId !== sessionId) {
+    return null;
+  }
+  sessionlessSetupTimingsByDevice.delete(deviceId);
+  return fallback.timing;
 }
 
 /** Consume once from the owning session, or the explicit session-less fallback. */
@@ -64,16 +87,17 @@ export function consumeSetupTiming(
 ): TimingData | null {
   if (sessionId) {
     const session = sessionManager?.getSession(sessionId);
-    if (session?.assignedDevice !== deviceId) {
-      return null;
+    if (!session || session.assignedDevice !== deviceId) {
+      if (sessionManager && !session) {
+        return null;
+      }
+      return consumeFallbackSetupTiming(deviceId, sessionId);
     }
     const timing = session.cacheData.pendingSetupTiming;
     delete session.cacheData.pendingSetupTiming;
     return timing ?? null;
   }
-  const timing = sessionlessSetupTimingsByDevice.get(deviceId);
-  sessionlessSetupTimingsByDevice.delete(deviceId);
-  return timing ?? null;
+  return consumeFallbackSetupTiming(deviceId);
 }
 
 /**

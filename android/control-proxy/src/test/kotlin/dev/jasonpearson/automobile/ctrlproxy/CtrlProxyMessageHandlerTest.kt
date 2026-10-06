@@ -26,6 +26,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 /**
@@ -38,6 +39,16 @@ import org.junit.Test
  * tests — no Robolectric.
  */
 class CtrlProxyMessageHandlerTest {
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun initializeDispatchClasses() = runTest {
+      // Initialize coroutines and generated serializers once, outside per-test timings.
+      // Each test still gets its own recording fake and handler.
+      CtrlProxyMessageHandlerTest()
+        .dispatch("""{"type":"request_select_all","requestId":"warmup"}""")
+    }
+  }
 
   private val json = Json {
     classDiscriminator = "type"
@@ -517,6 +528,12 @@ class CtrlProxyMessageHandlerTest {
       """{"type":"request_ime_action","requestId":"i1","action":"search","frameContext":"frame-1"}"""
     )
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search", "frame-1"), lastCall)
+  }
+
+  @Test
+  fun `dispatches request_click_focused_input`() = runTest {
+    dispatch("""{"type":"request_click_focused_input","requestId":"fc1"}""")
+    assertEquals("requestClickFocusedInput" to listOf<Any?>("fc1"), lastCall)
   }
 
   @Test

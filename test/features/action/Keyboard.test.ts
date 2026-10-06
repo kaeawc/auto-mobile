@@ -274,6 +274,22 @@ describe("Keyboard", () => {
       expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
     });
 
+    test("selectorless click without node identity still requires the IME to appear", async () => {
+      fakeClient.focusedInputClickResult = { success: true, action: "click", totalTimeMs: 1 };
+      fakeHierarchy.setResults([selectorField({ "resource-id": "" })]);
+      fakeHierarchy.setDefaultResult(baseHierarchy());
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result).toMatchObject({
+        success: false,
+        open: false,
+        message: "Failed to open keyboard",
+      });
+      expect(fakeClient.focusedInputClickCount).toBe(1);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    });
+
     test("does not tap after an unacknowledged selectorless click", async () => {
       fakeClient.focusedInputClickResult = {
         success: false,

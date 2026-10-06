@@ -487,6 +487,9 @@ export class Keyboard {
   ): Promise<NodeClickOutcome> {
     const selector = stableNodeSelectorForElement(element);
     if (!selector) {
+      // action_result contains no clicked-node identity (only success/action/timing/error),
+      // so we cannot compare the runner's current focused input with this host snapshot.
+      // The runner resolves input focus at dispatch time; success still requires a fresh IME check.
       return this.dispatchNodeClick(this.getOpenClient(), undefined, signal);
     }
     let client: KeyboardOpenClient;

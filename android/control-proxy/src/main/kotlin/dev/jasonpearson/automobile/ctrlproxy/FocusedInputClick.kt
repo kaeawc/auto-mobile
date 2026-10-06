@@ -7,13 +7,17 @@ internal fun <T> clickFocusedInput(
   findFocusedInput: () -> T?,
   click: (T) -> Boolean,
   recycle: (T) -> Unit,
+  settleAfterClick: () -> Unit = {},
 ): FocusedInputClickOutcome {
   val node =
     findFocusedInput() ?: return FocusedInputClickOutcome(false, "No focused editable input")
-  return try {
-    val success = click(node)
-    FocusedInputClickOutcome(success, if (success) null else "Focused input click returned false")
-  } finally {
-    recycle(node)
-  }
+  val outcome =
+    try {
+      val success = click(node)
+      FocusedInputClickOutcome(success, if (success) null else "Focused input click returned false")
+    } finally {
+      recycle(node)
+    }
+  if (outcome.success) settleAfterClick()
+  return outcome
 }

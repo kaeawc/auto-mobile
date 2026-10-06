@@ -1,3 +1,4 @@
+import { SHARED_STORAGE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { promises as nodeFs } from "node:fs";
@@ -32,7 +33,7 @@ import {
 } from "./sharedStorageContract";
 
 const DOWNLOADS_DIRECTORY = "Download";
-const SHARED_STORAGE_PUSH_TIMEOUT_MS = 120_000;
+export { SHARED_STORAGE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS = 5000;
 const SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS = 15000;
 const SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND = 64;

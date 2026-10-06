@@ -1,3 +1,5 @@
+import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
+export { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
 import { Mutex } from "async-mutex";
 import { abortErrorFromSignal, throwIfAborted } from "../utils/toolUtils";
 import { ActionableError, toActionableError } from "../models";
@@ -25,7 +27,6 @@ export class CriticalSectionCoordinator {
   private barrierResolvers: Map<string, BarrierWaiter[]>; // lock -> waiters waiting at barrier
   private cleanupTimers: Map<string, NodeJS.Timeout>; // lock -> cleanup timeout
   private keyGenerations: Map<string, number>;
-  private readonly BARRIER_TIMEOUT_MS = 30000; // 30 seconds
   private readonly LOCK_CLEANUP_DELAY_MS = 5000; // 5 seconds after last device
 
   // Separator used to build the internal map key from an optional namespace and
@@ -128,7 +129,7 @@ export class CriticalSectionCoordinator {
   public async enterCriticalSection(
     lock: string,
     deviceId: string,
-    timeout: number = this.BARRIER_TIMEOUT_MS,
+    timeout: number = BARRIER_TIMEOUT_MS,
     namespace?: string,
     signal?: AbortSignal,
   ): Promise<() => void> {
@@ -205,7 +206,7 @@ export class CriticalSectionCoordinator {
     lock: string,
     deviceId: string,
     deviceCount: number,
-    timeout: number = this.BARRIER_TIMEOUT_MS,
+    timeout: number = BARRIER_TIMEOUT_MS,
     namespace?: string,
     signal?: AbortSignal,
   ): Promise<void> {

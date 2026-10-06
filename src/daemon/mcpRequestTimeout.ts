@@ -1,8 +1,35 @@
 import {
+  DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+  MAX_VM_SNAPSHOT_TIMEOUT_MS,
+  SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+} from "../features/snapshot/deviceSnapshotTimeout";
+import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../features/navigation/exploreTimeout";
+import {
+  DEFAULT_WAIT_FOR_TIMEOUT_MS,
+  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+  WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+} from "../features/observe/waitForTimeout";
+import {
+  SHARED_STORAGE_PUSH_TIMEOUT_MS,
+  APP_FILE_PUSH_TIMEOUT_MS,
+  FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+} from "../features/storage/fileTransferTimeout";
+export {
+  SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+  WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+};
+import {
   resolveTextCtrlProxyTimeoutMs,
   TEXT_MCP_REQUEST_HEADROOM_MS,
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
 } from "../features/action/textTransportTimeout";
+import * as yaml from "js-yaml";
+import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
+import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -62,6 +89,22 @@ export function clampCallerMcpRequestTimeoutMs(raw: unknown): number | undefined
  * `android/junit-runner/.../AutoMobilePlanTypes.kt`.
  */
 export const MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS = 600_000;
+
+/**
+ * Allowance added on top of a plan's summed step budgets for what runs outside any step: the
+ * plan's terminal result, cleanup and session release. Reuses the wait-budget headroom so the
+ * plan deadline tracks the same dispatch/report allowance every wait step already carries.
+ */
+export const EXECUTE_PLAN_BUDGET_HEADROOM_MS = WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
+
+/** `planContent` larger than this is not parsed on the request path; it saturates at the cap. */
+export const MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS = 1_000_000;
+
+/** Steps visited (nested `criticalSection` sub-steps included) before the budget saturates. */
+export const MAX_EXECUTE_PLAN_BUDGET_STEPS = 5_000;
+
+/** Nesting depth of `criticalSection` sub-steps visited before the budget saturates. */
+const MAX_EXECUTE_PLAN_BUDGET_DEPTH = 8;
 
 /**
  * Floor for device preparation — cold-booting an emulator can take 45-90s depending on
@@ -192,14 +235,26 @@ const TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS = Math.max(
   TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_ANDROID,
 );
 
-const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
-  setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
-  uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
-  crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
-  getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
-  setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
-  setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
-};
+// A Map, not a plain object: the tool name is client-supplied, and an index such
+// as `table["constructor"]` would reach inherited `Object.prototype` members.
+const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
+  Object.entries({
+    deviceSnapshot: DEFAULT_VM_SNAPSHOT_TIMEOUT_MS + SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+    barrier: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    criticalSection: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+    stageSharedStorage: SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    stageSharedStorageFixtures:
+      SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+    setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
+    uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+    crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
+    getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    setUIState: MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
+  }),
+);
 
 /**
  * Floor for `openLink` — deep links can trigger sign-in, onboarding, data sync,
@@ -242,8 +297,8 @@ function resolveEnvTimeoutFloorMs(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
-function resolveFixedToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
-  return TOOL_TIMEOUT_FLOORS[toolName ?? ""];
+function resolveFixedToolTimeoutFloorMs(toolName: unknown): number | undefined {
+  return typeof toolName === "string" ? TOOL_TIMEOUT_FLOORS.get(toolName) : undefined;
 }
 
 function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
@@ -289,6 +344,115 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function positiveFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * Invalid/non-positive/non-finite budgets use the tool default, matching device
+ * preparation. Oversized finite values (including budget + headroom) saturate at
+ * the caller cap; no transport headroom can be guaranteed at that ceiling.
+ */
+function resolveArgumentTimeoutBudgetMs(
+  raw: unknown,
+  defaultMs: number,
+  headroomMs: number,
+): number {
+  return Math.min(
+    (positiveFiniteNumber(raw) ?? defaultMs) + headroomMs,
+    MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    MAX_SETTIMEOUT_DELAY_MS,
+  );
+}
+
+function resolveObserveWaitBudgetMs(args: Record<string, unknown>): number {
+  const waitFor = asRecord(args.waitFor);
+  if (!waitFor) {
+    return 0;
+  }
+  const defaultMs =
+    waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS;
+  // Both legacy predicates and the `for` DSL read these nested aliases in this
+  // order. Top-level timeoutMs is not a wait budget; schema validation owns it.
+  return resolveArgumentTimeoutBudgetMs(
+    waitFor.timeout ?? waitFor.timeoutMs,
+    defaultMs,
+    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
+function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: number): number {
+  // stageSharedStorage AND stageSharedStorageFixtures share files[], not a
+  // fixtures[] field. Canonical putAppFile also uses files[]; its legacy flat
+  // single-file shape, missing/invalid arrays, and empty arrays get one push.
+  // Count without visiting entries, so even an enormous sparse array is cheap.
+  const count = Array.isArray(args.files) ? Math.max(1, args.files.length) : 1;
+  return resolveArgumentTimeoutBudgetMs(
+    count * pushMs,
+    pushMs,
+    FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
+const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unknown>) => number> =
+  new Map([
+    [
+      "deviceSnapshot",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          Math.min(
+            positiveFiniteNumber(args.vmSnapshotTimeoutMs) ?? DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+            MAX_VM_SNAPSHOT_TIMEOUT_MS,
+          ),
+          DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+          SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    ["observe", resolveObserveWaitBudgetMs],
+    [
+      "barrier",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeout,
+          BARRIER_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    [
+      "criticalSection",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeout,
+          BARRIER_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    [
+      "explore",
+      (args) =>
+        resolveArgumentTimeoutBudgetMs(
+          args.timeoutMs,
+          DEFAULT_EXPLORE_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        ),
+    ],
+    [
+      "stageSharedStorage",
+      (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
+    ],
+    [
+      "stageSharedStorageFixtures",
+      (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
+    ],
+    ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
+  ]);
+
+function resolveArgumentBudgetToolBudgetMs(request: DaemonRequest): number {
+  if (request.method !== "tools/call") {
+    return 0;
+  }
+  const toolName: unknown = request.params?.name;
+  const resolver =
+    typeof toolName === "string" ? ARGUMENT_BUDGET_RESOLVERS.get(toolName) : undefined;
+  return typeof resolver === "function" ? resolver(asRecord(request.params?.arguments) ?? {}) : 0;
 }
 
 function resolveNamedDevicePreparationBudgetMs(argumentsRecord: Record<string, unknown>): number {
@@ -521,6 +685,146 @@ function resolveTextToolBudgetMs(
   );
 }
 
+/**
+ * The budget one plan step asks for, from the SAME resolution a standalone call gets: the
+ * argument-driven wait budget for tools that have one (`observe` waitFor, `barrier`,
+ * `criticalSection`, `explore`, `deviceSnapshot`, the file-push tools), otherwise the tool's own
+ * fixed floor, device-preparation budget or long-press budget (`installApp`, `launchApp`, ...).
+ * The generic 30 s default and `observe`'s cold-start floor are deliberately NOT counted: they
+ * are deadlines for ordinary calls, not waits the plan asks for, and counting them per step would
+ * stretch every plain plan to the global cap. Steps with no known budget contribute 0; the
+ * `executePlan` floor remains their safety net. A nested `executePlan` is not a plan step.
+ */
+function resolvePlanStepBudgetMs(tool: string, params: Record<string, unknown>): number {
+  if (tool === "executePlan") {
+    return 0;
+  }
+  const argumentResolver = ARGUMENT_BUDGET_RESOLVERS.get(tool);
+  if (argumentResolver) {
+    return argumentResolver(params);
+  }
+  const request: DaemonRequest = {
+    id: "plan-step",
+    type: "mcp_request",
+    method: "tools/call",
+    params: { name: tool, arguments: params },
+  };
+  return Math.max(
+    resolveToolTimeoutFloorMs(tool) ?? 0,
+    resolveDevicePreparationToolBudgetMs(request) ?? 0,
+    resolveTapOnLongPressBudgetMs(request) ?? 0,
+    resolveTapAnyLongPressBudgetMs(request) ?? 0,
+  );
+}
+
+interface PlanBudgetAccumulator {
+  /** Summed step budgets per execution track; sequential plans use the single "" track. */
+  readonly tracks: Map<string, number>;
+  stepsLeft: number;
+  /** A bound was hit, so the budget is unknown rather than small. */
+  saturated: boolean;
+}
+
+function addPlanStepBudgets(
+  steps: unknown,
+  multiDevice: boolean,
+  parentTrack: string | undefined,
+  accumulator: PlanBudgetAccumulator,
+  depth: number,
+): void {
+  if (!Array.isArray(steps)) {
+    return;
+  }
+  if (depth > MAX_EXECUTE_PLAN_BUDGET_DEPTH) {
+    accumulator.saturated = true;
+    return;
+  }
+  // Iterate the array, not an index range, but still stop at the visit bound: a
+  // sparse/huge array must cost O(bound), not O(length).
+  for (const raw of steps) {
+    if (accumulator.stepsLeft <= 0) {
+      accumulator.saturated = true;
+      return;
+    }
+    accumulator.stepsLeft -= 1;
+    const step = PlanNormalizer.toolAndParams(raw);
+    if (!step) {
+      continue;
+    }
+    // Multi-device plans run one parallel track per `params.device`; sub-steps of a
+    // criticalSection run serially on the section owner's device, so they stay on its track.
+    const track =
+      parentTrack ??
+      (multiDevice && typeof step.params.device === "string" ? step.params.device : "");
+    accumulator.tracks.set(
+      track,
+      (accumulator.tracks.get(track) ?? 0) + resolvePlanStepBudgetMs(step.tool, step.params),
+    );
+    if (step.tool === "criticalSection") {
+      addPlanStepBudgets(step.params.steps, multiDevice, track, accumulator, depth + 1);
+    }
+  }
+}
+
+function parsePlanContentForBudget(planContent: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(yaml.load(planContent, PLAN_YAML_LOAD_OPTIONS));
+  } catch (error) {
+    // Invalid YAML is surfaced by executePlan itself as a structured error; the request
+    // deadline just falls back to the floor.
+    logger.debug(`executePlan budget: plan content is not parseable YAML: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+/**
+ * Deadline an `executePlan` call needs for its steps, or 0 when it cannot be derived. Steps run
+ * under the plan's inherited signal with no per-step transport deadline, so a plan whose steps
+ * ask for long waits must be budgeted as a whole (#9882). Sequential steps SUM; the per-device
+ * tracks of a multi-device plan run in parallel, so the longest track's sum applies (this does
+ * not model barrier synchronization, where a track also waits for the slowest peer). Pure and
+ * bounded: it never throws, and a plan too large to walk saturates at the global cap, where such
+ * a plan can still hit the transport timeout.
+ */
+function resolveExecutePlanStepsBudgetMs(planContent: unknown): number {
+  if (typeof planContent !== "string") {
+    return 0;
+  }
+  if (planContent.length > MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS) {
+    return MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+  }
+  const plan = parsePlanContentForBudget(planContent);
+  if (!plan) {
+    return 0;
+  }
+  const accumulator: PlanBudgetAccumulator = {
+    tracks: new Map(),
+    stepsLeft: MAX_EXECUTE_PLAN_BUDGET_STEPS,
+    saturated: false,
+  };
+  const multiDevice = Array.isArray(plan.devices) && plan.devices.length > 0;
+  addPlanStepBudgets(plan.steps, multiDevice, undefined, accumulator, 0);
+  if (accumulator.saturated) {
+    return MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+  }
+  const longestTrackMs = [...accumulator.tracks.values()].reduce(
+    (longest, track) => Math.max(longest, track),
+    0,
+  );
+  return Math.min(
+    longestTrackMs + EXECUTE_PLAN_BUDGET_HEADROOM_MS,
+    MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    MAX_SETTIMEOUT_DELAY_MS,
+  );
+}
+
+function resolveExecutePlanBudgetMs(request: DaemonRequest): number {
+  if (request.method !== "tools/call" || request.params?.name !== "executePlan") {
+    return 0;
+  }
+  return resolveExecutePlanStepsBudgetMs(asRecord(request.params?.arguments)?.planContent);
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
@@ -531,6 +835,8 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const tapAnyOrdinaryTapBudget = resolveTapAnyOrdinaryTapBudgetMs(request);
   return Math.max(
     base,
+    resolveArgumentBudgetToolBudgetMs(request),
+    resolveExecutePlanBudgetMs(request),
     resolveTextToolBudgetMs(request, floor),
     floor ?? 0,
     devicePreparationBudget ?? 0,

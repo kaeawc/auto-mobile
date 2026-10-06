@@ -1,3 +1,7 @@
+import {
+  DEFAULT_WAIT_FOR_TIMEOUT_MS,
+  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+} from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
@@ -841,10 +845,13 @@ const runWaitForConditionDsl = async (
   signal: AbortSignal | undefined,
   timer: Timer,
   skipBackStack: boolean = false,
+  platform?: BootedDevice["platform"],
 ): Promise<WaitForObservationOutcome> => {
   const startTime = timer.now();
   const timeoutMs =
-    waitFor.timeout ?? waitFor.timeoutMs ?? (waitFor.for === "stable" ? 2500 : 5000);
+    waitFor.timeout ??
+    waitFor.timeoutMs ??
+    (waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS);
   // Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.
   const pollingScreen: ObserveScreen = skipBackStack
     ? {
@@ -896,6 +903,7 @@ const runWaitForConditionDsl = async (
     signal,
     pollingScreen,
     skipBackStack,
+    platform,
   });
   if (waitFor.for === "stable") {
     const settle = await new RealSettleObserve(pollingScreen, timer).execute({
@@ -1601,7 +1609,7 @@ export const waitForObservation = async (
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
     return complete(
-      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack),
+      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack, platform),
     );
   }
 
@@ -2172,6 +2180,7 @@ function createSettledGate({
   signal,
   pollingScreen,
   skipBackStack,
+  platform,
 }: {
   settled: SettledOptions | undefined;
   timer: Timer;
@@ -2180,6 +2189,7 @@ function createSettledGate({
   signal: AbortSignal | undefined;
   pollingScreen: ObserveScreen;
   skipBackStack: boolean;
+  platform: BootedDevice["platform"] | undefined;
 }) {
   return async (
     outcome: WaitForObservationOutcome,
@@ -2190,6 +2200,16 @@ function createSettledGate({
       return outcome;
     }
     let observation = outcome.observation;
+    // The floor must be in the device clock domain, like the `updatedAt` it is
+    // compared with (#9878, same class as #6430). The matched capture's own
+    // device stamp is inclusive, so it admits that capture (as the host
+    // `startTime` floor did with no skew) without rejecting every read of a
+    // still screen on a device whose clock trails the host. No device stamp
+    // (unavailable capture) means unfloored, as the #6430 loop does. iOS keeps
+    // the host `startTime` floor: the runner stamps `updatedAt` with its own
+    // `Date()`, which is the host clock for simulators but not clearly
+    // comparable for a physical device, so that path is unchanged.
+    const minTimestamp = settledGateFloor(observation, platform, startTime);
     let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
     let quietStart = timer.now();
     let polls = outcome.polls;
@@ -2217,7 +2237,7 @@ function createSettledGate({
       observation = await pollingScreen.execute({
         timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
         skipWaitForFresh: false,
-        minTimestamp: startTime,
+        minTimestamp,
         signal,
         skipBackStack: skipBackStack || undefined,
         skipScreenshot: true,
@@ -2474,7 +2494,7 @@ function hasIosWaitPanels(
 }
 
 function legacyWaitTimeout(waitFor: WaitForWithSettled): number {
-  return waitFor.timeout ?? waitFor.timeoutMs ?? 5000;
+  return waitFor.timeout ?? waitFor.timeoutMs ?? DEFAULT_WAIT_FOR_TIMEOUT_MS;
 }
 
 function waitObservationQuery(waitFor: WaitForWithSettled) {
@@ -2491,6 +2511,15 @@ function waitTimestampFloor(
   return needsHierarchyFreshness && baselineTimestamp !== undefined && baselineTimestamp > 0
     ? baselineTimestamp + 1
     : 0;
+}
+
+/** Settled-gate floor: iOS keeps the host `startTime`; otherwise the matched capture's own device stamp, else unfloored. */
+function settledGateFloor(
+  observation: ObserveResult,
+  platform: BootedDevice["platform"] | undefined,
+  startTime: number,
+): number {
+  return platform === "ios" ? startTime : (waitBaselineTimestamp(observation) ?? 0);
 }
 
 function waitBaselineTimestamp(observation: ObserveResult): number | undefined {

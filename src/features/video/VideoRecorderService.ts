@@ -146,10 +146,19 @@ function recordingWarnings(active: ActiveVideoRecording): string[] | undefined {
   return active.warning ? [active.warning] : undefined;
 }
 
+export interface ForceStopOptions {
+  /**
+   * `false` forbids any command that signals processes the recording does not
+   * exclusively own on the device (the device may now belong to another session).
+   * Defaults to `true`, the historical device-wide cleanup.
+   */
+  deviceWide?: boolean;
+}
+
 export interface VideoCaptureBackend {
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;
-  forceStop?(handle: RecordingHandle): Promise<void>;
+  forceStop?(handle: RecordingHandle, options?: ForceStopOptions): Promise<void>;
 }
 
 export interface StartVideoRecordingOptions {
@@ -483,13 +492,14 @@ export class VideoRecorderService {
     await this.forceStopOrDiscardRecording(recordingId, false);
   }
 
-  async discardRecording(recordingId: string): Promise<void> {
-    await this.forceStopOrDiscardRecording(recordingId, true);
+  async discardRecording(recordingId: string, options?: ForceStopOptions): Promise<void> {
+    await this.forceStopOrDiscardRecording(recordingId, true, options);
   }
 
   private async forceStopOrDiscardRecording(
     recordingId: string,
     discardArtifacts: boolean,
+    options?: ForceStopOptions,
   ): Promise<void> {
     const activeOutputPath = this.activeRecordings.get(recordingId)?.outputPath;
     const forceStopping = this.forceStoppingRecordings.get(recordingId);
@@ -512,7 +522,12 @@ export class VideoRecorderService {
     // Set this before awaiting the backend: the graceful stop may resolve while
     // a device-side force-stop command is still in flight.
     active.forceStopRequested = true;
-    const forceStop = this.forceStopActiveRecording(active, backendForceStop, discardArtifacts);
+    const forceStop = this.forceStopActiveRecording(
+      active,
+      backendForceStop,
+      discardArtifacts,
+      options,
+    );
     this.forceStoppingRecordings.set(recordingId, forceStop);
     try {
       await forceStop;
@@ -525,6 +540,7 @@ export class VideoRecorderService {
     active: ActiveRecordingState,
     backendForceStop: VideoCaptureBackend["forceStop"],
     discardArtifacts: boolean,
+    options?: ForceStopOptions,
   ): Promise<void> {
     active.startAbortController.abort();
     const handle = await this.resolveForceStopHandle(active, discardArtifacts);
@@ -538,7 +554,7 @@ export class VideoRecorderService {
     }
 
     try {
-      await backendForceStop.call(this.backend, handle);
+      await backendForceStop.call(this.backend, handle, options);
       this.activeRecordings.delete(active.recordingId);
       if (discardArtifacts) {
         await this.removeRecordingArtifacts(active.recordingId, active.outputPath);

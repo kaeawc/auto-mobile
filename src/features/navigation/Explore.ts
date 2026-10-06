@@ -1,3 +1,5 @@
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
+export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
 import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -137,7 +139,6 @@ export class Explore extends BaseVisualChange {
   private static readonly MAX_CONSECUTIVE_NO_CHANGE = 40;
   private static readonly MAX_PERMISSION_DIALOG_TAP_ATTEMPTS = 3;
   private static readonly MAX_LOOP_ITERATIONS = 3;
-  private static readonly DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly DEFAULT_RESET_INTERVAL = 15;
   private static readonly MAX_OUT_OF_APP_ATTEMPTS = 5;
 
@@ -187,7 +188,7 @@ export class Explore extends BaseVisualChange {
 
       // Set defaults
       const maxInteractions = options.maxInteractions ?? DEFAULT_MAX_INTERACTIONS;
-      const timeoutMs = options.timeoutMs ?? Explore.DEFAULT_TIMEOUT_MS;
+      const timeoutMs = options.timeoutMs ?? DEFAULT_EXPLORE_TIMEOUT_MS;
       const strategy = options.strategy ?? "weighted";
       const mode = options.mode ?? "hybrid";
       const resetInterval = options.resetInterval ?? Explore.DEFAULT_RESET_INTERVAL;

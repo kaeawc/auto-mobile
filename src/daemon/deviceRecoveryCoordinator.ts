@@ -1,6 +1,7 @@
 import type { DeviceInfo } from "../models";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { toActionableError } from "../models/ActionableError";
@@ -41,10 +42,18 @@ interface RecoveringAndroidImageSettlement {
 interface UnconfirmedRecoveringAndroidImage {
   settled: boolean;
   refreshGeneration: number;
+  /** Serials the attempt held; an `offline` one is alive, not gone (#10074). */
+  deviceIds: readonly string[];
 }
 
 export interface DeviceRecoveryPoolPort {
   getRefreshGeneration(): number;
+  /**
+   * Which of these serials `adb devices` still lists as `offline` rather than
+   * absent. Optional like the manager's: without it, absence from the online-only
+   * observation is read as gone, the behaviour before #10074.
+   */
+  getAndroidOfflineDeviceIds?(deviceIds: readonly string[]): Promise<Set<string>>;
   getEmulatorLossIncident(id: string): Promise<EmulatorLossIncident | undefined>;
   completeJoinedEmulatorLossRecovery(
     id: string,
@@ -386,7 +395,7 @@ export class DeviceRecoveryCoordinator {
     );
     if (!recordOwnsImage) {
       if (retainRecoveryImage) {
-        this.markRecoveringAndroidImageUnconfirmed(avdName, lateShutdownSettled);
+        this.markRecoveringAndroidImageUnconfirmed(avdName, recoveryDeviceIds, lateShutdownSettled);
       } else {
         this.clearRecoveringAndroidImage(avdName);
       }
@@ -403,11 +412,13 @@ export class DeviceRecoveryCoordinator {
    */
   private markRecoveringAndroidImageUnconfirmed(
     avdName: string,
+    recoveryDeviceIds: ReadonlySet<string>,
     lateShutdownSettled: Promise<unknown> | undefined,
   ): void {
     const entry: UnconfirmedRecoveringAndroidImage = {
       settled: lateShutdownSettled === undefined,
       refreshGeneration: this.pool.getRefreshGeneration(),
+      deviceIds: Array.from(recoveryDeviceIds),
     };
     this.unconfirmedRecoveringAndroidImages.set(avdName, entry);
     const settlement = this.recoveringAndroidImageSettlements.get(avdName);
@@ -435,12 +446,14 @@ export class DeviceRecoveryCoordinator {
    * observation already pooled it, so the pool owns it again. Ambiguous
    * observations (failed discovery, unresolved identity, duplicate AVD names)
    * keep the reservation, as does an observation that predates the late kill's
-   * settlement.
+   * settlement. The observation is online-only, so an AVD it lacks counts as gone
+   * only when none of the attempt's serials is still attached to adb as `offline`
+   * (#10074); an unreadable state list keeps the reservation too.
    */
-  liftUnconfirmedRecoveringAndroidImages(
+  async liftUnconfirmedRecoveringAndroidImages(
     discovery: BootedDeviceDiscovery,
     refreshGeneration: number,
-  ): void {
+  ): Promise<void> {
     if (
       this.unconfirmedRecoveringAndroidImages.size === 0 ||
       !discovery.succeededPlatforms.has("android") ||
@@ -448,6 +461,7 @@ export class DeviceRecoveryCoordinator {
     ) {
       return;
     }
+    const missing: Array<[string, UnconfirmedRecoveringAndroidImage]> = [];
     for (const [avdName, entry] of Array.from(this.unconfirmedRecoveringAndroidImages)) {
       if (!entry.settled || refreshGeneration <= entry.refreshGeneration) {
         continue;
@@ -458,12 +472,54 @@ export class DeviceRecoveryCoordinator {
       if (running.length > 1) {
         continue;
       }
+      if (running.length === 0) {
+        missing.push([avdName, entry]);
+        continue;
+      }
       logger.info(
-        running.length === 0
-          ? `[DevicePool] Android AVD '${avdName}' is confirmed stopped; lifting its unconfirmed recovery reservation`
-          : `[DevicePool] Android AVD '${avdName}' is still running as ${running[0].deviceId}; lifting its unconfirmed recovery reservation and leaving it with the pool`,
+        `[DevicePool] Android AVD '${avdName}' is still running as ${running[0].deviceId}; lifting its unconfirmed recovery reservation and leaving it with the pool`,
       );
       this.clearRecoveringAndroidImage(avdName);
+    }
+    for (const [avdName, entry] of missing) {
+      if (await this.isAnySerialAttachedOffline(avdName, entry.deviceIds)) {
+        continue;
+      }
+      // The probe awaited: a newer attempt may have re-reserved the AVD or another
+      // path may already have lifted it. Only lift the entry this pass decided.
+      if (this.unconfirmedRecoveringAndroidImages.get(avdName) !== entry) {
+        continue;
+      }
+      logger.info(
+        `[DevicePool] Android AVD '${avdName}' is confirmed stopped; lifting its unconfirmed recovery reservation`,
+      );
+      this.clearRecoveringAndroidImage(avdName);
+    }
+  }
+
+  private async isAnySerialAttachedOffline(
+    avdName: string,
+    deviceIds: readonly string[],
+  ): Promise<boolean> {
+    const probe = this.pool.getAndroidOfflineDeviceIds?.bind(this.pool);
+    if (!probe || deviceIds.length === 0) {
+      return false;
+    }
+    try {
+      const offline = await probe(deviceIds);
+      if (offline.size > 0) {
+        logger.info(
+          `[DevicePool] Android AVD '${avdName}' is absent from the booted list but adb still lists ${Array.from(offline).join(", ")} as offline; keeping its unconfirmed recovery reservation`,
+        );
+      }
+      return offline.size > 0;
+    } catch (error) {
+      // An unreadable state list cannot prove the serial left `adb devices`.
+      logger.warn(
+        `[DevicePool] adb device-state probe failed while lifting the recovery reservation for '${avdName}': ${errorMessage(error)}`,
+        error,
+      );
+      return true;
     }
   }
 

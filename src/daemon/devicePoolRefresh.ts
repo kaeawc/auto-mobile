@@ -77,7 +77,7 @@ export interface DevicePoolRefreshPort {
   liftUnconfirmedRecoveringAndroidImages(
     discovery: BootedDeviceDiscovery,
     refreshGeneration: number,
-  ): void;
+  ): Promise<void>;
 }
 
 /** Owns discovery scheduling, fresh observations, and generation fences. */
@@ -226,7 +226,7 @@ export class DevicePoolRefresh {
       perf.endOperation("poolUpdate");
       // After the pool update, so a still-running AVD is already pooled when its
       // unconfirmed recovery reservation lifts.
-      this.pool.liftUnconfirmedRecoveringAndroidImages(discovery, refreshGeneration);
+      await this.pool.liftUnconfirmedRecoveringAndroidImages(discovery, refreshGeneration);
 
       if (addedCount > 0 || removedCount > 0) {
         logger.info(

@@ -437,6 +437,9 @@ export interface ShutdownIdentityReservation {
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
 
+/** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
+const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
+
 /** Evidence belongs only to the entry captured before this target's discovery. */
 export interface TargetDeviceDiscoverySnapshot {
   capturedEntry: PooledDevice | undefined;
@@ -1317,6 +1320,10 @@ export class DevicePool {
   private createRecoveryCoordinator(): DeviceRecoveryCoordinator {
     return new DeviceRecoveryCoordinator({
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
+      getAndroidOfflineDeviceIds: async (deviceIds) =>
+        (await this.deviceManager.getAndroidOfflineDeviceIds?.(deviceIds, {
+          timeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+        })) ?? new Set<string>(),
       getRecoveringSessionLosses: () => this.recoveringSessionLosses,
       getPooledDevice: (id) => this.devices.get(id),
       getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),

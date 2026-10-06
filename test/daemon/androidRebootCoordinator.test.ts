@@ -133,9 +133,16 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     this.calls.push(`bind:${sessionId ?? "none"}`);
   }
   readonly stoppedProcesses: Array<ChildProcess | null | undefined> = [];
-  async stopEmulatorProcess(child?: ChildProcess | null): Promise<void> {
+  onStopProcess:
+    | ((child: ChildProcess | null | undefined, retain: (s: Promise<unknown>) => void) => void)
+    | undefined;
+  async stopEmulatorProcess(
+    child?: ChildProcess | null,
+    retainLeaseUntil?: (settlement: Promise<unknown>) => void,
+  ): Promise<void> {
     this.stoppedProcesses.push(child);
     this.calls.push("stop-process");
+    this.onStopProcess?.(child, retainLeaseUntil ?? (() => {}));
   }
   consumeAndroidRecoveryCancellation(): boolean {
     this.cancellationChecks++;
@@ -253,6 +260,58 @@ describe("AndroidRebootCoordinator", () => {
     ).toBe(false);
     expect(port.stoppedProcesses).toEqual([spawned]);
     expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
+  });
+  describe("a relaunch cancelled during startup validation (#10075)", () => {
+    const cancelledLaunch = () => {
+      const controller = new AbortController();
+      const spawned = { pid: 4242 } as ChildProcess;
+      const harnessed = setup(async () => {
+        controller.abort(new Error("cancel launch"));
+        throw new EmulatorLaunchCancelledError("Pixel", spawned);
+      });
+      const leaseSettlements: Promise<unknown>[] = [];
+      const exited = Promise.withResolvers<void>();
+      const cancelledRun = () =>
+        harnessed.coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+          oldDevice,
+          "incident",
+          {},
+          controller.signal,
+          (settlement) => {
+            leaseSettlements.push(settlement);
+          },
+        );
+      return { ...harnessed, spawned, exited, leaseSettlements, cancelledRun };
+    };
+
+    test("a child that cannot be confirmed exited keeps the lease on its exit and does not reserve the image", async () => {
+      const h = cancelledLaunch();
+      h.port.onStopProcess = (_child, retain) => {
+        retain(h.exited.promise);
+        throw new Error("emulator process 4242 did not exit after SIGKILL");
+      };
+      await expect(h.cancelledRun()).rejects.toThrow("did not exit after SIGKILL");
+      expect(h.port.stoppedProcesses).toEqual([h.spawned]);
+      // The lifecycle lease is what fences the AVD until the child exits: the pool's
+      // own retained-lease hook receives the child's exit, not a wrapper...
+      expect(h.leaseSettlements).toHaveLength(1);
+      expect(h.leaseSettlements[0]).toBe(h.exited.promise);
+      // ...so the #10076 unconfirmed-reservation path is not entered for a relaunch
+      // cleanup failure: the image reservation ends with the attempt.
+      expect(h.port.finishes).toEqual([
+        { retainRecoveryImage: false, lateShutdownSettled: undefined },
+      ]);
+    });
+
+    test("a child confirmed exited leaves neither the lease nor the image held", async () => {
+      const h = cancelledLaunch();
+      expect(await h.cancelledRun()).toBe(false);
+      expect(h.port.stoppedProcesses).toEqual([h.spawned]);
+      expect(h.leaseSettlements).toEqual([]);
+      expect(h.port.finishes).toEqual([
+        { retainRecoveryImage: false, lateShutdownSettled: undefined },
+      ]);
+    });
   });
   test.each([1, 3])("cancels at checkpoint %i in handoff order", async (checkpoint) => {
     const { coordinator, port, outcomes, attempts, timer } = setup();

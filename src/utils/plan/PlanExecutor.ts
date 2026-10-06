@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
 import { waitForTimeoutError } from "./waitForTimeout";
+import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -648,7 +649,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         };
       }
 
-      const error = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, step.tool);
+      const payload = getStructuredPayload(toolResult) ?? toolResult;
+      const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
       if (error) {
         if (step.optional) {
           return {

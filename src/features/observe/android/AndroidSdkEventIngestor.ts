@@ -42,8 +42,12 @@ export type AndroidTelemetryRecorder = Pick<
  * not exported).
  */
 export interface AndroidHandledExceptionEvent {
-  timestamp: number;
+  /** The device sends the time on the frame envelope, not inside the event (#10068). */
+  timestamp?: number;
   exceptionClass: string;
+  /** The wire name the device writes (`HandledExceptionData.message`, #10068). */
+  message?: string | null;
+  /** Legacy name from before #10068; read only when `message` is absent. */
   exceptionMessage?: string;
   stackTrace: string;
   customMessage?: string;
@@ -302,7 +306,7 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
 
       const nonFatalInput = {
         exceptionType: event.exceptionClass,
-        exceptionMessage: event.exceptionMessage ?? "Handled exception",
+        exceptionMessage: event.message ?? event.exceptionMessage ?? "Handled exception",
         stackTrace: stackTraceElements,
         customMessage: event.customMessage,
         deviceId: this.deviceId,

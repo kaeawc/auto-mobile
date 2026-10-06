@@ -22,7 +22,10 @@ import {
   readAndroidPreferencesXml,
   sanitizeAndroidPreferencesFileName,
 } from "../features/preferences/AndroidPreferencesXmlFile";
-import { resolveDefaultAndroidPreferencesUser } from "../features/preferences/resolveAndroidPreferencesUser";
+import {
+  rethrowForRouteWithoutUserId,
+  resolveDefaultAndroidPreferencesUser,
+} from "../features/preferences/resolveAndroidPreferencesUser";
 import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { isCtrlProxyStorageUnavailableError } from "../features/observe/android/CtrlProxyStorage";
 
@@ -127,7 +130,9 @@ async function getPreferenceEntriesForDevice(
         // app is only on one other user. A URI could name a user later through a `?userId=` query
         // parameter (templates can declare `queryParamNames`) without changing the path shape; the
         // cache key would then need the user too.
-        const userId = await resolveDefaultAndroidPreferencesUser(adb, packageName);
+        const userId = await resolveDefaultAndroidPreferencesUser(adb, packageName).catch(
+          rethrowForRouteWithoutUserId,
+        );
         const xml = await readAndroidPreferencesXml(
           adb,
           packageName,

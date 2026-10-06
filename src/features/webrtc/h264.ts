@@ -213,6 +213,19 @@ export class H264AccessUnitAssembler {
     return completed;
   }
 
+  /**
+   * Emit the in-progress access unit only when it already holds a VCL slice,
+   * i.e. a picture is actually in progress. A parameter-set-only prefix
+   * (SPS/PPS from a codec-config packet) stays pending so it is still grouped
+   * with the IDR that follows it, exactly as when no boundary was signalled.
+   * Used at a transport packet boundary where the producer guarantees the
+   * packet carried a whole picture (the Android video-server frames one
+   * encoder output per packet).
+   */
+  flushPicture(): Buffer[][] {
+    return this.hasVcl ? this.flush() : [];
+  }
+
   /** Emit the in-progress access unit, if any. */
   flush(): Buffer[][] {
     if (this.current.length === 0) {

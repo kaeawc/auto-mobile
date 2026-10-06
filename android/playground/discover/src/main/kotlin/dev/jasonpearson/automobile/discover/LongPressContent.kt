@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
@@ -57,6 +56,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -79,7 +79,7 @@ fun LongPressContent(modifier: Modifier = Modifier) {
       modifier = Modifier.fillMaxWidth(),
     )
 
-    Card(
+    AutoMobileContentCard(
       modifier =
         Modifier.fillMaxWidth()
           .combinedClickable(
@@ -219,7 +219,7 @@ fun LongPressContent(modifier: Modifier = Modifier) {
       modifier = Modifier.fillMaxWidth(),
     )
 
-    Card(
+    AutoMobileContentCard(
       modifier =
         Modifier.fillMaxWidth()
           .combinedClickable(
@@ -268,7 +268,7 @@ private fun LongPressDurationButton(requiredDurationMs: Int, label: String, test
   val highlightColor = MaterialTheme.colorScheme.tertiaryContainer
   val defaultColor = MaterialTheme.colorScheme.surfaceVariant
 
-  Card(
+  AutoMobileContentCard(
     modifier =
       Modifier.fillMaxWidth()
         .pointerInput(requiredDurationMs) {
@@ -342,7 +342,7 @@ private fun LongPressDragList() {
   val rowStridePx by
     rememberUpdatedState(with(LocalDensity.current) { (DragRowHeight + DragItemSpacing).toPx() })
 
-  Card(
+  AutoMobileContentCard(
     modifier = Modifier.fillMaxWidth(),
     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
   ) {
@@ -360,7 +360,7 @@ private fun LongPressDragList() {
         val isDragging = draggingItemId == item.id
         val offsetY = if (isDragging) dragOffset else 0f
 
-        Card(
+        AutoMobileContentCard(
           modifier =
             Modifier.fillMaxWidth()
               .height(DragRowHeight)
@@ -414,7 +414,7 @@ private fun CancelableLongPress() {
   val requiredDurationMs = 1500
   val coroutineScope = rememberCoroutineScope()
 
-  Card(
+  AutoMobileContentCard(
     modifier =
       Modifier.fillMaxWidth()
         .pointerInput(Unit) {

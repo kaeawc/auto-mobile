@@ -20,6 +20,7 @@ import type { DisplayPanel } from "../models/DisplayPanel";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
+import { stripInternalToolParams } from "./internalToolParams";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
@@ -96,6 +97,7 @@ import {
   ElementResolver,
   isMissingContainerError,
   type MatchMode,
+  type ContainerFailure,
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
 import {
@@ -559,15 +561,47 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 // (not env). Every dimension is always honored when requested — the focus /
 // region / overview scoping is on by default and applies only when a call sets
 // the matching `scope` field.
+const legacyObserveFocusObjectSchema = z.object({
+  resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+  text: z.string().optional().describe("Anchor by substring text match"),
+});
+const routedLegacyObserveFocusSchema = withJsonSchemaOverride(
+  legacyObserveFocusObjectSchema
+    .extend({ elementId: z.never().optional(), container: z.never().optional() })
+    .refine((value) => !("elementId" in value || "container" in value)),
+  (schema) => {
+    const properties = schema.properties as Record<string, unknown>;
+    delete properties.elementId;
+    delete properties.container;
+    schema.not = { anyOf: [{ required: ["elementId"] }, { required: ["container"] }] };
+    schema.additionalProperties = true;
+  },
+);
 const observeScopeFocusSchema = z
-  .union([
-    z.boolean(),
-    z.object({
-      resourceId: z.string().optional().describe("Anchor by exact resource-id"),
-      text: z.string().optional().describe("Anchor by substring text match"),
-    }),
-  ])
-  .describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor.");
+  .preprocess(
+    (value, ctx) => {
+      const cleanValue = stripInternalToolParams(value);
+      const nested =
+        cleanValue !== null &&
+        typeof cleanValue === "object" &&
+        ("elementId" in cleanValue || "container" in cleanValue);
+      const parsed = (
+        nested
+          ? nestedElementContainerSchema
+          : z.union([z.boolean(), legacyObserveFocusObjectSchema])
+      ).safeParse(cleanValue);
+      if (!parsed.success) {
+        // Abort before the permissive legacy arm can consume an invalid nested selector.
+        ctx.issues.push(...parsed.error.issues.map((issue) => ({ ...issue, continue: false })));
+        return z.NEVER;
+      }
+      return parsed.data;
+    },
+    z.union([z.boolean(), routedLegacyObserveFocusSchema, nestedElementContainerSchema]),
+  )
+  .describe(
+    "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
+  );
 
 const observeScopeRegionBoxSchema = z
   .object({
@@ -813,6 +847,45 @@ export interface WaitForObservationOutcome {
   waitMs: number;
   matchedElement?: Element;
   candidates?: Element[];
+  containerFailure?: ContainerFailure;
+}
+
+interface ObserveConditionEvaluation extends ConditionEvaluation {
+  containerFailure?: ContainerFailure;
+}
+
+function containerFailureMetadata(failed: boolean, failure: ContainerFailure | undefined) {
+  return failed && failure ? { containerFailure: failure } : {};
+}
+
+/** Record resolver diagnostics without changing predicate matching or other tools. */
+function trackContainerFailure(
+  finder: ConditionResolver,
+  container: ObserveWaitForOptions["container"],
+) {
+  // Resolution may propagate unique; diagnostics keep each client-sent level.
+  const levels: NonNullable<ObserveWaitForOptions["container"]>[] = [];
+  for (let level = container; level; level = level.container) {
+    levels.unshift(level);
+  }
+  let failure: ContainerFailure | undefined;
+  return {
+    finder: {
+      resolve: (...args: Parameters<ConditionResolver["resolve"]>) => {
+        const result = finder.resolve(...args);
+        const resolved = result.containerFailure;
+        failure ??= resolved && {
+          ...resolved,
+          selector: levels[resolved.level - 1] ?? resolved.selector,
+        };
+        return result;
+      },
+    } satisfies ConditionResolver,
+    failure: () => failure,
+    reset: () => {
+      failure = undefined;
+    },
+  };
 }
 
 /** True when the waitFor options are the #4398 declarative `for` DSL form. */
@@ -953,9 +1026,9 @@ const runWaitForConditionDsl = async (
     return applySettledGate(outcome, settle.settled);
   }
 
-  const finder = new ElementResolver();
-  const predicate = buildConditionPredicate(
-    finder,
+  const tracked = trackContainerFailure(new ElementResolver(), waitFor.container);
+  const evaluate = buildConditionPredicate(
+    tracked.finder,
     waitFor.for,
     {
       elementId: waitFor.elementId,
@@ -965,6 +1038,11 @@ const runWaitForConditionDsl = async (
     },
     { stableReads: waitFor.stableReads },
   );
+  const predicate: ConditionPredicate = (observation) => {
+    tracked.reset();
+    const evaluation = evaluate(observation);
+    return { ...evaluation, ...containerFailureMetadata(!evaluation.matched, tracked.failure()) };
+  };
   const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
     timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
@@ -981,6 +1059,7 @@ const runWaitForConditionDsl = async (
     waitMs: result.waitMs,
     matchedElement: result.matchedElement,
     candidates: result.candidates,
+    ...containerFailureMetadata(result.timedOut, tracked.failure()),
     ...(result.diagnostic
       ? {
           timeoutReason: `Timed out after ${result.waitMs} ms waiting for ${waitFor.for}; ${result.diagnostic}`,
@@ -1392,14 +1471,16 @@ const evaluateWaitForObservation = (
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
-): ConditionEvaluation & { awaitedElement?: Element } => {
+): ObserveConditionEvaluation & { awaitedElement?: Element } => {
   const sizeOptions = {
     platform,
     iosMultiPanel,
     observationScreenSize: observation.screenSize,
     display: observation.viewHierarchy,
   };
-  const evaluation: ConditionEvaluation = { matched: false };
+  const evaluation: ObserveConditionEvaluation = { matched: false };
+  const tracked = trackContainerFailure(finder, waitFor.container);
+  finder = tracked.finder;
   const needsHierarchy =
     hasElementPredicate(waitFor) || waitFor.absent !== undefined || waitFor.settled !== undefined;
   const diagnostic = needsHierarchy ? waitCaptureUnavailableReason(observation) : undefined;
@@ -1432,14 +1513,16 @@ const evaluateWaitForObservation = (
           )
         : false;
 
+  const matched = [
+    activeWindowMatched,
+    displayMatched,
+    absentSatisfied,
+    !needsElementMatch || awaitedElement !== null,
+  ].every(Boolean);
   return {
     ...evaluation,
-    matched: [
-      activeWindowMatched,
-      displayMatched,
-      absentSatisfied,
-      !needsElementMatch || awaitedElement !== null,
-    ].every(Boolean),
+    ...containerFailureMetadata(!matched, tracked.failure()),
+    matched,
     awaitedElement: awaitedElement ?? undefined,
   };
 };
@@ -1587,13 +1670,16 @@ function recordDisplayWaitEvidence(
   activeDisplayEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
 }
 
-function scopedWaitTimeoutMetadata(evaluation: ConditionEvaluation, waitMs: number) {
-  return evaluation.diagnostic
-    ? {
-        candidates: evaluation.candidates,
-        timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
-      }
-    : {};
+function scopedWaitTimeoutMetadata(evaluation: ObserveConditionEvaluation, waitMs: number) {
+  return {
+    ...containerFailureMetadata(!evaluation.matched, evaluation.containerFailure),
+    ...(evaluation.diagnostic
+      ? {
+          candidates: evaluation.candidates,
+          timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
+        }
+      : {}),
+  };
 }
 
 export const waitForObservation = async (
@@ -1981,6 +2067,7 @@ function createObserveWaitResponse(
     waitMs: waitOutcome.waitMs,
     matchedElement: waitOutcome.matchedElement,
     candidates: waitOutcome.candidates,
+    ...(waitOutcome.containerFailure ? { containerFailure: waitOutcome.containerFailure } : {}),
   };
   return createObserveResponse(
     { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
@@ -2102,7 +2189,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       // Include setup timing if this is the first observe after accessibility service setup
-      consumeObserveSetupTiming(deviceRead, device, result);
+      consumeObserveSetupTiming(deviceRead, device, result, args.sessionUuid);
 
       // Record back stack information in navigation graph if available
       if (!deviceRead) {
@@ -2242,6 +2329,7 @@ function createSettledGate({
     let matchedElement = outcome.matchedElement;
     let awaitedElement = outcome.awaitedElement;
     let conditionMatched = true;
+    let lastEvaluation: ObserveConditionEvaluation = { matched: true };
     while (timer.now() - startTime < timeoutMs) {
       if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
         return {
@@ -2273,9 +2361,10 @@ function createSettledGate({
       throwIfAborted(signal);
       polls++;
       const unavailableReason = waitCaptureUnavailableReason(observation);
-      const evaluation: ConditionEvaluation = unavailableReason
+      const evaluation: ObserveConditionEvaluation = unavailableReason
         ? { matched: false, diagnostic: unavailableReason }
         : recheck(observation);
+      lastEvaluation = evaluation;
       if (!evaluation.matched) {
         conditionMatched = false;
         matchedHash = null;
@@ -2302,6 +2391,7 @@ function createSettledGate({
       settled: false,
       timedOut: true,
       matched: conditionMatched,
+      ...containerFailureMetadata(!conditionMatched, lastEvaluation.containerFailure),
       ...scopedWaitTimeoutMetadata(
         { matched: conditionMatched, diagnostic: unavailableReason },
         timer.now() - startTime,
@@ -2644,8 +2734,9 @@ function consumeObserveSetupTiming(
   deviceRead: boolean,
   device: BootedDevice,
   result: ObserveResult,
+  sessionId?: string,
 ): void {
-  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId);
+  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId, sessionId);
   attachObserveSetupTiming(result, setupTiming);
 }
 

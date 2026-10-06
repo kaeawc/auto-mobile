@@ -838,6 +838,11 @@ export class DaemonManager implements DaemonManagerLike {
       },
       {
         maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+        expectedFailure: {
+          reason:
+            "Startup handles scan timeouts with namespace ownership probes and a degradation warning",
+          matches: (error) => error.message.includes("ETIMEDOUT"),
+        },
         delays: (attempt) =>
           Math.min(scanBackoff.delayForAttempt(attempt), this.remainingTime(startDeadline)),
         shouldRetry: (error) =>

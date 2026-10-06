@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   LoggingMessageNotificationSchema,
@@ -89,13 +89,20 @@ async function connectStallingHarness(loggingLevel?: LoggingLevel) {
   };
 }
 
-async function settleTurns(): Promise<void> {
-  for (let turn = 0; turn < 5; turn += 1) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-}
-
 describe("proxy server liveness stall reporting", () => {
+  beforeAll(async () => {
+    // Pay the SDK's one-off connection/schema compilation outside per-test timing.
+    // The throwaway harness is closed; every test creates its own client, proxy and fakes.
+    const harness = await connectStallingHarness();
+    try {
+      await harness.client.callTool({ name: "getAndroid", arguments: {} });
+    } finally {
+      await harness.close();
+      isAvailableSpy?.mockRestore();
+      isAvailableSpy = null;
+    }
+  });
+
   test("an unresponsive daemon is reported by notification and on the next tool call", async () => {
     const harness = await connectStallingHarness();
     const { client, notifications, timer, daemonManager } = harness;
@@ -105,8 +112,8 @@ describe("proxy server liveness stall reporting", () => {
       await client.callTool({ name: "getAndroid", arguments: {} });
 
       harness.stall();
+      // FakeTimer yields after each due event, including delivery of the final notification.
       await timer.advanceTimeAsync(19_000);
-      await settleTurns();
 
       // The idle harness was told without making a call.
       expect(notifications).toHaveLength(1);
@@ -135,6 +142,7 @@ describe("proxy server liveness stall reporting", () => {
         (notifications[0] as { data: unknown }).data as Record<string, unknown>,
       );
       expect(JSON.parse(text).error.message).toContain("restart the daemon yourself");
+      expect(daemonManager.startCallCount).toBe(0);
       expect(daemonManager.restartCallCount).toBe(0);
     } finally {
       await harness.close();
@@ -150,7 +158,6 @@ describe("proxy server liveness stall reporting", () => {
 
       harness.stall();
       await timer.advanceTimeAsync(19_000);
-      await settleTurns();
 
       expect(notifications).toEqual([]);
       const result = await client.callTool({
@@ -174,7 +181,6 @@ describe("proxy server liveness stall reporting", () => {
 
       harness.stall();
       await timer.advanceTimeAsync(19_000);
-      await settleTurns();
 
       expect(notifications).toHaveLength(1);
     } finally {

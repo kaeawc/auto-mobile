@@ -46,8 +46,9 @@ describe("Shake emulator console failure", () => {
       expect(result.intensity).toBe(100);
       expect(result.error).toContain(output);
       expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.startsWith("emu sensor"))).toEqual([
+        "emu sensor get acceleration",
         "emu sensor set acceleration 100:100:100",
-        "emu sensor set acceleration 0:0:0",
+        "emu sensor set acceleration 0:9.77622:0",
       ]);
       expect(timer.wasSleepCalled(50)).toBe(false);
     },

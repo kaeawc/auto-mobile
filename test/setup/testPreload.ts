@@ -1,8 +1,14 @@
+import { cleanupTestDirectories } from "./testDirectories";
+import { afterAll } from "bun:test";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { rmSync } from "node:fs";
 import childProcess from "node:child_process";
 import { ensureAuxSocketDir } from "./auxSocketDir";
 import { spawnArgv } from "./realDeviceToolSpawnGuard";
+
+// Bun test exits without emitting process exit; a global preload hook runs once
+// after all files, while the exit fallback also covers other process entrypoints.
+afterAll(cleanupTestDirectories);
 
 // Install before portAvailabilityPreload imports AndroidCtrlProxyClient ->
 // deviceDataStreamSocketServer -> daemonFiles -> constants (DAEMON_VERSION).

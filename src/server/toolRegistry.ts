@@ -617,6 +617,8 @@ export interface PlanLifecycleInput {
   device: BootedDevice | undefined;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /** An enclosing plan owns cleanup and release for this invocation. */
+  nestedInPlan?: boolean;
   // Injected teardown for the server-side per-transport SessionToolBinding
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
@@ -934,6 +936,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
         );
         device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+          sessionId: sessionUuid,
           skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
           readiness:
             typeof options.deviceReadiness === "function"
@@ -1570,6 +1573,10 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
   }
 
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
+    if (input.name === "executePlan" && input.nestedInPlan) {
+      // The enclosing plan is still using these sessions and devices.
+      return;
+    }
     const {
       name,
       args,
@@ -2097,13 +2104,11 @@ export class ToolRegistryClass {
               throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
             } finally {
               await this.planLifecycleManager.afterExecution({
+                ...resolvedTarget,
                 name,
                 args: handlerArgs,
-                baseSessionUuid: resolvedTarget.baseSessionUuid,
+                nestedInPlan: selectionContext?.planRequest !== undefined,
                 cleanupService: this.cleanupService,
-                device: resolvedTarget.device,
-                sessionUuid: resolvedTarget.sessionUuid,
-                shouldResolveDevice: resolvedTarget.shouldResolveDevice,
                 sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
                 sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
               });

@@ -39,6 +39,15 @@ import type { CtrlProxyRequestActionOptions } from "../../src/features/observe/i
 import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 
+/** A focused text field the fake models, so typed text changes what the fake reports back. */
+export interface FakeFocusedTextField {
+  value?: string;
+  placeholder?: string;
+  secure?: boolean;
+  /** What the field keeps after typed text arrives; default appends it unchanged. */
+  accept?: (current: string, typed: string) => string;
+}
+
 /**
  * Fake implementation of IOSCtrlProxy for testing
  * Allows configuring responses for hierarchy, screenshots, and gesture operations
@@ -145,6 +154,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
   private clipboardResults: CtrlProxyClipboardResult[] = [];
+  private textField: {
+    value: string;
+    placeholder?: string;
+    secure: boolean;
+    accept: (current: string, typed: string) => string;
+  } | null = null;
 
   // Clipboard call history
   private clipboardHistory: Array<{
@@ -893,11 +908,57 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
-  requestAppendText(
+  async requestAppendText(
     ...args: Parameters<IOSCtrlProxy["requestAppendText"]>
   ): ReturnType<IOSCtrlProxy["requestAppendText"]> {
     const [text, timeoutMs, perf, frameContext] = args;
-    return this.requestSetText(text, { timeoutMs, perf, frameContext });
+    const result = await this.requestSetText(text, { timeoutMs, perf, frameContext });
+    if (result.success && this.textField) {
+      this.textField.value = this.textField.accept(this.textField.value, text);
+    }
+    return result;
+  }
+
+  /**
+   * Model the focused text field the runner would report after typing. Without this the fake only
+   * records text requests. `accept` decides what the field keeps of typed text (default: append).
+   */
+  setFocusedTextField(config: FakeFocusedTextField = {}): void {
+    this.textField = {
+      value: config.value ?? "",
+      placeholder: config.placeholder,
+      secure: config.secure ?? false,
+      accept: config.accept ?? ((current, typed) => current + typed),
+    };
+  }
+
+  /**
+   * The focused field's attributes exactly as the runner serializes them
+   * (ElementLocator+Snapshot.swift): an empty `value` is omitted unless a placeholder is shown in
+   * its place, and a secure field reports bullets plus the password flag.
+   */
+  getFocusedTextFieldAttributes(): {
+    value?: string;
+    "hint-text"?: string;
+    password?: "true";
+  } | null {
+    const field = this.textField;
+    if (!field) {
+      return null;
+    }
+    const shown = field.value === "" ? field.placeholder : field.value;
+    return {
+      ...(shown === undefined || shown === ""
+        ? {}
+        : { value: field.secure ? "•".repeat(Array.from(shown).length) : shown }),
+      ...(field.placeholder === undefined ? {} : { "hint-text": field.placeholder }),
+      ...(field.secure ? { password: "true" as const } : {}),
+    };
+  }
+
+  /** The real field content, which the runner never reports for a secure field. */
+  getFocusedTextFieldValue(): string | undefined {
+    return this.textField?.value;
   }
 
   async requestClearText(
@@ -909,6 +970,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.checkFailure("clearText");
 
     this.setTextHistory.push({ text: "", resourceId });
+    if (this.textField) {
+      this.textField.value = "";
+    }
 
     return {
       success: true,

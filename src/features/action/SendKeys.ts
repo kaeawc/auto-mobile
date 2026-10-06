@@ -35,6 +35,13 @@ import {
 } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
+  describeIosTypedTextMismatch,
+  iosContentBeforeTyping,
+  iosTypedTextNotVerifiedNote,
+  readIosFocusedField,
+  type IosFieldRead,
+} from "./IosTextReadBack";
+import {
   clearTextWithKeyEvents,
   verifyKeyEventClear,
   getFocusedTextField,
@@ -70,6 +77,8 @@ const ANDROID_TYPE_FOCUSED_INPUT_ERROR = `${ANDROID_FOCUSED_INPUT_ERROR}. For pr
 export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
 /** Bounded settled re-reads used by the clear, eventLast caret and eventAll case read-backs. */
 const ANDROID_READ_BACK_ATTEMPTS = 3;
+/** Upper bound for one iOS focused-field read around typing; the request deadline can shrink it. */
+const IOS_TEXT_READ_BACK_TIMEOUT_MS = 3000;
 /** CtrlProxy's caret-unknown warning (InsertTextPlanner.kt), removed once the caret is proven. */
 export const CARET_UNKNOWN_WARNING =
   /Text was inserted, but the caret could not be placed after it \([^)]*\); the caret position is unknown, so insert any further text with request_insert_text rather than key events/;
@@ -314,6 +323,8 @@ export type TextActionResult = {
   success: boolean;
   retryable?: boolean;
   warning?: string;
+  /** iOS typing: true when the field was read back and matched, false when it could not be. */
+  verified?: boolean;
   caretPlaced?: boolean;
   resultingTextLength?: number;
   error?: string;
@@ -487,7 +498,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
-          ? await this.executeIosType(command.text, operation, signal)
+          ? await this.executeIosType(command.text, operation, signal, display)
           : await this.executeAndroidType({
               text: command.text,
               operation,
@@ -503,7 +514,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
         error: result.error,
-        ...this.textWarningFields(result),
+        ...this.textVerificationFields(result),
         ...(result.partialApplication ? { partialApplication: true } : {}),
         committedGraphemes: result.committedGraphemes,
         ...imeCommitUnitFields(result),
@@ -916,9 +927,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
+    // An append is judged against what the field held before; a replace clears first.
+    const before =
+      operation === "insert" && text.length > 0
+        ? await this.readIosField(signal, display, 0.5)
+        : undefined;
     if (operation === "replace") {
       const clearResult = await this.textClient.clear(signal);
       if (!clearResult.success) {
@@ -944,7 +961,100 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         resolvedMode,
       };
     }
-    return { success: true, resolvedMode };
+    // Only a confirmed dispatch is read back: an indeterminate one returned above and must not
+    // be followed by a read that could claim success.
+    return {
+      ...(await this.verifyIosTypedText(text, operation, before, signal, display)),
+      success: true,
+      resolvedMode,
+    };
+  }
+
+  /**
+   * XCUITest `typeText` replies success when the keys were delivered, not when the field kept
+   * them (#10167): a maximum length, input mask or autocorrect can change the result. Read the
+   * focused field once, without a screenshot, and compare it with the expected content. A
+   * mismatch is a warning rather than a failure, like the Android letter-case read-back (#9888).
+   * Secure fields are never compared, and an unreadable field is reported as not verified.
+   */
+  private async verifyIosTypedText(
+    text: string,
+    operation: SendKeysOperation,
+    before: IosFieldRead | undefined,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<Pick<TextActionResult, "verified" | "warning">> {
+    if (text.length === 0) {
+      return {};
+    }
+    if (before?.kind === "secure") {
+      return { verified: false };
+    }
+    if (before?.kind === "unreadable") {
+      return this.iosNotVerified(`the field could not be read before typing: ${before.reason}`);
+    }
+    const after = await this.readIosField(signal, display, 1);
+    if (after.kind === "secure") {
+      return { verified: false };
+    }
+    if (after.kind === "unreadable") {
+      return this.iosNotVerified(after.reason);
+    }
+    const warning = describeIosTypedTextMismatch({
+      typed: text,
+      operation,
+      before: before ? iosContentBeforeTyping(before) : "",
+      after,
+    });
+    if (warning === undefined) {
+      return { verified: true };
+    }
+    logger.warn(`[SendKeys] ${warning}`);
+    return { verified: false, warning };
+  }
+
+  private iosNotVerified(reason: string): Pick<TextActionResult, "verified" | "warning"> {
+    const note = iosTypedTextNotVerifiedNote(reason);
+    logger.info(`[SendKeys] ${note}`);
+    return { verified: false, warning: note };
+  }
+
+  /**
+   * One fresh, screenshot-free read of the focused iOS field, bounded by the request deadline
+   * (`share` of what remains) and the cancel signal. Failure to read is a value, not an error,
+   * so typing is never failed by its own read-back; cancellation still propagates.
+   */
+  private async readIosField(
+    signal: AbortSignal | undefined,
+    display: string | undefined,
+    share: number,
+  ): Promise<IosFieldRead> {
+    const deadlineMs = getTextRequestDeadlineMs();
+    const remainingMs =
+      deadlineMs === undefined ? IOS_TEXT_READ_BACK_TIMEOUT_MS : deadlineMs - this.timer.now();
+    const timeoutMs = Math.min(IOS_TEXT_READ_BACK_TIMEOUT_MS, Math.floor(remainingMs * share));
+    if (timeoutMs <= 0) {
+      return { kind: "unreadable", reason: "the request deadline left no time to read it" };
+    }
+    const timedOut = new AbortController();
+    const readSignal = signal ? AbortSignal.any([signal, timedOut.signal]) : timedOut.signal;
+    try {
+      const observation = await raceWithDeadline(
+        () => this.readFreshObservation(readSignal, display),
+        {
+          timer: this.timer,
+          timeoutMs,
+          signal,
+          label: "iOS typed-text read-back",
+          onTimeout: () => timedOut.abort(),
+        },
+      );
+      return readIosFocusedField(observation);
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] iOS field read unavailable: ${errorMessage(error)}`, error);
+      return { kind: "unreadable", reason: errorMessage(error) };
+    }
   }
 
   private async executeAndroidType(
@@ -2035,8 +2145,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return { ...result, ...(combined.length ? { warning: combined.join(" ") } : {}) };
   }
 
-  private textWarningFields(result: TextActionResult): Pick<TextActionResult, "warning"> {
-    return result.warning ? { warning: result.warning } : {};
+  private textVerificationFields(
+    result: TextActionResult,
+  ): Pick<TextActionResult, "warning" | "verified"> {
+    return {
+      ...(result.warning ? { warning: result.warning } : {}),
+      ...(result.verified === undefined ? {} : { verified: result.verified }),
+    };
   }
 
   private async executeAndroidEventAllCharacters(

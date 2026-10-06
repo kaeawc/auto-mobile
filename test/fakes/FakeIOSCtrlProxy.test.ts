@@ -262,3 +262,60 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
     });
   });
 });
+
+describe("FakeIOSCtrlProxy focused text field", () => {
+  test("reports nothing until a field is modelled", () => {
+    expect(new FakeIOSCtrlProxy().getFocusedTextFieldAttributes()).toBeNull();
+  });
+
+  test("appends typed text and clears, reporting the runner's serialization", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    proxy.setFocusedTextField({ value: "ab" });
+
+    await proxy.requestAppendText("cd");
+    expect(proxy.getFocusedTextFieldAttributes()).toEqual({ value: "abcd" });
+
+    await proxy.requestClearText();
+    // The runner omits an empty value.
+    expect(proxy.getFocusedTextFieldAttributes()).toEqual({});
+  });
+
+  test("an empty field reports its placeholder as its value", () => {
+    const proxy = new FakeIOSCtrlProxy();
+    proxy.setFocusedTextField({ placeholder: "Email" });
+
+    expect(proxy.getFocusedTextFieldAttributes()).toEqual({
+      value: "Email",
+      "hint-text": "Email",
+    });
+    expect(proxy.getFocusedTextFieldValue()).toBe("");
+  });
+
+  test("a secure field reports bullets and the password flag, never the content", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    proxy.setFocusedTextField({ secure: true });
+
+    await proxy.requestAppendText("hunter2");
+
+    expect(proxy.getFocusedTextFieldAttributes()).toEqual({ value: "•••••••", password: "true" });
+    expect(proxy.getFocusedTextFieldValue()).toBe("hunter2");
+  });
+
+  test("the accept hook models truncation and reformatting", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    proxy.setFocusedTextField({ accept: (current, typed) => (current + typed).slice(0, 3) });
+
+    await proxy.requestAppendText("abcdef");
+
+    expect(proxy.getFocusedTextFieldValue()).toBe("abc");
+  });
+
+  test("a failed append leaves the field alone", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    proxy.setFocusedTextField({ value: "x" });
+    proxy.setFailureMode("setText", new Error("runner gone"));
+
+    await expect(proxy.requestAppendText("y")).rejects.toThrow("runner gone");
+    expect(proxy.getFocusedTextFieldValue()).toBe("x");
+  });
+});

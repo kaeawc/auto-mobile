@@ -164,17 +164,49 @@ export function getFocusedTextField(
           searchable.textSources.value ??
           searchable.textSources.text ??
           (searchable.capturedTextLength === 0 ? "" : undefined);
-        const nodeClass = properties.class ?? properties.className;
-        const secure =
-          properties.password === true ||
-          properties.password === "true" ||
-          (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"));
+        const secure = isSecureTextInputProperties(properties);
         if (value !== undefined || secure) {
           field = { value, secure };
         }
       });
       if (field !== undefined) {
         return field;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** The runner's password flag or a secure text field class; its content is never read. */
+export function isSecureTextInputProperties(properties: Record<string, unknown>): boolean {
+  const nodeClass = properties.class ?? properties.className;
+  return (
+    properties.password === true ||
+    properties.password === "true" ||
+    (typeof nodeClass === "string" && nodeClass.includes("SecureTextField"))
+  );
+}
+
+/**
+ * The first focused editable control, topmost window first, with its raw node properties. Unlike
+ * `getFocusedTextField` it is returned even when it carries no value, which is how iOS reports an
+ * empty field (the runner omits an empty `value`).
+ */
+export function getFocusedTextInputProperties(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): Record<string, unknown> | undefined {
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    for (const root of rootGroup) {
+      let found: Record<string, unknown> | undefined;
+      parser.traverseNode(root, (node: ViewHierarchyNode) => {
+        const properties = parser.extractNodeProperties(node);
+        if (found === undefined && isFocusedTextInputProperties(properties)) {
+          found = properties;
+        }
+      });
+      if (found !== undefined) {
+        return found;
       }
     }
   }

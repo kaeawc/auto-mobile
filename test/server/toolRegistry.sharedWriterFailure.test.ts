@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import path from "node:path";
 import { DefaultAfterToolCallHandler } from "../../src/server/toolRegistry";
 import {
   JsonToolOutputArtifactWriter,
@@ -134,7 +135,7 @@ describe("shared artifact writer after a failed write (#10079 + #10080)", () => 
     await tapOn();
     expect(ledger.size).toBe(1);
     const only = writes[0];
-    expect(ledger.resolve(only.slice(only.lastIndexOf("/") + 1))?.path).toBe(only);
+    expect(ledger.resolve(path.basename(only))?.path).toBe(only);
   });
 
   test("the prune after a failed write deletes only issued artifacts, never a shared sibling", async () => {

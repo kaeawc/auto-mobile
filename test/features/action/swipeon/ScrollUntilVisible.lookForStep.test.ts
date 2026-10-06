@@ -106,6 +106,23 @@ test("lookFor row 11 is found without a fling", async () => {
   expect(await h.search("row 11")).toMatchObject({ found: true, element: { text: "row 11" } });
 });
 
+test("maxSwipes stops the search after that many swipes", async () => {
+  const h = listHarness();
+  await expect(h.search("row 25", { lookFor: { text: "row 25", maxSwipes: 2 } })).rejects.toThrow(
+    'text "row 25" not found',
+  );
+  expect(h.steps).toHaveLength(2);
+});
+
+test("maxSwipes still finds a target that needs no more swipes than the cap", async () => {
+  const h = listHarness();
+  expect(await h.search("row 11", { lookFor: { text: "row 11", maxSwipes: 8 } })).toMatchObject({
+    found: true,
+    element: { text: "row 11" },
+  });
+  expect(h.steps.length).toBeLessThanOrEqual(8);
+});
+
 test("every search step leaves at least a quarter viewport and holds before release", async () => {
   const h = listHarness();
   await h.search("row 25", { duration: 1, speed: "fast" });

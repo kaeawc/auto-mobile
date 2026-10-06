@@ -43,6 +43,10 @@ class StorageSubscriptionManager(
   scope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
   private val backgroundCalls: BackgroundCalls = ContentResolverCalls(context, ioDispatcher),
   private val cleanupTimeoutMs: Long = 1_000L,
+  // Waits between the first and the single retry of a DISABLED subscribe reply. Injected so tests
+  // run without a wall-clock sleep; the subscribe path already blocks a background worker.
+  private val retryDelayMs: Long = DISABLED_RETRY_DELAY_MS,
+  private val pause: (Long) -> Unit = { Thread.sleep(it) },
 ) {
 
   /**
@@ -75,6 +79,7 @@ class StorageSubscriptionManager(
     private const val AUTHORITY_SUFFIX = ".automobile.sharedprefs"
     private const val CHANGES_PATH = "changes"
     private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
+    private const val DISABLED_RETRY_DELAY_MS = 500L
   }
 
   /** State for a single subscription. */
@@ -457,37 +462,66 @@ class StorageSubscriptionManager(
     return Result.success(subscription)
   }
 
-  /** Calls the SDK's `subscribeToFile`; the success value is the app's process token, if any. */
+  /** Outcome of one `subscribeToFile` provider call. */
+  private class SubscribeCall(val result: Result<String?>, val disabled: Boolean = false)
+
+  /**
+   * Calls the SDK's `subscribeToFile`; the success value is the app's process token, if any.
+   *
+   * A provider call into an app without a process starts that process, and can land before the app
+   * has enabled inspection; the SDK then answers DISABLED although it is embedded and enabled
+   * (#10210). That happens after a force-stop, a swipe-away, a low-memory kill, a crash or a reboot
+   * alike, so the stopped flag cannot tell the cases apart. Retry once after a short delay (the
+   * first call already started the process) before reporting anything about the app.
+   */
   private fun requestSubscribeToFile(packageName: String, fileName: String): Result<String?> {
+    // Read before the call: the call itself starts the process and clears the stopped state.
+    val wasStopped = isPackageStopped(packageName)
+    val first = callSubscribeToFile(packageName, fileName)
+    if (!first.disabled) return first.result
+    if (!pauseBeforeRetry()) return first.result
+    val second = callSubscribeToFile(packageName, fileName)
+    if (!second.disabled) return second.result
+    if (wasStopped) return Result.failure(StorageError.AppStartedByRequest(packageName))
+    return second.result
+  }
+
+  private fun pauseBeforeRetry(): Boolean =
+    try {
+      pause(retryDelayMs)
+      true
+    } catch (e: InterruptedException) {
+      // Shutting down: keep the interrupt for the caller and report the first reply as it was.
+      Thread.currentThread().interrupt()
+      false
+    }
+
+  private fun callSubscribeToFile(packageName: String, fileName: String): SubscribeCall {
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
       val extras = Bundle().apply { putString("fileName", fileName) }
-      // Read before the call: the call itself starts the process and clears the stopped state.
-      val wasStopped = isPackageStopped(packageName)
       val result = context.contentResolver.call(uri, "subscribeToFile", null, extras)
 
       if (result == null) {
-        Result.failure(StorageError.SdkNotInstalled(packageName))
+        SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
       } else if (!result.getBoolean("success", false)) {
         val error = result.getString("error") ?: "Unknown error"
-        // A provider call into a stopped app starts its process, and can land before the app has
-        // enabled inspection; the SDK then reports DISABLED although it is embedded and enabled
-        // (#10210). Tell the client what to do instead of blaming the SDK setting.
-        if (wasStopped && result.getString("errorType") == "DISABLED") {
-          Result.failure(StorageError.AppNotRunning(packageName))
-        } else {
-          Result.failure(StorageError.SdkError(error))
-        }
+        SubscribeCall(
+          Result.failure(StorageError.SdkError(error)),
+          disabled = result.getString("errorType") == "DISABLED",
+        )
       } else {
         val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
-        Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
+        SubscribeCall(
+          Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
+        )
       }
     } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
+      SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
     } catch (e: Exception) {
       Log.e(TAG, "Error subscribing to $packageName:$fileName", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+      SubscribeCall(Result.failure(StorageError.SdkError(e.message ?: "Unknown error")))
     }
   }
 
@@ -1104,12 +1138,15 @@ sealed class StorageError(message: String) : Exception(message) {
     StorageError("SharedPreferences inspection is disabled in: $packageName")
 
   /**
-   * The target app's process is not running, so its SDK provider has not initialized yet. A
-   * provider call starts the process but can arrive before the app enables inspection, which looks
-   * like "inspection is disabled" although the SDK is embedded and enabled (#10210).
+   * The target app had no process (it was force-stopped) when the subscribe call arrived, so the
+   * call itself started it, and its inspection still had not become available after one retry. The
+   * app is running now, so the reply must not tell the user it is not running (#10210).
    */
-  class AppNotRunning(packageName: String) :
-    StorageError("app $packageName is not running; launch it and subscribe again")
+  class AppStartedByRequest(packageName: String) :
+    StorageError(
+      "app $packageName was not running; this request started it but its storage inspection did " +
+        "not become available. Launch the app normally and subscribe again"
+    )
 
   class FileNotFound(fileName: String) : StorageError("Preferences file not found: $fileName")
 

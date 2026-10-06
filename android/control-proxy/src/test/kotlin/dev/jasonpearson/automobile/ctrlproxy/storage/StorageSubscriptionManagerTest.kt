@@ -54,13 +54,15 @@ class StorageSubscriptionManagerTest {
   private lateinit var manager: StorageSubscriptionManager
   private val dispatcher = StandardTestDispatcher()
   private val scope = TestScope(dispatcher)
+  // Delays the manager asked for between a DISABLED reply and its retry; nothing really sleeps.
+  private val pauses = mutableListOf<Long>()
 
   @Before
   fun setUp() {
     contentResolver = mockk(relaxed = true)
     context = mockk(relaxed = true)
     every { context.contentResolver } returns contentResolver
-    manager = StorageSubscriptionManager(context, dispatcher, scope)
+    manager = StorageSubscriptionManager(context, dispatcher, scope, pause = { pauses += it })
   }
 
   @After
@@ -348,33 +350,87 @@ class StorageSubscriptionManagerTest {
     every { context.packageManager } returns packageManager
   }
 
+  private fun successReply() = Bundle().apply { putBoolean("success", true) }
+
+  /** Stubs `subscribeToFile` to answer [replies] in order, repeating the last one. */
+  private fun givenSubscribeReplies(vararg replies: Bundle) {
+    var next = 0
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } answers
+      {
+        replies[minOf(next++, replies.size - 1)]
+      }
+  }
+
   @Test
-  fun `subscribe to a stopped app reports it is not running rather than inspection disabled`() {
+  fun `subscribe to a stopped app that stays disabled says the request started it`() {
     givenInstalledPackage("com.example.app", stopped = true)
-    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-      disabledReply()
+    givenSubscribeReplies(disabledReply())
 
     val result = manager.subscribe("com.example.app", "auth")
 
     val error = result.exceptionOrNull()
-    assertTrue(error is StorageError.AppNotRunning)
+    assertTrue(error is StorageError.AppStartedByRequest)
     assertEquals(
-      "app com.example.app is not running; launch it and subscribe again",
+      "app com.example.app was not running; this request started it but its storage inspection " +
+        "did not become available. Launch the app normally and subscribe again",
       error?.message,
     )
     assertTrue(manager.getActiveSubscriptions().isEmpty())
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
   }
 
   @Test
-  fun `subscribe to a running app that reports inspection disabled keeps the SDK message`() {
+  fun `subscribe to a stopped app whose inspection comes up on the retry succeeds`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply(), successReply())
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    assertEquals(1, pauses.size)
+    assertEquals(1, manager.getActiveSubscriptions().size)
+  }
+
+  @Test
+  fun `a dead process with the stopped flag clear retries and subscribes`() {
+    // Swipe-away, low-memory kill, crash or reboot: not FLAG_STOPPED, yet the provider call still
+    // cold-starts the process and can beat the app's own inspection setup.
     givenInstalledPackage("com.example.app", stopped = false)
-    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-      disabledReply()
+    givenSubscribeReplies(disabledReply(), successReply())
+
+    val result = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(result.isSuccess)
+    assertEquals(1, pauses.size)
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `a genuinely disabled running app is retried exactly once then keeps the SDK message`() {
+    givenInstalledPackage("com.example.app", stopped = false)
+    givenSubscribeReplies(disabledReply())
 
     val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
 
     assertTrue(error is StorageError.SdkError)
     assertEquals("SharedPreferences inspection is disabled", error?.message)
+    assertEquals(1, pauses.size)
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `a reply other than disabled is not retried`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "FileNotFound")
+        putString("error", "Preferences file not found: auth")
+      }
+    )
+
+    manager.subscribe("com.example.app", "auth")
+
+    assertTrue(pauses.isEmpty())
+    verify(exactly = 1) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
   }
 
   @Test

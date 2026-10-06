@@ -7,6 +7,7 @@ import {
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
+  countNewTransitions,
   initializeGraphTraversal,
   getEdgeKey,
   hashEdgeAction,
@@ -112,6 +113,53 @@ describe("ExploreValidateMode", () => {
       expect(state.totalNodesInGraph).toBeGreaterThan(0);
       expect(state.totalEdgesInGraph).toBeGreaterThan(0);
       expect(state.pendingEdges.size).toBeGreaterThan(0);
+    });
+
+    test("totals distinct transitions, so repeated rows cannot cap coverage (#10194)", async () => {
+      for (const [from, to] of [
+        ["Home", "Settings"],
+        ["Settings", "Home"],
+        ["Home", "Profile"],
+      ]) {
+        for (let traversal = 0; traversal < 3; traversal++) {
+          fakeGraph.addEdge(createMockEdge(from, to, { timestamp: traversal }));
+        }
+      }
+
+      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+
+      expect(state.pendingEdges.size).toBe(3);
+      expect(state.totalEdgesInGraph).toBe(state.pendingEdges.size);
+    });
+  });
+
+  describe("countNewTransitions", () => {
+    const home = (to: string, text?: string) =>
+      createMockEdge("Home", to, {
+        interaction: text ? { toolName: "tapOn", args: { text }, timestamp: 1 } : undefined,
+      });
+
+    test("a re-traversal of a known transition is not new", () => {
+      const initial = [home("Settings", "Settings")];
+      const final = [home("Settings", "Settings"), home("Settings", "Settings")];
+
+      expect(countNewTransitions(initial, final)).toBe(0);
+    });
+
+    test("counts each new transition once, even when it was traversed repeatedly", () => {
+      const initial = [home("Settings", "Settings")];
+      const final = [
+        home("Settings", "Settings"),
+        home("Profile", "Me"),
+        home("Profile", "Me"),
+        home("Settings", "Gear"),
+      ];
+
+      expect(countNewTransitions(initial, final)).toBe(2);
+    });
+
+    test("a smaller final graph adds nothing", () => {
+      expect(countNewTransitions([home("Settings", "Settings")], [])).toBe(0);
     });
   });
 

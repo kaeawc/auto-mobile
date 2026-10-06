@@ -348,7 +348,10 @@ export class NavigationRepository {
   }
 
   /**
-   * Get all edges for an app.
+   * Get every edge ROW for an app: one per recorded traversal (the append-only
+   * traversal log). Use this when the number of traversals matters (e.g. the graph
+   * summary's traversalCount); readers that treat edges as transitions want
+   * {@link getDistinctEdges}.
    */
   async getEdges(appId: string): Promise<NavigationEdge[]> {
     const db = this.getDb();
@@ -358,6 +361,44 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .orderBy("timestamp", "asc")
       .execute();
+  }
+
+  /**
+   * Distinct transitions of an app: the newest traversal row (highest id, which is
+   * insertion order and so immune to a device clock stepping backwards, #10031) of
+   * each (from_screen, to_screen, tool_name, tool_args) group. The de-duplication is
+   * in SQL, so hydrating callers read O(distinct transitions) rows however many
+   * traversals were logged (#10194).
+   */
+  async getDistinctEdges(appId: string): Promise<NavigationEdge[]> {
+    return this.selectNewestEdgePerTransition(appId).execute();
+  }
+
+  /**
+   * Query for the newest `navigation_edges` row of each distinct transition of an
+   * app, optionally restricted to one endpoint screen (served by the from/to index).
+   * A transition is identified by its screen pair plus the recorded tool call, the
+   * same raw identity {@link getEdgeTargetsFrom} collapses on; GROUP BY treats NULL
+   * `tool_name` / `tool_args` (an unattributed edge) as one group.
+   */
+  private selectNewestEdgePerTransition(
+    appId: string,
+    endpoint: { column: "from_screen" | "to_screen"; screen: string } | null = null,
+  ) {
+    const db = this.getDb();
+    let newestIds = db
+      .selectFrom("navigation_edges")
+      .select((eb) => eb.fn.max<number>("id").as("id"))
+      .where("app_id", "=", appId);
+    let rows = db.selectFrom("navigation_edges").selectAll().where("app_id", "=", appId);
+    if (endpoint) {
+      newestIds = newestIds.where(endpoint.column, "=", endpoint.screen);
+      rows = rows.where(endpoint.column, "=", endpoint.screen);
+    }
+    return rows
+      .where("id", "in", newestIds.groupBy(["from_screen", "to_screen", "tool_name", "tool_args"]))
+      .orderBy("timestamp", "asc")
+      .orderBy("id", "asc");
   }
 
   /**
@@ -395,16 +436,14 @@ export class NavigationRepository {
   }
 
   /**
-   * Get edges from a specific screen.
+   * Get the distinct transitions leaving a specific screen (newest traversal row of
+   * each, see {@link getDistinctEdges}).
    */
   async getEdgesFrom(appId: string, fromScreen: string): Promise<NavigationEdge[]> {
-    const db = this.getDb();
-    return db
-      .selectFrom("navigation_edges")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("from_screen", "=", fromScreen)
-      .execute();
+    return this.selectNewestEdgePerTransition(appId, {
+      column: "from_screen",
+      screen: fromScreen,
+    }).execute();
   }
 
   /**
@@ -432,16 +471,14 @@ export class NavigationRepository {
   }
 
   /**
-   * Get edges to a specific screen.
+   * Get the distinct transitions entering a specific screen (newest traversal row of
+   * each, see {@link getDistinctEdges}).
    */
   async getEdgesTo(appId: string, toScreen: string): Promise<NavigationEdge[]> {
-    const db = this.getDb();
-    return db
-      .selectFrom("navigation_edges")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("to_screen", "=", toScreen)
-      .execute();
+    return this.selectNewestEdgePerTransition(appId, {
+      column: "to_screen",
+      screen: toScreen,
+    }).execute();
   }
 
   /**
@@ -957,31 +994,31 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .executeTakeFirst();
 
-    const edges = await db
-      .selectFrom("navigation_edges")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
+    // Count distinct transitions, not traversal rows (#10194); see getDistinctEdges.
+    const transitions = await db
+      .selectFrom((qb) =>
+        qb
+          .selectFrom("navigation_edges")
+          .select("tool_name")
+          .where("app_id", "=", appId)
+          .groupBy(["from_screen", "to_screen", "tool_name", "tool_args"])
+          .as("transition"),
+      )
+      .select([
+        db.fn.countAll<number>().as("count"),
+        sql<number>`coalesce(sum(case when tool_name is not null then 1 else 0 end), 0)`.as(
+          "toolCount",
+        ),
+      ])
       .executeTakeFirst();
-
-    const toolEdges = await db
-      .selectFrom("navigation_edges")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
-      .where("tool_name", "is not", null)
-      .executeTakeFirst();
-
-    const unknownEdges = await db
-      .selectFrom("navigation_edges")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
-      .where("tool_name", "is", null)
-      .executeTakeFirst();
+    const edgeCount = Number(transitions?.count || 0);
+    const toolEdgeCount = Number(transitions?.toolCount || 0);
 
     return {
       nodeCount: Number(nodes?.count || 0),
-      edgeCount: Number(edges?.count || 0),
-      toolEdgeCount: Number(toolEdges?.count || 0),
-      unknownEdgeCount: Number(unknownEdges?.count || 0),
+      edgeCount,
+      toolEdgeCount,
+      unknownEdgeCount: edgeCount - toolEdgeCount,
     };
   }
 

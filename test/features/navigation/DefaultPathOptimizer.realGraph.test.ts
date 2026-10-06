@@ -1,6 +1,21 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
+import type { Kysely } from "kysely";
+import { createTestDatabase } from "../../db/testDbHelper";
+import { NavigationRepository } from "../../../src/db/navigationRepository";
+import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
+import type { Database } from "../../../src/db/types";
 import { DefaultPathOptimizer } from "../../../src/features/navigation/DefaultPathOptimizer";
-import type { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
@@ -110,5 +125,123 @@ describe("DefaultPathOptimizer against a real navigation graph", () => {
 
     expect(result.shouldUseBack).toBe(false);
     expect(result.reason).toMatch(/No known navigation path to verify safety/);
+  });
+});
+
+/**
+ * The Back decision only needs adjacency, so it must not pay for edge hydration
+ * (modal / UI-element / scroll-position queries, JSON.parse of tool payloads).
+ */
+describe("DefaultPathOptimizer adjacency reads", () => {
+  let db: Kysely<Database>;
+  let repository: NavigationRepository;
+  let manager: NavigationGraphManager;
+  let telemetrySpy: ReturnType<typeof spyOn>;
+
+  beforeEach(async () => {
+    db = await createTestDatabase();
+    repository = new NavigationRepository(db);
+    manager = NavigationGraphManager.createForTesting(
+      repository,
+      new TestCoverageRepository(undefined, db),
+    );
+    TelemetryRecorder.resetInstance();
+    telemetrySpy = spyOn(
+      TelemetryRecorder.getInstance(),
+      "recordNavigationEvent",
+    ).mockResolvedValue(undefined);
+    await manager.setCurrentApp(APP_ID);
+  });
+
+  afterEach(async () => {
+    telemetrySpy.mockRestore();
+    TelemetryRecorder.resetInstance();
+    await db.destroy();
+  });
+
+  async function visit(screen: string, depth: number, timestamp: number): Promise<void> {
+    await manager.recordNavigationEvent({
+      destination: screen,
+      source: "",
+      arguments: {},
+      metadata: {},
+      timestamp,
+      sequenceNumber: timestamp,
+      applicationId: APP_ID,
+    });
+    await manager.recordBackStack({ depth, currentTaskId: 1 });
+  }
+
+  /** Add `count` extra rows for an existing transition (repeated traversals). */
+  async function duplicateEdge(from: string, to: string, count: number): Promise<void> {
+    await db
+      .insertInto("navigation_edges")
+      .values(
+        Array.from({ length: count }, (_, index) => ({
+          app_id: APP_ID,
+          from_screen: from,
+          to_screen: to,
+          tool_name: null,
+          tool_args: null,
+          timestamp: 10_000 + index,
+        })),
+      )
+      .execute();
+  }
+
+  test("issues one adjacency read per visited screen and never hydrates edges", async () => {
+    await visit("Feed", 1, 1001);
+    await visit("Detail", 2, 1002);
+    await visit("Settings", 3, 1003);
+    const hydrating = spyOn(repository, "getEdgesFrom");
+    const adjacency = spyOn(repository, "getEdgeTargetsFrom");
+
+    const result = await new DefaultPathOptimizer(manager).shouldUseBackButton(
+      "Settings",
+      "Feed",
+      3,
+    );
+
+    expect(result).toMatchObject({ shouldUseBack: true, backPresses: 2 });
+    // Hop 1 expands Feed; hop 2 expands its only new neighbour, Detail.
+    expect(adjacency.mock.calls.map((call) => call[1])).toEqual(["Feed", "Detail"]);
+    expect(hydrating).not.toHaveBeenCalled();
+  });
+
+  test("a screen pair with many duplicate rows costs one adjacency row", async () => {
+    await visit("Feed", 1, 1001);
+    await visit("Detail", 2, 1002);
+    await duplicateEdge("Feed", "Detail", 200);
+
+    const targets = await manager.getEdgeTargetsFrom("Feed");
+
+    expect(targets).toEqual([{ toScreen: "Detail", toolName: null, toolArgs: null }]);
+  });
+
+  test("a malformed edge payload cannot throw out of the Back decision", async () => {
+    await visit("Feed", 1, 1001);
+    await visit("Detail", 2, 1002);
+    await db
+      .updateTable("navigation_edges")
+      .set({ tool_name: "tapOn", tool_args: "{not json" })
+      .execute();
+
+    const result = await new DefaultPathOptimizer(manager).shouldUseBackButton("Detail", "Feed", 2);
+
+    expect(result).toMatchObject({ shouldUseBack: true, backPresses: 1 });
+    expect(result.reason).toMatch(/matches depth difference/);
+  });
+
+  test("adjacency keeps the tool name and raw args so callers can filter without hydrating", async () => {
+    await visit("Feed", 1, 1001);
+    await visit("Detail", 2, 1002);
+    await db
+      .updateTable("navigation_edges")
+      .set({ tool_name: "pressButton", tool_args: '{"button":"back"}' })
+      .execute();
+
+    expect(await manager.getEdgeTargetsFrom("Feed")).toEqual([
+      { toScreen: "Detail", toolName: "pressButton", toolArgs: '{"button":"back"}' },
+    ]);
   });
 });

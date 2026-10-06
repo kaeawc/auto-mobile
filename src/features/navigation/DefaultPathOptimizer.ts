@@ -1,6 +1,6 @@
 import { logger } from "../../utils/logger";
 import { NavigationGraphManager } from "./NavigationGraphManager";
-import { isRecordedBackEdge } from "./ExploreValidateMode";
+import { isRecordedBackEdgeTarget } from "./ExploreValidateMode";
 import {
   PathOptimizer,
   BackButtonRecommendation,
@@ -133,11 +133,11 @@ export class DefaultPathOptimizer implements PathOptimizer {
     let frontier = [from];
     for (let hops = 1; hops <= maxHops && frontier.length > 0; hops++) {
       const outgoing = (
-        await Promise.all(frontier.map((screen) => this.navigationGraph.getEdgesFrom(screen)))
+        await Promise.all(frontier.map((screen) => this.navigationGraph.getEdgeTargetsFrom(screen)))
       )
         .flat()
-        .filter((edge) => !isRecordedBackEdge(edge))
-        .map((edge) => edge.to);
+        .filter((target) => !isRecordedBackEdgeTarget(target))
+        .map((target) => target.toScreen);
       if (outgoing.includes(to)) {
         return hops;
       }

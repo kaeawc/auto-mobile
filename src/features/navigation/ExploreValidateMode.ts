@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import type { Element } from "../../models";
 import type { NavigationEdge, NavigationGraphService } from "./NavigationGraphManager";
+import type { NavigationEdgeTarget } from "../../db/navigationRepository";
 import type { Timer } from "../../utils/SystemTimer";
 import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
 import { logger } from "../../utils/logger";
@@ -303,6 +304,24 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
 export function isRecordedBackEdge(edge: NavigationEdge): boolean {
   const interaction = edge.interaction;
   return interaction?.toolName === "pressButton" && interaction.args?.button === "back";
+}
+
+/**
+ * The same predicate over an adjacency row (see `getEdgeTargetsFrom`), where `toolArgs`
+ * is the raw stored JSON. Cheap tool-name check first; the payload is parsed only for
+ * `pressButton` rows and a malformed one is "not a Back edge" rather than a throw.
+ */
+export function isRecordedBackEdgeTarget(target: NavigationEdgeTarget): boolean {
+  if (target.toolName !== "pressButton" || !target.toolArgs) {
+    return false;
+  }
+  try {
+    return asRecord(JSON.parse(target.toolArgs))?.button === "back";
+  } catch (error) {
+    // A malformed stored payload cannot be a recorded Back press; treat it as a forward edge.
+    logger.debug(`[Explore] Unparseable tool_args on ${target.toScreen} edge: ${error}`);
+    return false;
+  }
 }
 
 /** Coordinate containment is weaker evidence than a selector match on identity. */

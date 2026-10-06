@@ -3139,7 +3139,9 @@ export function registerInteractionTools() {
           device,
           notification,
           clearMatchTexts,
-          500,
+          // The list pass collapses the shade; reopening may take longer than
+          // the short drain wait used after a swipe (#10249).
+          device.platform === "android" && i === 0 ? awaitTimeoutMs : 500,
           progress,
           signal,
         );

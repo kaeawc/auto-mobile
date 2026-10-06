@@ -796,6 +796,16 @@ interface AndroidAppendTextOptions {
   signal?: AbortSignal;
 }
 
+type InputTargetAction =
+  | "input/tap"
+  | "input/swipe"
+  | "input/typeText"
+  | "input/pressButton"
+  | "input/key"
+  | "input/gestureStart"
+  | "input/gestureMove"
+  | "input/gestureEnd";
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -818,6 +828,11 @@ export class UnixSocketServer {
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private readonly resourceSubscriptions = new Map<string, Set<string>>();
+  /**
+   * The session that owned each resolved input target at resolution time, so a rebind between
+   * resolution and execution cannot leave the input running as an unowned call (#9958).
+   */
+  private readonly inputTargetOwners = new WeakMap<BootedDevice, string>();
   private resourceUpdatedUnsubscribe: (() => void) | null = null;
   /** Session-release frames written but not yet flushed to their client sockets. */
   private pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
@@ -6373,15 +6388,35 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action:
-      | "input/tap"
-      | "input/swipe"
-      | "input/typeText"
-      | "input/pressButton"
-      | "input/key"
-      | "input/gestureStart"
-      | "input/gestureMove"
-      | "input/gestureEnd",
+    action: InputTargetAction,
+    bypassAndroidDeviceListCache: boolean = false,
+  ): Promise<BootedDevice> {
+    const targetDevice = await this.selectInputTargetDevice(
+      platform,
+      deviceId,
+      socketSessionId,
+      action,
+      bypassAndroidDeviceListCache,
+    );
+    this.captureInputTargetOwner(targetDevice);
+    return targetDevice;
+  }
+
+  private captureInputTargetOwner(targetDevice: BootedDevice): void {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const owner = this.daemonState.getSessionManager().getSessionForDevice?.(targetDevice.deviceId);
+    if (owner) {
+      this.inputTargetOwners.set(targetDevice, owner);
+    }
+  }
+
+  private async selectInputTargetDevice(
+    platform: "android" | "ios",
+    deviceId: string | undefined,
+    socketSessionId: string | undefined,
+    action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean = false,
   ): Promise<BootedDevice> {
     const bootedDevices = await this.discoverInputTargetDevices(
@@ -6547,10 +6582,19 @@ export class UnixSocketServer {
     if (sessionUuid) {
       this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }
+    const resolvedOwner = this.inputTargetOwners.get(targetDevice);
+    if (resolvedOwner !== undefined && resolvedOwner !== sessionUuid) {
+      // The target was resolved for `resolvedOwner`, which has since left the device (rebind or
+      // release). Running now would drive it as an unowned call or as the next owner's (#9958).
+      throw new ActionableError(
+        `Session ${resolvedOwner} no longer owns device '${targetDevice.deviceId}' (it was rebound ` +
+          `or released after this input resolved its target); the input was not sent.`,
+      );
+    }
     const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
-    executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
     const signal = execution.abortController.signal;
     try {
+      executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
       return await runWithToolSelectionContext(
         {
@@ -6586,15 +6630,7 @@ export class UnixSocketServer {
 
   private async discoverInputTargetDevices(
     platform: "android" | "ios",
-    action:
-      | "input/tap"
-      | "input/swipe"
-      | "input/typeText"
-      | "input/pressButton"
-      | "input/key"
-      | "input/gestureStart"
-      | "input/gestureMove"
-      | "input/gestureEnd",
+    action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean,
   ): Promise<BootedDevice[]> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(

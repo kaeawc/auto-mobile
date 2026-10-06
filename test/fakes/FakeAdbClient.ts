@@ -27,6 +27,8 @@ interface SpawnBehavior {
   match: string;
   outcome:
     | { kind: "exit"; code: number; stderr?: string }
+    | { kind: "running" }
+    | { kind: "signal"; signal: NodeJS.Signals }
     | { kind: "error"; error: Error }
     | { kind: "reject"; error: Error };
 }
@@ -183,6 +185,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
     }
     if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
+    } else if (behavior?.outcome.kind === "signal") {
+      proc.scheduleExit(null, behavior.outcome.signal);
+    } else if (behavior?.outcome.kind === "running") {
+      // A long-lived process (a recorder): the test ends it via getSpawnedProcesses().
     } else {
       proc.scheduleExit(
         behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0,
@@ -199,6 +205,16 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setSpawnExit(match: string, code: number, stderr?: string): void {
     this.spawnBehaviors.push({ match, outcome: { kind: "exit", code, stderr } });
+  }
+
+  /** End a spawned command whose argv contains `match` by `signal` (no exit code). */
+  setSpawnKilled(match: string, signal: NodeJS.Signals): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "signal", signal } });
+  }
+
+  /** Keep a spawned command whose argv contains `match` running until the test ends it. */
+  setSpawnRunning(match: string): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "running" } });
   }
 
   /** Make a spawned command whose argv contains `match` print `stdout` (buffered until read). */

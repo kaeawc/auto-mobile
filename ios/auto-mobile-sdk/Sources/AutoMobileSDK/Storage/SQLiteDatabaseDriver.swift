@@ -8,6 +8,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     private let lock = NSLock()
     private let operationLock = NSLock()
     private let searchPaths: [String]
+    private let busyBudget: SQLiteBusyBudget
     private var openDatabases: [String: CachedConnection] = [:]
 
     /// `st_dev` + `st_ino` of the database file a connection was opened on.
@@ -27,10 +28,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             NSSearchPathForDirectoriesInDomains(.libraryDirectory, .userDomainMask, true),
             NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true),
         ].flatMap { $0 }
+        busyBudget = .standard
     }
 
-    init(searchPaths: [String]) {
+    init(searchPaths: [String], busyBudget: SQLiteBusyBudget = .standard) {
         self.searchPaths = searchPaths
+        self.busyBudget = busyBudget
     }
 
     deinit {
@@ -71,18 +74,31 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     public func getTables(databasePath: String) -> [String] {
+        tablesResult(databasePath: databasePath).tables
+    }
+
+    /// `getTables` plus the reason the list is incomplete. A lock held by the app (#10165) used to end
+    /// the row loop like `SQLITE_DONE` and answer an empty list; it now answers a `busy_lock`
+    /// diagnostic so callers can tell "locked" from "no tables".
+    func tablesResult(databasePath: String) -> SQLiteTablesResult {
         operationLock.lock()
         defer { operationLock.unlock() }
 
-        guard let db = openDatabase(path: databasePath, readOnly: true) else { return [] }
+        guard let db = openDatabase(path: databasePath, readOnly: true) else {
+            return SQLiteTablesResult(tables: [], diagnostic: nil)
+        }
 
         let query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
         defer { sqlite3_finalize(stmt) }
+        guard prepared == SQLITE_OK else {
+            return SQLiteTablesResult(tables: [], diagnostic: Self.failureDiagnostic(db: db, resultCode: prepared))
+        }
 
         var tables: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(stmt)
+        while stepResult == SQLITE_ROW {
             if let cString = sqlite3_column_text(stmt, 0) {
                 let name = String(cString: cString)
                 // Filter internal tables
@@ -90,8 +106,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                     tables.append(name)
                 }
             }
+            stepResult = sqlite3_step(stmt)
         }
-        return tables
+        guard stepResult == SQLITE_DONE else {
+            return SQLiteTablesResult(tables: [], diagnostic: Self.failureDiagnostic(db: db, resultCode: stepResult))
+        }
+        return SQLiteTablesResult(tables: tables, diagnostic: nil)
     }
 
     public func getTableData(databasePath: String, table: String, limit: Int, offset: Int) -> TableDataResult {
@@ -204,7 +224,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
 
         var columns: [ColumnInfo] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(stmt)
+        while stepResult == SQLITE_ROW {
             let name = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
             let type = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
             let notNull = sqlite3_column_int(stmt, 3) != 0
@@ -218,6 +239,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 isPrimaryKey: pk,
                 defaultValue: defaultValue
             ))
+            stepResult = sqlite3_step(stmt)
+        }
+        guard stepResult == SQLITE_DONE else {
+            return TableStructureResult(
+                columns: [],
+                diagnostic: Self.failureDiagnostic(db: db, resultCode: stepResult)
+            )
         }
 
         return TableStructureResult(columns: columns)
@@ -228,7 +256,10 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { operationLock.unlock() }
 
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let classification = Self.classifySQL(databasePath: databasePath, query: trimmed)
+        let classification = classify(databasePath: databasePath, query: trimmed)
+        if classification.isBusy {
+            return Self.busyResult()
+        }
         if classification.hasMultipleStatements {
             let message = "Multiple SQL statements are not supported"
             return SQLExecutionResult(
@@ -300,10 +331,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             return nil
         }
 
-        if !readOnly {
-            // Set busy timeout to wait for locks
-            sqlite3_busy_timeout(db, 5000)
-        }
+        // Bounded waits for a lock the app holds; both stay under the runner's 2 s relay timeout.
+        sqlite3_busy_timeout(db, readOnly ? busyBudget.readMs : busyBudget.writeMs)
         openDatabases[cacheKey] = CachedConnection(db: db, identity: identity)
         return db
     }
@@ -329,10 +358,16 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return FileIdentity(device: UInt64(bitPattern: Int64(info.st_dev)), inode: UInt64(info.st_ino))
     }
 
+    /// Classifies with this driver's classifier busy budget.
+    func classify(databasePath: String, query: String) -> SQLClassification {
+        Self.classifySQL(databasePath: databasePath, query: query, busyTimeoutMs: busyBudget.classifierMs)
+    }
+
     static func classifySQL(
         databasePath: String,
         query: String,
-        allowSyntaxFallback: Bool = false
+        allowSyntaxFallback: Bool = false,
+        busyTimeoutMs: Int32 = SQLiteBusyBudget.standard.classifierMs
     )
         -> SQLClassification
     {
@@ -346,13 +381,17 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 : SQLClassification(returnsRows: false, readOnly: false)
         }
         defer { sqlite3_close(connection) }
+        sqlite3_busy_timeout(connection, busyTimeoutMs)
 
         return query.withCString { sql in
             var statement: OpaquePointer?
             var tail: UnsafePointer<CChar>?
-            guard sqlite3_prepare_v2(connection, sql, -1, &statement, &tail) == SQLITE_OK else {
+            let prepared = sqlite3_prepare_v2(connection, sql, -1, &statement, &tail)
+            guard prepared == SQLITE_OK else {
                 if let statement { sqlite3_finalize(statement) }
-                return SQLClassification(returnsRows: false, readOnly: false)
+                // A statement that could not be prepared because the app holds a lock says nothing
+                // about whether it writes; reporting it as a write made SELECTs look like mutations.
+                return SQLClassification(returnsRows: false, readOnly: false, isBusy: isBusy(prepared))
             }
             defer { sqlite3_finalize(statement) }
             guard let statement else {
@@ -662,6 +701,27 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         sqlite3_total_changes(db) == totalBefore ? 0 : Int(sqlite3_changes(db))
     }
 
+    static func isBusy(_ resultCode: Int32) -> Bool {
+        let primary = resultCode & 0xFF
+        return primary == SQLITE_BUSY || primary == SQLITE_LOCKED
+    }
+
+    private static func failureDiagnostic(db: OpaquePointer, resultCode: Int32) -> StorageDiagnostic {
+        let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+        return isBusy(resultCode) ? StorageDiagnostic(code: "busy_lock", message: message) : diagnostic(for: message)
+    }
+
+    private static func busyResult() -> SQLExecutionResult {
+        let message = "database is locked"
+        return SQLExecutionResult(
+            columns: nil,
+            rows: nil,
+            rowsAffected: 0,
+            error: message,
+            diagnostic: StorageDiagnostic(code: "busy_lock", message: message)
+        )
+    }
+
     private static func diagnostic(for message: String) -> StorageDiagnostic {
         let code: String
         switch message.lowercased() {
@@ -745,10 +805,27 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 }
 
+/// How long each kind of SQLite connection waits for a lock the app holds before reporting
+/// `busy_lock`. All stay well under the runner's 2 s relay timeout (#10165, #10166).
+struct SQLiteBusyBudget: Sendable {
+    var classifierMs: Int32
+    var readMs: Int32
+    var writeMs: Int32
+
+    static let standard = SQLiteBusyBudget(classifierMs: 300, readMs: 500, writeMs: 800)
+}
+
+struct SQLiteTablesResult: Sendable {
+    let tables: [String]
+    let diagnostic: StorageDiagnostic?
+}
+
 struct SQLClassification {
     let returnsRows: Bool
     let readOnly: Bool
     var hasMultipleStatements = false
+    /// The statement could not be classified because the database was locked.
+    var isBusy = false
 
     var requiresWriteConnection: Bool { !(readOnly && returnsRows) }
 }

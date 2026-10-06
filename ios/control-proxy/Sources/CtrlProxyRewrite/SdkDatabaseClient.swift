@@ -124,6 +124,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
             guard (200 ..< 300).contains(http.statusCode) else {
                 let message = (try? JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: data).error)
                     ?? "HTTP \(http.statusCode)"
+                if message == Self.busyCode { throw SdkDatabaseError.busy }
                 throw SdkDatabaseError.unavailable("\(Self.unavailableMessage): \(message)")
             }
             return data
@@ -135,6 +136,9 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
             throw SdkDatabaseError.unavailable("\(Self.unavailableMessage): \(error.localizedDescription)")
         }
     }
+
+    /// The SDK's `busy_lock` wire code (HTTP 503), kept in step with `SdkDatabaseRouteHandler.busyCode`.
+    static let busyCode = "busy_lock"
 
     private static let unavailableMessage =
         "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"

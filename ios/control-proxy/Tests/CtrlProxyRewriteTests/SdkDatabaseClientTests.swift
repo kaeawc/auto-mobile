@@ -86,6 +86,35 @@ final class SdkDatabaseClientTests: XCTestCase {
         )
     }
 
+    func testBusyLockIsReportedAsBusyNotAsAMissingSdk() async {
+        let busy = Data(#"{"error":"busy_lock","diagnostic":{"code":"busy_lock","message":"busy_lock"}}"#.utf8)
+        let client = { self.makeClient(StubHTTPTransport([.respond(status: 503, body: busy)])) }
+        await assertThrows(
+            { _ = try await client().executeSQL(databasePath: "/db", query: "SELECT 1", sessionId: nil) },
+            { if case .busy = $0 { return true } else { return false } },
+            "busy_lock on execute must map to .busy"
+        )
+        await assertThrows(
+            { _ = try await client().listTables(databasePath: "/db") },
+            { if case .busy = $0 { return true } else { return false } },
+            "busy_lock on listTables must map to .busy"
+        )
+        let message = SdkDatabaseError.busy.localizedDescription
+        XCTAssertFalse(message.contains("embed the AutoMobile SDK"), message)
+        XCTAssertTrue(message.hasSuffix(": busy_lock"), "the wire code must stay last for the host's code parser")
+    }
+
+    func testOtherSdkErrorCodesStillCarryTheUnavailableWrapper() async {
+        let stub = StubHTTPTransport([.respond(status: 404, body: Data(#"{"error":"unknown_table"}"#.utf8))])
+        await assertThrows(
+            { _ = try await self.makeClient(stub).getTableData(databasePath: "/db", table: "t", limit: 1, offset: 0) },
+            {
+                if case let .unavailable(m) = $0 { return m.hasSuffix(": unknown_table") && m.contains("embed") }
+                else { return false } },
+            "codes other than busy_lock keep the existing wrapper text the host parses"
+        )
+    }
+
     func testExecuteSqlBadResponseOnNonHTTP() async {
         let stub = StubHTTPTransport([.nonHTTPResponse])
         await assertThrows(

@@ -111,6 +111,22 @@ test.each([
   expect(mapStorageSdkError(new Error(message), { operation: "database" })).toBe(foregroundMessage);
 });
 
+test.each([
+  "database busy - the app is holding a lock on this database; retry shortly: busy_lock",
+  `${sdkPrefix}: busy_lock`,
+])("maps a locked database to a retryable busy message: %s", (message) => {
+  const mapped = iosSqlErrorMessage(new Error(message), "/app/notes.db");
+  expect(mapped).toContain("busy_lock");
+  expect(mapped).toContain("retry in a moment");
+  expect(mapped).not.toContain("Ensure the app embeds");
+  expect(mapped).not.toContain("unrecognized error code");
+  expect(mapStorageSdkError(new Error(message), { operation: "database" })).toBe(mapped);
+});
+
+test("busy_lock is not a key-value storage code", () => {
+  expect(mapStorageSdkError(new Error("busy_lock"), { operation: "storage" })).toBeNull();
+});
+
 test("capability absence lists foreground and SDK setup as possible causes", () => {
   expect(
     iosSqlErrorMessage(

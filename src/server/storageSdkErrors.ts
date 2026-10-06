@@ -50,6 +50,7 @@ type StorageSdkErrorCode =
   | "invalid_store_name"
   | "write_verification_failed"
   | "mutation_not_authorized"
+  | "busy_lock"
   | "encode_failed"
   | "response_too_large";
 
@@ -68,6 +69,8 @@ const SDK_ERROR_MESSAGES: Record<StorageSdkErrorCode, (context: StorageSdkErrorC
         ? `The database is read-only for the inspector. Writes and transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) require mutation authorization. (${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT})`
         : IOS_STORAGE_MUTATION_AUTHORIZATION_HINT;
     },
+    busy_lock: () =>
+      "The app is holding a lock on the database and the iOS SDK gave up waiting (busy_lock). The request was not applied; retry in a moment.",
     invalid_store_name: () =>
       "The iOS SDK could not open that key-value store name (invalid_store_name). Use an empty name, \"standard\" (any case) or the app's bundle id for the app's standard UserDefaults; any other name must be a valid UserDefaults suite name with no leading or trailing whitespace (the global domain is not allowed).",
     write_verification_failed: ({ action }) => {
@@ -137,6 +140,10 @@ export function iosSqlErrorMessage(error: unknown, databasePath: string): string
       : mapped;
   }
   const message = errorMessage(error);
+  // The runner reports a busy database without the "embed the SDK" wrapper: the SDK did answer.
+  if (sdkErrorCode(message) === "busy_lock") {
+    return SDK_ERROR_MESSAGES.busy_lock({ operation: "database", databasePath });
+  }
   const prefix = `${SDK_UNAVAILABLE_PREFIX}: `;
   if (message.startsWith(prefix)) {
     const detail = message.slice(prefix.length);

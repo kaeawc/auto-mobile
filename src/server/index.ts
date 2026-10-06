@@ -33,6 +33,8 @@ import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
 import { ToolUnavailableError } from "./toolUnavailableError";
+import { stripInternalToolParams } from "./internalToolParams";
+export { stripInternalToolParams } from "./internalToolParams";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
@@ -46,8 +48,6 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-  deleteInternalToolParams,
-  INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -547,28 +547,6 @@ function extractInternalAcceptanceDiscoveryOrder(
   }
   const value = values[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
   return value === "forward" || value === "reverse" ? value : undefined;
-}
-
-export function stripInternalToolParams(params: unknown): unknown {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return params;
-  }
-
-  // Consult the CANONICAL list rather than an ad-hoc subset: the daemon's
-  // `ide/getNavigationGraph` route forwards `__mcpRequestTimeoutMs` as the ONLY
-  // internal marker, and a guard that omitted the timeout/deadline names left it
-  // on the arguments -- which a `.strict()` input schema (#6712) then rejected
-  // with "Unrecognized key" before the handler ran (#6917 review).
-  if (!INTERNAL_TOOL_PARAM_NAMES.some((name) => name in params)) {
-    return params;
-  }
-
-  const rest = { ...(params as Record<string, unknown>) };
-  // Strips `DAEMON_NON_FINITE_ENCODED_PARAM` too as a safety net: revival already
-  // removes that transport-provenance flag (#5863), but this guards the tool
-  // boundary against any future path that sets it without reviving.
-  deleteInternalToolParams(rest);
-  return rest;
 }
 
 // `formatToolParamError` lives in its own module so non-server callers (e.g.

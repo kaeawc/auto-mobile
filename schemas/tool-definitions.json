@@ -20609,6 +20609,13 @@
         "durationMs": {
           "type": "number"
         },
+        "warnings": {
+          "description": "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "error": {
           "type": "string"
         },

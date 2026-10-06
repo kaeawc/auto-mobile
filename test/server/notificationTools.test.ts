@@ -144,7 +144,7 @@ for (const name of ["getNotificationPolicy", "setNotificationPolicy"] as const) 
         platform: "android" as const,
         policyAccess: {
           supported: true,
-          allowed: false,
+          allowed: true,
           method: "android_dumpsys_notification" as const,
         },
         ...(success ? {} : { error: "Policy lookup failed" }),
@@ -172,3 +172,41 @@ for (const name of ["getNotificationPolicy", "setNotificationPolicy"] as const) 
     },
   );
 }
+
+test.each([
+  [true, "Requested notification policy access be allowed"],
+  [false, "Requested notification policy access be revoked"],
+])(
+  "setNotificationPolicy policyAccess=%s does not claim success when the state is unverified",
+  async (policyAccess, expectedPrefix) => {
+    registerNotificationTools();
+    const result = {
+      success: true,
+      appId: "com.example.app",
+      deviceId: "fake",
+      platform: "android" as const,
+      policyAccess: {
+        supported: true,
+        allowed: null,
+        method: "android_dumpsys_notification" as const,
+        warning: "Command succeeded but the resulting policy access was not verified: unknown",
+      },
+    };
+    const policy = spyOn(NotificationPolicy.prototype, "setPolicy").mockResolvedValue(result);
+    try {
+      const response = await ToolRegistry.getTool("setNotificationPolicy")!.deviceAwareHandler!(
+        { name: "Fake", deviceId: "fake", platform: "android" },
+        { appId: result.appId, policyAccess },
+      );
+      const payload = JSON.parse(response.content[0].text);
+      expect(payload.message).toStartWith(expectedPrefix);
+      expect(payload.message).toContain("not verified");
+      expect(payload.message).not.toStartWith("Allowed");
+      expect(payload.message).not.toStartWith("Revoked");
+      expect(response.isError).toBeUndefined();
+    } finally {
+      policy.mockRestore();
+      ToolRegistry.clearTools();
+    }
+  },
+);

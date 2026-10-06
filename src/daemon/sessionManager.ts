@@ -81,6 +81,12 @@ export interface BiometricEnrollmentSessionState {
 }
 
 /** What a pending restore must write, resolved before any await (see below). */
+/** One restore a release started; `abandon` records it when the teardown cap expires first. */
+interface ReleaseTeardownStage {
+  pending: Promise<void> | null;
+  abandon?: () => void;
+}
+
 interface BiometricRestoreTarget {
   incarnation?: number;
   sessionId: string;
@@ -672,6 +678,16 @@ const DEFAULT_SCREEN_READER_RESTORE_BACKOFF = exponentialBackoff({
   maxDelayMs: 2_000,
 });
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
+/**
+ * Overall budget for the restores one release runs through the ambient signal
+ * (keep-awake, biometric, network), measured from the start of the drain with the
+ * injected Timer. Release teardown runs under its own signal, not the caller's, so
+ * this bound is what stops a wedged device command from holding the device
+ * quarantined; the screen-reader, clock and rotation restores keep their own budgets
+ * and abandon mechanisms. Sized well above the three 1 s attempts plus their 250 ms
+ * retries, below the screen-reader budget (#10198).
+ */
+export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
@@ -1001,7 +1017,10 @@ export class SessionManager {
     if (this.healthRecoveries.has(key)) {
       return;
     }
-    const recovery = (async () => {
+    // Own context, never the caller's: this is started from a release that may be
+    // running under an aborted request signal or an expired teardown shield, and a
+    // recovery attempt that inherited it would fail before reaching the device (#10198).
+    const recovery = runWithAbortSignal(undefined, async () => {
       for (let attempt = 1; attempt <= 3; attempt++) {
         await this.timer.sleep(health.backoff.delayForAttempt(attempt));
         if (!this.restoreIncarnationIsCurrent(target)) {
@@ -1037,7 +1056,7 @@ export class SessionManager {
           }
         }
       }
-    })();
+    });
     this.healthRecoveries.set(key, recovery);
     void recovery
       .catch((error: unknown) => {
@@ -3081,11 +3100,107 @@ export class SessionManager {
    * Await tracked setup and start best-effort restoration for a releasing
    * session, returning the teardown that must still finish before the device
    * is handed out again.
+   *
+   * Teardown is cleanup that must run to completion whether or not the request
+   * that triggered the release was cancelled or hit its deadline, so it never runs
+   * under the caller's signal: that signal is already aborted for a cancelled plan,
+   * and every adb/simctl call that resolves `signal ?? getAbortSignal()` would fail
+   * before dispatch, leaving the device shaped and marked unhealthy (#10198). The
+   * restores that go through the ambient signal run under a teardown-owned shield
+   * bounded by {@link SESSION_RELEASE_TEARDOWN_CAP_MS}; at the cap the shield aborts
+   * and whatever has not finished is recorded as abandoned. The first attempts are
+   * awaited here as before; only their retries are handed back as pending cleanup.
    */
   private async drainReleaseTeardown(
     sessionId: string,
     session: Session,
   ): Promise<readonly Promise<void>[]> {
+    if (!this.releaseNeedsTeardown(session)) {
+      return [];
+    }
+    const shield = new AbortController();
+    const startedAtMs = this.timer.now();
+    const capHandle = this.timer.setTimeout(() => {
+      shield.abort(new ActionableError("Session release teardown exceeded its budget"));
+    }, SESSION_RELEASE_TEARDOWN_CAP_MS);
+    try {
+      const stages = await runWithAbortSignal(shield.signal, () =>
+        this.startReleaseTeardown(sessionId, session),
+      );
+      const cleanups = stages.flatMap((stage) => {
+        const bounded = this.boundTeardownStage(stage, startedAtMs);
+        return bounded ? [bounded] : [];
+      });
+      void Promise.allSettled(cleanups).then(() => this.timer.clearTimeout(capHandle));
+      return cleanups;
+    } catch (error) {
+      this.timer.clearTimeout(capHandle);
+      throw error;
+    }
+  }
+
+  /** A release with nothing to restore skips the shield and cap timer entirely. */
+  private releaseNeedsTeardown(session: Session): boolean {
+    const {
+      keepScreenAwake,
+      biometricEnrollment,
+      networkCondition,
+      clock,
+      rotation,
+      screenReader,
+    } = session.cacheData;
+    return (
+      keepScreenAwake?.applied === true ||
+      Boolean(biometricEnrollment || networkCondition || clock || rotation || screenReader) ||
+      this.abandonedScreenReaders.has(session.assignedDevice) ||
+      Array.from(this.sessionSetupPromises).some((setup) => setup.session === session)
+    );
+  }
+
+  /**
+   * Settle a capped stage at the teardown cap so the device stops being quarantined,
+   * recording the restore it left undone. Stages without `abandon` (setup, screen
+   * reader, clock, rotation) keep their own budgets and run to their own end.
+   */
+  private boundTeardownStage(
+    stage: ReleaseTeardownStage,
+    startedAtMs: number,
+  ): Promise<void> | null {
+    const { pending, abandon } = stage;
+    if (!pending || !abandon) {
+      return pending;
+    }
+    let settled = false;
+    const tracked = pending.finally(() => {
+      settled = true;
+    });
+    const capError = new Error("Session release teardown cap reached");
+    return raceWithDeadline(tracked, {
+      timer: this.timer,
+      timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.timer.now() - startedAtMs)),
+      label: "Session release teardown",
+      timeoutError: () => capError,
+      onTimeout: () => {
+        if (!settled) {
+          abandon();
+        }
+      },
+    }).catch((error: unknown) => {
+      // Reaching the cap is the recorded outcome (`abandon` ran), not a failure to surface.
+      if (error !== capError) {
+        throw error;
+      }
+    });
+  }
+
+  private async startReleaseTeardown(
+    sessionId: string,
+    session: Session,
+  ): Promise<readonly ReleaseTeardownStage[]> {
+    // Captured before any await: a rebind reassigns `session.assignedDevice`.
+    const deviceId = session.assignedDevice;
+    const biometricTarget = this.biometricRestoreTarget(session);
+    const networkTarget = this.networkConditionRestoreTarget(session);
     const setups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === session ? setup.promise : null,
     ).filter((setup): setup is Promise<void> => setup !== null);
@@ -3098,27 +3213,66 @@ export class SessionManager {
     const pendingNetworkRestoration = session.cacheData.networkCondition
       ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
       : null;
+    // The remaining restorers carry their own budgets and abandon mechanisms and are
+    // not bound to the teardown cap, so they must not inherit its shield either; the
+    // toggles they drive resolve the ambient signal themselves (#10159).
+    const ownBudget = <T>(start: () => Promise<T>) => runWithAbortSignal(undefined, start);
     const pendingClockRestoration = session.cacheData.clock
-      ? (await this.getPendingClockRestoration(session, pendingSetups)).pending
+      ? (await ownBudget(() => this.getPendingClockRestoration(session, pendingSetups))).pending
       : null;
     const pendingRotationRestoration = session.cacheData.rotation
-      ? (await this.getPendingRotationRestoration(session, pendingSetups)).pending
+      ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups))).pending
       : null;
     const ownScreenReaderRestoration = session.cacheData.screenReader
-      ? (await this.getPendingScreenReaderRestoration(session, pendingSetups)).pending
+      ? (await ownBudget(() => this.getPendingScreenReaderRestoration(session, pendingSetups)))
+          .pending
       : null;
     const pendingScreenReaderRestoration = this.abandonedScreenReaders.has(session.assignedDevice)
-      ? this.retryAbandonedScreenReaderAfter(session.assignedDevice, ownScreenReaderRestoration)
+      ? ownBudget(() =>
+          this.retryAbandonedScreenReaderAfter(session.assignedDevice, ownScreenReaderRestoration),
+        )
       : ownScreenReaderRestoration;
     return [
-      pendingSetups,
-      pendingRestoration,
-      pendingBiometricRestoration,
-      pendingNetworkRestoration,
-      pendingClockRestoration,
-      pendingRotationRestoration,
-      pendingScreenReaderRestoration,
-    ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
+      { pending: pendingSetups },
+      {
+        pending: pendingRestoration,
+        abandon: () =>
+          logger.warn(
+            `Gave up restoring keep-awake state on ${deviceId} after ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms; ` +
+              `the screen may stay awake until the next session changes it`,
+          ),
+      },
+      {
+        pending: pendingBiometricRestoration,
+        abandon: () => this.abandonCappedRestore(biometricTarget, "biometric-enrollment"),
+      },
+      {
+        pending: pendingNetworkRestoration,
+        abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
+      },
+      { pending: pendingClockRestoration },
+      { pending: pendingRotationRestoration },
+      { pending: pendingScreenReaderRestoration },
+    ];
+  }
+
+  /** The teardown budget ran out with this restore unfinished: record it like an exhausted retry. */
+  private abandonCappedRestore(
+    target: BiometricRestoreTarget | NetworkConditionRestoreTarget | null,
+    reason: "biometric-enrollment" | "network-condition",
+  ): void {
+    if (!target) {
+      return;
+    }
+    logger.warn(
+      `Session release teardown exceeded ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms before the ${reason} ` +
+        `restore finished on ${target.deviceId}; the device may hold session-modified state`,
+    );
+    this.abandonRestore(target, reason, () =>
+      "enrollment" in target
+        ? this.restoreBiometricEnrollment(target)
+        : this.restoreNetworkCondition(target),
+    );
   }
 
   private async persistTerminalReleaseWithUpgrade(

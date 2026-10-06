@@ -3832,6 +3832,10 @@ export class DaemonMcpProxy {
     // list scoped to the OLD binding and nothing else would clear it
     // (#6886 review).
     this.invalidateListCache("tools");
+    // `resources/list` and `resources/templates/list` are forwarded under the
+    // bound session too, so a list cached under the previous scope (an unbound
+    // list, or the prior binding's) must not be served for the new session.
+    this.invalidateListCache("resources");
     // Deliver the first ownership heartbeat as part of the acquisition so the
     // daemon records ownership before the pre-first-heartbeat grace fires
     // (mirrors the establishment guarantee in issue #5637).

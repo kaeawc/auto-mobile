@@ -9,6 +9,7 @@ import {
   readAndroidPreferencesXml,
   readAndroidPreferencesXmlIfExists,
   removeNamedNodes,
+  resolveAndroidPreferencesUser,
   sanitizeAndroidPreferencesFileName,
   serializeAndroidPreferencesXml,
   writeAndroidPreferencesXml,
@@ -30,6 +31,10 @@ import { float32ToJavaString } from "../../utils/float32ToJavaString";
  * wrong: it leaves callers able to *write* a value (via `setPreference`) but unable to
  * *delete* it (issue #6292). This module gives the key-value tools the same reachability
  * as `setPreference` for that fallback case.
+ *
+ * Like `setPreference`, every `run-as` targets one Android user: an explicit `userId`, else the
+ * user the package is installed for (see `resolveAndroidPreferencesUser`), so a work-profile app
+ * is read and written in its own profile rather than user 0 (issue #9964).
  */
 
 const KEY_VALUE_TYPE_TO_TAG: Partial<Record<KeyValueType, string>> = {
@@ -57,7 +62,7 @@ export function androidKeyValueFileName(name: string): string {
  * (read the snapshot, edit a private copy, overwrite the entire file). Two concurrent
  * mutations to the same file would each read the same snapshot and the later write would
  * clobber the earlier one — a lost-update TOCTOU. Chaining every mutation for a given
- * `(deviceId, appId, safeFileName)` behind the previous one (regardless of its success or failure)
+ * `(deviceId, appId, safeFileName[, userId])` behind the previous one (regardless of its success or failure)
  * makes each read observe the prior write, so concurrent edits compose instead of
  * clobbering. The tail is tracked with its errors swallowed so a failed mutation does not
  * wedge the queue, and the map entry is dropped once the chain drains to keep it bounded.
@@ -66,9 +71,16 @@ function serializeDirectMutationPerFile<T>(
   deviceId: string,
   appId: string,
   safeFileName: string,
+  userId: number,
   task: () => Promise<T>,
 ): Promise<T> {
-  return getAndroidSharedPreferencesMutationCoordinator().run(deviceId, appId, safeFileName, task);
+  return getAndroidSharedPreferencesMutationCoordinator().run(
+    deviceId,
+    appId,
+    safeFileName,
+    task,
+    userId,
+  );
 }
 
 /** Writes `key` = `value` (of `type`) into the on-device SharedPreferences XML file. */
@@ -80,10 +92,12 @@ export async function setAndroidKeyValueDirect(
   key: string,
   value: string,
   type: KeyValueType,
+  userId?: number,
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
-  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, async () => {
-    const existingXml = await readAndroidPreferencesXml(adb, appId, safeFileName);
+  const targetUser = await resolveAndroidPreferencesUser(adb, appId, userId);
+  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
+    const existingXml = await readAndroidPreferencesXml(adb, appId, safeFileName, targetUser);
     const document = await parseAndroidPreferencesXml(existingXml);
     document.map ??= {};
     removeNamedNodes(document, key);
@@ -98,6 +112,7 @@ export async function setAndroidKeyValueDirect(
       appId,
       safeFileName,
       serializeAndroidPreferencesXml(document),
+      targetUser,
     );
   });
 }
@@ -109,13 +124,16 @@ export async function removeAndroidKeyValueDirect(
   appId: string,
   fileName: string,
   key: string,
+  userId?: number,
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
-  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, async () => {
+  const targetUser = await resolveAndroidPreferencesUser(adb, appId, userId);
+  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
     const { xml: existingXml, exists } = await readAndroidPreferencesXmlIfExists(
       adb,
       appId,
       safeFileName,
+      targetUser,
     );
     if (!exists) {
       return;
@@ -128,6 +146,7 @@ export async function removeAndroidKeyValueDirect(
       appId,
       safeFileName,
       serializeAndroidPreferencesXml(document),
+      targetUser,
     );
   });
 }
@@ -138,10 +157,17 @@ export async function clearAndroidKeyValueFileDirect(
   deviceId: string,
   appId: string,
   fileName: string,
+  userId?: number,
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
-  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, async () => {
-    const { exists } = await readAndroidPreferencesXmlIfExists(adb, appId, safeFileName);
+  const targetUser = await resolveAndroidPreferencesUser(adb, appId, userId);
+  return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
+    const { exists } = await readAndroidPreferencesXmlIfExists(
+      adb,
+      appId,
+      safeFileName,
+      targetUser,
+    );
     if (!exists) {
       return;
     }
@@ -151,6 +177,7 @@ export async function clearAndroidKeyValueFileDirect(
       appId,
       safeFileName,
       serializeAndroidPreferencesXml(emptyDocument),
+      targetUser,
     );
   });
 }

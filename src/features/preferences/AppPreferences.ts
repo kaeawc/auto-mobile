@@ -20,7 +20,6 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
@@ -34,6 +33,7 @@ import {
   parseAndroidPreferencesXml,
   readAndroidPreferencesXml,
   removeNamedNodes,
+  resolveAndroidPreferencesUser,
   sanitizeAndroidPreferencesFileName,
   serializeAndroidPreferencesXml,
   writeAndroidPreferencesXml,
@@ -335,22 +335,8 @@ export class AppPreferences {
   }
 
   /** Explicit `userId` wins; otherwise the user the package is installed for (as `clearAppData`). */
-  private async resolveAndroidPreferencesUser(input: GetPreferenceInput): Promise<number> {
-    if (input.userId !== undefined) {
-      return input.userId;
-    }
-    try {
-      const target = await new AndroidUserTargetResolver(this.adb()).resolve({
-        packageName: input.appId,
-        installedOnly: true,
-      });
-      return target.userId;
-    } catch (error) {
-      throw toActionableError(
-        error,
-        `Failed to resolve the Android user for ${input.appId}. Pass userId explicitly`,
-      );
-    }
+  private resolveAndroidPreferencesUser(input: GetPreferenceInput): Promise<number> {
+    return resolveAndroidPreferencesUser(this.adb(), input.appId!, input.userId);
   }
 
   private adb(): AdbExecutor {

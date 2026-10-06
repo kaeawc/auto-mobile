@@ -329,3 +329,107 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
     ).rejects.toThrow(/SharedPreferencesInspector\.setEnabled/);
   });
 });
+
+// Issue #9964: the fallback must reach the same Android user as getPreference/setPreference.
+describe("storageTools Android user targeting for the direct-file fallback (#9964)", () => {
+  const IOS_DEVICE: BootedDevice = { name: "i", deviceId: "ios-sim", platform: "ios" };
+  const WORK_PROFILE_ADB = () => {
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x4c13, running: true },
+      { userId: 10, name: "Work profile", flags: 0x1030, running: true },
+    ]);
+    adb.setCommandResponse("shell pm list packages --user 0", createExecResult("", ""));
+    adb.setCommandResponse(
+      "shell pm list packages --user 10",
+      createExecResult(`package:${APP_ID}`, ""),
+    );
+    adb.setCommandResponse(
+      `cat shared_prefs/${FILE_NAME}.xml`,
+      createExecResult('<map><string name="probeA">1</string></map>', ""),
+    );
+    return adb;
+  };
+
+  beforeEach(() => {
+    ToolRegistry.clearTools();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    registerStorageTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    serverConfig.setEmbeddedSdkEnabled(false);
+    resetStorageToolsDependencies();
+  });
+
+  function useFallback(adb: FakeAdbExecutor): void {
+    setStorageToolsDependenciesForTesting({
+      androidClientFactory: () => inspectionDisabledClient(),
+      adbClientFactory: singleAdbFactory(adb),
+    });
+  }
+
+  function runAsCommands(adb: FakeAdbExecutor): string[] {
+    return adb.getExecutedCommands().filter((command) => command.includes("run-as"));
+  }
+
+  const toolCalls: Array<[string, Record<string, unknown>]> = [
+    ["setKeyValue", { key: "k", value: "v", type: "STRING" }],
+    ["removeKeyValue", { key: "probeA" }],
+    ["clearKeyValueFile", {}],
+  ];
+
+  test.each(toolCalls)(
+    "%s forwards an explicit userId to every run-as command",
+    async (name, extra) => {
+      const adb = WORK_PROFILE_ADB();
+      useFallback(adb);
+
+      await toolHandler(name)(ANDROID_DEVICE, {
+        appId: APP_ID,
+        name: FILE_NAME,
+        userId: 10,
+        ...extra,
+      });
+
+      const commands = runAsCommands(adb);
+      expect(commands).toHaveLength(2);
+      for (const command of commands) {
+        expect(command).toStartWith(`shell run-as ${APP_ID} --user 10 `);
+      }
+    },
+  );
+
+  test.each(toolCalls)("%s defaults to the user the app is installed for", async (name, extra) => {
+    const adb = WORK_PROFILE_ADB();
+    useFallback(adb);
+
+    await toolHandler(name)(ANDROID_DEVICE, { appId: APP_ID, name: FILE_NAME, ...extra });
+
+    for (const command of runAsCommands(adb)) {
+      expect(command).toStartWith(`shell run-as ${APP_ID} --user 10 `);
+    }
+  });
+
+  test.each(toolCalls)("%s rejects userId on an iOS device", async (name, extra) => {
+    setStorageToolsDependenciesForTesting({
+      iosClientFactory: () => {
+        throw new Error("iOS client must not be created");
+      },
+    });
+
+    await expect(
+      toolHandler(name)(IOS_DEVICE, { appId: APP_ID, name: FILE_NAME, userId: 10, ...extra }),
+    ).rejects.toThrow("userId is only supported for Android devices.");
+  });
+
+  test.each(toolCalls)("%s advertises an optional non-negative integer userId", (name) => {
+    const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name);
+    expect(definition?.inputSchema.properties?.userId).toMatchObject({
+      type: "integer",
+      minimum: 0,
+    });
+    expect(definition?.inputSchema.required ?? []).not.toContain("userId");
+  });
+});

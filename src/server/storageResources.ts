@@ -19,6 +19,7 @@ import {
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   readAndroidPreferencesXml,
+  resolveAndroidPreferencesUser,
   sanitizeAndroidPreferencesFileName,
 } from "../features/preferences/AndroidPreferencesXmlFile";
 import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
@@ -120,10 +121,17 @@ async function getPreferenceEntriesForDevice(
         throw ctrlProxyError;
       }
       try {
+        const adb = adbClientFactory.create(device);
+        // A resource URI carries no user, so resolve it as the preference tools do: the user the
+        // package is installed for. A URI could name a user later through a `?userId=` query
+        // parameter (templates can declare `queryParamNames`) without changing the path shape; the
+        // cache key would then need the user too.
+        const userId = await resolveAndroidPreferencesUser(adb, packageName);
         const xml = await readAndroidPreferencesXml(
-          adbClientFactory.create(device),
+          adb,
           packageName,
           sanitizeAndroidPreferencesFileName(fileName),
+          userId,
         );
         return { entries: await readAndroidStorageEntries(xml), source: "run-as" };
       } catch (runAsError) {

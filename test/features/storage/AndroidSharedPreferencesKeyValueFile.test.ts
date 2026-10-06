@@ -610,3 +610,101 @@ describe("direct mutation serialization (#6292)", () => {
     expect(adb.currentXml()).toContain('<string name="direct">two</string>');
   });
 });
+
+// Issue #9964: the direct-file fallback must target the same Android user as
+// getPreference/setPreference (#9919) instead of always reading and writing user 0.
+describe("Android user targeting for the direct key-value fallback (#9964)", () => {
+  const owner = { userId: 0, name: "Owner", flags: 0x4c13, running: true };
+  const work = { userId: 10, name: "Work profile", flags: 0x1030, running: true };
+  const APP = "com.example.app";
+  const STORED_XML = '<map><string name="probeA">1</string></map>';
+
+  function adbWithUsers(installedFor: { user0: boolean; user10: boolean }): FakeAdbExecutor {
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([owner, work]);
+    adb.setCommandResponse(
+      "shell pm list packages --user 0",
+      createExecResult(installedFor.user0 ? `package:${APP}` : "", ""),
+    );
+    adb.setCommandResponse(
+      "shell pm list packages --user 10",
+      createExecResult(installedFor.user10 ? `package:${APP}` : "", ""),
+    );
+    adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult(STORED_XML, ""));
+    return adb;
+  }
+
+  function runAsCommands(adb: FakeAdbExecutor): string[] {
+    return adb.getExecutedCommands().filter((command) => command.includes("run-as"));
+  }
+
+  const mutations: Array<[string, (adb: FakeAdbExecutor, userId?: number) => Promise<void>]> = [
+    [
+      "setAndroidKeyValueDirect",
+      (adb, userId) =>
+        setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING", userId),
+    ],
+    [
+      "removeAndroidKeyValueDirect",
+      (adb, userId) =>
+        removeAndroidKeyValueDirect(adb, "device-1", APP, "settings", "probeA", userId),
+    ],
+    [
+      "clearAndroidKeyValueFileDirect",
+      (adb, userId) => clearAndroidKeyValueFileDirect(adb, "device-1", APP, "settings", userId),
+    ],
+  ];
+
+  test.each(mutations)("%s: an explicit userId targets that user's copy", async (_name, run) => {
+    const adb = adbWithUsers({ user0: true, user10: true });
+
+    await run(adb, 10);
+
+    const commands = runAsCommands(adb);
+    expect(commands).toHaveLength(2);
+    for (const command of commands) {
+      expect(command).toStartWith(`shell run-as ${APP} --user 10 `);
+    }
+  });
+
+  test.each(mutations)(
+    "%s: with no userId it resolves the user the app is installed for",
+    async (_name, run) => {
+      const adb = adbWithUsers({ user0: false, user10: true });
+
+      await run(adb);
+
+      const commands = runAsCommands(adb);
+      expect(commands).toHaveLength(2);
+      for (const command of commands) {
+        expect(command).toStartWith(`shell run-as ${APP} --user 10 `);
+      }
+    },
+  );
+
+  test.each(mutations)(
+    "%s: a single-user device sends the same unscoped run-as commands as before",
+    async (_name, run) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult(STORED_XML, ""));
+
+      await run(adb);
+
+      const commands = adb.getExecutedCommands();
+      expect(commands).toHaveLength(2);
+      expect(commands[0]).toBe(`shell run-as ${APP} cat shared_prefs/settings.xml`);
+      expect(commands[1]).toStartWith(`shell run-as ${APP} sh -c `);
+      expect(commands.some((command) => command.includes("--user"))).toBe(false);
+    },
+  );
+
+  test("a resolution failure is an actionable error that asks for an explicit userId", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([]);
+
+    await expect(
+      setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING"),
+    ).rejects.toThrow(/Failed to resolve the Android user for com\.example\.app\. Pass userId/);
+    expect(runAsCommands(adb)).toHaveLength(0);
+  });
+});

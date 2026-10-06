@@ -1701,9 +1701,12 @@ export async function lookupLatestVideoRecording(
   if (recordings.length === LATEST_LOOKUP_FIRST_PAGE) {
     // Every one of the newest rows lacks a file: widen to all rows rather than miss an
     // older playable one. The common case reads only a page.
-    const firstPageSize = recordings.length;
+    const firstPageIds = new Set(recordings.map((recording) => recording.recordingId));
     recordings = await deps.recordingRepository.listRecordings(query);
-    const older = await firstPlayable(recordings.slice(firstPageSize), deps);
+    const older = await firstPlayable(
+      recordings.filter((recording) => !firstPageIds.has(recording.recordingId)),
+      deps,
+    );
     if (older) {
       return { recording: toMetadata(older) };
     }

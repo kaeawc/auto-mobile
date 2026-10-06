@@ -33,11 +33,16 @@ import {
   type SessionLogFileOutcome,
   type SessionLogFilesRequest,
   type SessionLogFilesResult,
+  type AndroidLogcatWindowResult,
   type SessionLogSourceOutcome,
   type ResetAppLogsPathOutcome,
   type ResetAppLogsResult,
   type UnifiedLogWindowRequest,
   type UnifiedLogWindowResult,
+  ANDROID_LOGCAT_DEFAULT_MAX_LINES,
+  ANDROID_LOGCAT_MAX_LINES_LIMIT,
+  SESSION_LOG_MAX_BYTES_LIMIT,
+  UNIFIED_LOG_MAX_WINDOW_SECONDS,
 } from "./sessionLogContract";
 
 /** The narrow simctl surface the iOS provider needs: one argv exec and one shell-string exec. */
@@ -95,6 +100,13 @@ export interface SessionLogProvider {
     maxBytes: number,
     signal?: AbortSignal,
   ): Promise<UnifiedLogWindowResult>;
+  collectAndroidLogcat?(
+    device: BootedDevice,
+    appId: string,
+    request: UnifiedLogWindowRequest,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): Promise<AndroidLogcatWindowResult>;
 }
 
 export interface SessionLogServiceDependencies {
@@ -175,11 +187,19 @@ class DefaultSessionLogService implements SessionLogService {
     }
     const unifiedLog = request.request.unifiedLog;
     if (unifiedLog) {
-      result.unifiedLog = provider.collectUnifiedLog
-        ? await runSource("unified log", () =>
-            provider.collectUnifiedLog!(device, appId, unifiedLog, maxBytes, signal),
-          )
-        : unavailable(`The unified log is not available on ${device.platform}.`);
+      if (device.platform === "android") {
+        result.androidLogcat = provider.collectAndroidLogcat
+          ? await runSource("Android logcat", () =>
+              provider.collectAndroidLogcat!(device, appId, unifiedLog, maxBytes, signal),
+            )
+          : unavailable(`Android logcat is not available on ${device.deviceId}.`);
+      } else {
+        result.unifiedLog = provider.collectUnifiedLog
+          ? await runSource("unified log", () =>
+              provider.collectUnifiedLog!(device, appId, unifiedLog, maxBytes, signal),
+            )
+          : unavailable(`The unified log is not available on ${device.platform}.`);
+      }
     }
     return result;
   }
@@ -318,6 +338,63 @@ export class AndroidSessionLogProvider implements SessionLogProvider {
   readonly platform = "android" as const;
 
   constructor(private readonly adbFactory: AdbClientFactory) {}
+
+  async collectAndroidLogcat(
+    device: BootedDevice,
+    appId: string,
+    request: UnifiedLogWindowRequest,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): Promise<AndroidLogcatWindowResult> {
+    const adb = this.adbFactory.create(device);
+    try {
+      const pidResult = await adb.executeCommand(
+        `shell pidof ${shellQuote(appId)}`,
+        10_000,
+        4096,
+        true,
+        signal,
+      );
+      const pid = Number(pidResult.stdout.trim().split(/\s+/)[0]);
+      if (!Number.isSafeInteger(pid) || pid <= 0) {
+        throw new ActionableError(`No running process was found for ${appId}.`);
+      }
+      const lastSeconds = Math.min(request.lastSeconds, UNIFIED_LOG_MAX_WINDOW_SECONDS);
+      const lineLimit = Math.min(ANDROID_LOGCAT_DEFAULT_MAX_LINES, ANDROID_LOGCAT_MAX_LINES_LIMIT);
+      const levelFilter =
+        request.level === "default" ? "*:V" : `*:${request.level === "info" ? "I" : "D"}`;
+      const command =
+        `shell logcat -d -v brief --pid ${pid} -T "$(( $(date +%s) - ${lastSeconds} )).000" ` +
+        `-m ${lineLimit} ${shellQuote(levelFilter)}`;
+      const output = await adb.executeCommand(
+        command,
+        20_000,
+        ANDROID_LOG_READ_MAX_BUFFER,
+        true,
+        signal,
+      );
+      const source = Buffer.from(output.stdout, "utf8");
+      const byteLimit = Math.min(maxBytes, SESSION_LOG_MAX_BYTES_LIMIT);
+      const bounded = source.byteLength > byteLimit ? source.subarray(0, byteLimit) : source;
+      const lineCount =
+        output.stdout.length === 0
+          ? 0
+          : output.stdout.split("\n").length - (output.stdout.endsWith("\n") ? 1 : 0);
+      return {
+        lastSeconds,
+        level: request.level,
+        pid,
+        lineLimit,
+        byteCount: source.byteLength,
+        truncated: bounded.byteLength < source.byteLength || lineCount >= lineLimit,
+        text: bounded.toString("utf8"),
+      };
+    } catch (error) {
+      throw new ActionableError(
+        `Android logcat is not available for ${appId}: ${errorMessage(error)}`,
+      );
+    }
+  }
 
   async readAppLogs(
     device: BootedDevice,

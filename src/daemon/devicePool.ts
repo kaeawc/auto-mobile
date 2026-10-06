@@ -724,6 +724,16 @@ interface StopDiscoveredEmulatorOptions {
   preservedSession: Session | undefined;
 }
 
+/**
+ * A queued multi-device request. `lent` holds the devices that the request's own
+ * already-bound sessions gave back to the pool while the request waits (#9950),
+ * keyed by session id, until the request can reclaim them.
+ */
+interface MultiDeviceAllocationTicket {
+  requests: DeviceAllocationRequest[];
+  lent: Map<string, PooledDevice>;
+}
+
 export class DevicePool {
   private devices: Map<string, PooledDevice> = new Map();
   private deviceSessionStarts: Map<string, number> = new Map();
@@ -731,9 +741,7 @@ export class DevicePool {
   private assignmentMutex = new Mutex();
   // Tickets begin after preflight. Only platform-disjoint requests may
   // overtake earlier waiters; new partial claims are released before waiting.
-  private readonly multiDeviceAllocationQueue: Array<{
-    requests: DeviceAllocationRequest[];
-  }> = [];
+  private readonly multiDeviceAllocationQueue: MultiDeviceAllocationTicket[] = [];
   private readonly multiDeviceAllocationWaiters = new Set<() => void>();
 
   private timer: Timer;
@@ -2056,8 +2064,9 @@ export class DevicePool {
     timeoutMs: number = 300000,
     platform?: Platform,
   ): Promise<Map<string, string>> {
-    const ticket = {
+    const ticket: MultiDeviceAllocationTicket = {
       requests: sessionIds.map((sessionId) => ({ sessionId, criteria: { platform } })),
+      lent: new Map(),
     };
     try {
       const startTime = this.timer.now();
@@ -2229,7 +2238,7 @@ export class DevicePool {
     requests: DeviceAllocationRequest[],
     timeoutMs: number = 300000,
   ): Promise<Map<string, string>> {
-    const ticket = { requests };
+    const ticket: MultiDeviceAllocationTicket = { requests, lent: new Map() };
     try {
       const startTime = this.timer.now();
       const assignments = new Map<string, string>();
@@ -2383,31 +2392,39 @@ export class DevicePool {
     }
   }
 
-  private canClaimMultiDeviceAllocation(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
-  ): boolean {
+  private isQueuedBehindEarlierWaiter(ticket: MultiDeviceAllocationTicket): boolean {
     const earlier = this.multiDeviceAllocationQueue.slice(
       0,
       this.multiDeviceAllocationQueue.indexOf(ticket),
     );
     // Comparing live candidate IDs alone misses devices joining later. Use a
     // conservative platform-disjoint rule across both APIs, including wildcards.
-    if (
-      earlier.some((waiter) =>
-        waiter.requests.some((prior) =>
-          ticket.requests.some(
-            (request) =>
-              !prior.criteria?.platform ||
-              !request.criteria?.platform ||
-              prior.criteria.platform === request.criteria.platform,
-          ),
+    return earlier.some((waiter) =>
+      waiter.requests.some((prior) =>
+        ticket.requests.some(
+          (request) =>
+            !prior.criteria?.platform ||
+            !request.criteria?.platform ||
+            prior.criteria.platform === request.criteria.platform,
         ),
-      )
-    ) {
+      ),
+    );
+  }
+
+  private canClaimMultiDeviceAllocation(ticket: MultiDeviceAllocationTicket): boolean {
+    if (this.isQueuedBehindEarlierWaiter(ticket)) {
       return false;
     }
     const available = new Set<string>();
     let canClaim = true;
+    for (const device of ticket.lent.values()) {
+      // The request's own lent devices are reserved for its base sessions. One
+      // that someone else took must come back before the request can proceed.
+      if (device.sessionId !== null) {
+        canClaim = false;
+      }
+      available.add(device.id);
+    }
     for (const request of this.criteriaMatcher.sortBySpecificity(ticket.requests)) {
       // Existing sessions do not require a new claim and must survive rollback.
       if (this.sessionManager.getSession(request.sessionId)) {
@@ -2442,7 +2459,7 @@ export class DevicePool {
   }
 
   private async executeMultiDeviceAllocation<T>(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+    ticket: MultiDeviceAllocationTicket,
     deadlineMs: number,
     setRefreshFailure: (failure: string | undefined) => void,
     allocate: () => Promise<T>,
@@ -2451,24 +2468,24 @@ export class DevicePool {
     let waited = false;
     while (true) {
       if (waited) {
-        await this.waitForMultiDeviceRetry(deadlineMs);
-        const refreshed = await this.refreshMultiDeviceInventory(ticket);
-        if (refreshed) {
-          setRefreshFailure(refreshed.failure);
-        }
+        await this.waitForNextMultiDeviceRound(ticket, deadlineMs, setRefreshFailure);
       }
       throwIfRequestAborted();
       if (this.timer.now() >= deadlineMs && waited) {
         return { success: false, attempts };
       }
       waited = true;
+      // Every evaluation counts, including those the queue or busy devices refused.
+      attempts++;
       if (!this.canClaimMultiDeviceAllocation(ticket)) {
         if (this.timer.now() >= deadlineMs) {
           return { success: false, attempts };
         }
         continue;
       }
-      attempts++;
+      if (!this.reclaimLentDevices(ticket)) {
+        continue;
+      }
       try {
         return { success: true, value: await allocate(), attempts };
       } catch (error) {
@@ -2481,8 +2498,100 @@ export class DevicePool {
     }
   }
 
+  private async waitForNextMultiDeviceRound(
+    ticket: MultiDeviceAllocationTicket,
+    deadlineMs: number,
+    setRefreshFailure: (failure: string | undefined) => void,
+  ): Promise<void> {
+    this.adjustBaseSessionLoan(ticket);
+    await this.waitForMultiDeviceRetry(deadlineMs);
+    const refreshed = await this.refreshMultiDeviceInventory(ticket);
+    if (refreshed) {
+      setRefreshFailure(refreshed.failure);
+    }
+  }
+
+  /**
+   * A request queued behind an earlier one cannot claim anything yet, so the
+   * devices its own sessions hold would only block the head: two plans from two
+   * single-device sessions otherwise wait for each other's device until the
+   * first one times out (#9950). It lends them while queued and takes them back
+   * once it is the head.
+   */
+  private adjustBaseSessionLoan(ticket: MultiDeviceAllocationTicket): void {
+    if (this.isQueuedBehindEarlierWaiter(ticket)) {
+      this.lendBaseSessionDevices(ticket);
+    } else {
+      this.reclaimLentDevices(ticket);
+    }
+  }
+
+  /**
+   * Return to the pool the devices held by this request's already-bound sessions.
+   * The session records are untouched; {@link reclaimLentDevices} puts the
+   * devices back before the request allocates or leaves the queue. Devices under
+   * autolock or pending teardown stay with their session. Synchronous like
+   * `releaseDevice`, so it cannot interleave with a claim's validated field writes.
+   */
+  private lendBaseSessionDevices(ticket: MultiDeviceAllocationTicket): void {
+    let lentAny = false;
+    for (const { sessionId } of ticket.requests) {
+      const device = this.findDeviceHeldByLiveSession(sessionId);
+      if (
+        !device ||
+        ticket.lent.has(sessionId) ||
+        device.autolockSessionId ||
+        this.sessionManager.getPendingDeviceCleanup(device.id)
+      ) {
+        continue;
+      }
+      device.sessionId = null;
+      device.status = "idle";
+      ticket.lent.set(sessionId, device);
+      lentAny = true;
+      logger.info(`[DevicePool] Lent device ${device.id} of session ${sessionId} while waiting`);
+    }
+    if (lentAny) {
+      this.notifyMultiDeviceAllocationWaiters();
+    }
+  }
+
+  private findDeviceHeldByLiveSession(sessionId: string): PooledDevice | undefined {
+    const session = this.sessionManager.getSession(sessionId);
+    const device = session ? this.devices.get(session.assignedDevice) : undefined;
+    return device?.sessionId === sessionId && device.status === "busy" ? device : undefined;
+  }
+
+  /**
+   * Take back every lent device that is still idle for its session. Returns
+   * false while one is held by another session. A device that left the pool, or
+   * whose session ended, is dropped: there is nothing left to give back.
+   */
+  private reclaimLentDevices(ticket: MultiDeviceAllocationTicket): boolean {
+    let complete = true;
+    for (const [sessionId, device] of [...ticket.lent]) {
+      const session = this.sessionManager.getSession(sessionId);
+      if (
+        this.devices.get(device.id) !== device ||
+        session?.assignedDevice !== device.id ||
+        device.sessionId === sessionId
+      ) {
+        ticket.lent.delete(sessionId);
+      } else if (this.isIdleDeviceEligible(device)) {
+        device.sessionId = sessionId;
+        device.status = "busy";
+        device.lastUsedAt = this.nextLastUsedAt();
+        device.assignmentCount++;
+        ticket.lent.delete(sessionId);
+      } else {
+        complete = false;
+      }
+    }
+    return complete;
+  }
+
   private async refreshMultiDeviceInventory(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+    ticket: MultiDeviceAllocationTicket,
   ): Promise<DevicePoolRefreshResult | undefined> {
     // Busy-only rounds must retain the last actual discovery failure. Refresh
     // only for missing capacity; releases already publish availability directly.
@@ -2561,9 +2670,9 @@ export class DevicePool {
     }
   }
 
-  private removeMultiDeviceAllocationTicket(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
-  ): void {
+  private removeMultiDeviceAllocationTicket(ticket: MultiDeviceAllocationTicket): void {
+    // Leaving the queue (success, timeout, abort) ends the loan on every exit.
+    this.reclaimLentDevices(ticket);
     const index = this.multiDeviceAllocationQueue.indexOf(ticket);
     if (index >= 0) {
       this.multiDeviceAllocationQueue.splice(index, 1);

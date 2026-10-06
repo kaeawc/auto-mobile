@@ -31,6 +31,13 @@ interface InventoryEntry {
   pending?: Promise<void>;
 }
 
+/** Extra reads a hydrate may start when a display event invalidates the inventory mid-read. */
+const MAX_INVENTORY_REREADS = 2;
+
+function hasReadInventory(entry: InventoryEntry): boolean {
+  return entry.outcome !== undefined && entry.outcome.kind !== "unreadable";
+}
+
 export class CachingDisplayInventoryProvider implements DisplayInventoryProvider {
   private readonly entries = new Map<string, InventoryEntry>();
 
@@ -51,6 +58,30 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       return device;
     }
     const key = `${device.platform}:${device.deviceId}`;
+    const reads: InventoryEntry[] = [];
+    // A display push that invalidates the entry mid-read must not leave this call without an
+    // inventory: re-read, bounded so an event storm cannot loop, and fall back to what was read.
+    for (let attempt = 0; attempt <= MAX_INVENTORY_REREADS; attempt++) {
+      const entry = await this.acquire(key, device, identityToken, signal);
+      reads.push(entry);
+      if (this.entries.get(key) === entry) {
+        break;
+      }
+    }
+    const entry = reads.findLast(hasReadInventory) ?? reads[reads.length - 1];
+    return {
+      ...device,
+      ...(entry.displays ? { displays: entry.displays } : {}),
+      ...(entry.outcome ? { [displayInventoryOutcome]: entry.outcome } : {}),
+    };
+  }
+
+  private async acquire(
+    key: string,
+    device: BootedDevice,
+    identityToken: string,
+    signal?: AbortSignal,
+  ): Promise<InventoryEntry> {
     let entry = this.entries.get(key);
     if (!entry || entry.token !== identityToken) {
       entry = { token: identityToken, displays: null };
@@ -64,11 +95,7 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       // Join the initial read, with this caller's cancellation limited to its own wait.
       await awaitWhileRequestIsLive(entry.pending, signal);
     }
-    return {
-      ...device,
-      ...(entry.displays ? { displays: entry.displays } : {}),
-      ...(entry.outcome ? { [displayInventoryOutcome]: entry.outcome } : {}),
-    };
+    return entry;
   }
 
   invalidate(deviceId: string): void {
@@ -86,19 +113,17 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       const source = device.platform === "android" ? this.androidSource : this.iosSource;
       // The shared read has its own bounded source timeout, not a caller's signal.
       const result = await source.read(device);
-      if (this.entries.get(key) === entry) {
-        this.recordRead(entry, result);
-      }
+      // Record even when invalidation replaced the entry: an orphaned entry is only seen by the
+      // callers already awaiting it, which use it as their last-read fallback.
+      this.recordRead(entry, result);
     } catch (error) {
       logger.warn(
         `[DisplayInventoryProvider] Inventory read failed for ${device.deviceId}: ${errorMessage(error)}`,
         error,
       );
-      if (this.entries.get(key) === entry) {
-        entry.displays = null;
-        entry.outcome = { kind: "unreadable", reason: errorMessage(error) };
-        entry.retryAt = this.timer.now() + this.failureRetryMs;
-      }
+      entry.displays = null;
+      entry.outcome = { kind: "unreadable", reason: errorMessage(error) };
+      entry.retryAt = this.timer.now() + this.failureRetryMs;
     } finally {
       if (this.entries.get(key) === entry) {
         entry.pending = undefined;

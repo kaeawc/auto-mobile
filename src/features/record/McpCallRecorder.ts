@@ -5,23 +5,51 @@ import { logger } from "../../utils/logger";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 
 /**
- * Set of MCP tool names that are relevant for test plan recording.
- * Infrastructure tools (device management, recording meta-tools) are excluded.
+ * MCP tool names whose successful calls are recorded as plan steps.
+ *
+ * The registry carries no per-tool "mutates the device" flag (`planExecutable`
+ * only widens which gated tools a plan may run), so this list is hand-kept.
+ * Infrastructure tools (device management, recording meta-tools, read-only
+ * queries) are excluded. `test/features/record/McpCallRecorderCoverage.test.ts`
+ * requires every tool in `schemas/tool-definitions.json` to be listed here or
+ * excluded there with a reason, so a new action tool cannot be silently left
+ * out of the exported plan (#9928).
  */
 export const PLAN_RELEVANT_TOOLS = new Set([
   // App lifecycle
   "launchApp",
   "terminateApp",
   "crashApp",
+  "appLifecycle",
   // Observation
   "observe",
   // Interaction
   "tapOn",
+  "tapAny",
+  "tapAt",
   "swipeOn",
   "sendKeys",
   "pressButton",
   "dragAndDrop",
   "pinchOn",
+  "selectAllText",
+  "clipboard",
+  "keyboard",
+  // Navigation and system UI
+  "homeScreen",
+  "recentApps",
+  "openLink",
+  "systemTray",
+  "wakeAndUnlock",
+  // Device state and orientation
+  "rotate",
+  "shake",
+  "setPosture",
+  "setDeviceState",
+  "displayConfig",
+  "changeLocalization",
+  "setAppPermissions",
+  "postNotification",
   // Form filling
   "setUIState",
 ]);

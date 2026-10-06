@@ -26,7 +26,10 @@ const crashedCapture = boundCapture
   .replace(boundLine, "     Bound services:{}")
   .replace("     Crashed services:{}", `     Crashed services:{{${component}}}`);
 const otherService = "com.example.reader/com.example.reader.ReaderService";
-const DEVICE_PREFIX = "adb -s test-device ";
+// The adb binary part of the command line is "adb" locally but an absolute
+// `$ANDROID_HOME/platform-tools/adb` path where the SDK env var is set (CI), so
+// the harness cuts at the device selector rather than assuming the binary name.
+const DEVICE_SELECTOR = " -s test-device ";
 const SETTINGS_PUT = "shell settings put secure enabled_accessibility_services";
 const FORCE_STOP = `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`;
 
@@ -54,7 +57,8 @@ function createHarness(handler: Handler = () => undefined) {
   timer.enableAutoAdvance();
   const executed: string[] = [];
   const exec = async (full: string): Promise<ExecResult> => {
-    const command = full.startsWith(DEVICE_PREFIX) ? full.slice(DEVICE_PREFIX.length) : full;
+    const selectorAt = full.indexOf(DEVICE_SELECTOR);
+    const command = selectorAt < 0 ? full : full.slice(selectorAt + DEVICE_SELECTOR.length);
     executed.push(command);
     const custom = await handler(command);
     if (custom !== undefined) {

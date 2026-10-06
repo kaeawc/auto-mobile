@@ -48,6 +48,12 @@ export interface ObserveScreenExecuteOptions {
   skipRecompositionTracking?: boolean;
   /** Poll callers own retries; do not add a second hierarchy read inside their poll. */
   skipStaleWindowRecovery?: boolean;
+  /**
+   * Explicit observe: when an Android hierarchy is still served from CtrlProxy's push cache
+   * without a device read, replace it with one synchronous extraction so the published
+   * freshness is verified. Off by default; costs no read when the tree was already verified.
+   */
+  verifyCachedHierarchy?: boolean;
 }
 
 /**

@@ -11,6 +11,8 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
   focusedIndex: number | null = null;
   swipeResult: A11ySwipeResult = { success: true, totalTimeMs: 1 };
   swipeHistory: Array<{ x1: number; y1: number; x2: number; y2: number; duration: number }> = [];
+  /** The signal each swipe request was given, in order. */
+  swipeSignals: Array<AbortSignal | undefined> = [];
   autoAdvanceOnSwipe = true;
   onSwipe: ((direction: SwipeDirection) => void) | null = null;
   private traversalOverrides: TraversalOrderResult[] = [];
@@ -88,8 +90,10 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     x2: number,
     y2: number,
     durationMs: number,
+    signal?: AbortSignal,
   ): Promise<A11ySwipeResult> {
     this.swipeHistory.push({ x1, y1, x2, y2, duration: durationMs });
+    this.swipeSignals.push(signal);
     const direction = this.getDirection(x1, x2);
 
     if (this.autoAdvanceOnSwipe) {

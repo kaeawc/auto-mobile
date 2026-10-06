@@ -105,7 +105,7 @@ describe("PostNotification - iOS Simulator", () => {
       body: "b",
       appId: "com.x",
       imageType: "bigPicture",
-      imagePath: "/tmp/x.png",
+      imagePath: "/fake-host/images/x.png",
     });
     expect(result.success).toBe(true);
     expect(result.warning).toContain("bigPicture");

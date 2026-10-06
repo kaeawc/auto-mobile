@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PerformanceAudit } from "../../../src/features/performance/PerformanceAudit";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
  * Issue #6252: `calculateFrameRate` read `capabilities.refreshRateHz`, a field
@@ -32,7 +33,9 @@ describe("PerformanceAudit frame-rate refresh-rate cap (#6252)", function () {
       ].join("\n"),
     );
     const adbFactory = new FakeAdbClientFactory(fakeAdbClient);
-    const audit = new PerformanceAudit(device, adbFactory);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const audit = new PerformanceAudit(device, adbFactory, undefined, timer);
 
     const metrics = await audit.collectMetrics(packageName, undefined, undefined, {
       skipTouchLatency: true,

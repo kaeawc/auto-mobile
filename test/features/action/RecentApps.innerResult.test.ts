@@ -7,46 +7,48 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
 
-type NavigationMethod = "gesture" | "legacy" | "hardware";
 const device: BootedDevice = {
   name: "test-device",
   platform: "android",
   deviceId: "test-recent-apps",
 };
 
-function createHierarchy(method: NavigationMethod): ViewHierarchyResult {
+const screenSize = { width: 1080, height: 2400 };
+const systemInsets = { top: 63, bottom: 63, left: 0, right: 0 };
+
+function observation(viewHierarchy: ViewHierarchyResult, timer: FakeTimer): ObserveResult {
+  return { timestamp: timer.now(), screenSize, systemInsets, viewHierarchy };
+}
+
+/** Real captured Playground hierarchy: includes android:id/content and a navigation bar view. */
+function capturedObservation(timer: FakeTimer): ObserveResult {
+  return { ...capturedAppHierarchy, timestamp: timer.now(), screenSize, systemInsets };
+}
+
+/**
+ * Minimal typed app hierarchy for #9979: the app tags a container with the bare id `content`
+ * (e.g. Compose testTagsAsResourceId) holding a clickable control whose id merely contains a
+ * navigation-ish word. Only the resource ids matter here; this is not a device dump.
+ */
+function appHierarchyWithControl(containerId: string, controlId: string): ViewHierarchyResult {
   return {
     hierarchy: {
       node: {
-        $: { class: "android.widget.FrameLayout", "resource-id": "@android:id/content" },
-        node:
-          method === "hardware"
-            ? []
-            : [
-                {
-                  $: {
-                    "resource-id":
-                      method === "gesture"
-                        ? "com.android.systemui:id/home_handle"
-                        : "com.android.systemui:id/recent_apps",
-                    class: "android.view.View",
-                    bounds: { left: 720, top: 1810, right: 1080, bottom: 1910 },
-                    clickable: "true",
-                  },
-                },
-              ],
+        $: { class: "android.widget.FrameLayout", "resource-id": containerId },
+        node: [
+          {
+            $: {
+              "resource-id": controlId,
+              class: "android.view.View",
+              bounds: { left: 720, top: 1810, right: 1080, bottom: 1910 },
+              clickable: "true",
+            },
+          },
+        ],
       },
     },
-  };
-}
-
-function createObservation(method: NavigationMethod, timer: FakeTimer): ObserveResult {
-  return {
-    timestamp: timer.now(),
-    screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 48, bottom: 120, left: 0, right: 0 },
-    viewHierarchy: createHierarchy(method),
   };
 }
 
@@ -64,7 +66,7 @@ describe("RecentApps inner result", () => {
     timer.enableAutoAdvance();
     observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();
-    observe.setObserveResult(() => createObservation("gesture", timer));
+    observe.setObserveResult(() => capturedObservation(timer));
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
     window.configureActiveWindow({
@@ -96,36 +98,8 @@ describe("RecentApps inner result", () => {
     globalActionSpy?.mockRestore();
   });
 
-  // These three regressions must fail on the original callback's constant success result.
-  test("preserves gesture inner failure and observation", async () => {
-    recentApps["executeGestureNavigation"] = async () => ({
-      success: false,
-      method: "gesture",
-      error: "Gesture failed",
-    });
-    const result = await recentApps.execute();
-    expect(result.success).toBe(false);
-    expect(result.method).toBe("gesture");
-    expect(result.error).toBe("Gesture failed");
-    expect(result.observation).toBeDefined();
-  });
-
-  test("preserves legacy inner failure and observation", async () => {
-    observe.setObserveResult(() => createObservation("legacy", timer));
-    recentApps["executeLegacyNavigation"] = async () => ({
-      success: false,
-      method: "legacy",
-      error: "Legacy failed",
-    });
-    const result = await recentApps.execute();
-    expect(result.success).toBe(false);
-    expect(result.method).toBe("legacy");
-    expect(result.error).toBe("Legacy failed");
-    expect(result.observation).toBeDefined();
-  });
-
+  // This regression must fail on the original callback's constant success result.
   test("preserves hardware inner failure and observation", async () => {
-    observe.setObserveResult(() => createObservation("hardware", timer));
     recentApps["executeHardwareNavigation"] = async () => ({
       success: false,
       method: "hardware",
@@ -138,21 +112,63 @@ describe("RecentApps inner result", () => {
     expect(result.observation).toBeDefined();
   });
 
-  test.each([
-    ["gesture", "shell input swipe"],
-    ["legacy", "shell input tap"],
-    ["hardware", "shell input keyevent 187"],
-  ] as const)("preserves %s success and issues its command", async (method, command) => {
-    observe.setObserveResult(() => createObservation(method, timer));
+  test("real captured app hierarchy opens Recents with the key event, never a tap or swipe", async () => {
     const result = await recentApps.execute();
     expect(result.success).toBe(true);
-    expect(result.method).toBe(method);
+    expect(result.method).toBe("hardware");
     expect(result.observation).toBeDefined();
-    expect(adb.getExecutedCommands().some((executed) => executed.includes(command))).toBe(true);
+    expect(adb.getExecutedCommands()).toEqual(["shell input keyevent 187"]);
+  });
+
+  // #9979: app elements whose ids contain navigation-ish words must never be tapped or swiped,
+  // whether the container matches `content` exactly or as the framework id.
+  test.each([
+    ["content", "recent_searches"],
+    ["content", "overview_tab"],
+    ["content", "recents_button"],
+    ["content", "bottom_nav_bar"],
+    ["content", "filter_pill"],
+    ["content", "home_handle"],
+    ["android:id/content", "com.android.systemui:id/recent_apps"],
+    ["@android:id/content", "com.android.systemui:id/home_handle"],
+  ])("app container %s with control %s is not acted on", async (containerId, controlId) => {
+    observe.setObserveResult(() =>
+      observation(appHierarchyWithControl(containerId, controlId), timer),
+    );
+    const result = await recentApps.execute();
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("hardware");
+    const commands = adb.getExecutedCommands();
+    expect(commands).toEqual(["shell input keyevent 187"]);
+    expect(commands.some((command) => /input (tap|swipe)/.test(command))).toBe(false);
+  });
+
+  test("an unavailable view hierarchy does not block the hardware press", async () => {
+    observe.setObserveResult(() => ({
+      timestamp: timer.now(),
+      screenSize,
+      systemInsets,
+    }));
+    const result = await recentApps.execute();
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("hardware");
+    expect(adb.getExecutedCommands()).toEqual(["shell input keyevent 187"]);
+  });
+
+  test("delivered global action succeeds without the key event", async () => {
+    globalActionSpy!.mockResolvedValue({
+      success: true,
+      action: "recent",
+      totalTimeMs: 10,
+      acknowledged: true,
+    });
+    const result = await recentApps.execute();
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("hardware");
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
   test("undelivered hardware global action falls back to ADB successfully", async () => {
-    observe.setObserveResult(() => createObservation("hardware", timer));
     const result = await recentApps.execute();
     expect(globalActionSpy).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
@@ -170,7 +186,6 @@ describe("RecentApps inner result", () => {
     "unsupported",
     "success",
   ])("hardware global action delivery: %s", async (reason) => {
-    observe.setObserveResult(() => createObservation("hardware", timer));
     const undelivered = reason === "WebSocket not connected" || reason === "send failed";
     const acknowledged =
       reason === "device refused" || reason === "unsupported" || reason === "success";
@@ -214,21 +229,19 @@ describe("RecentApps inner result", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("abort during gesture command rejects", async () => {
+  test("abort during the key event command rejects", async () => {
     const controller = new AbortController();
-    adb.abortAfterCommand("shell input swipe", controller);
+    adb.abortAfterCommand("shell input keyevent 187", controller);
     await expect(recentApps.execute(undefined, controller.signal)).rejects.toThrow(
       "Operation cancelled",
     );
-    expect(adb.getExecutedCommands().some((command) => command.includes("shell input swipe"))).toBe(
-      true,
-    );
+    expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");
   });
 
   test("thrown inner error rejects", async () => {
-    recentApps["executeGestureNavigation"] = async () => {
-      throw new Error("Inner gesture error");
+    recentApps["executeHardwareNavigation"] = async () => {
+      throw new Error("Inner hardware error");
     };
-    await expect(recentApps.execute()).rejects.toThrow("Inner gesture error");
+    await expect(recentApps.execute()).rejects.toThrow("Inner hardware error");
   });
 });

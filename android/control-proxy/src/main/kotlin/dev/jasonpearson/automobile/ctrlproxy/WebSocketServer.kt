@@ -106,6 +106,24 @@ class WebSocketServer(
     /** Requests that carry image bytes; their frames and decoder snippets are never logged. */
     private val overlayAssetRequestTypes = setOf("put_overlay_asset", "remove_overlay_asset")
 
+    /**
+     * True for an asset request, including one too broken for its `type` to parse: the raw text
+     * still names the type, and such a frame can be as full of image bytes as a well-formed one.
+     */
+    private fun isOverlayAssetFrame(raw: String, type: String?): Boolean =
+      if (type != null) type in overlayAssetRequestTypes
+      else overlayAssetRequestTypes.any { raw.contains("\"$it\"") }
+
+    /**
+     * kotlinx.serialization appends the input around the failing offset after "JSON input:"; for an
+     * asset frame that is image data, so only the diagnosis before it is returned.
+     */
+    private fun withoutInputSnippet(cause: String): String =
+      cause.substringBefore(JSON_INPUT_MARKER).trim().take(MAX_DIAGNOSIS_LENGTH)
+
+    private const val JSON_INPUT_MARKER = "JSON input:"
+    private const val MAX_DIAGNOSIS_LENGTH = 200
+
     /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
     private val overlayRequestTypes =
       setOf("show_overlay", "update_overlay", "dismiss_overlay") + overlayAssetRequestTypes
@@ -224,6 +242,7 @@ class WebSocketServer(
           ?: throwable::class.simpleName
           ?: "unknown error"
       val type = extractStringField(raw, "type")
+      if (isOverlayAssetFrame(raw, type)) return "Malformed request: ${withoutInputSnippet(cause)}"
       if (type != null && type !in registeredRequestTypes) return "Unknown command type: $type"
       val looksLikeOutOfRangeNumber =
         cause.contains("special floating-point value", ignoreCase = true) ||
@@ -273,6 +292,9 @@ class WebSocketServer(
     add("ime_key_events_v1")
     add("tap_double_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
+    // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
+    // decoder ignores unknown fields, so the overlay would silently land on the default display.
+    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("overlay_display_id_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
@@ -1016,9 +1038,13 @@ class WebSocketServer(
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
         // #2985.
         val type = extractStringField(message, "type")
-        if (type in overlayAssetRequestTypes) {
+        if (isOverlayAssetFrame(message, type)) {
           // Never echo the frame or the decoder's input snippet: it holds asset bytes.
-          Log.w(TAG, "Failed to parse $type (${message.length} chars): ${e.javaClass.simpleName}")
+          Log.w(
+            TAG,
+            "Failed to parse ${type ?: "asset request"} (${message.length} chars): " +
+              e.javaClass.simpleName,
+          )
         } else {
           Log.w(TAG, "Failed to parse client message: $message", e)
         }

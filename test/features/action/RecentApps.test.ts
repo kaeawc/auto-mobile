@@ -1,6 +1,6 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
-import { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
+import { BootedDevice, ObserveResult } from "../../../src/models";
 
 const testDevice: BootedDevice = {
   name: "test-device",
@@ -14,6 +14,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
 
 describe("RecentApps", () => {
   let recentApps: RecentApps;
@@ -43,11 +44,9 @@ describe("RecentApps", () => {
 
     // Set up default factory function for observe results to create new objects each time
     // This is needed because BaseVisualChange compares object identity to detect changes
-    let currentHierarchy = createGestureNavigationHierarchy();
     fakeObserveScreen.setObserveResult(() => {
       // Create new object to simulate actual change detection
-      currentHierarchy = createGestureNavigationHierarchy();
-      return createObserveResult(currentHierarchy);
+      return createObserveResult(createAppHierarchy());
     });
 
     // Inject the fakes into the feature
@@ -55,15 +54,6 @@ describe("RecentApps", () => {
     (recentApps as any).observeScreen = fakeObserveScreen;
     (recentApps as any).window = fakeWindow;
     (recentApps as any).awaitIdle = fakeAwaitIdle;
-  });
-
-  // Helper function to create mock ExecResult
-  const createExecResult = (stdout: string = ""): ExecResult => ({
-    stdout,
-    stderr: "",
-    toString: () => stdout,
-    trim: () => stdout.trim(),
-    includes: (searchString: string) => stdout.includes(searchString),
   });
 
   // Helper function to create mock ObserveResult
@@ -74,110 +64,26 @@ describe("RecentApps", () => {
     viewHierarchy: viewHierarchy || { node: {} },
   });
 
-  // Helper to create view hierarchy with gesture navigation
-  const createGestureNavigationHierarchy = () => ({
+  // Minimal app hierarchy; Android recentApps never inspects it (see #9979)
+  const createAppHierarchy = () => ({
     hierarchy: {
       node: {
         $: {
           class: "android.widget.FrameLayout",
-          "resource-id": "@android:id/content",
-        },
-        node: [
-          {
-            $: {
-              "resource-id": "com.android.systemui:id/navigationBarBackground",
-              class: "android.view.View",
-              bounds: { left: 0, top: 1800, right: 1080, bottom: 1920 },
-            },
-          },
-          {
-            $: {
-              "resource-id": "com.android.systemui:id/home_handle",
-              class: "android.view.View",
-              bounds: { left: 480, top: 1850, right: 600, bottom: 1870 },
-            },
-          },
-        ],
-      },
-    },
-  });
-
-  // Helper to create view hierarchy with legacy navigation (nav bar with recent apps button)
-  const createLegacyNavigationHierarchy = () => ({
-    hierarchy: {
-      node: {
-        $: {
-          class: "android.widget.FrameLayout",
-          "resource-id": "@android:id/content",
-        },
-        node: [
-          {
-            $: {
-              "resource-id": "com.android.systemui:id/recent_apps",
-              class: "android.widget.ImageView",
-              bounds: { left: 720, top: 1810, right: 1080, bottom: 1910 },
-              clickable: "true",
-            },
-          },
-        ],
-      },
-    },
-  });
-
-  // Helper to create empty view hierarchy (triggers hardware fallback)
-  const createEmptyHierarchy = () => ({
-    hierarchy: {
-      node: {
-        $: {
-          class: "android.widget.FrameLayout",
-          "resource-id": "@android:id/content",
+          "resource-id": "android:id/content",
         },
       },
     },
   });
 
   describe("execute", () => {
-    test("should execute gesture navigation when gesture indicators are detected", async () => {
-      // Use factory function to create new objects on each call
-      fakeObserveScreen.setObserveResult(() =>
-        createObserveResult(createGestureNavigationHierarchy()),
-      );
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
-
-      const result = await recentApps.execute();
-
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("gesture");
-      expect(result.observation).toBeDefined();
-
-      // Verify swipe command was executed
-      const executedCommands = fakeAdb.getExecutedCommands();
-      expect(
-        executedCommands.some((cmd) => cmd.includes("shell input swipe") && cmd.includes("500")),
-      ).toBe(true);
-    });
-
-    test("should execute legacy navigation when recent apps button is detected", async () => {
-      // Use factory function to create new objects on each call
-      fakeObserveScreen.setObserveResult(() =>
-        createObserveResult(createLegacyNavigationHierarchy()),
-      );
-      fakeAdb.setCommandResponse("shell input tap 900 1860", { stdout: "", stderr: "" });
-
-      const result = await recentApps.execute();
-
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("legacy");
-      expect(result.observation).toBeDefined();
-
-      // Verify tap command was executed on the recent apps button
-      const executedCommands = fakeAdb.getExecutedCommands();
-      expect(executedCommands.some((cmd) => cmd.includes("shell input tap 900 1860"))).toBe(true);
-    });
-
-    test("should execute hardware navigation when no navigation indicators are detected", async () => {
-      // Use factory function to create new objects on each call
-      fakeObserveScreen.setObserveResult(() => createObserveResult(createEmptyHierarchy()));
+    test("should open recents via the key event on a real captured app hierarchy", async () => {
+      fakeObserveScreen.setObserveResult(() => ({
+        ...capturedAppHierarchy,
+        timestamp: Date.now(),
+        screenSize: { width: 1080, height: 2400 },
+        systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
+      }));
       fakeAdb.setCommandResponse("shell input keyevent 187", { stdout: "", stderr: "" });
 
       const result = await recentApps.execute();
@@ -185,17 +91,11 @@ describe("RecentApps", () => {
       expect(result.success).toBe(true);
       expect(result.method).toBe("hardware");
       expect(result.observation).toBeDefined();
-
-      // Verify hardware keyevent was executed
-      const executedCommands = fakeAdb.getExecutedCommands();
-      expect(executedCommands.some((cmd) => cmd.includes("shell input keyevent 187"))).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent 187"]);
     });
 
     test("should work with progress callback", async () => {
-      // Use factory function to create new objects on each call
-      fakeObserveScreen.setObserveResult(() =>
-        createObserveResult(createGestureNavigationHierarchy()),
-      );
+      fakeObserveScreen.setObserveResult(() => createObserveResult(createAppHierarchy()));
       fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
 
       let callbackCalled = false;
@@ -208,121 +108,28 @@ describe("RecentApps", () => {
       expect(callbackCalled).toBe(true);
     });
 
-    test("should handle missing view hierarchy gracefully", async () => {
-      // Set factory to return null viewHierarchy
+    test("should still press recents when the view hierarchy is unavailable", async () => {
       fakeObserveScreen.setObserveResult(() => {
         const result = createObserveResult();
         (result.viewHierarchy as any) = null;
         return result;
       });
+      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
 
       const result = await recentApps.execute();
 
-      expect(result.success).toBe(false);
-      expect(result.method).toBe("unknown");
-    });
-
-    test("should handle missing screen size gracefully", async () => {
-      // Set factory to return null screenSize
-      fakeObserveScreen.setObserveResult(() => {
-        const result = createObserveResult(createGestureNavigationHierarchy());
-        (result.screenSize as any) = null;
-        return result;
-      });
-
-      await expect(recentApps.execute()).rejects.toThrow(
-        "Screen size or system insets not available",
-      );
-    });
-  });
-
-  describe("detectNavigationStyle", () => {
-    test("should detect gesture navigation from home handle", async () => {
-      const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
-
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultResponse(createExecResult(""));
-
-      const result = await recentApps.execute();
-
-      expect(result.method).toBe("gesture");
-    });
-
-    test("should detect legacy navigation from recent apps button", async () => {
-      const mockCachedObservation = createObserveResult(createLegacyNavigationHierarchy());
-
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultResponse(createExecResult(""));
-
-      const result = await recentApps.execute();
-
-      expect(result.method).toBe("legacy");
-    });
-
-    test("should default to hardware navigation when no indicators found", async () => {
-      const mockCachedObservation = createObserveResult(createEmptyHierarchy());
-
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultResponse(createExecResult(""));
-
-      const result = await recentApps.execute();
-
+      expect(result.success).toBe(true);
       expect(result.method).toBe("hardware");
     });
   });
 
   describe("error handling", () => {
-    test("should handle gesture navigation ADB command failure", async () => {
-      const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultError(new Error("gesture command failed"));
-
-      await expect(recentApps.execute()).rejects.toThrow("gesture command failed");
-    });
-
-    test("should handle legacy navigation ADB command failure", async () => {
-      const mockCachedObservation = createObserveResult(createLegacyNavigationHierarchy());
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultError(new Error("legacy command failed"));
-
-      await expect(recentApps.execute()).rejects.toThrow("legacy command failed");
-    });
-
     test("should handle hardware navigation ADB command failure", async () => {
-      const mockCachedObservation = createObserveResult(createEmptyHierarchy());
+      const mockCachedObservation = createObserveResult(createAppHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
       fakeAdb.setCommandError("shell input keyevent 187", new Error("hardware command failed"));
 
       await expect(recentApps.execute()).rejects.toThrow("hardware command failed");
-    });
-
-    test("should handle missing system insets for gesture navigation", async () => {
-      const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
-      (mockCachedObservation.systemInsets as any) = null;
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-
-      await expect(recentApps.execute()).rejects.toThrow(
-        "Screen size or system insets not available",
-      );
-    });
-
-    test("should handle missing recent apps button in legacy navigation", async () => {
-      // Use a hierarchy that won't have navigation indicators, so it defaults to hardware
-      // but we'll force it to legacy by mocking the detectNavigationStyle result
-      const mockCachedObservation = createObserveResult(createEmptyHierarchy());
-      fakeObserveScreen.setObserveResult(mockCachedObservation);
-      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
-
-      // Mock the RecentApps instance to force legacy navigation detection
-      const originalDetectNavigationStyle = (recentApps as any).detectNavigationStyle;
-      (recentApps as any).detectNavigationStyle = () => "legacy";
-
-      try {
-        await expect(recentApps.execute()).rejects.toThrow("Recent apps button not found");
-      } finally {
-        // Restore the original method
-        (recentApps as any).detectNavigationStyle = originalDetectNavigationStyle;
-      }
     });
   });
 

@@ -11,10 +11,13 @@ struct SettingsTab: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Account") {
+                Section(
+                    header: Text("Account").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     HStack {
                         Image(systemName: "person.circle.fill")
-                            .font(.system(size: 50))
+                            .font(theme.typography.displayMedium)
                             .foregroundStyle(theme.primary)
 
                         VStack(alignment: .leading) {
@@ -29,61 +32,99 @@ struct SettingsTab: View {
                     .padding(.vertical, 8)
 
                     TextField("Display Name", text: $userName)
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                 }
+                .listRowBackground(theme.surface)
 
-                Section("Preferences") {
+                Section(
+                    header: Text("Preferences").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     Toggle("Enable Notifications", isOn: $notificationsEnabled)
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
+                        .tint(theme.primary)
 
                     Toggle("Dark Mode", isOn: $darkModeEnabled)
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
+                        .tint(theme.primary)
 
                     Toggle("Analytics", isOn: $analyticsEnabled)
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
+                        .tint(theme.primary)
                 }
+                .listRowBackground(theme.surface)
 
-                Section("Storage") {
+                Section(
+                    header: Text("Storage").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     NavigationLink {
                         StorageSettingsView()
                     } label: {
                         Label("Manage Storage", systemImage: "internaldrive.fill")
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                     }
 
                     NavigationLink {
                         CacheSettingsView()
                     } label: {
                         Label("Clear Cache", systemImage: "trash.fill")
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                     }
                 }
+                .listRowBackground(theme.surface)
 
-                Section("About") {
+                Section(header: Text("About").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                     HStack {
                         Text("Version")
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                         Spacer()
                         Text("1.0.0")
+                            .font(theme.typography.bodyLarge)
                             .foregroundStyle(theme.textSecondary)
                     }
 
                     HStack {
                         Text("Build")
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                         Spacer()
                         Text("1")
+                            .font(theme.typography.bodyLarge)
                             .foregroundStyle(theme.textSecondary)
                     }
 
                     Link(destination: URL(string: "https://github.com") ?? URL(fileURLWithPath: "/")) {
                         HStack {
                             Text("View Source Code")
+                                .font(theme.typography.bodyLarge)
+                                .foregroundStyle(theme.textPrimary)
                             Spacer()
                             Image(systemName: "arrow.up.right.square")
                                 .foregroundStyle(theme.textSecondary)
                         }
                     }
+                    .font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.primary)
                 }
+                .listRowBackground(theme.surface)
 
                 Section {
                     Button("Sign Out", role: .destructive) {
                         userName = ""
                     }
+                    .font(theme.typography.labelLarge)
+                    .tint(theme.primary)
                     .foregroundStyle(theme.primary)
                 }
+                .listRowBackground(theme.surface)
             }
             .scrollContentBackground(.hidden)
             .background(theme.background)
@@ -112,7 +153,7 @@ struct StorageSettingsView: View {
             Section {
                 VStack(spacing: 16) {
                     Text(String(format: "%.1f MB", total))
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .font(theme.typography.displayMedium)
                         .foregroundStyle(theme.textPrimary)
 
                     Text("Total Storage Used")
@@ -122,12 +163,14 @@ struct StorageSettingsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
             }
+            .listRowBackground(theme.surface)
 
-            Section("Breakdown") {
+            Section(header: Text("Breakdown").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 StorageRow(title: "Documents", size: documents, color: .autoMobileLalala)
                 StorageRow(title: "Cache", size: cache, color: theme.primary)
                 StorageRow(title: "Other", size: other, color: .autoMobileDarkGrey)
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -149,10 +192,13 @@ struct StorageRow: View {
                 .frame(width: 12, height: 12)
 
             Text(title)
+                .font(theme.typography.bodyLarge)
+                .foregroundStyle(theme.textPrimary)
 
             Spacer()
 
             Text(String(format: "%.1f MB", size))
+                .font(theme.typography.bodyLarge)
                 .foregroundStyle(theme.textSecondary)
         }
     }
@@ -168,7 +214,7 @@ struct CacheSettingsView: View {
             Section {
                 VStack(spacing: 12) {
                     Image(systemName: "trash.circle.fill")
-                        .font(.system(size: 60))
+                        .font(theme.typography.displayLarge)
                         .foregroundStyle(theme.primary)
 
                     Text("45.2 MB")
@@ -184,6 +230,7 @@ struct CacheSettingsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
             }
+            .listRowBackground(theme.surface)
 
             Section {
                 Button {
@@ -195,6 +242,8 @@ struct CacheSettingsView: View {
                             ProgressView()
                         } else {
                             Text("Clear Cache")
+                                .font(theme.typography.labelLarge)
+                                .foregroundStyle(theme.primary)
                         }
                         Spacer()
                     }
@@ -202,6 +251,7 @@ struct CacheSettingsView: View {
                 .foregroundStyle(theme.primary)
                 .disabled(isClearing)
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -209,11 +259,19 @@ struct CacheSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .alert("Clear Cache?", isPresented: $showingClearAlert) {
             Button("Cancel", role: .cancel) {}
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
             Button("Clear", role: .destructive) {
                 clearCache()
             }
+            .font(theme.typography.labelLarge)
+            .foregroundStyle(theme.primary)
+            .tint(theme.primary)
         } message: {
             Text("This will remove all cached data. Downloads and saved content will not be affected.")
+                .font(theme.typography.bodyLarge)
+                .foregroundStyle(theme.textPrimary)
         }
     }
 

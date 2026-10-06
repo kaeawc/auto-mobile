@@ -77,10 +77,12 @@ struct SwiftUISemanticLinksDemo: View {
                 SemanticLinksInstructions()
 
                 Text(swiftUIInlineLinks)
+                    .foregroundStyle(theme.textPrimary)
                     .font(theme.typography.bodyLarge)
                     .accessibilityIdentifier("swiftui_semantic_links_inline")
 
                 Link("Privacy Policy", destination: SemanticLinkDestination.privacy.url)
+                    .foregroundStyle(theme.primary)
                     .font(theme.typography.titleMedium)
                     .accessibilityIdentifier("swiftui_semantic_links_standalone")
 
@@ -88,6 +90,7 @@ struct SwiftUISemanticLinksDemo: View {
             }
             .padding()
         }
+        .background(theme.background)
         .navigationTitle("Semantic Links (SwiftUI)")
         .navigationBarTitleDisplayMode(.inline)
         .environment(\.openURL, OpenURLAction { url in
@@ -150,6 +153,7 @@ struct UIKitSemanticLinksDemo: View {
             }
             .padding()
         }
+        .background(theme.background)
         .navigationTitle("Semantic Links (UIKit)")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "UIKitSemanticLinksDemo")
@@ -159,8 +163,8 @@ struct UIKitSemanticLinksDemo: View {
         let text = NSMutableAttributedString(
             string: "Read the Terms of Service, contact Support, or review the Terms of Service again.",
             attributes: [
-                .font: UIFont.preferredFont(forTextStyle: .body),
-                .foregroundColor: UIColor.label
+                .font: theme.typography.uiKitBodyLarge,
+                .foregroundColor: UIColor(theme.textPrimary),
             ]
         )
         addLink(.termsFirst, label: "Terms of Service", occurrence: 0, to: text)
@@ -173,8 +177,8 @@ struct UIKitSemanticLinksDemo: View {
         let text = NSMutableAttributedString(
             string: "Privacy Policy",
             attributes: [
-                .font: UIFont.preferredFont(forTextStyle: .body),
-                .foregroundColor: UIColor.label
+                .font: theme.typography.uiKitBodyLarge,
+                .foregroundColor: UIColor(theme.textPrimary),
             ]
         )
         addLink(.privacy, label: "Privacy Policy", occurrence: 0, to: text)
@@ -221,6 +225,7 @@ private struct UIKitSemanticLinkTextView: UIViewRepresentable {
     let attributedText: NSAttributedString
     let accessibilityIdentifier: String
     let onActivate: (URL) -> Void
+    @Environment(\.autoMobileTheme) private var theme
 
     func makeCoordinator() -> Coordinator {
         Coordinator(onActivate: onActivate)
@@ -240,6 +245,8 @@ private struct UIKitSemanticLinkTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ textView: UITextView, context: Context) {
+        textView.tintColor = UIColor(theme.primary)
+        textView.linkTextAttributes = [.foregroundColor: UIColor(theme.primary)]
         textView.attributedText = attributedText
         textView.accessibilityIdentifier = accessibilityIdentifier
         context.coordinator.onActivate = onActivate
@@ -248,8 +255,10 @@ private struct UIKitSemanticLinkTextView: UIViewRepresentable {
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: UITextView,
-        context: Context
-    ) -> CGSize? {
+        context _: Context
+    )
+        -> CGSize?
+    {
         let width = proposal.width ?? UIScreen.main.bounds.width
         return uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
     }
@@ -262,10 +271,12 @@ private struct UIKitSemanticLinkTextView: UIViewRepresentable {
         }
 
         func textView(
-            _ textView: UITextView,
+            _: UITextView,
             primaryActionFor textItem: UITextItem,
             defaultAction: UIAction
-        ) -> UIAction? {
+        )
+            -> UIAction?
+        {
             guard case let .link(url) = textItem.content else {
                 return defaultAction
             }

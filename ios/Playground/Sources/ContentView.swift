@@ -31,24 +31,32 @@ struct ContentView: View {
             DiscoverTab()
                 .tabItem {
                     Label("Discover", systemImage: "magnifyingglass")
+                        .font(theme.typography.labelMedium)
+                        .foregroundStyle(theme.textPrimary)
                 }
                 .tag(Tab.discover)
 
             DemosTab()
                 .tabItem {
                     Label("Demos", systemImage: "play.fill")
+                        .font(theme.typography.labelMedium)
+                        .foregroundStyle(theme.textPrimary)
                 }
                 .tag(Tab.demos)
 
             FilesPickerProbeView()
                 .tabItem {
                     Label("Files", systemImage: "folder")
+                        .font(theme.typography.labelMedium)
+                        .foregroundStyle(theme.textPrimary)
                 }
                 .tag(Tab.files)
 
             SettingsTab()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
+                        .font(theme.typography.labelMedium)
+                        .foregroundStyle(theme.textPrimary)
                 }
                 .tag(Tab.settings)
         }

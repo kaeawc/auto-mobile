@@ -9,7 +9,10 @@ struct DemosTab: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("SDK Features") {
+                Section(
+                    header: Text("SDK Features").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     NavigationLink {
                         SDKStatusDemo()
                     } label: {
@@ -50,8 +53,12 @@ struct DemosTab: View {
                         )
                     }
                 }
+                .listRowBackground(theme.surface)
 
-                Section("Performance") {
+                Section(
+                    header: Text("Performance").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     NavigationLink {
                         ScrollPerformanceDemo()
                     } label: {
@@ -82,8 +89,12 @@ struct DemosTab: View {
                         )
                     }
                 }
+                .listRowBackground(theme.surface)
 
-                Section("UI Components") {
+                Section(
+                    header: Text("UI Components").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     NavigationLink {
                         FormDemo()
                     } label: {
@@ -104,8 +115,12 @@ struct DemosTab: View {
                         )
                     }
                 }
+                .listRowBackground(theme.surface)
 
-                Section("Accessibility") {
+                Section(
+                    header: Text("Accessibility").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     NavigationLink {
                         TapAtTargetsDemo()
                     } label: {
@@ -156,8 +171,12 @@ struct DemosTab: View {
                         )
                     }
                 }
+                .listRowBackground(theme.surface)
 
-                Section("View Hierarchy") {
+                Section(
+                    header: Text("View Hierarchy").font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.textSecondary)
+                ) {
                     NavigationLink {
                         ViewHierarchyDebugDemo()
                     } label: {
@@ -168,7 +187,10 @@ struct DemosTab: View {
                         )
                     }
                 }
+                .listRowBackground(theme.surface)
             }
+            .scrollContentBackground(.hidden)
+            .background(theme.background)
             .navigationTitle("Demos")
             .navigationDestination(isPresented: $shouldOpenTapAtTargets) {
                 TapAtTargetsDemo()
@@ -233,6 +255,7 @@ struct ScrollPerformanceDemo: View {
                 }
             }
             .padding(.vertical, 4)
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -260,7 +283,7 @@ struct AnimationDemo: View {
                         .foregroundStyle(theme.textPrimary)
 
                     Image(systemName: "gear")
-                        .font(.system(size: 60))
+                        .font(theme.typography.displayLarge)
                         .foregroundStyle(theme.primary)
                         .rotationEffect(.degrees(rotation))
                         .onAppear {
@@ -293,15 +316,17 @@ struct AnimationDemo: View {
                         .font(theme.typography.titleMedium)
                         .foregroundStyle(theme.textPrimary)
 
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(isAnimating ? theme.primary : Color.autoMobileDarkGrey)
+                    theme.shapes.rounded(theme.shapes.small)
+                        .fill(isAnimating ? theme.primary : theme.surfaceVariant)
                         .frame(width: isAnimating ? 200 : 100, height: 60)
                         .animation(.easeInOut(duration: 0.5), value: isAnimating)
 
                     Button(isAnimating ? "Reset" : "Animate") {
                         isAnimating.toggle()
                     }
+                    .font(theme.typography.labelLarge)
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: theme.shapes.button))
                     .tint(theme.primary)
                 }
 
@@ -354,8 +379,13 @@ struct HeavyComputationDemo: View {
                         Picker("Duration", selection: $selectedDuration) {
                             ForEach(durations, id: \.self) { duration in
                                 Text("\(String(format: "%.1f", duration))s").tag(duration)
+                                    .font(theme.typography.bodyLarge)
+                                    .foregroundStyle(theme.textPrimary)
                             }
                         }
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
+                        .tint(theme.primary)
                         .pickerStyle(.segmented)
                         .padding(.horizontal)
                     }
@@ -364,13 +394,16 @@ struct HeavyComputationDemo: View {
                         blockMainThread()
                     } label: {
                         Label("Block Main Thread", systemImage: "exclamationmark.triangle.fill")
+                            .font(theme.typography.labelLarge)
+                            .foregroundStyle(theme.onPrimary)
                     }
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: theme.shapes.button))
                     .tint(theme.primary)
                 }
                 .padding()
                 .background(theme.primary.opacity(0.1))
-                .cornerRadius(12)
+                .cornerRadius(theme.shapes.small)
 
                 Divider()
                     .padding(.horizontal)
@@ -400,24 +433,27 @@ struct HeavyComputationDemo: View {
                                 .progressViewStyle(CircularProgressViewStyle())
                         } else {
                             Text("Start Computation")
+                                .font(theme.typography.labelLarge)
+                                .foregroundStyle(theme.onPrimary)
                         }
                     }
                     .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.roundedRectangle(radius: theme.shapes.button))
                     .tint(theme.primary)
                     .disabled(isComputing)
                 }
                 .padding()
                 .background(theme.surfaceVariant)
-                .cornerRadius(12)
+                .cornerRadius(theme.shapes.small)
 
                 // Result display
                 Text(result)
-                    .font(.system(.body, design: .monospaced))
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textPrimary)
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(theme.surfaceVariant)
-                    .cornerRadius(8)
+                    .cornerRadius(theme.shapes.extraSmall)
 
                 Spacer()
             }
@@ -483,36 +519,64 @@ struct FormDemo: View {
 
     var body: some View {
         Form {
-            Section("Personal Information") {
+            Section(
+                header: Text("Personal Information").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 TextField("Name", text: $name)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.textPrimary)
                 TextField("Email", text: $email)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.textPrimary)
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
             }
+            .listRowBackground(theme.surface)
 
-            Section("Preferences") {
+            Section(
+                header: Text("Preferences").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 Toggle("Enable Notifications", isOn: $enableNotifications)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.textPrimary)
+                    .tint(theme.primary)
 
                 Picker("Theme", selection: $selectedTheme) {
-                    ForEach(themes, id: \.self) { theme in
-                        Text(theme)
+                    ForEach(themes, id: \.self) { option in
+                        Text(option)
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                     }
                 }
+                .font(theme.typography.bodyLarge)
+                .foregroundStyle(theme.textPrimary)
+                .tint(theme.primary)
 
                 VStack(alignment: .leading) {
                     Text("Volume: \(Int(volume * 100))%")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Slider(value: $volume)
                 }
             }
+            .listRowBackground(theme.surface)
 
             Section {
                 Button("Save Changes") {
                     // Save action
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
                 .frame(maxWidth: .infinity)
             }
+            .listRowBackground(theme.surface)
         }
+        .scrollContentBackground(.hidden)
+        .background(theme.background)
         .navigationTitle("Forms")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -528,36 +592,66 @@ struct AlertsDemo: View {
 
     var body: some View {
         List {
-            Section("Alerts") {
+            Section(header: Text("Alerts").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 Button("Show Alert") {
                     showAlert = true
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
                 .alert("Alert Title", isPresented: $showAlert) {
                     Button("OK", role: .cancel) {}
+                        .font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.primary)
+                        .tint(theme.primary)
                 } message: {
                     Text("This is an alert message.")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                 }
 
                 Button("Show Confirmation") {
                     showConfirmation = true
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
                 .confirmationDialog("Choose an action", isPresented: $showConfirmation) {
                     Button("Option 1") {}
+                        .font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.primary)
+                        .tint(theme.primary)
                     Button("Option 2") {}
+                        .font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.primary)
+                        .tint(theme.primary)
                     Button("Delete", role: .destructive) {}
+                        .font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.primary)
+                        .tint(theme.primary)
                     Button("Cancel", role: .cancel) {}
+                        .font(theme.typography.labelLarge)
+                        .foregroundStyle(theme.primary)
+                        .tint(theme.primary)
                 }
             }
+            .listRowBackground(theme.surface)
 
-            Section("Sheets") {
+            Section(header: Text("Sheets").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 Button("Show Sheet") {
                     showSheet = true
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
                 .sheet(isPresented: $showSheet) {
                     SheetContent()
                 }
             }
+            .listRowBackground(theme.surface)
         }
+        .scrollContentBackground(.hidden)
+        .background(theme.background)
         .navigationTitle("Alerts & Sheets")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -571,11 +665,17 @@ struct SheetContent: View {
         NavigationStack {
             VStack(spacing: 20) {
                 Text("This is a sheet")
+                    .foregroundStyle(theme.textPrimary)
                     .font(theme.typography.headlineLarge)
 
                 Text("Swipe down or tap Done to dismiss")
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textSecondary)
             }
+            .font(theme.typography.bodyLarge)
+            .foregroundStyle(theme.textPrimary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(theme.background)
             .navigationTitle("Sheet")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -583,6 +683,9 @@ struct SheetContent: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.primary)
+                    .tint(theme.primary)
                 }
             }
         }
@@ -605,17 +708,23 @@ struct AccessibilityDemo: View {
                 Text(
                     "This text will scale with Dynamic Type settings. Try changing the text size in Settings > Accessibility > Display & Text Size."
                 )
+                .font(theme.typography.bodyLarge)
                 .dynamicTypeSize(dynamicTypeSize)
                 .foregroundStyle(theme.textSecondary)
             }
+            .listRowBackground(theme.surface)
 
-            Section("VoiceOver Labels") {
+            Section(
+                header: Text("VoiceOver Labels").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 HStack {
                     Image(systemName: "star.fill")
-                        .foregroundStyle(Color.autoMobileWarning)
+                        .foregroundStyle(theme.warning)
                         .accessibilityLabel("Favorite")
 
                     Text("Favorite Item")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textPrimary)
 
                     Spacer()
@@ -633,19 +742,26 @@ struct AccessibilityDemo: View {
                     HStack {
                         Image(systemName: "plus")
                         Text("Add Item")
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                     }
                 }
                 .tint(theme.primary)
                 .accessibilityHint("Double tap to add a new item")
             }
+            .listRowBackground(theme.surface)
 
-            Section("AutoMobile Colors") {
+            Section(
+                header: Text("AutoMobile Colors").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 HStack {
                     Rectangle()
                         .fill(Color.autoMobileLalala)
                         .frame(width: 40, height: 40)
-                        .cornerRadius(4)
+                        .cornerRadius(theme.shapes.extraSmall)
                     Text("Primary (Lalala)")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textPrimary)
                 }
 
@@ -653,8 +769,9 @@ struct AccessibilityDemo: View {
                     Rectangle()
                         .fill(theme.primary)
                         .frame(width: 40, height: 40)
-                        .cornerRadius(4)
+                        .cornerRadius(theme.shapes.extraSmall)
                     Text("Secondary (Red)")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textPrimary)
                 }
 
@@ -662,15 +779,17 @@ struct AccessibilityDemo: View {
                     Rectangle()
                         .fill(Color.autoMobileEggshell)
                         .frame(width: 40, height: 40)
-                        .cornerRadius(4)
+                        .cornerRadius(theme.shapes.extraSmall)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 4)
+                            theme.shapes.rounded(theme.shapes.extraSmall)
                                 .stroke(Color.autoMobileLightGrey, lineWidth: 1)
                         )
                     Text("Background (Eggshell)")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textPrimary)
                 }
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -690,38 +809,58 @@ struct SDKStatusDemo: View {
 
     var body: some View {
         List {
-            Section("SDK State") {
+            Section(header: Text("SDK State").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 HStack {
                     Text("Initialized")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text(AutoMobileSDK.shared.isInitialized ? "Yes" : "No")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(AutoMobileSDK.shared.isInitialized ? theme.success : theme.textSecondary)
                 }
 
                 HStack {
                     Text("Bundle ID")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text(AutoMobileSDK.shared.bundleId ?? "N/A")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textSecondary)
                         .lineLimit(1)
                 }
 
                 Toggle("Enabled", isOn: $sdkEnabled)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.textPrimary)
+                    .tint(theme.primary)
                     .onChange(of: sdkEnabled) { _, newValue in
                         AutoMobileSDK.shared.setEnabled(newValue)
                     }
 
                 HStack {
                     Text("Navigation Listeners")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text("\(AutoMobileSDK.shared.listenerCount)")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textSecondary)
                 }
             }
+            .listRowBackground(theme.surface)
 
-            Section("Log Message") {
+            Section(
+                header: Text("Log Message").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 TextField("Event Name", text: $eventName)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.textPrimary)
                 TextField("Property (key=value)", text: $eventProperty)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.textPrimary)
 
                 Button("Log Event") {
                     var message = eventName
@@ -731,6 +870,9 @@ struct SDKStatusDemo: View {
                     AutoMobileLog.shared.i("DemosTab", message)
                     statusMessage = "Logged: \(eventName)"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
                 .disabled(eventName.isEmpty)
 
                 if !statusMessage.isEmpty {
@@ -739,22 +881,33 @@ struct SDKStatusDemo: View {
                         .font(theme.typography.labelMedium)
                 }
             }
+            .listRowBackground(theme.surface)
 
-            Section("Storage Inspection") {
+            Section(
+                header: Text("Storage Inspection").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 HStack {
                     Text("UserDefaults Inspector")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text(UserDefaultsInspector.shared.isEnabled ? "Enabled" : "Disabled")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(UserDefaultsInspector.shared.isEnabled ? theme.success : theme.textSecondary)
                 }
 
                 HStack {
                     Text("Database Inspector")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text(DatabaseInspector.shared.isEnabled ? "Enabled" : "Disabled")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(DatabaseInspector.shared.isEnabled ? theme.success : theme.textSecondary)
                 }
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -773,11 +926,17 @@ struct ErrorTrackingDemo: View {
 
     var body: some View {
         List {
-            Section("Handled Exceptions") {
+            Section(
+                header: Text("Handled Exceptions").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 HStack {
                     Text("Recorded Errors")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text("\(AutoMobileFailures.shared.eventCount)")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textSecondary)
                 }
 
@@ -795,6 +954,9 @@ struct ErrorTrackingDemo: View {
                     errorCount = AutoMobileFailures.shared.eventCount
                     lastError = "PlaygroundDemo:1001"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
 
                 Button("Record Network Error") {
                     let error = NSError(
@@ -810,18 +972,26 @@ struct ErrorTrackingDemo: View {
                     errorCount = AutoMobileFailures.shared.eventCount
                     lastError = "NSURLErrorDomain:\(NSURLErrorTimedOut)"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
 
                 if !lastError.isEmpty {
                     Text("Last: \(lastError)")
                         .font(theme.typography.labelMedium)
-                        .foregroundStyle(Color.autoMobileError)
+                        .foregroundStyle(theme.error)
                 }
             }
+            .listRowBackground(theme.surface)
 
-            Section("Recent Events") {
+            Section(
+                header: Text("Recent Events").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 let events = AutoMobileFailures.shared.getRecentEvents()
                 if events.isEmpty {
                     Text("No errors recorded")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textSecondary)
                 } else {
                     ForEach(events.suffix(5).reversed(), id: \.timestamp) { event in
@@ -838,6 +1008,7 @@ struct ErrorTrackingDemo: View {
                     }
                 }
             }
+            .listRowBackground(theme.surface)
 
             Section {
                 Button("Clear All Events", role: .destructive) {
@@ -845,8 +1016,11 @@ struct ErrorTrackingDemo: View {
                     errorCount = 0
                     lastError = ""
                 }
+                .font(theme.typography.labelLarge)
+                .tint(theme.primary)
                 .foregroundStyle(theme.primary)
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -867,12 +1041,20 @@ struct BiometricsDemo: View {
 
     var body: some View {
         List {
-            Section("Override Biometric Result") {
+            Section(
+                header: Text("Override Biometric Result").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 Picker("Result", selection: $selectedResult) {
                     ForEach(resultOptions, id: \.self) { option in
                         Text(option.capitalized).tag(option)
+                            .font(theme.typography.bodyLarge)
+                            .foregroundStyle(theme.textPrimary)
                     }
                 }
+                .font(theme.typography.bodyLarge)
+                .foregroundStyle(theme.textPrimary)
+                .tint(theme.primary)
                 .pickerStyle(.segmented)
 
                 Button("Set Override") {
@@ -886,6 +1068,9 @@ struct BiometricsDemo: View {
                     AutoMobileBiometrics.shared.overrideResult(result)
                     statusMessage = "Override set: \(selectedResult)"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
 
                 Button("Consume Override") {
                     if let result = AutoMobileBiometrics.shared.consumeOverride() {
@@ -894,27 +1079,38 @@ struct BiometricsDemo: View {
                         statusMessage = "No override available"
                     }
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
 
                 Button("Clear Override") {
                     AutoMobileBiometrics.shared.clearOverride()
                     statusMessage = "Override cleared"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
             }
+            .listRowBackground(theme.surface)
 
-            Section("Status") {
+            Section(header: Text("Status").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 HStack {
                     Text("Has Override")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text(AutoMobileBiometrics.shared.hasOverride ? "Yes" : "No")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(AutoMobileBiometrics.shared.hasOverride ? theme.success : theme.textSecondary)
                 }
 
                 if !statusMessage.isEmpty {
                     Text(statusMessage)
                         .font(theme.typography.labelMedium)
-                        .foregroundStyle(Color.autoMobileInfo)
+                        .foregroundStyle(theme.info)
                 }
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -933,7 +1129,10 @@ struct NetworkTrackingDemo: View {
 
     var body: some View {
         List {
-            Section("Manual Recording") {
+            Section(
+                header: Text("Manual Recording").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 Button("Record GET Request") {
                     AutoMobileNetwork.shared.recordRequest(
                         url: "https://api.example.com/users",
@@ -945,6 +1144,9 @@ struct NetworkTrackingDemo: View {
                     requestCount += 1
                     lastRequest = "GET /users → 200"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
 
                 Button("Record POST Request") {
                     AutoMobileNetwork.shared.recordRequest(
@@ -958,6 +1160,9 @@ struct NetworkTrackingDemo: View {
                     requestCount += 1
                     lastRequest = "POST /posts → 201"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
 
                 Button("Record Failed Request") {
                     AutoMobileNetwork.shared.recordRequest(
@@ -969,9 +1174,16 @@ struct NetworkTrackingDemo: View {
                     requestCount += 1
                     lastRequest = "GET /timeout → Error"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
             }
+            .listRowBackground(theme.surface)
 
-            Section("WebSocket Events") {
+            Section(
+                header: Text("WebSocket Events").font(theme.typography.labelLarge)
+                    .foregroundStyle(theme.textSecondary)
+            ) {
                 Button("Record WebSocket Frame") {
                     AutoMobileNetwork.shared.recordWebSocketFrame(
                         url: "wss://ws.example.com/stream",
@@ -982,22 +1194,30 @@ struct NetworkTrackingDemo: View {
                     requestCount += 1
                     lastRequest = "WS frame received (1024 bytes)"
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
             }
+            .listRowBackground(theme.surface)
 
-            Section("Status") {
+            Section(header: Text("Status").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 HStack {
                     Text("Events Recorded")
+                        .font(theme.typography.bodyLarge)
+                        .foregroundStyle(theme.textPrimary)
                     Spacer()
                     Text("\(requestCount)")
+                        .font(theme.typography.bodyLarge)
                         .foregroundStyle(theme.textSecondary)
                 }
 
                 if !lastRequest.isEmpty {
                     Text(lastRequest)
                         .font(theme.typography.labelMedium)
-                        .foregroundStyle(Color.autoMobileInfo)
+                        .foregroundStyle(theme.info)
                 }
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -1078,7 +1298,7 @@ struct ViewHierarchyDebugDemo: View {
                     HStack(spacing: 4) {
                         Image(systemName: "star.fill")
                             .font(theme.typography.labelSmall)
-                            .foregroundStyle(Color.autoMobileWarning)
+                            .foregroundStyle(theme.warning)
                         Text("4.8")
                             .font(theme.typography.labelSmall)
                             .foregroundStyle(theme.textSecondary)
@@ -1091,14 +1311,14 @@ struct ViewHierarchyDebugDemo: View {
             }
             .padding()
             .background(theme.surfaceVariant)
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("combined-card")
             .accessibilityLabel("Photo Title, 4.8 stars, 128 reviews")
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 2: Custom Accessibility Actions
@@ -1126,7 +1346,7 @@ struct ViewHierarchyDebugDemo: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(theme.surfaceVariant)
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .accessibilityIdentifier("message-cell")
             .accessibilityElement(children: .combine)
             .accessibilityAction(named: "Reply") { tapCount += 1 }
@@ -1137,7 +1357,7 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 3: Gesture Recognizers
@@ -1162,7 +1382,7 @@ struct ViewHierarchyDebugDemo: View {
             .padding(40)
             .frame(maxWidth: .infinity)
             .background(theme.primary.opacity(0.15))
-            .cornerRadius(16)
+            .cornerRadius(theme.shapes.medium)
             .accessibilityIdentifier("gesture-target")
             .onTapGesture { tapCount += 1 }
             .onLongPressGesture { longPressCount += 1 }
@@ -1181,7 +1401,7 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 4: Layered Views
@@ -1196,24 +1416,24 @@ struct ViewHierarchyDebugDemo: View {
                 .foregroundStyle(theme.textSecondary)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 20)
+                theme.shapes.rounded(theme.shapes.medium)
                     .fill(theme.primary.opacity(0.3))
                     .frame(width: 200, height: 200)
                     .accessibilityIdentifier("layer-back")
 
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.autoMobileWarning.opacity(0.5))
+                theme.shapes.rounded(theme.shapes.medium)
+                    .fill(theme.warning.opacity(0.5))
                     .frame(width: 150, height: 150)
                     .accessibilityIdentifier("layer-middle")
 
-                RoundedRectangle(cornerRadius: 12)
+                theme.shapes.rounded(theme.shapes.small)
                     .fill(theme.primary.opacity(0.7))
                     .frame(width: 100, height: 100)
                     .accessibilityIdentifier("layer-front")
 
                 Text("Top")
                     .font(theme.typography.titleMedium)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(theme.onPrimary)
                     .accessibilityIdentifier("layer-label")
             }
             .frame(maxWidth: .infinity)
@@ -1221,7 +1441,7 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 5: Hidden Views
@@ -1239,16 +1459,19 @@ struct ViewHierarchyDebugDemo: View {
 
             VStack(spacing: 12) {
                 Text("Visible content")
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textPrimary)
                     .accessibilityIdentifier("visible-text")
 
                 Text("A11y-hidden content")
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.primary)
                     .accessibilityIdentifier("a11y-hidden-text")
                     .accessibilityHidden(true)
 
                 Text("Elements-hidden container child")
-                    .foregroundStyle(Color.autoMobileWarning)
+                    .font(theme.typography.bodyLarge)
+                    .foregroundStyle(theme.warning)
                     .accessibilityIdentifier("elements-hidden-child")
 
                 // Decorative divider — no a11y representation
@@ -1265,17 +1488,18 @@ struct ViewHierarchyDebugDemo: View {
                     .accessibilityHidden(true)
 
                 Text("Below the decorative divider")
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textPrimary)
                     .accessibilityIdentifier("below-divider-text")
             }
             .padding()
             .background(theme.surfaceVariant)
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .accessibilityIdentifier("hidden-views-container")
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 6: UIKit Control
@@ -1303,13 +1527,14 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 }
 
 // MARK: - UIKit Representables
 
 struct StepperControlView: UIViewRepresentable {
+    @Environment(\.autoMobileTheme) private var theme
     @Binding var value: Double
 
     func makeUIView(context: Context) -> UIStepper {
@@ -1324,6 +1549,7 @@ struct StepperControlView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIStepper, context _: Context) {
+        uiView.tintColor = UIColor(theme.primary)
         uiView.value = value
     }
 
@@ -1343,6 +1569,7 @@ struct StepperControlView: UIViewRepresentable {
 }
 
 struct SegmentedControlView: UIViewRepresentable {
+    @Environment(\.autoMobileTheme) private var theme
     func makeUIView(context _: Context) -> UISegmentedControl {
         let control = UISegmentedControl(items: ["Low", "Medium", "High"])
         control.selectedSegmentIndex = 1
@@ -1350,7 +1577,18 @@ struct SegmentedControlView: UIViewRepresentable {
         return control
     }
 
-    func updateUIView(_: UISegmentedControl, context _: Context) {}
+    func updateUIView(_ uiView: UISegmentedControl, context _: Context) {
+        uiView.backgroundColor = UIColor(theme.surfaceVariant)
+        uiView.selectedSegmentTintColor = UIColor(theme.primary)
+        uiView.setTitleTextAttributes([
+            .font: theme.typography.uiKitLabelLarge,
+            .foregroundColor: UIColor(theme.textPrimary),
+        ], for: .normal)
+        uiView.setTitleTextAttributes([
+            .font: theme.typography.uiKitLabelLarge,
+            .foregroundColor: UIColor(theme.onPrimary),
+        ], for: .selected)
+    }
 }
 
 #Preview {

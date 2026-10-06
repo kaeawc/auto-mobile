@@ -15,8 +15,9 @@ struct TapAtTargetsDemo: View {
     @State private var showsCrosshairs = false
 
     private let targetColors: [Color] = [
-        .red, .blue, .green, .orange, .purple, .pink,
-        .cyan, .yellow, .mint, .indigo, .brown,
+        .pgLightPrimary, .pgAccentSkyBlue, .pgAccentGrassGreen, .pgAccentConeOrange,
+        .pgAccentSlidePurple, .pgDarkPrimary, .pgDarkSecondary, .pgLightTertiary,
+        .pgAccentSandTan, .pgLightSecondary, .pgAccentInk,
     ]
 
     var body: some View {
@@ -40,7 +41,7 @@ struct TapAtTargetsDemo: View {
 
             Canvas { context, _ in
                 for (index, target) in targets.enumerated() {
-                    let color = target.id == flashedTargetID ? Color.white : targetColors[index]
+                    let color = target.id == flashedTargetID ? theme.surface : targetColors[index]
                     draw(target, color: color, in: &context)
                     drawLabel(for: target, in: &context)
                 }
@@ -87,11 +88,16 @@ struct TapAtTargetsDemo: View {
                     flashedTargetID = nil
                     flashToken = UUID()
                 }
+                .font(theme.typography.labelLarge)
+                .foregroundStyle(theme.primary)
+                .tint(theme.primary)
                 .accessibilityIdentifier("tapat-reset")
 
                 Spacer()
 
                 Toggle("Crosshairs", isOn: $showsCrosshairs)
+                    .foregroundStyle(theme.textPrimary)
+                    .tint(theme.primary)
                     .font(theme.typography.labelMedium)
                     .fixedSize()
                     .accessibilityIdentifier("tapat-crosshairs-toggle")
@@ -124,10 +130,9 @@ struct TapAtTargetsDemo: View {
         let labelPoint = isTiny
             ? CGPoint(x: target.rect.maxX + 5, y: target.center.y)
             : target.center
-        let foreground: Color = isTiny ? theme.textPrimary : .white
-        let fontSize: CGFloat = isTiny ? 11 : min(20, max(9, target.rect.width * 0.24))
+        let foreground: Color = isTiny ? theme.textPrimary : theme.onPrimary
         let text = Text(target.id)
-            .font(.system(size: fontSize, weight: .bold, design: .rounded))
+            .font(isTiny ? theme.typography.labelSmall : theme.typography.labelLarge)
             .foregroundColor(foreground)
         context.draw(text, at: labelPoint)
     }
@@ -138,7 +143,7 @@ struct TapAtTargetsDemo: View {
         path.addLine(to: CGPoint(x: center.x + 5, y: center.y))
         path.move(to: CGPoint(x: center.x, y: center.y - 5))
         path.addLine(to: CGPoint(x: center.x, y: center.y + 5))
-        context.stroke(path, with: .color(.black), lineWidth: 1)
+        context.stroke(path, with: .color(theme.textPrimary), lineWidth: 1)
     }
 
     private func recordTap(

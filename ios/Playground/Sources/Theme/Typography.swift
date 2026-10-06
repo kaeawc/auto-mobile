@@ -38,3 +38,28 @@ struct PlaygroundTypography {
     let labelMedium = PlaygroundFont.shantell(12, .medium, relativeTo: .caption)
     let labelSmall = PlaygroundFont.shantell(11, .medium, relativeTo: .caption2)
 }
+
+#if canImport(UIKit)
+    import UIKit
+
+    extension PlaygroundTypography {
+        /// UIKit fixtures use the same body role and Dynamic Type curve as SwiftUI.
+        var uiKitBodyLarge: UIFont {
+            let font = UIFont(name: PlaygroundFont.baseName, size: 16)
+                ?? UIFont.preferredFont(forTextStyle: .body)
+            let descriptor = font.fontDescriptor.addingAttributes([
+                .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.regular.rawValue],
+            ])
+            return UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont(descriptor: descriptor, size: 16))
+        }
+
+        var uiKitLabelLarge: UIFont {
+            let font = UIFont(name: PlaygroundFont.baseName, size: 14)
+                ?? UIFont.preferredFont(forTextStyle: .subheadline)
+            let descriptor = font.fontDescriptor.addingAttributes([
+                .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.medium.rawValue],
+            ])
+            return UIFontMetrics(forTextStyle: .subheadline).scaledFont(for: UIFont(descriptor: descriptor, size: 14))
+        }
+    }
+#endif

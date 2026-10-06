@@ -65,13 +65,15 @@ struct AccessibilityRotorDemo: View {
                     .font(theme.typography.bodyMedium)
                     .foregroundStyle(theme.textSecondary)
             }
+            .listRowBackground(theme.surface)
 
-            Section("Entries") {
+            Section(header: Text("Entries").font(theme.typography.labelLarge).foregroundStyle(theme.textSecondary)) {
                 ForEach(items) { item in
                     row(for: item)
                         .accessibilityRotorEntry(id: item.id, in: rotorNamespace)
                 }
             }
+            .listRowBackground(theme.surface)
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
@@ -89,7 +91,7 @@ struct AccessibilityRotorDemo: View {
     private func row(for item: Item) -> some View {
         HStack(spacing: 12) {
             Image(systemName: item.isFlagged ? "flag.fill" : "circle")
-                .foregroundStyle(item.isFlagged ? Color.autoMobileWarning : theme.textSecondary)
+                .foregroundStyle(item.isFlagged ? theme.warning : theme.textSecondary)
                 .frame(width: 24)
                 .accessibilityHidden(true)
 

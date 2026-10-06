@@ -712,6 +712,25 @@ describe("TapAnyElement node long press fallbacks", () => {
     expect(adb.getAllCommands()).toEqual([]);
   });
 
+  test("falls back to coordinates when an advertised long_click reports node not found", async () => {
+    const { proxy, adb, tapAny } = setup();
+    proxy.setActionResult({
+      success: false,
+      action: "long_click",
+      totalTimeMs: 1,
+      error: "Element not found with NodeSelector(testTag=message_row_42)",
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+      expect(result.success).toBe(true);
+      expect(proxy.getNodeActionHistory()).toHaveLength(1);
+      expect(adb.getAllCommands()).toEqual(["shell input touchscreen swipe 60 45 60 45 1200"]);
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   test.each([false, true])(
     "logs a thrown node action and falls back (advertised=%s)",
     async (advertised) => {

@@ -5,7 +5,10 @@ import {
 } from "../observe/observationReadScope";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { freshTapHierarchy } from "./freshTapHierarchy";
-import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
+import {
+  isRejectedSemanticAction,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
@@ -689,7 +692,12 @@ export class TapAnyElement extends BaseVisualChange {
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      if (
+        isRejectedSemanticAction(
+          hasAccessibilityAction(element.actions, "long_click"),
+          result.error,
+        )
+      ) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );

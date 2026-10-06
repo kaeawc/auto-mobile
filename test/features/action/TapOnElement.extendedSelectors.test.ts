@@ -703,6 +703,39 @@ describe("TapOnElement extended selectors", () => {
       expect(internals.adb.getAllCommands()).toEqual([]);
     });
 
+    test("falls back to coordinates when an advertised unique-id long click reports node not found", async () => {
+      const { proxy, internals } = setup();
+      proxy.setActionResult(
+        longClickResult(
+          false,
+          `Element not found with resource-id: ${uniqueIdElement["resource-id"]}`,
+        ),
+      );
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        expect(proxy.getActionHistory()).toHaveLength(1);
+        expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test("falls back to coordinates when an advertised selector long click reports node not found", async () => {
+      const { proxy, internals } = setup();
+      proxy.setActionResult(
+        longClickResult(false, "Element not found with NodeSelector(testTag=message_row_42)"),
+      );
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
+        expect(proxy.getNodeActionHistory()).toHaveLength(1);
+        expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
     test("logs a thrown bare-id action and falls back", async () => {
       const { proxy, internals } = setup();
       proxy.setFailureMode("requestAction", new Error("runner disconnected"));

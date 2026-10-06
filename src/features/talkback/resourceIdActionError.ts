@@ -7,6 +7,21 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 
+/**
+ * CtrlProxy replies `Element not found with <target>` when its node lookup misses. The selector was
+ * resolved from a hierarchy the device itself produced, so this says the lookup missed (for
+ * example the element sits in a window the lookup did not search), not that the press is
+ * impossible; semantic actions treat it like any other lookup failure and use coordinates.
+ */
+export function isNodeNotFoundReply(error: string | undefined): boolean {
+  return error?.startsWith("Element not found with ") === true;
+}
+
+/** An advertised semantic action the device rejected, as opposed to one whose lookup missed. */
+export function isRejectedSemanticAction(advertised: boolean, error: string | undefined): boolean {
+  return advertised && !isNodeNotFoundReply(error);
+}
+
 /** Bare native IDs resolve globally; only a complete tree can prove uniqueness. */
 export async function resourceIdActionError(
   resourceId: string,

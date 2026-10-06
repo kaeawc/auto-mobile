@@ -2753,6 +2753,9 @@ const attributeTrayRows = (
   return { notifications, unattributedRows };
 };
 
+/** The list pass cannot read an open notification shade. */
+export class NotificationShadeNotOpenError extends ActionableError {}
+
 /** Bounded UI inventory, in encounter order, with no inferred posting times. */
 // eslint-disable-next-line complexity -- bounded scan coordinates shade state, pagination, and overlap.
 export const listSystemTrayNotifications = async (
@@ -2794,7 +2797,9 @@ export const listSystemTrayNotifications = async (
   while (true) {
     signal?.throwIfAborted();
     if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
-      throw new ActionableError("Notification shade is not open; cannot list notifications.");
+      throw new NotificationShadeNotOpenError(
+        "Notification shade is not open; cannot list notifications.",
+      );
     }
     const pageNotifications = readTrayNotifications(observation.viewHierarchy);
     const overlap = trayPageOverlap(previousNotifications, pageNotifications);

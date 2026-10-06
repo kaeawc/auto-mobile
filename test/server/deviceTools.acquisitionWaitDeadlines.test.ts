@@ -29,6 +29,11 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import {
+  registerLiveDeadline,
+  unregisterLiveDeadline,
+} from "../../src/daemon/liveDeadlineRegistry";
 
 isolateToolRegistry();
 
@@ -121,7 +126,7 @@ describe("device acquisition wait deadlines", () => {
   function acquire(
     device: BootedDevice,
     signal?: AbortSignal,
-    internalArgs: Record<string, number> = {},
+    internalArgs: Record<string, unknown> = {},
   ) {
     deviceUtils.setBootedDevices(device.platform, [device]);
     const tool = ToolRegistry.getTool(device.platform === "android" ? "getAndroid" : "getApple")!;
@@ -152,6 +157,170 @@ describe("device acquisition wait deadlines", () => {
     expect(observedDeadline).toBe(500);
     expect(timer.getSleepHistory()).toEqual([]);
   });
+
+  for (const mode of [
+    "boot progress",
+    "readiness progress",
+    "no progress",
+    "live without progress",
+  ] as const) {
+    const withProgress = mode === "boot progress" || mode === "readiness progress";
+    test(`cold boot deadline: ${mode}`, async () => {
+      const key = "cold-boot-deadline";
+      const deadline = new ProgressExtendableDeadline(0, 180_000);
+      if (mode !== "no progress") {
+        registerLiveDeadline(key, deadline);
+      }
+      let acceptProgress = mode === "boot progress";
+      deviceUtils.setDeviceImages("android", [
+        { platform: "android", name: android.name, deviceId: android.deviceId, isRunning: false },
+      ]);
+      const bootGate = Promise.withResolvers<void>();
+      const setupGate = Promise.withResolvers<void>();
+      let setupSignal: AbortSignal | undefined;
+      const ready = deviceUtils.waitForDeviceReady.bind(deviceUtils);
+      deviceUtils.waitForDeviceReady = async (...args) => {
+        await bootGate.promise;
+        return await ready(...args);
+      };
+      const service = new RunnerReadinessService({
+        timer,
+        getAndroidManager: () => ({
+          isInstalled: async () => true,
+          isEnabled: async () => true,
+          isVersionCompatible: async () => true,
+          enable: async () => {},
+          resetSetupState: () => {},
+          setup: async () => ({ success: true, message: "ready" }),
+          ensureCompatibleVersion: async () => {
+            setupSignal = getAbortSignal();
+            await setupGate.promise;
+            setupSignal?.throwIfAborted();
+            return { status: "compatible" };
+          },
+        }),
+        getAndroidClient: () => ({
+          isConnected: () => true,
+          waitForConnection: async () => true,
+          verifyServiceReady: async () => true,
+          connectWithoutSetup: async () => true,
+        }),
+        getIosManager: () => {
+          throw new Error("unexpected iOS manager");
+        },
+        getIosClient: () => {
+          throw new Error("unexpected iOS client");
+        },
+        checkIosOverride: async () => ({ present: false, usable: true }),
+        awaitIosStartupMaintenance: async () => {},
+      });
+      setDeviceToolsDependencies({
+        ensureCtrlProxyReady: (request) => service.ensureReady(request),
+      });
+      const progress = withProgress
+        ? async () => {
+            if (acceptProgress) {
+              deadline.extendOnProgress(timer.now(), 180_000);
+            }
+          }
+        : undefined;
+      const pending = ToolRegistry.getTool("getAndroid")!.handler(
+        {
+          avdName: android.name,
+          __mcpRequestDeadlineMs: 180_000,
+          ...(mode !== "no progress" ? { __mcpLiveDeadlineKey: key } : {}),
+        },
+        progress,
+      );
+      const outcome = observe(pending);
+      try {
+        await flushMicrotasks();
+        timer.advanceTime(150_000);
+        await progress?.();
+        bootGate.resolve();
+        await flushMicrotasks();
+        expect(deviceUtils.wasMethodCalled("startDevice")).toBe(true);
+        expect(setupSignal).toBeDefined();
+        timer.advanceTime(29_000);
+        if (mode === "readiness progress") {
+          acceptProgress = true;
+          await progress?.();
+        }
+        timer.advanceTime(1_000);
+        await flushMicrotasks();
+        if (withProgress) {
+          expect(setupSignal?.aborted).toBe(false);
+          timer.advanceTime(10_000);
+          setupGate.resolve();
+          await pending;
+          expect(outcome.error).toBeUndefined();
+          expect(sessionManager.getAllSessionIds()).toHaveLength(1);
+        } else {
+          expect(setupSignal?.aborted).toBe(true);
+          setupGate.resolve();
+          await expect(pending).rejects.toBeInstanceOf(ActionableError);
+          expect(sessionManager.getAllSessionIds()).toEqual([]);
+        }
+        expect(timer.getSleepHistory()).toEqual([]);
+        expect(lifecycleReleases).toBe(1);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        deadline.extendOnProgress(timer.now(), 180_000);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        bootGate.resolve();
+        setupGate.resolve();
+        unregisterLiveDeadline(key);
+        await flushMicrotasks();
+      }
+    });
+  }
+
+  for (const stage of ["upgrade", "uninstall"] as const) {
+    test(`cancelled APK ${stage} invalidates the installed cache`, async () => {
+      const adb = new FakeAdbExecutor();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, timer);
+      const listing = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
+      adb.setCommandResponse(listing, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
+        stderr: "",
+      });
+      adb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/ctrlproxy/base.apk",
+        stderr: "",
+      });
+      // A known mismatched SHA selects upgrade; an unknown SHA selects reinstall.
+      adb.setCommandResponse("shell sha256sum", {
+        stdout: stage === "upgrade" ? "different-sha /data/app/ctrlproxy/base.apk" : "",
+        stderr: "",
+      });
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      manager.downloadApk = async () => "fake.apk";
+      manager.cleanupApk = async () => {};
+      expect(await manager.isInstalled()).toBe(true);
+      const execute = adb.executeCommand.bind(adb);
+      const caller = new AbortController();
+      let dispatched = false;
+      adb.executeCommand = async (command, ...args) => {
+        if (command.startsWith(stage === "upgrade" ? "install -r" : "shell pm uninstall")) {
+          dispatched = true;
+          // Model a package mutation completed on-device before cancellation arrived.
+          adb.setCommandResponse(listing, { stdout: "", stderr: "" });
+          caller.abort(new Error("caller cancelled"));
+        }
+        return await execute(command, ...args);
+      };
+      await expect(
+        runWithAbortSignal(caller.signal, () =>
+          manager.ensureCompatibleVersion({
+            allowDownloadWhenInstalled: true,
+          }),
+        ),
+      ).rejects.toThrow("cancelled");
+      expect(dispatched).toBe(true);
+      expect(await manager.isInstalled()).toBe(false);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+  }
 
   for (const stage of [
     "CtrlProxy APK install",

@@ -1423,9 +1423,9 @@ export class RunnerReadinessService {
     };
     const callerAbortError = (reason: unknown) =>
       callerTimedOut
-        ? operationFailure instanceof ActionableError
-          ? operationFailure
-          : deadlineError()
+        ? operationFailure === undefined
+          ? deadlineError()
+          : toActionableError(operationFailure, `Runner readiness ${phase} failed`)
         : reason;
     const phaseStartedMs = this.dependencies.timer.now();
     let elapsedRecorded = false;
@@ -1466,7 +1466,7 @@ export class RunnerReadinessService {
             );
           } catch (error) {
             operationFailure = error;
-            throw toActionableError(error, `Runner readiness ${phase} failed`);
+            throw error;
           }
         },
       );

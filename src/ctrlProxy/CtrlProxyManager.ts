@@ -1909,6 +1909,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       } catch (upgradeError) {
         perf.endOperation("installApk");
         if (upgradeError instanceof CtrlProxyApkStageError) {
+          this.clearAvailabilityCache();
           throw upgradeError;
         }
         const deviceError = this.statusInspectionDeviceError(upgradeError);
@@ -1943,6 +1944,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       };
     } catch (reinstallError) {
       if (reinstallError instanceof CtrlProxyApkStageError) {
+        this.clearAvailabilityCache();
         throw reinstallError;
       }
       const reinstallMessage = errorMessage(reinstallError);

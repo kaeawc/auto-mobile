@@ -1596,6 +1596,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
               onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
+              backScope = serviceScope,
             ),
             OverlayResultSink { requestId, success, error ->
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {

@@ -82,11 +82,12 @@ private fun overlayChildren(node: OverlayNode): List<OverlayNode> =
 
 fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): OverlayRenderModel {
   guardOverlayTree(spec.root)
+  val mapped = mapOverlayNode(spec.root, spec.state.orEmpty(), pages, "root")
   return OverlayRenderModel(
     mapOverlayPlacement(spec.window.placement),
     spec.window.opacity,
-    mapOverlayNode(spec.root, spec.state.orEmpty(), pages, "root"),
-    hasOverlayTextField(spec.root),
+    mapped,
+    hasVisibleTextField(mapped),
   )
 }
 
@@ -325,8 +326,25 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
   }
 }
 
-private fun hasOverlayTextField(node: OverlayNode): Boolean =
-  node is OverlayTextFieldNode || overlayDescendants(node).any(::hasOverlayTextField)
+/**
+ * True only while an editable field is actually on screen: not hidden by `visibleWhen`, not on a
+ * pager page other than the settled one, and not inside a closed bottom sheet. Open sheets are
+ * hoisted and rendered by [modalOverlaySheets], so their fields count and their closed twins do
+ * not. The window may take input focus only while this holds.
+ */
+fun hasVisibleTextField(root: OverlayRenderNode): Boolean =
+  inlineTextFieldVisible(root) ||
+    modalOverlaySheets(root).any { sheet -> sheet.children.any(::inlineTextFieldVisible) }
+
+private fun inlineTextFieldVisible(node: OverlayRenderNode): Boolean =
+  when {
+    !node.visible -> false
+    node.role == "textField" -> true
+    node.role == "bottomSheet" -> false // Hoisted: only modalOverlaySheets renders it.
+    node.role == "pager" ->
+      node.children.getOrNull(node.page)?.let(::inlineTextFieldVisible) == true
+    else -> node.children.any(::inlineTextFieldVisible)
+  }
 
 /** Open sheet nodes are rendered last so their modal scrim covers the entire overlay window. */
 fun modalOverlaySheets(node: OverlayRenderNode): List<OverlayRenderNode> {

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   FocusNavigationExecutor,
   FocusNavigationStoppedError,
-  type FocusNavigationPath,
 } from "../../../src/features/talkback/FocusNavigationExecutor";
 import type { Element } from "../../../src/models/Element";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
@@ -16,17 +15,12 @@ const makeElement = (resourceId: string, index: number): Element => ({
 
 const longTraversal = () => {
   const driver = new FakeFocusNavigationDriver();
+  driver.exposeHierarchy = true;
   driver.setElements(
     Array.from({ length: 12 }, (_, index) => makeElement(`e${index}`, index)),
     0,
   );
-  const path: FocusNavigationPath = {
-    currentFocusIndex: 0,
-    targetFocusIndex: 10,
-    swipeCount: 10,
-    direction: "forward",
-  };
-  return { driver, path };
+  return driver;
 };
 
 const executorFor = (driver: FakeFocusNavigationDriver, timer: FakeTimer) =>
@@ -37,161 +31,134 @@ const requestContext = (getDeadlineMs: () => number | undefined) => ({
   textState: { dispatched: () => () => {} },
 });
 
+const failureOf = (promise: Promise<unknown>) =>
+  promise.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+
+const target = { resourceId: "e10" };
+
 describe("FocusNavigationExecutor request cancellation", () => {
-  test("a cancel after the third swipe stops before the fourth and says how far the cursor moved", async () => {
+  test("a cancel that lands with the focus request stops before the read-back and says the cursor moved", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const { driver, path } = longTraversal();
+    const driver = longTraversal();
     const controller = new AbortController();
-    driver.onSwipe = () => {
-      if (driver.getSwipeCount() === 3) {
-        controller.abort();
-      }
-    };
+    driver.onFocusAction = () => controller.abort();
 
-    const failure = await executorFor(driver, timer)
-      .navigateToElement("device-1", { resourceId: "e10" }, path, {
-        verificationInterval: 1,
-        swipeDelay: 100,
+    const failure = await failureOf(
+      executorFor(driver, timer).navigateToElement("device-1", target, {
         signal: controller.signal,
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      }),
+    );
 
     expect(failure).toBeInstanceOf(FocusNavigationStoppedError);
     expect((failure as Error).message).toBe(
-      "Operation cancelled. Focus navigation partially applied: 3 swipes already moved the " +
-        "TalkBack cursor and the target was not activated. Observe before retrying; do not " +
-        "retry automatically.",
+      "Operation cancelled. Focus navigation partially applied: 1 accessibility-focus request " +
+        "already moved the TalkBack cursor and the target was not activated. Observe before " +
+        "retrying; do not retry automatically.",
     );
-    expect(driver.getSwipeCount()).toBe(3);
+    expect(driver.getFocusRequestCount()).toBe(1);
   });
 
-  test("hands the request signal to every swipe request", async () => {
+  test("a request already cancelled sends no focus request and does not claim the cursor moved", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const { driver, path } = longTraversal();
-    const controller = new AbortController();
-
-    await executorFor(driver, timer).navigateToElement("device-1", { resourceId: "e10" }, path, {
-      verificationInterval: 1,
-      swipeDelay: 0,
-      signal: controller.signal,
-    });
-
-    expect(driver.swipeSignals).toHaveLength(10);
-    expect(driver.swipeSignals.every((signal) => signal === controller.signal)).toBe(true);
-  });
-
-  test("a request already cancelled sends no swipe and does not claim the cursor moved", async () => {
-    const timer = new FakeTimer();
-    const { driver, path } = longTraversal();
+    const driver = longTraversal();
     const controller = new AbortController();
     controller.abort();
 
-    const failure = await executorFor(driver, timer)
-      .navigateToElement("device-1", { resourceId: "e10" }, path, {
-        verificationInterval: 1,
-        swipeDelay: 0,
+    const failure = await failureOf(
+      executorFor(driver, timer).navigateToElement("device-1", target, {
         signal: controller.signal,
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      }),
+    );
 
     expect((failure as Error).message).toBe("Operation cancelled");
-    expect(driver.getSwipeCount()).toBe(0);
+    expect(driver.getFocusRequestCount()).toBe(0);
   });
 
-  test("a cancel during the post-swipe wait ends the wait without a further swipe", async () => {
+  test("a cancel during the settle wait ends the wait without confirming or tapping", async () => {
     const timer = new FakeTimer();
-    const { driver, path } = longTraversal();
+    const driver = longTraversal();
     const controller = new AbortController();
 
-    const settled = executorFor(driver, timer)
-      .navigateToElement("device-1", { resourceId: "e10" }, path, {
-        verificationInterval: 1,
-        swipeDelay: 100,
+    const settled = failureOf(
+      executorFor(driver, timer).navigateToElement("device-1", target, {
         signal: controller.signal,
-      })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      }),
+    );
     await new Promise((resolve) => setImmediate(resolve));
-    expect(driver.getSwipeCount()).toBe(1);
+    expect(driver.getFocusRequestCount()).toBe(1);
     controller.abort();
 
     // The fake clock never advanced: the sleep did not have to finish for the cancel to land.
     expect((await settled) as Error).toMatchObject({
-      message: expect.stringContaining("partially applied: 1 swipe already moved"),
+      message: expect.stringContaining("partially applied: 1 accessibility-focus request already"),
     });
-    expect(driver.getSwipeCount()).toBe(1);
+    expect(driver.getFocusRequestCount()).toBe(1);
   });
 
   test("the ambient request signal cancels navigation without an explicit signal", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const { driver, path } = longTraversal();
+    const driver = longTraversal();
     const controller = new AbortController();
-    driver.onSwipe = () => {
-      if (driver.getSwipeCount() === 2) {
-        controller.abort();
-      }
-    };
+    driver.onFocusAction = () => controller.abort();
 
     await expect(
       runWithAbortSignal(controller.signal, () =>
-        executorFor(driver, timer).navigateToElement("device-1", { resourceId: "e10" }, path, {
-          verificationInterval: 1,
-          swipeDelay: 0,
-        }),
+        executorFor(driver, timer).navigateToElement("device-1", target),
       ),
-    ).rejects.toThrow("partially applied: 2 swipes");
-    expect(driver.getSwipeCount()).toBe(2);
+    ).rejects.toThrow("partially applied: 1 accessibility-focus request");
   });
 
-  test("stops swiping once the request's remaining time budget is spent", async () => {
+  test("sends nothing once the request's remaining time budget is spent", async () => {
     const timer = new FakeTimer();
-    const { driver, path } = longTraversal();
-    driver.onSwipe = () => timer.advanceTime(100);
+    const driver = longTraversal();
+    timer.advanceTime(500);
 
     const result = runWithAbortSignal(
       undefined,
-      () =>
-        executorFor(driver, timer).navigateToElement("device-1", { resourceId: "e10" }, path, {
-          verificationInterval: 1,
-          swipeDelay: 0,
-        }),
+      () => executorFor(driver, timer).navigateToElement("device-1", target),
+      requestContext(() => 250),
+    );
+
+    await expect(result).rejects.toThrow("Request time budget exhausted during focus navigation.");
+    expect(driver.getFocusRequestCount()).toBe(0);
+  });
+
+  test("a budget that runs out after the focus request stops before the confirmation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const driver = longTraversal();
+    driver.onFocusAction = () => timer.advanceTime(300);
+
+    const result = runWithAbortSignal(
+      undefined,
+      () => executorFor(driver, timer).navigateToElement("device-1", target),
       requestContext(() => 250),
     );
 
     await expect(result).rejects.toThrow(
       "Request time budget exhausted during focus navigation. Focus navigation partially " +
-        "applied: 3 swipes already moved",
+        "applied: 1 accessibility-focus request already moved",
     );
-    expect(driver.getSwipeCount()).toBe(3);
+    expect(driver.getFocusRequestCount()).toBe(1);
   });
 
   test("a request with budget left navigates to the target", async () => {
     const timer = new FakeTimer();
-    const { driver, path } = longTraversal();
-    driver.onSwipe = () => timer.advanceTime(10);
+    timer.enableAutoAdvance();
+    const driver = longTraversal();
 
     const reached = await runWithAbortSignal(
       undefined,
-      () =>
-        executorFor(driver, timer).navigateToElement("device-1", { resourceId: "e10" }, path, {
-          verificationInterval: 1,
-          swipeDelay: 0,
-        }),
+      () => executorFor(driver, timer).navigateToElement("device-1", target),
       requestContext(() => 10_000),
     );
 
     expect(reached).toBe(true);
-    expect(driver.getSwipeCount()).toBe(10);
+    expect(driver.getFocusRequestCount()).toBe(1);
   });
 });

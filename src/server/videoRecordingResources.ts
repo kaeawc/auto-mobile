@@ -1,6 +1,7 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import {
-  getLatestVideoRecordingMetadata,
+  lookupLatestVideoRecording,
+  type LatestVideoRecordingLookup,
   getVideoRecordingMetadata,
   listVideoRecordings,
 } from "./videoRecordingManager";
@@ -35,7 +36,8 @@ export function assertWithinArchiveRoot(filePath: string, archiveRoot: string): 
  * database (issue #3067) or touching the real filesystem.
  */
 export interface VideoRecordingResourceStore {
-  getLatest(scope?: { ownerSessionUuid?: string }): Promise<VideoRecordingMetadata | null>;
+  /** The newest recording that has a file, or why there is none (#10187). */
+  lookupLatest(scope?: { ownerSessionUuid?: string }): Promise<LatestVideoRecordingLookup>;
   getById(
     recordingId: string,
     options?: { touch?: boolean; ownerSessionUuid?: string },
@@ -47,7 +49,7 @@ export interface VideoRecordingResourceStore {
 }
 
 const defaultVideoRecordingResourceStore: VideoRecordingResourceStore = {
-  getLatest: getLatestVideoRecordingMetadata,
+  lookupLatest: lookupLatestVideoRecording,
   getById: getVideoRecordingMetadata,
   list: listVideoRecordings,
   readFile: fs.readFile,
@@ -68,7 +70,24 @@ function getVideoMimeType(metadata: VideoRecordingMetadata): string {
   if (metadata.format === "mp4") {
     return "video/mp4";
   }
+  if (metadata.format === "mov") {
+    return "video/quicktime";
+  }
   return "application/octet-stream";
+}
+
+function describeNoPlayableRecording(
+  newest: NonNullable<LatestVideoRecordingLookup["newestWithoutFile"]>,
+): string {
+  const why =
+    newest.status === "interrupted"
+      ? "was interrupted and has no file"
+      : "has no file on disk any more";
+  return `No playable video recording is available: the newest recording ${newest.recordingId} ${why}.`;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 export async function buildVideoResourceContent(
@@ -108,12 +127,19 @@ export async function buildVideoResourceContent(
     logger.error(
       `[VideoRecordingResources] Failed to read video ${metadata.recordingId}: ${error}`,
     );
+    // A recording saved without a file has size 0: only an interrupted capture that never
+    // reached the host looks like that, since a completed recording is recorded non-empty.
+    const missingFile = `Recording ${metadata.recordingId} has no video file on disk (${
+      metadata.sizeBytes === 0
+        ? "it was interrupted before a file was saved"
+        : "the file was deleted or moved"
+    })`;
     return {
       uri,
       mimeType: "application/json",
       text: JSON.stringify(
         {
-          error: `Failed to read video data: ${error}`,
+          error: `Failed to read video data: ${isMissingFileError(error) ? missingFile : error}`,
           metadata,
         },
         null,
@@ -127,15 +153,21 @@ export async function getLatestVideoRecording(
   store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore,
 ): Promise<ResourceContent> {
   try {
-    const latest = await store.getLatest();
+    const { recording: latest, newestWithoutFile } = await store.lookupLatest();
     if (!latest) {
       return {
         uri: VIDEO_RESOURCE_URIS.LATEST,
         mimeType: "application/json",
         text: JSON.stringify(
-          {
-            error: 'No video recordings available. Call videoRecording with action "start" first.',
-          },
+          newestWithoutFile
+            ? {
+                error: describeNoPlayableRecording(newestWithoutFile),
+                newestRecording: newestWithoutFile,
+              }
+            : {
+                error:
+                  'No video recordings available. Call videoRecording with action "start" first.',
+              },
           null,
           2,
         ),

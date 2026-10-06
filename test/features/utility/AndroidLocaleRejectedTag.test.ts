@@ -293,6 +293,29 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
       });
     }
 
+    // Preserve the pre-existing comparison cases; these replies were not captured.
+    const cases: ReadonlyArray<readonly [requested: string, reported: string]> = [
+      ["iw", "he"],
+      ["in-ID", "id-ID"],
+      ["ji", "yi"],
+      ["he", "he-IL"],
+      ["zh-TW", "zh-Hant-TW"],
+      ["fr-FR", "fr-fr"],
+    ];
+    for (const [requested, reported] of cases) {
+      it(`app path: request ${requested} read back as ${reported} is applied`, async () => {
+        adb.setCommandResponseSequence(GET_APP, [
+          uncapturedMultiLocale(""),
+          uncapturedMultiLocale(reported),
+        ]);
+
+        const outcome = await adapter.setLocale(requested, { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(true);
+        expect(setCommands()).toEqual([`shell ${SET_APP} --locales '${requested}'`]);
+      });
+    }
+
     // Legacy device-wide path: `persist.sys.locale` was empty in every capture, so these pairs are
     // not device-observed and keep their original strings.
     const legacyCases: ReadonlyArray<readonly [requested: string, reported: string]> = [
@@ -319,6 +342,19 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
         expect(outcome.success).toBe(true);
       });
     }
+
+    it("still restores when the device reports a different region than requested", async () => {
+      adb.setCommandResponseSequence(GET_APP, [
+        uncapturedMultiLocale(""),
+        uncapturedMultiLocale("fr-CA"),
+        uncapturedMultiLocale(""),
+      ]);
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toContain("Restored the app's previous locale (unset)");
+    });
 
     it("restores when the device keeps only the language of a request that named a region", async () => {
       // The device printed [he] after a he request; a he-IL request that reads back [he]

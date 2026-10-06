@@ -23,8 +23,8 @@ final class InnerSessionHost: NSObject, URLSessionDataDelegate, @unchecked Senda
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     init(
-        makeConfiguration: @escaping @Sendable () -> URLSessionConfiguration = InnerSessionHost
-            .mirroredConfiguration
+        makeConfiguration: @escaping @Sendable ()
+            -> URLSessionConfiguration = { InnerSessionHost.mirroredConfiguration() }
     ) {
         self.makeConfiguration = makeConfiguration
         super.init()

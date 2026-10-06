@@ -79,6 +79,9 @@ function harness(trackingFailure?: unknown) {
     notifyDeviceReady: () => {
       calls.push("ready");
     },
+    liftUnconfirmedRecoveringAndroidImages: () => {
+      calls.push("lift-recovery-images");
+    },
   };
   const refresh = new DevicePoolRefresh(port);
   return {
@@ -148,7 +151,14 @@ describe("DevicePoolRefresh", () => {
     expect(await h.refresh.refreshDevices()).toBe(1);
     expect(h.devices.get(booted.deviceId)?.lastUsedAt).toBe(42);
     expect(h.starts.get(booted.deviceId)).toBe(42);
-    expect(h.calls).toEqual(["discover", "prune", "unsuppress", "track", "ready"]);
+    expect(h.calls).toEqual([
+      "discover",
+      "prune",
+      "unsuppress",
+      "track",
+      "ready",
+      "lift-recovery-images",
+    ]);
   });
 
   test("a removal during discovery fences a stale addition", async () => {

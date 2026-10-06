@@ -1,4 +1,5 @@
 import type { DeviceInfo } from "../models";
+import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -32,7 +33,18 @@ interface RecoveringAndroidImageSettlement {
   resolve(): void;
 }
 
+/**
+ * A sessionless recovery could not confirm the old emulator stopped, and no
+ * recovery record owns the reservation. The image stays reserved until a later
+ * fresh observation (after any late kill settled) proves the AVD's state.
+ */
+interface UnconfirmedRecoveringAndroidImage {
+  settled: boolean;
+  refreshGeneration: number;
+}
+
 export interface DeviceRecoveryPoolPort {
+  getRefreshGeneration(): number;
   getEmulatorLossIncident(id: string): Promise<EmulatorLossIncident | undefined>;
   completeJoinedEmulatorLossRecovery(
     id: string,
@@ -97,6 +109,11 @@ export class DeviceRecoveryCoordinator {
   readonly androidRecoveryHandoffOwners = new Map<string, symbol>();
   readonly recoveringAndroidImageSettlements: Map<string, RecoveringAndroidImageSettlement> =
     new Map();
+
+  private readonly unconfirmedRecoveringAndroidImages = new Map<
+    string,
+    UnconfirmedRecoveringAndroidImage
+  >();
 
   constructor(private readonly pool: DeviceRecoveryPoolPort) {}
 
@@ -357,6 +374,7 @@ export class DeviceRecoveryCoordinator {
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
     replacementHandoffOwner: symbol,
+    lateShutdownSettled?: Promise<unknown>,
   ): void {
     for (const [deviceId, owner] of this.androidRecoveryHandoffOwners) {
       if (owner === replacementHandoffOwner) {
@@ -366,16 +384,93 @@ export class DeviceRecoveryCoordinator {
     const recordOwnsImage = Array.from(this.pool.getRecoveringSessionLosses().values()).some(
       (record) => record.avdName === avdName && record.reservations.has("image"),
     );
-    if (!retainRecoveryImage && !recordOwnsImage) {
-      this.clearRecoveringAndroidImage(avdName);
+    if (!recordOwnsImage) {
+      if (retainRecoveryImage) {
+        this.markRecoveringAndroidImageUnconfirmed(avdName, lateShutdownSettled);
+      } else {
+        this.clearRecoveringAndroidImage(avdName);
+      }
     }
     for (const deviceId of recoveryDeviceIds) {
       this.recoveringAndroidDeviceIds.delete(deviceId);
     }
   }
 
+  /**
+   * Keep the reservation without a record to finalize it: wake startup waiters so
+   * they fail fast instead of waiting out their boot budget, and remember the
+   * generation after which a fresh observation may lift it.
+   */
+  private markRecoveringAndroidImageUnconfirmed(
+    avdName: string,
+    lateShutdownSettled: Promise<unknown> | undefined,
+  ): void {
+    const entry: UnconfirmedRecoveringAndroidImage = {
+      settled: lateShutdownSettled === undefined,
+      refreshGeneration: this.pool.getRefreshGeneration(),
+    };
+    this.unconfirmedRecoveringAndroidImages.set(avdName, entry);
+    const settlement = this.recoveringAndroidImageSettlements.get(avdName);
+    if (settlement) {
+      this.recoveringAndroidImageSettlements.delete(avdName);
+      settlement.resolve();
+    }
+    const noteSettled = (): void => {
+      if (this.unconfirmedRecoveringAndroidImages.get(avdName) === entry) {
+        entry.settled = true;
+        entry.refreshGeneration = this.pool.getRefreshGeneration();
+      }
+    };
+    void lateShutdownSettled?.then(noteSettled, noteSettled);
+  }
+
+  /** The first of these AVDs whose recovery reservation is unconfirmed and unowned. */
+  findUnconfirmedRecoveringAndroidImage(avdNames: readonly string[]): string | undefined {
+    return avdNames.find((avdName) => this.unconfirmedRecoveringAndroidImages.has(avdName));
+  }
+
+  /**
+   * Lift unconfirmed reservations a later fresh Android observation can decide.
+   * Gone: nothing holds the AVD any more. Running: the refresh that carried this
+   * observation already pooled it, so the pool owns it again. Ambiguous
+   * observations (failed discovery, unresolved identity, duplicate AVD names)
+   * keep the reservation, as does an observation that predates the late kill's
+   * settlement.
+   */
+  liftUnconfirmedRecoveringAndroidImages(
+    discovery: BootedDeviceDiscovery,
+    refreshGeneration: number,
+  ): void {
+    if (
+      this.unconfirmedRecoveringAndroidImages.size === 0 ||
+      !discovery.succeededPlatforms.has("android") ||
+      discovery.devices.some((device) => device.name.startsWith("Unknown ("))
+    ) {
+      return;
+    }
+    for (const [avdName, entry] of Array.from(this.unconfirmedRecoveringAndroidImages)) {
+      if (!entry.settled || refreshGeneration <= entry.refreshGeneration) {
+        continue;
+      }
+      const running = discovery.devices.filter(
+        (device) => device.platform === "android" && device.name === avdName,
+      );
+      if (running.length > 1) {
+        continue;
+      }
+      logger.info(
+        running.length === 0
+          ? `[DevicePool] Android AVD '${avdName}' is confirmed stopped; lifting its unconfirmed recovery reservation`
+          : `[DevicePool] Android AVD '${avdName}' is still running as ${running[0].deviceId}; lifting its unconfirmed recovery reservation and leaving it with the pool`,
+      );
+      this.clearRecoveringAndroidImage(avdName);
+    }
+  }
+
   setRecoveringAndroidImage(avdName: string, image: DeviceInfo): void {
     this.recoveringAndroidImages.set(avdName, image);
+    // A new attempt owns the reservation again and re-marks it if it also fails.
+    this.unconfirmedRecoveringAndroidImages.delete(avdName);
     if (this.recoveringAndroidImageSettlements.has(avdName)) {
       return;
     }
@@ -388,6 +483,7 @@ export class DeviceRecoveryCoordinator {
 
   clearRecoveringAndroidImage(avdName: string): void {
     this.recoveringAndroidImages.delete(avdName);
+    this.unconfirmedRecoveringAndroidImages.delete(avdName);
     const settlement = this.recoveringAndroidImageSettlements.get(avdName);
     if (!settlement) {
       return;

@@ -1244,6 +1244,8 @@ export class DevicePool {
           sources,
         ),
       notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+      liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
+        this.recoveryCoordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
     };
   }
 
@@ -1314,6 +1316,7 @@ export class DevicePool {
 
   private createRecoveryCoordinator(): DeviceRecoveryCoordinator {
     return new DeviceRecoveryCoordinator({
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       getRecoveringSessionLosses: () => this.recoveringSessionLosses,
       getPooledDevice: (id) => this.devices.get(id),
       getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
@@ -1452,12 +1455,13 @@ export class DevicePool {
           this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
         clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
           this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
-        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
+        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner, lateShutdown) =>
           this.recoveryCoordinator.finishAndroidRecoveryAttempt(
             avdName,
             deviceIds,
             retainImage,
             owner,
+            lateShutdown,
           ),
         stopAndroidEmulatorForRecovery: (
           ...[

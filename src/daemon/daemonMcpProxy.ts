@@ -38,6 +38,7 @@ import {
 } from "./constants";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
@@ -245,6 +246,15 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
     throw new Error("heartbeat interval must be a positive finite number");
   }
   return Math.max(1, interval);
+}
+
+function isLivenessOwnerConflictError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
+  );
 }
 
 /** The harness-supplied stable owner token when given, otherwise a per-process one (#10050). */
@@ -832,9 +842,18 @@ export class DaemonMcpProxy {
    * is heartbeated on the keeper's cadence under the same owner token; an entry
    * leaves on release, fencing, confirmed loss and close.
    */
-  private readonly otherHeldSessions = new Map<string, { claimSent: boolean }>();
+  private readonly otherHeldSessions = new Map<
+    string,
+    {
+      claimSent: boolean;
+      /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
+      conflictSince?: number;
+    }
+  >();
   /** Supersession is informational; report it at most once per proxy instance. */
   private livenessSupersessionLogged = false;
+  /** Sessions whose live-owner conflict was already reported, so each tick does not repeat it. */
+  private readonly livenessConflictLogged = new Set<string>();
   /** Stable for this proxy instance, including all transport reconnects. */
   private readonly livenessOwnerToken: string;
   private readonly buildIdentity: BuildIdentity;
@@ -3631,6 +3650,10 @@ export class DaemonMcpProxy {
     if (held && claimLivenessOwnership) {
       held.claimSent = true;
     }
+    if (held) {
+      held.conflictSince = undefined;
+    }
+    this.livenessConflictLogged.delete(sessionUuid);
   }
 
   private handleHeldSessionHeartbeatError(
@@ -3651,6 +3674,10 @@ export class DaemonMcpProxy {
       this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
       return;
     }
+    if (isLivenessOwnerConflictError(error)) {
+      this.handleHeldSessionOwnerConflict(sessionUuid);
+      return;
+    }
     if (error instanceof DaemonBoundSessionExpiredError) {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating: ${error.message}`,
@@ -3662,6 +3689,41 @@ export class DaemonMcpProxy {
     logger.warn(
       `[DaemonMcpProxy] Heartbeat for held session ${sessionUuid} failed: ${errorMessage(error)}`,
       error,
+    );
+  }
+
+  /**
+   * The daemon refused this held session's claim because another token owns it
+   * with a live lease (#10050). The claim stays unsent so each tick retries it,
+   * which succeeds once that lease lapses. A refusal that outlasts the heartbeat
+   * leash means this proxy cannot own the session, so it stops heartbeating that
+   * session alone; siblings are unaffected.
+   */
+  private handleHeldSessionOwnerConflict(sessionUuid: string): void {
+    const held = this.otherHeldSessions.get(sessionUuid);
+    if (!held) {
+      return;
+    }
+    const now = this.timer.now();
+    held.conflictSince ??= now;
+    if (now - held.conflictSince >= this.heartbeatLeashMs) {
+      logger.warn(
+        `[DaemonMcpProxy] Held session ${sessionUuid} is owned by another live liveness owner; no longer heartbeating it`,
+      );
+      this.livenessConflictLogged.delete(sessionUuid);
+      this.dropHeldSession(sessionUuid);
+      return;
+    }
+    this.noteLivenessOwnerConflict(sessionUuid);
+  }
+
+  private noteLivenessOwnerConflict(sessionUuid: string): void {
+    if (this.livenessConflictLogged.has(sessionUuid)) {
+      return;
+    }
+    this.livenessConflictLogged.add(sessionUuid);
+    logger.warn(
+      `[DaemonMcpProxy] Session ${sessionUuid} is owned by another live liveness owner; retrying the claim until its lease expires`,
     );
   }
 
@@ -3792,19 +3854,7 @@ export class DaemonMcpProxy {
       );
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership, isCurrent);
     } catch (error) {
-      if (
-        error !== null &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
-      ) {
-        // Another claimant owns liveness now. Preserve the old successful no-op's
-        // local acknowledgement without fencing, reconnecting or re-claiming.
-        if (!this.livenessSupersessionLogged) {
-          this.livenessSupersessionLogged = true;
-          logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded`);
-        }
-        this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
+      if (this.absorbOwnershipRefusal(error, sessionUuid, isCurrent)) {
         return;
       }
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -3814,6 +3864,41 @@ export class DaemonMcpProxy {
       }
       throw error;
     }
+  }
+
+  /**
+   * Handle the daemon refusing the latest binding's heartbeat on ownership grounds.
+   * Returns true when the refusal was absorbed (no fencing, reconnecting or failing
+   * the keeper).
+   */
+  private absorbOwnershipRefusal(
+    error: unknown,
+    sessionUuid: string,
+    isCurrent: () => boolean,
+  ): boolean {
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+    ) {
+      // Another claimant owns liveness now. Preserve the old successful no-op's
+      // local acknowledgement without fencing, reconnecting or re-claiming.
+      if (!this.livenessSupersessionLogged) {
+        this.livenessSupersessionLogged = true;
+        logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded`);
+      }
+      this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
+      return true;
+    }
+    if (isLivenessOwnerConflictError(error)) {
+      // Another token owns this session with a live lease. Nothing was recorded
+      // (no local acknowledgement either), the claim stays unsent so the next
+      // tick retries it, and the keeper is not failed by the refusal.
+      this.noteLivenessOwnerConflict(sessionUuid);
+      return true;
+    }
+    return false;
   }
 
   private recordBoundSessionHeartbeatSuccess(
@@ -3827,6 +3912,7 @@ export class DaemonMcpProxy {
     if (claimLivenessOwnership) {
       this.livenessOwnershipClaimSent = true;
     }
+    this.livenessConflictLogged.delete(sessionUuid);
     this.boundSessionUuidAt = this.timer.now();
   }
 

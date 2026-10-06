@@ -2,11 +2,50 @@
 
 setup() {
   TEST_ROOT="${BATS_TEST_TMPDIR}"
+  STUB_BIN="${TEST_ROOT}/bin"
   export HOME="${TEST_ROOT}/home" TMPDIR="${TEST_ROOT}/tmp" UNINSTALL_SH_SOURCE_ONLY=true
-  mkdir -p "${HOME}" "${TMPDIR}"
+  export AUTOMOBILE_DAEMON_SOCKET_PATH="${TEST_ROOT}/daemon.sock"
+  export AUTOMOBILE_DAEMON_PID_FILE_PATH="${TEST_ROOT}/daemon.pid"
+  export AUTOMOBILE_DAEMON_LOCK_FILE_PATH="${TEST_ROOT}/daemon.lock"
+  export PROCESS_CALLS="${TEST_ROOT}/process-calls.log"
+  mkdir -p "${HOME}" "${TMPDIR}" "${STUB_BIN}"
+  : > "${PROCESS_CALLS}"
+  local tool
+  for tool in pkill killall pgrep; do
+    cat > "${STUB_BIN}/${tool}" <<'STUB'
+#!/usr/bin/env bash
+printf '%s %s\n' "${0##*/}" "$*" >> "${PROCESS_CALLS}"
+exit 1
+STUB
+    chmod +x "${STUB_BIN}/${tool}"
+  done
+  cat > "${STUB_BIN}/ps" <<'STUB'
+#!/usr/bin/env bash
+printf 'ps %s\n' "$*" >> "${PROCESS_CALLS}"
+# Empty process table: never inspect the developer's processes.
+exit 0
+STUB
+  chmod +x "${STUB_BIN}/ps"
+  # Bash uses a builtin kill; PATH alone cannot intercept it.
+  kill() { printf 'kill %s\n' "$*" >> "${PROCESS_CALLS}"; return 1; }
+  export -f kill
+  for tool in nc sleep; do
+    cat > "${STUB_BIN}/${tool}" <<'STUB'
+#!/usr/bin/env bash
+# Never connect or wait on the host. nc refusal is the default probe result.
+[[ "${0##*/}" == nc ]] && exit "${NC_STATUS:-1}"
+exit 0
+STUB
+    chmod +x "${STUB_BIN}/${tool}"
+  done
+  export PATH="${STUB_BIN}:${PATH}"
   source "${BATS_TEST_DIRNAME}/../../scripts/uninstall.sh"
   unset UNINSTALL_SH_SOURCE_ONLY
   DRY_RUN=false
+}
+
+teardown() {
+  ! grep -Eq '^(pkill|killall|pgrep) ' "${PROCESS_CALLS}"
 }
 
 write_json_fixture() {
@@ -30,7 +69,7 @@ JSON
   mkdir -p "${bin}"
   for tool in python3 cp mv rm dirname; do ln -s "$(command -v "${tool}")" "${bin}/${tool}"; done
   write_json_fixture "${path}"
-  run env PATH="${bin}:/usr/bin:/bin" HOME="${HOME}" UNINSTALL_SH_SOURCE_ONLY=true /bin/bash -c 'source "$1"; remove_from_json_config "$2"' _ "${BATS_TEST_DIRNAME}/../../scripts/uninstall.sh" "${path}"
+  run env PATH="${STUB_BIN}:${bin}:/usr/bin:/bin" HOME="${HOME}" UNINSTALL_SH_SOURCE_ONLY=true /bin/bash -c 'source "$1"; remove_from_json_config "$2"' _ "${BATS_TEST_DIRNAME}/../../scripts/uninstall.sh" "${path}"
   [ "${status}" -eq 0 ] || { echo "status=${status} output=${output}"; false; }
   [ -f "${path}.bak" ]
   "$(command -v python3)" -c 'import json,sys; d=json.load(open(sys.argv[1])); assert "github" in d["mcpServers"] and "auto-mobile" not in d["mcpServers"]; assert len(d["projects"])==3' "${path}"

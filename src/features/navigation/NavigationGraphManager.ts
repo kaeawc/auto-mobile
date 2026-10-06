@@ -437,10 +437,18 @@ export class NavigationGraphManager implements NavigationGraphService {
   private timer: Timer;
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
+  // The screen each app was on when another app came to the foreground (#10193). An SDK app
+  // that returns to the foreground on the screen it was left on sends no navigation event (the
+  // SDK emits only when the destination changes), so without this the manager would resume with
+  // an unknown screen. In-memory on purpose: it is the same transient state as `currentScreen`.
+  private lastKnownScreens: Map<string, string> = new Map();
+  private static readonly LAST_KNOWN_SCREENS_CAP = 64;
   private navigationWriteState = {
     tail: Promise.resolve() as Promise<void>,
     epoch: 0,
     timeoutMs: NAVIGATION_WRITE_TIMEOUT_MS,
+    /** Writes enqueued and not yet settled; a queued app switch may not have landed yet. */
+    pending: 0,
   };
   private graphUpdateListeners: Array<() => void | Promise<void>> = [];
 
@@ -776,15 +784,17 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Creates the app record in the database if it doesn't exist.
    */
   public async setCurrentApp(appId: string): Promise<void> {
-    return this.enqueueNavigationWrite("setCurrentApp", (epoch) =>
-      this.setCurrentAppUnlocked(appId, epoch),
-    );
+    // An explicit switch proves nothing about the screen, so it is left unknown (#10193).
+    return this.enqueueNavigationWrite("setCurrentApp", async (epoch) => {
+      await this.setCurrentAppUnlocked(appId, epoch, { restoreScreen: false });
+    });
   }
 
   private enqueueNavigationWrite<T>(
     operation: string,
     write: (epoch: number) => Promise<T>,
   ): Promise<T> {
+    this.navigationWriteState.pending++;
     const result = this.navigationWriteState.tail.then(() => {
       const epoch = this.navigationWriteState.epoch;
       return raceWithDeadline(() => write(epoch), {
@@ -802,15 +812,34 @@ export class NavigationGraphManager implements NavigationGraphService {
     });
     // Keep the tail usable after failure; return result so this caller still sees its rejection.
     this.navigationWriteState.tail = result.then(
-      () => undefined,
-      () => undefined,
+      () => {
+        this.navigationWriteState.pending--;
+      },
+      () => {
+        this.navigationWriteState.pending--;
+      },
     );
     return result;
   }
 
-  private async setCurrentAppUnlocked(appId: string, epoch: number): Promise<void> {
+  /**
+   * Switch the current app. Returns whether the app changed.
+   *
+   * `restoreScreen` puts back the screen the incoming app was last left on (#10193). It is only
+   * safe where the app itself reported its identity (an SDK navigation event, or a foreground
+   * signal for an SDK app): a hierarchy-driven or explicit switch leaves the screen unknown
+   * (the hierarchy fingerprint may still name it) rather than guess.
+   *
+   * `observedAt` is when the triggering event was received; tool calls recorded before it were
+   * issued while another app owned the screen, so they can no longer label a transition.
+   */
+  private async setCurrentAppUnlocked(
+    appId: string,
+    epoch: number,
+    options: { restoreScreen: boolean; observedAt?: number },
+  ): Promise<boolean> {
     if (this.currentAppId === appId) {
-      return;
+      return false;
     }
 
     // Ensure the app row exists BEFORE committing the in-memory switch (#9992). A rejected
@@ -819,11 +848,69 @@ export class NavigationGraphManager implements NavigationGraphService {
     // later event hit the navigation_nodes.app_id foreign key. The error propagates to the caller.
     await this.repository.getOrCreateApp(appId);
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
+    const switchedFromApp = this.currentAppId !== null;
+    this.rememberCurrentScreen();
     this.currentAppId = appId;
-    this.currentScreen = null;
+    this.currentScreen = options.restoreScreen ? (this.lastKnownScreens.get(appId) ?? null) : null;
     this.activeNavigation = null;
-    logger.info(`[NAVIGATION_GRAPH] Set current app: ${appId}`);
+    if (switchedFromApp && options.observedAt !== undefined) {
+      this.dropToolCallsRecordedThrough(options.observedAt);
+    }
+    logger.info(
+      `[NAVIGATION_GRAPH] Set current app: ${appId}` +
+        (this.currentScreen ? ` (resumed on ${this.currentScreen})` : ""),
+    );
     this.notifyGraphUpdated();
+    return true;
+  }
+
+  private rememberCurrentScreen(): void {
+    if (!this.currentAppId) {
+      return;
+    }
+    this.lastKnownScreens.delete(this.currentAppId);
+    if (!this.currentScreen) {
+      return;
+    }
+    this.lastKnownScreens.set(this.currentAppId, this.currentScreen);
+    if (this.lastKnownScreens.size > NavigationGraphManager.LAST_KNOWN_SCREENS_CAP) {
+      const oldest = this.lastKnownScreens.keys().next().value;
+      this.lastKnownScreens.delete(oldest ?? "");
+    }
+  }
+
+  /**
+   * An SDK app is back in front. The SDK sends no navigation event when it resumes on the
+   * screen it was left on and the client skips hierarchy updates for SDK apps, so this is the
+   * only signal that brings back the remembered screen (#10193). Cheap when nothing changed.
+   */
+  public async recordAppForeground(appId: string): Promise<void> {
+    const trimmed = appId.trim();
+    // A queued app switch may not have landed, so only a quiet queue proves nothing changed.
+    if (!trimmed || (trimmed === this.currentAppId && this.navigationWriteState.pending === 0)) {
+      return;
+    }
+    const observedAt = this.timer.now();
+    await this.enqueueNavigationWrite("recordAppForeground", (epoch) =>
+      this.setCurrentAppUnlocked(trimmed, epoch, { restoreScreen: true, observedAt }),
+    );
+  }
+
+  /**
+   * Forget where an app was, because its process is known to have stopped or been reset
+   * (terminate, crash, uninstall, cold launch, cleared data): a fresh process must not get an
+   * edge from a stale screen (#10193). Synchronous and idempotent.
+   */
+  public forgetAppScreen(appId: string): void {
+    this.lastKnownScreens.delete(appId);
+    if (this.currentAppId === appId) {
+      this.currentScreen = null;
+      this.activeNavigation = null;
+    }
+  }
+
+  private dropToolCallsRecordedThrough(observedAt: number): void {
+    this.toolCallHistory = this.toolCallHistory.filter((tc) => tc.timestamp > observedAt);
   }
 
   /**
@@ -967,9 +1054,14 @@ export class NavigationGraphManager implements NavigationGraphService {
     receivedAt: number,
     epoch: number,
   ): Promise<void> {
-    // Auto-set current app from navigation event if provided
+    // Auto-set current app from navigation event if provided. A switch here drops the tool
+    // calls recorded before the event: they were issued while another app was in front, so
+    // they cannot be what moved this app (#10193).
     if (event.applicationId && event.applicationId !== this.currentAppId) {
-      await this.setCurrentAppUnlocked(event.applicationId, epoch);
+      await this.setCurrentAppUnlocked(event.applicationId, epoch, {
+        restoreScreen: true,
+        observedAt: receivedAt,
+      });
     }
 
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
@@ -1219,13 +1311,15 @@ export class NavigationGraphManager implements NavigationGraphService {
    * 4. Does nothing if app has no named nodes (SDK not integrated)
    */
   public async recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void> {
+    const receivedAt = this.timer.now();
     return this.enqueueNavigationWrite("recordHierarchyNavigation", (epoch) =>
-      this.recordHierarchyNavigationUnlocked(event, epoch),
+      this.recordHierarchyNavigationUnlocked(event, receivedAt, epoch),
     );
   }
 
   private async recordHierarchyNavigationUnlocked(
     event: HierarchyNavigationEvent,
+    receivedAt: number,
     epoch: number,
   ): Promise<void> {
     const appId = event.packageName?.trim();
@@ -1234,8 +1328,13 @@ export class NavigationGraphManager implements NavigationGraphService {
       return;
     }
     // Auto-set current app from package name if provided
+    // A hierarchy switch never restores a remembered screen: only the fingerprint lookup below
+    // may name the screen, otherwise it stays unknown rather than guessed (#10193).
     if (appId !== this.currentAppId) {
-      await this.setCurrentAppUnlocked(appId, epoch);
+      await this.setCurrentAppUnlocked(appId, epoch, {
+        restoreScreen: false,
+        observedAt: receivedAt,
+      });
     }
 
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
@@ -1981,6 +2080,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       }
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentScreen = null;
+      this.lastKnownScreens.delete(appId);
       this.failedEdgeReplays.clear();
       logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${appId}`);
       this.notifyGraphUpdated();
@@ -1997,6 +2097,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentAppId = null;
       this.currentScreen = null;
+      this.lastKnownScreens.clear();
       this.activeNavigation = null;
       this.toolCallHistory = [];
       logger.info(`[NAVIGATION_GRAPH] Cleared all navigation graphs`);

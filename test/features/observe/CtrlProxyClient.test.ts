@@ -521,7 +521,7 @@ describe("AndroidCtrlProxyClient", function () {
       }),
     );
 
-    return { navHarness, navManager, resultPromise, testClient, testTimer };
+    return { navHarness, navManager, resultPromise, socket, testClient, testTimer };
   };
 
   interface ScreenshotUpdateMessage {
@@ -3096,6 +3096,43 @@ describe("AndroidCtrlProxyClient", function () {
         await resultPromise;
         await settleNavigationHierarchyInterleaving(testTimer);
 
+        expect(navManager.getCurrentScreen()).toBe("SdkHome");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("an SDK app's hierarchy update after another app was in front restores its screen (#10193)", async function () {
+      const { navManager, resultPromise, socket, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+        await navManager.recordHierarchyNavigation({
+          packageName: "com.example.launcher",
+          fromFingerprint: null,
+          toFingerprint: "launcher-hash",
+          timestamp: testTimer.now(),
+        });
+        expect(navManager.getCurrentAppId()).toBe("com.example.launcher");
+        expect(navManager.getCurrentScreen()).toBeNull();
+
+        // Warm return: the SDK sends no navigation event, only a hierarchy update.
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "SDK Home", "resource-id": "com.example.sdk:id/home" },
+            },
+          }),
+        );
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(navManager.getCurrentAppId()).toBe("com.example.sdk");
         expect(navManager.getCurrentScreen()).toBe("SdkHome");
       } finally {
         await testClient.close();

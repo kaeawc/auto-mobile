@@ -1193,6 +1193,26 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "sendKeys",
 ]);
 
+/** Tools that always end an app's process. */
+const APP_STOPPING_TOOLS: ReadonlySet<string> = new Set([
+  "terminateApp",
+  "crashApp",
+  "uninstallApp",
+]);
+
+/**
+ * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
+ * was on (#10193): a fresh process must not get an edge from a stale screen. `launchApp` only
+ * counts when it asks for a cold boot or cleared data.
+ */
+function appStoppedByToolCall(name: string, args: any): string | undefined {
+  const stops =
+    APP_STOPPING_TOOLS.has(name) ||
+    (name === "launchApp" && (args?.coldBoot === true || args?.clearAppData === true));
+  const appId = args?.appId ?? args?.packageName;
+  return stops && typeof appId === "string" && appId.length > 0 ? appId : undefined;
+}
+
 class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   record(
     name: string,
@@ -1200,6 +1220,10 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
   ): (() => void) | undefined {
+    const stoppedApp = appStoppedByToolCall(name, args);
+    if (stoppedApp) {
+      this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
+    }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
     if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
@@ -1209,10 +1233,17 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
       ? RealObserveScreen.getRecentCachedResultForDevice(device.deviceId)
       : RealObserveScreen.getRecentCachedResult();
     const uiState = new UIStateExtractor().extractFromObservation(cachedResult);
-    const navManager = sessionUuid
+    return this.navigationManager(sessionUuid).recordToolCall(
+      name,
+      stripNavigationInternalParams(args),
+      uiState,
+    );
+  }
+
+  private navigationManager(sessionUuid: string | undefined): NavigationGraphManager {
+    return sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();
-    return navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
   }
 }
 

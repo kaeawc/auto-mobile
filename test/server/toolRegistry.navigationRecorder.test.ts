@@ -167,6 +167,39 @@ describe("navigation recorder handler outcomes", () => {
     });
   });
 
+  describe("app lifecycle tools forget the app's screen (#10193)", () => {
+    test.each([
+      ["terminateApp", { appId: "com.x" }],
+      ["crashApp", { appId: "com.x" }],
+      ["uninstallApp", { appId: "com.x" }],
+      ["launchApp", { appId: "com.x", coldBoot: true }],
+      ["launchApp", { appId: "com.x", clearAppData: true }],
+    ])("%s %j leaves the next transition without an edge", async (tool, args) => {
+      registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
+      await registry.getTool(tool)!.handler(args);
+
+      timer.setCurrentTime(1_011_000);
+      await navigate("Home");
+
+      expect(await harness.manager.getEdgesFrom("Splash")).toEqual([]);
+    });
+
+    test.each([
+      ["launchApp", { appId: "com.x" }],
+      ["appLifecycle", { appId: "com.x", action: "killBackgrounded" }],
+    ])("%s %j keeps the remembered screen", async (tool, args) => {
+      registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
+      await registry.getTool(tool)!.handler(args);
+
+      timer.setCurrentTime(1_011_000);
+      await navigate("Home");
+
+      expect((await harness.manager.getEdgesFrom("Splash")).map((edge) => edge.to)).toEqual([
+        "Home",
+      ]);
+    });
+  });
+
   test("navigation while a handler is running keeps its tap attribution", async () => {
     const completion = Promise.withResolvers<{ success: boolean }>();
     const started = Promise.withResolvers<void>();

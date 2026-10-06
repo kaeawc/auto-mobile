@@ -1288,6 +1288,35 @@ describe("CtrlProxyManager", function () {
       ).toHaveLength(1);
     });
 
+    test("a same-tick check then force after an earlier force flight still restarts", async () => {
+      fakeAdb.setCommandResponse("shell dumpsys accessibility", {
+        stdout: accessibilityFixture("bound-label"),
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell settings get secure enabled_accessibility_services", {
+        stdout: serviceComponent,
+        stderr: "",
+      });
+      const forceStops = () =>
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) => command === `shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`)
+          .length;
+
+      // The earlier force flight leaves "force" as the last recorded flight kind.
+      expect(await accessibilityServiceClient.forceRestartProcess()).toBe(true);
+      expect(forceStops()).toBe(1);
+
+      // Both calls start in the same synchronous turn; the check owns the flight, so
+      // the force caller must run its own restart after the healthy check settles.
+      const check = accessibilityServiceClient.rebindIfUnhealthy();
+      const restart = accessibilityServiceClient.forceRestartProcess();
+
+      expect(await check).toBe(false);
+      expect(await restart).toBe(true);
+      expect(forceStops()).toBe(2);
+    });
+
     test("claims the flight before checking device presence", async () => {
       fakeAdb.setCommandResponse("shell dumpsys accessibility", {
         stdout: accessibilityFixture("bound-label"),

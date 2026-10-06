@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "fs";
 import * as path from "path";
 import {
@@ -8,6 +8,7 @@ import {
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { logger } from "../../src/utils/logger";
 import type { BootedDevice, ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -26,6 +27,9 @@ const crashedCapture = boundCapture
   .replace(boundLine, "     Bound services:{}")
   .replace("     Crashed services:{}", `     Crashed services:{{${component}}}`);
 const otherService = "com.example.reader/com.example.reader.ReaderService";
+const talkBack =
+  "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService";
+const SETTINGS_GET = "shell settings get secure enabled_accessibility_services";
 // The adb binary part of the command line is "adb" locally but an absolute
 // `$ANDROID_HOME/platform-tools/adb` path where the SDK env var is set (CI), so
 // the harness cuts at the device selector rather than assuming the binary name.
@@ -232,5 +236,87 @@ describe("AndroidCtrlProxyManager rebind cancellation (#10199)", () => {
 
     expect((error as Error).message).toContain("left disabled");
     expect(timer.now() - startedAt).toBeGreaterThanOrEqual(REBIND_MUTATION_COMMAND_TIMEOUT_MS);
+  });
+
+  describe("re-add and restore writes read the live service list (#10205)", () => {
+    // A service enabled by something else mid-rebind (the `accessibility` tool turning
+    // TalkBack on) must survive: the writes add CtrlProxy to what is set NOW.
+    test("a service enabled between the removal and the re-add survives the re-add", async () => {
+      let live = `${otherService}:${component}`;
+      const { manager, executed } = createHarness((command) => {
+        if (command === SETTINGS_GET) {
+          return live;
+        }
+        if (command === FORCE_STOP) {
+          live = `${otherService}:${talkBack}`;
+        }
+        return undefined;
+      });
+
+      expect(await manager.rebindIfUnhealthy()).toBe(true);
+
+      expect(readdWrites(executed)).toEqual([
+        `${SETTINGS_PUT} '${otherService}:${talkBack}:${component}'`,
+      ]);
+    });
+
+    test("the restore after a failed force-stop also keeps a service enabled meanwhile", async () => {
+      let live = `${otherService}:${component}`;
+      const { manager, executed } = createHarness((command) => {
+        if (command === SETTINGS_GET) {
+          return live;
+        }
+        if (command === FORCE_STOP) {
+          live = `${talkBack}:${otherService}`;
+          throw new Error("force-stop failed");
+        }
+        return undefined;
+      });
+
+      await expect(manager.rebindIfUnhealthy()).rejects.toThrow("force-stop failed");
+
+      expect(readdWrites(executed)).toEqual([
+        `${SETTINGS_PUT} '${talkBack}:${otherService}:${component}'`,
+      ]);
+    });
+
+    test("CtrlProxy already present in the live list is not duplicated", async () => {
+      let live = `${otherService}:${component}`;
+      const { manager, executed } = createHarness((command) => {
+        if (command === SETTINGS_GET) {
+          return live;
+        }
+        if (command === FORCE_STOP) {
+          live = `${component}:${talkBack}`;
+        }
+        return undefined;
+      });
+
+      expect(await manager.rebindIfUnhealthy()).toBe(true);
+
+      expect(readdWrites(executed)).toEqual([`${SETTINGS_PUT} '${talkBack}:${component}'`]);
+    });
+
+    test("an unreadable live list falls back to the remembered one and says so", async () => {
+      let reads = 0;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const { manager, executed } = createHarness((command) => {
+        if (command === SETTINGS_GET && ++reads >= 2) {
+          throw new Error("settings read failed");
+        }
+        return undefined;
+      });
+
+      try {
+        expect(await manager.rebindIfUnhealthy()).toBe(true);
+
+        expect(readdWrites(executed)).toEqual([`${SETTINGS_PUT} '${otherService}:${component}'`]);
+        expect(
+          warn.mock.calls.some((call) => String(call[0]).includes("remembered service list")),
+        ).toBe(true);
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });

@@ -22,7 +22,7 @@ import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import * as path from "path";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, ExecResult } from "../models";
 import { requireBootedDevice } from "../devices/requireBootedDevice";
 import {
   isExplicitPin,
@@ -1116,6 +1116,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   private async runRebindFlight(kind: RebindFlightKind): Promise<boolean> {
     const signal = getAbortSignal();
+    if (!this.rebindFlights.has("rebind")) {
+      // SingleFlight starts the task a microtask after registering the flight, so
+      // record the kind here, synchronously, for a same-turn force caller to read.
+      this.rebindFlightKind = kind;
+    }
     try {
       return await this.rebindFlights.run(
         "rebind",
@@ -1134,7 +1139,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private startRebindFlight(kind: RebindFlightKind, flightSignal?: AbortSignal): Promise<boolean> {
-    this.rebindFlightKind = kind;
     const previous = this.rebindSettled;
     const flight = (async () => {
       await previous;
@@ -1263,10 +1267,51 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         await this.runShieldedCommand(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`);
         await this.timer.sleep(AndroidCtrlProxyManager.REBIND_FORCE_STOP_SETTLE_MS);
       }
-      await this.writeEnabledServicesShielded(plan.withCtrlProxy);
+      await this.writeCtrlProxyEnabledShielded(plan.withCtrlProxy);
     } catch (error) {
       throw await this.restoreAfterRebindFailure(error, plan.withCtrlProxy, force);
     }
+  }
+
+  /**
+   * Add CtrlProxy to the list that is configured NOW rather than the one read
+   * before the section began: a service enabled by something else in between (for
+   * example TalkBack through the `accessibility` tool) must not be dropped. The
+   * remembered list is only the fallback when the live one cannot be read.
+   */
+  private async writeCtrlProxyEnabledShielded(rememberedServices: string): Promise<void> {
+    await this.writeEnabledServicesShielded(
+      await this.liveServicesWithCtrlProxy(rememberedServices),
+    );
+  }
+
+  private async liveServicesWithCtrlProxy(rememberedServices: string): Promise<string> {
+    try {
+      const result = await this.runShieldedCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
+      return AndroidCtrlProxyManager.withCtrlProxyService(
+        AndroidCtrlProxyManager.accessibilityServices(result.stdout),
+      );
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Could not read the live enabled_accessibility_services (${errorMessage(error)}); ` +
+          `re-adding CtrlProxy to the remembered service list read before the rebind, which may drop a service enabled since`,
+        error,
+      );
+      return rememberedServices;
+    }
+  }
+
+  private static withCtrlProxyService(services: string[]): string {
+    return [
+      ...services.filter((service) => !service.includes(AndroidCtrlProxyManager.PACKAGE)),
+      AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT,
+    ].join(":");
   }
 
   private writeEnabledServicesShielded(services: string): Promise<unknown> {
@@ -1275,7 +1320,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     );
   }
 
-  private async runShieldedCommand(command: string): Promise<unknown> {
+  private async runShieldedCommand(command: string): Promise<ExecResult> {
     const shield = new AbortController();
     return raceWithDeadline(
       () => this.adb.executeCommand(command, undefined, undefined, undefined, shield.signal, true),
@@ -1299,7 +1344,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     force: boolean,
   ): Promise<unknown> {
     try {
-      await this.writeEnabledServicesShielded(servicesWithCtrlProxy);
+      await this.writeCtrlProxyEnabledShielded(servicesWithCtrlProxy);
       return error;
     } catch (restoreError) {
       logger.warn(

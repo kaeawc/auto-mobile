@@ -1887,6 +1887,12 @@ export class NavigationGraphManager implements NavigationGraphService {
     const appId = this.currentAppId;
     if (appId) {
       await this.repository.clearAppGraph(appId);
+      // The node ids held by the SDK-correlation window were just deleted; drop it
+      // before the epoch check so a superseded clear cannot leave a fingerprint write
+      // (correlateActiveNavigation) targeting a dead node (FK violation).
+      if (this.activeNavigation?.appId === appId) {
+        this.activeNavigation = null;
+      }
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentScreen = null;
       logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${appId}`);

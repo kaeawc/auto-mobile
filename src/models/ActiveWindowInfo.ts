@@ -5,7 +5,11 @@ export interface ActiveWindowInfo {
   appId: string;
   activityName: string;
   layoutSeqSum: number;
-  /** Optional classification for system dialogs or non-app surfaces */
+  /**
+   * Optional classification for system dialogs or non-app surfaces. Includes
+   * `"interactive_overlay"` while the AutoMobile interactive overlay holds window
+   * focus; `appId` then names the app behind it (issue #10000).
+   */
   type?: string;
   /**
    * True when a focused SystemUI surface (notification shade, quick settings,

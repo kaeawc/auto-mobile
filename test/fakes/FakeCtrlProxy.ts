@@ -114,8 +114,19 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   > = [];
   private readonly overlayListeners = new Set<(event: OverlayEvent) => void>();
 
+  private readonly queuedOverlayResults: OverlayResult[] = [];
+
   setOverlayResult(result: OverlayResult): void {
     this.overlayResult = result;
+  }
+
+  /** Results returned, in order, by the next show/update requests before the default. */
+  queueOverlayResults(...results: OverlayResult[]): void {
+    this.queuedOverlayResults.push(...results);
+  }
+
+  private nextOverlayResult(): OverlayResult {
+    return this.queuedOverlayResults.shift() ?? this.overlayResult;
   }
 
   getOverlayHistory() {
@@ -136,7 +147,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
     });
-    return this.overlayResult;
+    return this.nextOverlayResult();
   }
 
   async requestUpdateOverlay(
@@ -146,7 +157,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   ): Promise<OverlayResult> {
     this.checkFailure("requestUpdateOverlay");
     this.overlayHistory.push({ method: "update", update, timeoutMs, perf });
-    return this.overlayResult;
+    return this.nextOverlayResult();
   }
 
   async requestDismissOverlay(

@@ -2007,6 +2007,9 @@ carry neither `index` nor `ambiguous`; selectors with an index omit `ambiguous`.
 `observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
 `textEquals`, `countStable`, and legacy element predicates) accept a nested
 `container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.
+The `timeout` / `timeoutMs` wait budget is capped at 1,770,000 ms so the wait
+and its 30-second dispatch/report allowance fit within the caller's 30-minute
+request limit.
 Each container names exactly one `elementId` or `text` and may carry its own
 zero-based `index`, `selectionStrategy`, and enclosing `container`. The outermost
 container resolves first; later levels and the leaf search only strict descendants

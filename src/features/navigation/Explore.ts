@@ -131,6 +131,12 @@ export class Explore extends BaseVisualChange {
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
   private hasObservedTargetApp: boolean = false;
+  /**
+   * Withdraws the record of the last successful recorded action. A gesture that
+   * caused no navigation would otherwise stay correlatable for the manager's
+   * window and stamp the next navigation, e.g. a dead-end Back (#9989).
+   */
+  private withdrawPendingToolCall: (() => void) | null = null;
   /** @internal Exposed for focused traversal report tests. */
   graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
@@ -233,7 +239,16 @@ export class Explore extends BaseVisualChange {
     } catch (error) {
       perf.end();
       throw toActionableError(error, `Failed to execute exploration`);
+    } finally {
+      this.discardPendingToolCall();
     }
+  }
+
+  /** Withdraw the pending record: explore is moving on from that action. */
+  private discardPendingToolCall(): void {
+    const withdraw = this.withdrawPendingToolCall;
+    this.withdrawPendingToolCall = null;
+    withdraw?.();
   }
 
   private async initializeValidateTraversal(): Promise<void> {
@@ -395,6 +410,9 @@ export class Explore extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<"none" | "continue" | "break"> {
+    // Everything this step may dispatch (permission/blocker taps, relaunch,
+    // Back) is unrecorded, so the previous action's record must not claim it.
+    this.discardPendingToolCall();
     const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
     if (permissionOutcome === "break") {
       return "break";
@@ -1171,6 +1189,8 @@ export class Explore extends BaseVisualChange {
     observation: ObserveResult | undefined,
     run: () => Promise<T>,
   ): Promise<T> {
+    // The previous action is over once the next one is recorded.
+    this.discardPendingToolCall();
     const withdraw = toolName
       ? this.navigationManager.recordToolCall(
           toolName,
@@ -1184,7 +1204,12 @@ export class Explore extends BaseVisualChange {
       succeeded = result.success;
       return result;
     } finally {
-      if (!succeeded) {
+      if (succeeded) {
+        // Keep the record until explore moves on: the navigation it causes may
+        // land after the gesture returns, but a gesture that causes none must
+        // not be attributed to whatever navigates next.
+        this.withdrawPendingToolCall = withdraw ?? null;
+      } else {
         withdraw?.();
       }
     }
@@ -1233,6 +1258,9 @@ export class Explore extends BaseVisualChange {
     progress?: ProgressCallback,
     observation?: ObserveResult,
   ): Promise<void> {
+    // The previous action caused no navigation (that is why this is a dead end): withdraw
+    // its record before the Back press is recorded in its place.
+    this.discardPendingToolCall();
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
@@ -1264,6 +1292,7 @@ export class Explore extends BaseVisualChange {
    * Reset to home screen
    */
   private async resetToHome(progress?: ProgressCallback, signal?: AbortSignal): Promise<void> {
+    this.discardPendingToolCall();
     try {
       if (progress) {
         await progress(

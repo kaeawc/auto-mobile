@@ -1831,6 +1831,122 @@ describe("Explore", () => {
       expect(await historySize()).toBe(1);
     });
 
+    describe("a gesture that caused no navigation", () => {
+      const navigate = (destination: string) =>
+        fakeGraph.recordNavigationEvent({
+          destination,
+          source: "TEST",
+          arguments: {},
+          metadata: {},
+          timestamp: 1,
+          sequenceNumber: 0,
+          applicationId: "com.test.app",
+        });
+
+      async function swipeWithoutNavigation(): Promise<Explore> {
+        navigate("Home");
+        const swipe = spyOn(SwipeOnElement.prototype, "execute").mockResolvedValue({
+          success: true,
+        } as never);
+        try {
+          await perform()(
+            createMockElement({ scrollable: true, "resource-id": "com.test:id/list" }),
+            createMockObservation(),
+          );
+        } finally {
+          swipe.mockRestore();
+        }
+        expect(await historySize()).toBe(1);
+        return explore;
+      }
+
+      function unrecordedPress(destination: string) {
+        return spyOn(PressButton.prototype, "press").mockImplementation(async () => {
+          navigate(destination);
+          return { success: true };
+        });
+      }
+
+      test("does not stamp the dead-end Back that navigates next", async () => {
+        const dead = await swipeWithoutNavigation();
+        const press = unrecordedPress("Previous");
+        try {
+          await Reflect.get(dead, "handleDeadEnd").call(dead);
+        } finally {
+          press.mockRestore();
+        }
+
+        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual(
+          [],
+        );
+        expect(await historySize()).toBe(0);
+      });
+
+      test("is not attributed to resetToHome navigation", async () => {
+        const reset = await swipeWithoutNavigation();
+        const press = unrecordedPress("Launcher");
+        try {
+          await Reflect.get(reset, "resetToHome").call(reset);
+        } finally {
+          press.mockRestore();
+        }
+
+        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual(
+          [],
+        );
+        expect(await historySize()).toBe(0);
+      });
+
+      test("is withdrawn when the next action is recorded", async () => {
+        await swipeWithoutNavigation();
+        const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+        try {
+          const next: Perform = Reflect.get(explore, "performInteraction").bind(explore);
+          await next(createMockElement({ text: "Settings" }), createMockObservation());
+        } finally {
+          tap.mockRestore();
+        }
+
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
+        expect(await historySize()).toBe(1);
+        navigate("Settings");
+        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual([
+          "tapOn",
+        ]);
+      });
+    });
+
+    test("a tap that navigates keeps its edge interaction after explore moves on", async () => {
+      const navigate = (destination: string) =>
+        fakeGraph.recordNavigationEvent({
+          destination,
+          source: "TEST",
+          arguments: {},
+          metadata: {},
+          timestamp: 1,
+          sequenceNumber: 0,
+          applicationId: "com.test.app",
+        });
+      navigate("Home");
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        await perform()(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+        navigate("Settings");
+        await Reflect.get(explore, "handleDeadEnd").call(explore);
+      } finally {
+        tap.mockRestore();
+        press.mockRestore();
+      }
+
+      const [edge] = fakeGraph.getEdgesFrom("Home");
+      expect(edge.interaction?.toolName).toBe("tapOn");
+      expect(await historySize()).toBe(0);
+    });
+
     test("a failed swipe withdraws its record, and a selector-less container records nothing", async () => {
       const swipe = spyOn(SwipeOnElement.prototype, "execute").mockResolvedValue({
         success: false,

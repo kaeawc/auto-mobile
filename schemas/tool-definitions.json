@@ -8513,10 +8513,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -14088,10 +14090,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [

@@ -1,6 +1,7 @@
 import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
   DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+  MAX_WAIT_FOR_TIMEOUT_MS,
 } from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
@@ -205,8 +206,20 @@ const waitForCommonShape = {
   absent: absentPredicateSchema
     .optional()
     .describe("Wait until an element matching these fields is absent"),
-  timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-  timeoutMs: z.number().optional().describe("Alias for timeout"),
+  timeout: z
+    .number()
+    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+    })
+    .optional()
+    .describe("Wait timeout ms (default: 5000)"),
+  timeoutMs: z
+    .number()
+    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+    })
+    .optional()
+    .describe("Alias for timeout"),
   container: waitForContainerField,
   selectionStrategy: resolverSelectionStrategySchema.optional(),
 };
@@ -353,8 +366,20 @@ const waitForConditionDslSchema = z
       .number()
       .optional()
       .describe("Consecutive stable reads for countStable/stable (default 2)"),
-    timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
-    timeoutMs: z.number().optional().describe("Alias for timeout"),
+    timeout: z
+      .number()
+      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+      })
+      .optional()
+      .describe("Wait timeout ms (default 5000; stable default 2500)"),
+    timeoutMs: z
+      .number()
+      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+      })
+      .optional()
+      .describe("Alias for timeout"),
     container: waitForContainerField,
     selectionStrategy: resolverSelectionStrategySchema.optional(),
     textAny: z.never().optional(),
@@ -491,8 +516,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: { $ref: "#waitForContainer" },
     selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
-    timeout: { type: "number" },
-    timeoutMs: { type: "number" },
+    timeout: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
+    timeoutMs: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
   },
   // Enforce the same shape the runtime does: either the `for` DSL, or at least one
   // legacy predicate with textAny mutually exclusive from the element predicates /

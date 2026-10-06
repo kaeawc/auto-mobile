@@ -408,12 +408,17 @@ async function prepareDevice(
       } else {
         await releaseReadiness();
         if (state.coldBootSettlements.length > 0) {
-          // Release exactly once whatever the settlements do — the bounded wait in
-          // `cancelUnownedColdBoot` guarantees each completes, and `finally`
-          // guarantees the lease is not stranded if one completes by rejecting.
-          // A System UI ANR replacement retired mid-recovery settles here too, so
-          // the AVD's key cannot be handed to the next request while the emulator
-          // this one only signalled is still running.
+          // Release exactly once whatever the settlements do — `finally` guarantees
+          // the lease is not stranded if one completes by rejecting. Not every
+          // settlement is bounded: `cancelUnownedColdBoot` waits at most two
+          // grace periods, but a survivor handed over by `retainLeaseUntil` settles
+          // only when its exit event fires or a periodic pid re-check finds it gone
+          // (#9920), so an unkillable emulator holds the lease until then. While it
+          // does, the lease reports it to start/provision requests ("held by
+          // unkillable process N") instead of leaving them queued. A System UI ANR
+          // replacement retired mid-recovery settles here too, so the AVD's key
+          // cannot be handed to the next request while the emulator this one only
+          // signalled is still running.
           void Promise.allSettled(state.coldBootSettlements)
             .finally(() => lifecycleReservations?.lifecycleLease.release())
             .catch((error: unknown) => {

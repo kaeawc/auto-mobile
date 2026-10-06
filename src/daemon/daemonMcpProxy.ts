@@ -824,6 +824,15 @@ export class DaemonMcpProxy {
    * response is lost; reconnects must then verify the same token, not reclaim.
    */
   private livenessOwnershipClaimSent = false;
+  /**
+   * Device sessions this proxy still holds besides its latest binding, each with
+   * whether its ownership claim has been delivered (#9335). `boundSessionUuid`
+   * only tracks the LATEST binding, so acquiring or naming a second session moves
+   * it off the first, which still depends on this proxy for liveness. Every entry
+   * is heartbeated on the keeper's cadence under the same owner token; an entry
+   * leaves on release, fencing, confirmed loss and close.
+   */
+  private readonly otherHeldSessions = new Map<string, { claimSent: boolean }>();
   /** Supersession is informational; report it at most once per proxy instance. */
   private livenessSupersessionLogged = false;
   /** Stable for this proxy instance, including all transport reconnects. */
@@ -1519,6 +1528,10 @@ export class DaemonMcpProxy {
       // the binding so the next call/heartbeat can reclaim it after reconnecting.
       this.recoverableBoundSessionHandoff = releasedSessionUuid;
       this.livenessOwnershipClaimSent = false;
+      const heldHandoff = this.otherHeldSessions.get(releasedSessionUuid);
+      if (heldHandoff) {
+        heldHandoff.claimSent = false;
+      }
       this.discoveryEpoch += 1;
       this.invalidateCache();
       return;
@@ -1529,6 +1542,7 @@ export class DaemonMcpProxy {
     // daemon denies), matching the "released session remains denied" guarantee
     // (issue #5663).
     this.ownedDeviceSessions.delete(releasedSessionUuid);
+    this.dropHeldSession(releasedSessionUuid);
     if (
       releasedSessionUuid === this.boundSessionUuid ||
       releasedSessionUuid === this.terminalBoundSession?.sessionUuid
@@ -3226,6 +3240,7 @@ export class DaemonMcpProxy {
     reason: string,
     release?: SessionReleaseSnapshot,
   ): void {
+    this.dropHeldSession(sessionUuid);
     if (this.terminalBoundSession) {
       if (this.terminalBoundSession.sessionUuid === sessionUuid) {
         if (reason !== "released") {
@@ -3246,7 +3261,11 @@ export class DaemonMcpProxy {
     this.discoveryEpoch += 1;
     this.invalidateCache();
     this.clearBoundSessionUuid();
-    void this.stopBoundSessionHeartbeat();
+    // Other held sessions keep depending on this keeper after the latest binding
+    // is fenced, so it only stops once nothing is left to heartbeat (#9335).
+    if (this.otherHeldSessions.size === 0) {
+      void this.stopBoundSessionHeartbeat();
+    }
     // A result-minted binding scoped the tool list the client last fetched; the
     // connection is now unbound, so prompt a re-list (binding does the same).
     // A declared binding's discovery keeps failing, so there is nothing to refresh.
@@ -3543,6 +3562,132 @@ export class DaemonMcpProxy {
   }
 
   private async runBoundSessionHeartbeatTick(): Promise<void> {
+    if (this.otherHeldSessions.size === 0) {
+      await this.runLatestBindingHeartbeatTick();
+      return;
+    }
+    // Each held session is isolated: a failure of one never skips the others,
+    // and the latest binding's own failure semantics are preserved.
+    const [latestBinding] = await Promise.allSettled([
+      this.runLatestBindingHeartbeatTick(),
+      this.heartbeatOtherHeldSessions(),
+    ]);
+    if (latestBinding.status === "rejected") {
+      throw latestBinding.reason;
+    }
+  }
+
+  private async heartbeatOtherHeldSessions(): Promise<void> {
+    await Promise.all(
+      [...this.otherHeldSessions.keys()].map((sessionUuid) =>
+        this.heartbeatHeldSession(sessionUuid),
+      ),
+    );
+  }
+
+  /** Never rejects: a held session's failure is logged and must not stop its siblings. */
+  private async heartbeatHeldSession(sessionUuid: string): Promise<void> {
+    const held = this.otherHeldSessions.get(sessionUuid);
+    if (!held || this.closing) {
+      return;
+    }
+    const claimLivenessOwnership = !held.claimSent;
+    try {
+      await raceWithDeadline(
+        () =>
+          // Fencing the latest binding must not silence its siblings, hence
+          // allowReleasedSession. Not-found is not proof of loss here, as on the
+          // latest binding's tick: the release notification is authoritative.
+          this.withRecoverableReconnect(
+            () =>
+              this.requireClient().callDaemonMethod(
+                DAEMON_HEARTBEAT_METHOD,
+                this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
+              ),
+            sessionUuid,
+            true,
+            false,
+          ),
+        {
+          timer: this.timer,
+          timeoutMs: Math.max(
+            1,
+            Math.min(Math.floor(this.heartbeatLeashMs / 2), this.heartbeatIntervalMs * 2),
+          ),
+          label: "Held-session heartbeat",
+        },
+      );
+      this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
+    } catch (error) {
+      this.handleHeldSessionHeartbeatError(sessionUuid, claimLivenessOwnership, error);
+    }
+  }
+
+  private recordHeldSessionHeartbeatSuccess(
+    sessionUuid: string,
+    claimLivenessOwnership: boolean,
+  ): void {
+    const held = this.otherHeldSessions.get(sessionUuid);
+    if (held && claimLivenessOwnership) {
+      held.claimSent = true;
+    }
+  }
+
+  private handleHeldSessionHeartbeatError(
+    sessionUuid: string,
+    claimLivenessOwnership: boolean,
+    error: unknown,
+  ): void {
+    if (this.closing) {
+      return;
+    }
+    if (
+      error !== null &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+    ) {
+      // Same informational outcome as the latest binding: no fencing or re-claim.
+      this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
+      return;
+    }
+    if (error instanceof DaemonBoundSessionExpiredError) {
+      logger.warn(
+        `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating: ${error.message}`,
+        error,
+      );
+      this.dropHeldSession(sessionUuid);
+      return;
+    }
+    logger.warn(
+      `[DaemonMcpProxy] Heartbeat for held session ${sessionUuid} failed: ${errorMessage(error)}`,
+      error,
+    );
+  }
+
+  /** Stop heartbeating a held session; idle the keeper once nothing remains to heartbeat. */
+  private dropHeldSession(sessionUuid: string): void {
+    if (!this.otherHeldSessions.delete(sessionUuid)) {
+      return;
+    }
+    if (
+      this.otherHeldSessions.size === 0 &&
+      (this.boundSessionUuid === undefined || this.terminalBoundSession)
+    ) {
+      void this.stopBoundSessionHeartbeat();
+    }
+  }
+
+  /** The latest binding moves on: its session stays held and keeps its claim state. */
+  private holdPreviousBinding(nextSessionUuid: string): void {
+    const previous = this.boundSessionUuid;
+    this.otherHeldSessions.delete(nextSessionUuid);
+    if (previous && previous !== nextSessionUuid) {
+      this.otherHeldSessions.set(previous, { claimSent: this.livenessOwnershipClaimSent });
+    }
+  }
+
+  private async runLatestBindingHeartbeatTick(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
     if (!sessionUuid || this.terminalBoundSession || this.closing) {
       return;
@@ -3860,6 +4005,7 @@ export class DaemonMcpProxy {
     // the new binding so a release delivered during that await cannot be missed.
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     this.terminalBoundSession = undefined;
+    this.holdPreviousBinding(mintedSessionUuid);
     this.boundSessionUuid = mintedSessionUuid;
     this.boundSessionUuidAt = this.timer.now();
     this.ownedDeviceSessions.add(mintedSessionUuid);
@@ -3955,6 +4101,7 @@ export class DaemonMcpProxy {
   // result-minted UUID and preserves its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
     if (sessionUuid !== this.boundSessionUuid) {
+      this.holdPreviousBinding(sessionUuid);
       this.boundSessionFromResultMint = false;
       this.livenessOwnershipClaimSent = false;
     }
@@ -4301,6 +4448,7 @@ export class DaemonMcpProxy {
     this.connectionClosedUnsubscribe = null;
     this.connected = false;
     this.clearBoundSessionUuid();
+    this.otherHeldSessions.clear();
     this.ownedDeviceSessions.clear();
     this.terminalBoundSession = undefined;
     // Drain the per-UUID release-tracking maps at the close/reconnect boundary.

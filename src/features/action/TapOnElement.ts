@@ -78,6 +78,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -3815,6 +3816,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             talkBack,
             onDispatched: () => {
               tapTimestamp = this.timer.now();
+              reportToolDispatched();
             },
           });
           if (tapTimestamp !== undefined) {
@@ -4406,8 +4408,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
-          // Platform-specific tap execution
+          // Platform-specific tap execution. Everything that waits for the target (search,
+          // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
           await perf.track("executeTap", async () => {
+            reportToolDispatched();
             switch (this.device.platform) {
               case "android":
                 screenReaderNavigation = await this.executeAndroidTap(

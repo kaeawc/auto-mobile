@@ -24,6 +24,7 @@ import {
   NavigationGraphStats,
   PathResult,
   ToolCallInteraction,
+  NavigationToolCallHandle,
   ExportedGraph,
   NavigationGraphSummary,
   NavigationGraphSummaryEdge,
@@ -208,7 +209,11 @@ export interface NavigationGraphService
   recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void>;
 
   // Tool call correlation
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void;
+  recordToolCall(
+    toolName: string,
+    args: Record<string, any>,
+    uiState?: UIState,
+  ): NavigationToolCallHandle;
   updateScrollPosition(scrollPosition: ScrollPosition): void;
 
   // Pathfinding
@@ -467,6 +472,10 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   // Tool call history kept in memory for correlation (transient data)
   private toolCallHistory: ToolCallInteraction[] = [];
+  // Calls that left the history for a reason that is final: withdrawn, consumed by an edge, or
+  // dropped on an app switch. A late dispatch report must not bring one back (#10196). A call
+  // pruned only by age is not in here, so reporting its dispatch can still revive it.
+  private retiredToolCalls: WeakSet<ToolCallInteraction> = new WeakSet();
 
   // Edge actions whose replay by navigateTo did not reach the edge's target (#10031),
   // per (app, from, to) pair. In-memory on purpose: it is advisory ranking state that
@@ -480,9 +489,10 @@ export class NavigationGraphManager implements NavigationGraphService {
   private readonly HISTORY_PAGE_DEFAULT = 50;
   private readonly HISTORY_PAGE_MAX = 200;
 
-  // Correlation window: tool call must occur 0-2000ms before navigation event
+  // Correlation window: the tool call's gesture must go out 0-2000ms before the navigation
+  // event. Measured from dispatch when the action reported it, else from tool start (#10196).
   private readonly TOOL_CALL_CORRELATION_WINDOW_MS = 2000;
-  // Keep tool calls for 10 seconds
+  // Keep tool calls for 10 seconds, measured the same way.
   private readonly TOOL_CALL_HISTORY_TTL_MS = 10000;
 
   // Active navigation window: fingerprints seen within this window of an SDK event are correlated
@@ -910,7 +920,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   }
 
   private dropToolCallsRecordedThrough(observedAt: number): void {
-    this.toolCallHistory = this.toolCallHistory.filter((tc) => tc.timestamp > observedAt);
+    this.retireToolCalls((tc) => tc.timestamp <= observedAt);
   }
 
   /**
@@ -1201,7 +1211,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Consume only a committed transition's match, not initial/same-screen events.
     // A rolled-back write leaves the call eligible for the next edge.
-    this.toolCallHistory = this.toolCallHistory.filter((tc) => tc !== edgeInteraction);
+    this.retireToolCalls((tc) => tc === edgeInteraction);
 
     // Set active navigation state for fingerprint correlation. Fingerprints seen
     // within ACTIVE_NAVIGATION_WINDOW_MS in the same app will be correlated to this node.
@@ -1562,12 +1572,14 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   /**
    * Record a tool call for one future edge; withdraw it if execution fails or is cancelled.
+   * The returned handle also reports when the call's gesture was dispatched, so a call that
+   * spent seconds finding its target is still attributed to the navigation it caused (#10196).
    */
   public recordToolCall(
     toolName: string,
     args: Record<string, any>,
     uiState?: UIState,
-  ): () => void {
+  ): NavigationToolCallHandle {
     const timestamp = this.timer.now();
 
     const interaction: ToolCallInteraction = {
@@ -1588,9 +1600,31 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Clean up old tool calls
     this.cleanupToolCallHistory();
-    return () => {
-      this.toolCallHistory = this.toolCallHistory.filter((tc) => tc !== interaction);
-    };
+    const withdraw = (): void => this.retireToolCalls((tc) => tc === interaction);
+    return Object.assign(withdraw, {
+      markDispatched: () => this.markToolCallDispatched(interaction),
+    });
+  }
+
+  /** The call's gesture went out now; correlation and the TTL measure from here (#10196). */
+  private markToolCallDispatched(interaction: ToolCallInteraction): void {
+    if (this.retiredToolCalls.has(interaction)) {
+      return;
+    }
+    interaction.dispatchedAt = Math.max(this.timer.now(), interaction.timestamp);
+    // A call that waited longer than the TTL for its target was pruned while still in flight.
+    if (!this.toolCallHistory.includes(interaction)) {
+      this.toolCallHistory.push(interaction);
+    }
+  }
+
+  private retireToolCalls(matches: (toolCall: ToolCallInteraction) => boolean): void {
+    for (const toolCall of this.toolCallHistory) {
+      if (matches(toolCall)) {
+        this.retiredToolCalls.add(toolCall);
+      }
+    }
+    this.toolCallHistory = this.toolCallHistory.filter((tc) => !matches(tc));
   }
 
   /**
@@ -1630,13 +1664,18 @@ export class NavigationGraphManager implements NavigationGraphService {
     );
   }
 
+  /** The moment a call acted: its reported dispatch, else when the tool started (#10196). */
+  private toolCallActedAt(toolCall: ToolCallInteraction): number {
+    return toolCall.dispatchedAt ?? toolCall.timestamp;
+  }
+
   /**
    * Remove tool calls older than TTL.
    */
   private cleanupToolCallHistory(): void {
     const cutoff = this.timer.now() - this.TOOL_CALL_HISTORY_TTL_MS;
     const before = this.toolCallHistory.length;
-    this.toolCallHistory = this.toolCallHistory.filter((tc) => tc.timestamp >= cutoff);
+    this.toolCallHistory = this.toolCallHistory.filter((tc) => this.toolCallActedAt(tc) >= cutoff);
     const removed = before - this.toolCallHistory.length;
     if (removed > 0) {
       logger.debug(`[NAVIGATION_GRAPH] Cleaned up ${removed} old tool calls`);
@@ -1648,11 +1687,13 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Uses host receipt time so device clock skew cannot move a tool call outside
    * the correlation window. Arrival order breaks ties and also works when the
    * SDK supplied no timestamp (so no device-to-host offset can be estimated).
+   * The window runs from when the call's gesture was dispatched when the action
+   * reported it, so a tap that waited for its target is still attributed (#10196).
    */
   private findCorrelatedToolCall(receivedAt: number): ToolCallInteraction | undefined {
     this.cleanupToolCallHistory();
     const candidates = this.toolCallHistory.filter((tc) => {
-      const timeDiff = receivedAt - tc.timestamp;
+      const timeDiff = receivedAt - this.toolCallActedAt(tc);
       return timeDiff >= 0 && timeDiff <= this.TOOL_CALL_CORRELATION_WINDOW_MS;
     });
 
@@ -1664,11 +1705,13 @@ export class NavigationGraphManager implements NavigationGraphService {
       return undefined;
     }
 
-    // Return the most recent tool call before navigation
-    const mostRecent = candidates[candidates.length - 1];
+    // Return the call that acted most recently before navigation; the later arrival wins a tie.
+    const mostRecent = candidates.reduce((latest, tc) =>
+      this.toolCallActedAt(tc) >= this.toolCallActedAt(latest) ? tc : latest,
+    );
     logger.debug(
       `[NAVIGATION_GRAPH] Correlated tool call: ${mostRecent.toolName} ` +
-        `(${receivedAt - mostRecent.timestamp}ms before navigation)`,
+        `(${receivedAt - this.toolCallActedAt(mostRecent)}ms before navigation)`,
     );
     return mostRecent;
   }

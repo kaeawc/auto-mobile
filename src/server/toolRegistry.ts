@@ -3,6 +3,8 @@ import {
   postActionCaptures,
 } from "../utils/PostActionCaptureContext";
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
+import { runWithToolDispatchReporter } from "../utils/ToolDispatchContext";
+import type { NavigationToolCallHandle } from "../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
 import {
@@ -451,7 +453,7 @@ interface NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): (() => void) | undefined;
+  ): NavigationToolCallHandle | undefined;
 }
 
 /** Removes routing and execution implementation details before persisting a navigation edge. */
@@ -1219,7 +1221,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): (() => void) | undefined {
+  ): NavigationToolCallHandle | undefined {
     const stoppedApp = appStoppedByToolCall(name, args);
     if (stoppedApp) {
       this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
@@ -1749,6 +1751,14 @@ function sessionDisplayPinnedHandler(input: {
     });
 }
 
+/** Run a tool so the action it executes can report its dispatch to the recorded call. */
+function runReportingDispatch<T>(
+  call: NavigationToolCallHandle | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  return runWithToolDispatchReporter(call?.markDispatched, run);
+}
+
 async function invokeResolvedDeviceHandler(input: {
   options: DeviceAwareToolOptions;
   selectionContext: ReturnType<typeof getToolSelectionContext>;
@@ -1777,14 +1787,18 @@ async function invokeResolvedDeviceHandler(input: {
     if (signal?.aborted) {
       withdraw?.();
     }
-    const response = await input.auditRunner.run({
-      name,
-      args,
-      device: target.device,
-      handler,
-      progress,
-      signal,
-    });
+    // The action reports when its gesture goes out, so a tool that waited for its target
+    // is attributed from the dispatch, not from the start (#10196).
+    const response = await runReportingDispatch(withdraw, () =>
+      input.auditRunner.run({
+        name,
+        args,
+        device: target.device,
+        handler,
+        progress,
+        signal,
+      }),
+    );
     succeeded = !isToolResponseFailure(response);
     return response;
   } finally {

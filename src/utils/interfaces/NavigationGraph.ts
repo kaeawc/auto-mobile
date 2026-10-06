@@ -90,9 +90,22 @@ export interface ToolCallInteraction {
   toolName: string;
   args: Record<string, any>;
   timestamp: number; // milliseconds
+  /**
+   * When the call's gesture was actually dispatched, if the action reported it (#10196).
+   * `timestamp` is when the tool started, which can be seconds earlier for a `tapOn` that
+   * waits for its target; correlation measures from this when present.
+   */
+  dispatchedAt?: number;
   /** UI state at the time of the tool call */
   uiState?: UIState;
 }
+
+/**
+ * What recording a tool call returns: calling it withdraws the call (the tool failed or was
+ * cancelled). `markDispatched` is present on a real graph so the running action can report
+ * the moment its gesture went out.
+ */
+export type NavigationToolCallHandle = (() => void) & { markDispatched?: () => void };
 
 /**
  * Represents a screen/destination in the navigation graph.
@@ -462,7 +475,11 @@ export interface NavigationGraph {
   recordBackStack(backStack: BackStackInfo): void | Promise<void>;
 
   /** Record an eligible tool call; returns an idempotent withdrawal handle. */
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void;
+  recordToolCall(
+    toolName: string,
+    args: Record<string, any>,
+    uiState?: UIState,
+  ): NavigationToolCallHandle;
 
   /** Get the current screen name */
   getCurrentScreen(): string | null;

@@ -1,6 +1,7 @@
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
+import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
@@ -1200,7 +1201,9 @@ export class Explore extends BaseVisualChange {
       : undefined;
     let succeeded = false;
     try {
-      const result = await run();
+      // The action reports when its gesture goes out (#10196); a swipe that reports
+      // nothing is attributed from the start of the call.
+      const result = await runWithToolDispatchReporter(withdraw?.markDispatched, run);
       succeeded = result.success;
       return result;
     } finally {

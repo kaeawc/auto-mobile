@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test, spyOn } from "
 import { z } from "zod/v4";
 import { stripNavigationInternalParams, ToolRegistryClass } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { reportToolDispatched } from "../../src/utils/ToolDispatchContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../src/db/navigationRepository";
@@ -164,6 +165,50 @@ describe("navigation recorder handler outcomes", () => {
     await navigate("Home");
     expect((await harness.manager.getEdgesFrom("Splash"))[0].interaction?.args).toEqual({
       text: "Next",
+    });
+  });
+
+  describe("dispatch reporting (#10196)", () => {
+    // The tool starts at 1_010_000 and spends 3 s finding its target before the tap.
+    function slowTap(reportDispatch: boolean): () => Promise<{ success: boolean }> {
+      return async () => {
+        timer.setCurrentTime(1_013_000);
+        if (reportDispatch) {
+          reportToolDispatched();
+        }
+        timer.setCurrentTime(1_013_300);
+        await navigate("Home");
+        return { success: true };
+      };
+    }
+
+    test("a tool that reports its dispatch is attributed from it, not from its start", async () => {
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(true));
+
+      await registry.getTool("tapOn")!.handler({ text: "Continue" });
+
+      expect((await harness.manager.getEdgesFrom("Splash"))[0].interaction?.args).toEqual({
+        text: "Continue",
+      });
+    });
+
+    test("a tool that reports nothing is still measured from its start", async () => {
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(false));
+
+      await registry.getTool("tapOn")!.handler({ text: "Continue" });
+
+      expect((await harness.manager.getEdgesFrom("Splash"))[0].interaction).toBeUndefined();
+    });
+
+    test("a failed tool that reported its dispatch is still withdrawn", async () => {
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
+        reportToolDispatched();
+        return { success: false };
+      });
+
+      await registry.getTool("tapOn")!.handler({ text: "Continue" });
+
+      await expectUnattributedAdvance();
     });
   });
 

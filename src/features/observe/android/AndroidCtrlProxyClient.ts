@@ -4746,12 +4746,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
   }
 
-  /** Tell the Kotlin service that recording has started (enables interaction event emission). */
+  /** Send start_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStarted(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
   }
 
-  /** Tell the Kotlin service that recording has stopped (disables interaction event emission). */
+  /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
   }
@@ -6223,6 +6223,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
     } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
+      // The app may be back in front without a navigation event (#10193). The signal names this
+      // device: on the shared global manager another device's tick must not switch the app.
+      if (navigationPackage) {
+        this.getNavigationGraphManager()
+          .recordAppForeground(navigationPackage, this.device.deviceId)
+          .catch((error) =>
+            logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
+          );
+      }
     } else {
       // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
       // non-SDK apps never emit navigation_event, so this is the only path that gives
@@ -6735,8 +6744,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private enqueueNavigationGraphWrite(event: NavigationEvent): Promise<void> {
+  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
     const navigationGraphManager = this.getNavigationGraphManager();
+    // Stamp the device that received the event: the manager's telemetry must not read the
+    // recorder's ambient context, which another device's client may have set (#10195).
+    const event: NavigationEvent = { ...received, deviceId: this.device.deviceId };
     const navWrite = this.navigationWriteTail.then(
       () => navigationGraphManager.recordNavigationEvent(event),
       () => navigationGraphManager.recordNavigationEvent(event),

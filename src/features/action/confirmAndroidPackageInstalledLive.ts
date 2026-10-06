@@ -16,16 +16,22 @@ export interface ConfirmPackageInstalledLiveRequest {
   userId: number;
   /** Store behind the installed-apps cache; staled when the device disagrees with it. */
   staleMarker: InstalledAppsCacheStaleMarker;
+  /**
+   * What the installed-apps cache said about the package. The cache is staled
+   * whenever the live read disagrees, in either direction: an app installed out
+   * of band (#9976) or removed out of band (#10192).
+   */
+  cacheListedPackage: boolean;
   signal?: AbortSignal;
 }
 
 /**
- * Second opinion for a "not installed" verdict taken from the installed-apps
- * cache (#9976). The cache is only invalidated by package events and the
- * install/uninstall tools, so an app installed out of band (`adb install`,
- * Gradle) is invisible to it until the TTL expires. One `pm list packages
- * --user N` read settles it. When the device lists the package, the cache is
- * marked stale so the next listing rebuilds instead of repeating the miss.
+ * Second opinion for a verdict taken from the installed-apps cache. The cache
+ * is only invalidated by package events and the install/uninstall tools, so an
+ * app installed or removed out of band (`adb install`/`adb uninstall`, Gradle)
+ * is stale in it until the TTL expires. One `pm list packages --user N` read
+ * settles it. When the device disagrees with the cache, the cache is marked
+ * stale so the next listing rebuilds instead of repeating the miss.
  *
  * A failed read throws rather than returning false: a command failure is not
  * evidence of absence (#6456).
@@ -33,7 +39,7 @@ export interface ConfirmPackageInstalledLiveRequest {
 export async function confirmAndroidPackageInstalledLive(
   request: ConfirmPackageInstalledLiveRequest,
 ): Promise<boolean> {
-  const { adb, deviceId, packageName, userId, staleMarker, signal } = request;
+  const { adb, deviceId, packageName, userId, staleMarker, cacheListedPackage, signal } = request;
   let installed: boolean;
   try {
     installed = await isPackageInstalledForUser(adb, packageName, userId, undefined, signal);
@@ -41,9 +47,9 @@ export async function confirmAndroidPackageInstalledLive(
     signal?.throwIfAborted();
     throw toActionableError(error, `Could not determine whether ${packageName} is installed`);
   }
-  if (installed) {
+  if (installed !== cacheListedPackage) {
     logger.info(
-      `[LaunchApp] ${packageName} is installed for user ${userId} but missing from the installed-apps cache; marking the cache stale`,
+      `[LaunchApp] ${packageName} is ${installed ? "installed" : "not installed"} for user ${userId} but the installed-apps cache says otherwise; marking the cache stale`,
     );
     await markInstalledAppsCacheStale(deviceId, staleMarker);
   }

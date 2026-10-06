@@ -1,3 +1,4 @@
+import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -81,6 +82,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -1764,9 +1766,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
-        (options.selectionStrategy !== "unique" &&
-          options.index === undefined &&
-          !options.container?.container) ||
+        (!isStrictlyScoped(options) && options.index === undefined) ||
         !this.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
@@ -1829,7 +1829,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           : "tap";
     const lookupAction = options.subtext
       ? "inspect"
-      : options.selectionStrategy === "unique" || options.container?.container
+      : isStrictlyScoped(options)
         ? intentAction
         : options.action === "focus"
           ? "focus-input"
@@ -3268,8 +3268,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const scopedOptions = {
       container: container.container,
       index: container.index,
-      strategy:
-        options.selectionStrategy === "unique" ? ("unique" as const) : container.selectionStrategy,
+      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
     };
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
@@ -3646,6 +3645,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ...context,
       onWarning: (warning) => displayWarnings.push(warning),
     });
+    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
+    // earliest moment the gesture can take effect: reporting once it returns could put the
+    // dispatch after the navigation event it caused (#10196).
+    reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -4452,8 +4455,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
-          // Platform-specific tap execution
+          // Platform-specific tap execution. Everything that waits for the target (search,
+          // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
           await perf.track("executeTap", async () => {
+            reportToolDispatched();
             switch (this.device.platform) {
               case "android":
                 screenReaderNavigation = await this.executeAndroidTap(
@@ -4704,7 +4709,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return undefined;
     }
 
-    if (options?.container?.container || options?.selectionStrategy === "unique") {
+    if (isStrictlyScoped(options)) {
       await this.executeScopedAndroidTap({
         action,
         x,

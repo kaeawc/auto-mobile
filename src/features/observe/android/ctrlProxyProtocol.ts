@@ -719,6 +719,7 @@ export interface RequestLaunchIntentMessage {
 
 // =============================================================================
 // Recording Requests (no requestId on the wire)
+// Both commands are kept for wire compatibility and currently have no effect on the device.
 // =============================================================================
 
 /** `@SerialName("start_recording")` → `StartRecording` (sent without requestId) */

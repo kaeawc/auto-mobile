@@ -36,6 +36,24 @@ export const accessibilitySchema = addDeviceTargetingToSchema(
     .strict(),
 );
 
+/**
+ * Which feature flag, if any, overrides what the action tools (tapOn, swipeOn, observe) assume
+ * about the screen reader. The explicit state query never applies it to `enabled` (#10222):
+ * `enabled` is what the device reports, this says what the tools will treat it as. Force wins
+ * over auto-detect-off, matching `resolveState`/`resolveVoiceOverState`.
+ */
+function detectionOverride(featureFlags: FeatureFlagService): {
+  detectionOverride?: { mode: "forced-on" | "auto-detect-off"; effectiveEnabled: boolean };
+} {
+  if (featureFlags.isEnabled("force-accessibility-mode")) {
+    return { detectionOverride: { mode: "forced-on", effectiveEnabled: true } };
+  }
+  if (!featureFlags.isEnabled("accessibility-auto-detect")) {
+    return { detectionOverride: { mode: "auto-detect-off", effectiveEnabled: false } };
+  }
+  return {};
+}
+
 interface AccessibilityArgs {
   talkback?: boolean;
   voiceover?: boolean;
@@ -138,18 +156,24 @@ async function handleAndroidAccessibility(device: BootedDevice, args: Accessibil
     return await toggleTalkBackAccessibility(device, args, args.talkback);
   }
 
-  // Detect current TalkBack state on Android
+  // Read the device's TalkBack state fresh. No feature flags are passed: they steer how the
+  // action tools adapt, not what the device reports (#10222) — the toggle path reads the same way.
   accessibilityDetector.invalidateCache(device.deviceId);
   const adb = defaultAdbClientFactory.create(device);
-  const featureFlags = FeatureFlagService.getInstance();
-  const state = await accessibilityDetector.resolveState(device.deviceId, adb, featureFlags);
+  const override = detectionOverride(FeatureFlagService.getInstance());
+  const state = await accessibilityDetector.resolveState(device.deviceId, adb);
   if (state === null) {
     return createStructuredToolResponse({
       service: "unknown",
       reason: "could not determine TalkBack state: device accessibility settings read unavailable",
+      ...override,
     });
   }
-  return createStructuredToolResponse({ enabled: state.enabled, service: state.service });
+  return createStructuredToolResponse({
+    enabled: state.enabled,
+    service: state.service,
+    ...override,
+  });
 }
 
 async function handleIosAccessibility(device: BootedDevice, args: AccessibilityArgs) {
@@ -179,21 +203,22 @@ async function handleIosAccessibility(device: BootedDevice, args: AccessibilityA
     return createStructuredToolResponse({ enabled, service });
   }
 
-  // Detect current VoiceOver state on iOS
+  // Probe the device's VoiceOver state fresh, without feature flags (see the Android branch, #10222).
   iosVoiceOverDetector.invalidateCache(device.deviceId);
   const client = IOSCtrlProxyClient.getInstance(device);
-  const featureFlags = FeatureFlagService.getInstance();
-  const state = await iosVoiceOverDetector.resolveState(device.deviceId, client, featureFlags);
+  const override = detectionOverride(FeatureFlagService.getInstance());
+  const state = await iosVoiceOverDetector.resolveState(device.deviceId, client);
   if (state === null) {
     // An unreadable probe is not evidence of "off": omit `enabled`, like the Android branch (#9682).
     return createStructuredToolResponse({
       service: "unknown",
       reason: "could not determine VoiceOver state: CtrlProxy VoiceOver probe unavailable",
+      ...override,
     });
   }
   const service = state ? ("voiceover" as const) : ("unknown" as const);
   logger.debug(`[accessibility tool] VoiceOver state: enabled=${state}`);
-  return createStructuredToolResponse({ enabled: state, service });
+  return createStructuredToolResponse({ enabled: state, service, ...override });
 }
 
 export function registerAccessibilityTools() {
@@ -213,7 +238,7 @@ export function registerAccessibilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "accessibility",
-    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device.",
+    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     accessibilitySchema,
     accessibilityHandler,
     { defaultEnabled: false, outputSchema: accessibilityStateSchema },

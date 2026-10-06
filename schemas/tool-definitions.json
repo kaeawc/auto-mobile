@@ -1,7 +1,7 @@
 [
   {
     "name": "accessibility",
-    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device.",
+    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -61,6 +61,20 @@
             }
           },
           "required": ["kind", "package", "activity"],
+          "additionalProperties": false
+        },
+        "detectionOverride": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["forced-on", "auto-detect-off"]
+            },
+            "effectiveEnabled": {
+              "type": "boolean"
+            }
+          },
+          "required": ["mode", "effectiveEnabled"],
           "additionalProperties": false
         }
       },
@@ -3046,29 +3060,36 @@
           "type": "string"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
           "anyOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/__schema0"
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "description": "Container resource ID",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["elementId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "description": "Container text",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["text"],
+                  "additionalProperties": false
                 }
-              },
-              "required": ["text"],
-              "additionalProperties": false
+              ]
             }
           ]
         },
@@ -3079,7 +3100,7 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3093,7 +3114,61 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -8502,10 +8577,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -8818,7 +8895,7 @@
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor.",
+              "description": "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
               "anyOf": [
                 {
                   "type": "boolean"
@@ -8835,7 +8912,10 @@
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": true
+                },
+                {
+                  "$ref": "#/$defs/__schema0"
                 }
               ]
             },
@@ -13399,6 +13479,20 @@
               },
               "required": ["kind", "package", "activity"],
               "additionalProperties": false
+            },
+            "detectionOverride": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["forced-on", "auto-detect-off"]
+                },
+                "effectiveEnabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["mode", "effectiveEnabled"],
+              "additionalProperties": false
             }
           },
           "required": ["service"],
@@ -14063,10 +14157,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -16671,6 +16767,41 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "pages": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "state": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "lastKnown": {
+                "description": "Pages and state are the last accepted overlay_event snapshot, not a live device query",
+                "type": "boolean",
+                "const": true
               }
             },
             "required": ["lastAction", "success", "timestamp"],
@@ -17007,7 +17138,7 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
           "$ref": "#/$defs/__schema0"
         },
         "autoTarget": {
@@ -27698,12 +27829,16 @@
       "type": "object",
       "properties": {
         "duration": {
-          "description": "Shake duration ms (default 1000)",
-          "type": "number"
+          "description": "Shake duration ms (1-1798000, default 1000)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1798000
         },
         "intensity": {
-          "description": "Shake intensity (Android; default 100)",
-          "type": "number"
+          "description": "Shake intensity on Android (1-1000, default 100); ignored on iOS",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1000
         },
         "platform": {
           "type": "string",

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { wrapCommandError } from "../../src/utils/CommandError";
+import { wrappedAdbRejection } from "./adbRejection";
 
 /**
  * One command from a `test/fixtures/android-am-start/*.txt` capture. Each capture is the
@@ -51,10 +51,10 @@ export function adbRejectionFromCapture(
   section: AmStartCaptureSection,
   stream: "stdout" | "stderr",
 ): Error {
-  const raw = Object.assign(new Error(`Command failed: adb shell ${section.command}`), {
-    code: section.exitCode,
+  return wrappedAdbRejection({
+    args: ["shell", section.command],
+    exitCode: section.exitCode,
     stdout: stream === "stdout" ? section.output : "",
     stderr: stream === "stderr" ? section.output : "",
   });
-  return wrapCommandError(raw, { command: "adb", args: ["shell", section.command] });
 }

@@ -60,6 +60,7 @@ import {
   IOS_SIMULATOR_DOWNGRADE_REINSTALL_TIMEOUT_MS,
 } from "./installAppTimeout";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import {
   ANDROID_INSTALL_OUTLIVED_WARNING,
   indeterminateAndroidInstallMessage,
@@ -833,7 +834,12 @@ export class InstallApp {
     }
   }
 
-  private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";
+  /**
+   * pm's own failure line. The `Failure [` prefix keeps an APK path that merely contains the
+   * code (adb echoes the path in its stderr: `adb: failed to install <path>: Failure [...]`)
+   * from reading as a downgrade, which would uninstall the app.
+   */
+  private static readonly ANDROID_DOWNGRADE_MARKER = "Failure [INSTALL_FAILED_VERSION_DOWNGRADE";
 
   private setInstalledAppsRepository(installedAppsRepository?: InstalledAppsStore): void {
     if (installedAppsRepository) {
@@ -891,15 +897,13 @@ export class InstallApp {
     }
   }
 
-  /** stdout/stderr attached to a failed command; the message echoes the command line. */
+  /**
+   * stdout/stderr of a failed command, found by walking `cause` (a real AdbClient rejection
+   * keeps them on the wrapped raw error); the message echoes the command line.
+   */
   private extractCommandStreams(error: unknown): string {
-    if (!(error instanceof Error)) {
-      return "";
-    }
-    const details = error as Error & { stderr?: unknown; stdout?: unknown };
-    return [details.stderr, details.stdout]
-      .filter((value) => typeof value === "string" && value.length > 0)
-      .join("\n");
+    const { stdout, stderr } = adbFailureOutput(error);
+    return [stderr, stdout].filter((value) => value.trim().length > 0).join("\n");
   }
 
   private isAndroidCancellation(error: unknown, signal?: AbortSignal): boolean {

@@ -18,6 +18,7 @@ import {
 } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { InstalledAppsRepository } from "../../db/installedAppsRepository";
 import {
@@ -78,35 +79,6 @@ export function amStartReportedFailure(stdout: string, stderr: string): boolean 
     /^Error(?::| type \d+)/m.test(`${stdout}\n${stderr}`) ||
     /does not exist/i.test(`${stdout}\n${stderr}`)
   );
-}
-
-const ADB_FAILURE_CAUSE_DEPTH = 5;
-
-function outputText(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  return Buffer.isBuffer(value) ? value.toString() : "";
-}
-
-/**
- * The command's own stdout/stderr carried by a rejected adb call, found by walking `cause`.
- * `adb shell` propagates the remote exit status, so `am start` for a package that is not
- * installed exits 1 and rejects the call: the text arrives on the error (the raw execFile
- * error, wrapped by `wrapCommandError`), not in a resolved result. The error `message` is
- * never read, because it echoes the command line and so the package name.
- */
-export function adbFailureOutput(error: unknown): { stdout: string; stderr: string } {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  let current: unknown = error;
-  for (let depth = 0; depth < ADB_FAILURE_CAUSE_DEPTH && current instanceof Error; depth += 1) {
-    const streams = current as Error & { stdout?: unknown; stderr?: unknown };
-    stdout.push(outputText(streams.stdout));
-    stderr.push(outputText(streams.stderr));
-    current = current.cause;
-  }
-  return { stdout: stdout.join("\n"), stderr: stderr.join("\n") };
 }
 
 const PACKAGE_NOT_INSTALLED_ERROR = "App is not installed";

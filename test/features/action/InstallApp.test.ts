@@ -20,6 +20,10 @@ import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { getAndroidAppMetadataFromAdb } from "../../../src/features/observe/GetAppMetadata";
+import {
+  adbRejectionFromInstallCapture,
+  readAndroidInstallCapture,
+} from "../../helpers/androidInstallCapture";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
@@ -2529,14 +2533,61 @@ describe("InstallApp", () => {
       await expect(rejection).rejects.not.toThrow("the app is not installed");
     });
 
+    // A real AdbClient rejection (#10191): wrapCommandError's Error with the raw execFile
+    // error, which carries the streams, on `cause`. The text is the daemon log's own record of
+    // `adb install` over a newer build (test/fixtures/android-install/downgrade-over-newer.txt).
+    const downgradeCapture = readAndroidInstallCapture("downgrade-over-newer.txt");
+    const capturedApkPath = downgradeCapture.args.at(-1) ?? "";
+
+    test("the captured downgrade rejection carries its streams on cause, not on the top-level error", () => {
+      const rejection = adbRejectionFromInstallCapture(downgradeCapture);
+      expect(rejection).toBeInstanceOf(Error);
+      expect((rejection as Error & { stderr?: unknown }).stderr).toBeUndefined();
+      expect((rejection.cause as Error & { stderr?: unknown }).stderr).toContain(
+        "Failure [INSTALL_FAILED_VERSION_DOWNGRADE",
+      );
+      expect(downgradeCapture.exitCode).toBe(1);
+    });
+
+    test("a real wrapped downgrade rejection runs the uninstall and reinstall recovery", async () => {
+      const { installApp } = setup(false);
+      fakeAdb.setCommandResponse(listCommand, present());
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installs = 0;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (args[0] === installCommand && ++installs === 1) {
+          throw adbRejectionFromInstallCapture(downgradeCapture);
+        }
+        if (args[0] === installCommand) {
+          return createExecResult("Success");
+        }
+        return execute(...args);
+      });
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("was newer than the artifact");
+      expect(fakeAdb.wasCommandExecuted(`uninstall ${packageName}`)).toBe(true);
+      expect(installs).toBe(2);
+    });
+
     test("error classification ignores the echoed command line and APK path", async () => {
       const { installApp } = setup(false);
       const hostile = `/tmp/INSTALL_FAILED_VERSION_DOWNGRADE.apk`;
       const command = `install --user 0 -r "${hostile}"`;
+      // The same wrapped shape as the real capture, for a different failure on a hostile path:
+      // adb echoes the APK path in its own stderr line, and the message echoes the command.
+      const stderr = downgradeCapture.stderr
+        .replace(capturedApkPath, hostile)
+        .replace(/Failure \[.*\]/, "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]");
+      expect(stderr).toContain(hostile);
       fakeAdb.setCommandError(
         command,
-        Object.assign(new Error(`Command failed: adb ${command}`), {
-          stderr: "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
+        adbRejectionFromInstallCapture({
+          ...downgradeCapture,
+          args: ["-s", "emulator-5600", "install", "--user", "0", "-r", hostile],
+          stderr,
         }),
       );
 

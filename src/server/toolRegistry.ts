@@ -1388,6 +1388,9 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       internal: internalCall,
       artifactWriter,
       artifactMode,
+      // A cancelled or timed-out call's response is discarded by the transport, so it
+      // must not advance the diff baseline or metadata snapshot (#10081).
+      delivered: !signal?.aborted,
     });
 
     const telemetryArgs = { ...args };

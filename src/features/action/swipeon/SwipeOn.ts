@@ -16,7 +16,12 @@ import {
 } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { BaseVisualChange, ProgressCallback, type DisplayFence } from "../BaseVisualChange";
+import {
+  BaseVisualChange,
+  INTERMEDIATE_OBSERVATION_OPTIONS,
+  ProgressCallback,
+  type DisplayFence,
+} from "../BaseVisualChange";
 import {
   ActionableError,
   BootedDevice,
@@ -293,6 +298,7 @@ export class SwipeOn extends BaseVisualChange {
     ) {
       throwIfAborted(signal);
       observeResult = await this.observeScreen.execute({
+        ...INTERMEDIATE_OBSERVATION_OPTIONS,
         freshness: staleCachedRefetch ? "fresh" : "cached-ok",
         timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
         skipStaleWindowRecovery: true,
@@ -304,6 +310,7 @@ export class SwipeOn extends BaseVisualChange {
       observeResult,
       (timeoutMs) =>
         this.observeScreen.execute({
+          ...INTERMEDIATE_OBSERVATION_OPTIONS,
           freshness: "fresh",
           timeoutMs,
           skipStaleWindowRecovery: true,
@@ -378,6 +385,7 @@ export class SwipeOn extends BaseVisualChange {
         resolutionObservation,
         (timeoutMs) =>
           this.observeScreen.execute({
+            ...INTERMEDIATE_OBSERVATION_OPTIONS,
             display: target.observation.display.key,
             freshness: "fresh",
             timeoutMs,
@@ -1498,6 +1506,7 @@ export class SwipeOn extends BaseVisualChange {
           observeResult,
           (timeoutMs) =>
             this.observeScreen.execute({
+              ...INTERMEDIATE_OBSERVATION_OPTIONS,
               freshness: "fresh",
               timeoutMs,
               skipStaleWindowRecovery: true,

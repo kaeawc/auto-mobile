@@ -51,7 +51,7 @@ import {
 const device = { deviceId: "previous-observe-trace", name: "Trace", platform: "android" } as const;
 type Phase = "observe" | "before" | "action" | "settle" | "terminal";
 
-function harness(initiallyVerified = true) {
+function harness(initiallyVerified = true, revealAfterAction = false) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_700_000_000_000);
   timer.enableAutoAdvance();
@@ -113,6 +113,17 @@ function harness(initiallyVerified = true) {
               enabled: true,
               bounds: { left: 100, top: 200, right: 300, bottom: 300 },
             },
+            ...(revealAfterAction && phase === "action"
+              ? [
+                  {
+                    text: "Revealed Item",
+                    class: "android.widget.Button",
+                    clickable: true,
+                    enabled: true,
+                    bounds: { left: 100, top: 800, right: 300, bottom: 900 },
+                  },
+                ]
+              : []),
           ],
         },
       },
@@ -228,7 +239,12 @@ function harness(initiallyVerified = true) {
       audits.length = 0;
       return result;
     },
-    async run(name: "tapOn" | "swipeOn" | "sendKeys", fail = false) {
+    async run(
+      name: "tapOn" | "swipeOn" | "sendKeys",
+      fail = false,
+      swipeOptions: Parameters<SwipeOn["execute"]>[0] = { direction: "up", autoTarget: false },
+      expectSuccess = !fail,
+    ) {
       return runWithPostActionCaptureScope(undefined, async () => {
         // sendKeys does not inherit BaseVisualChange. Exercise the shared action
         // contract explicitly; its production selector focus delegates to tapOn.
@@ -236,7 +252,7 @@ function harness(initiallyVerified = true) {
           name === "tapOn" && !fail
             ? await tap.execute({ action: "tap", text: "Regular Button" })
             : name === "swipeOn" && !fail
-              ? await swipeAction.execute({ direction: "up", autoTarget: false })
+              ? await swipeAction.execute(swipeOptions)
               : await base.observedInteraction(
                   async () => {
                     phase = "action";
@@ -244,7 +260,7 @@ function harness(initiallyVerified = true) {
                   },
                   { changeExpected: false, predictionContext: { toolName: name, toolArgs: {} } },
                 );
-        if (!fail) {
+        if (expectSuccess) {
           expect(result.success).toBe(true);
         }
         const response = createStructuredToolResponse(result);
@@ -350,6 +366,35 @@ describe("BaseVisualChange previous observation with real ObserveScreen", () => 
       false,
     );
     expect(h.captures).toEqual(["terminal"]);
+  });
+
+  test.each([
+    ["plain swipe", { direction: "up" }],
+    ["screen swipe", { direction: "up", autoTarget: false }],
+    ["auto-targeted swipe", { direction: "up", autoTarget: true }],
+    ["container swipe", { direction: "up", container: { text: "Regular Button" } }],
+  ] as const)(
+    "verified observe -> %s reads the hierarchy again without a capture before the gesture",
+    async (_name, swipeOptions) => {
+      const h = harness();
+      expect((await h.observe()).freshness?.isFresh).toBe(true);
+      await h.run("swipeOn", false, swipeOptions);
+      console.log(`${_name}: captures=${JSON.stringify(h.captures)}`);
+      expect(h.captures).toEqual(["terminal"]);
+    },
+  );
+
+  test("verified observe -> lookFor swipe captures only terminal evidence", async () => {
+    const h = harness(true, true);
+    await h.observe();
+    const result = await h.run("swipeOn", false, {
+      direction: "up",
+      lookFor: { text: "Revealed Item" },
+      maxScrolls: 2,
+    });
+    console.log(`lookFor swipe: captures=${JSON.stringify(h.captures)}`);
+    expect(h.captures).toEqual(["terminal"]);
+    expect(result?.screenshotPath).toBe("/fake/settled.png");
   });
 
   test("aged cache -> tapOn refetches without capturing before dispatch", async () => {

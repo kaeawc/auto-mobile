@@ -613,6 +613,7 @@ interface LocalizationLocaleMetadata {
   localeScope?: "app" | "system";
   localeAppId?: string;
   localeMethod?: string;
+  warning?: string;
 }
 
 async function applyLocaleChange(
@@ -640,6 +641,7 @@ async function applyLocaleChange(
       localeScope,
       ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
       ...(result.method ? { localeMethod: result.method } : {}),
+      ...(result.warning ? { warning: result.warning } : {}),
     };
   } else {
     errors.push(result.error ?? "Failed to set locale");

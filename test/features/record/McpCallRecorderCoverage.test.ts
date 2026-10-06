@@ -1,15 +1,22 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpCallRecorder, PLAN_RELEVANT_TOOLS } from "../../../src/features/record/McpCallRecorder";
+import { registerMcpTools } from "../../../src/server/index";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
 
-// Every tool the MCP server advertises (generated from the registry and kept in
-// sync by `generate-tool-definitions.ts --check`).
-const registeredTools: string[] = (
-  JSON.parse(
-    readFileSync(resolve(import.meta.dir, "../../../schemas/tool-definitions.json"), "utf8"),
-  ) as { name: string }[]
-).map((tool) => tool.name);
+// Every tool the live registry lists in daemon mode (the superset surface).
+// Tools hidden from listing (startDevice, plan-only barrier/criticalSection) are
+// not enumerable, so they are classified below by name regardless.
+let registeredTools: string[] = [];
+
+beforeAll(() => {
+  ToolRegistry.clearTools();
+  registerMcpTools(true);
+  registeredTools = ToolRegistry.getAllTools({ includeUnavailable: true }).map((tool) => tool.name);
+});
+
+afterAll(() => {
+  ToolRegistry.clearTools();
+});
 
 const DEVICE_MANAGEMENT = "Device or image management, not a replayable step in a plan";
 const READ_ONLY = "Read-only query; changes no device state so a plan gains nothing from it";
@@ -84,6 +91,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
 
 describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   test("every registered tool is either recorded or excluded with a reason", () => {
+    expect(registeredTools.length).toBeGreaterThan(60);
     const unclassified = registeredTools.filter(
       (name) => !PLAN_RELEVANT_TOOLS.has(name) && !(name in EXCLUDED_TOOLS),
     );
@@ -96,8 +104,58 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   });
 
   test("every recorded tool is registered", () => {
-    const registered = new Set(registeredTools);
-    expect([...PLAN_RELEVANT_TOOLS].filter((name) => !registered.has(name))).toEqual([]);
+    const missing = [...PLAN_RELEVANT_TOOLS].filter(
+      (name) => ToolRegistry.getRegisteredTool(name) === undefined,
+    );
+    expect(missing).toEqual([]);
+  });
+
+  test("a recorded tapAt step carries no snapshot reference and parses for replay", () => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    recorder.record("tapAt", { x: 10, y: 20, snapshotId: "snap-1", deviceId: "emulator-5554" });
+    const [step] = recorder.stop();
+
+    expect(step).toEqual({ tool: "tapAt", params: { x: 10, y: 20 } });
+    const schema = ToolRegistry.getToolForPlan("tapAt")?.schema;
+    expect(schema).toBeDefined();
+    expect(() => schema.parse(step.params)).not.toThrow();
+  });
+
+  test("tools other than tapAt keep their params untouched", () => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    recorder.record("tapAny", { container: { text: "List" } });
+    expect(recorder.stop()[0].params).toEqual({ container: { text: "List" } });
+  });
+
+  test("read-only actions of multi-action tools are not recorded", () => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    recorder.record("keyboard", { action: "detect" });
+    recorder.record("keyboard", { action: "listImes" });
+    recorder.record("clipboard", { action: "get" });
+    recorder.record("systemTray", { action: "list", appId: "com.example" });
+    recorder.record("systemTray", { action: "find", notification: { title: "Hi" } });
+    recorder.record("displayConfig", {});
+    expect(recorder.stop()).toEqual([]);
+  });
+
+  test("mutating actions of the same tools are recorded", () => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    recorder.record("keyboard", { action: "open" });
+    recorder.record("clipboard", { action: "copy", text: "x" });
+    recorder.record("systemTray", { action: "tap", notification: { title: "Hi" } });
+    recorder.record("displayConfig", { theme: "dark" });
+    recorder.record("displayConfig", { reset: true });
+    expect(recorder.stop().map((step) => step.tool)).toEqual([
+      "keyboard",
+      "clipboard",
+      "systemTray",
+      "displayConfig",
+      "displayConfig",
+    ]);
   });
 
   test("records the action tools a session can run, in order (issue scenario)", () => {

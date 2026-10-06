@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
+import { SURVIVING_PROCESS_RECHECK_INTERVAL_MS } from "../../src/devices/coldBootProcessTermination";
 import { DeviceBootService } from "../../src/devices/deviceBootService";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
@@ -21,7 +22,10 @@ const image: DeviceInfo = {
   osVersion: "35",
 };
 const GRACE_MS = 1_000;
+const SURVIVOR_RECHECK_MS = SURVIVING_PROCESS_RECHECK_INTERVAL_MS;
 const PID = 4242;
+
+class BootFailure extends Error {}
 
 type FakeEmulator = ChildProcess & { exitCode: number | null; signalCode: NodeJS.Signals | null };
 
@@ -56,10 +60,16 @@ function setup() {
   const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
   const emulator = fakeEmulator();
   const retained: Promise<void>[] = [];
+  // A stand-in for process.kill(pid, 0): no test ever probes a real pid.
+  const liveness = { running: true, probed: [] as number[] };
   devices.setDeviceImages("android", [image]);
   matcher.setImageResult(image);
   devices.setMockChildProcess(image.name, emulator.process);
-  const boot = (lifecycleLease?: VirtualDeviceLifecycleLease, signal?: AbortSignal) =>
+  const boot = (
+    lifecycleLease?: VirtualDeviceLifecycleLease,
+    signal?: AbortSignal,
+    canRetainLease = true,
+  ) =>
     new DeviceBootService({
       deviceManager: devices,
       deviceMatcher: matcher,
@@ -73,9 +83,14 @@ function setup() {
       timer,
       lifecycleCoordinator: coordinator,
       lifecycleLease,
-      retainLeaseUntil: (settlement) => retained.push(settlement),
+      retainLeaseUntil: canRetainLease ? (settlement) => retained.push(settlement) : undefined,
+      isProcessRunning: (pid) => {
+        liveness.probed.push(pid);
+        return liveness.running;
+      },
     }).boot({ platform: "android", signal });
   // A second request for the same AVD: granted only once the first lease is released.
+  const refusals: unknown[] = [];
   const nextRequestForAvd = () => {
     let granted = false;
     void coordinator
@@ -83,12 +98,28 @@ function setup() {
         { kind: "stable", platform: "android", stableId: image.name },
         { operation: "start", deadlineMs: 60_000 },
       )
-      .then(() => {
-        granted = true;
-      });
+      .then(
+        () => {
+          granted = true;
+        },
+        (error: unknown) => {
+          refusals.push(error);
+        },
+      );
     return () => granted;
   };
-  return { devices, matcher, timer, coordinator, emulator, retained, boot, nextRequestForAvd };
+  return {
+    devices,
+    matcher,
+    timer,
+    coordinator,
+    emulator,
+    retained,
+    liveness,
+    refusals,
+    boot,
+    nextRequestForAvd,
+  };
 }
 
 function track(promise: Promise<unknown>): { error: () => unknown; settled: () => boolean } {
@@ -158,7 +189,6 @@ describe("DeviceBootService owned cold-boot termination (#9901)", () => {
     t.devices.setWaitForDeviceReadyError(new Error("boot wedged"));
     const outcome = track(t.boot());
     await settle();
-    const nextGranted = t.nextRequestForAvd();
 
     t.timer.advanceTime(GRACE_MS);
     await settle();
@@ -171,14 +201,19 @@ describe("DeviceBootService owned cold-boot termination (#9901)", () => {
     expect(message).toContain(String(PID));
     expect(message).toContain("did not exit after SIGTERM and SIGKILL");
     expect(t.emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
-    // The AVD is not handed to a retry as if it were free.
-    expect(nextGranted()).toBe(false);
     expect(t.retained).toHaveLength(1);
+    // The AVD is not handed to a retry as if it were free: the retry is told why, at once.
+    const nextGranted = t.nextRequestForAvd();
+    await settle();
+    expect(nextGranted()).toBe(false);
+    expect(String((t.refusals[0] as Error).message)).toContain(`held by unkillable process ${PID}`);
 
     // The survivor finally dies: only now is the lease released.
     t.emulator.exit();
     await settle();
-    expect(nextGranted()).toBe(true);
+    const afterExit = t.nextRequestForAvd();
+    await settle();
+    expect(afterExit()).toBe(true);
   });
 
   it("applies the same ordering when the caller aborts during boot", async () => {
@@ -234,9 +269,10 @@ describe("DeviceBootService owned cold-boot termination (#9901)", () => {
     lease.release();
   });
 
-  it("keeps the boot's own error when the process exit cannot be observed", async () => {
+  it("keeps the boot's own error and says the AVD was released when the exit cannot be observed", async () => {
     const t = setup();
-    t.devices.setWaitForDeviceReadyError(new Error("boot wedged"));
+    const failure = new BootFailure("boot wedged");
+    t.devices.setWaitForDeviceReadyError(failure);
     t.emulator.process.once = () => {
       throw new Error("exit listener registration failed");
     };
@@ -244,7 +280,167 @@ describe("DeviceBootService owned cold-boot termination (#9901)", () => {
     await settle();
 
     expect(outcome.settled()).toBe(true);
-    expect(String((outcome.error() as Error).message)).toContain("boot wedged");
+    const thrown = outcome.error() as BootFailure;
+    expect(thrown.message).toContain("boot wedged");
+    // The lease is released at once, so the note must not claim the AVD stays reserved.
+    expect(thrown.message).toContain("could not be observed");
+    expect(thrown.message).toContain("AVD was released");
+    expect(thrown.message).not.toContain("stays reserved");
+    const next = t.nextRequestForAvd();
+    await settle();
+    expect(next()).toBe(true);
+  });
+
+  it("annotates a copy of the failure and leaves the original error object untouched", async () => {
+    const t = setup();
+    const failure = new BootFailure("boot wedged");
+    t.devices.setWaitForDeviceReadyError(failure);
+    const outcome = track(t.boot());
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+
+    const thrown = outcome.error();
+    expect(thrown).toBeInstanceOf(BootFailure);
+    expect(thrown).not.toBe(failure);
+    expect((thrown as BootFailure).message).toContain("did not exit after SIGTERM and SIGKILL");
+    expect(failure.message).toBe("boot wedged");
+  });
+
+  it("releases the lease once a periodic liveness re-check finds the survivor's pid gone", async () => {
+    const t = setup();
+    t.devices.setWaitForDeviceReadyError(new Error("boot wedged"));
+    const outcome = track(t.boot());
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    expect(outcome.settled()).toBe(true);
+    expect(t.liveness.probed).toEqual([]);
+
+    // Still alive after a full interval: the hold stays and is reported, not waited on.
+    t.timer.advanceTime(SURVIVOR_RECHECK_MS);
+    await settle();
+    expect(t.liveness.probed).toEqual([PID]);
+    const whileAlive = t.nextRequestForAvd();
+    await settle();
+    expect(whileAlive()).toBe(false);
+    expect(t.refusals).toHaveLength(1);
+
+    // The pid vanishes without an exit event ever firing.
+    t.liveness.running = false;
+    t.timer.advanceTime(SURVIVOR_RECHECK_MS);
+    await settle();
+    const afterGone = t.nextRequestForAvd();
+    await settle();
+    expect(afterGone()).toBe(true);
+    // The watch stops re-checking once it has released the lease.
+    const probes = t.liveness.probed.length;
+    t.timer.advanceTime(SURVIVOR_RECHECK_MS * 3);
+    await settle();
+    expect(t.liveness.probed).toHaveLength(probes);
+    expect(t.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  it("refuses a start queued behind the AVD the moment its emulator proves unkillable", async () => {
+    const t = setup();
+    t.devices.setWaitForDeviceReadyError(new Error("boot wedged"));
+    const outcome = track(t.boot());
+    await settle();
+    const queued = t.nextRequestForAvd();
+    await settle();
+    expect(t.refusals).toHaveLength(0);
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+
+    expect(outcome.settled()).toBe(true);
+    expect(queued()).toBe(false);
+    expect(t.refusals).toHaveLength(1);
+    expect(String((t.refusals[0] as Error).message)).toContain(`held by unkillable process ${PID}`);
+  });
+
+  it("returns to an aborted caller at once while cleanup finishes in the background holding the lease", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    const reason = new Error("request cancelled");
+    t.devices.waitForDeviceReady = async () => await new Promise<BootedDevice>(() => {});
+    const outcome = track(t.boot(undefined, controller.signal));
+    await settle();
+
+    controller.abort(reason);
+    await settle();
+
+    // No timer has advanced: the caller is not held for the 2 s termination wait.
+    expect(outcome.settled()).toBe(true);
+    expect(outcome.error()).toBe(reason);
+    expect(reason.message).toBe("request cancelled");
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    const nextGranted = t.nextRequestForAvd();
+    await settle();
+    expect(nextGranted()).toBe(false);
+
+    // The daemon keeps finishing the cleanup, still holding the lease.
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    expect(t.emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(nextGranted()).toBe(false);
+    t.emulator.exit();
+    await settle();
+    expect(nextGranted()).toBe(true);
+  });
+
+  it("keeps a late-abandoned cleanup's survivor holding the lease and reports it", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    t.devices.waitForDeviceReady = async () => await new Promise<BootedDevice>(() => {});
+    const outcome = track(t.boot(undefined, controller.signal));
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+    expect(outcome.settled()).toBe(true);
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    const next = t.nextRequestForAvd();
+    await settle();
+
+    expect(next()).toBe(false);
+    expect(String((t.refusals[0] as Error).message)).toContain(`held by unkillable process ${PID}`);
+    t.liveness.running = false;
+    t.timer.advanceTime(SURVIVOR_RECHECK_MS);
+    await settle();
+    const afterGone = t.nextRequestForAvd();
+    await settle();
+    expect(afterGone()).toBe(true);
+  });
+
+  it("still waits in full when an injected lease has no way to hold the survivor", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    t.devices.waitForDeviceReady = async () => await new Promise<BootedDevice>(() => {});
+    const lease = await t.coordinator.reserve(
+      { kind: "stable", platform: "android", stableId: image.name },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+    const outcome = track(t.boot(lease, controller.signal, false));
+    await settle();
+
+    controller.abort(new Error("request cancelled"));
+    await settle();
+    expect(outcome.settled()).toBe(false);
+
+    t.emulator.exit();
+    await settle();
+    expect(outcome.settled()).toBe(true);
+    lease.release();
   });
 
   it("never signals an adopted running emulator", async () => {

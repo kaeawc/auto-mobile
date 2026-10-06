@@ -95,6 +95,7 @@ import {
   ElementResolver,
   isMissingContainerError,
   type MatchMode,
+  type ContainerFailure,
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
 import {
@@ -537,12 +538,30 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 const observeScopeFocusSchema = z
   .union([
     z.boolean(),
-    z.object({
-      resourceId: z.string().optional().describe("Anchor by exact resource-id"),
-      text: z.string().optional().describe("Anchor by substring text match"),
-    }),
+    nestedElementContainerSchema,
+    z.preprocess(
+      (value, ctx) => {
+        if (
+          value &&
+          typeof value === "object" &&
+          ["elementId", "container", "index", "selectionStrategy"].some((key) => key in value)
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Use the nested element selector form for scoped queries",
+          });
+        }
+        return value;
+      },
+      z.object({
+        resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+        text: z.string().optional().describe("Anchor by substring text match"),
+      }),
+    ),
   ])
-  .describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor.");
+  .describe(
+    "Scope to a subtree: true = foreground app; legacy {resourceId|text} anchor, or {elementId|text, container?, index?, selectionStrategy?} recursive selector.",
+  );
 
 const observeScopeRegionBoxSchema = z
   .object({
@@ -788,6 +807,33 @@ export interface WaitForObservationOutcome {
   waitMs: number;
   matchedElement?: Element;
   candidates?: Element[];
+  containerFailure?: ContainerFailure;
+}
+
+interface ObserveConditionEvaluation extends ConditionEvaluation {
+  containerFailure?: ContainerFailure;
+}
+
+function containerFailureMetadata(failed: boolean, failure: ContainerFailure | undefined) {
+  return failed && failure ? { containerFailure: failure } : {};
+}
+
+/** Record resolver diagnostics without changing predicate matching or other tools. */
+function trackContainerFailure(finder: ConditionResolver) {
+  let failure: ContainerFailure | undefined;
+  return {
+    finder: {
+      resolve: (...args: Parameters<ConditionResolver["resolve"]>) => {
+        const result = finder.resolve(...args);
+        failure ??= result.containerFailure;
+        return result;
+      },
+    } satisfies ConditionResolver,
+    failure: () => failure,
+    reset: () => {
+      failure = undefined;
+    },
+  };
 }
 
 /** True when the waitFor options are the #4398 declarative `for` DSL form. */
@@ -928,9 +974,9 @@ const runWaitForConditionDsl = async (
     return applySettledGate(outcome, settle.settled);
   }
 
-  const finder = new ElementResolver();
-  const predicate = buildConditionPredicate(
-    finder,
+  const tracked = trackContainerFailure(new ElementResolver());
+  const evaluate = buildConditionPredicate(
+    tracked.finder,
     waitFor.for,
     {
       elementId: waitFor.elementId,
@@ -940,6 +986,11 @@ const runWaitForConditionDsl = async (
     },
     { stableReads: waitFor.stableReads },
   );
+  const predicate: ConditionPredicate = (observation) => {
+    tracked.reset();
+    const evaluation = evaluate(observation);
+    return { ...evaluation, ...containerFailureMetadata(!evaluation.matched, tracked.failure()) };
+  };
   const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
     timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
@@ -956,6 +1007,7 @@ const runWaitForConditionDsl = async (
     waitMs: result.waitMs,
     matchedElement: result.matchedElement,
     candidates: result.candidates,
+    ...containerFailureMetadata(result.timedOut, tracked.failure()),
     ...(result.diagnostic
       ? {
           timeoutReason: `Timed out after ${result.waitMs} ms waiting for ${waitFor.for}; ${result.diagnostic}`,
@@ -1367,14 +1419,16 @@ const evaluateWaitForObservation = (
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
-): ConditionEvaluation & { awaitedElement?: Element } => {
+): ObserveConditionEvaluation & { awaitedElement?: Element } => {
   const sizeOptions = {
     platform,
     iosMultiPanel,
     observationScreenSize: observation.screenSize,
     display: observation.viewHierarchy,
   };
-  const evaluation: ConditionEvaluation = { matched: false };
+  const evaluation: ObserveConditionEvaluation = { matched: false };
+  const tracked = trackContainerFailure(finder);
+  finder = tracked.finder;
   const needsHierarchy =
     hasElementPredicate(waitFor) || waitFor.absent !== undefined || waitFor.settled !== undefined;
   const diagnostic = needsHierarchy ? waitCaptureUnavailableReason(observation) : undefined;
@@ -1407,14 +1461,16 @@ const evaluateWaitForObservation = (
           )
         : false;
 
+  const matched = [
+    activeWindowMatched,
+    displayMatched,
+    absentSatisfied,
+    !needsElementMatch || awaitedElement !== null,
+  ].every(Boolean);
   return {
     ...evaluation,
-    matched: [
-      activeWindowMatched,
-      displayMatched,
-      absentSatisfied,
-      !needsElementMatch || awaitedElement !== null,
-    ].every(Boolean),
+    ...containerFailureMetadata(!matched, tracked.failure()),
+    matched,
     awaitedElement: awaitedElement ?? undefined,
   };
 };
@@ -1562,13 +1618,16 @@ function recordDisplayWaitEvidence(
   activeDisplayEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
 }
 
-function scopedWaitTimeoutMetadata(evaluation: ConditionEvaluation, waitMs: number) {
-  return evaluation.diagnostic
-    ? {
-        candidates: evaluation.candidates,
-        timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
-      }
-    : {};
+function scopedWaitTimeoutMetadata(evaluation: ObserveConditionEvaluation, waitMs: number) {
+  return {
+    ...containerFailureMetadata(!evaluation.matched, evaluation.containerFailure),
+    ...(evaluation.diagnostic
+      ? {
+          candidates: evaluation.candidates,
+          timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
+        }
+      : {}),
+  };
 }
 
 export const waitForObservation = async (
@@ -1956,6 +2015,7 @@ function createObserveWaitResponse(
     waitMs: waitOutcome.waitMs,
     matchedElement: waitOutcome.matchedElement,
     candidates: waitOutcome.candidates,
+    ...(waitOutcome.containerFailure ? { containerFailure: waitOutcome.containerFailure } : {}),
   };
   return createObserveResponse(
     { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
@@ -2217,6 +2277,7 @@ function createSettledGate({
     let matchedElement = outcome.matchedElement;
     let awaitedElement = outcome.awaitedElement;
     let conditionMatched = true;
+    let lastEvaluation: ObserveConditionEvaluation = { matched: true };
     while (timer.now() - startTime < timeoutMs) {
       if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
         return {
@@ -2248,9 +2309,10 @@ function createSettledGate({
       throwIfAborted(signal);
       polls++;
       const unavailableReason = waitCaptureUnavailableReason(observation);
-      const evaluation: ConditionEvaluation = unavailableReason
+      const evaluation: ObserveConditionEvaluation = unavailableReason
         ? { matched: false, diagnostic: unavailableReason }
         : recheck(observation);
+      lastEvaluation = evaluation;
       if (!evaluation.matched) {
         conditionMatched = false;
         matchedHash = null;
@@ -2277,6 +2339,7 @@ function createSettledGate({
       settled: false,
       timedOut: true,
       matched: conditionMatched,
+      ...containerFailureMetadata(!conditionMatched, lastEvaluation.containerFailure),
       ...scopedWaitTimeoutMetadata(
         { matched: conditionMatched, diagnostic: unavailableReason },
         timer.now() - startTime,

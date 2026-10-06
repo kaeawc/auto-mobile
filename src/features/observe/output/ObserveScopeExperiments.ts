@@ -1,9 +1,13 @@
+import { ElementResolver, matchedSourceNode } from "../../utility/ElementResolver";
+import { SearchableHierarchy } from "../../utility/SearchableNode";
+import type { ElementContainerSelector } from "../../../models/PinchOnOptions";
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { LayoutWarnings } from "../../../models/ObservationInsets";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import { nodeAttributes } from "../../../models/ViewHierarchyResult";
 import type {
   FocusAnchor,
+  ObserveFocusSelector,
   NormalizedRegion,
   ObserveScopeInput,
   ObserveScopeKind,
@@ -12,6 +16,7 @@ import type {
 
 export type {
   FocusAnchor,
+  ObserveFocusSelector,
   NormalizedRegion,
   ObserveScopeInput,
   ObserveScopeKind,
@@ -60,7 +65,7 @@ export interface ObserveScopeConfig {
   /** Requested dimensions withheld because their server experiment flags are off. */
   gatedOff?: ObserveScopeKind[];
   /** Optional FOCUS anchor; when absent, FOCUS scopes to the foreground app. */
-  focusAnchor?: FocusAnchor;
+  focusAnchor?: ObserveFocusSelector;
   /** OVERVIEW on. */
   overview: boolean;
   /** REGION on. */
@@ -190,25 +195,36 @@ function withChildren(node: NodeRecord, children: NodeRecord[]): NodeRecord {
  * FOCUS
  * ------------------------------------------------------------------------ */
 
-/** Depth-first search for the first node matching a semantic anchor. */
-function findAnchor(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord | null {
+/** Preserve legacy depth-first anchor order while counting its matches. */
+function findAnchors(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord[] {
+  const matches: NodeRecord[] = [];
   for (const node of nodes) {
     if (anchor.resourceId !== undefined && stringAttr(node, "resource-id") === anchor.resourceId) {
-      return node;
-    }
-    if (
+      matches.push(node);
+    } else if (
       anchor.text !== undefined &&
       anchor.text !== "" &&
       stringAttr(node, "text").includes(anchor.text)
     ) {
-      return node;
+      matches.push(node);
     }
-    const found = findAnchor(childrenOf(node), anchor);
-    if (found) {
-      return found;
-    }
+    matches.push(...findAnchors(childrenOf(node), anchor));
   }
-  return null;
+  return matches;
+}
+
+/** Legacy anchors may supply both fields; discovery names the rule that matched. */
+function legacyFocusChain(roots: NodeRecord[], anchor: FocusAnchor, matched?: NodeRecord) {
+  const byId =
+    anchor.resourceId !== undefined &&
+    (!matched || stringAttr(matched, "resource-id") === anchor.resourceId);
+  const discoveryAnchor = byId ? { resourceId: anchor.resourceId } : { text: anchor.text };
+  return [
+    {
+      selector: byId ? { elementId: anchor.resourceId } : { text: anchor.text },
+      matchCount: findAnchors(roots, discoveryAnchor).length,
+    },
+  ];
 }
 
 /**
@@ -286,6 +302,46 @@ function filterElementsByForeignPackage(obs: ObserveResult, fgPackage: string): 
   elements.text = (elements.text ?? []).filter(keep);
 }
 
+/** New selector form shares action resolution over this one cloned capture. */
+function scopeToSelector(
+  obs: ObserveResult,
+  selector: ElementContainerSelector,
+): { result: ObserveResult; focus: NonNullable<ObserveScopeMetadata["focus"]> } {
+  const snapshot = {
+    id: "observe-focus",
+    nodes: obs.viewHierarchy ? new SearchableHierarchy().project(obs.viewHierarchy) : [],
+  };
+  const resolution = new ElementResolver().resolve(snapshot, selector, { action: "inspect" });
+  const matched = resolution.chosen ? matchedSourceNode(resolution, selector) : undefined;
+  setRootNodes(obs, matched ? [matched.source as NodeRecord] : []);
+  // Window roots and categorized elements must not leak peers outside the subtree.
+  if (obs.viewHierarchy) {
+    delete obs.viewHierarchy.windows;
+  }
+  delete obs.elements;
+  const chain = (resolution.scopeChain ?? []).map(({ selector: query, matchCount }) => ({
+    selector: query,
+    matchCount,
+  }));
+  if (!resolution.containerFailure) {
+    chain.push({ selector, matchCount: resolution.candidates.length });
+  }
+  return {
+    result: obs,
+    focus: {
+      by: "anchor",
+      matched: matched !== undefined,
+      chain,
+      ...(resolution.error ? { error: resolution.error } : {}),
+      ...(resolution.containerFailure ? { containerFailure: resolution.containerFailure } : {}),
+    },
+  };
+}
+
+function isResolverFocus(anchor: ObserveFocusSelector): anchor is ElementContainerSelector {
+  return ["elementId", "container", "index", "selectionStrategy"].some((key) => key in anchor);
+}
+
 /**
  * FOCUS transform. With an anchor, keep only the matched node's subtree. Without
  * one (`scope.focus: true`), drop identifiable non-foreground chrome. Returns the
@@ -293,17 +349,29 @@ function filterElementsByForeignPackage(obs: ObserveResult, fgPackage: string): 
  */
 export function scopeToFocus(
   input: ObserveResult,
-  anchor?: FocusAnchor,
+  anchor?: ObserveFocusSelector,
 ): { result: ObserveResult; focus: NonNullable<ObserveScopeMetadata["focus"]> } {
   const obs = clone(input);
   const roots = rootNodes(obs);
 
-  if (anchor && (anchor.resourceId !== undefined || anchor.text !== undefined)) {
-    const matched = findAnchor(roots, anchor);
+  if (anchor && isResolverFocus(anchor)) {
+    return scopeToSelector(obs, anchor);
+  }
+  const legacy: FocusAnchor | undefined = anchor;
+  if (legacy && (legacy.resourceId !== undefined || legacy.text !== undefined)) {
+    const matches = findAnchors(roots, legacy);
+    const matched = matches[0];
     if (matched) {
       setRootNodes(obs, [matched]);
     }
-    return { result: obs, focus: { by: "anchor", matched: matched !== null } };
+    return {
+      result: obs,
+      focus: {
+        by: "anchor",
+        matched: matched !== undefined,
+        chain: legacyFocusChain(roots, legacy, matched),
+      },
+    };
   }
 
   const pkg = foregroundPackage(obs);
@@ -810,7 +878,7 @@ function gatedOffDimensions(
 }
 
 /** The anchor object of a `focus` request, or undefined for the `true` (foreground) form. */
-function focusAnchorOf(focus: ObserveScopeInput["focus"]): FocusAnchor | undefined {
+function focusAnchorOf(focus: ObserveScopeInput["focus"]): ObserveFocusSelector | undefined {
   return typeof focus === "object" ? focus : undefined;
 }
 

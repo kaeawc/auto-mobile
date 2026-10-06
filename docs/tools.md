@@ -2004,6 +2004,50 @@ index carries `selector.ambiguous: true`, including inert matches and groups
 with a child that can promote to a tap or toggle ancestor. Unique selectors
 carry neither `index` nor `ambiguous`; selectors with an index omit `ambiguous`.
 
+`observe({ project: "full", scope: { focus: ... } })` also accepts the action
+selector vocabulary: exactly one `elementId` or `text`, optional `container`
+(recursive), `index`, and `selectionStrategy`. The shared resolver resolves
+outermost-first through strict descendants, including anonymous wrappers;
+noninteractive containers are valid. `unique` is recommended for intentional
+queries and applies at every unindexed level. Explicit indices override
+uniqueness within the resolver's existing ranked candidate set at that level.
+Scope cannot expose descendants missing from the automation hierarchy.
+
+For example, on Android (resource IDs) or iOS (accessibility identifiers):
+
+```json
+{
+  "project": "full",
+  "scope": {
+    "focus": {
+      "elementId": "item_42",
+      "container": { "elementId": "cart_A" },
+      "selectionStrategy": "unique"
+    }
+  }
+}
+```
+
+The returned `observeScope.focus.chain` lists outermost-to-target selectors and
+`matchCount` at each level, before index selection. Selectors use `elementId` /
+`text` and retain their enclosing `container`, indices, and effective strategy,
+so the final selector can become an action's `container` (for example, tap
+`remove` within that item). Use qualified Android resource IDs when needed.
+No scope metadata is added to an observation that did not request a scope.
+Legacy `{resourceId}` / flat `{text}` anchors retain their exact-ID / substring
+matching and first-node behavior; their metadata additionally reports one level
+and its count. Boolean foreground-app focus keeps its existing metadata.
+As before, scope transforms apply to full projection, not the default skeleton.
+
+A failed new selector returns an empty subtree and `observeScope.focus.matched:
+false`, with the resolver's unchanged `error`. A missing leaf reports
+`Target not found within container`; missing or ambiguous ancestors additionally
+carry `containerFailure: { level, reason: "not-found" | "ambiguous", selector }`.
+Levels are one-based from the outermost container. Successful ancestor levels
+remain in `chain`; target counts are included when its ancestors resolved.
+`observe.waitFor` container timeouts expose the same optional `containerFailure`
+at the top level, alongside the existing `timeoutReason` and candidates.
+
 `observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
 `textEquals`, `countStable`, and legacy element predicates) accept a nested
 `container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.

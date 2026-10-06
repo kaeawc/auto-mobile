@@ -69,6 +69,18 @@ export type MatchKind =
   | "regex"
   | "class-exact"
   | "all";
+export interface ContainerFailure {
+  level: number;
+  reason: "not-found" | "ambiguous";
+  selector: ResolverSelector;
+}
+
+export interface ResolvedScope {
+  selector: ResolverSelector;
+  node: SearchableEntry;
+  matchCount: number;
+}
+
 export interface ElementResolution {
   chosen: SearchableEntry | null;
   snapshotNodes?: readonly SearchableEntry[];
@@ -82,6 +94,8 @@ export interface ElementResolution {
   }[];
   matchMode: MatchMode;
   scope?: SearchableEntry;
+  scopeChain?: ResolvedScope[];
+  containerFailure?: ContainerFailure;
   error?: string;
 }
 
@@ -324,6 +338,11 @@ export class ElementResolver {
     const ambiguous = /ambiguous/i.test(result.error ?? "");
     return {
       ...result,
+      containerFailure: {
+        level,
+        reason: ambiguous ? "ambiguous" : "not-found",
+        selector,
+      },
       error: `Container level ${level} ${ambiguous ? "ambiguous" : "not found"}: ${selector.elementId ?? selector.text}${ambiguous ? `; ${this.candidateDetails(result.candidates)}` : ""}`,
     };
   }
@@ -356,6 +375,7 @@ export class ElementResolver {
         return true;
       });
     let scope: SearchableEntry | undefined = boundary;
+    const scopeMetadata: Pick<ElementResolution, "scopeChain"> = {};
     let siblingCandidateNodes: SearchableEntry[] | undefined;
     if (selector.container) {
       const container = this.resolveInNodes(
@@ -373,6 +393,14 @@ export class ElementResolver {
       // rooted at the node that actually supplied the text, so siblings in
       // that row do not become descendants of the requested container.
       scope = containerSource(selector.container, container) ?? container.chosen;
+      scopeMetadata.scopeChain = [
+        ...(container.scopeChain ?? []),
+        {
+          selector: this.containerSelector(selector),
+          node: scope,
+          matchCount: container.candidates.length,
+        },
+      ];
       nodes = nodes.filter((node) => isWithin(node, scope!, snapshot.nodes));
     }
     if (selector.sibling) {
@@ -410,6 +438,7 @@ export class ElementResolver {
       candidates: matched.matches.map(({ node }) => node),
       ...matched,
       scope,
+      ...scopeMetadata,
     };
     if (matched.error) {
       return result;

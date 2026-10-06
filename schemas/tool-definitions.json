@@ -8815,10 +8815,13 @@
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor.",
+              "description": "Scope to a subtree: true = foreground app; legacy {resourceId|text} anchor, or {elementId|text, container?, index?, selectionStrategy?} recursive selector.",
               "anyOf": [
                 {
                   "type": "boolean"
+                },
+                {
+                  "$ref": "#/$defs/__schema0"
                 },
                 {
                   "type": "object",

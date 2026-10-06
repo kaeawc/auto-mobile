@@ -4,6 +4,8 @@
  * normalization rules apply to ADB and `defaults read` output.
  */
 
+import { logger } from "../../../utils/logger";
+
 export function normalizeSettingValue(value: string | null): string | null {
   if (value === null || value === undefined) {
     return null;
@@ -89,5 +91,60 @@ export function extractCalendarFromLocale(locale: string): string | null {
     }
   }
 
+  return null;
+}
+
+/** Private-use language range reserved by BCP 47 / ISO 639 (`qaa` through `qtz`). */
+const PRIVATE_USE_LANGUAGE = /^q[a-t][a-z]$/;
+
+function isKnownLanguageSubtag(primary: string): boolean {
+  try {
+    // With `fallback: "none"` an unrecognised language code yields undefined
+    // instead of echoing the code back (e.g. `zz`, `qaa`).
+    const names = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
+    return names.of(primary) !== undefined;
+  } catch (error) {
+    // A runtime without Intl.DisplayNames language data cannot answer this;
+    // treat the language as acceptable rather than rejecting a real locale.
+    // The read-back verification still guards the apply.
+    logger.debug(`Intl.DisplayNames unavailable for language "${primary}": ${error}`);
+    return true;
+  }
+}
+
+/**
+ * Check, before anything is sent to a device, that a locale tag is a
+ * well-formed BCP 47 language tag whose primary language the runtime
+ * recognises. Android turns a tag it cannot make sense of into `und` (or keeps
+ * only its leading subtag, e.g. `zz`) and keeps that value applied, so a tag
+ * that fails here would otherwise be left on the device (issue #10155).
+ *
+ * Accepts `fr-FR`, `sr-Latn-RS`, `zh-Hant-TW`, `en-u-ca-buddhist` and the
+ * POSIX-style `en_US` spelling (`_` is read as `-`, as Android does). Rejects a
+ * malformed tag (stray punctuation, over-long subtags, a comma-separated list,
+ * a private-use-only tag), `und` and any `und-*` tag, the private-use language
+ * range `qaa`-`qtz`, and a primary language the runtime does not know.
+ *
+ * Returns an error message when the tag is rejected, otherwise `null`.
+ */
+export function validateLocaleTag(languageTag: string): string | null {
+  const expected = 'e.g. "fr-FR", "sr-Latn-RS" or "zh-Hant-TW"';
+  let canonical: string;
+  try {
+    canonical = Intl.getCanonicalLocales(languageTag.replace(/_/g, "-"))[0] ?? "";
+  } catch (error) {
+    // Intl throws RangeError for a structurally invalid tag; that is the
+    // rejection signal this validator exists to report.
+    logger.debug(`locale tag "${languageTag}" is not a well-formed BCP 47 tag: ${error}`);
+    return `Invalid locale "${languageTag}": not a well-formed BCP 47 language tag (${expected}).`;
+  }
+
+  const primary = canonical.split("-")[0].toLowerCase();
+  if (primary === "und") {
+    return `Invalid locale "${languageTag}": "und" (undetermined) is not a real locale; use a language such as "fr-FR".`;
+  }
+  if (PRIVATE_USE_LANGUAGE.test(primary) || !isKnownLanguageSubtag(primary)) {
+    return `Invalid locale "${languageTag}": "${primary}" is not a recognised language (${expected}).`;
+  }
   return null;
 }

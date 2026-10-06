@@ -70,6 +70,8 @@ import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard, KeyboardOpenIndeterminateError } from "../features/action/Keyboard";
+import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
+import { serverConfig } from "../utils/ServerConfig";
 import { withAndroidImeLock } from "../features/action/androidImeLock";
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
@@ -3330,11 +3332,19 @@ export function registerInteractionTools() {
       args.display,
       { container: args.container, selectionStrategy: args.selectionStrategy },
     );
+    const dismissal = await dismissKeyboardAfterSendKeys(
+      device,
+      serverConfig.isDismissKeyboardAfterInputEnabled(),
+      result.success,
+      async (closeSignal) => keyboardFactory(device).execute("close", closeSignal),
+      signal,
+    );
     const response = createStructuredToolResponse({
       message: result.success
-        ? `Executed ${result.completedCommands} sendKeys command(s)`
+        ? `Executed ${result.completedCommands} sendKeys command(s)${dismissal.warnings?.length ? `. Warning: ${dismissal.warnings.join("; ")}` : ""}`
         : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
       ...result,
+      ...dismissal,
     });
     return result.success ? response : { ...response, isError: true };
   };

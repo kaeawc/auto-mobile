@@ -2097,12 +2097,71 @@ const NOTIFICATION_ROW_RESOURCE_ID = "com.android.systemui:id/expandableNotifica
 // clearAll takes between swipes.
 const SYSTEM_TRAY_DISMISS_SETTLE_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100;
 
-/** How many rows match the criteria in a hierarchy (used to compare before/after a dismiss). */
-export const countNotificationMatches = (
+// A row's relative timestamp ("now", "1 min") and its expand/collapse affordance
+// ("Expand" / "Collapse") change while the shade settles, so neither is part of
+// the row's identity.
+const NOTIFICATION_ROW_VOLATILE_TEXT_ID = /\/(time|time_divider|chronometer|date)$|expand_button/;
+
+const isVolatileRowTextNode = (node: ViewHierarchyNode): boolean => {
+  const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- Classifies a SystemUI layout node; user element selection uses the resolver.
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  return NOTIFICATION_ROW_VOLATILE_TEXT_ID.test(resourceId);
+};
+
+const collectStableRowTexts = (node: ViewHierarchyNode): string[] => {
+  if (!node) {
+    return [];
+  }
+  return [
+    ...(isVolatileRowTextNode(node) ? [] : extractNodeTextCandidates(node)),
+    ...getDirectChildNodes(node).flatMap(collectStableRowTexts),
+  ];
+};
+
+/**
+ * Identity of a notification row. CtrlProxy exposes no notification key and row
+ * bounds shift when siblings leave, so a row is identified by its own
+ * non-volatile texts (title, body, app label). Null when the row has no text.
+ */
+const notificationRowSignature = (node: ViewHierarchyNode): string | null => {
+  const texts = collectStableRowTexts(node);
+  return texts.length > 0 ? JSON.stringify(texts) : null;
+};
+
+const countRowsWithSignature = (viewHierarchy: ViewHierarchyResult, signature: string): number =>
+  collectNotificationCandidates(viewHierarchy).filter(
+    (candidate) => notificationRowSignature(candidate.node) === signature,
+  ).length;
+
+/** What the swiped row looked like before the swipe, to compare against after it. */
+export interface NotificationDismissBaseline {
+  match: SystemTrayNotificationMatch;
+  /** Criteria matches before the swipe; the comparison for a row with no identity. */
+  matchCountBefore: number;
+  /** Identity of the swiped row; null when it is not a text-bearing row of the shade. */
+  rowSignature: string | null;
+  /** Rows sharing that identity before the swipe. */
+  rowCountBefore: number;
+}
+
+export const captureNotificationDismissBaseline = (
   viewHierarchy: ViewHierarchyResult,
+  match: SystemTrayNotificationMatch,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
-): number => findNotificationMatches(viewHierarchy, criteria, appMatchTexts).length;
+): NotificationDismissBaseline => {
+  const signature = notificationRowSignature(match.candidate.node);
+  const rowCountBefore = signature === null ? 0 : countRowsWithSignature(viewHierarchy, signature);
+  return {
+    match,
+    matchCountBefore: findNotificationMatches(viewHierarchy, criteria, appMatchTexts).length,
+    // A swiped node that is not one of the shade's rows (composite or root
+    // fallback match) has no identity to track; those compare criteria counts.
+    rowSignature: rowCountBefore > 0 ? signature : null,
+    rowCountBefore,
+  };
+};
 
 // SystemUI only advertises the accessibility "dismiss" action on rows that can
 // be swiped away, so a row that lists actions without it is ongoing or
@@ -2133,7 +2192,7 @@ export type NotificationDismissVerification =
  */
 export const verifyNotificationDismissed = async (
   device: BootedDevice,
-  swiped: { match: SystemTrayNotificationMatch; matchCountBefore: number },
+  swiped: NotificationDismissBaseline,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   observation: ObserveResult,
@@ -2145,9 +2204,20 @@ export const verifyNotificationDismissed = async (
     if (!hierarchy || !detector.isTrayOpen(hierarchy)) {
       return "indeterminate";
     }
-    return countNotificationMatches(hierarchy, criteria, appMatchTexts) < swiped.matchCountBefore
-      ? "dismissed"
-      : "present";
+    // The swiped row's own identity decides when it has one: a new matching
+    // notification arriving mid-settle, or an unrelated matching row leaving,
+    // must not flip the outcome. Only shade rows are counted then, so a
+    // root-text fallback match (a status-bar icon, whole-screen text) cannot
+    // inflate the post-swipe count once no rows are left.
+    const { rowSignature } = swiped;
+    const [remaining, before] =
+      rowSignature === null
+        ? [
+            findNotificationMatches(hierarchy, criteria, appMatchTexts).length,
+            swiped.matchCountBefore,
+          ]
+        : [countRowsWithSignature(hierarchy, rowSignature), swiped.rowCountBefore];
+    return remaining < before ? "dismissed" : "present";
   };
   let verified = observation;
   let outcome = classify(verified);

@@ -67,6 +67,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
   private spawnedProcesses: FakeAdbProcess[] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
+  private spawnStdouts: Array<{ match: string; stdout: string }> = [];
   // A single merged log of executeCommand()/spawn() calls in the order they
   // actually happened. `commandCalls`/`spawnCalls` are separate arrays, so a
   // count- or membership-only assertion against them can't tell a caller that
@@ -176,6 +177,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
     }
     const proc = new FakeAdbProcess();
     this.spawnedProcesses.push(proc);
+    const stdout = this.spawnStdouts.find((s) => joined.includes(s.match));
+    if (stdout) {
+      proc.stdout.push(stdout.stdout);
+    }
     if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
     } else {
@@ -194,6 +199,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setSpawnExit(match: string, code: number, stderr?: string): void {
     this.spawnBehaviors.push({ match, outcome: { kind: "exit", code, stderr } });
+  }
+
+  /** Make a spawned command whose argv contains `match` print `stdout` (buffered until read). */
+  setSpawnStdout(match: string, stdout: string): void {
+    this.spawnStdouts.push({ match, stdout });
   }
 
   setSpawnError(match: string, error: Error): void {

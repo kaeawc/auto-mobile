@@ -165,6 +165,11 @@ interface SkeletonAccumulator {
   elementId?: string;
   label?: string;
   editableHint?: string;
+  /**
+   * The hint is not already a searchable label source (Android: iOS puts it in the
+   * searchable text fields), so a labelled field must surface it itself (#9346).
+   */
+  hintBesideLabel?: true;
   sublabel?: string;
   testTag?: string;
   semanticLinks?: SkeletonElement["semanticLinks"];
@@ -211,6 +216,26 @@ function strictlyContains(
   );
 }
 
+/** Seed an accumulator from the first element seen for an identity. */
+function newAccumulator(
+  el: Element,
+  { elementId, label, affordances, textSources }: ReturnType<typeof toSkeletonSearchable>,
+  bounds: SkeletonElement["bounds"],
+): SkeletonAccumulator {
+  const acc: SkeletonAccumulator = {
+    elementId,
+    label,
+    editableHint: affordances.includes("input") ? nonEmptyString(el["hint-text"]) : undefined,
+    sublabel: deriveSublabel(el, label),
+    bounds,
+    affordances: new Set<Affordance>(),
+  };
+  if (textSources["hint-text"] === undefined) {
+    acc.hintBesideLabel = true;
+  }
+  return acc;
+}
+
 /**
  * Merge overlapping element categories into one accumulator per `(elementId, label,
  * bounds)` triple, unioning affordances. `text` overlaps `clickable`/`scrollable`
@@ -229,19 +254,13 @@ function accumulateByIdentity(
     if (!bounds) {
       continue;
     }
-    const { elementId, label, affordances } = toSkeletonSearchable(el);
+    const searchable = toSkeletonSearchable(el);
+    const { elementId, label, affordances } = searchable;
     const key = identityKey(elementId, label, bounds);
 
     let acc = byIdentity.get(key);
     if (!acc) {
-      acc = {
-        elementId,
-        label,
-        editableHint: affordances.includes("input") ? nonEmptyString(el["hint-text"]) : undefined,
-        sublabel: deriveSublabel(el, label),
-        bounds,
-        affordances: new Set<Affordance>(),
-      };
+      acc = newAccumulator(el, searchable, bounds);
       byIdentity.set(key, acc);
     }
     if (acc.provenance === undefined) {
@@ -339,11 +358,23 @@ function hoistContainerLabels(
   }
 }
 
-/** Use an editable field's placeholder only when it has no label after descendant hoisting. */
+/**
+ * Use an editable field's placeholder as its label only when it has none after
+ * descendant hoisting. A field that already has a label keeps it, and a distinct
+ * hint is carried in `sublabel` so a filled field can still be told apart by the
+ * placeholder it was addressed by before it had text (#9346). The hint is never
+ * emitted as the label of a labelled field, so it cannot read as the field's value.
+ */
 function applyEditableHintFallback(accumulators: SkeletonAccumulator[]): void {
   for (const acc of accumulators) {
-    if (acc.label === undefined && acc.affordances.has("input") && acc.editableHint !== undefined) {
-      acc.label = acc.editableHint;
+    const hint = acc.editableHint;
+    if (hint === undefined || !acc.affordances.has("input")) {
+      continue;
+    }
+    if (acc.label === undefined) {
+      acc.label = hint;
+    } else if (acc.hintBesideLabel && acc.label.trim() !== hint.trim()) {
+      acc.sublabel = [...new Set([acc.sublabel?.trim(), hint.trim()].filter(Boolean))].join(", ");
     }
   }
 }

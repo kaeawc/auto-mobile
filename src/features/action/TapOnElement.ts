@@ -5094,7 +5094,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
       if (!longPressResult.success) {
         if (longPressResult.semanticActionFailure) {
-          throw new Error(
+          throw new ActionableError(
             `Semantic long press failed for the selected element: ${longPressResult.error ?? "unknown error"}`,
           );
         }

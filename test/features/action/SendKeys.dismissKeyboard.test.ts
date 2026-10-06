@@ -108,6 +108,39 @@ describe("sendKeys dismiss keyboard after input (#10221)", () => {
     expect(h.events).toEqual(["type", "key:tab", "type", "close", "observe"]);
   });
 
+  test.each(["search", "done", "go", "send"] as const)(
+    "skips the dismissal when a '%s' IME key follows the last entry: the keyboard is already going away and the app may have navigated",
+    async (key) => {
+      const h = setup();
+      const result = await h.sendKeys.execute([typeCommand, { action: "key", key }]);
+      expect(result.success).toBe(true);
+      expect(h.events).toEqual(["type", `key:${key}`, "observe"]);
+    },
+  );
+
+  test("skips the dismissal when a semantic key follows the last of several entries", async () => {
+    const h = setup();
+    await h.sendKeys.execute([
+      typeCommand,
+      { action: "key", key: "tab" },
+      typeCommand,
+      { action: "key", key: "search" },
+    ]);
+    expect(h.events).toEqual(["type", "key:tab", "type", "key:search", "observe"]);
+  });
+
+  test("still closes when the semantic key came before the last entry", async () => {
+    const h = setup();
+    await h.sendKeys.execute([typeCommand, { action: "key", key: "next" }, typeCommand]);
+    expect(h.events).toEqual(["type", "key:next", "type", "close", "observe"]);
+  });
+
+  test("still closes when only a non-semantic key follows the last entry", async () => {
+    const h = setup();
+    await h.sendKeys.execute([typeCommand, { action: "key", key: "tab" }]);
+    expect(h.events).toEqual(["type", "key:tab", "close", "observe"]);
+  });
+
   test("does nothing when the option is off", async () => {
     const h = setup({ enabled: false });
     expect((await h.sendKeys.execute([typeCommand])).success).toBe(true);

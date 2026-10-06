@@ -3077,7 +3077,9 @@ export class SendKeys {
    * that types, moves to the next field and types again keeps its keyboard. Skipped on iOS (the
    * option was always Android-only), after a failure or indeterminate outcome (the caller must not
    * be told more than the entry reported), when no command entered text, and on an explicitly
-   * routed display (`Keyboard.close` cannot target one). It reuses the state-checked keyboard
+   * routed display (`Keyboard.close` cannot target one), and when a semantic IME key (done, go,
+   * search, next, ...) ran after the last text entry (the keyboard is leaving by itself and the
+   * app may have navigated). It reuses the state-checked keyboard
    * close, so an already-hidden keyboard is left alone and a raw Back is never sent blind. A failed
    * close is a warning on the last text entry, never a failure of the entry.
    */
@@ -3099,6 +3101,15 @@ export class SendKeys {
     if (!lastEntry) {
       return;
     }
+    if (this.endsWithSemanticKeyAfterEntry(execution.results, lastEntry)) {
+      // The key already submitted or moved on: the keyboard is going away by itself and the app
+      // may have navigated, so a state read could mistake the destination's own widgets for an
+      // open keyboard (label heuristic when window metadata is missing) and Back would leave it.
+      logger.debug(
+        "[SendKeys] Keyboard dismissal skipped: a semantic IME key followed the last text entry.",
+      );
+      return;
+    }
     if (routing.display !== undefined) {
       this.addCommandWarning(
         lastEntry,
@@ -3112,6 +3123,16 @@ export class SendKeys {
     if (cause !== undefined) {
       this.addCommandWarning(lastEntry, `keyboard dismissal failed: ${cause}`);
     }
+  }
+
+  /** True when a semantic IME key (done, go, next, ...) ran after the last text entry. */
+  private endsWithSemanticKeyAfterEntry(
+    results: SendKeysCommandResult[],
+    lastEntry: SendKeysCommandResult,
+  ): boolean {
+    return results
+      .slice(results.lastIndexOf(lastEntry) + 1)
+      .some((result) => result.action === "key" && result.key && isSemanticKey(result.key));
   }
 
   /** The reason the keyboard could not be closed, or undefined once it is (or already was) closed. */

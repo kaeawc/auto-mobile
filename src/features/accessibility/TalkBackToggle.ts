@@ -1,13 +1,22 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BootedDevice } from "../../models";
-import type { TalkBackResult, TalkBackBlockingPrompt } from "../../models/AccessibilityResult";
+import type {
+  ScreenReaderToggleOptions,
+  TalkBackResult,
+  TalkBackBlockingPrompt,
+} from "../../models/AccessibilityResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AccessibilityDetector } from "./interfaces/AccessibilityDetector";
 import { accessibilityDetector } from "./AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { type SecureSettingsRpc, CtrlProxySecureSettingsRpc } from "./SecureSettingsRpc";
+import {
+  type TalkBackDialogProbe,
+  type TalkBackDialogProbeResult,
+  CtrlProxyTalkBackDialogProbe,
+} from "./TalkBackDialogProbe";
 
 const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
 const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkBackService`;
@@ -30,9 +39,24 @@ export function isTalkBackRuntimePermissionPrompt(app: {
   );
 }
 
+async function reportPreviousState(
+  options: ScreenReaderToggleOptions | undefined,
+  previousEnabled: boolean,
+): Promise<void> {
+  await options?.beforeChange?.(previousEnabled);
+}
+
+interface DialogDismissState {
+  dialogSeen: boolean;
+  /** A probe or the single fallback dump produced an answer. */
+  observed: boolean;
+  dumpUsed: boolean;
+}
+
 export class TalkBackToggle {
   private readonly adb: AdbExecutor;
   private readonly secureSettings: SecureSettingsRpc;
+  private readonly dialogProbe: TalkBackDialogProbe;
 
   constructor(
     private readonly device: BootedDevice,
@@ -40,12 +64,14 @@ export class TalkBackToggle {
     private readonly detector: AccessibilityDetector = accessibilityDetector,
     private readonly timer: Timer = defaultTimer,
     secureSettings: SecureSettingsRpc | null = null,
+    dialogProbe: TalkBackDialogProbe | null = null,
   ) {
     this.adb = adb ?? defaultAdbClientFactory.create(device);
     this.secureSettings = secureSettings ?? new CtrlProxySecureSettingsRpc(device);
+    this.dialogProbe = dialogProbe ?? new CtrlProxyTalkBackDialogProbe(device);
   }
 
-  async toggle(enabled: boolean): Promise<TalkBackResult> {
+  async toggle(enabled: boolean, options?: ScreenReaderToggleOptions): Promise<TalkBackResult> {
     // Step 1: Verify the Google TalkBack package before enabling it. Disabling
     // relies on the active-service detector so it also removes vendor/AOSP
     // TalkBack components that use the same TalkBackService contract.
@@ -80,6 +106,10 @@ export class TalkBackToggle {
         currentState: enabled,
       };
     }
+
+    // The state is known and about to change: let the caller record it before any write, so a
+    // failure part-way through the write is still restored (#10146).
+    await reportPreviousState(options, talkBackCurrentlyEnabled);
 
     // Step 3: Apply ADB commands. A settings-write failure here (e.g. the a11y
     // path AND the ADB fallback both fail) is wrapped into a typed result rather
@@ -327,9 +357,12 @@ export class TalkBackToggle {
   }
 
   /**
-   * After enabling TalkBack, Android shows a permission dialog that must be
-   * accepted before automation can continue.  Check immediately (no initial
-   * delay), then retry with delays to allow the dialog time to appear.
+   * After enabling TalkBack, Android may show a consent dialog that must be
+   * accepted before automation can continue. A write through `settings put`
+   * normally shows none, so stop as soon as the setting reads enabled. Otherwise
+   * look for the dialog through the CtrlProxy hierarchy, which does not restart
+   * any accessibility service. `uiautomator dump` does, so it is a fallback used
+   * at most once per call and only while CtrlProxy cannot answer (#10147).
    * Match the positive button by resource-id for locale independence, but
    * only when the TalkBack dialog context is confirmed — android:id/button1
    * is a generic ID reused by many dialogs.
@@ -337,64 +370,79 @@ export class TalkBackToggle {
   private async dismissPermissionDialog(): Promise<
     "not-found" | "dismissed" | "could-not-confirm"
   > {
-    let dialogSeen = false;
-    let dumpSucceeded = false;
-    let observedXml: string | null = null;
-
+    const state: DialogDismissState = { dialogSeen: false, observed: false, dumpUsed: false };
     for (let attempt = 0; attempt < DIALOG_DISMISS_RETRIES; attempt++) {
       if (attempt > 0) {
         await this.timer.sleep(DIALOG_DISMISS_DELAY_MS);
       }
-      let xml: string;
-      try {
-        xml = observedXml ?? (await this.dumpWindowHierarchy());
-        dumpSucceeded = true;
-      } catch (error) {
-        logger.warn(`[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} dump failed:`, error);
-        observedXml = null;
-        continue;
-      }
-      observedXml = null;
-
-      const nodeMatch = this.findTalkBackPermissionButton(xml);
-      if (!nodeMatch) {
-        if (dialogSeen) {
-          logger.debug("[TalkBackToggle] TalkBack permission dialog dismissed");
-          return "dismissed";
-        }
-        continue;
-      }
-
-      dialogSeen = true;
-      const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeMatch[0]);
-      if (boundsMatch) {
-        const x = Math.round((parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2);
-        const y = Math.round((parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2);
-        await this.adb.executeCommand(`shell input tap ${x} ${y}`);
-        // Read back immediately after the tap. Reuse a still-matched dump on
-        // the next attempt so the happy path costs just one extra dump.
-        try {
-          observedXml = await this.dumpWindowHierarchy();
-          dumpSucceeded = true;
-        } catch (error) {
-          logger.warn(
-            `[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} read-back dump failed:`,
-            error,
-          );
-          observedXml = null;
-          continue;
-        }
-        if (!this.findTalkBackPermissionButton(observedXml)) {
-          logger.debug("[TalkBackToggle] TalkBack permission dialog dismissed");
-          return "dismissed";
-        }
+      const outcome = await this.dismissAttempt(state);
+      if (outcome) {
+        return outcome;
       }
     }
+    // Nothing could be observed, or a dialog was seen and never confirmed gone.
+    return state.dialogSeen || !state.observed ? "could-not-confirm" : "not-found";
+  }
 
-    if (dialogSeen || !dumpSucceeded) {
-      return "could-not-confirm";
+  private async dismissAttempt(
+    state: DialogDismissState,
+  ): Promise<"not-found" | "dismissed" | undefined> {
+    if ((await this.detectTalkBackEnabled()) === true) {
+      logger.debug("[TalkBackToggle] TalkBack reads enabled; no consent dialog to dismiss");
+      return state.dialogSeen ? "dismissed" : "not-found";
     }
-    return "not-found";
+    const seen = await this.lookForDialog(state);
+    if (seen.kind === "unavailable") {
+      return undefined;
+    }
+    state.observed = true;
+    if (seen.kind === "none") {
+      return state.dialogSeen ? "dismissed" : undefined;
+    }
+    state.dialogSeen = true;
+    if (!seen.tap) {
+      return undefined;
+    }
+    await this.adb.executeCommand(`shell input tap ${seen.tap.x} ${seen.tap.y}`);
+    // Read back right after the tap, without a dump: the fallback dump is spent.
+    const after = await this.lookForDialog(state);
+    if (after.kind === "none") {
+      logger.debug("[TalkBackToggle] TalkBack permission dialog dismissed");
+      return "dismissed";
+    }
+    return undefined;
+  }
+
+  private async lookForDialog(state: DialogDismissState): Promise<TalkBackDialogProbeResult> {
+    const probed = await this.dialogProbe.probe();
+    if (probed.kind !== "unavailable" || state.dumpUsed) {
+      return probed;
+    }
+    state.dumpUsed = true;
+    try {
+      return this.classifyDump(await this.dumpWindowHierarchy());
+    } catch (error) {
+      logger.warn("[TalkBackToggle] Dialog fallback hierarchy dump failed:", error);
+      return { kind: "unavailable" };
+    }
+  }
+
+  private classifyDump(xml: string): TalkBackDialogProbeResult {
+    const nodeMatch = this.findTalkBackPermissionButton(xml);
+    if (!nodeMatch) {
+      return { kind: "none" };
+    }
+    const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeMatch[0]);
+    if (!boundsMatch) {
+      return { kind: "dialog", tap: null };
+    }
+    return {
+      kind: "dialog",
+      tap: {
+        x: Math.round((parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2),
+        y: Math.round((parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2),
+      },
+    };
   }
 
   /** Match button1 only when the TalkBack dialog context is present. */

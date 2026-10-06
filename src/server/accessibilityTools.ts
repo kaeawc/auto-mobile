@@ -14,6 +14,10 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";
+import { DaemonState } from "../daemon/daemonState";
+import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
+import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
+import { runSessionScreenReaderMutation } from "./sessionScreenReader";
 
 export const accessibilitySchema = addDeviceTargetingToSchema(
   z
@@ -35,12 +39,63 @@ export const accessibilitySchema = addDeviceTargetingToSchema(
 interface AccessibilityArgs {
   talkback?: boolean;
   voiceover?: boolean;
+  sessionUuid?: string;
 }
 
-async function toggleTalkBackAccessibility(device: BootedDevice, requestedEnabled: boolean) {
+/**
+ * Run a screen-reader toggle so the state the session found is recorded before it
+ * is changed and restored when the session releases its device (#10146). The slot is
+ * write-once, so a later toggle in the same session never overwrites it.
+ */
+async function toggleRecordingPreviousState<
+  R extends { supported: boolean; currentState?: boolean },
+>(
+  device: BootedDevice,
+  args: AccessibilityArgs,
+  run: (options: ScreenReaderToggleOptions) => Promise<R>,
+): Promise<R> {
+  const manager =
+    args.sessionUuid && DaemonState.getInstance().isInitialized()
+      ? DaemonState.getInstance().getSessionManager()
+      : undefined;
+  const platform = device.platform === "ios" ? "ios" : "android";
+  return runSessionScreenReaderMutation(
+    manager,
+    args.sessionUuid,
+    device.deviceId,
+    async (slot?: ScreenReaderRestoreSlot) => {
+      const alreadyRecorded = slot?.get() !== undefined;
+      let recordedPrevious: boolean | undefined;
+      const result = await run({
+        beforeChange: (previousEnabled) => {
+          if (slot && !alreadyRecorded) {
+            slot.record({ platform, previousEnabled });
+            recordedPrevious = previousEnabled;
+          }
+        },
+      });
+      // Nothing changed (unsupported, or the write never landed): there is nothing to restore.
+      if (
+        recordedPrevious !== undefined &&
+        (!result.supported || result.currentState === recordedPrevious)
+      ) {
+        slot?.clear();
+      }
+      return result;
+    },
+  );
+}
+
+async function toggleTalkBackAccessibility(
+  device: BootedDevice,
+  args: AccessibilityArgs,
+  requestedEnabled: boolean,
+) {
   try {
     const toggle = new TalkBackToggle(device);
-    const talkback = await toggle.toggle(requestedEnabled);
+    const talkback = await toggleRecordingPreviousState(device, args, (options) =>
+      toggle.toggle(requestedEnabled, options),
+    );
     if (!talkback.supported) {
       throw new ActionableError(
         talkback.reason ?? "TalkBack toggle is not supported on this device",
@@ -72,7 +127,7 @@ async function handleAndroidAccessibility(device: BootedDevice, args: Accessibil
     throw new ActionableError("VoiceOver is not supported on Android devices");
   }
   if (args.talkback !== undefined) {
-    return await toggleTalkBackAccessibility(device, args.talkback);
+    return await toggleTalkBackAccessibility(device, args, args.talkback);
   }
 
   // Detect current TalkBack state on Android
@@ -95,7 +150,10 @@ async function handleIosAccessibility(device: BootedDevice, args: AccessibilityA
   }
   if (args.voiceover !== undefined) {
     const toggle = new VoiceOverToggle(device);
-    const voiceover = await toggle.toggle(args.voiceover);
+    const requestedEnabled = args.voiceover;
+    const voiceover = await toggleRecordingPreviousState(device, args, (options) =>
+      toggle.toggle(requestedEnabled, options),
+    );
     if (!voiceover.supported) {
       throw new ActionableError(
         voiceover.reason ?? "VoiceOver toggle is not supported on this device",

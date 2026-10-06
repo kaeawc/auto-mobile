@@ -8,7 +8,7 @@ import { up as keyLookupUp } from "../../src/db/migrations/2026_07_04_000_storag
 import {
   up as insertionOrderUp,
   down as insertionOrderDown,
-} from "../../src/db/migrations/2026_10_05_000_storage_events_key_lookup_insertion_order";
+} from "../../src/db/migrations/2026_10_05_001_storage_events_key_lookup_insertion_order";
 import type { Database } from "../../src/db/types";
 import { recordStorageEvent, getStorageEvents } from "../../src/db/storageEventRepository";
 import { createTestDatabase } from "./testDbHelper";
@@ -84,7 +84,7 @@ describe("storage event previous-value lookup follows insertion order", () => {
   });
 });
 
-describe("2026_10_05_000_storage_events_key_lookup_insertion_order migration", () => {
+describe("2026_10_05_001_storage_events_key_lookup_insertion_order migration", () => {
   let bunDb: BunDatabase;
   let db: Kysely<unknown>;
 

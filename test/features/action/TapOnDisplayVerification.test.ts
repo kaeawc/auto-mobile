@@ -679,6 +679,36 @@ describe("tapOn display verification", () => {
     expect(h.capture.requests).toEqual([]);
   });
 
+  test("explicit display clips against the panel's captured size, not a stale observation size (#6523)", async () => {
+    const h = harness(true);
+    const wide = hierarchy({ left: 120 });
+    h.setCurrent(wide);
+    h.capture.read = () => wide;
+    // The observation carries a stale 100x100 size, but the panel's capture is 200x200.
+    h.observe.setObserveResult(() => ({
+      ...h.observation(),
+      screenSize: { width: 100, height: 100 },
+    }));
+    const result = await h.execute({});
+    expect(result.success).toBe(true);
+    // Centre of the 120..180 element on the 200-wide panel; the stale size would clip it away.
+    expect(h.dispatches).toEqual([{ displayId: 2, x: 150, y: 60 }]);
+  });
+
+  test("explicit display ensureChecked refresh re-sizes the tap from the refreshed capture (#6523)", async () => {
+    const h = harness(true, { checked: false });
+    // The cached observation is a 100x100 capture; the pre-tap ensureChecked refresh
+    // returns the panel's current 200x200 capture where the toggle sits at x=120..180.
+    const stale = { ...hierarchy({ checked: false }), screenWidth: 100, screenHeight: 100 };
+    const fresh = hierarchy({ checked: false, left: 120 });
+    h.setCurrent(stale);
+    h.capture.read = (index) => (index === 0 ? stale : fresh);
+    const result = await h.execute({ ensureChecked: true, preTapStability: false });
+    // Post-tap verification of the (static) fake toggle fails; delivery is what matters here.
+    expect(result.error).not.toContain("no visible tap area");
+    expect(h.dispatches[0]).toEqual({ displayId: 2, x: 150, y: 60 });
+  });
+
   test("default tap keeps refresh captures on the default path", async () => {
     const h = harness(false);
     const before = { ...hierarchy(), displayId: undefined };

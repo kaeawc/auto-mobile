@@ -329,8 +329,8 @@ describe("ContrastChecker", function () {
     it("should handle elements larger than screenshot", async function () {
       const screenshotPath = path.join(fixturesDir, "small-element.png");
 
-      // Element bounds larger than the image: pixel sampling edge-clamps rather
-      // than throwing, so this must still produce a finite ratio >= 1.
+      // Element bounds larger than the image: the pixels are not the element's, so nothing is
+      // measured (an edge-clamped read would invent a colour, #10220).
       const oversizedElement: Element = {
         bounds: { left: 0, top: 0, right: 200, bottom: 100 },
         text: "Oversized",
@@ -338,16 +338,14 @@ describe("ContrastChecker", function () {
 
       const result = await checker.checkContrast(screenshotPath, oversizedElement, "AA");
 
-      expect(result).not.toBeNull();
-      expect(Number.isFinite(result!.ratio)).toBe(true);
-      expect(result!.ratio).toBeGreaterThanOrEqual(1);
+      expect(result).toBeNull();
     });
   });
 
   describe("Color Sampling", function () {
-    it("should sample text color from center region", async function () {
+    it("should identify the dense text colour inside the surrounding background", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
-      // Use full image bounds - center will have text color (black from 5-95)
+      // The dense black block occupies most of the box, but its perimeter is white.
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Center",
@@ -356,7 +354,7 @@ describe("ContrastChecker", function () {
       const result = await checker.checkContrast(screenshotPath, element, "AA");
 
       expect(result).not.toBeNull();
-      // Should detect black text in center (center at 50,25 is in the text region 5-95)
+      // The block is foreground even though it occupies more pixels than the perimeter.
       expect(result!.textColor.r).toBeLessThan(50);
       expect(result!.textColor.g).toBeLessThan(50);
       expect(result!.textColor.b).toBeLessThan(50);
@@ -463,22 +461,29 @@ describe("ContrastChecker", function () {
       expect(backend.rawPixelsCalls[0]).toBe(screenshotBytes);
     });
 
-    it("tolerates element bounds beyond the image via edge clamping", async function () {
+    it("does not measure element bounds beyond the image, and reports them in batch", async function () {
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(20, 20, 0, 0, 0));
       const seamChecker = new ContrastChecker({}, undefined, backend, {
         readFile: async () => Buffer.from("synthetic screenshot"),
       });
-      // Bounds extend past the 20x20 image; jimp getPixelColor edge-extends, so
-      // sampling must not throw and should resolve to the (uniform black) edge.
-      const element: Element = {
+      // Bounds extend past the 20x20 image: no edge-clamped read, no result (#10220).
+      const outside: Element = {
         bounds: { left: 10, top: 10, right: 40, bottom: 40 },
         text: "Sample",
       };
+      const inside: Element = { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Fits" };
 
-      const result = await seamChecker.checkContrast(syntheticScreenshotPath, element, "AA");
+      expect(await seamChecker.checkContrast(syntheticScreenshotPath, outside, "AA")).toBeNull();
+      const batch = await seamChecker.checkContrastBatchWithCoverage(
+        syntheticScreenshotPath,
+        [outside, inside],
+        "AA",
+      );
 
-      expect(result).not.toBeNull();
+      expect(batch.outsideImage).toEqual([outside]);
+      expect(batch.results.has(outside)).toBe(false);
+      expect(batch.results.get(inside)).not.toBeNull();
     });
   });
 

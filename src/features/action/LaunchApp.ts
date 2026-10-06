@@ -2069,6 +2069,35 @@ export class LaunchApp extends BaseVisualChange {
     signal?.throwIfAborted();
   }
 
+  private async resolveAndroidLauncherComponent(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const command = `shell cmd package resolve-activity --brief --user ${userId} -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+    try {
+      const result = await this.adb.executeCommand(command);
+      this.assertLaunchNotAborted(signal);
+      const lastLine = result.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1);
+      const componentMatch = lastLine?.match(/^([^/\s]+)\/([^/\s]+)$/);
+      const [, componentPackage, componentActivity] = componentMatch ?? [];
+      if (!componentPackage || !componentActivity || componentPackage !== packageName) {
+        return undefined;
+      }
+      const component = `${componentPackage}/${componentActivity}`;
+      return resolveComponentActivity(component, packageName) ? component : undefined;
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      // Older Android versions may lack this resolver; the bare intent remains the fallback.
+      logger.debug(`[LaunchApp] Launcher component resolution unavailable: ${errorMessage(error)}`);
+      return undefined;
+    }
+  }
+
   private async tryAndroidIntentLaunch(
     packageName: string,
     userId: number,
@@ -2076,8 +2105,10 @@ export class LaunchApp extends BaseVisualChange {
   ): Promise<{ success: boolean; amReportedError?: boolean }> {
     logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
     try {
-      // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
-      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+      const component = await this.resolveAndroidLauncherComponent(packageName, userId, signal);
+      this.assertLaunchNotAborted(signal);
+      const launcherTarget = component ? `-n ${shellQuote(component)}` : shellQuote(packageName);
+      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${launcherTarget}`;
       logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
       const result = await this.adb.executeCommand(intentCmd);
       this.assertLaunchNotAborted(signal);

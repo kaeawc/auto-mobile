@@ -24,7 +24,7 @@ import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
-import { DefaultUIStateSetup } from "./DefaultUIStateSetup";
+import { DefaultUIStateSetup, UIStateSetupScreenChangedError } from "./DefaultUIStateSetup";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
 import { DefaultScreenTransitionWaiter } from "./DefaultScreenTransitionWaiter";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -479,6 +479,9 @@ export class NavigateTo {
     failure?: StepFailureDetail,
   ): Promise<PathStepsOutcome> {
     this.rememberReplayFailure(edge, failure);
+    if (failure?.error instanceof UIStateSetupScreenChangedError) {
+      return { result };
+    }
     // The failure result already carries the screen the graph reported after the replay.
     if (result.currentScreen !== edge.from) {
       return { result };

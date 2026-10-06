@@ -435,6 +435,24 @@ export type OverlayUpdate = { id: string } & (
 export type UpdateOverlayMessage = { type: "update_overlay"; requestId: string } & OverlayUpdate;
 export type OverlayDismiss = { id: string; all?: never } | { all: true; id?: never };
 export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string } & OverlayDismiss;
+/**
+ * `@SerialName("put_overlay_asset")` → `PutOverlayAsset`. `dataBase64` is the encoded image file
+ * (PNG, JPEG or WebP) in standard base64 without line breaks, sent in the one JSON text frame like
+ * screenshots. Replaces any asset with the same id. Answered by one `overlay_result`.
+ */
+export interface PutOverlayAssetMessage {
+  type: "put_overlay_asset";
+  requestId: string;
+  id: string;
+  mimeType: string;
+  dataBase64: string;
+}
+/** `@SerialName("remove_overlay_asset")` → `RemoveOverlayAsset`. Idempotent on the device. */
+export interface RemoveOverlayAssetMessage {
+  type: "remove_overlay_asset";
+  requestId: string;
+  id: string;
+}
 
 export interface OverlayResult {
   success: boolean;
@@ -442,6 +460,16 @@ export interface OverlayResult {
   error?: string | null;
   requestId?: string;
   timestamp?: number;
+}
+
+/**
+ * Outcome of an overlay asset upload or removal. `dispatched` is true once the frame was written
+ * to the socket; `acknowledged` is true only when the device answered (success or refusal). A
+ * dispatched, unacknowledged request is indeterminate: the device may or may not have applied it.
+ */
+export interface OverlayAssetResult extends OverlayResult {
+  dispatched: boolean;
+  acknowledged: boolean;
 }
 
 /** Id-less push; pager selection has its own namespace, separate from authored state. */
@@ -737,6 +765,8 @@ export type CtrlProxyRequest =
   | ShowOverlayMessage
   | UpdateOverlayMessage
   | DismissOverlayMessage
+  | PutOverlayAssetMessage
+  | RemoveOverlayAssetMessage
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
@@ -779,6 +809,8 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "show_overlay",
   "update_overlay",
   "dismiss_overlay",
+  "put_overlay_asset",
+  "remove_overlay_asset",
   "discover_keystore",
   "set_hierarchy_interval",
   "request_activate_accessibility_link",
@@ -946,6 +978,8 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   show_overlay: true,
   update_overlay: true,
   dismiss_overlay: true,
+  put_overlay_asset: true,
+  remove_overlay_asset: true,
   list_preference_files: true,
   get_preferences: true,
   discover_keystore: true,
@@ -1229,6 +1263,25 @@ export const ctrlProxyRequests = {
     return args.id !== undefined
       ? { type: "dismiss_overlay", requestId: args.requestId, id: args.id }
       : { type: "dismiss_overlay", requestId: args.requestId, all: args.all };
+  },
+
+  putOverlayAsset(args: {
+    requestId: string;
+    id: string;
+    mimeType: string;
+    dataBase64: string;
+  }): PutOverlayAssetMessage {
+    return {
+      type: "put_overlay_asset",
+      requestId: args.requestId,
+      id: args.id,
+      mimeType: args.mimeType,
+      dataBase64: args.dataBase64,
+    };
+  },
+
+  removeOverlayAsset(args: { requestId: string; id: string }): RemoveOverlayAssetMessage {
+    return { type: "remove_overlay_asset", requestId: args.requestId, id: args.id };
   },
 
   addHighlight(args: {

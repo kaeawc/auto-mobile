@@ -172,9 +172,11 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus } from "./CtrlProxyFocus";
-import { CtrlProxyOverlays } from "./CtrlProxyOverlays";
+import { CtrlProxyOverlays, type OverlayAssetRequestOptions } from "./CtrlProxyOverlays";
 import type { OverlaySpec } from "../../overlay/overlaySpec";
+import type { OverlayAssetUpload } from "../../overlay/overlayAssets";
 import type {
+  OverlayAssetResult,
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
@@ -1276,6 +1278,14 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<OverlayResult>;
+  requestPutOverlayAsset(
+    asset: OverlayAssetUpload,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult>;
+  requestRemoveOverlayAsset(
+    id: string,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult>;
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void;
 
   requestAddHighlight(
@@ -3568,6 +3578,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<OverlayResult> {
     return this.overlays.requestDismissOverlay(target, timeoutMs, perf);
   }
+  requestPutOverlayAsset(
+    asset: OverlayAssetUpload,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    return this.overlays.requestPutOverlayAsset(asset, options);
+  }
+  requestRemoveOverlayAsset(
+    id: string,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    return this.overlays.requestRemoveOverlayAsset(id, options);
+  }
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
     return this.overlays.onOverlayEvent(listener);
   }
@@ -5176,7 +5198,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
       const errorText =
         rejectedCommand &&
-        ["show_overlay", "update_overlay", "dismiss_overlay"].includes(rejectedCommand)
+        [
+          "show_overlay",
+          "update_overlay",
+          "dismiss_overlay",
+          "put_overlay_asset",
+          "remove_overlay_asset",
+        ].includes(rejectedCommand)
           ? deviceError
           : rewriteUnknownCommandError(deviceError, "android");
       logger.warn(

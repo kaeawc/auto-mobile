@@ -696,6 +696,49 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `overlay asset requests round trip byte identical shared literals`() {
+    val put =
+      """{"type":"put_overlay_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""
+    val remove = """{"type":"remove_overlay_asset","requestId":"r7","id":"hero"}"""
+    for (literal in listOf(put, remove)) {
+      val request = json.decodeFromString<WebSocketRequest>(literal)
+      assertEquals(literal, json.encodeToString(request))
+    }
+    val decoded = assertIs<PutOverlayAsset>(json.decodeFromString<WebSocketRequest>(put))
+    assertEquals("r6", decoded.requestId)
+    assertEquals("hero", decoded.id)
+    assertEquals("image/png", decoded.mimeType)
+    assertEquals("iVBORw0KGgo=", decoded.dataBase64)
+    assertEquals(
+      "r7",
+      assertIs<RemoveOverlayAsset>(json.decodeFromString<WebSocketRequest>(remove)).requestId,
+    )
+  }
+
+  @Test
+  fun `overlay asset requests reject missing required fields`() {
+    for (literal in
+      listOf(
+        """{"type":"put_overlay_asset","requestId":"r","mimeType":"image/png","dataBase64":"AA=="}""",
+        """{"type":"put_overlay_asset","requestId":"r","id":"a","dataBase64":"AA=="}""",
+        """{"type":"put_overlay_asset","requestId":"r","id":"a","mimeType":"image/png"}""",
+        """{"type":"remove_overlay_asset","requestId":"r"}""",
+      )) {
+      assertFailsWith<SerializationException>(literal) {
+        json.decodeFromString<WebSocketRequest>(literal)
+      }
+    }
+  }
+
+  @Test
+  fun `put overlay asset never renders its payload`() {
+    val payload = "SECRETBYTES".repeat(20)
+    val request = PutOverlayAsset("r", "hero", "image/png", payload)
+    assertFalse(request.toString().contains("SECRETBYTES"))
+    assertTrue(request.toString().contains("${payload.length} chars"))
+  }
+
+  @Test
   fun `request decoder remains lenient inside nested overlay spec`() {
     val literal =
       """{"type":"show_overlay","requestId":"r","spec":{"id":"panel","extra":true,"window":{"placement":{"type":"fullscreen","future":true}},"root":{"type":"text","text":"Hello","unknown":1}}}"""

@@ -144,6 +144,8 @@ const KOTLIN_SERIAL_NAMES = [
   "show_overlay",
   "update_overlay",
   "dismiss_overlay",
+  "put_overlay_asset",
+  "remove_overlay_asset",
   "request_hierarchy",
   "request_hierarchy_if_stale",
   "set_hierarchy_interval",
@@ -333,6 +335,28 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         ctrlProxyRequests.dismissOverlay({ requestId: "r5", all: true }),
       ),
       expected: '{"type":"dismiss_overlay","requestId":"r5","all":true}',
+    },
+    {
+      builder: "putOverlayAsset",
+      name: "upload (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.putOverlayAsset({
+          requestId: "r6",
+          id: "hero",
+          mimeType: "image/png",
+          dataBase64: "iVBORw0KGgo=",
+        }),
+      ),
+      expected:
+        '{"type":"put_overlay_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}',
+    },
+    {
+      builder: "removeOverlayAsset",
+      name: "removal (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.removeOverlayAsset({ requestId: "r7", id: "hero" }),
+      ),
+      expected: '{"type":"remove_overlay_asset","requestId":"r7","id":"hero"}',
     },
 
     {
@@ -967,7 +991,7 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
   test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 44", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(44);
+    expect(builderNames.length).toBe(46);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });

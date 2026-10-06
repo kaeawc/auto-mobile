@@ -5488,11 +5488,21 @@ describe("provisionDevice handler", () => {
     deviceManager.setDeviceImages("android", [
       { name: "phone-api-36-a", platform: "android", isRunning: false },
     ]);
+    // A failed owned boot now waits for the emulator to exit before releasing the AVD (#9901),
+    // so the fake process exits on SIGTERM instead of lingering on the never-advanced FakeTimer.
+    const exitListeners: (() => void)[] = [];
     const handle: any = {
       exitCode: null,
       signalCode: null,
-      once: () => handle,
-      kill: () => true,
+      once: (_event: string, listener: () => void) => {
+        exitListeners.push(listener);
+        return handle;
+      },
+      kill: () => {
+        handle.exitCode = 0;
+        exitListeners.forEach((listener) => listener());
+        return true;
+      },
     };
     deviceManager.setMockChildProcess("phone-api-36-a", handle);
     const originalWaitForDeviceReady = deviceManager.waitForDeviceReady.bind(deviceManager);

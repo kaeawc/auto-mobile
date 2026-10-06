@@ -1,0 +1,26 @@
+# one swipe, mCurrentRotation=ROTATION_90 (user_rotation=1), natural (700,1600)->(700,1000) = same physical motion as the portrait capture; on the rotated display (1600,380)->(1000,380), a leftward swipe
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1   (events injected with sendevent; every axis value differs from the previous contact so all axes are reported)
+[  190147.614063] EV_ABS       ABS_MT_TRACKING_ID   00000068            
+[  190147.614063] EV_ABS       ABS_MT_POSITION_X    000052f5            
+[  190147.614063] EV_ABS       ABS_MT_POSITION_Y    00005554            
+[  190147.614063] EV_ABS       ABS_MT_PRESSURE      00000276            
+[  190147.614063] EV_ABS       ABS_MT_TOUCH_MAJOR   0000000a            
+[  190147.614063] EV_SYN       SYN_REPORT           00000000            
+[  190147.717122] EV_ABS       ABS_MT_POSITION_Y    00005154            
+[  190147.717122] EV_SYN       SYN_REPORT           00000000            
+[  190147.820119] EV_ABS       ABS_MT_POSITION_Y    00004d54            
+[  190147.820119] EV_SYN       SYN_REPORT           00000000            
+[  190147.920340] EV_ABS       ABS_MT_POSITION_Y    00004954            
+[  190147.920340] EV_SYN       SYN_REPORT           00000000            
+[  190148.031963] EV_ABS       ABS_MT_POSITION_Y    00004554            
+[  190148.031963] EV_SYN       SYN_REPORT           00000000            
+[  190148.140386] EV_ABS       ABS_MT_POSITION_Y    00004154            
+[  190148.140386] EV_SYN       SYN_REPORT           00000000            
+[  190148.256734] EV_ABS       ABS_MT_POSITION_Y    00003d54            
+[  190148.256734] EV_SYN       SYN_REPORT           00000000            
+[  190148.360862] EV_ABS       ABS_MT_POSITION_Y    00003954            
+[  190148.360862] EV_SYN       SYN_REPORT           00000000            
+[  190148.480867] EV_ABS       ABS_MT_POSITION_Y    00003554            
+[  190148.480867] EV_SYN       SYN_REPORT           00000000            
+[  190148.603299] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190148.603299] EV_SYN       SYN_REPORT           00000000            

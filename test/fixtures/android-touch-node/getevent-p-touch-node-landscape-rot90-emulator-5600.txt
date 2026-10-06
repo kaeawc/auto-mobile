@@ -1,0 +1,81 @@
+# adb -s emulator-5600 shell getevent -p /dev/input/event1   (mCurrentRotation=ROTATION_90, user_rotation=1)
+add device 1: /dev/input/event1
+  name:     "virtio_input_multi_touch_1"
+  events:
+    KEY (0001): 0141  014b 
+    ABS (0003): 0000  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0001  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0002  : value 0, min 0, max 1, fuzz 0, flat 0, resolution 0
+                002f  : value 0, min 0, max 10, fuzz 0, flat 0, resolution 0
+                0030  : value 0, min 0, max 2147483647, fuzz 0, flat 0, resolution 0
+                0031  : value 0, min 0, max 2147483647, fuzz 0, flat 0, resolution 0
+                0034  : value 0, min 0, max 90, fuzz 0, flat 0, resolution 0
+                0035  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0036  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0037  : value 0, min 0, max 15, fuzz 0, flat 0, resolution 0
+                0039  : value 0, min 0, max 65535, fuzz 0, flat 0, resolution 0
+                003a  : value 0, min 0, max 1024, fuzz 0, flat 0, resolution 0
+    SW  (0005): 0000 
+  input props:
+    <none>
+# adb -s emulator-5600 shell dumpsys input | grep -A40 'Device 3: virtio_input_multi_touch_1' (viewport/orientation while rotated)
+    11: virtio_input_multi_touch_10
+      Classes: KEYBOARD | TOUCH | TOUCH_MT | SWITCH
+      Path: /dev/input/event10
+      Enabled: true
+      Descriptor: 03d5168c37d991df1726df002537cd6ccc5b68cb
+      Location: virtio19/input0
+      ControllerNumber: 0
+      UniqueId: 
+      Identifier: bus=0x0006, vendor=0x0000, product=0x0000, version=0x0000, bluetoothAddress=<not set>
+      KeyLayoutFile: /system/usr/keylayout/Generic.kl
+      KeyCharacterMapFile: /system/usr/keychars/Generic.kcm
+      ConfigurationFile: 
+      VideoDevice: <none>
+      SysfsDevicePath: /sys/devices/platform/3f000000.pcie/pci0000:00/0000:00:0e.0/virtio19
+      KeyState (pressed): <none>
+      SwState (pressed): <none>
+      AbsState: ABS_X=0, ABS_Y=0, ABS_Z=0, ABS_MT_SLOT=0, ABS_MT_TOUCH_MAJOR=0, ABS_MT_TOUCH_MINOR=0, ABS_MT_ORIENTATION=0, ABS_MT_POSITION_X=0, ABS_MT_POSITION_Y=0, ABS_MT_TOOL_TYPE=0, ABS_MT_TRACKING_ID=0, ABS_MT_PRESSURE=0
+    12: virtio_input_multi_touch_11
+      Classes: KEYBOARD | TOUCH | TOUCH_MT | SWITCH
+      Path: /dev/input/event11
+      Enabled: true
+      Descriptor: e760666b71e579617395a5018f318365e9f44147
+      Location: virtio20/input0
+      ControllerNumber: 0
+      UniqueId: 
+      Identifier: bus=0x0006, vendor=0x0000, product=0x0000, version=0x0000, bluetoothAddress=<not set>
+      KeyLayoutFile: /system/usr/keylayout/Generic.kl
+      KeyCharacterMapFile: /system/usr/keychars/Generic.kcm
+      ConfigurationFile: 
+      VideoDevice: <none>
+      SysfsDevicePath: /sys/devices/platform/3f000000.pcie/pci0000:00/0000:00:0f.0/virtio20
+      KeyState (pressed): <none>
+      SwState (pressed): <none>
+      AbsState: ABS_X=0, ABS_Y=0, ABS_Z=0, ABS_MT_SLOT=0, ABS_MT_TOUCH_MAJOR=0, ABS_MT_TOUCH_MINOR=0, ABS_MT_ORIENTATION=0, ABS_MT_POSITION_X=0, ABS_MT_POSITION_Y=0, ABS_MT_TOOL_TYPE=0, ABS_MT_TRACKING_ID=0, ABS_MT_PRESSURE=0
+    13: qwerty2 (aka device 0 - built-in keyboard)
+      Classes: KEYBOARD | ALPHAKEY | DPAD
+      Path: /dev/input/event12
+      Enabled: true
+      Descriptor: e9ac6dde47cf0ffa91b87f7b85e6f8de0933fc98
+      Location: virtio21/input0
+      ControllerNumber: 0
+      UniqueId: 
+      Identifier: bus=0x0006, vendor=0x0627, product=0x0001, version=0x0001, bluetoothAddress=<not set>
+      KeyLayoutFile: /vendor/usr/keylayout/qwerty2.kl
+      KeyCharacterMapFile: /vendor/usr/keychars/qwerty2.kcm
+      ConfigurationFile: 
+      VideoDevice: <none>
+      SysfsDevicePath: /sys/devices/platform/3f000000.pcie/pci0000:00/0000:00:10.0/virtio21
+      KeyState (pressed): <none>
+    10: virtio_input_multi_touch_9
+      Classes: KEYBOARD | TOUCH | TOUCH_MT | SWITCH
+      Path: /dev/input/event9
+      Enabled: true
+      Descriptor: ac8abc2b3d95a68148a903fffc0a312b4dd19302
+      Location: virtio18/input0
+      ControllerNumber: 0
+      UniqueId: 
+      Identifier: bus=0x0006, vendor=0x0000, product=0x0000, version=0x0000, bluetoothAddress=<not set>
+      KeyLayoutFile: /system/usr/keylayout/Generic.kl
+      KeyCharacterMapFile: /system/usr/keychars/Generic.kcm

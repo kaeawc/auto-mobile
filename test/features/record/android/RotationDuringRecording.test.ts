@@ -12,7 +12,6 @@ import {
   GEOMETRY_READ_TIMEOUT_MS,
   type DisplayGeometryProbe,
 } from "../../../../src/features/record/android/DisplayGeometryTracker";
-import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
 import { GetEventReader } from "../../../../src/features/record/android/GetEventReader";
 import {
   GEOMETRY_SETTLE_MS,
@@ -26,9 +25,6 @@ import type {
   A11ySource,
   DisplayChange,
   DisplayChangeSource,
-  GestureEmitter,
-  GestureEvent,
-  RawTouchFrame,
 } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -36,11 +32,13 @@ import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../../fakes/FakeAdbProcess";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { readTouchNodeCapture, replayCapture } from "../../../helpers/touchNodeCaptures";
 
 // Real capture (issue #9143): one tap, raw (0x6ccc, 0x3f25) = (27852, 16165), on a
-// virtio_input_multi_touch emulator node. The repo holds no `getevent -p` capture
-// for that node; the axis range below is the virtio default (0..32767), an
-// assumption the expected pixels depend on, not something the capture proves.
+// virtio_input_multi_touch emulator node. This capture carries no axis range; the
+// range below (0..32767) is the one `getevent -p` reports for that node, captured in
+// test/fixtures/android-touch-node/getevent-p-touch-node-emulator-5600.txt and
+// parsed in TouchNodeCaptures.test.ts.
 // The first six lines are the DOWN frame (4 lines) and the UP frame (2 lines).
 const CAPTURE = readFileSync(
   join(__dirname, "../../../fixtures/android-getevent/same-coordinate-taps-api36.txt"),
@@ -111,17 +109,6 @@ class FakeA11y implements A11ySource {
   }
   onInteraction(): () => void {
     return () => {};
-  }
-}
-
-class FakeEmitter implements GestureEmitter {
-  private handler?: (event: GestureEvent) => void;
-  start(onGesture: (event: GestureEvent) => void): void {
-    this.handler = onGesture;
-  }
-  stop(): void {}
-  emit(event: GestureEvent): void {
-    this.handler?.(event);
   }
 }
 
@@ -356,63 +343,86 @@ describe("DualTrackRecorder geometry timeline (#10174)", () => {
   });
 });
 
-describe("swipe direction after a rotation (#10174)", () => {
-  function frame(arrivedAt: number, x: number, released = false): RawTouchFrame {
-    return {
-      arrivedAt,
-      activeSlots: released ? [] : [{ slotId: 0, trackingId: 1, x, y: RAW.y, pressure: 0 }],
-      releasedSlots: released ? [0] : [],
-    };
+describe("captured swipes and taps after a rotation (#10174)", () => {
+  // Real `getevent -lt` captures (test/fixtures/android-touch-node/README.md) fed through the
+  // real GetEventReader, with the same physical motion recorded in ROTATION_0 and ROTATION_90.
+  // The device's own export for those orientations was tapAt (325,378) / swipeOn up and left.
+  type Pipeline = Awaited<ReturnType<typeof setupTapPipeline>>;
+
+  function replay(pipeline: Pipeline, name: string): void {
+    replayCapture(pipeline.timer, pipeline.feed, readTouchNodeCapture(name));
+    pipeline.timer.advanceTime(1_000);
   }
 
-  /**
-   * Starts at the captured raw point and moves along raw X only. These frames are
-   * typed values derived from the capture, not getevent text: the repo holds no
-   * captured swipe, so a real swipe capture is still needed for end-to-end cover.
-   */
-  async function recordRawXDrag(rotation: number | undefined) {
-    const timer = new FakeTimer();
-    timer.advanceTime(1000);
-    const timeline = new ScreenGeometryTimeline(
-      AXES,
-      { rotation: 0, display: PHYSICAL },
-      timer.now(),
-    );
-    const probe = new FakeProbe();
-    const tracker = new DisplayGeometryTracker(timeline, probe, timer);
-    const source = new FakeDisplaySource();
-    const emitter = new FakeEmitter();
-    const recorder = new DualTrackRecorder(device, emitter, new FakeA11y(), timer, tracker, source);
-    await recorder.start();
-    if (rotation !== undefined) {
-      rotate({ probe, source }, rotation);
-      timer.advanceTime(2_000);
-    }
-    const classifier = new GestureClassifier(timeline, 1);
-    classifier.feedFrame(frame(timer.now(), RAW.x));
-    timer.advanceTime(100);
-    classifier.feedFrame(frame(timer.now(), RAW.x - 9000));
-    timer.advanceTime(100);
-    const gesture = classifier.feedFrame(frame(timer.now(), 0, true));
-    emitter.emit(gesture!);
-    return recorder.stop();
+  async function rotated(rotation: number): Promise<Pipeline> {
+    const pipeline = await setupTapPipeline();
+    rotate(pipeline, rotation);
+    pipeline.timer.advanceTime(2_000);
+    return pipeline;
   }
 
-  test("a raw-X drag is horizontal in portrait", async () => {
-    const { steps } = await recordRawXDrag(undefined);
-    expect(steps[0].params.direction).toBe("left");
+  test("a captured upward swipe in portrait exports swipeOn up, fast", async () => {
+    const p = await setupTapPipeline();
+    replay(p, "getevent-lt-swipe-portrait-all-axes-emulator-5600.txt");
+
+    const result = await p.recorder.stop();
+
+    expect(result.steps).toEqual([{ tool: "swipeOn", params: { direction: "up", speed: "fast" } }]);
+    expect(result.geometryWarnings).toBeUndefined();
   });
 
-  test("the same raw-X drag after a rotation to 90 degrees is a vertical swipe", async () => {
-    const { steps, geometryWarnings } = await recordRawXDrag(1);
-    expect(steps[0]).toMatchObject({ tool: "swipeOn", params: { direction: "down" } });
-    expect(steps[0].label).toBeUndefined();
+  test("the same physical swipe after a rotation to 90 degrees exports swipeOn left", async () => {
+    const p = await rotated(1);
+    replay(p, "getevent-lt-swipe-landscape-rot90-all-axes-emulator-5600.txt");
+
+    const { steps, geometryWarnings } = await p.recorder.stop();
+
+    expect(steps).toEqual([{ tool: "swipeOn", params: { direction: "left", speed: "fast" } }]);
     expect(geometryWarnings).toBeUndefined();
   });
 
-  test("rotation 3 reverses the vertical direction", async () => {
-    const { steps } = await recordRawXDrag(3);
-    expect(steps[0].params.direction).toBe("up");
+  test("a captured rotated tap exports the landscape point the capture header gives", async () => {
+    const p = await rotated(1);
+    replay(p, "getevent-lt-tap-landscape-rot90-all-axes-emulator-5600.txt");
+
+    const { steps } = await p.recorder.stop();
+
+    // Header: natural (300,900) = display (900,780) on 2400x1080; within 1 px of rounding.
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ tool: "tapAt", params: { action: "tap" } });
+    expect(Math.abs(Number(steps[0].params.x) - 900)).toBeLessThanOrEqual(1);
+    expect(Math.abs(Number(steps[0].params.y) - 780)).toBeLessThanOrEqual(1);
+  });
+
+  test("a recording that rotates between captures maps each gesture with its own rotation", async () => {
+    const p = await setupTapPipeline();
+    replay(p, "getevent-lt-tap-portrait-all-axes-emulator-5600.txt");
+    replay(p, "getevent-lt-swipe-portrait-all-axes-emulator-5600.txt");
+    rotate(p, 1);
+    p.timer.advanceTime(2_000);
+    replay(p, "getevent-lt-tap-landscape-rot90-all-axes-emulator-5600.txt");
+    replay(p, "getevent-lt-swipe-landscape-rot90-all-axes-emulator-5600.txt");
+
+    const { steps, geometryWarnings } = await p.recorder.stop();
+
+    // The first tap reported no Y (the kernel dropped it as unchanged), so it cannot be placed.
+    expect(steps.map((step) => [step.tool, step.params.direction])).toEqual([
+      ["swipeOn", "up"],
+      ["tapAt", undefined],
+      ["swipeOn", "left"],
+    ]);
+    expect(steps.every((step) => step.label === undefined)).toBe(true);
+    expect(geometryWarnings).toBeUndefined();
+  });
+
+  test("the portrait capture read under rotation 3 reverses to a rightward swipe", async () => {
+    // Derived: no ROTATION_270 capture exists, so this reuses the portrait raw drag.
+    const p = await rotated(3);
+    replay(p, "getevent-lt-swipe-portrait-all-axes-emulator-5600.txt");
+
+    const { steps } = await p.recorder.stop();
+
+    expect(steps[0].params.direction).toBe("right");
   });
 });
 

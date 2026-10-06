@@ -57,6 +57,16 @@ export const ROTATION_UNKNOWN_CAVEAT =
 export const SIZE_UNKNOWN_CAVEAT =
   "display size could not be read after a display change; touch coordinates may be scaled with the wrong size";
 
+/**
+ * What the foldable captures show (emulator-5602, test/fixtures/android-touch-node/):
+ * `getevent -p` lists the same 11 touch nodes with the same 0..32767 axis ranges in the
+ * opened (2076x2152) and closed (1080x2364) postures, so the raw range never changes and
+ * only the display size moves the mapped pixels. `dumpsys input` shows the closed posture
+ * also enabling `virtio_input_multi_touch_7` (a second node on the cover panel's
+ * viewport), which `getevent -p` cannot reveal. A recording reads only the node chosen
+ * when it started, so the caveat stays: after a size change this recording may be
+ * mapping, or missing, touches that belong to the other panel.
+ */
 function panelChangedCaveat(from: DisplaySize, to: DisplaySize): string {
   return `display size changed from ${from.width}x${from.height} to ${to.width}x${to.height} (fold/unfold?); touches are still read from the touch node chosen when recording started, so coordinates may refer to a different panel`;
 }

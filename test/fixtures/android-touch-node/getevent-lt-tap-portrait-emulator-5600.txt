@@ -1,0 +1,8 @@
+# one tap, mCurrentRotation=ROTATION_0, sendevent at natural (540,700) on 1080x2400 -> raw (16383,9556)
+# NOTE: events were injected with sendevent; the kernel drops axes whose value did not change since the previous contact (here ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_PRESSURE, ABS_MT_TOUCH_MAJOR), and this node has no BTN_TOUCH key, so EV_KEY BTN_TOUCH is never reported.
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1
+[  190098.041174] EV_ABS       ABS_MT_TRACKING_ID   0000005b            
+[  190098.041174] EV_ABS       ABS_MT_POSITION_Y    00002555            
+[  190098.041174] EV_SYN       SYN_REPORT           00000000            
+[  190098.209765] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190098.209765] EV_SYN       SYN_REPORT           00000000            

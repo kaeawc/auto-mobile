@@ -108,7 +108,7 @@ export interface AndroidAppMetadataAdbOptions {
   optional?: boolean;
 }
 
-async function getAndroidAppMetadataFromAdb(
+export async function getAndroidAppMetadataFromAdb(
   adb: AdbExecutor,
   packageName: string,
   options: AndroidAppMetadataAdbOptions = {},

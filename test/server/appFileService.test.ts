@@ -1246,7 +1246,11 @@ describe("AppFileService", () => {
   test("rolls back earlier media files when writing the third of five fails", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    executor.setCommandError("third.png", new Error("index query failed"));
+    // Match the push (its destination follows a space) and not the backup probe (it is quoted).
+    executor.setCommandError(
+      " /storage/emulated/12/Download/automobile-media/third.png",
+      new Error("index query failed"),
+    );
     const sharedStorageService = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
@@ -1343,7 +1347,11 @@ describe("AppFileService", () => {
   test("reports and warns when rolling back a media file fails", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    executor.setCommandError("third.png", new Error("index query failed"));
+    // Match the push (its destination follows a space) and not the backup probe (it is quoted).
+    executor.setCommandError(
+      " /storage/emulated/12/Download/automobile-media/third.png",
+      new Error("index query failed"),
+    );
     executor.setCommandError(
       "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png'",
       new Error("device unavailable"),

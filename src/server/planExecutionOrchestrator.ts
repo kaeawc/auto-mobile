@@ -22,6 +22,7 @@ import {
 } from "../db/testExecutionRepository";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
+import { decodePlanContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
 import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
@@ -480,13 +481,8 @@ export class PlanExecutionOrchestrator {
    * and reconcile any `devices` arg against the plan's own device declarations.
    */
   private async preparePlan(): Promise<Plan> {
-    let yamlContent = this.request.planContent;
-
-    if (yamlContent.startsWith("base64:")) {
-      this.perfLog("Decoding base64 plan content");
-      yamlContent = Buffer.from(yamlContent.substring(7), "base64").toString("utf-8");
-      this.perfLog(`Base64 content decoded (${yamlContent.length} bytes)`);
-    }
+    const yamlContent = decodePlanContent(this.request.planContent);
+    this.perfLog(`Plan content ready (${yamlContent.length} bytes)`);
 
     this.perfLog("Validating plan YAML schema");
     const validator = this.createSchemaValidator();

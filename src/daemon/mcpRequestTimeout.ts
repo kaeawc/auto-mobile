@@ -30,7 +30,7 @@ import {
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
 } from "../features/action/textTransportTimeout";
 import * as yaml from "js-yaml";
-import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
+import { decodePlanContent, PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -790,7 +790,9 @@ function addPlanStepBudgets(
 
 function parsePlanContentForBudget(planContent: string): Record<string, unknown> | undefined {
   try {
-    return asRecord(yaml.load(planContent, PLAN_YAML_LOAD_OPTIONS));
+    // Same decode rule as the orchestrator, so a `base64:` plan gets the budget its plain-YAML
+    // twin gets (#10173). The caller bounded the ENCODED length before this runs.
+    return asRecord(yaml.load(decodePlanContent(planContent), PLAN_YAML_LOAD_OPTIONS));
   } catch (error) {
     // Invalid YAML is surfaced by executePlan itself as a structured error; the request
     // deadline just falls back to the floor.

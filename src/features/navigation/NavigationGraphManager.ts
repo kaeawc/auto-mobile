@@ -51,6 +51,48 @@ import type {
 // Re-export types for convenience
 export type { NavigationEvent, NavigationEdge, UIState };
 
+/**
+ * Whether `candidate` should replace `existing` as the edge used for a screen
+ * pair during path finding (#9990). An edge carrying a tool call can be
+ * replayed; one without is replayed as a Back press, so a tool edge always wins.
+ * Among edges of the same kind the most recent wins (id breaks timestamp ties).
+ */
+function isPreferredPathEdge(candidate: DBNavigationEdge, existing: DBNavigationEdge): boolean {
+  const candidateReplayable = candidate.tool_name !== null;
+  const existingReplayable = existing.tool_name !== null;
+  if (candidateReplayable !== existingReplayable) {
+    return candidateReplayable;
+  }
+  if (candidate.timestamp !== existing.timestamp) {
+    return candidate.timestamp > existing.timestamp;
+  }
+  return candidate.id > existing.id;
+}
+
+/**
+ * Index edges by source screen, keeping one edge per (from, to) pair: every
+ * traversal inserts a new row, and the oldest row may have no tool call
+ * (replayed as Back). See #9990.
+ */
+function indexPathEdgesBySource(
+  dbEdges: DBNavigationEdge[],
+): Map<string, Map<string, DBNavigationEdge>> {
+  const edgesBySource = new Map<string, Map<string, DBNavigationEdge>>();
+  for (const edge of dbEdges) {
+    const source = edge.from_screen;
+    let outgoingEdges = edgesBySource.get(source);
+    if (!outgoingEdges) {
+      outgoingEdges = new Map<string, DBNavigationEdge>();
+      edgesBySource.set(source, outgoingEdges);
+    }
+    const existing = outgoingEdges.get(edge.to_screen);
+    if (!existing || isPreferredPathEdge(edge, existing)) {
+      outgoingEdges.set(edge.to_screen, edge);
+    }
+  }
+  return edgesBySource;
+}
+
 async function loadEdgeInteraction(
   repository: NavigationRepository,
   dbEdge: DBNavigationEdge,
@@ -1535,16 +1577,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Get all edges for BFS
     const dbEdges = await this.repository.getEdges(this.currentAppId);
 
-    const edgesBySource = new Map<string, DBNavigationEdge[]>();
-    for (const edge of dbEdges) {
-      const source = edge.from_screen;
-      const outgoingEdges = edgesBySource.get(source);
-      if (outgoingEdges) {
-        outgoingEdges.push(edge);
-      } else {
-        edgesBySource.set(source, [edge]);
-      }
-    }
+    const edgesBySource = indexPathEdgesBySource(dbEdges);
 
     // BFS to find shortest path
     const queue: string[] = [startScreen];
@@ -1554,7 +1587,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     while (queueHead < queue.length) {
       const screen = queue[queueHead++];
-      const outgoingEdges = edgesBySource.get(screen) ?? [];
+      const outgoingEdges = edgesBySource.get(screen)?.values() ?? [];
 
       for (const edge of outgoingEdges) {
         if (edge.to_screen === targetScreen) {

@@ -142,7 +142,7 @@ describe("buildNetworkMockRules", function () {
 describe("describeInvalidMockPattern", function () {
   test("accepts ordinary patterns and valid quantifiers", function () {
     for (const pattern of [
-      "api\\.example\\.com",
+      "^api\\.example\\.com$",
       ".*",
       "/users/\\d{3}/profile",
       "/a{2,}/b{1,4}",

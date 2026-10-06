@@ -64,6 +64,22 @@ describe("navigation recorder handler outcomes", () => {
       },
       planLifecycleManager: { afterExecution: async () => {} },
     });
+    // Pay the one-time cold-start cost of the first recorded tool call and navigation write
+    // (~5 ms, far more on a loaded runner) outside the per-test budget. beforeEach clears the
+    // graph, so nothing from this throwaway call is visible to a test.
+    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
+      throw new Error("warmup");
+    });
+    await registry
+      .getTool("tapOn")!
+      .handler({ text: "warmup" })
+      .catch(() => {});
+    timer.setCurrentTime(1_000_000);
+    await navigate("Splash");
+    timer.setCurrentTime(1_011_000);
+    await navigate("Home");
+    await harness.manager.getEdgesFrom("Splash");
+    await harness.manager.getStats();
   });
   beforeEach(async () => {
     await harness.manager.clearAllGraphs();

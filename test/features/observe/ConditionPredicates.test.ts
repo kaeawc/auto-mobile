@@ -12,6 +12,7 @@ import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import type { ConditionResolver } from "../../../src/features/observe/ConditionPredicates";
 import type { SearchableEntry } from "../../../src/features/utility/SearchableNode";
+import { iosKeyboardVisibleHierarchy } from "../../fixtures/observe/iosKeyboardStates";
 
 /**
  * Unit tests for the declarative condition-predicate builders that back the
@@ -661,4 +662,138 @@ test("appear by hint does not match a filled Android field", () => {
     }),
   ]);
   expect(appear(new ElementResolver(), { text: "Phone" })(observation).matched).toBe(false);
+});
+
+describe("iOS text field values (#10095)", () => {
+  const finder = new ElementResolver();
+  const emailId = "s2-598fedefa9cbde41";
+  const typed = "mt8@example.com";
+
+  function capturedKeyboardObs(placeholder?: string): ObserveResult {
+    const hierarchy = structuredClone(iosKeyboardVisibleHierarchy);
+    if (placeholder !== undefined) {
+      // Derive a variant of the captured node: some captures keep the placeholder in `text`.
+      const visit = (value: unknown): void => {
+        if (Array.isArray(value)) {
+          value.forEach(visit);
+        } else if (typeof value === "object" && value !== null) {
+          if (Object.entries(value).some(([key, v]) => key === "view-id" && v === emailId)) {
+            Object.assign(value, { text: placeholder });
+          }
+          Object.values(value).forEach(visit);
+        }
+      };
+      visit(hierarchy.hierarchy);
+    }
+    return { ...obs([]), viewHierarchy: hierarchy };
+  }
+
+  test("a captured UITextField's typed value satisfies textEquals by elementId", () => {
+    const evaluation = textEquals(finder, { elementId: emailId }, typed)(capturedKeyboardObs());
+    expect(evaluation.matched).toBe(true);
+    expect(evaluation.matchedElement?.value).toBe(typed);
+  });
+
+  test("a captured UITextField's typed value satisfies textEquals without an elementId", () => {
+    expect(textEquals(finder, {}, typed)(capturedKeyboardObs()).matched).toBe(true);
+  });
+
+  test("textEquals still rejects a different value for the captured field", () => {
+    const observation = capturedKeyboardObs();
+    expect(textEquals(finder, { elementId: emailId }, "mt8@example")(observation).matched).toBe(
+      false,
+    );
+  });
+
+  test("a placeholder held in text does not satisfy textEquals once the field has a value", () => {
+    const observation = capturedKeyboardObs("Placeholder");
+    expect(textEquals(finder, { elementId: emailId }, "Placeholder")(observation).matched).toBe(
+      false,
+    );
+    expect(textEquals(finder, {}, "Placeholder")(observation).matched).toBe(false);
+    expect(textEquals(finder, { elementId: emailId }, typed)(observation).matched).toBe(true);
+    expect(textEquals(finder, {}, typed)(observation).matched).toBe(true);
+  });
+
+  test("an empty field shows its placeholder text, so textEquals compares that", () => {
+    const observation = obs([
+      node({
+        "resource-id": "email",
+        class: "XCUIElementTypeTextField",
+        actions: ["set_text"],
+        value: "",
+        text: "Placeholder",
+      }),
+    ]);
+    expect(textEquals(finder, { elementId: "email" }, "Placeholder")(observation).matched).toBe(
+      true,
+    );
+  });
+});
+
+describe("elementId combined with text applies both criteria (#10096)", () => {
+  const finder = new ElementResolver();
+  const status = (text: string) => obs([node({ "resource-id": "status", text })]);
+
+  test("appear requires the id-located element to carry the text", () => {
+    const predicate = appear(finder, { elementId: "status", text: "Done" });
+    const loading = predicate(status("Loading"));
+    expect(loading.matched).toBe(false);
+    expect(loading.matchedElement).toBeUndefined();
+    const done = predicate(status("Done"));
+    expect(done.matched).toBe(true);
+    expect(done.matchedElement?.text).toBe("Done");
+  });
+
+  test("appear keeps showing the id-located element as a timeout candidate", () => {
+    const evaluation = appear(finder, { elementId: "status", text: "Done" })(status("Loading"));
+    expect(evaluation.candidates?.map((candidate) => candidate.text)).toEqual(["Loading"]);
+  });
+
+  test("appear finds the id match that carries the text among duplicates", () => {
+    const evaluation = appear(finder, { elementId: "row", text: "Unread" })(
+      obs([
+        node({ "resource-id": "row", text: "Read" }),
+        node({ "resource-id": "row", text: "Unread" }),
+      ]),
+    );
+    expect(evaluation.matched).toBe(true);
+    expect(evaluation.matchedElement?.text).toBe("Unread");
+  });
+
+  test("disappear matches once no id-located element carries the text", () => {
+    const predicate = disappear(finder, { elementId: "status", text: "Loading" });
+    expect(predicate(status("Loading")).matched).toBe(false);
+    expect(predicate(status("Done")).matched).toBe(true);
+  });
+
+  test("countStable counts only the id-located elements carrying the text", () => {
+    const rows = () =>
+      obs([
+        node({ "resource-id": "row", text: "Unread" }),
+        node({ "resource-id": "row", text: "Read" }),
+      ]);
+    const predicate = countStable(finder, { elementId: "row", text: "Unread" });
+    expect(predicate(rows()).candidates?.map((candidate) => candidate.text)).toEqual(["Unread"]);
+    expect(predicate(rows()).matched).toBe(true);
+    const grown = obs([
+      node({ "resource-id": "row", text: "Unread" }),
+      node({ "resource-id": "row", text: "Unread" }),
+    ]);
+    expect(predicate(grown).matched).toBe(false);
+  });
+
+  test("clickable applies the same text rule through the shared matcher", () => {
+    const predicate = clickable(finder, { elementId: "go", text: "Done" });
+    const tappable = (text: string) => obs([node({ "resource-id": "go", clickable: true, text })]);
+    expect(predicate(tappable("Loading")).matched).toBe(false);
+    expect(predicate(tappable("Done")).matched).toBe(true);
+  });
+
+  test("elementId alone and text alone keep their existing behaviour", () => {
+    expect(appear(finder, { elementId: "status" })(status("Loading")).matched).toBe(true);
+    expect(appear(finder, { text: "Loading" })(status("Loading")).matched).toBe(true);
+    expect(disappear(finder, { elementId: "status" })(status("Loading")).matched).toBe(false);
+    expect(disappear(finder, { text: "Done" })(status("Loading")).matched).toBe(true);
+  });
 });

@@ -14,7 +14,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,6 +25,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -197,7 +200,12 @@ class DefaultInteractiveOverlayHost(
 
   private fun windowFor(displayId: Int): OverlayDisplayWindow =
     if (displayId == Display.DEFAULT_DISPLAY) {
-      OverlayDisplayWindow(context, windowManager, densityProvider)
+      OverlayDisplayWindow(
+        context,
+        windowManager,
+        navigationBarBottomPx = { navigationBarBottomPx(windowManager, sdkInt) },
+        density = densityProvider,
+      )
     } else {
       requireNotNull(displayWindows.open(displayId)) {
         "Unknown or disconnected display: $displayId"
@@ -301,7 +309,12 @@ class DefaultInteractiveOverlayHost(
     val request = current.request
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
     current.view.alpha = overlayHostChrome(request).windowAlpha
-    current.view.setContent { InteractiveOverlayWindowContent(request) }
+    val target = current.target
+    current.view.setContent {
+      InteractiveOverlayWindowContent(request) {
+        overlayInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+      }
+    }
   }
 
   override suspend fun relayout(): Boolean = mainThread.onMain {
@@ -553,7 +566,13 @@ fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
 }
 
 @Composable
-private fun InteractiveOverlayWindowContent(request: InteractiveOverlayRequest) {
+private fun InteractiveOverlayWindowContent(
+  request: InteractiveOverlayRequest,
+  insetFloor: () -> OverlayInsetFloor,
+) {
+  // Read again when the configuration changes (rotation), which is when the bar moves.
+  val configuration = LocalConfiguration.current
+  val floor = remember(request.placement, configuration) { insetFloor() }
   val chrome = overlayHostChrome(request)
   val fullscreen = request.placement as? OverlayPlacement.Fullscreen
   val scope = rememberCoroutineScope()
@@ -584,8 +603,9 @@ private fun InteractiveOverlayWindowContent(request: InteractiveOverlayRequest) 
           .alpha(chrome.contentAlpha)
           .background(fullscreen?.scrim ?: Color.Transparent)
       ) {
-        request.content()
+        CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
       }
     }
-  } else Box { request.content() }
+  } else
+    Box { CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() } }
 }

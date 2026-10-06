@@ -60,6 +60,17 @@ describe("buildNetworkGraph", () => {
     });
   });
 
+  it("classifies a mocked response by its status code, not the mock marker", () => {
+    const { graph } = buildNetworkGraph([
+      makeEvent({ path: "/users", statusCode: 200, error: "mocked:mock-1" }),
+      makeEvent({ path: "/down", statusCode: 503, error: "mocked:mock-2" }),
+      makeEvent({ path: "/sim", statusCode: 0, error: "simulated:timeout" }),
+    ]);
+    expect(graph[0].paths["users[GET]"]).toMatchObject({ success: 1, errors: 0 });
+    expect(graph[0].paths["down[GET]"]).toMatchObject({ success: 0, errors: 1 });
+    expect(graph[0].paths["sim[GET]"]).toMatchObject({ success: 0, errors: 1 });
+  });
+
   it("returns empty graph for no events", () => {
     const result = buildNetworkGraph([]);
     expect(result.graph).toHaveLength(0);

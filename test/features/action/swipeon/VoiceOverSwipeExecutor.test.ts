@@ -6,7 +6,8 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { GestureExecutor } from "../../../../src/features/action/swipeon/types";
 import type { SwipeResult } from "../../../../src/models/SwipeResult";
-import type { Element } from "../../../../src/models";
+import type { BootedDevice, Element } from "../../../../src/models";
+import { VOICEOVER_STATE_UNKNOWN_WARNING } from "../../../../src/features/accessibility/interfaces/IosVoiceOverDetector";
 import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 function makeSwipeResult(overrides: Partial<SwipeResult> = {}): SwipeResult {
@@ -325,6 +326,69 @@ describe("VoiceOverSwipeExecutor", () => {
       expect(calls).toHaveLength(2);
       // Return duration = 300 / 2 = 150
       expect(calls[1].options?.duration).toBe(150);
+    });
+  });
+
+  describe("iOS platform with an unreadable VoiceOver probe (#10038)", () => {
+    const iosDevice: BootedDevice = { platform: "ios", deviceId: "00001234-ABCD", name: "iPhone" };
+
+    test.each([
+      { label: "standard swipe", boomerang: undefined, expectedSwipes: 1 },
+      {
+        label: "boomerang swipe",
+        boomerang: { apexPauseMs: 0, returnSpeed: 1 },
+        expectedSwipes: 2,
+      },
+    ])(
+      "takes the $label and warns that the state is unknown",
+      async ({ boomerang, expectedSwipes }) => {
+        const { executor, calls } = makeFakeGestureExecutor();
+        fakeVoiceOverDetector.setPersistentResolvedState(null);
+
+        const result = await new VoiceOverSwipeExecutor(
+          iosDevice,
+          executor,
+          fakeIosClient,
+          fakeVoiceOverDetector,
+          fakeTimer,
+        ).executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf, boomerang);
+
+        expect(result.success).toBe(true);
+        expect(calls).toHaveLength(expectedSwipes);
+        expect(result.warnings).toEqual([VOICEOVER_STATE_UNKNOWN_WARNING]);
+      },
+    );
+
+    test("a confirmed-off probe takes the standard swipe without a warning", async () => {
+      const { executor, calls } = makeFakeGestureExecutor();
+      fakeVoiceOverDetector.setPersistentResolvedState(false);
+
+      const result = await new VoiceOverSwipeExecutor(
+        iosDevice,
+        executor,
+        fakeIosClient,
+        fakeVoiceOverDetector,
+        fakeTimer,
+      ).executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf);
+
+      expect(calls).toHaveLength(1);
+      expect(result.warnings).toBeUndefined();
+    });
+
+    test("a confirmed-on probe still refuses the synthesized scroll", async () => {
+      const { executor, calls } = makeFakeGestureExecutor();
+      fakeVoiceOverDetector.setPersistentResolvedState(true);
+
+      const result = await new VoiceOverSwipeExecutor(
+        iosDevice,
+        executor,
+        fakeIosClient,
+        fakeVoiceOverDetector,
+        fakeTimer,
+      ).executeSwipeGesture(100, 500, 100, 200, "up", null, { duration: 300 }, perf);
+
+      expect(result.success).toBe(false);
+      expect(calls).toHaveLength(0);
     });
   });
 

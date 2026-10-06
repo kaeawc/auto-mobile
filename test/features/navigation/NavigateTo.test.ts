@@ -615,6 +615,9 @@ describe("NavigateTo", () => {
         { waitForScreen: async () => false },
         fakeGraph,
         new FakeTimer(),
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
 
       const result = await navigateTo.execute(
@@ -648,6 +651,9 @@ describe("NavigateTo", () => {
         null,
         fakeGraph,
         timer,
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
       let settled = false;
       const execution = navigateTo
@@ -727,6 +733,9 @@ describe("NavigateTo", () => {
         },
         fakeGraph,
         new FakeTimer(),
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
 
       const result = await navigateTo.execute({
@@ -811,6 +820,9 @@ describe("NavigateTo", () => {
         null,
         fakeGraph,
         timer,
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
 
       const result = await navigateTo.execute({

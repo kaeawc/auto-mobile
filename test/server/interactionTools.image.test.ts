@@ -1,6 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, expect, test } from "bun:test";
 import {
   tapAtSchema,
   hitTestSchema,
@@ -21,6 +21,26 @@ const screenshot = {
 const image = { unit: "normalized" as const, x: 0.25, y: 0.5, source: { screenshot } };
 const args = { image };
 afterEach(resetTapAtElementFactory);
+
+beforeAll(async () => {
+  // One-time cold-start work (lazy zod schema build, registering and JSON-schema-converting the
+  // ~20 interaction tools, first crop; ~15 ms in the first test that touches each) is paid here,
+  // outside the per-test budget. Nothing asserts on these throwaway calls.
+  tapAtSchema.safeParse(args);
+  await cropSource(
+    {
+      platform: "ios",
+      screenSize: screenshot.screenSize,
+      rotation: 1,
+      rasterOrientation: "display",
+    },
+    { width: 300, height: 600 },
+    { left: -10, top: 20, right: 60, bottom: 100 },
+  );
+  registerInteractionTools();
+  ToolRegistry.getToolDefinitions({ includeUnavailable: true });
+  ToolRegistry.clearTools();
+});
 
 test("strict image argument schema preserves the bare coordinate and hitTest forms", async () => {
   expect(tapAtSchema.safeParse(args).success).toBe(true);

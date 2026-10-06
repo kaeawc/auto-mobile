@@ -5,6 +5,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -248,19 +249,96 @@ class NetworkMockRuleStoreTest {
     )
   }
 
-  // Deterministic: every publication gets fresh counters, including unchanged rules.
+  // Issue #10101: the device compiles with its own regex engine, so the host cannot know what it
+  // will refuse. applyRules reports exactly the rules it skipped, with the compiler's reason.
   @Test
-  fun `setRules resets remaining counters for unchanged rules`() {
+  fun `applyRules returns the ids and reasons of the rules the device engine rejected`() {
     val store = createStore()
-    val dtos = listOf(rule(limit = 5, remaining = 2))
+
+    val rejected =
+      store.applyRules(
+        listOf(
+          rule(mockId = "ok"),
+          rule(mockId = "brace", path = "/items/{id}"),
+          rule(mockId = "bracket", host = "[invalid"),
+        )
+      )
+
+    assertEquals(listOf("brace", "bracket"), rejected.map { it.mockId })
+    assertTrue(rejected.all { it.reason.startsWith("invalid regex: ") })
+    assertEquals(1, store.getRuleCount())
+    assertEquals("ok", store.findMatchingRule("api.example.com", "/users", "GET")?.mockId)
+    assertNull(store.findMatchingRule("api.example.com", "/items/{id}", "GET"))
+  }
+
+  @Test
+  fun `applyRules reports nothing when every rule compiles`() {
+    val store = createStore()
+
+    assertTrue(store.applyRules(listOf(rule(mockId = "a"), rule(mockId = "b"))).isEmpty())
+    assertTrue(store.applyRules(emptyList()).isEmpty())
+  }
+
+  // Issue #10060: the host re-sends its whole list on every change and reconnect; an exhausted
+  // rule must stay exhausted when the same rule (same mockId and definition) is re-sent.
+  @Test
+  fun `setRules keeps the consumed counter for an unchanged rule when another rule is added`() {
+    val store = createStore()
+    val first = rule(mockId = "mock-1", path = "/login", limit = 1, remaining = 1)
+    store.setRules(listOf(first))
+    assertNotNull(store.findMatchingRule("api.example.com", "/login", "POST"))
+    assertNull(store.findMatchingRule("api.example.com", "/login", "POST"))
+
+    store.setRules(listOf(first, rule(mockId = "mock-2", path = "/profile")))
+
+    assertNull(store.findMatchingRule("api.example.com", "/login", "POST"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/profile", "GET"))
+  }
+
+  @Test
+  fun `setRules keeps a partially consumed counter across an identical re-push`() {
+    val store = createStore()
+    val dtos = listOf(rule(limit = 3, remaining = 3))
     store.setRules(dtos)
-    repeat(2) { assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET")) }
-    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
 
     store.setRules(dtos)
 
-    repeat(2) { assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET")) }
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+  }
+
+  @Test
+  fun `setRules gives a fresh counter to a new mockId or a changed definition`() {
+    val store = createStore()
+    store.setRules(listOf(rule(mockId = "mock-1", limit = 1, remaining = 1)))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    // Same id, different limit: a different rule, so it starts fresh.
+    store.setRules(listOf(rule(mockId = "mock-1", limit = 2, remaining = 2)))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    // New id, same definition: also fresh.
+    store.setRules(listOf(rule(mockId = "mock-9", limit = 2, remaining = 2)))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+  }
+
+  @Test
+  fun `setRules with an empty list drops counters so a later push starts fresh`() {
+    val store = createStore()
+    val dtos = listOf(rule(limit = 1, remaining = 1))
+    store.setRules(dtos)
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    store.setRules(emptyList())
+    store.setRules(dtos)
+
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
   }
 
   // --- Error simulation tests ---
@@ -288,6 +366,79 @@ class NetworkMockRuleStoreTest {
     val store = createStore()
     store.setErrorSimulation(false, null, null, null)
 
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  // --- Skew-immune expiry (issue #10062) ---
+
+  @Test
+  fun `remainingMs simulation runs its duration on a device clock far ahead of the host`() {
+    // Device wall clock is two minutes ahead of the host epoch the old code compared against.
+    val wall = AtomicLong(1_000_000L + 120_000L)
+    val mono = AtomicLong(5_000L)
+    val store = NetworkMockRuleStore(clock = { wall.get() }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "http500", null, 1_030_000L, remainingMs = 30_000L)
+
+    assertNotNull(store.getActiveErrorSimulation())
+    mono.addAndGet(29_999L)
+    assertNotNull(store.getActiveErrorSimulation())
+    mono.addAndGet(1L)
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `remainingMs simulation still expires on a device clock far behind the host`() {
+    val wall = AtomicLong(1_000_000L - 120_000L)
+    val mono = AtomicLong(5_000L)
+    val store = NetworkMockRuleStore(clock = { wall.get() }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "http500", null, 1_030_000L, remainingMs = 30_000L)
+
+    mono.addAndGet(30_000L)
+
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `wall clock steps do not change a remainingMs simulation`() {
+    val wall = AtomicLong(1_000L)
+    val mono = AtomicLong(0L)
+    val store = NetworkMockRuleStore(clock = { wall.get() }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 10_000L)
+
+    wall.set(Long.MAX_VALUE / 2)
+
+    assertNotNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `remainingMs of zero is already expired`() {
+    val store = NetworkMockRuleStore(clock = { 1_000L }, monotonicClock = { 0L })
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 0L)
+
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `remainingMs wins over a conflicting absolute expiry`() {
+    val mono = AtomicLong(0L)
+    val store = NetworkMockRuleStore(clock = { 1_000L }, monotonicClock = { mono.get() })
+    // The absolute value is already in the past on the device clock; the duration governs.
+    store.setErrorSimulation(true, "timeout", null, 500L, remainingMs = 10_000L)
+
+    assertNotNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `a re-pushed remainingMs replaces the deadline rather than extending the original`() {
+    val mono = AtomicLong(0L)
+    val store = NetworkMockRuleStore(clock = { 1_000L }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 30_000L)
+    mono.addAndGet(10_000L)
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 20_000L)
+
+    mono.addAndGet(19_999L)
+    assertNotNull(store.getActiveErrorSimulation())
+    mono.addAndGet(1L)
     assertNull(store.getActiveErrorSimulation())
   }
 

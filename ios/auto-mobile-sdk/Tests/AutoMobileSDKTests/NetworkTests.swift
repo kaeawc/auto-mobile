@@ -12,6 +12,17 @@ private final class EventCollector: @unchecked Sendable {
     func collect(_ events: [any SdkEvent]) { lock.lock(); _events = events; lock.unlock() }
 }
 
+/// Fake monotonic clock for `NetworkMockRuleStore(uptimeMs:)`; mutated only from the test thread.
+private final class UptimeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Int64
+    init(_ value: Int64) { _value = value }
+    var value: Int64 {
+        get { lock.lock(); defer { lock.unlock() }; return _value }
+        set { lock.lock(); _value = newValue; lock.unlock() }
+    }
+}
+
 #if DEBUG
     /// Flushes and snapshots network events synchronously from URLProtocol terminal callbacks.
     private final class EventObservingURLProtocolClient: NSObject, URLProtocolClient {
@@ -386,6 +397,61 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/users", method: "GET"))
         }
 
+        private func mockRule(_ mockId: String, host: String = ".*", path: String) -> NetworkMockRuleDTO {
+            NetworkMockRuleDTO(
+                mockId: mockId,
+                host: host,
+                path: path,
+                method: "*",
+                limit: nil,
+                remaining: nil,
+                statusCode: 500,
+                responseHeaders: [:],
+                responseBody: "",
+                contentType: "application/json"
+            )
+        }
+
+        /// Issue #10101: NSRegularExpression decides what compiles, so the store reports what it skipped.
+        func testNetworkMockRuleStoreReportsTheRulesItRejected() {
+            let store = NetworkMockRuleStore()
+
+            let rejected = store.setRules([
+                mockRule("ok", path: "^/ok$"),
+                mockRule("bad-path", path: "[unterminated"),
+                mockRule("bad-host", host: "(", path: "^/ok$"),
+            ])
+
+            XCTAssertEqual(rejected.map(\.mockId), ["bad-path", "bad-host"])
+            XCTAssertTrue(rejected.allSatisfy { $0.reason.hasPrefix("invalid regex: ") })
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/ok", method: "GET"))
+        }
+
+        func testNetworkMockRuleStoreReportsNothingWhenEveryRuleCompiles() {
+            let store = NetworkMockRuleStore()
+
+            XCTAssertTrue(store.setRules([mockRule("a", path: "/a"), mockRule("b", path: "/b")]).isEmpty)
+            XCTAssertTrue(store.setRules([]).isEmpty)
+        }
+
+        func testSetMockRulesResponseBodyListsRejectedRulesForTheRunner() throws {
+            let body = SdkHierarchyServer.setMockRulesResponseBody(rejected: [
+                RejectedMockRule(mockId: "m1", reason: "invalid regex: x"),
+            ])
+
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["status"] as? String, "ok")
+            let rejected = try XCTUnwrap(json["rejected"] as? [[String: String]])
+            XCTAssertEqual(rejected, [["mockId": "m1", "reason": "invalid regex: x"]])
+        }
+
+        func testSetMockRulesResponseBodyReportsAnEmptyListWhenNothingWasRejected() throws {
+            let body = SdkHierarchyServer.setMockRulesResponseBody(rejected: [])
+
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual((json["rejected"] as? [Any])?.count, 0)
+        }
+
         func testNetworkMockRuleStoreHonorsLimit() {
             let store = NetworkMockRuleStore()
             store.setRules([
@@ -405,6 +471,41 @@ final class AutoMobileNetworkTests: XCTestCase {
 
             XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
             XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
+        }
+
+        // Issue #10060: the host re-sends its whole rule list on every change and reconnect; an
+        // exhausted rule must stay exhausted when the same rule is re-sent.
+        func testNetworkMockRuleStoreKeepsConsumedCounterWhenOtherRulesChange() {
+            func rule(_ mockId: String, path: String, limit: Int?) -> NetworkMockRuleDTO {
+                NetworkMockRuleDTO(
+                    mockId: mockId,
+                    host: "api\\.example\\.com",
+                    path: path,
+                    method: "*",
+                    limit: limit,
+                    remaining: limit,
+                    statusCode: 401,
+                    responseHeaders: [:],
+                    responseBody: "",
+                    contentType: "application/json"
+                )
+            }
+            let store = NetworkMockRuleStore()
+            let login = rule("mock-1", path: "^/login$", limit: 1)
+            store.setRules([login])
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+
+            store.setRules([login, rule("mock-2", path: "^/profile$", limit: nil)])
+
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/profile", method: "GET"))
+
+            // A changed definition under the same id is a different rule and starts fresh.
+            store.setRules([rule("mock-1", path: "^/login$", limit: 2)])
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/login", method: "POST"))
         }
 
         func testNetworkMockRuleStoreHonorsErrorSimulationLimitAndExpiry() {
@@ -428,6 +529,41 @@ final class AutoMobileNetworkTests: XCTestCase {
             ))
             dateProvider.advance(by: 2)
 
+            XCTAssertNil(store.activeErrorSimulation())
+        }
+
+        /// Issue #10062: a remaining duration is timed on the device's monotonic clock, so a device wall clock
+        /// two minutes ahead of the host neither kills the simulation at once nor stretches it.
+        func testNetworkMockRuleStoreTimesRemainingMsOnTheMonotonicClockNotTheWallClock() {
+            let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 220))
+            let uptime = UptimeBox(5000)
+            let store = NetworkMockRuleStore(dateProvider: dateProvider, uptimeMs: { uptime.value })
+            store.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "http500",
+                limit: nil,
+                expiresAtEpochMs: 130_000,
+                remainingMs: 30000
+            ))
+
+            XCTAssertNotNil(store.activeErrorSimulation())
+            uptime.value += 29999
+            XCTAssertNotNil(store.activeErrorSimulation())
+            uptime.value += 1
+            XCTAssertNil(store.activeErrorSimulation())
+        }
+
+        func testNetworkMockRuleStoreStillHonorsLegacyEpochWhenRemainingMsIsAbsent() {
+            let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
+            let store = NetworkMockRuleStore(dateProvider: dateProvider, uptimeMs: { 0 })
+            store.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "timeout",
+                limit: nil,
+                expiresAtEpochMs: 101_000
+            ))
+            XCTAssertNotNil(store.activeErrorSimulation())
+            dateProvider.advance(by: 2)
             XCTAssertNil(store.activeErrorSimulation())
         }
 

@@ -19,13 +19,27 @@ export interface SimulationConfig {
   expiresAt: number;
 }
 
+/**
+ * Milliseconds left on a simulation, measured on the host clock at call time.
+ * Devices turn this into a deadline on their own monotonic clock, so the length
+ * of a simulation never depends on the skew between host and device clocks
+ * (issue #10062). Computed at send time so a re-push after a reconnect carries
+ * what is left rather than the original duration.
+ */
+export function simulationRemainingMs(sim: SimulationConfig, nowMs: number): number {
+  return Math.max(0, Math.ceil(sim.expiresAt - nowMs));
+}
+
 export interface MockRule {
   mockId: string;
   host: string;
   path: string;
   method: string;
+  /**
+   * Configured use limit. The host never learns how many times a rule fired, so
+   * it keeps no live "remaining" count; the device owns consumption.
+   */
   limit: number | null;
-  remaining: number | null;
   statusCode: number;
   responseHeaders: Record<string, string>;
   responseBody: string;
@@ -45,13 +59,18 @@ export interface NetworkNotification {
   error: string | null;
 }
 
+export interface SimulatingErrorsSnapshot {
+  errorType: SimulatedErrorType;
+  limit?: number;
+  remainingSeconds: number;
+}
+
 export interface NetworkStateSnapshot {
   capturing: boolean;
-  simulatingErrors?: {
-    errorType: SimulatedErrorType;
-    limit?: number;
-    remainingSeconds: number;
-  };
+  /** Error simulation for the device the snapshot was requested for. */
+  simulatingErrors?: SimulatingErrorsSnapshot;
+  /** Per-device error simulation, present on a device-less snapshot. */
+  simulatingErrorsByDevice?: Record<string, SimulatingErrorsSnapshot>;
   notifFilter: NotifFilter;
   notifDebounceMs: number;
   slowThresholdMs: number;
@@ -66,6 +85,19 @@ export interface NetworkStateConfig {
   notifier?: ResourceNotifier;
 }
 
+/**
+ * Mock rules and error simulation for ONE device (issue #10061). Keyed by device
+ * so a rule set for device A is never pushed to device B, and so a session
+ * release can remove exactly what that session installed.
+ */
+interface DeviceNetworkScope {
+  mocks: Map<string, MockRule>;
+  simulation: SimulationConfig | null;
+  simulationTimeout: NodeJS.Timeout | null;
+  /** Session that last installed state here; null for sessionless (direct) mode. */
+  ownerSessionUuid: string | null;
+}
+
 const defaultNotifier: ResourceNotifier = {
   notifyResourceUpdated(uri: string): void {
     void ResourceRegistry.notifyResourceUpdated(uri);
@@ -76,12 +108,10 @@ export class NetworkState {
   private static instance: NetworkState | null = null;
 
   private _capturing = false;
-  private _simulation: SimulationConfig | null = null;
-  private _simulationTimeout: NodeJS.Timeout | null = null;
+  private readonly _devices: Map<string, DeviceNetworkScope> = new Map();
   private _notifFilter: NotifFilter = "all";
   private _notifDebounceMs = 100;
   private _slowThresholdMs = 2000;
-  private _mocks: Map<string, MockRule> = new Map();
   private _nextMockId = 1;
 
   private _debounceTimeout: NodeJS.Timeout | null = null;
@@ -110,15 +140,13 @@ export class NetworkState {
   }
 
   dispose(): void {
-    if (this._simulationTimeout) {
-      this.timer.clearTimeout(this._simulationTimeout);
-      this._simulationTimeout = null;
+    for (const deviceId of Array.from(this._devices.keys())) {
+      this.retireDevice(deviceId);
     }
     if (this._debounceTimeout) {
       this.timer.clearTimeout(this._debounceTimeout);
       this._debounceTimeout = null;
     }
-    this._simulation = null;
     this._pendingNotifications = [];
   }
 
@@ -132,21 +160,86 @@ export class NetworkState {
     this._capturing = enabled;
   }
 
+  // --- Per-device scope ---
+
+  private scopeFor(deviceId: string): DeviceNetworkScope {
+    let scope = this._devices.get(deviceId);
+    if (!scope) {
+      scope = {
+        mocks: new Map(),
+        simulation: null,
+        simulationTimeout: null,
+        ownerSessionUuid: null,
+      };
+      this._devices.set(deviceId, scope);
+    }
+    return scope;
+  }
+
+  private pruneIfEmpty(deviceId: string): void {
+    const scope = this._devices.get(deviceId);
+    if (scope && scope.mocks.size === 0 && scope.simulation === null) {
+      this._devices.delete(deviceId);
+    }
+  }
+
+  /**
+   * Record which session installed state on a device. A sessionless write leaves
+   * the existing owner alone, so direct mode keeps today's lifetime.
+   */
+  noteSessionOwner(deviceId: string, sessionUuid: string | undefined): void {
+    if (sessionUuid !== undefined) {
+      this.scopeFor(deviceId).ownerSessionUuid = sessionUuid;
+    }
+  }
+
+  /**
+   * Remove a device's rules and simulation when the session that installed them
+   * is released (or leaves the device). Returns true when state was removed so
+   * the caller knows to push the now-empty set to the device. State installed
+   * sessionless, or by a different session, is left in place.
+   */
+  clearDeviceOwnedBySession(deviceId: string, sessionUuid: string): boolean {
+    const scope = this._devices.get(deviceId);
+    if (!scope || scope.ownerSessionUuid !== sessionUuid) {
+      return false;
+    }
+    this.retireDevice(deviceId);
+    return true;
+  }
+
+  /** Drop everything held for a device, regardless of owner (device removed). */
+  retireDevice(deviceId: string): void {
+    const scope = this._devices.get(deviceId);
+    if (!scope) {
+      return;
+    }
+    this.stopSimulationTimer(scope);
+    this._devices.delete(deviceId);
+  }
+
   // --- Error Simulation ---
 
-  get simulation(): SimulationConfig | null {
-    if (this._simulation && this.timer.now() >= this._simulation.expiresAt) {
-      this._simulation = null;
+  getSimulation(deviceId: string): SimulationConfig | null {
+    const scope = this._devices.get(deviceId);
+    if (!scope) {
+      return null;
     }
-    return this._simulation;
+    if (scope.simulation && this.timer.now() >= scope.simulation.expiresAt) {
+      scope.simulation = null;
+      this.pruneIfEmpty(deviceId);
+    }
+    return scope.simulation;
   }
 
   startSimulation(
+    deviceId: string,
     errorType: SimulatedErrorType,
     durationSeconds: number,
     limit: number | null,
   ): void {
     this.startSimulationUntil(
+      deviceId,
       errorType,
       Math.ceil(this.timer.now() + durationSeconds * 1000),
       limit,
@@ -154,37 +247,51 @@ export class NetworkState {
   }
 
   startSimulationUntil(
+    deviceId: string,
     errorType: SimulatedErrorType,
     expiresAt: number,
     limit: number | null,
   ): void {
-    if (this._simulationTimeout) {
-      this.timer.clearTimeout(this._simulationTimeout);
-      this._simulationTimeout = null;
-    }
+    // Clear the previous simulation in place: cancelSimulation() prunes an empty
+    // scope, which would drop the owner recorded just before this call.
+    const scope = this.scopeFor(deviceId);
+    this.stopSimulationTimer(scope);
+    scope.simulation = null;
     const timeoutMs = Math.max(0, expiresAt - this.timer.now());
     if (timeoutMs === 0) {
-      this._simulation = null;
+      this.pruneIfEmpty(deviceId);
       return;
     }
-    this._simulation = {
+    scope.simulation = {
       errorType,
       limit,
       remaining: limit,
       expiresAt,
     };
-    this._simulationTimeout = this.timer.setTimeout(() => {
-      this._simulation = null;
-      this._simulationTimeout = null;
+    scope.simulationTimeout = this.timer.setTimeout(() => {
+      scope.simulation = null;
+      scope.simulationTimeout = null;
+      if (this._devices.get(deviceId) === scope) {
+        this.pruneIfEmpty(deviceId);
+      }
     }, timeoutMs);
   }
 
-  cancelSimulation(): void {
-    if (this._simulationTimeout) {
-      this.timer.clearTimeout(this._simulationTimeout);
-      this._simulationTimeout = null;
+  cancelSimulation(deviceId: string): void {
+    const scope = this._devices.get(deviceId);
+    if (!scope) {
+      return;
     }
-    this._simulation = null;
+    this.stopSimulationTimer(scope);
+    scope.simulation = null;
+    this.pruneIfEmpty(deviceId);
+  }
+
+  private stopSimulationTimer(scope: DeviceNetworkScope): void {
+    if (scope.simulationTimeout) {
+      this.timer.clearTimeout(scope.simulationTimeout);
+      scope.simulationTimeout = null;
+    }
   }
 
   // --- Notification Config ---
@@ -215,39 +322,75 @@ export class NetworkState {
 
   // --- Mocks ---
 
-  addMock(rule: Omit<MockRule, "mockId">): MockRule {
+  addMock(deviceId: string, rule: Omit<MockRule, "mockId">): MockRule {
     const mockId = `mock-${this._nextMockId++}`;
     const mock: MockRule = { ...rule, mockId };
-    this._mocks.set(mockId, mock);
+    this.scopeFor(deviceId).mocks.set(mockId, mock);
     return mock;
   }
 
-  removeMock(mockId: string): boolean {
-    return this._mocks.delete(mockId);
+  removeMock(deviceId: string, mockId: string): boolean {
+    const removed = this._devices.get(deviceId)?.mocks.delete(mockId) ?? false;
+    this.pruneIfEmpty(deviceId);
+    return removed;
   }
 
-  clearAllMocks(): number {
-    const count = this._mocks.size;
-    this._mocks.clear();
+  clearAllMocks(deviceId: string): number {
+    const scope = this._devices.get(deviceId);
+    const count = scope?.mocks.size ?? 0;
+    scope?.mocks.clear();
+    this.pruneIfEmpty(deviceId);
     return count;
   }
 
-  getMocks(): Map<string, MockRule> {
-    return new Map(this._mocks);
+  getMocks(deviceId: string): Map<string, MockRule> {
+    return new Map(this._devices.get(deviceId)?.mocks);
   }
 
-  getMockSummary(): Record<string, number> {
+  /** Every device's rules, for the device-less `automobile:network/mocks` resource. */
+  getAllMocks(): Array<MockRule & { deviceId: string }> {
+    return Array.from(this._devices.entries()).flatMap(([deviceId, scope]) =>
+      Array.from(scope.mocks.values()).map((mock) => ({ ...mock, deviceId })),
+    );
+  }
+
+  /**
+   * Summary of a device's rules keyed `method host+path`. The value is the
+   * configured use limit (-1 when unlimited), NOT a live remaining count: the
+   * host never learns how many times a rule fired (issue #10060).
+   */
+  getMockSummary(deviceId: string): Record<string, number> {
     const summary: Record<string, number> = {};
-    for (const mock of this._mocks.values()) {
+    for (const mock of this._devices.get(deviceId)?.mocks.values() ?? []) {
       const key = `${mock.method} ${mock.host}${mock.path}`;
-      summary[key] = mock.remaining ?? -1;
+      summary[key] = mock.limit ?? -1;
     }
     return summary;
   }
 
   // --- Snapshot ---
 
-  getSnapshot(): NetworkStateSnapshot {
+  private simulatingErrorsSnapshot(deviceId: string): SimulatingErrorsSnapshot | undefined {
+    const sim = this.getSimulation(deviceId);
+    if (!sim) {
+      return undefined;
+    }
+    const snapshot: SimulatingErrorsSnapshot = {
+      errorType: sim.errorType,
+      remainingSeconds: Math.max(0, Math.ceil((sim.expiresAt - this.timer.now()) / 1000)),
+    };
+    if (sim.limit !== null) {
+      snapshot.limit = sim.limit;
+    }
+    return snapshot;
+  }
+
+  /**
+   * Snapshot of capture/notification config plus error simulation. With a
+   * `deviceId`, `simulatingErrors` describes that device; without one the
+   * per-device map is reported instead.
+   */
+  getSnapshot(deviceId?: string): NetworkStateSnapshot {
     const snapshot: NetworkStateSnapshot = {
       capturing: this._capturing,
       notifFilter: this._notifFilter,
@@ -255,17 +398,24 @@ export class NetworkState {
       slowThresholdMs: this._slowThresholdMs,
     };
 
-    const sim = this.simulation;
-    if (sim) {
-      snapshot.simulatingErrors = {
-        errorType: sim.errorType,
-        remainingSeconds: Math.max(0, Math.ceil((sim.expiresAt - this.timer.now()) / 1000)),
-      };
-      if (sim.limit !== null) {
-        snapshot.simulatingErrors.limit = sim.limit;
+    if (deviceId !== undefined) {
+      const simulating = this.simulatingErrorsSnapshot(deviceId);
+      if (simulating) {
+        snapshot.simulatingErrors = simulating;
       }
+      return snapshot;
     }
 
+    const byDevice: Record<string, SimulatingErrorsSnapshot> = {};
+    for (const id of Array.from(this._devices.keys())) {
+      const simulating = this.simulatingErrorsSnapshot(id);
+      if (simulating) {
+        byDevice[id] = simulating;
+      }
+    }
+    if (Object.keys(byDevice).length > 0) {
+      snapshot.simulatingErrorsByDevice = byDevice;
+    }
     return snapshot;
   }
 

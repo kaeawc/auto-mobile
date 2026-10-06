@@ -24,6 +24,7 @@ class CommandAdvertisementTest {
       "node_selector_actions",
       "ime_key_events_v1",
       "tap_double_v1",
+      "network_mock_rules_report_v1",
       "gesture_display_id_v1",
       "overlay_display_id_v1",
       "full_command_set_v1",
@@ -45,6 +46,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("node_selector_actions"))
       assertTrue(commands.contains("ime_key_events_v1"))
       assertTrue(commands.contains("tap_double_v1"))
+      assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertEquals(commands.size, commands.toSet().size)
       assertTrue(commands.all { it in sealedRequestTypes || it in knownFlags })
       assertTrue(commands.contains("request_tap_coordinates"))

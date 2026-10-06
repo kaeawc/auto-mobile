@@ -3,8 +3,18 @@ import { validateHeaderName } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { NetworkState, type SimulatedErrorType } from "./NetworkState";
-import { buildNetworkMockRules } from "./networkMockRules";
+import {
+  NetworkState,
+  simulationRemainingMs,
+  type SimulatedErrorType,
+  type SimulationConfig,
+} from "./NetworkState";
+import {
+  buildNetworkMockRules,
+  type NetworkMockRuleSync,
+  type NetworkMockSyncReport,
+  type RejectedMockRule,
+} from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -134,19 +144,62 @@ type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 
 const NETWORK_GRAPH_MAX_EVENTS = 10_000;
 
-type DeviceSyncResult = { synced: true } | { synced: false; warning: string };
+/**
+ * `report` is what the device said about a pushed mock-rule list (#10101); absent for pushes that
+ * carry no rule report (error simulation, or a platform without one).
+ */
+type DeviceSyncResult =
+  | { synced: true; report?: NetworkMockSyncReport }
+  | { synced: false; warning: string };
 
-function deviceSyncFields(result: DeviceSyncResult): { deviceSynced?: false; warning?: string } {
-  return result.synced ? {} : { deviceSynced: false, warning: result.warning };
+interface DeviceSyncFields {
+  deviceSynced?: false;
+  warning?: string;
+  /** Rules the device's regex engine refused: stored on the host but NOT installed. */
+  notInstalled?: RejectedMockRule[];
+  /** False when the rules were sent but the device did not report what it installed. */
+  deviceConfirmed?: false;
+  note?: string;
 }
+
+const MOCK_RULES_UNCONFIRMED_NOTE =
+  "Mock rules were sent to the device, but it did not report which it installed " +
+  "(an older SDK or CtrlProxy, or no reply in time). A rule its regex engine rejects would be skipped silently.";
+
+function rejectedRulesFields(rejected: RejectedMockRule[]): DeviceSyncFields {
+  const listed = rejected.map((rule) => `${rule.mockId} (${rule.reason})`).join("; ");
+  return {
+    deviceSynced: false,
+    notInstalled: rejected,
+    warning:
+      `${rejected.length} mock rule(s) are stored but were NOT installed: the device's regex ` +
+      `engine rejected them: ${listed}. Fix the host/path pattern and add the rule again, or ` +
+      "clear it with clearMockNetwork.",
+  };
+}
+
+function deviceSyncFields(result: DeviceSyncResult): DeviceSyncFields {
+  if (!result.synced) {
+    return { deviceSynced: false, warning: result.warning };
+  }
+  if (result.report?.status === "unconfirmed") {
+    return { deviceConfirmed: false, note: MOCK_RULES_UNCONFIRMED_NOTE };
+  }
+  if (result.report?.status === "reported" && result.report.rejected.length > 0) {
+    return rejectedRulesFields(result.report.rejected);
+  }
+  return {};
+}
+
+const ANDROID_NOT_SYNCED_WARNING =
+  "Network state is stored but was not synced to the device; it will be applied when the " +
+  "device connection is restored (error simulation keeps its original expiry).";
 
 function syncAndroidNetworkMessage(
   device: BootedDevice,
   message: Record<string, unknown>,
 ): DeviceSyncResult {
-  const warning =
-    "Network state is stored but was not synced to the device; it will be applied when the " +
-    "device connection is restored (error simulation keeps its original expiry).";
+  const warning = ANDROID_NOT_SYNCED_WARNING;
   try {
     if (AndroidCtrlProxyClient.getInstance(device).sendMessage(JSON.stringify(message))) {
       return { synced: true };
@@ -220,17 +273,30 @@ async function syncMockRulesToDevice(
   state: NetworkState,
 ): Promise<DeviceSyncResult> {
   if (device.platform === "android") {
-    // Use limit (not remaining): device-side stores track consumption and
-    // reconnect restores all retained rules from NetworkState.
-    return syncAndroidNetworkMessage(device, {
-      type: "set_network_mock_rules",
-      rules: buildNetworkMockRules(state),
-    });
+    // This device's rules only (#10061). Device-side stores keep consumption per
+    // mockId across a re-push (#10060), so resending the full list is safe.
+    return syncAndroidMockRules(device, buildNetworkMockRules(state, device.deviceId));
   }
   if (device.platform !== "ios") {
     return { synced: true };
   }
   return syncIosMockRules(device);
+}
+
+async function syncAndroidMockRules(
+  device: BootedDevice,
+  rules: NetworkMockRuleSync[],
+): Promise<DeviceSyncResult> {
+  try {
+    const push = await AndroidCtrlProxyClient.getInstance(device).pushNetworkMockRules(rules);
+    if (push.delivered) {
+      return { synced: true, report: push.report };
+    }
+    logger.warn(`[networkTools] ${ANDROID_NOT_SYNCED_WARNING} (${push.error})`);
+  } catch (error) {
+    logger.warn(`[networkTools] Failed to sync network state: ${errorMessage(error)}`, error);
+  }
+  return { synced: false, warning: ANDROID_NOT_SYNCED_WARNING };
 }
 
 const IOS_MOCK_SYNC_PENDING = "will be applied when the device connection is restored";
@@ -253,9 +319,10 @@ const IOS_MOCK_SYNC_WARNINGS: Record<Exclude<IosMockRuleSyncOutcome, "sent">, st
 
 async function syncIosMockRules(device: BootedDevice): Promise<DeviceSyncResult> {
   try {
-    const outcome = await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+    const { outcome, report } =
+      await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
     if (outcome === "sent") {
-      return { synced: true };
+      return { synced: true, report };
     }
     const warning = IOS_MOCK_SYNC_WARNINGS[outcome];
     logger.warn(`[networkTools] ${warning}`);
@@ -269,12 +336,15 @@ async function syncIosMockRules(device: BootedDevice): Promise<DeviceSyncResult>
   }
 }
 
-function errorSimulationMessageFields(sim: NetworkState["simulation"]) {
+function errorSimulationMessageFields(sim: SimulationConfig | null, nowMs: number) {
   return {
     enabled: sim !== null,
     errorType: sim?.errorType ?? null,
     limit: sim?.limit ?? null,
+    // Host-clock epoch, kept for SDKs that predate remainingMs.
     expiresAtEpochMs: sim?.expiresAt ?? null,
+    // New SDKs time the simulation from this on the device's own monotonic clock (#10062).
+    remainingMs: sim ? simulationRemainingMs(sim, nowMs) : null,
   };
 }
 
@@ -285,10 +355,10 @@ async function syncErrorSimulationToDevice(
   if (device.platform !== "android" && device.platform !== "ios") {
     return { synced: true };
   }
-  const sim = state.simulation;
+  const sim = state.getSimulation(device.deviceId);
   if (device.platform === "ios") {
     const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation(
-      errorSimulationMessageFields(sim),
+      errorSimulationMessageFields(sim, state.timer.now()),
     );
     if (!result.success) {
       throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
@@ -298,7 +368,7 @@ async function syncErrorSimulationToDevice(
 
   return syncAndroidNetworkMessage(device, {
     type: "set_network_error_simulation",
-    ...errorSimulationMessageFields(sim),
+    ...errorSimulationMessageFields(sim, state.timer.now()),
   });
 }
 
@@ -308,17 +378,17 @@ async function setIosErrorSimulation(
   config: { errorType: SimulatedErrorType; durationSeconds: number; limit: number | null } | null,
 ): Promise<void> {
   if (config === null) {
-    state.cancelSimulation();
+    state.cancelSimulation(device.deviceId);
   }
 
-  const expiresAtEpochMs = config
-    ? Math.ceil(state.timer.now() + config.durationSeconds * 1000)
-    : null;
+  const remainingMs = config ? Math.ceil(config.durationSeconds * 1000) : null;
+  const expiresAtEpochMs = remainingMs === null ? null : Math.ceil(state.timer.now() + remainingMs);
   const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
     enabled: config !== null,
     errorType: config?.errorType ?? null,
     limit: config?.limit ?? null,
     expiresAtEpochMs,
+    remainingMs,
   });
   if (!result.success) {
     throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
@@ -327,18 +397,19 @@ async function setIosErrorSimulation(
   if (config === null) {
     return;
   }
-  state.startSimulationUntil(config.errorType, expiresAtEpochMs!, config.limit);
+  state.startSimulationUntil(device.deviceId, config.errorType, expiresAtEpochMs!, config.limit);
 }
 
 function iosSimulationConfig(
   state: NetworkState,
+  device: BootedDevice,
   simulation: NonNullable<NetworkArgs["simulateErrors"]>,
 ) {
   if (simulation.cancel) {
     if (isIosNetworkErrorSimulationAvailable()) {
       return null;
     }
-    state.cancelSimulation();
+    state.cancelSimulation(device.deviceId);
     return undefined;
   }
   assertIosNetworkErrorSimulationAvailable();
@@ -354,16 +425,22 @@ function iosSimulationConfig(
 
 function updateSimulation(
   state: NetworkState,
+  device: BootedDevice,
   simulation: NonNullable<NetworkArgs["simulateErrors"]>,
 ): void {
   if (simulation.cancel) {
-    state.cancelSimulation();
+    state.cancelSimulation(device.deviceId);
   } else {
     if (!simulation.durationSeconds) {
       throw new ActionableError("durationSeconds is required unless cancel is true");
     }
     const errorType: SimulatedErrorType = simulation.errorType ?? "http500";
-    state.startSimulation(errorType, simulation.durationSeconds, simulation.limit ?? null);
+    state.startSimulation(
+      device.deviceId,
+      errorType,
+      simulation.durationSeconds,
+      simulation.limit ?? null,
+    );
   }
 }
 
@@ -376,12 +453,14 @@ function createNetworkHandler(state: NetworkState) {
 
     if (args.simulateErrors !== undefined) {
       if (device.platform === "ios") {
-        const config = iosSimulationConfig(state, args.simulateErrors);
+        state.noteSessionOwner(device.deviceId, args.sessionUuid);
+        const config = iosSimulationConfig(state, device, args.simulateErrors);
         if (config !== undefined) {
           await setIosErrorSimulation(device, state, config);
         }
       } else {
-        updateSimulation(state, args.simulateErrors);
+        state.noteSessionOwner(device.deviceId, args.sessionUuid);
+        updateSimulation(state, device, args.simulateErrors);
         syncResult = await syncErrorSimulationToDevice(device, state);
       }
     }
@@ -396,7 +475,10 @@ function createNetworkHandler(state: NetworkState) {
       state.setSlowThresholdMs(args.slowThresholdMs);
     }
 
-    return createJSONToolResponse({ ...state.getSnapshot(), ...deviceSyncFields(syncResult) });
+    return createJSONToolResponse({
+      ...state.getSnapshot(device.deviceId),
+      ...deviceSyncFields(syncResult),
+    });
   };
 }
 
@@ -406,7 +488,6 @@ function mockRuleFields(args: MockNetworkArgs) {
     path: args.path,
     method: args.method ?? "*",
     limit: args.limit ?? null,
-    remaining: args.limit ?? null,
     statusCode: args.statusCode ?? 200,
     responseHeaders: args.responseHeaders ?? {},
     responseBody: args.responseBody ?? "",
@@ -454,13 +535,14 @@ export function registerNetworkTools(): void {
       }
       assertValidResponseHeaders(args.responseHeaders);
 
-      const mock = state.addMock(mockRuleFields(args));
+      state.noteSessionOwner(device.deviceId, args.sessionUuid);
+      const mock = state.addMock(device.deviceId, mockRuleFields(args));
 
       const syncResult = await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         mockId: mock.mockId,
-        mocked: state.getMockSummary(),
+        mocked: state.getMockSummary(device.deviceId),
         ...deviceSyncFields(syncResult),
       });
     },
@@ -484,19 +566,19 @@ export function registerNetworkTools(): void {
 
       let cleared: number;
       if (args.mockId) {
-        cleared = state.removeMock(args.mockId) ? 1 : 0;
+        cleared = state.removeMock(device.deviceId, args.mockId) ? 1 : 0;
         if (cleared === 0) {
           throw new ActionableError(`Mock '${args.mockId}' not found`);
         }
       } else {
-        cleared = state.clearAllMocks();
+        cleared = state.clearAllMocks(device.deviceId);
       }
 
       const syncResult = await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         cleared,
-        remaining: state.getMockSummary(),
+        remaining: state.getMockSummary(device.deviceId),
         ...deviceSyncFields(syncResult),
       });
     },

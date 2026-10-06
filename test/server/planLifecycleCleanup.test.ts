@@ -12,10 +12,11 @@ import {
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import {
   DefaultPlanLifecycleManager,
+  PLAN_APP_CLEANUP_CAP_MS,
   type PlanLifecycleInput,
 } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
-import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -33,12 +34,27 @@ const devices: BootedDevice[] = [
 class FakeAppCleanupService implements AppCleanupService {
   readonly calls: Array<{ device: BootedDevice; config: AppCleanupConfig }> = [];
   failingDeviceId?: string;
+  /** Like the real terminate / clear-data actions, throw when the ambient signal is aborted. */
+  throwWhenAmbientAborted = false;
+  /** Block until the ambient signal aborts (a dead device that never answers). */
+  hangUntilAmbientAborted = false;
+  readonly abortedAtStart = new Map<string, boolean | undefined>();
 
   constructor(private readonly events: string[]) {}
 
   async cleanup(device: BootedDevice, config: AppCleanupConfig): Promise<void> {
     this.calls.push({ device, config });
     this.events.push(`cleanup-start:${device.deviceId}`);
+    const signal = getAbortSignal();
+    this.abortedAtStart.set(device.deviceId, signal?.aborted);
+    if (this.throwWhenAmbientAborted) {
+      signal?.throwIfAborted();
+    }
+    if (this.hangUntilAmbientAborted && signal) {
+      await new Promise<void>((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      );
+    }
     if (device.deviceId === this.failingDeviceId) {
       this.events.push(`cleanup-rejected:${device.deviceId}`);
       throw new Error("injected cleanup failure");
@@ -151,6 +167,8 @@ describe("executePlan cleans every acquired device before release", () => {
     await lifecycle.afterExecution(input());
     expectCleanupBeforeRelease(targets);
     expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(count);
+    // A clean cleanup adds no incomplete-cleanup summary.
+    expect(log.at("warn")).toEqual([]);
   });
 
   test.each(["device-A", "device-B"])(
@@ -176,8 +194,12 @@ describe("executePlan cleans every acquired device before release", () => {
         );
       }
       const warnings = log.at("warn");
-      expect(warnings).toHaveLength(1);
+      expect(warnings).toHaveLength(2);
       expect(warnings[0].message).toContain(failingDeviceId);
+      // One summary says the already-finalized plan result does not cover the failed cleanup.
+      expect(warnings[1].message).toContain("app cleanup for com.example.chat was incomplete");
+      expect(warnings[1].message).toContain(`failed on ${failingDeviceId}`);
+      expect(warnings[1].message).toContain("already finalized and does not report this");
       expect(sessionManager.getSession("base:B")).toBeNull();
       expect(sessionManager.getSession("base:C")).toBeNull();
       expect(sessionManager.getSession("base")).toBeNull();
@@ -241,6 +263,51 @@ describe("executePlan cleans every acquired device before release", () => {
       );
     },
   );
+
+  test.each([
+    ["a request deadline or client cancel", () => new Error("request cancelled")],
+    ["a sibling device loss", () => new DeviceLostError("device-B", "device lost during plan")],
+  ])("cleans every owned device under a live signal after %s (#10022)", async (_label, reason) => {
+    await acquire(devices.slice(0, 3));
+    cleanup.throwWhenAmbientAborted = true;
+    const controller = new AbortController();
+    controller.abort(reason());
+    await runWithAbortSignal(controller.signal, () => lifecycle.afterExecution(input()));
+    const lost = controller.signal.reason instanceof DeviceLostError ? "device-B" : undefined;
+    const owned = devices.slice(0, 3).filter((device) => device.deviceId !== lost);
+    expectCleanupBeforeRelease(owned);
+    expect([...cleanup.abortedAtStart.entries()]).toEqual(
+      owned.map((device) => [device.deviceId, false]),
+    );
+    expect(events.filter((event) => event.startsWith("cleanup-rejected:"))).toEqual([]);
+    expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(3);
+  });
+
+  test("a device that never answers cannot hang release past the cleanup cap", async () => {
+    await acquire(devices.slice(0, 2));
+    cleanup.hangUntilAmbientAborted = true;
+    const timer = new FakeTimer();
+    const capped = new DefaultPlanLifecycleManager(timer);
+    const controller = new AbortController();
+    controller.abort(new Error("request deadline"));
+    const work = runWithAbortSignal(controller.signal, () => capped.afterExecution(input()));
+    await Promise.resolve();
+    expect(events.some((event) => event.startsWith("release:"))).toBe(false);
+    timer.advanceTime(PLAN_APP_CLEANUP_CAP_MS);
+    await work;
+    expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(2);
+    expect(
+      log.at("warn").some((entry) => entry.message.includes("App cleanup did not finish")),
+    ).toBe(true);
+    expect(log.at("warn").some((entry) => entry.message.includes("App cleanup failed"))).toBe(true);
+    expect(
+      log
+        .at("warn")
+        .some((entry) =>
+          entry.message.includes(`did not finish within ${PLAN_APP_CLEANUP_CAP_MS}ms`),
+        ),
+    ).toBe(true);
+  });
 
   test("skips a pooled device with quarantined runtime identity", async () => {
     await acquire(devices.slice(0, 2));

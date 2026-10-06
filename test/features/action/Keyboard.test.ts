@@ -237,7 +237,7 @@ describe("Keyboard", () => {
   });
 
   describe("open without moving the caret (#9942)", () => {
-    const selectorField = (extra: Record<string, string> = {}): ViewHierarchyResult => ({
+    const selectorField = (extra: Record<string, string | number> = {}): ViewHierarchyResult => ({
       hierarchy: {
         node: {
           $: {
@@ -340,15 +340,125 @@ describe("Keyboard", () => {
       expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
     });
 
-    test("falls back to the tap when the click is accepted but no IME appears", async () => {
+    test("does not tap after an accepted click that shows no IME", async () => {
       fakeHierarchy.setResults([selectorField()]);
       fakeHierarchy.setDefaultResult(baseHierarchy());
 
       const result = await newKeyboard().execute("open");
 
       expect(fakeClient.nodeActions.length).toBe(1);
-      expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      expect(result).toMatchObject({
+        success: false,
+        open: false,
+        message: "Failed to open keyboard",
+      });
+    });
+
+    test("does not tap after a click that was dispatched but never acknowledged", async () => {
+      fakeClient.actionResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 5000,
+        error: "Action timeout after 5000ms",
+        dispatched: true,
+        acknowledged: false,
+      };
+      fakeHierarchy.setResults([selectorField()]);
+      fakeHierarchy.setDefaultResult(baseHierarchy());
+
+      const result = await newKeyboard().execute("open");
+
       expect(result.success).toBe(false);
+      expect(result.error).toContain("Keyboard open outcome is indeterminate");
+      expect(result.error).toContain("Action timeout after 5000ms");
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      expect(fakeHierarchy.getCallCount()).toBe(1);
+    });
+
+    test("still taps when the runner refused the click with an acknowledged failure", async () => {
+      fakeClient.actionResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "Accessibility action is unavailable: click",
+        dispatched: true,
+        acknowledged: true,
+      };
+      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+    });
+
+    describe("selector uniqueness", () => {
+      const withDuplicate = (
+        field: Record<string, string | number>,
+        duplicate: Record<string, string | number>,
+      ) =>
+        ({
+          hierarchy: {
+            node: {
+              $: {},
+              node: [
+                selectorField(field).hierarchy.node,
+                {
+                  $: {
+                    class: "android.widget.TextView",
+                    bounds: { left: 0, top: 500, right: 100, bottom: 600 },
+                    ...duplicate,
+                  },
+                },
+              ],
+            },
+          },
+        }) satisfies ViewHierarchyResult;
+
+      test.each([
+        ["test-tag", { "test-tag": "notes-field" }],
+        ["unique-id", { "unique-id": "notes-unique" }],
+      ])("taps instead of clicking when the %s is shared by another node", async (_, ids) => {
+        const field = { "resource-id": "", ...ids };
+        fakeHierarchy.setResults([withDuplicate(field, ids), keyboardWindowHierarchy()]);
+
+        const result = await newKeyboard().execute("open");
+
+        expect(result.success).toBe(true);
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+      });
+
+      test("clicks when the full collection-indexed selector is unique although the tag repeats", async () => {
+        const ids = {
+          "test-tag": "row",
+          "collection-row-index": 2,
+          "collection-column-index": 0,
+        };
+        const sameTagOtherRow = { ...ids, "collection-row-index": 3 };
+        fakeHierarchy.setResults([
+          withDuplicate({ "resource-id": "", ...ids }, sameTagOtherRow),
+          keyboardWindowHierarchy(),
+        ]);
+
+        await newKeyboard().execute("open");
+
+        expect(fakeClient.nodeActions.length).toBe(1);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("taps instead of clicking when the hierarchy is incomplete", async () => {
+        fakeHierarchy.setResults([
+          { ...selectorField(), ctrlProxyIncomplete: true },
+          keyboardWindowHierarchy(),
+        ]);
+
+        await newKeyboard().execute("open");
+
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+      });
     });
 
     test("reports a moved caret when only the tap fallback can show the keyboard", async () => {
@@ -479,11 +589,26 @@ describe("Keyboard", () => {
         const controller = live();
         fakeHierarchy.setResults([focusedInputHierarchy()]);
         fakeHierarchy.setDefaultResult(baseHierarchy());
-        fakeAdb.abortAfterCommand("shell input tap", controller);
+        // adb terminates the started process on abort and rejects once it has settled.
+        const calls: unknown[][] = [];
+        const execute = spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+          calls.push(args);
+          controller.abort();
+          throw new Error("Operation cancelled");
+        });
 
-        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
-          "Keyboard open outcome is indeterminate: the tap was dispatched",
-        );
+        try {
+          await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+            "Keyboard open outcome is indeterminate: the tap was dispatched",
+          );
+        } finally {
+          execute.mockRestore();
+        }
+
+        // Waits for the aborted process to settle (sixth argument) instead of abandoning it.
+        expect(calls).toEqual([
+          ["shell input tap 110 70", undefined, undefined, undefined, controller.signal, true],
+        ]);
 
         expect(fakeHierarchy.getCallCount()).toBe(1);
         expect(fakeTimer.getSleepCallCount()).toBe(0);

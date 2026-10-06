@@ -17,11 +17,12 @@ import {
   type ImeSubtypeSnapshot,
   type KeyboardIdentity,
 } from "./AndroidImeCatalog";
-import { Keyboard } from "./Keyboard";
+import { Keyboard, KeyboardOpenIndeterminateError } from "./Keyboard";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 
 const READY_TIMEOUT_MS = 2_000;
 const READY_POLL_MS = 100;
+const OPEN_SETTLE_MS = 500;
 const ENABLED_DRIFT_DIAGNOSTIC_MAX_CHARS = 512;
 
 export class ImeSessionFocusLostError extends ActionableError {
@@ -197,12 +198,12 @@ export class InstalledImeKeySession {
     editorBefore: FocusedEditorEvidence | null,
     signal?: AbortSignal,
   ) {
-    const { catalog, keyboard, tap } = this.dependencies;
+    const { catalog, tap } = this.dependencies;
     signal?.throwIfAborted();
     await catalog.selectWithinLock(imeId, signal);
     signal?.throwIfAborted();
     // Cancellation reaches the open poll; restoration still runs afterwards under the held lock.
-    const opened = await keyboard.execute("open", signal);
+    const opened = await this.openWithSettle(signal);
     // A cancelled open can report a failed result; surface the cancellation instead.
     signal?.throwIfAborted();
     if (!opened.success) {
@@ -234,6 +235,23 @@ export class InstalledImeKeySession {
       capability: "visibleKeyTap" as const,
       keyboard: identity,
     };
+  }
+
+  /**
+   * An aborted open can leave a click the runner never acknowledged still in flight. Give
+   * the framework a bounded moment to apply it before the IME is switched back, so the
+   * restoration cannot race the focus activation. Cancellation does not shorten this wait.
+   */
+  private async openWithSettle(signal?: AbortSignal) {
+    const { keyboard, timer } = this.dependencies;
+    try {
+      return await keyboard.execute("open", signal);
+    } catch (error) {
+      if (error instanceof KeyboardOpenIndeterminateError) {
+        await timer.sleep(OPEN_SETTLE_MS);
+      }
+      throw error;
+    }
   }
 
   private async verifyEditorAfterTap(

@@ -31,10 +31,8 @@ import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/and
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
-import {
-  nodeActionTargetError,
-  stableNodeSelectorForElement,
-} from "../talkback/TalkBackTapStrategy";
+import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
+import { keyboardNodeClickTargetError } from "./keyboardNodeClickTarget";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -131,11 +129,21 @@ export interface KeyboardOpenClient {
   requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
 }
 
+type NodeClickOutcome =
+  | { kind: "unavailable" }
+  | { kind: "sent" }
+  | { kind: "unconfirmed"; error?: string };
+
+function keyboardOpenIndeterminateMessage(dispatched: string, reason?: string): string {
+  return `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`;
+}
+
 /** A cancelled open whose click/tap was already sent: the device may have applied it. */
-function keyboardOpenIndeterminateError(dispatched: string, reason?: string): ActionableError {
-  return new ActionableError(
-    `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`,
-  );
+export class KeyboardOpenIndeterminateError extends ActionableError {
+  constructor(dispatched: string, reason?: string) {
+    super(keyboardOpenIndeterminateMessage(dispatched, reason));
+    this.name = "KeyboardOpenIndeterminateError";
+  }
 }
 
 export class Keyboard {
@@ -417,12 +425,15 @@ export class Keyboard {
 
     // Show the IME without a touch first: a coordinate tap lands inside the field
     // and moves the caret into existing text (#9942).
-    if (await this.showWithoutTouch(focusedInput, hierarchy, signal)) {
-      const shown = await this.waitForKeyboardState(true, signal);
-      if (shown.open && !shown.error) {
-        return this.openResult(shown, "Keyboard opened");
-      }
-      logger.warn("Keyboard did not open after a node click; falling back to a tap");
+    const click = await this.showWithoutTouch(focusedInput, hierarchy, signal);
+    // Once a click reached the device the field may already be activated (a read-only
+    // picker would toggle twice), so a tap is only a fallback when no click was sent.
+    if (click.kind === "unconfirmed") {
+      const message = keyboardOpenIndeterminateMessage("node click", click.error);
+      return { success: false, open: false, message, error: message };
+    }
+    if (click.kind === "sent") {
+      return this.openResult(await this.waitForKeyboardState(true, signal), "Keyboard opened");
     }
 
     const caretBefore = await this.readCaret(signal);
@@ -458,41 +469,37 @@ export class Keyboard {
 
   /**
    * Ask CtrlProxy to `click` the focused editable node, which makes the framework
-   * show the IME for that field without a touch position. Returns true only when
-   * the runner accepted the action; false means "use the tap fallback" (no stable
-   * selector, the id is not unique, the runner is too old, or the action failed).
+   * show the IME for that field without a touch position. `unavailable` means no
+   * click was sent and the tap fallback is allowed (no stable selector, the selector
+   * does not resolve to exactly this field, the runner is too old, or it refused the
+   * action); `sent` means the runner accepted it; `unconfirmed` means it was
+   * dispatched but never acknowledged, so a second activation would be unsafe.
    */
   private async showWithoutTouch(
     element: Element,
     hierarchy: ViewHierarchyResult | null,
     signal?: AbortSignal,
-  ): Promise<boolean> {
+  ): Promise<NodeClickOutcome> {
     const selector = stableNodeSelectorForElement(element);
     if (!selector) {
-      return false;
+      return { kind: "unavailable" };
     }
     let client: KeyboardOpenClient;
     try {
       client = this.getOpenClient();
-      // A bare resource-id resolves globally on the device, so it must be unique in
-      // this hierarchy or the click could land on a different field.
-      const targetError = await nodeActionTargetError(
-        selector,
-        {
-          supportsNodeActionSelectors: () =>
-            awaitWhileRequestIsLive(client.supportsNodeActionSelectors(undefined, signal), signal),
-          getAccessibilityHierarchy: async () => hierarchy,
-        },
-        element,
+      // The runner clicks the first depth-first match of the whole selector, so it must
+      // name exactly one node in this hierarchy and that node must be the focused field.
+      const targetError = await keyboardNodeClickTargetError(selector, hierarchy, element, () =>
+        awaitWhileRequestIsLive(client.supportsNodeActionSelectors(undefined, signal), signal),
       );
       if (targetError) {
         logger.warn(`Keyboard open: node click unavailable (${targetError})`);
-        return false;
+        return { kind: "unavailable" };
       }
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
-      return false;
+      return { kind: "unavailable" };
     }
     return this.dispatchNodeClick(client, selector, signal);
   }
@@ -501,7 +508,7 @@ export class Keyboard {
     client: KeyboardOpenClient,
     selector: AccessibilityNodeSelector,
     signal?: AbortSignal,
-  ): Promise<boolean> {
+  ): Promise<NodeClickOutcome> {
     throwIfAborted(signal);
     let result: A11yActionResult;
     try {
@@ -509,17 +516,19 @@ export class Keyboard {
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
-      return false;
+      return { kind: "unavailable" };
     }
+    const unacknowledged = result.dispatched === true && result.acknowledged !== true;
     // The runner reports an aborted-after-send click as dispatched but unacknowledged.
-    if (signal?.aborted && result.dispatched === true && result.acknowledged !== true) {
-      throw keyboardOpenIndeterminateError("node click", result.error);
+    if (signal?.aborted && unacknowledged) {
+      throw new KeyboardOpenIndeterminateError("node click", result.error);
     }
     throwIfAborted(signal);
-    if (!result.success) {
-      logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
+    if (result.success) {
+      return { kind: "sent" };
     }
-    return result.success;
+    logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
+    return unacknowledged ? { kind: "unconfirmed", error: result.error } : { kind: "unavailable" };
   }
 
   /** Best-effort caret read; undefined when the runner cannot report it. */
@@ -803,20 +812,20 @@ export class Keyboard {
     const y = Math.round(center.y);
     throwIfAborted(signal);
     try {
-      await awaitWhileRequestIsLive(
-        this.adb.executeCommand(
-          `shell input tap ${x} ${y}`,
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        ),
+      // Do not stop waiting on abort: the adb process is terminated and awaited (bounded by
+      // the adb client's grace period) so a started tap has settled before callers restore state.
+      await this.adb.executeCommand(
+        `shell input tap ${x} ${y}`,
+        undefined,
+        undefined,
+        undefined,
         signal,
+        true,
       );
     } catch (error) {
       // The tap command had started, so it may have reached the device.
       if (signal?.aborted) {
-        throw keyboardOpenIndeterminateError("tap", errorMessage(error));
+        throw new KeyboardOpenIndeterminateError("tap", errorMessage(error));
       }
       throw error;
     }

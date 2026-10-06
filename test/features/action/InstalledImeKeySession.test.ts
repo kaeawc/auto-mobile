@@ -1,10 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import type { ViewHierarchyResult } from "../../../src/models";
 import * as imeSession from "../../../src/features/action/InstalledImeKeySession";
 import {
   InstalledImeKeySession,
   tapFrameBoundImeKey,
 } from "../../../src/features/action/InstalledImeKeySession";
+import { KeyboardOpenIndeterminateError } from "../../../src/features/action/Keyboard";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import {
@@ -751,6 +752,46 @@ test("a cancel that rejects the keyboard open is rethrown unchanged", async () =
 
   await expect(session.tapKey(target, "a", controller.signal)).rejects.toBe(reason);
   expect(getReadCount()).toBe(1);
+});
+
+test("lets an unacknowledged click settle before restoring the IME after an abort", async () => {
+  const { session, events, timer, setKeyboardOutcome, getActive } = fixture();
+  const controller = new AbortController();
+  const failure = new KeyboardOpenIndeterminateError("node click", "request cancelled");
+  setKeyboardOutcome(async () => {
+    controller.abort();
+    throw failure;
+  });
+  const eventsAtSleep: string[][] = [];
+  const sleep = spyOn(timer, "sleep").mockImplementation(async () => {
+    eventsAtSleep.push([...events]);
+  });
+
+  await expect(session.tapKey(target, "a", controller.signal)).rejects.toBe(failure);
+
+  expect(sleep.mock.calls).toEqual([[500]]);
+  // Only the selection had run when the settle wait happened; restoration came after.
+  expect(eventsAtSleep).toEqual([[`select:${target}:signaled`]]);
+  expect(events).toEqual([
+    `select:${target}:signaled`,
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
+  expect(getActive()).toBe(original);
+});
+
+test("does not wait to settle after a plain abort with nothing dispatched", async () => {
+  const { session, timer, setKeyboardOutcome } = fixture();
+  const controller = new AbortController();
+  setKeyboardOutcome(async () => {
+    controller.abort();
+    throw controller.signal.reason;
+  });
+  const sleep = spyOn(timer, "sleep");
+
+  await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow();
+
+  expect(sleep).not.toHaveBeenCalled();
 });
 
 test("a keyboard open that fails without a cancel still reports the open failure", async () => {

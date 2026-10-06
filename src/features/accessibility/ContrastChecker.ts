@@ -790,22 +790,39 @@ export class ContrastChecker {
 
   /** Quantized clusters retain their actual mean colour; anti-aliasing does not dominate a bin. */
   private colorClusters(colors: RGB[], quantized = true): ColorCluster[] {
-    const bins = new Map<string, RGB[]>();
+    // Numeric RGB keys preserve insertion order (including ties) without string
+    // keys, per-bin pixel arrays, or recursively clustering each exact colour.
+    const bins = new Map<
+      number,
+      { r: number; g: number; b: number; count: number; coreCount: number }
+    >();
+    const exactCounts = new Map<number, number>();
     for (const color of colors) {
+      const exactKey = (color.r << 16) | (color.g << 8) | color.b;
       const key = quantized
-        ? `${color.r >> 3},${color.g >> 3},${color.b >> 3}`
-        : `${color.r},${color.g},${color.b}`;
+        ? ((color.r >> 3) << 10) | ((color.g >> 3) << 5) | (color.b >> 3)
+        : exactKey;
+      const exactCount = (exactCounts.get(exactKey) ?? 0) + 1;
+      exactCounts.set(exactKey, exactCount);
       const bin = bins.get(key);
       if (bin) {
-        bin.push(color);
+        bin.r += color.r;
+        bin.g += color.g;
+        bin.b += color.b;
+        bin.count++;
+        bin.coreCount = Math.max(bin.coreCount, exactCount);
       } else {
-        bins.set(key, [color]);
+        bins.set(key, { ...color, count: 1, coreCount: 1 });
       }
     }
     return Array.from(bins.values(), (bin) => ({
-      color: this.averageColor(bin),
-      count: bin.length,
-      coreCount: quantized ? this.colorClusters(bin, false)[0].count : bin.length,
+      color: {
+        r: Math.round(bin.r / bin.count),
+        g: Math.round(bin.g / bin.count),
+        b: Math.round(bin.b / bin.count),
+      },
+      count: bin.count,
+      coreCount: bin.coreCount,
     })).sort((a, b) => b.count - a.count);
   }
 

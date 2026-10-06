@@ -24,6 +24,7 @@ import {
 } from "../../utils/media/FfmpegClient";
 import {
   PROCESS_EXIT_TIMEOUT_MS,
+  ProcessTeardownUnconfirmedError,
   trackProcess,
   waitForExit,
   waitForSpawn,
@@ -58,7 +59,54 @@ export const IOS_RECORDING_STOP_TIMEOUT_MS = 30000;
 export const IOS_RECORDING_FILE_READY_TIMEOUT_MS = 15000;
 const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
 const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
+// The iOS post-process is a stream copy unless a `resolution` was requested; then it is a
+// full decode, scale and re-encode of every frame, which grows with the recording (up to
+// 3600 s). A fixed 60 s SIGKILLed long re-encodes and failed the stop (#10188). The copy
+// keeps the 60 s budget, and that is also the floor for a re-encode. The ratio and ceiling
+// below are judgment, NOT measured on a host: half a second of budget per recorded second
+// assumes the encoder runs at least twice as fast as real time (hardware encoders and even
+// libx264 ultrafast at a phone-sized frame are expected to be well above that), and 30 min
+// is that ratio at the longest iOS recording. A stop carries no request deadline on this
+// path (the request signal only bounds startup), so the ceiling is the only upper bound.
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
+const FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS = 500;
+const FFMPEG_REENCODE_MAX_BUDGET_MS = 30 * 60 * 1000;
+
+/** Whether the iOS post-process can stream-copy the raw capture instead of re-encoding it. */
+function isStreamCopyPostProcess(config: VideoCaptureConfig): boolean {
+  return !config.resolution;
+}
+
+/**
+ * Time ffmpeg may take to post-process the iOS capture. `recordedSeconds` is how long the
+ * capture ran; unknown means no safe estimate, so a re-encode gets the ceiling.
+ */
+export function ffmpegPostProcessBudgetMs(
+  config: VideoCaptureConfig,
+  recordedSeconds: number | undefined,
+): number {
+  if (isStreamCopyPostProcess(config)) {
+    return FFMPEG_POST_PROCESS_TIMEOUT_MS;
+  }
+  if (recordedSeconds === undefined || !Number.isFinite(recordedSeconds)) {
+    return FFMPEG_REENCODE_MAX_BUDGET_MS;
+  }
+  // The output is capped at maxDurationSeconds (`-t`), so that is all ffmpeg re-encodes.
+  const outputSeconds =
+    config.maxDurationSeconds && config.maxDurationSeconds > 0
+      ? Math.min(recordedSeconds, config.maxDurationSeconds)
+      : recordedSeconds;
+  return Math.min(
+    FFMPEG_REENCODE_MAX_BUDGET_MS,
+    Math.max(
+      FFMPEG_POST_PROCESS_TIMEOUT_MS,
+      Math.ceil(Math.max(0, outputSeconds) * FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS),
+    ),
+  );
+}
+
+/** What iOS post-processing produced: the processed output, or the raw capture kept instead. */
+type PostProcessOutcome = { kind: "processed" } | { kind: "kept-raw"; warning: string };
 // Total budget for the whole iOS start path: the simctl availability probe, the
 // spawn, and every attempt's "Recording started" handshake. The handshake is the
 // expensive part — simctl only emits it after encoding the first video frame — and
@@ -525,30 +573,15 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     );
 
     try {
-      if (backendHandle.platform === "ios") {
-        await this.postProcessRecording(backendHandle);
-      } else if (backendHandle.ffmpegTracker) {
-        await waitForExit(
-          backendHandle.ffmpegTracker.process,
-          backendHandle.ffmpegTracker.exitPromise,
-          { timer: this.timer },
-        );
-      }
-      const sizeBytes = await this.recordingFileProbe.size(handle.outputPath);
+      const { outputPath, warnings } = await this.finalizeCaptureOutput(backendHandle, handle);
+      const sizeBytes = await this.recordingFileProbe.size(outputPath);
       if (!sizeBytes) {
         throw new ActionableError("The finalized recording is missing or contains zero bytes.");
       }
       // Probe the produced codec: the iOS copy path can preserve HEVC.
-      const codec = await this.codecProbe.codec(handle.outputPath);
-      if (backendHandle.capturePath) {
-        try {
-          await this.captureFileRemover.remove(backendHandle.capturePath);
-        } catch (error) {
-          logger.warn(
-            `[FfmpegVideo] Failed to remove raw recording: ${errorMessage(error)}`,
-            error,
-          );
-        }
+      const codec = await this.codecProbe.codec(outputPath);
+      if (outputPath !== backendHandle.capturePath) {
+        await this.removeRawCapture(backendHandle.capturePath);
       }
       this.logProcessWarnings("capture", backendHandle.captureTracker);
       if (backendHandle.ffmpegTracker) {
@@ -556,14 +589,54 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       }
       return {
         recordingId: handle.recordingId,
-        outputPath: handle.outputPath,
+        outputPath,
         startedAt: handle.startedAt,
         endedAt: backendHandle.captureTracker.exitState.endedAt ?? new Date().toISOString(),
         sizeBytes,
         codec,
+        ...(warnings.length > 0 && { warnings }),
       };
     } catch (error) {
       throw await this.buildFinalizationError(backendHandle, error);
+    }
+  }
+
+  /**
+   * Produces the final output once capture has exited: iOS post-processes the raw capture
+   * (which may end with the raw capture returned instead, #10188); Android waits for its
+   * encoder. The raw capture is returned, never deleted, when it is the output.
+   */
+  private async finalizeCaptureOutput(
+    backendHandle: FfmpegBackendHandle,
+    handle: RecordingHandle,
+  ): Promise<{ outputPath: string; warnings: string[] }> {
+    if (backendHandle.platform === "ios") {
+      const outcome = await this.postProcessRecording(backendHandle);
+      return outcome.kind === "kept-raw"
+        ? {
+            outputPath: backendHandle.capturePath ?? handle.outputPath,
+            warnings: [outcome.warning],
+          }
+        : { outputPath: handle.outputPath, warnings: [] };
+    }
+    if (backendHandle.ffmpegTracker) {
+      await waitForExit(
+        backendHandle.ffmpegTracker.process,
+        backendHandle.ffmpegTracker.exitPromise,
+        { timer: this.timer },
+      );
+    }
+    return { outputPath: handle.outputPath, warnings: [] };
+  }
+
+  private async removeRawCapture(capturePath: string | undefined): Promise<void> {
+    if (!capturePath) {
+      return;
+    }
+    try {
+      await this.captureFileRemover.remove(capturePath);
+    } catch (error) {
+      logger.warn(`[FfmpegVideo] Failed to remove raw recording: ${errorMessage(error)}`, error);
     }
   }
 
@@ -1187,7 +1260,9 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
   }
 
-  private async postProcessRecording(backendHandle: FfmpegBackendHandle): Promise<void> {
+  private async postProcessRecording(
+    backendHandle: FfmpegBackendHandle,
+  ): Promise<PostProcessOutcome> {
     const capturePath = backendHandle.capturePath;
     if (!capturePath) {
       throw new ActionableError("Missing iOS capture path for FFmpeg processing.");
@@ -1219,6 +1294,53 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       );
     }
 
+    try {
+      await this.runFfmpegPostProcess(backendHandle, capturePath);
+      return { kind: "processed" };
+    } catch (error) {
+      if (error instanceof ProcessTeardownUnconfirmedError) {
+        // ffmpeg may still be running against the files: nothing is safe to hand back.
+        throw error;
+      }
+      return this.keepRawCaptureAfterPostProcessFailure(backendHandle, error);
+    }
+  }
+
+  /**
+   * ffmpeg could not produce the processed output (it failed, ran out of its budget, or
+   * left no usable file), but the raw capture is complete and playable. Return it with a
+   * warning instead of failing the stop and discarding the recording (#10188); the partial
+   * output ffmpeg left behind is removed so only one file is offered.
+   */
+  private async keepRawCaptureAfterPostProcessFailure(
+    backendHandle: FfmpegBackendHandle,
+    error: unknown,
+  ): Promise<PostProcessOutcome> {
+    logger.warn(
+      `[FfmpegVideo] iOS post-processing did not finish; keeping the unprocessed capture: ${errorMessage(error)}`,
+      error,
+    );
+    try {
+      await this.captureFileRemover.remove(backendHandle.config.outputPath);
+    } catch (removeError) {
+      logger.warn(
+        `[FfmpegVideo] Failed to remove the partial post-processed output: ${errorMessage(removeError)}`,
+        removeError,
+      );
+    }
+    const reason = errorMessage(error).split("\n")[0];
+    return {
+      kind: "kept-raw",
+      warning:
+        `iOS post-processing did not finish (${reason}); returning the unprocessed simulator ` +
+        "capture, which has not been scaled to the requested resolution.",
+    };
+  }
+
+  private async runFfmpegPostProcess(
+    backendHandle: FfmpegBackendHandle,
+    capturePath: string,
+  ): Promise<void> {
     const hwAccel = await this.detectHardwareAccel();
     const ffmpegArgs = await this.buildFfmpegArgs(backendHandle.config, hwAccel, {
       type: "file",
@@ -1244,19 +1366,32 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const ffmpegTracker = trackProcess(ffmpegProcess);
     backendHandle.ffmpegTracker = ffmpegTracker;
 
+    const budgetMs = ffmpegPostProcessBudgetMs(
+      backendHandle.config,
+      this.recordedSeconds(backendHandle.config),
+    );
     await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise, {
-      timeoutMs: FFMPEG_POST_PROCESS_TIMEOUT_MS,
+      timeoutMs: budgetMs,
       signal: null,
       timer: this.timer,
     });
 
     if (isFailedExitState(ffmpegTracker.exitState)) {
-      throw new ActionableError(
-        this.buildFfmpegFailureMessage("FFmpeg post-processing failed", ffmpegArgs, ffmpegTracker),
-      );
+      // Nothing else signals ffmpeg here: a SIGKILL is waitForExit escalating past its budget.
+      const summary =
+        ffmpegTracker.exitState.signal === "SIGKILL"
+          ? `FFmpeg post-processing timed out after ${budgetMs}ms`
+          : "FFmpeg post-processing failed";
+      throw new ActionableError(this.buildFfmpegFailureMessage(summary, ffmpegArgs, ffmpegTracker));
     }
 
     await this.assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker);
+  }
+
+  /** Seconds the recording has been running, or undefined when its start time is unusable. */
+  private recordedSeconds(config: VideoCaptureConfig): number | undefined {
+    const startedAtMs = Date.parse(config.startedAt);
+    return Number.isNaN(startedAtMs) ? undefined : (this.timer.now() - startedAtMs) / 1000;
   }
 
   private async buildFfmpegArgs(
@@ -1271,7 +1406,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     } else {
       args.push("-i", input.path);
 
-      if (!config.resolution) {
+      if (isStreamCopyPostProcess(config)) {
         args.push("-c", "copy");
         args.push("-movflags", "+faststart");
         // Keep the iOS simulator fast stream-copy remux while honoring explicit duration caps.

@@ -150,8 +150,12 @@ function applyBackendDisplayOutcome(active: ActiveVideoRecording, handle: Record
   }
 }
 
-function recordingWarnings(active: ActiveVideoRecording): string[] | undefined {
-  return active.warning ? [active.warning] : undefined;
+function recordingWarnings(
+  active: ActiveVideoRecording,
+  stopResult?: RecordingResult,
+): string[] | undefined {
+  const warnings = [...(active.warning ? [active.warning] : []), ...(stopResult?.warnings ?? [])];
+  return warnings.length > 0 ? warnings : undefined;
 }
 
 export interface ForceStopOptions {
@@ -449,7 +453,7 @@ export class VideoRecorderService {
       config: active.config,
       recordedPanel: stopResult.recordedPanel ?? active.recordedPanel,
       transitions: recordingTransitions(stopResult, active.recordedPanel),
-      warnings: recordingWarnings(active),
+      warnings: recordingWarnings(active, stopResult),
     };
 
     this.activeRecordings.delete(recordingId);

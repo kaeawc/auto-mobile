@@ -1,4 +1,4 @@
-import type { IOSDispatchResult } from "./CtrlProxyDispatch";
+import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -1794,6 +1794,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
       serializeRequest: serializeIosRequest,
+      wireDeadlineParams: iosWireDeadlineParams,
       getReconnectStatus: () => this.getReconnectStatus(),
       isCommandSupported: (messageType) => this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),

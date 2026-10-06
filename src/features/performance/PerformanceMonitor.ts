@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -1102,7 +1103,7 @@ export class PerformanceMonitor {
       const { stdout } = await adb.executeCommand(
         `shell dumpsys gfxinfo ${shellQuote(device.packageName)} reset`,
         PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         undefined,
         signal,
         true,
@@ -1284,7 +1285,7 @@ export class PerformanceMonitor {
       const { stdout } = await adb.executeCommand(
         `shell dumpsys meminfo ${shellQuote(device.packageName)}`,
         PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         undefined,
         signal,
         true,

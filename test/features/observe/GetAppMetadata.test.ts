@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import {
   GetAppMetadata,
@@ -112,7 +113,7 @@ describe("GetAppMetadata (Android)", () => {
         {
           command: "shell dumpsys package 'com.example.app'",
           timeoutMs: 2000,
-          maxBuffer: undefined,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
           noRetry: undefined,
           signal: controller.signal,
         },

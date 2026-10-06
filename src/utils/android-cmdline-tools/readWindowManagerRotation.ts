@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { parseWindowManagerRotation } from "./parseWindowManagerRotation";
 import { throwIfAborted } from "../toolUtils";
@@ -7,9 +8,8 @@ export const WINDOW_MANAGER_ROTATION_COMMAND = "shell dumpsys window displays";
 export const WINDOW_MANAGER_ROTATION_FALLBACK_COMMAND =
   'shell dumpsys window | grep -i "mRotation="';
 export const WINDOW_MANAGER_ROTATION_TIMEOUT_MS = 5_000;
-// API 36 captures are 21,263–26,165 bytes. Allow 4 MiB for larger multi-display
-// dumps, above Node's default 1 MiB, while keeping each read's memory bounded.
-export const WINDOW_MANAGER_ROTATION_MAX_BUFFER = 4 * 1024 * 1024;
+// Preserve the exported rotation limit as an alias of the shared dumpsys cap.
+export const WINDOW_MANAGER_ROTATION_MAX_BUFFER = DUMPSYS_MAX_BUFFER;
 
 export async function readWindowManagerRotation(
   adb: Pick<AdbExecutor, "executeCommand">,

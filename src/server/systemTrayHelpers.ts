@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
 import { SearchableHierarchy } from "../features/utility/SearchableNode";
 /**
@@ -509,7 +510,7 @@ export const resolveAppLabel = async (
     const result = await adb.executeCommand(
       `shell dumpsys package ${shellQuote(appId)}`,
       undefined,
-      undefined,
+      DUMPSYS_MAX_BUFFER,
       true,
       signal,
     );
@@ -2621,7 +2622,6 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
 // The aggregate unredacted dump of every posted notification routinely exceeds
 // the child process's 1 MiB default stdout buffer, which rejects the read
 // outright and leaves every header-less row unattributed.
-const DUMPSYS_NOTIFICATION_MAX_BUFFER = 8 * 1024 * 1024;
 
 const readDumpsysNotificationOutput = async (
   adb: SystemTrayAdb,
@@ -2631,7 +2631,7 @@ const readDumpsysNotificationOutput = async (
     const result = await adb.executeCommand(
       "shell dumpsys notification --noredact",
       undefined,
-      DUMPSYS_NOTIFICATION_MAX_BUFFER,
+      DUMPSYS_MAX_BUFFER,
       true,
       signal,
     );

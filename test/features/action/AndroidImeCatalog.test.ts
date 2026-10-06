@@ -1,3 +1,8 @@
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
+import { createExecResult } from "../../../src/utils/execResult";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { expect, test } from "bun:test";
 import {
   AndroidImeCatalog,
@@ -17,6 +22,8 @@ import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools
 const gboard =
   "com.google.android.inputmethod.latin/com.google.android.apps.inputmethod.latin.LatinIME";
 const samsung = "com.samsung.android.honeyboard/.service.HoneyBoardService";
+
+const ADVERTISED_SUBTYPE_UNIT_VECTOR = `mId=${gboard}\n  mSubtypeId=42 mSubtypeLocale=en_US\nmId=${samsung}\n  mSubtypeId=42 mSubtypeLocale=ko_KR`;
 
 function fixture(deviceId = "test-device") {
   const adb = new FakeAdbExecutor();
@@ -389,15 +396,10 @@ test("captures identity and subtype without inventing absent optional fields", a
     stderr: "",
   });
   adb.setCommandResponse("shell dumpsys input_method", {
-    stdout: `mId=${gboard}\n  mSubtypeId=42 mSubtypeLocale=en_US\nmId=${samsung}\n  mSubtypeId=42 mSubtypeLocale=ko_KR`,
+    stdout: ADVERTISED_SUBTYPE_UNIT_VECTOR,
     stderr: "",
   });
-  expect(
-    parseAdvertisedImeSubtypes(
-      `mId=${gboard}\n  mSubtypeId=42 mSubtypeLocale=en_US\nmId=${samsung}\n  mSubtypeId=42 mSubtypeLocale=ko_KR`,
-      gboard,
-    )?.get(42),
-  ).toBe("en_US");
+  expect(parseAdvertisedImeSubtypes(ADVERTISED_SUBTYPE_UNIT_VECTOR, gboard)?.get(42)).toBe("en_US");
   adb.setCommandResponse("shell dumpsys package", {
     stdout: `Packages:\n  Package [com.google.android.inputmethod.latin] (abc):\n    versionName=15.2.0\nShared users:\n`,
     stderr: "",
@@ -462,4 +464,36 @@ test("rejects a subtype that is no longer advertised before writing it", async (
         command.startsWith("shell settings put secure selected_input_method_subtype"),
       ),
   ).toBe(false);
+});
+
+test("passes the dumpsys bound through fake exec and parses input_method above 1 MiB", async () => {
+  // No input_method capture exists under test/fixtures. Pad the pre-existing
+  // inline parser unit vector with synthetic feature-flag lines; this is not a capture.
+  const padding = "  filler_feature_flag=true\n".repeat(50_000);
+  const stdout = padding + ADVERTISED_SUBTYPE_UNIT_VECTOR + "\n" + padding;
+  expect(Buffer.byteLength(stdout)).toBeGreaterThan(1024 * 1024);
+  const timer = new FakeTimer();
+  let dumpsysReads = 0;
+  const adb = new AdbClient(
+    null,
+    async (_file, args, maxBuffer) => {
+      if (args.join(" ") === "shell settings get secure selected_input_method_subtype") {
+        expect(maxBuffer).toBeUndefined();
+        return createExecResult("42", "");
+      }
+      expect(args).toEqual(["shell", "dumpsys", "input_method"]);
+      expect(maxBuffer).toBe(DUMPSYS_MAX_BUFFER);
+      expect(Buffer.byteLength(stdout)).toBeLessThanOrEqual(maxBuffer ?? 1024 * 1024);
+      dumpsysReads += 1;
+      return createExecResult(stdout, "");
+    },
+    null,
+    new DefaultRetryExecutor(timer),
+    timer,
+  );
+  expect(await new AndroidImeCatalog(adb, "large-ime-dump").readSubtype(gboard)).toEqual({
+    id: 42,
+    locale: "en_US",
+  });
+  expect(dumpsysReads).toBe(1);
 });

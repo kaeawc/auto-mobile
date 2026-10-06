@@ -3370,6 +3370,8 @@ export class DevicePool {
     return deferredUntil !== undefined && this.timer.now() >= deferredUntil;
   }
 
+  // rebindSameAvdReplacementSession and the recovery ports may have already
+  // detached the entry: their session fence does not require pooled-entry identity.
   private isPreservedSessionCurrent(session: Session, deviceId: string): boolean {
     return this.sessionManager.isCurrentSession(session) && session.assignedDevice === deviceId;
   }
@@ -4738,9 +4740,14 @@ export class DevicePool {
     return result;
   }
 
+  private isPooledEntryCurrent(device: PooledDevice): boolean {
+    return this.devices.get(device.id) === device;
+  }
+
+  // selectAssignableIdleDevice additionally requires eligibility and resolved identity.
   private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === null &&
       this.selectIdleDevice([device]) === device &&
       this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
@@ -5137,9 +5144,11 @@ export class DevicePool {
     }
   }
 
+  // createSessionOrRestore / DeviceAutolockManager check the session object and busy
+  // assignment, including a held suspect session; automation admission is separate.
   private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === session.sessionId &&
       device.status === "busy" &&
       this.sessionManager.getSession(session.sessionId) === session
@@ -5245,13 +5254,15 @@ export class DevicePool {
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
   }
 
+  // releaseCapturedDevice checks assignment generation, but permits release after
+  // the session has left SessionManager and does not require a busy status.
   private isCapturedReleaseCurrent(
     device: PooledDevice,
     expectedSessionId: string,
     expectedAssignmentCount: number,
   ): boolean {
     const deviceId = device.id;
-    if (this.devices.get(deviceId) !== device) {
+    if (!this.isPooledEntryCurrent(device)) {
       logger.debug(`Ignoring stale release for replacement device ${deviceId}`);
       return false;
     }

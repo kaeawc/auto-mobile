@@ -262,6 +262,131 @@ describe("buildNetworkGraph", () => {
   });
 });
 
+describe("buildNetworkGraph host ports", () => {
+  const at = (url: string, id = 1) => {
+    const parsed = new URL(url);
+    return makeEvent({ id, url, host: parsed.hostname, path: parsed.pathname });
+  };
+
+  it("keeps hosts that differ only by port as separate entries", () => {
+    const { graph } = buildNetworkGraph([
+      at("https://api.example.com:8080/a", 1),
+      at("https://api.example.com:9090/a", 2),
+      at("https://api.example.com:9090/a", 3),
+    ]);
+
+    expect(graph.map((g) => [g.scheme, g.host])).toEqual([
+      ["https", "api.example.com:8080"],
+      ["https", "api.example.com:9090"],
+    ]);
+    expect((graph[0].paths["a[GET]"] as GraphLeaf).success).toBe(1);
+    expect((graph[1].paths["a[GET]"] as GraphLeaf).success).toBe(2);
+  });
+
+  it("separates a non-default port from the default port of the same host", () => {
+    const { graph } = buildNetworkGraph([
+      at("https://api.example.com/a", 1),
+      at("https://api.example.com:8443/a", 2),
+    ]);
+
+    expect(graph.map((g) => g.host)).toEqual(["api.example.com", "api.example.com:8443"]);
+  });
+
+  it("treats a port that is the other scheme's default as non-default", () => {
+    const { graph } = buildNetworkGraph([
+      at("http://api.example.com:443/a", 1),
+      at("http://api.example.com/a", 2),
+    ]);
+
+    expect(graph.map((g) => g.host)).toEqual(["api.example.com:443", "api.example.com"]);
+  });
+
+  it("merges an explicit default port with the implicit one under the bare host", () => {
+    const { graph } = buildNetworkGraph([
+      at("https://api.example.com/a", 1),
+      at("https://api.example.com:443/a", 2),
+      at("http://api.example.com:80/a", 3),
+      at("http://api.example.com/a", 4),
+    ]);
+
+    expect(graph.map((g) => [g.scheme, g.host])).toEqual([
+      ["https", "api.example.com"],
+      ["http", "api.example.com"],
+    ]);
+    for (const host of graph) {
+      expect((host.paths["a[GET]"] as GraphLeaf).success).toBe(2);
+    }
+  });
+
+  it("labels a non-default port on an IPv6 host", () => {
+    const { graph } = buildNetworkGraph([at("http://[::1]:3000/a")]);
+    expect(graph.map((g) => g.host)).toEqual(["[::1]:3000"]);
+  });
+
+  it("produces output byte-identical to the pre-port-keying graph for default-port traffic", () => {
+    const ev = (
+      id: number,
+      url: string,
+      path: string,
+      method: string,
+      durationMs: number,
+      statusCode = 200,
+    ) =>
+      makeEvent({
+        id,
+        url,
+        host: new URL(url).hostname,
+        path,
+        method,
+        durationMs,
+        statusCode,
+      });
+    const { graph } = buildNetworkGraph([
+      ev(1, "https://api.example.com/a", "/a", "GET", 10),
+      ev(2, "https://api.example.com:443/b", "/b", "GET", 20),
+      ev(3, "https://api.example.com/a", "/a", "POST", 30, 500),
+      ev(4, "http://api.example.com/users/1", "/users/1", "GET", 40),
+      ev(5, "http://api.example.com:80/users/2", "/users/2", "GET", 60),
+      ev(6, "https://cdn.example.com/v1/x", "/v1/x", "GET", 5),
+      ev(7, "https://api.example.com/a", "/a", "GET", 30),
+    ]);
+
+    // Captured from the implementation before host-port keying and tuple group keys;
+    // key order is part of the contract, so compare the serialized form.
+    expect(JSON.stringify({ graph })).toBe(
+      '{"graph":[{"scheme":"https","host":"api.example.com","paths":{"a[GET]":{"method":"GET","type":"application/json","success":2,"errors":0,"p50":20,"p95":29},"b[GET]":{"method":"GET","type":"application/json","success":1,"errors":0,"p50":20,"p95":20},"a[POST]":{"method":"POST","type":"application/json","success":0,"errors":1,"p50":30,"p95":30}}},{"scheme":"http","host":"api.example.com","paths":{"users":{"paths":{"{id}[GET]":{"method":"GET","type":"application/json","success":2,"errors":0,"p50":50,"p95":59,"parameterized":true}}}}},{"scheme":"https","host":"cdn.example.com","paths":{"v1":{"paths":{"x[GET]":{"method":"GET","type":"application/json","success":1,"errors":0,"p50":5,"p95":5}}}}}]}',
+    );
+  });
+});
+
+describe("buildNetworkGraph delimiter-safe path grouping", () => {
+  it("keeps a path containing the old `::` group delimiter intact", () => {
+    const { graph } = buildNetworkGraph([
+      makeEvent({ url: "https://api.example.com/a::b/c", path: "/a::b/c" }),
+    ]);
+
+    const root = graph[0].paths;
+    expect(Object.keys(root)).toEqual(["a::b"]);
+    const branch = root["a::b"] as GraphBranch;
+    expect(Object.keys(branch.paths)).toEqual(["c[GET]"]);
+    expect((branch.paths["c[GET]"] as GraphLeaf).success).toBe(1);
+  });
+
+  it("does not let a path ending in `::GET` collide with the GET group of its prefix", () => {
+    const { graph } = buildNetworkGraph([
+      makeEvent({ id: 1, path: "/x", method: "GET" }),
+      makeEvent({ id: 2, path: "/x::GET", method: "GET" }),
+      makeEvent({ id: 3, path: "/x", method: "POST" }),
+    ]);
+
+    const root = graph[0].paths;
+    expect(Object.keys(root).sort()).toEqual(["x::GET[GET]", "x[GET]", "x[POST]"]);
+    expect((root["x[GET]"] as GraphLeaf).success).toBe(1);
+    expect((root["x::GET[GET]"] as GraphLeaf).success).toBe(1);
+    expect((root["x[POST]"] as GraphLeaf).success).toBe(1);
+  });
+});
+
 // Issue #4187: the tree used `{}` nodes guarded by `!node[key]`, so a path segment
 // named after an `Object.prototype` member read back as the inherited member
 // (truthy), the branch was never created, and `branch.paths = {}` was written onto

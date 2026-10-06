@@ -53,11 +53,25 @@ interface EventGroup {
   errors: number;
 }
 
+/** One method on one raw path. The path is stored, not re-derived from a joined key. */
+interface PathGroup extends EventGroup {
+  path: string;
+}
+
 type HostEntry = {
   scheme: string;
+  /** Host label; carries `:port` only when the port is not the scheme's default. */
   host: string;
-  pathGroups: Map<string, EventGroup[]>;
+  pathGroups: Map<string, PathGroup>;
 };
+
+/**
+ * Map keys are JSON-encoded tuples: unlike a delimiter join, no component's content
+ * (a `::` in a path, a `:` in a host) can make two distinct tuples collide.
+ */
+function tupleKey(...parts: string[]): string {
+  return JSON.stringify(parts);
+}
 
 function accumulateEvent(hostMap: Map<string, HostEntry>, event: NetworkEventWithId): void {
   let scheme = "https";
@@ -67,14 +81,16 @@ function accumulateEvent(hostMap: Map<string, HostEntry>, event: NetworkEventWit
     try {
       const parsed = new URL(event.url);
       scheme = parsed.protocol.replace(":", "");
-      host = parsed.hostname;
+      // `URL.port` is "" for the scheme's default port, so default-port hosts keep the
+      // bare hostname label while a non-default port gets its own host entry.
+      host = parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
     } catch {
       // Captured URLs may be malformed; the event host still supplies a usable graph fallback.
       logger.debug("Network graph URL could not be parsed; using fallback host");
     }
   }
 
-  const hostKey = `${scheme}://${host}`;
+  const hostKey = tupleKey(scheme, host);
   let entry = hostMap.get(hostKey);
   if (!entry) {
     entry = { scheme, host, pathGroups: new Map() };
@@ -82,23 +98,19 @@ function accumulateEvent(hostMap: Map<string, HostEntry>, event: NetworkEventWit
   }
 
   const path = event.path ?? "/";
-  const groupKey = `${path}::${event.method}`;
+  const groupKey = tupleKey(path, event.method);
 
-  let groups = entry.pathGroups.get(groupKey);
-  if (!groups) {
-    groups = [];
-    entry.pathGroups.set(groupKey, groups);
-  }
-  let group = groups.find((g) => g.method === event.method);
+  let group = entry.pathGroups.get(groupKey);
   if (!group) {
     group = {
+      path,
       method: event.method,
       contentType: event.contentType,
       durations: [],
       success: 0,
       errors: 0,
     };
-    groups.push(group);
+    entry.pathGroups.set(groupKey, group);
   }
 
   group.durations.push(event.durationMs);
@@ -111,26 +123,22 @@ function accumulateEvent(hostMap: Map<string, HostEntry>, event: NetworkEventWit
 
 function insertPathGroups(
   root: Record<string, GraphNode>,
-  pathGroups: Map<string, EventGroup[]>,
+  pathGroups: Map<string, PathGroup>,
 ): void {
-  for (const [groupKey, groups] of pathGroups) {
-    const [path] = groupKey.split("::");
-    const segments = path.split("/").filter((s) => s.length > 0);
+  for (const group of pathGroups.values()) {
+    const segments = group.path.split("/").filter((s) => s.length > 0);
+    const sorted = [...group.durations].sort((a, b) => a - b);
+    const leaf: GraphLeaf & { _durations?: number[] } = {
+      method: group.method,
+      type: group.contentType ?? undefined,
+      success: group.success,
+      errors: group.errors,
+      p50: Math.round(computePercentile(sorted, 50)),
+      p95: Math.round(computePercentile(sorted, 95)),
+      _durations: group.durations,
+    };
 
-    for (const group of groups) {
-      const sorted = [...group.durations].sort((a, b) => a - b);
-      const leaf: GraphLeaf & { _durations?: number[] } = {
-        method: group.method,
-        type: group.contentType ?? undefined,
-        success: group.success,
-        errors: group.errors,
-        p50: Math.round(computePercentile(sorted, 50)),
-        p95: Math.round(computePercentile(sorted, 95)),
-        _durations: group.durations,
-      };
-
-      insertIntoTree(root, segments, 0, leaf);
-    }
+    insertIntoTree(root, segments, 0, leaf);
   }
 }
 
@@ -140,7 +148,7 @@ export function buildNetworkGraph(
 ): NetworkGraph {
   const minRequests = options.minRequests ?? 1;
 
-  // Group events by scheme+host+path+method
+  // Group events by scheme+host(+non-default port)+path+method
   const hostMap = new Map<string, HostEntry>();
 
   for (const event of events) {

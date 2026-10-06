@@ -6,6 +6,7 @@ import { createExecResult } from "../../../src/utils/execResult";
 import type { HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
 import {
   DeviceAppManager,
+  SIMULATOR_APP_CONTAINER_TIMEOUT_MS,
   SIMULATOR_UNINSTALL_TIMEOUT_MS,
 } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -322,6 +323,69 @@ describe("DeviceAppManager simulator uninstall bound (issue #10077)", () => {
     });
 
     await expect(manager.uninstallApp(udid, "com.example.app", true)).rejects.toBe(failure);
+    expect(events).toEqual([]);
+  });
+});
+
+describe("DeviceAppManager simulator app-container lookup bound", () => {
+  const udid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
+  const bundleId = "com.example.app";
+
+  test("bounds simctl get_app_container with a timeout, a kill signal and the request signal", async () => {
+    const { manager, calls } = harness();
+    const controller = new AbortController();
+
+    // An empty container path means "no bundle to hash", so no filesystem read happens.
+    const hash = await manager.getInstalledAppBundleHash(udid, bundleId, true, {
+      signal: controller.signal,
+    });
+
+    expect(hash).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual(["simctl", "get_app_container", udid, bundleId, "app"]);
+    expect(calls[0]?.options).toEqual({
+      timeoutMs: SIMULATOR_APP_CONTAINER_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      signal: controller.signal,
+    });
+  });
+
+  test("still bounds the lookup when no request signal exists", async () => {
+    const { manager, calls } = harness();
+
+    await manager.getInstalledAppBundleHash(udid, bundleId, true);
+
+    expect(calls[0]?.options).toEqual({
+      timeoutMs: SIMULATOR_APP_CONTAINER_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+  });
+
+  test("a timed-out lookup keeps the null-on-failure contract and logs a warning", async () => {
+    const timeout = wrapCommandError(Object.assign(new Error("node timeout"), { killed: true }), {
+      command: "xcrun",
+    });
+    const { manager, events } = harness(async () => {
+      throw timeout;
+    });
+
+    expect(await manager.getInstalledAppBundleHash(udid, bundleId, true)).toBeNull();
+    expect(events).toHaveLength(1);
+  });
+
+  test("a cancelled lookup propagates the cancellation instead of reading as 'not installed'", async () => {
+    const controller = new AbortController();
+    const killed = wrapCommandError(Object.assign(new Error("aborted"), { killed: true }), {
+      command: "xcrun",
+    });
+    const { manager, events } = harness(async () => {
+      controller.abort();
+      throw killed;
+    });
+
+    await expect(
+      manager.getInstalledAppBundleHash(udid, bundleId, true, { signal: controller.signal }),
+    ).rejects.toThrow("Operation cancelled");
     expect(events).toEqual([]);
   });
 });

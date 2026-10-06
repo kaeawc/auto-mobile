@@ -2776,8 +2776,6 @@ describe("DeviceBootService", () => {
       expectNoLeasesHeld(test.lifecycleCoordinator);
     });
 
-<<<<<<< HEAD
-=======
     /** Hangs only the first cache-bypassing re-check; later reads answer truthfully. */
     function hangFirstRecheck(test: ReturnType<typeof setup>) {
       const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
@@ -2904,7 +2902,6 @@ describe("DeviceBootService", () => {
       expect(test.freshChecks()).toBe(0);
     });
 
->>>>>>> origin/work/orch-u-iosadopt
     it("still lets a caller abort cancel a hung simulator re-check", async () => {
       const test = setup();
       const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);

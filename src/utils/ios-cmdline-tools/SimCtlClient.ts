@@ -39,6 +39,7 @@ import { compareStrictNumericVersions } from "../deviceMatcher";
 import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
 import { fixedBackoff } from "../Backoff";
 import { DefaultSimulatorAppPresenter, type SimulatorAppPresenter } from "./SimulatorAppPresenter";
+import { SimctlCommandTimeoutError } from "./SimctlCommandTimeoutError";
 import {
   SimCtlSimulatorDeviceTypeProfiles,
   type SimulatorDeviceTypeProfile,
@@ -359,8 +360,14 @@ export interface SimCtl {
    * Uninstall an app from the simulator
    * @param bundleId - The bundle identifier of the app to uninstall
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
+   * @param options - `timeoutMs` kills the child and rejects with a SimctlCommandTimeoutError;
+   *   `signal` kills it on cancellation. Without a `timeoutMs` the default command budget applies.
    */
-  uninstallApp(bundleId: string, deviceId?: string): Promise<void>;
+  uninstallApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * Get the screen size of the simulator
@@ -909,7 +916,9 @@ export class SimCtlClient implements SimCtl {
           timeoutMs,
           label: "simctl command",
           timeoutError: () =>
-            (timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
+            (timeoutError = new SimctlCommandTimeoutError(
+              `Command timed out after ${timeoutMs}ms: ${fullCommand}`,
+            )),
           onTimeout: () => controller.abort(timeoutError),
         });
         const duration = this.timer.now() - startTime;
@@ -2765,10 +2774,18 @@ export class SimCtlClient implements SimCtl {
     await this.executeCommandArgs(["install", targetDevice, appPath]);
   }
 
-  async uninstallApp(bundleId: string, deviceId?: string): Promise<void> {
+  async uninstallApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Uninstalling app ${bundleId} from iOS simulator ${targetDevice}`);
-    await this.executeCommandArgs(["uninstall", targetDevice, bundleId]);
+    await this.executeCommandArgs(
+      ["uninstall", targetDevice, bundleId],
+      options?.timeoutMs,
+      options?.signal,
+    );
   }
 
   /**

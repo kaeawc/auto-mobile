@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { SIMULATOR_UNINSTALL_TIMEOUT_MS } from "../../../src/utils/ios-cmdline-tools/simulatorUninstallBound";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import {
   resolveIosInstallBackend,
@@ -537,8 +538,13 @@ describe("resolveIosDowngradeRecoveryBackend", () => {
     expect(backend?.kind).toBe("simulator");
     await backend?.terminateApp(bundleId);
     await backend?.uninstallApp(bundleId);
-    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
-    expect(simctl.getMethodCalls("uninstallApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
+    // Both are bounded (issue #10077); no request signal is in scope here, so none is forwarded.
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([
+      { bundleId, deviceId: simulatorUdid, options: { timeoutMs: expect.any(Number) } },
+    ]);
+    expect(simctl.getMethodCalls("uninstallApp")).toEqual([
+      { bundleId, deviceId: simulatorUdid, options: { timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS } },
+    ]);
   });
 
   test.each([physicalUdid, "unrecognized-device"])(

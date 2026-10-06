@@ -17,13 +17,18 @@ import type { DevicectlVersionSource } from "./CoreDeviceCapabilityProbe";
 import { classifyDevicectlInvocationError } from "./DevicectlDeviceLister";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import {
+  indeterminateSimulatorUninstallError,
+  SIMULATOR_UNINSTALL_TIMEOUT_MS,
+} from "./simulatorUninstallBound";
 
 /** Short reads share the 15-second device-list budget used by the lister and SimCtlClient. */
 const DEVICECTL_INFO_TIMEOUT_MS = 15_000;
 /** Process changes and uninstall match SimCtlClient's 60-second command budget. */
 const DEVICECTL_PROCESS_TIMEOUT_MS = 60_000;
-/** `simctl uninstall` is a local filesystem removal; bound it well under the 60-second command budget. */
-export const SIMULATOR_UNINSTALL_TIMEOUT_MS = 30_000;
+export { SIMULATOR_UNINSTALL_TIMEOUT_MS };
+/** `simctl get_app_container` is a local lookup; a wedged one must not hold the hash read. */
+export const SIMULATOR_APP_CONTAINER_TIMEOUT_MS = 15_000;
 /** Large bundle installs and copies over USB need longer than simctl, but must remain bounded. */
 const DEVICECTL_TRANSFER_TIMEOUT_MS = 180_000;
 /** Let the executor's timeout and SIGKILL settle first before abandoning a wedged executor. */
@@ -598,9 +603,10 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     deviceUdid: string,
     bundleId: string,
     isSimulator = false,
+    options?: { signal?: AbortSignal },
   ): Promise<string | null> {
     if (isSimulator) {
-      return this.getSimulatorAppBundleHash(deviceUdid, bundleId);
+      return this.getSimulatorAppBundleHash(deviceUdid, bundleId, options?.signal);
     }
 
     // withInstalledAppBundle propagates callback errors; preserve this method's
@@ -1172,6 +1178,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
   private async getSimulatorAppBundleHash(
     deviceUdid: string,
     bundleId: string,
+    signal?: AbortSignal,
   ): Promise<string | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
@@ -1179,15 +1186,21 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
 
     let appPath: string;
     try {
-      const result = await this.execute("xcrun", [
-        "simctl",
-        "get_app_container",
-        deviceUdid,
-        bundleId,
-        "app",
-      ]);
+      // Bounded and killable like the simulator uninstall: a wedged lookup must not hold the
+      // install-time hash read, and its child must not outlive a cancelled caller.
+      const result = await this.execute(
+        "xcrun",
+        ["simctl", "get_app_container", deviceUdid, bundleId, "app"],
+        {
+          timeoutMs: SIMULATOR_APP_CONTAINER_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          ...(signal ? { signal } : {}),
+        },
+      );
       appPath = result.trim();
     } catch (error) {
+      // Cancellation is the caller's own decision; it must not read as "app not installed".
+      throwIfAborted(signal);
       const errorMessage = getErrorMessage(error);
       const logMessage = `[DeviceAppManager] Failed to read simulator app bundle for ${bundleId}: ${errorMessage}`;
       if (isExpectedMissingLegacySimulatorApp(bundleId, errorMessage)) {
@@ -1222,7 +1235,6 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     }
     // Bounded and killable (issue #10077): a wedged `simctl uninstall` must not
     // hold the call, and its child must not be left behind on cancellation.
-    const command = "xcrun simctl uninstall";
     try {
       await this.execute("xcrun", ["simctl", "uninstall", deviceUdid, bundleId], {
         timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS,
@@ -1237,12 +1249,9 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
       }
       // The command was dispatched and never acknowledged, so the app may or may
       // not be gone: neither a success nor a plain failure.
-      const message =
-        `Uninstall outcome is indeterminate: ${command} was dispatched but did not finish within ` +
-        `${SIMULATOR_UNINSTALL_TIMEOUT_MS} ms, so ${bundleId} may or may not be uninstalled. ` +
-        "Do not retry automatically. List the installed apps to check before retrying.";
-      this.deps.logger.warn(message);
-      throw new ActionableError(message, { cause: error });
+      const indeterminate = indeterminateSimulatorUninstallError(bundleId, error);
+      this.deps.logger.warn(indeterminate.message);
+      throw indeterminate;
     }
   }
 }

@@ -917,7 +917,7 @@ export class InstallApp {
     const beforeBundleIds = this.extractBundleIds(beforeApps);
 
     const downgraded = await perf.track("simctlInstall", () =>
-      this.installiOSSimulatorWithDowngradeRecovery(appPath, backend),
+      this.installiOSSimulatorWithDowngradeRecovery(appPath, backend, signal),
     );
 
     this.cacheInvalidator.invalidate(this.device);
@@ -1035,6 +1035,7 @@ export class InstallApp {
   private async installiOSSimulatorWithDowngradeRecovery(
     appPath: string,
     backend: IosInstallBackend,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     try {
       await backend.installApp(appPath);
@@ -1069,7 +1070,9 @@ export class InstallApp {
           terminateError,
         );
       }
-      await recoveryBackend.uninstallApp(bundleId);
+      // Bounded and cancellable: a cancel before this dispatches leaves the app installed. Once it
+      // has returned, the reinstall below is not abandoned by a cancel (issue #10073).
+      await recoveryBackend.uninstallApp(bundleId, signal);
       this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
       await this.reinstallAfterIosDowngradeUninstall(appPath, bundleId, backend);

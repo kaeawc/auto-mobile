@@ -41,6 +41,7 @@ val OverlayRole = SemanticsPropertyKey<String>("OverlayRole")
 @Composable
 internal fun OverlayRuntimeContent(
   runtime: OverlayRuntime,
+  images: OverlayImageCache? = null,
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
@@ -50,7 +51,10 @@ internal fun OverlayRuntimeContent(
       // the order they happened, whatever the dispatcher does with separately launched jobs.
       val queue = remember { Channel<OverlayInteraction>(Channel.UNLIMITED) }
       LaunchedEffect(queue) { for (interaction in queue) interact(interaction) }
-      CompositionLocalProvider(LocalOverlayTextEpochs provides snapshot.textEpochs) {
+      CompositionLocalProvider(
+        LocalOverlayTextEpochs provides snapshot.textEpochs,
+        LocalOverlayImageCache provides images,
+      ) {
         OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
           queue.trySend(interaction)
         }
@@ -116,10 +120,7 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
           modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)
         )
     }
-    "image" ->
-      Box(
-        modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)
-      )
+    "image" -> OverlayImageContent(node, modifier)
     "scroll" -> {
       val scroll = rememberScrollState()
       val source = node.source as? OverlayScrollNode
@@ -268,14 +269,6 @@ private fun OverlayNavigationTab(item: OverlayItem, selected: Boolean, select: (
       if (item.icon != null || item.image != null) OverlayNavigationIcon(item)
     },
   )
-}
-
-@Composable
-private fun OverlayNavigationIcon(item: OverlayItem) {
-  // Image resolution belongs to #9301. Missing images fall back to the built-in icon, then a shape.
-  val icon = overlayIcon(item.icon)
-  if (icon != null) Icon(icon, contentDescription = null)
-  else Box(Modifier.size(24.dp).background(Color.LightGray).semantics { role = Role.Image })
 }
 
 /** An in-window sheet: no Dialog/extra window, so scrim and gestures stay inside overlay bounds. */

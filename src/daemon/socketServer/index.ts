@@ -9,6 +9,8 @@ export {
 export { RequestResponseSocketServer } from "./RequestResponseSocketServer";
 export {
   PushSubscriptionSocketServer,
+  SubscriptionFilterConflictError,
+  matchesDeviceRouting,
   type SubscriptionResponse,
 } from "./PushSubscriptionSocketServer";
 export {

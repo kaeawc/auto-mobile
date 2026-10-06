@@ -4,7 +4,11 @@ import {
 } from "./streamSocketAuth";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
+import {
+  PushSubscriptionSocketServer,
+  getSocketPath,
+  matchesDeviceRouting,
+} from "./socketServer/index";
 import type { FailureType, FailureSeverity } from "../server/failuresResources";
 import { FAILURES_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import {
@@ -42,6 +46,8 @@ interface FailureFilter {
   type: FailureType | null;
   severity: FailureSeverity | null;
   deviceSessionUuid: string | null;
+  /** Serial named by a `deviceId`-only subscription; the live key when no uuid is given (#10143). */
+  deviceId?: string | null;
 }
 
 /**
@@ -124,21 +130,30 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): FailureFilter {
+    // Validated, not cast: a blank/non-string key would otherwise become a filter that
+    // matches nothing while the subscribe call still acks success (#6676).
+    const { deviceSessionUuid, deviceId } = this.parseDeviceFilterKeys(request);
     return {
       type: (request.type as FailureType) ?? null,
       severity: (request.severity as FailureSeverity) ?? null,
-      // Validated, not cast: a blank/non-string key would otherwise become a filter that
-      // matches nothing while the subscribe call still acks success (#6676).
-      deviceSessionUuid: this.parseDeviceSessionUuid(request.deviceSessionUuid),
+      deviceSessionUuid,
+      deviceId,
+    };
+  }
+
+  protected override describeEffectiveFilter(filter: FailureFilter): Record<string, unknown> {
+    return {
+      type: filter.type,
+      severity: filter.severity,
+      deviceSessionUuid: filter.deviceSessionUuid,
+      deviceId: filter.deviceId ?? null,
     };
   }
 
   protected matchesFilter(filter: FailureFilter, data: FailureNotificationPush): boolean {
     const matchesType = filter.type === null || filter.type === data.type;
     const matchesSeverity = filter.severity === null || filter.severity === data.severity;
-    const matchesDevice =
-      filter.deviceSessionUuid === null || filter.deviceSessionUuid === data.deviceSessionUuid;
-    return matchesType && matchesSeverity && matchesDevice;
+    return matchesType && matchesSeverity && matchesDeviceRouting(filter, data);
   }
 
   protected createPushMessage(

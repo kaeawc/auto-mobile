@@ -4,6 +4,7 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BaseSocketServer } from "./BaseSocketServer";
 import { deviceSessionErrorFields, type DeviceSessionResolver } from "../deviceSessionResolver";
+import { ActionableError } from "../../models/ActionableError";
 import {
   Subscriber,
   SubscriptionCommand,
@@ -21,7 +22,62 @@ export interface SubscriptionResponse {
   error?: string;
   timestamp?: number;
   subscriptionId?: string;
-  code?: "BACKFILL_QUEUE_OVERFLOW" | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE";
+  code?:
+    | "BACKFILL_QUEUE_OVERFLOW"
+    | "DEVICE_SESSION_SUPERSEDED_BY_RESTORE"
+    | "SUBSCRIPTION_FILTER_CONFLICT";
+  /**
+   * The filter the daemon actually applied to this subscription, echoed on the ack
+   * by servers that implement {@link PushSubscriptionSocketServer.describeEffectiveFilter}.
+   * A client that asked for a narrower scope than the echo shows (for example a
+   * `deviceId` key an older daemon ignores) can detect the mismatch instead of
+   * silently receiving every device's events (#10143).
+   */
+  filter?: Record<string, unknown>;
+}
+
+/**
+ * A subscribe request whose device-routing keys contradict each other (for example a
+ * `deviceId` that is not the serial of the `deviceSessionUuid` it was sent with).
+ * Rejected with a typed code instead of picking one key and silently ignoring the
+ * other (#10143).
+ */
+export class SubscriptionFilterConflictError extends ActionableError {
+  readonly code = "SUBSCRIPTION_FILTER_CONFLICT" as const;
+}
+
+/** Wire `code` for typed subscription-filter errors; empty for every other error. */
+export function subscriptionFilterErrorFields(error: unknown): {
+  code?: "SUBSCRIPTION_FILTER_CONFLICT";
+} {
+  return error instanceof SubscriptionFilterConflictError ? { code: error.code } : {};
+}
+
+/** Device-routing keys of a subscribe request, validated (see parseDeviceFilterKeys). */
+export interface DeviceFilterKeys {
+  /** Epoch routing key (epic #5256), or null when the request did not name one. */
+  deviceSessionUuid: string | null;
+  /** Serial/UDID the request named, or null when it did not. */
+  deviceId: string | null;
+}
+
+/**
+ * Whether an event belongs to a subscription's device scope. A `deviceSessionUuid`
+ * filter routes on the epoch key (a retired epoch matches nothing); a serial-only
+ * filter (`deviceId` without a uuid) routes on the event's serial; neither means
+ * every device.
+ */
+export function matchesDeviceRouting(
+  filter: { deviceSessionUuid: string | null; deviceId?: string | null },
+  event: { deviceSessionUuid?: string | null; deviceId?: string | null },
+): boolean {
+  if (filter.deviceSessionUuid !== null) {
+    return filter.deviceSessionUuid === (event.deviceSessionUuid ?? null);
+  }
+  if (filter.deviceId !== undefined && filter.deviceId !== null) {
+    return filter.deviceId === (event.deviceId ?? null);
+  }
+  return true;
 }
 
 const MAX_BACKFILL_QUEUE = 1_000;
@@ -208,6 +264,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         success: false,
         error: errorMessage(error),
         ...deviceSessionErrorFields(error),
+        ...subscriptionFilterErrorFields(error),
       };
       this.sendJson(socket, errorResponse);
     }
@@ -245,12 +302,27 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       type: "subscription_response",
       success: true,
       subscriptionId,
+      ...this.effectiveFilterField(filter),
     };
     this.sendJson(socket, response);
 
     logger.info(`[${this.serverName}] New subscriber ${subscriptionId}`);
 
     this.onSubscribed(subscriptionId, filter, socket);
+  }
+
+  private effectiveFilterField(filter: TFilter): { filter?: Record<string, unknown> } {
+    const effective = this.describeEffectiveFilter(filter);
+    return effective ? { filter: effective } : {};
+  }
+
+  /**
+   * Wire description of the filter a subscription ended up with, echoed on the ack.
+   * Default: none. Servers whose clients narrow by device override this so a key the
+   * daemon did not apply is visible to the client (#10143).
+   */
+  protected describeEffectiveFilter(_filter: TFilter): Record<string, unknown> | undefined {
+    return undefined;
   }
 
   /** Generic subscription mechanics have no admission policy; concrete data servers opt in. */
@@ -646,6 +718,48 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     // Return the trimmed key, never the raw one: filters compare by exact equality,
     // so a padded `" uuid-a "` would ack success and then match nothing - the same
     // inert subscription this validation exists to prevent (#6676).
+    return trimmed;
+  }
+
+  /**
+   * Validate the device-routing keys of a subscribe request: `deviceSessionUuid`
+   * (see {@link parseDeviceSessionUuid}) and `deviceId`, the serial/UDID older
+   * clients send because it is the key they hold (#10143). Throws, so the
+   * `processLine` catch path answers `{ type: "error", success: false }` and no
+   * subscription is created, for a blank/non-string `deviceId` or when both keys are
+   * given and do not name the same device (a typed
+   * {@link SubscriptionFilterConflictError}). A uuid that no longer resolves cannot
+   * be shown to agree with a serial, so that combination is also a conflict.
+   */
+  protected parseDeviceFilterKeys(request: Record<string, unknown>): DeviceFilterKeys {
+    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+    const deviceId = this.parseDeviceIdKey(request.deviceId);
+    if (deviceSessionUuid !== null && deviceId !== null) {
+      const resolved = this.deviceSessionResolver?.resolveDeviceId(deviceSessionUuid) ?? null;
+      if (resolved !== deviceId) {
+        throw new SubscriptionFilterConflictError(
+          `deviceId '${deviceId}' conflicts with deviceSessionUuid '${deviceSessionUuid}'` +
+            (resolved === null
+              ? ", which does not identify a live device session"
+              : ` (device '${resolved}')`) +
+            ". Send one of them, or a deviceSessionUuid that belongs to that deviceId.",
+        );
+      }
+    }
+    return { deviceSessionUuid, deviceId };
+  }
+
+  private parseDeviceIdKey(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (typeof value !== "string") {
+      throw new Error("deviceId must be a string or null");
+    }
+    const trimmed = value.trim();
+    if (trimmed.length === 0) {
+      throw new Error("deviceId must not be blank");
+    }
     return trimmed;
   }
 

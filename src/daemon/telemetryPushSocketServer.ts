@@ -6,7 +6,11 @@ import {
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
+import {
+  PushSubscriptionSocketServer,
+  getSocketPath,
+  matchesDeviceRouting,
+} from "./socketServer/index";
 import type { TelemetryEvent } from "../features/telemetry/TelemetryRecorder";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { getLogEvents } from "../db/logEventRepository";
@@ -109,10 +113,12 @@ interface TelemetryFilter {
    */
   deviceSessionUuid: string | null;
   /**
-   * Serial/UDID resolved from `deviceSessionUuid` at subscribe time. Retained
-   * only for the serial-scoped backfill DB queries (which key on the persisted
-   * `device_id`); it is NOT the live routing key. `null` for an all-devices
-   * subscription or a `deviceSessionUuid` with no live epoch.
+   * Serial/UDID scope. With a `deviceSessionUuid`, resolved from it at subscribe
+   * time and retained only for the serial-scoped backfill DB queries (which key on
+   * the persisted `device_id`); the uuid stays the live routing key. Without one, it
+   * is the `deviceId` the client named and is itself the live and backfill routing
+   * key, so a serial-only subscriber is never widened to every device (#10143).
+   * `null` for an all-devices subscription or a `deviceSessionUuid` with no live epoch.
    */
   deviceId: string | null;
   sessionId: string | null;
@@ -191,7 +197,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   protected parseSubscriptionFilter(request: Record<string, unknown>): TelemetryFilter {
     // Validated, not cast: a blank/non-string key would otherwise become a filter that
     // matches nothing while the subscribe call still acks success (#6676).
-    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+    const { deviceSessionUuid, deviceId } = this.parseDeviceFilterKeys(request);
     return {
       category: (request.category as string) ?? null,
       deviceSessionUuid,
@@ -199,8 +205,17 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       // queries. Within an epoch the serial is stable, so a snapshot is safe.
       deviceId: deviceSessionUuid
         ? this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid)
-        : null,
+        : deviceId,
       sessionId: (request.sessionId as string) ?? null,
+    };
+  }
+
+  protected override describeEffectiveFilter(filter: TelemetryFilter): Record<string, unknown> {
+    return {
+      category: filter.category,
+      deviceSessionUuid: filter.deviceSessionUuid,
+      deviceId: filter.deviceId,
+      sessionId: filter.sessionId,
     };
   }
 
@@ -211,13 +226,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     if (filter.sessionId !== null && filter.sessionId !== data.sessionId) {
       return false;
     }
-    if (
-      filter.deviceSessionUuid !== null &&
-      filter.deviceSessionUuid !== (data.deviceSessionUuid ?? null)
-    ) {
-      return false;
-    }
-    return true;
+    return matchesDeviceRouting(filter, data);
   }
 
   protected override onSubscribed(
@@ -235,18 +244,31 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       });
   }
 
+  /**
+   * Whether a subscription must backfill NOTHING rather than fall through to an
+   * all-devices query. A subscription that named a specific deviceSessionUuid which no
+   * longer resolves to a live serial (retired epoch) would otherwise leak other
+   * devices' history to a stale-uuid subscriber (epic #5256, AC4); an all-devices
+   * subscription (deviceSessionUuid === null, deviceId === null) still backfills every
+   * device. A serial-only subscription has no epoch to retire, but a quarantined pooled
+   * identity is withheld from live delivery, so its history is withheld too.
+   */
+  private withholdsBackfill(filter: TelemetryFilter): boolean {
+    if (filter.deviceSessionUuid !== null) {
+      return filter.deviceId === null;
+    }
+    return (
+      filter.deviceId !== null && this.deviceSessionResolver.isRoutingSuspended(filter.deviceId)
+    );
+  }
+
   private async backfillRecentEvents(
     subscriptionId: string,
     filter: TelemetryFilter,
     socket: Socket,
   ): Promise<void> {
     const limit = 100;
-    // A subscription that named a specific deviceSessionUuid which no longer
-    // resolves to a live serial (retired epoch) must backfill NOTHING — never fall
-    // through to an all-devices query, which would leak other devices' history to a
-    // stale-uuid subscriber (epic #5256, AC4). An all-devices subscription
-    // (deviceSessionUuid === null) still backfills every device.
-    if (filter.deviceSessionUuid !== null && filter.deviceId === null) {
+    if (this.withholdsBackfill(filter)) {
       return;
     }
     const deviceId = filter.deviceId ?? undefined;

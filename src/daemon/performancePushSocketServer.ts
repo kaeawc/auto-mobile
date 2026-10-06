@@ -4,7 +4,11 @@ import {
 } from "./streamSocketAuth";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
+import {
+  PushSubscriptionSocketServer,
+  getSocketPath,
+  matchesDeviceRouting,
+} from "./socketServer/index";
 import { PERFORMANCE_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import {
   type DeviceSessionResolver,
@@ -87,6 +91,8 @@ export interface LivePerformanceData {
  */
 interface PerformanceFilter {
   deviceSessionUuid: string | null;
+  /** Serial named by a `deviceId`-only subscription; the live key when no uuid is given (#10143). */
+  deviceId?: string | null;
   packageName: string | null;
 }
 
@@ -259,19 +265,27 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected parseSubscriptionFilter(request: Record<string, unknown>): PerformanceFilter {
+    // Validated, not cast: a blank/non-string key would otherwise become a filter that
+    // matches nothing while the subscribe call still acks success (#6676).
+    const { deviceSessionUuid, deviceId } = this.parseDeviceFilterKeys(request);
     return {
-      // Validated, not cast: a blank/non-string key would otherwise become a filter that
-      // matches nothing while the subscribe call still acks success (#6676).
-      deviceSessionUuid: this.parseDeviceSessionUuid(request.deviceSessionUuid),
+      deviceSessionUuid,
+      deviceId,
       packageName: (request.packageName as string) ?? null,
     };
   }
 
+  protected override describeEffectiveFilter(filter: PerformanceFilter): Record<string, unknown> {
+    return {
+      deviceSessionUuid: filter.deviceSessionUuid,
+      deviceId: filter.deviceId ?? null,
+      packageName: filter.packageName,
+    };
+  }
+
   protected matchesFilter(filter: PerformanceFilter, data: LivePerformanceData): boolean {
-    const matchesDevice =
-      filter.deviceSessionUuid === null || filter.deviceSessionUuid === data.deviceSessionUuid;
     const matchesPackage = filter.packageName === null || filter.packageName === data.packageName;
-    return matchesDevice && matchesPackage;
+    return matchesDeviceRouting(filter, data) && matchesPackage;
   }
 
   protected createPushMessage(

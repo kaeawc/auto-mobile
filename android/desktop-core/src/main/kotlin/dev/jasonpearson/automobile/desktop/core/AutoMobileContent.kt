@@ -1450,7 +1450,9 @@ fun AutoMobileContent(
           LOG.info("Telemetry push socket missing, daemon appears down - skipping reconnect")
         } else {
           LOG.info("Telemetry push disconnected, attempting reconnect")
-          client.connect()
+          // connect() overwrites the client's subscribed device, so a bare connect() would
+          // widen this pane's subscription to every device (#10143).
+          client.connect(deviceId = activeDeviceId)
         }
       }
     }

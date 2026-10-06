@@ -116,6 +116,8 @@ import {
   recordWrongWindowEvidence,
 } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
+import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
+import { INTERACTIVE_OVERLAY_WINDOW_TYPE, isOwnOverlayFocused } from "./ownOverlayFocus";
 import { DefaultElementParser } from "../utility/ElementParser";
 import {
   ALERT_TITLE_RESOURCE_ID,
@@ -318,6 +320,24 @@ function isStatusBarOnlyCandidate(
     (observed === undefined
       ? hierarchy?.ctrlProxyIncomplete === true
       : SYSTEM_UI_WINDOW_PACKAGES.has(observed))
+  );
+}
+
+/**
+ * A focused window that legitimately differs from the resumed activity: a
+ * system-UI panel (a window, not an ActivityRecord), or the product's own
+ * focusable overlay, which owns focus while the app stays resumed behind it
+ * (issue #10000). Neither is a stale wrong-window capture.
+ */
+function isExpectedFocusDivergence(
+  hierarchy: ObserveResult["viewHierarchy"],
+  observed: string,
+  foreground: string,
+): boolean {
+  return (
+    SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
+    SYSTEM_UI_WINDOW_PACKAGES.has(foreground) ||
+    isOwnOverlayFocused(hierarchy)
   );
 }
 
@@ -1831,6 +1851,7 @@ export class RealObserveScreen implements ObserveScreen {
         postCaptureForeground,
         signal,
       );
+      await this.attributeFocusedOwnOverlayToForeground(result, foregroundIdentity);
       const windowIdentityMismatch = await this.resolveWindowIdentityMismatch(
         result,
         foregroundIdentity,
@@ -3457,7 +3478,7 @@ export class RealObserveScreen implements ObserveScreen {
     if (!foreground || !observed) {
       return undefined;
     }
-    if (SYSTEM_UI_WINDOW_PACKAGES.has(observed) || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
+    if (isExpectedFocusDivergence(result.viewHierarchy, observed, foreground)) {
       return undefined;
     }
     const confirmed = await this.resolvePostCaptureForegroundIdentity(
@@ -3473,6 +3494,36 @@ export class RealObserveScreen implements ObserveScreen {
       return undefined;
     }
     return { observed, foreground };
+  }
+
+  /**
+   * While CtrlProxy's own interactive overlay holds window focus, name the app
+   * behind it as the active app (issue #10000) and keep the overlay's presence
+   * visible through `activeWindow.type`. The device-confirmed resumed app is the
+   * attribution source; with no ground truth, or a SystemUI surface on top, the
+   * window is left as captured.
+   */
+  private async attributeFocusedOwnOverlayToForeground(
+    result: ObserveResult,
+    foregroundIdentity: Promise<string | undefined>,
+  ): Promise<void> {
+    const activeWindow = result.activeWindow;
+    if (activeWindow?.appId !== CTRL_PROXY_PACKAGE || !isOwnOverlayFocused(result.viewHierarchy)) {
+      return;
+    }
+    const foreground = await foregroundIdentity;
+    if (
+      !foreground ||
+      foreground === CTRL_PROXY_PACKAGE ||
+      SYSTEM_UI_WINDOW_PACKAGES.has(foreground)
+    ) {
+      return;
+    }
+    result.activeWindow = {
+      ...activeWindow,
+      appId: foreground,
+      type: activeWindow.type ?? INTERACTIVE_OVERLAY_WINDOW_TYPE,
+    };
   }
 
   /**

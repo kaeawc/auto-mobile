@@ -3186,6 +3186,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     observeResult?: ObserveResult,
     containerFound: boolean = true,
     signal?: AbortSignal,
+    selection?: ElementSelectionResult,
   ): Promise<never> {
     if (options.container && !containerFound) {
       const containerLabel = options.container.elementId
@@ -3213,6 +3214,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
     } else {
       baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
+    }
+
+    if (selection?.onlyKeyboardKeyMatch) {
+      throw new TapTargetUnavailableError(
+        `${baseError}. The only match is a soft-keyboard key, which observe does not list; ` +
+          "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
+        "not-found",
+      );
     }
 
     if (this.visionConfig.enabled && observeResult) {
@@ -3783,7 +3792,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         }
         // Vision screenshots are not display-aware. Omit the observation to keep
         // the shared base error without invoking default-display vision fallback.
-        await this.handleElementNotFound(options, undefined, outcome.containerFound, signal);
+        await this.handleElementNotFound(
+          options,
+          undefined,
+          outcome.containerFound,
+          signal,
+          outcome.selection,
+        );
       } catch (error) {
         logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
         return {
@@ -4205,6 +4220,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               observeResult,
               searchOutcome.containerFound,
               signal,
+              searchOutcome.selection,
             );
           }
           const liveSelection = await this.refreshEnsureCheckedSelection(

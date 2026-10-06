@@ -1,4 +1,5 @@
 import type { ExecResult } from "../../src/models";
+import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 interface UserImeState {
   active: string | null;
@@ -10,7 +11,7 @@ interface UserImeState {
  * Per-user IME state behind the `ime` and `settings` shell commands, applying the AOSP
  * defaults when `--user` is omitted: `ime` acts on the foreground user, `settings` on user 0.
  */
-export class FakeMultiUserImeAdb {
+export class FakeMultiUserImeAdb implements Pick<AdbExecutor, "execute"> {
   readonly calls: string[][] = [];
   private readonly users = new Map<number, UserImeState>();
 

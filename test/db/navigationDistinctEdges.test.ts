@@ -73,6 +73,51 @@ describe("navigation_edges distinct-transition readers (#10194)", () => {
       .execute();
   }
 
+  test("stats collapse legacy routing rows without hydrating complete edges", async () => {
+    const args = { selector: { text: "Settings" }, action: "tap" };
+    await db
+      .insertInto("navigation_edges")
+      .values([
+        ...traversalRows(2, "Home", "Settings", "tapOn", JSON.stringify(args)),
+        ...traversalRows(
+          2,
+          "Home",
+          "Settings",
+          "tapOn",
+          JSON.stringify({
+            ...args,
+            platform: "android",
+            deviceId: "phone",
+            device: "old",
+            sessionUuid: "session",
+          }),
+        ),
+        ...traversalRows(
+          1,
+          "Home",
+          "Settings",
+          "tapOn",
+          JSON.stringify({ ...args, action: "longPress" }),
+        ),
+        ...traversalRows(2, "Settings", "Home", null, null),
+      ])
+      .execute();
+    const expected = await repo.getDistinctEdges(APP);
+    const hydrate = spyOn(repo, "getDistinctEdges").mockImplementation(async () => {
+      throw new Error("Stats must not hydrate full edges");
+    });
+    try {
+      expect(await repo.getStats(APP)).toEqual({
+        nodeCount: 0,
+        edgeCount: expected.length,
+        toolEdgeCount: 2,
+        unknownEdgeCount: 1,
+      });
+    } finally {
+      hydrate.mockRestore();
+    }
+  });
+
   test("500 traversals of one transition read as one edge", async () => {
     await db
       .insertInto("navigation_edges")

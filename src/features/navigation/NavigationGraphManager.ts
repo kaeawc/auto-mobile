@@ -1729,7 +1729,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     const interaction: ToolCallInteraction = {
       toolName,
-      args,
+      args: stripNavigationToolParams(args),
       timestamp,
       uiState,
       ...(deviceId !== undefined ? { deviceId } : {}),
@@ -1746,21 +1746,37 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Clean up old tool calls
     this.cleanupToolCallHistory();
+    const startApp = this.currentAppId;
+    const startScreen = this.currentScreen;
     const withdraw = (): void => this.retireToolCalls((tc) => tc === interaction);
     return Object.assign(withdraw, {
-      markDispatched: () => this.markToolCallDispatched(interaction),
+      markDispatched: () => this.markToolCallDispatched(interaction, startApp, startScreen),
     });
   }
 
   /** The call's gesture went out now; correlation and the TTL measure from here (#10196). */
-  private markToolCallDispatched(interaction: ToolCallInteraction): void {
+  private markToolCallDispatched(
+    interaction: ToolCallInteraction,
+    startApp: string | null,
+    startScreen: string | null,
+  ): void {
     if (this.retiredToolCalls.has(interaction)) {
       return;
     }
     // The first report is the earliest the gesture could take effect; a later one (a retry, or
     // a report made after the command returned) must not move the window past an event the
     // gesture already caused.
-    interaction.dispatchedAt ??= Math.max(this.timer.now(), interaction.timestamp);
+    if (interaction.dispatchedAt === undefined) {
+      // Dispatch reports carry no observation. State captured at tool start belongs to a
+      // different source if searchUntil crossed screens; never replay that stale state.
+      if (
+        (startApp && this.currentAppId && this.currentAppId !== startApp) ||
+        (startScreen && this.currentScreen && this.currentScreen !== startScreen)
+      ) {
+        interaction.uiState = undefined;
+      }
+      interaction.dispatchedAt = Math.max(this.timer.now(), interaction.timestamp);
+    }
     // A call that waited longer than the TTL for its target was pruned while still in flight.
     if (!this.toolCallHistory.includes(interaction)) {
       this.toolCallHistory.push(interaction);

@@ -4503,3 +4503,84 @@ describe("exact notification classifier IDs", () => {
     expect(getNotificationGroupChildRows(group)).toEqual([]);
   });
 });
+
+describe("Android systemTray clearAll initial shade readiness", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  test("uses the short first wait when the app inventory is empty", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell dumpsys notification --noredact", {
+      stdout: "Current Notification Manager state:\nNotification List:\nSnoozed notifications:",
+      stderr: "",
+    });
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult(createEmptyTrayObservation());
+    const installedAppsSpy = mockInstalledApps(["com.example.empty"]);
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      appLabelResolver: async () => "Empty App",
+      observeScreenFactory: () => observer,
+    });
+    registerInteractionTools();
+
+    try {
+      const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+        action: "clearAll",
+        notification: { appId: "com.example.empty" },
+        awaitTimeout: 30000,
+      });
+      expect(JSON.parse(result.content[0].text).dismissedCount).toBe(0);
+      expect(timer.now()).toBeLessThan(2000);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  for (const [readyAfterMs, awaitTimeout, expectedSwipes] of [
+    [1000, undefined, 1],
+    [1000, 2000, 1],
+    [1000, 500, 0],
+    [0, 2000, 1],
+  ] as const) {
+    test(`shade ready at ${readyAfterMs}ms with timeout ${awaitTimeout ?? "default"}: ${expectedSwipes} swipe`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const adb = new FakeAdbExecutor();
+      const observer = new FakeObserveScreen();
+      const swipes = () =>
+        adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+      observer.setObserveResult(() =>
+        createObservation(
+          timer.now() >= readyAfterMs && swipes().length === 0
+            ? headerlessTwoNotificationGroups.expanded
+            : undefined,
+        ),
+      );
+      setSystemTrayDependencies({
+        timer,
+        adbFactory: () => adb,
+        observeScreenFactory: () => observer,
+      });
+      registerInteractionTools();
+
+      const handler = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!;
+      const result = await handler(device, {
+        action: "clearAll",
+        notification: { title: "Delta" },
+        awaitTimeout,
+      });
+
+      expect(swipes()).toHaveLength(expectedSwipes);
+      expect(JSON.parse(result.content[0].text).dismissedCount).toBe(expectedSwipes);
+      // Later no-match iterations retain the short drain budget rather than
+      // paying the full caller timeout after the notification has gone.
+      expect(timer.now()).toBeLessThan(2000);
+    });
+  }
+});

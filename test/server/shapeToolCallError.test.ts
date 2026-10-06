@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { SessionSuspectError } from "../../src/daemon/sessionManager";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
@@ -153,4 +154,22 @@ test("queue deadline marker survives tool error shaping; plain timeouts remain u
     content: [{ type: "text", text: `Error: ${started.message}` }],
     isError: true,
   });
+});
+
+test("a suspect-session refusal keeps its wire code so a proxy can tell it is restorable (#10053)", () => {
+  const error = new SessionSuspectError("session-a", 8_000);
+  const shaped = shapeToolCallError(error, context);
+  expect(JSON.parse(shaped.content[0].text)).toEqual({
+    error: {
+      code: "daemon_session_suspect",
+      message: error.message,
+      sessionUuid: "session-a",
+      remainingMs: 8_000,
+      retryable: true,
+    },
+  });
+  expect(shaped.isError).toBe(true);
+  // An unrelated error that merely carries a code stays prose.
+  const other = Object.assign(new Error("boom"), { code: "something_else" });
+  expect(shapeToolCallError(other, context).content[0].text).toBe("Error: boom");
 });

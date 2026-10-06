@@ -80,3 +80,22 @@ export function isContrastObservable(
 ): boolean {
   return !hasDeviceOcclusion(element) && !isCoveredByAnotherWindow(element, windowId, windows);
 }
+
+/** Positive IME ownership only: never infer a keyboard from its screen position or package spelling. */
+export function isInputMethodElement(
+  element: Element,
+  windowId: number | undefined,
+  windows: readonly ViewHierarchyWindowInfo[] = [],
+): boolean {
+  const own = windowId === undefined ? undefined : windows.find((window) => window.id === windowId);
+  if (own) {
+    return own.type === WINDOW_TYPE_INPUT_METHOD;
+  }
+  const packageName = element.package ?? element["resource-id"]?.split(":id/")[0];
+  return (
+    packageName !== undefined &&
+    windows.some(
+      (window) => window.type === WINDOW_TYPE_INPUT_METHOD && window.packageName === packageName,
+    )
+  );
+}

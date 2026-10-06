@@ -108,6 +108,7 @@ struct DemosTab: View {
                 Section("Accessibility") {
                     NavigationLink {
                         TapAtTargetsDemo()
+                            .font(nil)
                     } label: {
                         DemoRow(
                             title: "Tap At Targets",
@@ -169,9 +170,11 @@ struct DemosTab: View {
                     }
                 }
             }
+            .playgroundContent()
             .navigationTitle("Demos")
             .navigationDestination(isPresented: $shouldOpenTapAtTargets) {
                 TapAtTargetsDemo()
+                    .font(nil)
             }
             .onAppear {
                 guard !didCheckDeepLink else { return }
@@ -236,6 +239,7 @@ struct ScrollPerformanceDemo: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Scroll Performance")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "ScrollPerformanceDemo")
@@ -260,7 +264,7 @@ struct AnimationDemo: View {
                         .foregroundStyle(theme.textPrimary)
 
                     Image(systemName: "gear")
-                        .font(.system(size: 60))
+                        .font(theme.typography.featureIcon)
                         .foregroundStyle(theme.primary)
                         .rotationEffect(.degrees(rotation))
                         .onAppear {
@@ -293,7 +297,7 @@ struct AnimationDemo: View {
                         .font(theme.typography.titleMedium)
                         .foregroundStyle(theme.textPrimary)
 
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: theme.shapes.small)
                         .fill(isAnimating ? theme.primary : Color.autoMobileDarkGrey)
                         .frame(width: isAnimating ? 200 : 100, height: 60)
                         .animation(.easeInOut(duration: 0.5), value: isAnimating)
@@ -310,6 +314,7 @@ struct AnimationDemo: View {
             .padding()
         }
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Animations")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "AnimationDemo")
@@ -370,7 +375,7 @@ struct HeavyComputationDemo: View {
                 }
                 .padding()
                 .background(theme.primary.opacity(0.1))
-                .cornerRadius(12)
+                .cornerRadius(theme.shapes.small)
 
                 Divider()
                     .padding(.horizontal)
@@ -408,22 +413,23 @@ struct HeavyComputationDemo: View {
                 }
                 .padding()
                 .background(theme.surfaceVariant)
-                .cornerRadius(12)
+                .cornerRadius(theme.shapes.small)
 
                 // Result display
                 Text(result)
-                    .font(.system(.body, design: .monospaced))
+                    .font(theme.typography.bodyLarge)
                     .foregroundStyle(theme.textPrimary)
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(theme.surfaceVariant)
-                    .cornerRadius(8)
+                    .cornerRadius(theme.shapes.thumbnail)
 
                 Spacer()
             }
             .padding()
         }
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Heavy Computation")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "HeavyComputationDemo")
@@ -513,6 +519,7 @@ struct FormDemo: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .playgroundContent()
         .navigationTitle("Forms")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -558,6 +565,7 @@ struct AlertsDemo: View {
                 }
             }
         }
+        .playgroundContent()
         .navigationTitle("Alerts & Sheets")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -576,6 +584,7 @@ struct SheetContent: View {
                 Text("Swipe down or tap Done to dismiss")
                     .foregroundStyle(theme.textSecondary)
             }
+            .playgroundContent()
             .navigationTitle("Sheet")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -644,7 +653,7 @@ struct AccessibilityDemo: View {
                     Rectangle()
                         .fill(Color.autoMobileLalala)
                         .frame(width: 40, height: 40)
-                        .cornerRadius(4)
+                        .cornerRadius(theme.shapes.swatch)
                     Text("Primary (Lalala)")
                         .foregroundStyle(theme.textPrimary)
                 }
@@ -653,7 +662,7 @@ struct AccessibilityDemo: View {
                     Rectangle()
                         .fill(theme.primary)
                         .frame(width: 40, height: 40)
-                        .cornerRadius(4)
+                        .cornerRadius(theme.shapes.swatch)
                     Text("Secondary (Red)")
                         .foregroundStyle(theme.textPrimary)
                 }
@@ -662,9 +671,9 @@ struct AccessibilityDemo: View {
                     Rectangle()
                         .fill(Color.autoMobileEggshell)
                         .frame(width: 40, height: 40)
-                        .cornerRadius(4)
+                        .cornerRadius(theme.shapes.swatch)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 4)
+                            RoundedRectangle(cornerRadius: theme.shapes.swatch)
                                 .stroke(Color.autoMobileLightGrey, lineWidth: 1)
                         )
                     Text("Background (Eggshell)")
@@ -674,6 +683,7 @@ struct AccessibilityDemo: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Accessibility")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -758,6 +768,7 @@ struct SDKStatusDemo: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("SDK Status")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "SDKStatusDemo")
@@ -850,6 +861,7 @@ struct ErrorTrackingDemo: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Error Tracking")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "ErrorTrackingDemo")
@@ -918,6 +930,7 @@ struct BiometricsDemo: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Biometrics")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "BiometricsDemo")
@@ -1001,6 +1014,7 @@ struct NetworkTrackingDemo: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Network Tracking")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "NetworkTrackingDemo")
@@ -1044,6 +1058,7 @@ struct ViewHierarchyDebugDemo: View {
             .padding()
         }
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Hierarchy Debug")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "ViewHierarchyDebugDemo")
@@ -1091,14 +1106,14 @@ struct ViewHierarchyDebugDemo: View {
             }
             .padding()
             .background(theme.surfaceVariant)
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("combined-card")
             .accessibilityLabel("Photo Title, 4.8 stars, 128 reviews")
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 2: Custom Accessibility Actions
@@ -1126,7 +1141,7 @@ struct ViewHierarchyDebugDemo: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(theme.surfaceVariant)
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .accessibilityIdentifier("message-cell")
             .accessibilityElement(children: .combine)
             .accessibilityAction(named: "Reply") { tapCount += 1 }
@@ -1137,7 +1152,7 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 3: Gesture Recognizers
@@ -1162,7 +1177,7 @@ struct ViewHierarchyDebugDemo: View {
             .padding(40)
             .frame(maxWidth: .infinity)
             .background(theme.primary.opacity(0.15))
-            .cornerRadius(16)
+            .cornerRadius(theme.shapes.gestureTarget)
             .accessibilityIdentifier("gesture-target")
             .onTapGesture { tapCount += 1 }
             .onLongPressGesture { longPressCount += 1 }
@@ -1181,7 +1196,7 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 4: Layered Views
@@ -1196,24 +1211,24 @@ struct ViewHierarchyDebugDemo: View {
                 .foregroundStyle(theme.textSecondary)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: theme.shapes.layeredBackdrop)
                     .fill(theme.primary.opacity(0.3))
                     .frame(width: 200, height: 200)
                     .accessibilityIdentifier("layer-back")
 
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: theme.shapes.gestureTarget)
                     .fill(Color.autoMobileWarning.opacity(0.5))
                     .frame(width: 150, height: 150)
                     .accessibilityIdentifier("layer-middle")
 
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: theme.shapes.small)
                     .fill(theme.primary.opacity(0.7))
                     .frame(width: 100, height: 100)
                     .accessibilityIdentifier("layer-front")
 
                 Text("Top")
                     .font(theme.typography.titleMedium)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.autoMobileWhite)
                     .accessibilityIdentifier("layer-label")
             }
             .frame(maxWidth: .infinity)
@@ -1221,7 +1236,7 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 5: Hidden Views
@@ -1270,12 +1285,12 @@ struct ViewHierarchyDebugDemo: View {
             }
             .padding()
             .background(theme.surfaceVariant)
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .accessibilityIdentifier("hidden-views-container")
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 
     // MARK: - Section 6: UIKit Control
@@ -1303,13 +1318,14 @@ struct ViewHierarchyDebugDemo: View {
         }
         .padding()
         .background(theme.surfaceVariant.opacity(0.3))
-        .cornerRadius(12)
+        .cornerRadius(theme.shapes.small)
     }
 }
 
 // MARK: - UIKit Representables
 
 struct StepperControlView: UIViewRepresentable {
+    @Environment(\.autoMobileTheme) private var theme
     @Binding var value: Double
 
     func makeUIView(context: Context) -> UIStepper {
@@ -1324,6 +1340,7 @@ struct StepperControlView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIStepper, context _: Context) {
+        uiView.tintColor = UIColor(theme.primary)
         uiView.value = value
     }
 
@@ -1343,6 +1360,7 @@ struct StepperControlView: UIViewRepresentable {
 }
 
 struct SegmentedControlView: UIViewRepresentable {
+    @Environment(\.autoMobileTheme) private var theme
     func makeUIView(context _: Context) -> UISegmentedControl {
         let control = UISegmentedControl(items: ["Low", "Medium", "High"])
         control.selectedSegmentIndex = 1
@@ -1350,7 +1368,17 @@ struct SegmentedControlView: UIViewRepresentable {
         return control
     }
 
-    func updateUIView(_: UISegmentedControl, context _: Context) {}
+    func updateUIView(_ control: UISegmentedControl, context _: Context) {
+        control.selectedSegmentTintColor = UIColor(theme.primary)
+        control.setTitleTextAttributes([
+            .font: theme.typography.uiKitLabel,
+            .foregroundColor: UIColor(theme.textPrimary),
+        ], for: .normal)
+        control.setTitleTextAttributes([
+            .font: theme.typography.uiKitLabel,
+            .foregroundColor: UIColor(theme.onPrimary),
+        ], for: .selected)
+    }
 }
 
 #Preview {

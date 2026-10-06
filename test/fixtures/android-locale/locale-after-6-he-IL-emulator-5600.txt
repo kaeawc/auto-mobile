@@ -1,0 +1,8 @@
+$ adb -s emulator-5600 shell getprop persist.sys.locale
+
+$ adb -s emulator-5600 shell cmd locale get-app-locales dev.jasonpearson.automobile.playground
+Locales for dev.jasonpearson.automobile.playground for user 0 are [he-IL]
+$ adb -s emulator-5600 shell cmd locale get-app-locales dev.jasonpearson.automobile.playground --user 0
+Locales for dev.jasonpearson.automobile.playground for user 0 are [he-IL]
+$ adb -s emulator-5600 shell settings get system system_locales
+en-US

@@ -508,6 +508,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     if (typeof id !== "string" && typeof id !== "number") {
       return null;
     }
+    if (event.category === "overlay" && typeof data.sequence === "number") {
+      return JSON.stringify([event.category, event.deviceId, event.sessionId, id, data.sequence]);
+    }
     return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
   }
 }

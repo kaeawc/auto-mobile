@@ -240,6 +240,18 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
+  fun `gboard automation typing commits exact text without moving the caret mid-commit`() {
+    val editor = FakeEditor()
+
+    type(policy(KeyboardProfiles.DEFAULT), editor, "hello ")
+
+    assertEquals("hello ", editor.text)
+    assertEquals(6, editor.selectionStart)
+    assertEquals(-1, editor.composingStart)
+    assertEquals(-1, editor.composingEnd)
+  }
+
+  @Test
   fun `gboard keeps hi there text and clears composition when input ends`() {
     val policy = policy(KeyboardProfiles.GBOARD)
     val editor = FakeEditor()
@@ -302,19 +314,23 @@ class ConfigurableTypingPolicyTest {
   }
 
   @Test
-  fun `samsung recomposes word under moved cursor while gboard does not`() {
+  fun `samsung and gboard recompose word under moved cursor while direct does not`() {
     val editor = FakeEditor("hello world")
     editor.setSelection(8)
     val snapshot = editor.snapshot()
 
-    val samsungOps = policy(KeyboardProfiles.SAMSUNG).onSelectionChanged(snapshot)
-    assertEquals(listOf(ImeOp.SetComposingRegion(6, 11)), samsungOps)
-    editor.apply(samsungOps)
-    assertEquals("hello world", editor.text)
-    assertEquals(6, editor.composingStart)
-    assertEquals(11, editor.composingEnd)
+    listOf(KeyboardProfiles.SAMSUNG, KeyboardProfiles.GBOARD).forEach { profile ->
+      val recomposedEditor = FakeEditor("hello world")
+      recomposedEditor.setSelection(8)
+      val ops = policy(profile).onSelectionChanged(recomposedEditor.snapshot())
+      assertEquals(profile.id, listOf(ImeOp.SetComposingRegion(6, 11)), ops)
+      recomposedEditor.apply(ops)
+      assertEquals(profile.id, "hello world", recomposedEditor.text)
+      assertEquals(profile.id, 6, recomposedEditor.composingStart)
+      assertEquals(profile.id, 11, recomposedEditor.composingEnd)
+    }
 
-    assertTrue(policy(KeyboardProfiles.GBOARD).onSelectionChanged(snapshot).isEmpty())
+    assertTrue(policy(KeyboardProfiles.DIRECT).onSelectionChanged(snapshot).isEmpty())
   }
 
   @Test
@@ -327,6 +343,31 @@ class ConfigurableTypingPolicyTest {
     val ops = policy.onText("X", editor.snapshot())
     assertEquals(
       listOf(ImeOp.SetComposingText("woXrld"), ImeOp.SetSelection(9, 9)),
+      ops,
+    )
+    editor.apply(ops)
+
+    assertEquals("hello woXrld", editor.text)
+    assertEquals(9, editor.selectionStart)
+    assertEquals(6, editor.composingStart)
+    assertEquals(12, editor.composingEnd)
+  }
+
+  @Test
+  fun `gboard inserts into a recomposed word at the moved caret`() {
+    val policy = policy(KeyboardProfiles.GBOARD)
+    val editor = FakeEditor("hello world")
+    editor.setSelection(8)
+    editor.apply(policy.onSelectionChanged(editor.snapshot()))
+
+    val ops = policy.onText("X", editor.snapshot())
+    assertEquals(
+      listOf(
+        ImeOp.BeginBatchEdit,
+        ImeOp.SetComposingText("woXrld"),
+        ImeOp.SetSelection(9, 9),
+        ImeOp.EndBatchEdit,
+      ),
       ops,
     )
     editor.apply(ops)

@@ -687,8 +687,15 @@ the id from that device's host records; successful dismiss-all clears that devic
 After an event arrives, each shown entry also reports `pendingCount`, `lastSequence`
 (the highest accepted sequence), and cumulative overflow `droppedCount`. Before any
 event, these optional fields are omitted to preserve existing responses.
+Each shown entry also includes `pages` (pager id to zero-based page index), flat
+`state`, and `lastKnown: true` from its latest accepted `overlay_event`. These
+snapshots survive event consumption, host updates, and failed show attempts; a successful new show clears them
+until another event arrives. Requested state is never reported as observed state.
+Accepted events are pushed once to telemetry under category `overlay`, with
+owning device/session ids, event id, kind, name, sequence, pages and state. This
+telemetry is push-only, with no database persistence or historical backfill.
 A device-side `dismissed` event removes shown presence across that device's host
-sessions. `page_changed` events change only event bookkeeping, not host mutation
+sessions. `page_changed` events update the last known snapshot and event bookkeeping, preserving host mutation
 status. Raw transport disconnects are not observed; session release, device removal,
 and device unbinding clear the corresponding buffers and host status.
 
@@ -758,9 +765,11 @@ The device subscription ends when no nonterminal overlays remain.
 
 `highlight` takes either `shape` (a `circle` with `bounds`) or an `elementId`/`text`
 selector, never both. `elementId` is a resource ID; `text` matches text,
-content description, or placeholder. `selectionStrategy` is `first` (default)
-or `random`. `description` labels the highlight, and `timeoutMs` bounds the
-highlight request (default 5000 ms).
+content description, or placeholder. `selectionStrategy` is `first` (default),
+`random`, or `unique` (ambiguity returns the resolver failure). `container` accepts
+a nested chain with per-level `index` and `selectionStrategy`, resolved outermost
+first through the same resolver as `tapOn`. `description` labels the highlight,
+and `timeoutMs` bounds the highlight request (default 5000 ms).
 
 `explore` accepts positive integer `maxInteractions` (default 200), a positive
 `timeoutMs` (default 300000 ms), `resetToHome` to return home
@@ -876,7 +885,7 @@ settled screenshot is eligible.
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
@@ -1025,8 +1034,13 @@ belong inside `container` or `lookFor`; a strategy without a selector and
 malformed recursive selectors are rejected. Existing screen and simple selector
 calls retain their defaults.
 
-This nested-scoping contract is not yet available for `observe` subtree queries
-or `waitFor`.
+`waitFor` accepts nested container scopes. This nested-scoping contract is not yet
+available for `observe` subtree queries.
+
+`pinchOn.container` accepts nested containers with per-level `index` and
+`selectionStrategy` (`first`, `random`, or `unique`; default `first`). Strategy
+selection is supported only inside each container level; `pinchOn` has no
+top-level `selectionStrategy`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands. Each `key` command accepts at most 4 raw modifier entries
@@ -1503,7 +1517,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🔠 <code>displayConfig</code>                                                  | Reads or sets font/text scale, effective display density, and light/dark theme for adaptive-layout and large-font accessibility testing. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only, via `simctl ui appearance`; physical iOS is unsupported. Android reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light. Omitted from discovery by default — select it with `setToolEnabled` (case-sensitive `displayConfig`) or `--enable-tool displayConfig`; direct calls by name remain available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator; duration must be an integer from 1 to 1,798,000 ms, and Android intensity must be from 1 to 1,000.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an Android emulator phone call or incoming SMS.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -1634,7 +1648,7 @@ reset never forces light mode. The in-memory record survives feature instances,
 is cleared after a confirmed restore, and is lost when the process restarts.
 Failed restores keep the record for retry. The iOS Simulator reset continues to
 restore light appearance. Failed `displayConfig` results set MCP `isError: true`.
-`shake.duration` is the shake duration in milliseconds (default 1000).
+`shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
 `biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
 
 `postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
@@ -1697,6 +1711,20 @@ identifier from `automobile:devices/images`.
 booting the OS and `automationReadyTimeoutMs` for installing, updating, starting,
 and verifying the automation runner. Each defaults to 180000 ms; their sum,
 including defaults for omitted fields, must not exceed 890000 ms.
+
+`setDeviceResources` and `provisionDevice.resources` results include `requested`
+and an independent `observed` full-platform resource snapshot after configuration,
+including unrequested groups. No read path yields `unsupported` with a reason;
+failed reads yield `unknown`. Explicit opposite enabled/disabled states set
+`success: false` and name the resources in `observationContradictions`, using the
+existing MCP error response (provisioning retains the device/session). Unknown or
+unsupported observations do not add failures. Existing mutation fields retain
+their shape and meaning. Observation uses at most half the remaining resource deadline and shares the abort
+signal; exhausted reads report `unknown`, and provisioning replay refreshes it.
+Identical package and launchctl reads are reused only within one observation.
+Cancellation after mutation carries the completed result on the propagated error
+as `deviceResourceResult` (including any restore receipt). Non-abort observation errors are
+logged and omit `observed` while retaining the mutation result.
 
 `provisionDevice.operationId` is a caller-generated idempotency key.
 `deleteDevice.operationId` is a caller-generated idempotency and diagnostic
@@ -2004,9 +2032,58 @@ index carries `selector.ambiguous: true`, including inert matches and groups
 with a child that can promote to a tap or toggle ancestor. Unique selectors
 carry neither `index` nor `ambiguous`; selectors with an index omit `ambiguous`.
 
+`observe({ project: "full", scope: { focus: ... } })` also accepts the action
+selector vocabulary: exactly one `elementId` or `text`, optional `container`
+(recursive), `index`, and `selectionStrategy`. The shared resolver resolves
+outermost-first through strict descendants, including anonymous wrappers;
+noninteractive containers are valid. `unique` is recommended for intentional
+queries and applies at every unindexed level. Explicit indices override
+uniqueness within the resolver's existing ranked candidate set at that level.
+Scope cannot expose descendants missing from the automation hierarchy.
+
+For example, on Android (resource IDs) or iOS (accessibility identifiers):
+
+```json
+{
+  "project": "full",
+  "scope": {
+    "focus": {
+      "elementId": "item_42",
+      "container": { "elementId": "cart_A" },
+      "selectionStrategy": "unique"
+    }
+  }
+}
+```
+
+The returned `observeScope.focus.chain` lists outermost-to-target selectors and
+`matchCount` at each level, before index selection. Selectors use `elementId` /
+`text` and retain their enclosing `container`, indices, and effective strategy,
+so the final selector can become an action's `container` (for example, tap
+`remove` within that item). Use qualified Android resource IDs when needed.
+No scope metadata is added to an observation that did not request a scope.
+Legacy `{resourceId}` / flat `{text}` anchors retain their exact-ID / substring
+matching, first-node behavior, and unchanged metadata without `chain`. An object
+with `elementId` or `container` is a nested selector; every other object keeps
+the flat `resourceId`/`text` anchor, ignoring extra fields. Boolean foreground-app
+focus keeps its existing metadata.
+As before, scope transforms apply to full projection, not the default skeleton.
+
+A failed new selector returns an empty subtree and `observeScope.focus.matched:
+false`, with the resolver's unchanged `error`. A missing leaf reports
+`Target not found within container`; missing or ambiguous ancestors additionally
+carry `containerFailure: { level, reason: "not-found" | "ambiguous", selector }`.
+Levels are one-based from the outermost container. Successful ancestor levels
+remain in `chain`; target counts are included when its ancestors resolved.
+`observe.waitFor` container timeouts expose the same optional `containerFailure`
+at the top level, alongside the existing `timeoutReason` and candidates.
+
 `observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
 `textEquals`, `countStable`, and legacy element predicates) accept a nested
 `container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.
+The `timeout` / `timeoutMs` wait budget is capped at 1,770,000 ms so the wait
+and its 30-second dispatch/report allowance fit within the caller's 30-minute
+request limit.
 Each container names exactly one `elementId` or `text` and may carry its own
 zero-based `index`, `selectionStrategy`, and enclosing `container`. The outermost
 container resolves first; later levels and the leaf search only strict descendants

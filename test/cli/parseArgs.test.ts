@@ -174,6 +174,17 @@ describe("parseArgs (#4277)", () => {
     expect(parsed.initialSessionUuid).toBe("device-session-a");
   });
 
+  test("parses a harness-supplied stable liveness owner token for proxy mode", () => {
+    const parsed = parseArgs(
+      ["--initial-session-uuid", "device-session-a", "--liveness-owner-token", "harness-token"],
+      logger,
+    );
+
+    expect(parsed.initialSessionUuid).toBe("device-session-a");
+    expect(parsed.livenessOwnerToken).toBe("harness-token");
+    expect(parseArgs([], logger).livenessOwnerToken).toBeUndefined();
+  });
+
   test("uses the runner readiness environment default and lets CLI override it", () => {
     const fromEnvironment = parseArgs([], logger, {
       AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
@@ -243,6 +254,11 @@ describe("parseArgs (#4277)", () => {
         args: ["--initial-session-uuid", "--debug"],
         expected: { initialSessionUuid: undefined, debug: true },
       },
+      {
+        name: "--liveness-owner-token with no value preserves the following --debug",
+        args: ["--liveness-owner-token", "--debug"],
+        expected: { livenessOwnerToken: undefined, debug: true },
+      },
     ])("$name", ({ args, expected }) => {
       const parsed = parseArgs(args, logger);
 
@@ -269,6 +285,12 @@ describe("parseArgs (#4277)", () => {
         args: ["--initial-session-uuid", "device-session-a"],
         key: "initialSessionUuid",
         value: "device-session-a",
+      },
+      {
+        name: "--liveness-owner-token with a valid value",
+        args: ["--liveness-owner-token", "harness-token"],
+        key: "livenessOwnerToken",
+        value: "harness-token",
       },
     ])("$name still parses correctly", ({ args, key, value }) => {
       const parsed = parseArgs(args, logger);

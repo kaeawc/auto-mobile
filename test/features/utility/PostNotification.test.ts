@@ -397,6 +397,102 @@ describe("PostNotification", () => {
       }
     });
 
+    test("reads only the header bytes, never the whole file", async () => {
+      const headReads: number[] = [];
+      class HeadOnlyFileSystem extends FakeFileSystem {
+        async readFileBuffer(): Promise<Buffer> {
+          throw new Error("the whole file must not be read");
+        }
+        async readFileHead(_path: string, byteCount: number): Promise<Buffer> {
+          headReads.push(byteCount);
+          return PNG_BYTES;
+        }
+      }
+      const imagePath = path.join(IMAGE_DIR, "big.png");
+      const fileSystem = new HeadOnlyFileSystem();
+      fileSystem.setBinaryFile(imagePath, PNG_BYTES);
+      configureBroadcastResult(1);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(true);
+      expect(headReads).toEqual([32]);
+    });
+
+    test("rejects an oversized file from its size alone, without reading it", async () => {
+      let reads = 0;
+      class HugeFileSystem extends FakeFileSystem {
+        async stat() {
+          return { size: 17 * 1024 * 1024, mtimeMs: 0, isFile: () => true };
+        }
+        async readFileHead(): Promise<Buffer> {
+          reads += 1;
+          return PNG_BYTES;
+        }
+      }
+      const imagePath = path.join(IMAGE_DIR, "huge.png");
+      const result = await newNotifier(new HugeFileSystem()).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("too large");
+      expect(result.error).toContain("17.0 MiB");
+      expect(result.error).toContain("at most 16 MiB");
+      expect(reads).toBe(0);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("accepts a file exactly at the size limit", async () => {
+      class LimitFileSystem extends FakeFileSystem {
+        async stat() {
+          return { size: 16 * 1024 * 1024, mtimeMs: 0, isFile: () => true };
+        }
+        async readFileHead(): Promise<Buffer> {
+          return PNG_BYTES;
+        }
+      }
+      configureBroadcastResult(1);
+      const result = await newNotifier(new LimitFileSystem()).execute(
+        bigPicture(path.join(IMAGE_DIR, "limit.png")),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    // ISO-BMFF `ftyp` box: 4-byte size, "ftyp", major brand.
+    const ftyp = (brand: string) =>
+      Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from(`ftyp${brand}`, "latin1")]);
+
+    test.each([
+      ["heic", "HEIF/HEIC images are decoded by Android 8.0"],
+      ["mif1", "HEIF/HEIC images are decoded by Android 8.0"],
+      ["avif", "AVIF images are decoded by Android 14"],
+    ])("accepts a %s image with a version warning instead of refusing it", async (brand, text) => {
+      const imagePath = path.join(IMAGE_DIR, `photo.${brand}`);
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, ftyp(brand));
+      configureBroadcastResult(1);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain(text);
+      expect(fakeAdb.wasCommandExecuted("push ")).toBe(true);
+    });
+
+    test("still refuses an ftyp container whose brand is not an image brand", async () => {
+      const imagePath = path.join(IMAGE_DIR, "movie.png");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, ftyp("mp42"));
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Unsupported image type");
+    });
+
+    test("keeps the version warning alongside the app's posted-without-image warning", async () => {
+      const imagePath = path.join(IMAGE_DIR, "photo.heic");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, ftyp("heic"));
+      configureBroadcastResult(2);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("HEIF/HEIC images are decoded by Android 8.0");
+      expect(result.warning).toContain("could not load the bigPicture image");
+    });
+
     test("rejects a path that is not a regular file", async () => {
       class DirectoryFileSystem extends FakeFileSystem {
         async stat() {
@@ -499,6 +595,21 @@ describe("PostNotification", () => {
       expect(failed.success).toBe(false);
       expect(failed.error).toBe("SDK notification receiver reported a failure.");
     });
+
+    test.each([3, 7, -1])(
+      "fails closed on result code %i, which this host does not know, and says to update the host",
+      async (code) => {
+        configureBroadcastResult(code);
+        const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+          title: "Hello",
+          body: "World",
+          appId: "com.example.app",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(`result code ${code}`);
+        expect(result.error).toContain("update AutoMobile");
+      },
+    );
   });
 
   test("reports an absent receiver without broadcasting", async () => {

@@ -391,6 +391,13 @@ export interface DeviceBootServiceDependencies {
    * (#9901). A lease this service reserves itself is held automatically.
    */
   retainLeaseUntil?: (settlement: Promise<void>) => void;
+  /**
+   * Set by a long-lived owner (the daemon): once the request is cancelled or out of budget, the
+   * emulator's termination may carry on in the background while the lease stays held (#9920).
+   * Left unset by a one-shot process (`--boot-device`) that exits as soon as `boot` returns,
+   * which would take the SIGKILL escalation's timer down with it: there `boot` waits in full.
+   */
+  cleanupMayOutliveRequest?: boolean;
   /** Liveness probe for an emulator that survived SIGKILL; injected so tests never signal a real pid. */
   isProcessRunning?: (pid: number) => boolean;
   /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
@@ -1434,14 +1441,18 @@ export class DeviceBootService {
   /**
    * Waits for the owned emulator's termination, but only while the request is
    * live. When the request is cancelled or out of budget the cleanup carries on
-   * in the background and keeps the lease held (#9920). A lease this service
-   * does not own and cannot hand the survivor to is still waited on in full.
+   * in the background and keeps the lease held (#9920), but only for a long-lived
+   * owner (`cleanupMayOutliveRequest`) with a lease it can hold. A one-shot CLI
+   * process, or a lease this service does not own and cannot hand the survivor
+   * to, is still waited on in full.
    */
   private async awaitOwnedCleanup(
     termination: Promise<OwnedTermination>,
     context: BootDeadlineContext,
   ): Promise<OwnedTerminationWait> {
-    const canHold = context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined;
+    const canHold =
+      this.dependencies.cleanupMayOutliveRequest === true &&
+      (context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined);
     if (!canHold) {
       return (await termination).state;
     }

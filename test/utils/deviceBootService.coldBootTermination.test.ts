@@ -69,6 +69,7 @@ function setup() {
     lifecycleLease?: VirtualDeviceLifecycleLease,
     signal?: AbortSignal,
     canRetainLease = true,
+    options: { cleanupMayOutliveRequest?: boolean; timeoutMs?: number } = {},
   ) =>
     new DeviceBootService({
       deviceManager: devices,
@@ -84,11 +85,12 @@ function setup() {
       lifecycleCoordinator: coordinator,
       lifecycleLease,
       retainLeaseUntil: canRetainLease ? (settlement) => retained.push(settlement) : undefined,
+      cleanupMayOutliveRequest: options.cleanupMayOutliveRequest ?? true,
       isProcessRunning: (pid) => {
         liveness.probed.push(pid);
         return liveness.running;
       },
-    }).boot({ platform: "android", signal });
+    }).boot({ platform: "android", signal, timeoutMs: options.timeoutMs });
   // A second request for the same AVD: granted only once the first lease is released.
   const refusals: unknown[] = [];
   const nextRequestForAvd = () => {
@@ -420,6 +422,50 @@ describe("DeviceBootService owned cold-boot termination (#9901)", () => {
     const afterGone = t.nextRequestForAvd();
     await settle();
     expect(afterGone()).toBe(true);
+  });
+
+  it("sends SIGKILL before a one-shot CLI boot returns when readiness times out at the deadline", async () => {
+    const t = setup();
+    t.devices.waitForDeviceReady = async () => await new Promise<BootedDevice>(() => {});
+    // No long-lived owner, as in `--boot-device`: the process exits as soon as boot rejects.
+    const outcome = track(
+      t.boot(undefined, undefined, false, {
+        cleanupMayOutliveRequest: false,
+        timeoutMs: 10_000,
+      }),
+    );
+    await settle();
+
+    t.timer.advanceTime(10_000);
+    await settle();
+    // The budget is spent, but the caller is not released with only SIGTERM sent.
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    expect(outcome.settled()).toBe(false);
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    expect(t.emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(outcome.settled()).toBe(false);
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    expect(outcome.settled()).toBe(true);
+    expect(String((outcome.error() as Error).message)).toContain(
+      "did not exit after SIGTERM and SIGKILL",
+    );
+  });
+
+  it("keeps the daemon's abort race: a long-lived owner is released before SIGKILL", async () => {
+    const t = setup();
+    t.devices.waitForDeviceReady = async () => await new Promise<BootedDevice>(() => {});
+    const outcome = track(t.boot(undefined, undefined, true, { timeoutMs: 10_000 }));
+    await settle();
+
+    t.timer.advanceTime(10_000);
+    await settle();
+
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    expect(outcome.settled()).toBe(true);
   });
 
   it("still waits in full when an injected lease has no way to hold the survivor", async () => {

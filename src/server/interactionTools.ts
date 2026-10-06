@@ -48,6 +48,12 @@ import {
   PINCH_DURATION_MAX_MS,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
+import {
+  SHAKE_DURATION_MAX_MS,
+  SHAKE_DURATION_MIN_MS,
+  SHAKE_INTENSITY_MAX,
+  SHAKE_INTENSITY_MIN,
+} from "../models/ShakeOptions";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
 import { DaemonState } from "../daemon/daemonState";
@@ -237,8 +243,25 @@ export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotifica
 export const shakeSchema = addDeviceTargetingToSchema(
   z
     .object({
-      duration: z.number().optional().describe("Shake duration ms (default 1000)"),
-      intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
+      duration: z
+        .number()
+        .finite()
+        .int()
+        .min(SHAKE_DURATION_MIN_MS)
+        .max(SHAKE_DURATION_MAX_MS)
+        .optional()
+        .describe(
+          `Shake duration ms (${SHAKE_DURATION_MIN_MS}-${SHAKE_DURATION_MAX_MS}, default 1000)`,
+        ),
+      intensity: z
+        .number()
+        .finite()
+        .min(SHAKE_INTENSITY_MIN)
+        .max(SHAKE_INTENSITY_MAX)
+        .optional()
+        .describe(
+          `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
+        ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.

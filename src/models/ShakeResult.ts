@@ -6,4 +6,6 @@ import { BaseActionResult } from "./BaseActionResult";
 export interface ShakeResult extends BaseActionResult {
   duration: number;
   intensity: number;
+  restoreError?: string;
+  restoreWarning?: string;
 }

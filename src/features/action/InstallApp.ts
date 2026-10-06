@@ -300,12 +300,15 @@ export class InstallApp {
     }
     const packageName = packageNameResult.packageName?.trim();
 
-    // Auto-detect target user if not specified
+    // Auto-detect target user if not specified. installedOnly makes a reinstall
+    // target the user(s) that already have the package; a first install still
+    // resolves through the default policy (no running user has it).
     const targetUserId = await perf.track("detectTargetUser", async () => {
       return (
         await new AndroidUserTargetResolver(this.adb).resolve({
           packageName,
           explicitUserId: userId,
+          installedOnly: true,
           signal,
         })
       ).userId;

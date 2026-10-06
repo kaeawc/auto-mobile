@@ -252,6 +252,20 @@ describe("PinchOn", () => {
     expect(capture.requests[0]?.searchRaw).toBe(true);
   });
 
+  test("a missing cached hierarchy is re-read without a screenshot or audit before the pinch", async () => {
+    fakeObserveScreen.setObserveResult(() => ({
+      ...createObserveResult(),
+      viewHierarchy: fakeObserveScreen.getExecuteCallCount() === 0 ? undefined : createHierarchy(),
+    }));
+    await pinchOn.execute({ direction: "out", autoTarget: false });
+    const reads = fakeObserveScreen.getExecuteOptions();
+    expect(reads[0]).toMatchObject({
+      freshness: "cached-ok",
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+    });
+  });
+
   test("screen fallback uses fresh rotated dimensions and capture insets", async () => {
     fakeObserveScreen.setObserveResult({
       ...createObserveResult(),

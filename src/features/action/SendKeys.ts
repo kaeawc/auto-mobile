@@ -71,6 +71,10 @@ const ANDROID_READ_BACK_ATTEMPTS = 3;
 export const CARET_UNKNOWN_WARNING =
   /Text was inserted, but the caret could not be placed after it \([^)]*\); the caret position is unknown, so insert any further text with request_insert_text rather than key events/;
 
+/** The field still shows its pre-clear text after the full settle poll (#9943). */
+const CLEAR_UNCHANGED_WARNING =
+  "The field still shows its pre-clear text after the clear was acknowledged; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.";
+
 class ImeRestorationError extends Error {}
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
@@ -248,7 +252,7 @@ export interface SendKeysCommandExecutor {
   clear(
     signal?: AbortSignal,
     display?: string,
-  ): Promise<{ success: boolean; error?: string; retryable?: boolean }>;
+  ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -346,10 +350,7 @@ export interface SendKeysTextClient {
   ): Promise<TextActionResult>;
 }
 
-type AndroidClearState =
-  | { kind: "applied" }
-  | { kind: "pending"; remaining: number }
-  | { kind: "unreadable" };
+type AndroidClearState = { kind: "applied" } | { kind: "pending" } | { kind: "unreadable" };
 
 /** Field text and collapsed caret expected after the eventLast prefix insert (UTF-16 units). */
 interface EventLastCaretExpectation {
@@ -606,21 +607,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   async clear(signal?: AbortSignal, display?: string): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
-    // The pre-clear text is what an unapplied clear still shows (#9884).
-    const preClearText =
-      this.device.platform === "android"
-        ? await this.readTextBeforeClear(signal, display)
-        : undefined;
-    const clearResult = await this.textClient.clear(
-      this.device.platform === "ios" ? signal : undefined,
-    );
     if (this.device.platform !== "android") {
-      return clearResult;
+      return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
     }
+    const { result: clearResult, unchangedWarning } = await this.clearAndVerifyAndroid(
+      signal,
+      display,
+    );
     if (clearResult.success) {
-      // set_text("") is acknowledged before the app applies it; a following a11y insert
-      // plans from a fresh node snapshot and would otherwise write old + new text (#9884).
-      return (await this.verifyAndroidClearApplied(preClearText, signal, display)) ?? clearResult;
+      return this.withTextWarnings(clearResult, [unchangedWarning]);
     }
     logger.warn(`[SendKeys] Android accessibility clear failed: ${clearResult.error}`);
     const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
@@ -635,6 +630,25 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       };
     }
     return this.clearEventOnlyForReplace(textLength, signal, display);
+  }
+
+  /**
+   * set_text("") is acknowledged before the app applies it; a following a11y insert plans from a
+   * fresh node snapshot and would otherwise write old + new text (#9884). The text read before the
+   * clear is what an unapplied clear still shows. Shared by the `clear` command and the clear that
+   * precedes an eventAll/eventLast replace (#9940).
+   */
+  private async clearAndVerifyAndroid(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
+    const preClearText = await this.readTextBeforeClear(signal, display);
+    const result = await this.textClient.clear();
+    if (!result.success) {
+      return { result };
+    }
+    const unchangedWarning = await this.verifyAndroidClearApplied(preClearText, signal, display);
+    return { result, ...(unchangedWarning === undefined ? {} : { unchangedWarning }) };
   }
 
   /**
@@ -664,14 +678,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   /**
    * Poll until the acknowledged clear is visible, i.e. the field no longer shows the pre-clear
-   * text. Any other content (empty, hint, a mask or permanent prefix) counts as applied. An
-   * unreadable field is retried, then passes with a warning.
+   * text. Any other content (empty, hint, a mask or permanent prefix) counts as applied. Text that
+   * is still unchanged after the full poll is a settled state (a mask or permanent prefix already
+   * at its cleared content, or a refused clear), so the clear stays successful with a warning
+   * rather than failing the call (#9943). An unreadable field is retried, then passes.
    */
   private async verifyAndroidClearApplied(
     preClearText: string | undefined,
     signal?: AbortSignal,
     display?: string,
-  ): Promise<TextActionResult | undefined> {
+  ): Promise<string | undefined> {
     if (preClearText === undefined) {
       return undefined;
     }
@@ -686,10 +702,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
     }
     if (state.kind === "pending") {
-      return {
-        success: false,
-        error: `Field was not fully cleared: ${state.remaining} UTF-16 units remain`,
-      };
+      logger.warn(`[SendKeys] ${CLEAR_UNCHANGED_WARNING}`);
+      return CLEAR_UNCHANGED_WARNING;
     }
     logger.warn("[SendKeys] The clear could not be verified: the focused field stayed unreadable");
     return undefined;
@@ -709,7 +723,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       return snapshot.length === 0 || snapshot.text !== preClearText
         ? { kind: "applied" }
-        : { kind: "pending", remaining: snapshot.length };
+        : { kind: "pending" };
     } catch (error) {
       this.checkAbort(signal, error);
       logger.warn(`[SendKeys] Clear read-back unavailable: ${errorMessage(error)}`, error);
@@ -1576,7 +1590,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     const prefix = chars.slice(0, split.index).join("");
     const suffix = chars.slice(split.index + 1).join("");
-    const initialResult = await this.insertEventLastPrefix(prefix, operation, signal);
+    const initialResult = await this.insertEventLastPrefix(prefix, operation, signal, display);
     if (!initialResult.success) {
       return initialResult;
     }
@@ -1614,11 +1628,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     prefix: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     // The expectation needs the field as it was BEFORE the insert, so it is read up front.
     const expected = await this.expectEventLastCaret(prefix, operation, signal);
     return this.confirmEventLastCaret(
-      await this.prepareEventLastPrefix(prefix, operation, signal),
+      await this.prepareEventLastPrefix(prefix, operation, signal, display),
       expected,
       signal,
     );
@@ -1732,9 +1747,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     prefix: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     if (operation === "replace") {
-      return prefix ? await this.textClient.replace(prefix) : await this.textClient.clear();
+      // A bare tail key event follows an empty prefix, so the clear must be visible first (#9940).
+      if (prefix) {
+        return await this.textClient.replace(prefix);
+      }
+      const { result, unchangedWarning } = await this.clearForReplace(operation, signal, display);
+      return this.withTextWarnings(result, [unchangedWarning]);
     }
     return prefix ? this.insertText(prefix, undefined, signal) : { success: true };
   }
@@ -1766,7 +1787,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
     }
 
-    const clearResult = await this.clearForReplace(operation);
+    const { result: clearResult, unchangedWarning } = await this.clearForReplace(
+      operation,
+      signal,
+      display,
+    );
     if (!clearResult.success) {
       return clearResult;
     }
@@ -1776,7 +1801,44 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       operation === "replace",
       signal,
     );
-    return typed.success ? this.verifyEventAllLetterCase(text, typed, signal, display) : typed;
+    if (!typed.success) {
+      return typed;
+    }
+    const confirmed = unchangedWarning
+      ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
+      : typed;
+    return this.verifyEventAllLetterCase(text, confirmed, signal, display);
+  }
+
+  /**
+   * The replace's clear left the pre-clear text showing, so the typed text may have landed after
+   * it: old text + new text. One read after typing: a field that now equals the requested text
+   * was just slow to apply the clear; anything else keeps the unchanged-clear warning, naming the
+   * field content. A permanent prefix or mask legitimately gives "prefix + text", which cannot be
+   * told from a refused clear by text alone, so this stays a warning rather than a failure.
+   */
+  private async confirmReplaceAfterUnchangedClear(
+    text: string,
+    unchangedWarning: string,
+    typed: TextActionResult,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    let field: string | undefined;
+    try {
+      field = this.readFocusedText(await this.readFreshObservation(signal, display));
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] Replace read-back unavailable: ${errorMessage(error)}`, error);
+    }
+    if (field === text) {
+      return typed;
+    }
+    const observed =
+      field === undefined
+        ? "The field could not be read after typing."
+        : `After typing, the field holds ${JSON.stringify(field)}, not just the requested text: it is either a permanent prefix or mask, or the field refused the clear and now contains both the old and the new text.`;
+    return this.withTextWarnings(typed, [`${unchangedWarning} ${observed}`]);
   }
 
   /**
@@ -2055,8 +2117,20 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private clearForReplace(operation: SendKeysOperation): Promise<TextActionResult> {
-    return operation === "replace" ? this.textClient.clear() : Promise.resolve({ success: true });
+  /**
+   * Clear before a replace and wait until it is visible, so a following insert or the preceding-state
+   * baseline read does not plan from the pre-clear text (#9940). `unchangedWarning` is set when the
+   * field still shows its pre-clear text: a mask or prefix at its cleared content, or a refused clear.
+   */
+  private async clearForReplace(
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
+    if (operation !== "replace") {
+      return { result: { success: true } };
+    }
+    return this.clearAndVerifyAndroid(signal, display);
   }
 
   private async hasAndroidKeyEvent(graphemes: string[]): Promise<boolean> {
@@ -2931,6 +3005,7 @@ export class SendKeys {
           action: "clear",
           success: result.success,
           ...(result.retryable === false ? { retryable: false } : {}),
+          ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),
         }));
     }

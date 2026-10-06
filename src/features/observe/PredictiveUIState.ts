@@ -7,7 +7,12 @@ import {
   PredictionTarget,
   Predictions,
 } from "../../models";
-import { NavigationEdge, NavigationGraphManager } from "../navigation/NavigationGraphManager";
+import type { NavigationEdge, NavigationGraphManager } from "../navigation/NavigationGraphManager";
+import {
+  resolveNavigationGraphForDevice,
+  type NavigationDeviceRef,
+  type NavigationGraphResolver,
+} from "../navigation/deviceNavigationGraph";
 import { PredictionHistoryRepository } from "../../db/predictionHistoryRepository";
 import { normalizeToolArgs, normalizeIdentifier } from "../../utils/predictionUtils";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
@@ -145,12 +150,21 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
   private historyRepository = new PredictionHistoryRepository();
   private readonly DEFAULT_CONFIDENCE = 0.5;
 
-  async generate(result: ObserveResult): Promise<Predictions | undefined> {
+  constructor(
+    private readonly resolveNavigationGraph: NavigationGraphResolver = resolveNavigationGraphForDevice,
+  ) {}
+
+  async generate(
+    result: ObserveResult,
+    device?: NavigationDeviceRef,
+  ): Promise<Predictions | undefined> {
     if (!result.viewHierarchy) {
       return undefined;
     }
 
-    const navGraph = NavigationGraphManager.getInstance();
+    // The manager the device's navigation events are recorded on: its bound session's, else
+    // the global one (#10197).
+    const navGraph = this.resolveNavigationGraph(device);
     const currentScreen = navGraph.getCurrentScreen();
     if (!currentScreen) {
       return undefined;

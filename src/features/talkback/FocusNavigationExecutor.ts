@@ -1,11 +1,11 @@
 import type { DisplayFence } from "../action/BaseVisualChange";
 import type { Element } from "../../models/Element";
-import type { ScreenSize } from "../../models/ScreenSize";
 import {
   ActionableError,
   type BootedDevice,
   type CurrentFocusResult,
   type TraversalOrderResult,
+  type ViewHierarchyResult,
 } from "../../models";
 import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 import { DeviceDetection } from "../../utils/DeviceDetection";
@@ -15,18 +15,24 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient, type A11ySwipeResult } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import type { AccessibilityNodeSelector, A11yActionResult } from "../observe/android/types";
 import { FocusElementMatcher } from "./FocusElementMatcher";
-import { FocusPathCalculator, type FocusNavigationPath } from "./FocusPathCalculator";
+import {
+  ambiguousTestTagError,
+  nodeActionTargetError,
+  requiresNodeSelector,
+  stableNodeSelectorForElement,
+} from "./nodeActionTarget";
 
 interface NavigationOptions {
   displayFence?: DisplayFence;
-  maxSwipes?: number;
-  verificationInterval?: number;
-  swipeDelay?: number;
-  onFocusObserved?: (element: Element | null) => void;
-  /** Called immediately before a swipe request; even failed requests may move the screen. */
-  onSwipeRequested?: () => void;
+  /** How long to let TalkBack apply a focus request before reading the cursor back. */
+  focusSettleMs?: number;
+  /** The cursor and the traversal it was read from, after every read of the screen. */
+  onFocusObserved?: (element: Element | null, traversal: readonly Element[]) => void;
+  /** Called immediately before a focus request; even a failed request may move the cursor. */
+  onFocusRequested?: () => void;
   /**
    * Request cancellation. The ambient request signal is always honoured too, so a caller
    * that runs inside a request context needs no explicit signal.
@@ -41,58 +47,88 @@ interface NavigationOptions {
  */
 export class FocusNavigationStoppedError extends Error {}
 
+/**
+ * Focus navigation could not start: nothing was dispatched, so the screen is exactly as it was
+ * observed and a caller may still use a non-cursor activation. Every other navigation failure
+ * happens after a focus request was sent and must never fall back to a coordinate tap.
+ */
+export class FocusNavigationUnavailableError extends ActionableError {}
+
 const BUDGET_EXHAUSTED_MESSAGE = "Request time budget exhausted during focus navigation.";
 
 /**
- * Describe a stop that happened after `swipesSent` swipe requests. Swipes move the TalkBack
- * cursor, so the device is not where the request found it. Device-loss errors keep their typed
- * carrier, and a stop before any swipe changed nothing, so both pass through unchanged.
+ * Describe a stop that happened after `focusRequests` focus requests were sent. A focus
+ * request moves the TalkBack cursor, so the device is not where the request found it.
+ * Device-loss errors keep their typed carrier, and a stop before any request changed nothing,
+ * so both pass through unchanged.
  */
-export function stoppedFocusNavigationError(error: unknown, swipesSent: number): unknown {
-  if (error instanceof FocusNavigationStoppedError || isDeviceLostError(error) || swipesSent <= 0) {
+export function stoppedFocusNavigationError(error: unknown, focusRequests: number): unknown {
+  if (
+    error instanceof FocusNavigationStoppedError ||
+    isDeviceLostError(error) ||
+    focusRequests <= 0
+  ) {
     return error;
   }
   const reason = errorMessage(error);
   return new FocusNavigationStoppedError(
-    `${reason.endsWith(".") ? reason : `${reason}.`} Focus navigation partially applied: ${swipesSent} swipe` +
-      `${swipesSent === 1 ? "" : "s"} already moved the TalkBack cursor and the target was not ` +
-      "activated. Observe before retrying; do not retry automatically.",
+    `${reason.endsWith(".") ? reason : `${reason}.`} Focus navigation partially applied: ` +
+      `${focusRequests} accessibility-focus request${focusRequests === 1 ? "" : "s"} already ` +
+      "moved the TalkBack cursor and the target was not activated. Observe before retrying; do " +
+      "not retry automatically.",
     { cause: error },
   );
 }
 
 /**
- * Throw when the request was cancelled or its time budget is spent. Called before every swipe
- * and before the activation, so nothing further is dispatched for a request that is over.
+ * Throw when the request was cancelled or its time budget is spent. Called before every focus
+ * request and before the activation, so nothing further is dispatched for a request that is
+ * over.
  */
 export function assertFocusNavigationLive(
   signal: AbortSignal | undefined,
   timer: Timer,
-  swipesSent: number,
+  focusRequests: number,
 ): void {
   try {
     throwIfAborted(signal);
   } catch (error) {
-    throw stoppedFocusNavigationError(error, swipesSent);
+    throw stoppedFocusNavigationError(error, focusRequests);
   }
   const deadlineMs = getRequestContext()?.getDeadlineMs?.();
   if (deadlineMs !== undefined && timer.now() >= deadlineMs) {
-    throw stoppedFocusNavigationError(new Error(BUDGET_EXHAUSTED_MESSAGE), swipesSent);
+    throw stoppedFocusNavigationError(new Error(BUDGET_EXHAUSTED_MESSAGE), focusRequests);
   }
 }
 
+/**
+ * The reads and accessibility actions focus navigation needs. The cursor is moved with
+ * ACTION_ACCESSIBILITY_FOCUS: a gesture an accessibility service dispatches reaches the app as
+ * ordinary touch input, so a cursor "swipe" scrolls the app's own pager instead (#10209).
+ */
 export interface FocusNavigationDriver {
+  /** Full, unfiltered tree for global-ID safety. Drivers without this capability use coordinates. */
+  getAccessibilityHierarchy?(): Promise<ViewHierarchyResult | null>;
   requestTraversalOrder(): Promise<TraversalOrderResult>;
   requestCurrentFocus(): Promise<CurrentFocusResult>;
-  requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    durationMs: number,
+  /**
+   * Request an accessibility action on an element.
+   * @param action - The action to perform (e.g., "click", "focus")
+   * @param resourceId - Optional resource ID of the target element
+   */
+  requestAction(
+    action: string,
+    resourceId?: string,
     signal?: AbortSignal,
-  ): Promise<A11ySwipeResult>;
-  getScreenSize(): Promise<ScreenSize>;
+  ): Promise<A11yActionResult>;
+  /** Request an accessibility action using stable fields observed from a node. */
+  requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
+  /** Whether the connected runner can resolve stable node selectors. */
+  supportsNodeActionSelectors(): Promise<boolean>;
 }
 
 export interface FocusNavigationDriverFactory {
@@ -109,7 +145,6 @@ interface NavigationVerification {
 
 interface FocusNavigationExecutorDependencies {
   matcher?: FocusElementMatcher;
-  pathCalculator?: FocusPathCalculator;
   timer?: Timer;
   driverFactory?: FocusNavigationDriverFactory;
   deviceResolver?: (deviceId: string) => BootedDevice;
@@ -121,6 +156,16 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
     this.accessibilityService = accessibilityService;
   }
 
+  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
+    return this.accessibilityService.getAccessibilityHierarchy(
+      undefined,
+      undefined,
+      false,
+      undefined,
+      true,
+    );
+  }
+
   async requestTraversalOrder(): Promise<TraversalOrderResult> {
     return this.accessibilityService.requestTraversalOrder();
   }
@@ -129,21 +174,14 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
     return this.accessibilityService.requestCurrentFocus();
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    durationMs: number,
+  async requestAction(
+    action: string,
+    resourceId?: string,
     signal?: AbortSignal,
-  ): Promise<A11ySwipeResult> {
-    return this.accessibilityService.requestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      durationMs,
-      undefined,
+  ): Promise<A11yActionResult> {
+    return this.accessibilityService.requestAction(
+      action,
+      resourceId,
       undefined,
       undefined,
       undefined,
@@ -151,18 +189,22 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
     );
   }
 
-  async getScreenSize(): Promise<ScreenSize> {
-    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.accessibilityService.requestNodeAction(
+      action,
+      selector,
       undefined,
       undefined,
-      true,
+      signal,
     );
-    if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
-      throw new ActionableError(
-        "CtrlProxy did not provide screen dimensions for TalkBack navigation",
-      );
-    }
-    return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+  }
+
+  async supportsNodeActionSelectors(): Promise<boolean> {
+    return this.accessibilityService.supportsNodeActionSelectors();
   }
 }
 
@@ -172,46 +214,67 @@ class DefaultFocusNavigationDriverFactory implements FocusNavigationDriverFactor
   }
 }
 
+function elementIdentity(element: Element): string {
+  const bounds = element.bounds;
+  return [
+    element["resource-id"] ?? "",
+    element["content-desc"] ?? "",
+    element.text ?? "",
+    bounds ? `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}` : "",
+  ].join("|");
+}
+
+/**
+ * Order-insensitive identity of what the traversal shows: which nodes, with which labels, where.
+ * Accessibility focus is deliberately not part of it, so only a changed screen (a pager that
+ * moved, a navigation) changes the fingerprint, not the cursor.
+ */
+export function screenFingerprint(elements: readonly Element[]): string {
+  return elements.map(elementIdentity).sort().join("\n");
+}
+
 export class FocusNavigationExecutor {
-  private static readonly DEFAULT_MAX_SWIPES = 100;
-  private static readonly DEFAULT_VERIFICATION_INTERVAL = 5;
-  private static readonly DEFAULT_SWIPE_DELAY_MS = 100;
-  private static readonly DEFAULT_SWIPE_DURATION_MS = 150;
-  private static readonly DEFAULT_MAX_STUCK_CHECKS = 2;
+  private static readonly DEFAULT_FOCUS_SETTLE_MS = 100;
+  /** How long after the request the cursor may take to show up on the target. */
+  private static readonly FOCUS_READBACK_BOUND_MS = 500;
 
   private matcher: FocusElementMatcher;
-  private pathCalculator: FocusPathCalculator;
   private timer: Timer;
   private driverFactory: FocusNavigationDriverFactory;
   private deviceResolver: (deviceId: string) => BootedDevice;
 
   constructor(dependencies: FocusNavigationExecutorDependencies = {}) {
     this.matcher = dependencies.matcher ?? new FocusElementMatcher();
-    this.pathCalculator = dependencies.pathCalculator ?? new FocusPathCalculator(this.matcher);
     this.timer = dependencies.timer ?? defaultTimer;
     this.driverFactory = dependencies.driverFactory ?? new DefaultFocusNavigationDriverFactory();
     this.deviceResolver = dependencies.deviceResolver ?? this.resolveDevice;
   }
 
+  /**
+   * Move the TalkBack cursor onto the target with one ACTION_ACCESSIBILITY_FOCUS request and
+   * confirm it landed. Resolves true once the cursor is on the target. Throws
+   * {@link FocusNavigationUnavailableError} before dispatching anything when the cursor cannot
+   * be moved this way, and a plain ActionableError once a request was sent and the cursor did not
+   * reach the target (including when the screen changed meanwhile): the caller must not tap
+   * coordinates it chose before that.
+   */
   async navigateToElement(
     deviceId: string,
     targetSelector: FocusElementSelector,
-    path: FocusNavigationPath,
     options: NavigationOptions = {},
   ): Promise<boolean> {
     const signal = combineWithAmbientAbort(options.signal);
-    const progress = { swipesSent: 0 };
+    const progress = { focusRequests: 0 };
     try {
       return await this.runNavigation(
         deviceId,
         targetSelector,
-        path,
         {
           ...options,
           signal,
-          onSwipeRequested: () => {
-            progress.swipesSent += 1;
-            options.onSwipeRequested?.();
+          onFocusRequested: () => {
+            progress.focusRequests += 1;
+            options.onFocusRequested?.();
           },
         },
         progress,
@@ -219,224 +282,153 @@ export class FocusNavigationExecutor {
     } catch (error) {
       // A request that ended mid-navigation (even an in-flight read rejected by the abort)
       // must say the cursor already moved, whatever error the interrupted call raised.
-      throw signal?.aborted ? stoppedFocusNavigationError(error, progress.swipesSent) : error;
+      throw signal?.aborted ? stoppedFocusNavigationError(error, progress.focusRequests) : error;
     }
   }
 
   private async runNavigation(
     deviceId: string,
     targetSelector: FocusElementSelector,
-    path: FocusNavigationPath,
     options: NavigationOptions,
-    progress: { swipesSent: number },
+    progress: { focusRequests: number },
   ): Promise<boolean> {
     const { signal } = options;
-    const maxSwipes = options.maxSwipes ?? FocusNavigationExecutor.DEFAULT_MAX_SWIPES;
-    const verificationInterval = Math.max(
-      1,
-      options.verificationInterval ?? FocusNavigationExecutor.DEFAULT_VERIFICATION_INTERVAL,
-    );
-    const swipeDelay = Math.max(
-      0,
-      options.swipeDelay ?? FocusNavigationExecutor.DEFAULT_SWIPE_DELAY_MS,
-    );
-
-    if (path.swipeCount > maxSwipes) {
-      throw new ActionableError(
-        `Target requires ${path.swipeCount} swipes (max: ${maxSwipes}). ` +
-          "Try scrolling the container first or narrow the selector.",
-      );
-    }
-
     const device = this.deviceResolver(deviceId);
     if (device.platform !== "android") {
       throw new ActionableError("TalkBack focus navigation is only supported on Android devices.");
     }
 
     const driver = this.driverFactory.createDriver(device);
-    const screenSize = await driver.getScreenSize();
-    this.validateScreenSize(screenSize);
-
-    let currentPath = path;
-    let remainingSwipes = currentPath.swipeCount;
-    let totalSwipes = 0;
-    const navigationProgress = {
-      lastFocusSignature: null as string | null,
-      noProgressChecks: 0,
-      bestDistance: Number.POSITIVE_INFINITY,
-    };
-
-    if (remainingSwipes === 0) {
-      assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
-      const initialVerification = await this.verifyNavigationState(driver, targetSelector, signal);
-      if (initialVerification.reachedTarget) {
-        options.onFocusObserved?.(initialVerification.currentFocus);
-        return true;
-      }
-      options.onFocusObserved?.(initialVerification.currentFocus);
-      const recalculated = this.recalculateVerifiedPath(
-        initialVerification,
-        targetSelector,
-        "Target not found",
-      );
-      if (recalculated.swipeCount > maxSwipes) {
-        throw new ActionableError(
-          `Target requires ${recalculated.swipeCount} swipes (max: ${maxSwipes}). ` +
-            "Try scrolling the container first or narrow the selector.",
-        );
-      }
-      currentPath = recalculated;
-      remainingSwipes = recalculated.swipeCount;
+    assertFocusNavigationLive(signal, this.timer, progress.focusRequests);
+    const before = await this.verifyNavigationState(driver, targetSelector, false, signal);
+    options.onFocusObserved?.(before.currentFocus, before.orderedElements);
+    if (before.reachedTarget) {
+      return true;
     }
 
-    while (remainingSwipes > 0) {
-      assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
-      await this.performFocusSwipe(driver, currentPath.direction, screenSize, options);
-      totalSwipes += 1;
-      remainingSwipes -= 1;
-
-      if (totalSwipes > maxSwipes) {
-        throw new ActionableError(
-          `Focus navigation exceeded max swipes (${maxSwipes}). ` +
-            "Try scrolling the container first or narrow the selector.",
-        );
-      }
-
-      if (swipeDelay > 0) {
-        await awaitWhileRequestIsLive(this.timer.sleep(swipeDelay), signal);
-      }
-      assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
-
-      const shouldVerify = remainingSwipes === 0 || totalSwipes % verificationInterval === 0;
-      // Fidelity reporting observes each cursor step, but keeps path
-      // recalculation and the non-convergence guard at their configured cadence.
-      // A TalkBack focus event can lag several swipes; counting every sample as
-      // a failed verification would turn that normal delay into a false trap.
-      let verification: NavigationVerification | undefined;
-      if (options.onFocusObserved) {
-        verification = await this.verifyNavigationState(driver, targetSelector, signal);
-        options.onFocusObserved(verification.currentFocus);
-        if (verification.reachedTarget) {
-          return true;
-        }
-      }
-      if (!shouldVerify) {
-        continue;
-      }
-
-      verification ??= await this.verifyNavigationState(driver, targetSelector, signal);
-      options.onFocusObserved?.(verification.currentFocus);
-
-      if (verification.reachedTarget) {
-        return true;
-      }
-
-      const recalculated = this.recalculateVerifiedPath(
-        verification,
-        targetSelector,
-        "Target element disappeared during navigation",
-      );
-
-      this.checkNavigationProgress(verification, recalculated, navigationProgress);
-
-      if (this.shouldRecalculatePath(currentPath, recalculated)) {
-        const remainingAllowed = maxSwipes - totalSwipes;
-        if (recalculated.swipeCount > remainingAllowed) {
-          throw new ActionableError(
-            `Target requires ${recalculated.swipeCount} additional swipes (max remaining: ${remainingAllowed}). ` +
-              "Try scrolling the container first or narrow the selector.",
-          );
-        }
-        currentPath = recalculated;
-        remainingSwipes = recalculated.swipeCount;
-      }
-    }
-
-    assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
-    const finalVerification = await this.verifyNavigationState(driver, targetSelector, signal);
-    options.onFocusObserved?.(finalVerification.currentFocus);
-    return finalVerification.reachedTarget;
-  }
-
-  private validateScreenSize(screenSize: ScreenSize): void {
-    if (
-      !screenSize ||
-      !Number.isFinite(screenSize.width) ||
-      !Number.isFinite(screenSize.height) ||
-      screenSize.width <= 0 ||
-      screenSize.height <= 0
-    ) {
-      throw new ActionableError("Unable to determine screen size for focus navigation.");
-    }
-  }
-
-  private recalculateVerifiedPath(
-    verification: NavigationVerification,
-    targetSelector: FocusElementSelector,
-    missingTargetPrefix: string,
-  ): FocusNavigationPath {
-    if (verification.targetIndex === null) {
-      throw new ActionableError(
-        `${missingTargetPrefix} (${this.describeSelector(targetSelector)}). ` +
+    const target =
+      before.targetIndex === null ? undefined : before.orderedElements[before.targetIndex];
+    if (!target) {
+      throw new FocusNavigationUnavailableError(
+        `Target not found in the accessibility traversal (${this.describeSelector(targetSelector)}). ` +
           "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures." +
-          this.describeTraversalTruncation(verification),
+          this.describeTraversalTruncation(before),
       );
     }
 
-    const recalculated = this.pathCalculator.calculatePath(
-      verification.currentFocus,
+    await this.requestFocus(driver, target, before.orderedElements, options, progress);
+    const after = await this.readCursorAfterFocusRequest(
+      driver,
       targetSelector,
-      verification.orderedElements,
+      options,
+      progress.focusRequests,
     );
-    if (!recalculated) {
-      throw new ActionableError(
-        `${missingTargetPrefix} (${this.describeSelector(targetSelector)}). ` +
-          "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures." +
-          this.describeTraversalTruncation(verification),
-      );
+    options.onFocusObserved?.(after.currentFocus, after.orderedElements);
+    if (after.reachedTarget) {
+      return true;
     }
-    return recalculated;
+    throw this.unreachedTargetError(before, after, targetSelector);
   }
 
-  private checkNavigationProgress(
-    verification: NavigationVerification,
-    recalculated: FocusNavigationPath,
-    progress: { lastFocusSignature: string | null; bestDistance: number; noProgressChecks: number },
-  ): void {
-    // Progress guard (#3917): the distance to the target is the recalculated
-    // swipe count when the cursor is resolved, and unknown when the cursor
-    // can't be located in the traversal order. If we fail to get closer for
-    // several consecutive checks, bail instead of swiping in a (possibly wrong)
-    // direction until maxSwipes — this catches a cursor moving the wrong way or
-    // one we can't track. When the cursor is resolvable, an initially wrong
-    // direction is still corrected below via shouldRecalculatePath.
-    const focusSignature = this.buildFocusSignature(verification.currentFocus);
-    const focusMoved = focusSignature === null || focusSignature !== progress.lastFocusSignature;
-    progress.lastFocusSignature = focusSignature;
-
-    const distanceToTarget =
-      recalculated.currentFocusIndex === null ? null : recalculated.swipeCount;
-    if (distanceToTarget !== null && distanceToTarget < progress.bestDistance) {
-      progress.bestDistance = distanceToTarget;
-      progress.noProgressChecks = 0;
-    } else {
-      progress.noProgressChecks += 1;
-      if (progress.noProgressChecks >= FocusNavigationExecutor.DEFAULT_MAX_STUCK_CHECKS) {
-        if (!focusMoved) {
-          throw new ActionableError(
-            "Focus did not move after multiple swipes. " +
-              "Try scrolling the container or ensure the element is focusable.",
-          );
-        }
-        throw new ActionableError(
-          distanceToTarget === null
-            ? "Focus navigation could not track the TalkBack cursor position. " +
-                "Try scrolling the container first or narrow the selector."
-            : "Focus navigation is not converging on the target. " +
-                "Try scrolling the container first or narrow the selector.",
-        );
+  /**
+   * Read the cursor back after a focus request. TalkBack applies the request asynchronously, so a
+   * slow device may still show the old cursor on the first read: poll every settle interval until
+   * the cursor is on the target or the readback bound is spent, stopping at the first read that
+   * shows it. Cancellation and the request deadline are checked before every read.
+   */
+  private async readCursorAfterFocusRequest(
+    driver: FocusNavigationDriver,
+    targetSelector: FocusElementSelector,
+    options: NavigationOptions,
+    focusRequests: number,
+  ): Promise<NavigationVerification> {
+    const { signal } = options;
+    const stepMs = Math.max(
+      0,
+      options.focusSettleMs ?? FocusNavigationExecutor.DEFAULT_FOCUS_SETTLE_MS,
+    );
+    const maxReads =
+      stepMs > 0
+        ? Math.max(1, Math.ceil(FocusNavigationExecutor.FOCUS_READBACK_BOUND_MS / stepMs))
+        : 1;
+    let after: NavigationVerification;
+    for (let read = 1; ; read += 1) {
+      if (stepMs > 0) {
+        await awaitWhileRequestIsLive(this.timer.sleep(stepMs), signal);
+      }
+      assertFocusNavigationLive(signal, this.timer, focusRequests);
+      after = await this.verifyNavigationState(driver, targetSelector, true, signal);
+      if (after.reachedTarget || read >= maxReads) {
+        return after;
       }
     }
+  }
+
+  /**
+   * Send ACTION_ACCESSIBILITY_FOCUS for the target node. A target the runner cannot address
+   * with a stable selector raises {@link FocusNavigationUnavailableError} before any dispatch.
+   */
+  private async requestFocus(
+    driver: FocusNavigationDriver,
+    target: Element,
+    traversal: readonly Element[],
+    options: NavigationOptions,
+    progress: { focusRequests: number },
+  ): Promise<void> {
+    const { signal } = options;
+    const selector = stableNodeSelectorForElement(target);
+    if (!selector) {
+      throw new FocusNavigationUnavailableError(
+        "The target has no resource-id, test tag or unique id, so the TalkBack cursor cannot be " +
+          "moved onto it without a touch gesture.",
+      );
+    }
+    const targetError =
+      ambiguousTestTagError(selector, traversal) ??
+      (await nodeActionTargetError(selector, driver, target));
+    if (targetError) {
+      throw new FocusNavigationUnavailableError(
+        `The TalkBack cursor cannot be moved onto the target: ${targetError}.`,
+      );
+    }
+
+    assertFocusNavigationLive(signal, this.timer, progress.focusRequests);
+    options.displayFence?.assertCurrent();
+    options.onFocusRequested?.();
+    const result = await awaitWhileRequestIsLive(
+      requiresNodeSelector(selector)
+        ? driver.requestNodeAction("focus", selector, signal)
+        : driver.requestAction("focus", selector.resourceId, signal),
+      signal,
+    );
+    if (!result.success) {
+      throw new ActionableError(
+        `Could not move the TalkBack cursor onto the target: ${
+          result.error ?? "ACTION_ACCESSIBILITY_FOCUS failed"
+        }. No tap was sent.`,
+      );
+    }
+  }
+
+  private unreachedTargetError(
+    before: NavigationVerification,
+    after: NavigationVerification,
+    targetSelector: FocusElementSelector,
+  ): ActionableError {
+    const target = this.describeSelector(targetSelector);
+    if (screenFingerprint(before.orderedElements) !== screenFingerprint(after.orderedElements)) {
+      return new ActionableError(
+        `The screen changed while moving the TalkBack cursor onto the target (${target}), and the ` +
+          "cursor is not on it. No tap was sent. Observe the new screen and resolve the target again.",
+      );
+    }
+    const focus = after.currentFocus
+      ? this.describeFocus(after.currentFocus)
+      : "no element has accessibility focus";
+    return new ActionableError(
+      `The TalkBack cursor did not move onto the target (${target}) after the focus request; ` +
+        `${focus}. No tap was sent. Observe before retrying.`,
+    );
   }
 
   private resolveDevice(deviceId: string): BootedDevice {
@@ -448,51 +440,21 @@ export class FocusNavigationExecutor {
     };
   }
 
-  private async performFocusSwipe(
-    driver: FocusNavigationDriver,
-    direction: "forward" | "backward",
-    screenSize: ScreenSize,
-    options: NavigationOptions,
-  ): Promise<void> {
-    const { x1, y1, x2, y2 } = this.getSwipeCoordinates(direction, screenSize);
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    options.displayFence?.assertCurrent();
-    options.onSwipeRequested?.();
-    const result = await awaitWhileRequestIsLive(
-      driver.requestSwipe(
-        x1,
-        y1,
-        x2,
-        y2,
-        FocusNavigationExecutor.DEFAULT_SWIPE_DURATION_MS,
-        options.signal,
-      ),
-      options.signal,
-    );
-    if (!result.success) {
-      throw new ActionableError(result.error || "Failed to perform focus swipe.");
-    }
-  }
-
-  private getSwipeCoordinates(
-    direction: "forward" | "backward",
-    screenSize: ScreenSize,
-  ): { x1: number; y1: number; x2: number; y2: number } {
-    const midY = Math.round(screenSize.height * 0.5);
-    const padding = Math.round(screenSize.width * 0.2);
-    const startX = direction === "forward" ? padding : screenSize.width - padding;
-    const endX = direction === "forward" ? screenSize.width - padding : padding;
-    return { x1: startX, y1: midY, x2: endX, y2: midY };
-  }
-
   private async verifyNavigationState(
     driver: FocusNavigationDriver,
     targetSelector: FocusElementSelector,
+    dispatched: boolean,
     signal?: AbortSignal,
   ): Promise<NavigationVerification> {
     const traversal = await awaitWhileRequestIsLive(driver.requestTraversalOrder(), signal);
     if (traversal.error) {
-      throw new ActionableError(`Failed to get traversal order: ${traversal.error}`);
+      // Once a focus request was sent an unreadable screen is a failure, never a fallback.
+      const message = `Failed to get traversal order: ${traversal.error}`;
+      throw dispatched
+        ? new ActionableError(
+            `${message}. The focus request may have moved the cursor; no tap was sent.`,
+          )
+        : new FocusNavigationUnavailableError(message);
     }
 
     const orderedElements = traversal.elements ?? [];
@@ -505,9 +467,11 @@ export class FocusNavigationExecutor {
     if (!currentFocus) {
       const focusResult = await awaitWhileRequestIsLive(driver.requestCurrentFocus(), signal);
       if (focusResult.error) {
+        // A failed reply is not evidence of where the cursor is, even if it carries an element.
         logger.warn(`[FocusNavigation] Failed to get current focus: ${focusResult.error}`);
+      } else {
+        currentFocus = focusResult.focusedElement ?? null;
       }
-      currentFocus = focusResult.focusedElement ?? null;
     }
 
     const reachedTarget = currentFocus
@@ -529,32 +493,9 @@ export class FocusNavigationExecutor {
       : "";
   }
 
-  private buildFocusSignature(element: Element | null): string | null {
-    if (!element) {
-      return null;
-    }
-    const resourceId =
-      element["resource-id"] ?? (element as { resourceId?: string }).resourceId ?? "";
-    const contentDesc =
-      element["content-desc"] ?? (element as { contentDesc?: string }).contentDesc ?? "";
-    const testTag = element["test-tag"] ?? (element as { testTag?: string }).testTag ?? "";
-    const text = element.text ?? "";
-    const bounds = element.bounds
-      ? `${element.bounds.left},${element.bounds.top},${element.bounds.right},${element.bounds.bottom}`
-      : "no-bounds";
-    return `${resourceId}|${contentDesc}|${testTag}|${text}|${bounds}`;
-  }
-
-  private shouldRecalculatePath(
-    currentPath: FocusNavigationPath,
-    recalculated: FocusNavigationPath,
-  ): boolean {
-    return (
-      currentPath.targetFocusIndex !== recalculated.targetFocusIndex ||
-      currentPath.direction !== recalculated.direction ||
-      currentPath.swipeCount !== recalculated.swipeCount ||
-      (currentPath.currentFocusIndex ?? 0) !== (recalculated.currentFocusIndex ?? 0)
-    );
+  private describeFocus(element: Element): string {
+    const label = element.text || element["content-desc"] || element["resource-id"];
+    return label ? `focus is on "${label}"` : "focus is on another element";
   }
 
   private describeSelector(selector: FocusElementSelector): string {

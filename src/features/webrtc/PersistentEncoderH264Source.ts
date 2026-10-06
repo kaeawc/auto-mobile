@@ -281,6 +281,14 @@ export interface PersistentEncoderH264SourceOptions {
   onData: (chunk: Buffer) => void;
   /** Called for newly encoded device frames, excluding cached replay and config packets. */
   onSourceFrame?: () => void;
+  /**
+   * Called right after {@link onData} for every H.264 packet (config, live and
+   * replayed). The device frames each encoder output as one length-delimited
+   * packet, so the bytes just delivered end on an access-unit boundary: a
+   * consumer that splits Annex-B can release the trailing NAL immediately
+   * instead of holding it until the encoder's next output (issue #10150).
+   */
+  onEncodedAccessUnit?: () => void;
   /** Called with each chunk of 8 kHz mono PCM16LE audio when enabled. */
   onAudioData?: (chunk: Buffer) => void;
   /**
@@ -1491,16 +1499,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       onPacket: (packet) => {
         if (this.socket === socket) {
           if (packet.codecId === VIDEO_SERVER_CODEC_ID_H264) {
-            this.observeVideoPacket(packet);
-            // A CONFIG packet attests the current display rotation (issue #4786). Surface it before
-            // the payload so the relay's rotation is current when the SPS/PPS reaches subscribers.
-            if (packet.config && packet.rotation !== undefined) {
-              this.options.onRotation?.(packet.rotation);
-            }
-            if (!packet.config && !packet.replayed) {
-              this.options.onSourceFrame?.();
-            }
-            this.options.onData(packet.data);
+            this.deliverVideoPacket(packet);
           } else if (packet.codecId === VIDEO_SERVER_CODEC_ID_PCM16) {
             this.options.onAudioData?.(packet.data);
             this.resolveStartupAudioPacket?.(packet);
@@ -1529,6 +1528,21 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     });
     socket.on("error", reportFailure);
     socket.on("close", () => reportFailure(new Error("video-server socket closed")));
+  }
+
+  private deliverVideoPacket(packet: VideoServerPacket): void {
+    this.observeVideoPacket(packet);
+    // A CONFIG packet attests the current display rotation (issue #4786). Surface it before
+    // the payload so the relay's rotation is current when the SPS/PPS reaches subscribers.
+    if (packet.config && packet.rotation !== undefined) {
+      this.options.onRotation?.(packet.rotation);
+    }
+    if (!packet.config && !packet.replayed) {
+      this.options.onSourceFrame?.();
+    }
+    this.options.onData(packet.data);
+    // Packets are length-framed on the wire, so the host knows where this access unit ends.
+    this.options.onEncodedAccessUnit?.();
   }
 
   private observeVideoPacket(packet: VideoServerPacket): void {

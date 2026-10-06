@@ -83,19 +83,17 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
   });
 
   describe("cancellation (#10145)", () => {
-    test("a cancel mid-navigation stops the swipes, never activates, and reports the moved cursor", async () => {
+    test("a cancel with the focus request stops before the confirmation, never activates, and reports the moved cursor", async () => {
       const controller = new AbortController();
-      driver.onSwipe = () => {
-        if (driver.getSwipeCount() === 3) {
-          controller.abort();
-        }
-      };
+      driver.onFocusAction = () => controller.abort();
 
       await expect(
         strategy.executeTap(device.deviceId, rows[10], driver, undefined, controller.signal),
-      ).rejects.toThrow("Focus navigation partially applied: 3 swipes already moved");
+      ).rejects.toThrow(
+        "Focus navigation partially applied: 1 accessibility-focus request already moved",
+      );
 
-      expect(driver.getSwipeCount()).toBe(3);
+      expect(driver.getFocusRequestCount()).toBe(1);
       expect(driver.tapHistory).toEqual([]);
       expect(driver.doubleTapHistory).toEqual([]);
       expect(driver.actionHistory).toEqual([]);
@@ -103,17 +101,17 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
 
     test("a cancel that lands after navigation but before activation never dispatches the tap", async () => {
       const controller = new AbortController();
-      spyOn(executor, "navigateToElement").mockImplementation(async (_id, _sel, _path, options) => {
-        for (let swipe = 0; swipe < 4; swipe += 1) {
-          options?.onSwipeRequested?.();
-        }
+      spyOn(executor, "navigateToElement").mockImplementation(async (_id, _sel, options) => {
+        options?.onFocusRequested?.();
         controller.abort();
         return true;
       });
 
       await expect(
         strategy.executeTap(device.deviceId, rows[10], driver, undefined, controller.signal),
-      ).rejects.toThrow("partially applied: 4 swipes already moved the TalkBack cursor");
+      ).rejects.toThrow(
+        "partially applied: 1 accessibility-focus request already moved the TalkBack cursor",
+      );
 
       expect(driver.doubleTapHistory).toEqual([]);
       expect(driver.tapHistory).toEqual([]);
@@ -139,19 +137,15 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
 
     test("the ambient request signal stops navigation and activation without an explicit signal", async () => {
       const controller = new AbortController();
-      driver.onSwipe = () => {
-        if (driver.getSwipeCount() === 2) {
-          controller.abort();
-        }
-      };
+      driver.onFocusAction = () => controller.abort();
 
       await expect(
         runWithAbortSignal(controller.signal, () =>
           strategy.executeTap(device.deviceId, rows[10], driver),
         ),
-      ).rejects.toThrow("partially applied: 2 swipes");
+      ).rejects.toThrow("partially applied: 1 accessibility-focus request");
 
-      expect(driver.getSwipeCount()).toBe(2);
+      expect(driver.getFocusRequestCount()).toBe(1);
       expect(driver.doubleTapHistory).toEqual([]);
     });
 
@@ -165,7 +159,7 @@ describe("TalkBackTapStrategy focus-navigation activation and cancellation", () 
       );
 
       expect(result).toMatchObject({ success: true, method: "focus-navigation" });
-      expect(driver.getSwipeCount()).toBe(10);
+      expect(driver.getFocusRequestCount()).toBe(1);
       expect(driver.doubleTapHistory).toHaveLength(1);
     });
   });

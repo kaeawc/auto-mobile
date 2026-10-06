@@ -53,6 +53,8 @@ export async function executeAndroidSearchDrag(options: {
   onFallback?: () => void;
   searchDragState?: AndroidSearchDragState;
   onIndeterminate?: (cause: unknown) => never;
+  /** Fires when CtrlProxy confirms the drag was sent; the ADB fallback reports its own send. */
+  onDispatched?: () => void;
 }): Promise<SwipeResult> {
   const { client, x1, y1, x2, y2, duration, signal, displayId, beforeSend } = options;
   const fallback = () => {
@@ -102,6 +104,7 @@ export async function executeAndroidSearchDrag(options: {
       beforeSend,
       () => {
         dispatched = true;
+        options.onDispatched?.();
       },
     );
     throwIfAborted(signal);

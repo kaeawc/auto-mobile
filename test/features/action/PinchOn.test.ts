@@ -166,6 +166,7 @@ describe("PinchOn", () => {
         },
       );
       action.observeScreen = fakeObserveScreen;
+      action.awaitIdle = fakeAwaitIdle;
       let postReads = 0;
       fakeObserveScreen.setObserveResult(() => {
         if (!fakeA11yService.getPinchHistory().length) {

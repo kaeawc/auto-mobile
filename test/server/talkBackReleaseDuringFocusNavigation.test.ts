@@ -8,7 +8,6 @@ import {
 import {
   FocusNavigationExecutor,
   FocusNavigationStoppedError,
-  type FocusNavigationPath,
 } from "../../src/features/talkback/FocusNavigationExecutor";
 import type { Element } from "../../src/models/Element";
 import { runSessionScreenReaderMutation } from "../../src/server/sessionScreenReader";
@@ -26,8 +25,8 @@ const makeElement = (resourceId: string, index: number): Element => ({
 
 /**
  * One device whose TalkBack state and event order are shared by the `accessibility` tool, the
- * session restore and a focus navigation. The navigation's swipes only move the cursor while
- * TalkBack is on, so a swipe recorded after the restore turned it off would be the defect.
+ * session restore and a focus navigation. The navigation's focus request only moves the cursor
+ * while TalkBack is on, so one recorded after the restore turned it off would be the defect.
  */
 function harness() {
   const timer = new FakeTimer();
@@ -64,18 +63,13 @@ function harness() {
   );
 
   const driver = new FakeFocusNavigationDriver();
+  driver.exposeHierarchy = true;
   driver.setElements(
     Array.from({ length: 12 }, (_, index) => makeElement(`e${index}`, index)),
     0,
   );
-  driver.onSwipe = () => {
-    events.push(talkBackEnabled ? "swipe" : "swipe-with-talkback-off");
-  };
-  const path: FocusNavigationPath = {
-    currentFocusIndex: 0,
-    targetFocusIndex: 10,
-    swipeCount: 10,
-    direction: "forward",
+  driver.onFocusAction = () => {
+    events.push(talkBackEnabled ? "focus" : "focus-with-talkback-off");
   };
   const executor = new FocusNavigationExecutor({
     timer,
@@ -95,7 +89,6 @@ function harness() {
     events,
     manager,
     driver,
-    path,
     executor,
     enableTalkBackInSession,
     restoreWrites,
@@ -114,20 +107,16 @@ describe("session release while TalkBack focus navigation is in flight (#10144, 
       // `cancelAndReleaseSession` does it: abort the session's executions, then release.
       const request = new AbortController();
       const navigation = h.executor
-        .navigateToElement("device-1", { resourceId: "e10" }, h.path, {
-          verificationInterval: 100,
-          swipeDelay: 100,
-          signal: request.signal,
-        })
+        .navigateToElement("device-1", { resourceId: "e10" }, { signal: request.signal })
         .then(
           () => "reached" as const,
           (error: unknown) => error,
         );
-      // Swipe 1 is sent and the loop is parked in its settle delay (FakeTimer does not advance).
+      // The focus request is sent and navigation is parked in its settle delay (FakeTimer does not advance).
       for (let turn = 0; turn < 20; turn++) {
         await Promise.resolve();
       }
-      expect(h.driver.getSwipeCount()).toBe(1);
+      expect(h.driver.getFocusRequestCount()).toBe(1);
 
       await cancelAndReleaseSession(
         "s1",
@@ -145,10 +134,12 @@ describe("session release while TalkBack focus navigation is in flight (#10144, 
       const outcome = await navigation;
 
       expect(outcome).toBeInstanceOf(FocusNavigationStoppedError);
-      expect((outcome as Error).message).toContain("1 swipe already moved the TalkBack cursor");
+      expect((outcome as Error).message).toContain(
+        "1 accessibility-focus request already moved the TalkBack cursor",
+      );
       // Nothing is dispatched between the cancel and the restore, and nothing after it. When the
       // navigation's own rejection surfaces relative to the restore is deliberately not pinned.
-      expect(h.events).toEqual(["tool-enabled", "swipe", "cancel", "restore-off"]);
+      expect(h.events).toEqual(["tool-enabled", "focus", "cancel", "restore-off"]);
       expect(h.restoreWrites).toEqual([false]);
       expect(h.isEnabled()).toBe(false);
 
@@ -158,7 +149,7 @@ describe("session release while TalkBack focus navigation is in flight (#10144, 
       for (let turn = 0; turn < 20; turn++) {
         await Promise.resolve();
       }
-      expect(h.driver.getSwipeCount()).toBe(1);
+      expect(h.driver.getFocusRequestCount()).toBe(1);
       expect(h.restoreWrites).toEqual([false]);
     } finally {
       h.manager.stopCleanupTimer();
@@ -175,22 +166,21 @@ describe("session release while TalkBack focus navigation is in flight (#10144, 
       const reached = await h.executor.navigateToElement(
         "device-1",
         { resourceId: "e10" },
-        h.path,
-        { verificationInterval: 1, swipeDelay: 0, signal: new AbortController().signal },
+        { signal: new AbortController().signal },
       );
       await h.manager.releaseSession("s1", "explicit-release");
 
       expect(reached).toBe(true);
-      expect(h.events.filter((event) => event === "swipe")).toHaveLength(10);
+      expect(h.events.filter((event) => event === "focus")).toHaveLength(1);
       expect(h.events.at(-1)).toBe("restore-off");
-      expect(h.events).not.toContain("swipe-with-talkback-off");
+      expect(h.events).not.toContain("focus-with-talkback-off");
       expect(h.restoreWrites).toEqual([false]);
     } finally {
       h.manager.stopCleanupTimer();
     }
   });
 
-  test("a navigation cancelled with no swipe sent reports no cursor movement and the restore still runs", async () => {
+  test("a navigation cancelled with no focus request sent reports no cursor movement and the restore still runs", async () => {
     const h = harness();
     try {
       await h.manager.createSession("s1", android.deviceId, "android");
@@ -199,11 +189,7 @@ describe("session release while TalkBack focus navigation is in flight (#10144, 
       request.abort();
 
       const failure = await h.executor
-        .navigateToElement("device-1", { resourceId: "e10" }, h.path, {
-          verificationInterval: 1,
-          swipeDelay: 0,
-          signal: request.signal,
-        })
+        .navigateToElement("device-1", { resourceId: "e10" }, { signal: request.signal })
         .then(
           () => undefined,
           (error: unknown) => error,
@@ -212,7 +198,7 @@ describe("session release while TalkBack focus navigation is in flight (#10144, 
 
       expect(failure).toBeInstanceOf(Error);
       expect((failure as Error).message).not.toContain("partially applied");
-      expect(h.driver.getSwipeCount()).toBe(0);
+      expect(h.driver.getFocusRequestCount()).toBe(0);
       expect(h.restoreWrites).toEqual([false]);
     } finally {
       h.manager.stopCleanupTimer();

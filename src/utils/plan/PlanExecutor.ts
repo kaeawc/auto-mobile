@@ -25,6 +25,7 @@ import {
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
+import { getPlanDevicePlatform } from "./PlanDevices";
 import { computeSafeBarrierResumeStep } from "./BarrierResumeGuard";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
@@ -1079,7 +1080,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
           device,
           track,
           startStep,
-          platform,
+          // A mixed-platform plan runs each label's steps with that label's declared
+          // platform; the request platform only covers labels that declare none (#10023).
+          getPlanDevicePlatform(plan.devices, device) ?? platform,
           deviceId,
           sessionUuid,
           combinedSignal,

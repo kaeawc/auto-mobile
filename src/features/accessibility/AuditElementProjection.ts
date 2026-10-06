@@ -1,5 +1,5 @@
 import type { Element } from "../../models/Element";
-import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
+import { nodeAttributes, type ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 
@@ -14,6 +14,26 @@ export interface AuditElementProjection {
    * An accessibility service announces that merged text, so these are labelled.
    */
   descendantLabelled: ReadonlySet<Element>;
+  /**
+   * The `windowId` of the window each element sits in, from the nearest ancestor the capture
+   * marked with one. Absent for elements whose capture carries no window markers. The contrast
+   * check uses it to tell which windows are stacked above an element (#10220).
+   */
+  windowIds: ReadonlyMap<Element, number>;
+}
+
+/** The window an entry belongs to: its own marker, else its parent's (entries are parent-first). */
+function entryWindowId(
+  entry: SearchableEntry,
+  entries: readonly SearchableEntry[],
+): number | undefined {
+  const marker = nodeAttributes(entry.source).windowId;
+  if (typeof marker === "number" && Number.isInteger(marker)) {
+    return marker;
+  }
+  return entry.parentIndex === undefined
+    ? undefined
+    : entryWindowId(entries[entry.parentIndex], entries);
 }
 
 /** Image-like classes: an icon next to a number makes the number a badge, not the control's name. */
@@ -76,12 +96,17 @@ export function projectAuditElements(
   const entries = searchable.project(resolveViewHierarchyForSearch(capture) ?? capture);
   const elements: Element[] = [];
   const descendantLabelled = new Set<Element>();
+  const windowIds = new Map<Element, number>();
   for (const entry of entries) {
     // Group 0 is the main hierarchy; window roots are separate groups the audit never read.
     if (entry.rootGroup !== 0 || !entry.element) {
       continue;
     }
     elements.push(entry.element);
+    const windowId = entryWindowId(entry, entries);
+    if (windowId !== undefined) {
+      windowIds.set(entry.element, windowId);
+    }
     const hasOwnLabel = Boolean(entry.element.text || entry.element["content-desc"]);
     if (
       !hasOwnLabel &&
@@ -91,5 +116,5 @@ export function projectAuditElements(
       descendantLabelled.add(entry.element);
     }
   }
-  return { elements, descendantLabelled };
+  return { elements, descendantLabelled, windowIds };
 }

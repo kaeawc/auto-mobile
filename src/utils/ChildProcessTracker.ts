@@ -87,6 +87,7 @@ interface CloseAwareProcess {
 export function createExitTracker(
   process: TrackedChildProcess,
   stderr: string[],
+  options: { maxStderrChars?: number } = {},
 ): { exitState: ProcessExitState; exitPromise: Promise<void> } {
   const closeAwareProcess = process as TrackedChildProcess & CloseAwareProcess;
   const exitState: ProcessExitState = {};
@@ -137,8 +138,21 @@ export function createExitTracker(
   // the streams are closed. Keep collecting diagnostics through that gap.
   const onClose = () => cleanup();
 
+  // Optional bound for long-lived processes: keep the most recent output so the
+  // collected diagnostics cannot grow for the lifetime of the process.
+  let stderrChars = 0;
   const onStderr = (chunk: Buffer | string) => {
-    stderr.push(chunk.toString());
+    const text = chunk.toString();
+    stderr.push(text);
+    stderrChars += text.length;
+    const max = options.maxStderrChars;
+    while (max !== undefined && stderrChars > max && stderr.length > 1) {
+      stderrChars -= stderr.shift()?.length ?? 0;
+    }
+    if (max !== undefined && stderr.length === 1 && stderrChars > max) {
+      stderr[0] = stderr[0].slice(-max);
+      stderrChars = max;
+    }
   };
 
   process.once("error", onError);

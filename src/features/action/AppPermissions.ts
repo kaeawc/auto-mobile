@@ -61,6 +61,13 @@ export function mapAndroidPermissionStates(
   });
 }
 
+function operationWarnings(operations: AppPermissionOperationResult[]): { warnings?: string[] } {
+  const warnings = operations.flatMap((operation) =>
+    operation.warning ? [operation.warning] : [],
+  );
+  return warnings.length > 0 ? { warnings } : {};
+}
+
 export type AppPermissionAction = IosSimulatorPermissionAction;
 
 export interface SetAppPermissionsInput {
@@ -95,6 +102,8 @@ export interface AppPermissionOperationResult {
   skipped?: boolean;
   result?: unknown;
   error?: string;
+  /** Set when the operation succeeded but its outcome could not be verified. */
+  warning?: string;
 }
 
 export interface SetAppPermissionsResult {
@@ -107,6 +116,8 @@ export interface SetAppPermissionsResult {
   failedCount: number;
   operations: AppPermissionOperationResult[];
   error?: string;
+  /** Operation warnings (e.g. an unverified outcome); present only on Android when any exist. */
+  warnings?: string[];
 }
 
 export interface GetAppPermissionsResult {
@@ -306,7 +317,6 @@ export class AppPermissions {
     }
 
     const failedOperations = operations.filter((operation) => !operation.success);
-
     return {
       success: failedOperations.length === 0,
       appId,
@@ -316,6 +326,7 @@ export class AppPermissions {
       changedCount: operations.reduce((sum, operation) => sum + operation.changedCount, 0),
       failedCount: operations.reduce((sum, operation) => sum + operation.failedCount, 0),
       operations,
+      ...operationWarnings(operations),
       ...(failedOperations.length > 0
         ? {
             error: failedOperations
@@ -383,6 +394,7 @@ export class AppPermissions {
       failedCount: result.success ? 0 : 1,
       result,
       ...(result.error ? { error: result.error } : {}),
+      ...(result.policyAccess.warning ? { warning: result.policyAccess.warning } : {}),
     };
   }
 

@@ -50,6 +50,7 @@ const egg = readFileSync(
   "utf8",
 ).replaceAll("com.android.egg", "com.example.app");
 const dumpsysNotification = "shell dumpsys notification";
+const currentUser = "shell am get-current-user";
 const policyListsApp = "  mPolicyAccess={0=[com.example.app, com.other.app]}\n";
 const policyOmitsApp = "  mPolicyAccess={0=[com.other.app]}\n";
 const grantedEgg = egg.replace(
@@ -68,6 +69,7 @@ describe("AppPermissions", () => {
     client.setCommandResult("shell cmd notification set_enabled 'com.example.app' true", "");
     client.setCommandResult("shell cmd notification allow_dnd 'com.example.app'", "");
     client.setCommandResult(dumpsysNotification, policyListsApp);
+    client.setCommandResult(currentUser, "0\n");
     client.setCommandResult(
       "shell appops set --uid 'com.example.app' SCHEDULE_EXACT_ALARM allow",
       "",
@@ -137,6 +139,7 @@ describe("AppPermissions", () => {
   test("valid Android reset precedes additional permission commands", async () => {
     const adbFactory = new FakeAdbClientFactory();
     adbFactory.getFakeClient().setCommandResult(dumpsysNotification, policyOmitsApp);
+    adbFactory.getFakeClient().setCommandResult(currentUser, "0\n");
     const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
       "com.example.app",
       { action: "reset", permissions: ["all"], notificationPolicyAccess: false },
@@ -148,6 +151,7 @@ describe("AppPermissions", () => {
       "shell pm reset-permissions",
       "shell cmd notification disallow_dnd 'com.example.app'",
       dumpsysNotification,
+      currentUser,
     ]);
   });
 
@@ -213,6 +217,7 @@ describe("AppPermissions", () => {
       const client = adbFactory.getFakeClient();
       client.setCommandResult(notificationPolicyAccess ? allow : disallow, "", commandStderr);
       client.setCommandResult(dumpsysNotification, dumpsys);
+      client.setCommandResult(currentUser, "0\n");
       const result = await new AppPermissions(androidDevice, { adbFactory }).setPermissions(
         "com.example.app",
         { notificationPolicyAccess },
@@ -226,7 +231,7 @@ describe("AppPermissions", () => {
       expect(result.operations[0].result).toMatchObject({
         policyAccess: { allowed: true, method: "android_dumpsys_notification" },
       });
-      expect(client.getAllCommands()).toEqual([allow, dumpsysNotification]);
+      expect(client.getAllCommands()).toEqual([allow, dumpsysNotification, currentUser]);
     });
 
     test("revoke counts as changed only when dumpsys no longer lists the app", async () => {
@@ -266,12 +271,21 @@ describe("AppPermissions", () => {
       expect(result.operations[0].result).toMatchObject({
         policyAccess: { allowed: null, warning: expect.stringContaining("not verified") },
       });
+      expect(result.warnings).toEqual([expect.stringContaining("not verified")]);
+      expect(result.operations[0].warning).toContain("not verified");
+    });
+
+    test("a verified change carries no warnings", async () => {
+      const { result } = await setPolicyAccess(true, policyListsApp);
+      expect(result.warnings).toBeUndefined();
+      expect(result.operations[0].warning).toBeUndefined();
     });
   });
 
   test("aggregates an alarm failure after a successful policy operation", async () => {
     const adbFactory = new FakeAdbClientFactory();
     adbFactory.getFakeClient().setCommandResult(dumpsysNotification, policyListsApp);
+    adbFactory.getFakeClient().setCommandResult(currentUser, "0\n");
     const alarm = spyOn(SetAndroidScheduleExactAlarmAppOp.prototype, "execute").mockResolvedValue({
       success: false,
       appId: "com.example.app",
@@ -297,6 +311,7 @@ describe("AppPermissions", () => {
       expect(adbFactory.getFakeClient().getAllCommands()).toEqual([
         "shell cmd notification allow_dnd 'com.example.app'",
         dumpsysNotification,
+        currentUser,
       ]);
     } finally {
       alarm.mockRestore();

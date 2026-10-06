@@ -561,7 +561,8 @@ export const freshnessSchema = z
   })
   .passthrough();
 
-// Unavailable Android status reads return service + reason without asserting enabled.
+// Unavailable status reads (TalkBack on Android, VoiceOver on iOS) return service + reason
+// without asserting enabled.
 export const accessibilityStateSchema = z
   .object({
     enabled: z.boolean().optional(),

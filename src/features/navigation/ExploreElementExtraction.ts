@@ -166,6 +166,24 @@ export function extractAllElements(
 /** A single tapOn selector; `index` pins one occurrence when the selector is not unique. */
 export type TapSelector = { elementId: string; index?: number } | { text: string; index?: number };
 
+/**
+ * The public `tapOn` tool arguments equivalent to tapping with `selector`:
+ * the selector nests under `selector` and `index` is a sibling field. This is
+ * the form `navigateTo` replays through the tool schema (#9989).
+ */
+export function publicTapOnArgs(selector: TapSelector): {
+  selector: { elementId: string } | { text: string };
+  index?: number;
+  action: "tap";
+} {
+  const { index } = selector;
+  return {
+    selector: "elementId" in selector ? { elementId: selector.elementId } : { text: selector.text },
+    ...(index !== undefined ? { index } : {}),
+    action: "tap",
+  };
+}
+
 type SelectOccurrence = (index?: number) => ElementSelectionResult;
 
 /** Keep own labels authoritative; only unlabelled controls inherit descendant labels. */

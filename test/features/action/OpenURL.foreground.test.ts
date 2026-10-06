@@ -17,6 +17,7 @@ const observation = (appId: string, isFresh = true): ObserveResult => ({
 });
 
 const safari = "com.apple.mobilesafari";
+const springboard = "com.apple.springboard";
 const playground = "com.example.Playground";
 const simulator = {
   name: "iPhone",
@@ -59,10 +60,31 @@ test("in-app custom deep link returns without confirmation or sleep", async () =
   expect(observe.getExecuteCallCount()).toBe(0);
 });
 
-test("https from Playground waits for Safari specifically", async () => {
+test("https from Playground confirms Safari", async () => {
   const { result, timer, observe } = await openWithForeground("https://example.com", playground, [
-    "com.apple.MobileSMS",
     safari,
+  ]);
+  expect(result).toEqual({ success: true, url: "https://example.com" });
+  expect(observe.getExecuteCallCount()).toBe(1);
+  expect(timer.getSleepCallCount()).toBe(0);
+});
+
+test("https universal link confirms as soon as another app is foreground", async () => {
+  const { result, timer, observe } = await openWithForeground(
+    "https://example.com/item/5",
+    "com.example.Other",
+    [playground],
+  );
+  expect(result).toEqual({ success: true, url: "https://example.com/item/5" });
+  expect(observe.getExecuteCallCount()).toBe(1);
+  expect(timer.getSleepCallCount()).toBe(0);
+  expect(timer.now()).toBe(0);
+});
+
+test("https universal link waits past the unchanged foreground until another app appears", async () => {
+  const { result, observe, timer } = await openWithForeground("https://example.com", playground, [
+    playground,
+    "com.apple.MobileSMS",
   ]);
   expect(result).toEqual({ success: true, url: "https://example.com" });
   expect(observe.getExecuteCallCount()).toBe(2);
@@ -89,7 +111,7 @@ test("known handler timeout keeps success and adds the confirmation warning", as
   expect(timer.now()).toBe(5_000);
 });
 
-test("system scheme waits for its mapped handler", async () => {
+test("system scheme still waits for its mapped handler, not any app change", async () => {
   const { result, timer, observe } = await openWithForeground("sms:+15551234567", playground, [
     safari,
     "com.apple.MobileSMS",
@@ -123,5 +145,71 @@ test("reports unconfirmed foreground after a bounded five-second wait", async ()
     timer,
   );
   expect(confirmed).toBe(false);
+  expect(timer.now()).toBe(5_000);
+});
+
+test("any other verified app confirms when a previous app is given", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const confirmed = await waitForIosForegroundChange(
+    safari,
+    { read: async () => observation(playground) },
+    timer,
+    undefined,
+    "com.example.Other",
+  );
+  expect(confirmed).toBe(true);
+  expect(timer.now()).toBe(0);
+});
+
+test("an unchanged previous app is not a confirmation", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const confirmed = await waitForIosForegroundChange(
+    safari,
+    { read: async () => observation(playground) },
+    timer,
+    undefined,
+    playground,
+  );
+  expect(confirmed).toBe(false);
+  expect(timer.now()).toBe(5_000);
+});
+
+test("a stale other-app snapshot does not confirm even with a previous app", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const snapshots = [observation(playground, false), observation(playground)];
+  let reads = 0;
+  const confirmed = await waitForIosForegroundChange(
+    safari,
+    { read: async () => snapshots[reads++]! },
+    timer,
+    undefined,
+    "com.example.Other",
+  );
+  expect(confirmed).toBe(true);
+  expect(reads).toBe(2);
+});
+
+test("https universal link: SpringBoard then the app confirms on the app", async () => {
+  const { result, observe, timer } = await openWithForeground(
+    "https://example.com/item/5",
+    "com.example.Other",
+    [springboard, playground],
+  );
+  expect(result).toEqual({ success: true, url: "https://example.com/item/5" });
+  expect(observe.getExecuteCallCount()).toBe(2);
+  expect(timer.getSleepHistory()).toEqual([100]);
+});
+
+test("https universal link: SpringBoard only waits the full timeout and warns", async () => {
+  const { result, timer } = await openWithForeground("https://example.com/item/5", playground, [
+    springboard,
+  ]);
+  expect(result.success).toBe(true);
+  expect(result.warnings).toEqual([
+    expect.stringContaining("foreground app change was not confirmed"),
+  ]);
   expect(timer.now()).toBe(5_000);
 });

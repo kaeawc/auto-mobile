@@ -23,6 +23,11 @@ import {
   getUncollectedWrappers,
   isStrictAncestor,
 } from "./elementProvenance";
+import {
+  IOS_KEYBOARD_MIN_VISIBLE_HEIGHT,
+  clipRectToScreen,
+  usableScreenExtent,
+} from "../ios/IosScreenIdentity";
 
 /**
  * Interactable Skeleton Projection (issue #4388).
@@ -848,9 +853,6 @@ export function getIosImeOccluder(
   return { ...occluder, bounds: [0, occluder.bounds[1], screenSize.width, screenSize.height] };
 }
 
-// Ignore sub-two-point animation slivers; they do not constitute a usable software keyboard.
-export const IOS_KEYBOARD_MIN_VISIBLE_HEIGHT = 2;
-
 /** Clip shared iOS action geometry to the screen; parked keyboards have no visible rectangle. */
 export function getVisibleIosImeBounds(
   occluder: ImeOccluder,
@@ -873,21 +875,7 @@ function clipImeBounds(
   bounds: Bounds,
   screenSize: NonNullable<ObserveResult["screenSize"]>,
 ): Bounds | undefined {
-  if (
-    ![...bounds, screenSize.width, screenSize.height].every(Number.isFinite) ||
-    screenSize.width <= 0 ||
-    screenSize.height <= 0
-  ) {
-    return undefined;
-  }
-  const [left, top, right, bottom] = bounds;
-  const clipped: Bounds = [
-    Math.max(0, left),
-    Math.max(0, top),
-    Math.min(screenSize.width, right),
-    Math.min(screenSize.height, bottom),
-  ];
-  return clipped[2] > clipped[0] && clipped[3] > clipped[1] ? clipped : undefined;
+  return clipRectToScreen(bounds, screenSize);
 }
 
 function isBelowImeWindow(provenance: ElementProvenance | undefined, ime: ImeOccluder): boolean {
@@ -1282,17 +1270,48 @@ export interface SkeletonProjectionResult {
   context: SkeletonElement[];
 }
 
+const IOS_KEYBOARD_PACKAGE = "com.apple.keyboard";
+
+/**
+ * Whether the iOS keyboard the capture identified is on screen. Absent when it
+ * cannot be judged (Android, no measured keyboard rectangle, or no usable
+ * screen size) — callers then keep the evidence-only reading.
+ */
+type IosImeState = { parked: true } | { parked: false; bounds: Bounds };
+
+function resolveIosImeState(
+  ime: ImeWindow | undefined,
+  occluder: ImeOccluder | undefined,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+): IosImeState | undefined {
+  if (ime?.package !== IOS_KEYBOARD_PACKAGE || !occluder || !viewport) {
+    return undefined;
+  }
+  const screen = usableScreenExtent(viewport.width, viewport.height);
+  if (!screen) {
+    return undefined;
+  }
+  // The same clip + minimum-height rule as isIosKeyboardVisible, on the measured union.
+  const bounds = getVisibleIosImeBounds(occluder, screen);
+  return bounds ? { parked: false, bounds } : { parked: true };
+}
+
+/** The rectangle that physically covers app rows; a parked iOS keyboard covers nothing. */
+function coveringImeOccluder(
+  ime: ImeWindow | undefined,
+  occluder: ImeOccluder | undefined,
+  iosIme: IosImeState | undefined,
+): ImeOccluder | undefined {
+  if (ime?.package !== IOS_KEYBOARD_PACKAGE) {
+    return occluder;
+  }
+  return occluder && iosIme && !iosIme.parked ? { ...occluder, bounds: iosIme.bounds } : undefined;
+}
+
 function markAppRowsCoveredByIme(
   kept: SkeletonAccumulator[],
-  elements: ObserveElements,
-  ime: ImeWindow | undefined,
+  occluder: ImeOccluder | undefined,
 ): void {
-  // The iOS collector uses this fixed identity. Its existing keyboard collapse
-  // remains unchanged; only Android app-window rows get occlusion treatment.
-  if (!ime || ime.package === "com.apple.keyboard") {
-    return;
-  }
-  const occluder = getImeOccluder(elements);
   if (!occluder) {
     return;
   }
@@ -1334,13 +1353,16 @@ export function projectSkeleton(
   attributeContainerLabels(accumulators);
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
-  markAppRowsCoveredByIme(kept, elements, ime);
+  const occluder = ime ? getImeOccluder(elements) : undefined;
+  // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
+  const iosIme = resolveIosImeState(ime, occluder, viewport);
+  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 
   // One row for the whole IME window, appended last: the keyboard is a mode, not
   // a list of targets, so it must never come before the app's own affordances.
-  const imeRow = imeAccumulator(elements, ime);
+  const imeRow = iosIme?.parked ? undefined : imeAccumulator(elements, ime);
   if (imeRow) {
     actionable.push(imeRow);
   }
@@ -1353,8 +1375,10 @@ export function projectSkeleton(
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.
-    keyboard:
-      getCapturedKeyboard(elements) ?? (ime ? { visible: true, package: ime.package } : undefined),
+    keyboard: iosIme?.parked
+      ? undefined
+      : (getCapturedKeyboard(elements) ??
+        (ime ? { visible: true, package: ime.package } : undefined)),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
   };

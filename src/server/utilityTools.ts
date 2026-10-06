@@ -31,7 +31,11 @@ import {
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
-import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
+import {
+  createJSONToolResponse,
+  createStructuredToolResponse,
+  withIsErrorOnFailure,
+} from "../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { BootedDevice, Platform } from "../models";
@@ -725,14 +729,17 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
     }
   }
 
-  return createJSONToolResponse({
+  return withIsErrorOnFailure(
+    createJSONToolResponse({
+      success,
+      changes,
+      intentBroadcast,
+      ...localeMetadata,
+      ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
+      ...(success ? {} : { error: errors.join("; ") }),
+    }),
     success,
-    changes,
-    intentBroadcast,
-    ...localeMetadata,
-    ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
-    ...(success ? {} : { error: errors.join("; ") }),
-  });
+  );
 };
 
 const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {

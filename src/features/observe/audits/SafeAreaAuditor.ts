@@ -707,7 +707,7 @@ function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
   return candidates
     .filter((candidate) => !containerWarnings.has(candidate))
     .filter(({ warning }) => {
-      const key = `${warning.type}:${warning.element.viewId ?? warning.element.resourceId ?? warning.element.text ?? "unknown"}:${warning.sides.join(",")}`;
+      const key = `${warning.type}:${warningIdentity(warning.element)}:${warning.sides.join(",")}`;
       if (seen.has(key)) {
         return false;
       }
@@ -715,6 +715,23 @@ function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
       return true;
     })
     .map((candidate) => candidate.warning);
+}
+
+/**
+ * Stable identity for deduping warnings (#10040). Identified elements keep the
+ * historical id-or-text key. An element with only a content description, or with
+ * no label at all, is keyed by its bounds as well so two different unlabeled
+ * nodes (e.g. icon buttons) never merge; true duplicates of one node share
+ * bounds and still collapse.
+ */
+function warningIdentity(element: LayoutWarning["element"]): string {
+  const id = element.viewId ?? element.resourceId ?? element.text;
+  if (id !== undefined) {
+    return id;
+  }
+  const { left, top, right, bottom } = element.bounds;
+  const bounds = `[${left},${top},${right},${bottom}]`;
+  return element.contentDesc !== undefined ? `desc:${element.contentDesc}${bounds}` : bounds;
 }
 
 function coversSides(required: Side[], candidate: Side[]): boolean {

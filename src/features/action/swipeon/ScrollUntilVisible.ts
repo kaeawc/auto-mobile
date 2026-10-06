@@ -139,6 +139,11 @@ export interface ScrollUntilVisibleStrategy {
     holdDurationMs?: number;
     onSearchFallback?: () => void;
     searchDragState?: AndroidSearchDragState;
+    /**
+     * Called when the gesture is handed to the device, never before the strategy's own
+     * pre-send checks; a strategy that cannot see its send point calls it as it begins the send.
+     */
+    onDispatched?: () => void;
   }) => Promise<SwipeOnResult & { observation: ObserveResult }>;
 }
 
@@ -976,8 +981,16 @@ export class ScrollUntilVisible {
     if (strategy) {
       // The caller's loop and recoveries check the signal, but not between that check and here.
       throwIfAborted(signal);
-      swipes.dispatched++;
     }
+    // The strategy sits behind observedInteraction's own awaits and abort checks, so a swipe is
+    // counted only when it reports the gesture reached the device, once per swipe.
+    let counted = false;
+    const onDispatched = () => {
+      if (!counted) {
+        counted = true;
+        swipes.dispatched++;
+      }
+    };
     return strategy
       ? await strategy.swipe({
           x1: Math.floor(startX),
@@ -989,6 +1002,7 @@ export class ScrollUntilVisible {
           onSearchFallback,
           searchDragState,
           previousObservation: lastObservation,
+          onDispatched,
         })
       : await this.deps.observedInteraction(
           async (_observeResult, fence) => {

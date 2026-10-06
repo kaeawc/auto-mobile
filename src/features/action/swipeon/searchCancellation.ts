@@ -21,7 +21,11 @@ export class SwipeSearchCancelledError extends Error {
   }
 }
 
-/** Counts the gestures one search attempted to dispatch; shared by the loop and its recoveries. */
+/**
+ * Counts the gestures one search reported as handed to the device; shared by the loop and its
+ * recoveries. A path that cannot see its own send point (legacy executors, TalkBack) counts as it
+ * begins the send, so there the count is an attempt, never fewer than were sent.
+ */
 export interface SwipeCounter {
   dispatched: number;
 }

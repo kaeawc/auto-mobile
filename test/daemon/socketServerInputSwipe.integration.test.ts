@@ -93,7 +93,18 @@ describe("UnixSocketServer input/swipe", () => {
       end: { x: 56.75, y: 78.5 },
       durationMs: 420,
     });
-    expect(requestSwipe).toHaveBeenCalledWith(12.5, 34.25, 56.75, 78.5, 420, 1234);
+    expect(requestSwipe).toHaveBeenCalledWith(
+      12.5,
+      34.25,
+      56.75,
+      78.5,
+      420,
+      1234,
+      undefined,
+      undefined,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -215,7 +226,18 @@ describe("UnixSocketServer input/swipe", () => {
       start: { x: 1, y: 2 },
       end: { x: 3, y: 4 },
     });
-    expect(requestSwipe).toHaveBeenCalledWith(1, 2, 3, 4, 300, 30_000);
+    expect(requestSwipe).toHaveBeenCalledWith(
+      1,
+      2,
+      3,
+      4,
+      300,
+      30_000,
+      undefined,
+      undefined,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
   });
 
   test("serializes concurrent swipes for the same device across socket clients", async () => {

@@ -2091,6 +2091,90 @@ export const swipeElement = async (
   await awaitWhileRequestIsLive(getDetector(device, signal).swipeElement(element), signal);
 };
 
+const NOTIFICATION_ROW_RESOURCE_ID = "com.android.systemui:id/expandableNotificationRow";
+
+// Settle for the row-removal animation after a swipe, mirroring the pause
+// clearAll takes between swipes.
+const SYSTEM_TRAY_DISMISS_SETTLE_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100;
+
+/** How many rows match the criteria in a hierarchy (used to compare before/after a dismiss). */
+export const countNotificationMatches = (
+  viewHierarchy: ViewHierarchyResult,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+): number => findNotificationMatches(viewHierarchy, criteria, appMatchTexts).length;
+
+// SystemUI only advertises the accessibility "dismiss" action on rows that can
+// be swiped away, so a row that lists actions without it is ongoing or
+// otherwise non-clearable. A node that exposes no action list says nothing.
+const isRowWithoutDismissAction = (node: ViewHierarchyNode): boolean => {
+  const props = getNodeProperties(node);
+  // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- Classifies a SystemUI layout node; user element selection uses the resolver.
+  const resourceId = String(props?.["resource-id"] ?? props?.resourceId ?? "");
+  return (
+    resourceId === NOTIFICATION_ROW_RESOURCE_ID &&
+    Array.isArray(props?.actions) &&
+    !props.actions.includes("dismiss")
+  );
+};
+
+export type NotificationDismissVerification =
+  | { outcome: "dismissed" | "indeterminate"; observation: ObserveResult }
+  | { outcome: "still-present"; observation: ObserveResult; nonClearable: boolean };
+
+/**
+ * Confirm an Android notification swipe removed the matched row. `observation`
+ * is the post-swipe observation the caller already took; when it still shows
+ * the row, wait one swipe settle and observe once more before reporting it
+ * stuck (the row may be mid-animation). Costs no extra device call when the
+ * row is already gone, and one sleep plus one observe otherwise. An
+ * observation that is not a notification shade cannot confirm either way and
+ * is reported as indeterminate.
+ */
+export const verifyNotificationDismissed = async (
+  device: BootedDevice,
+  swiped: { match: SystemTrayNotificationMatch; matchCountBefore: number },
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+  observation: ObserveResult,
+  signal?: AbortSignal,
+): Promise<NotificationDismissVerification> => {
+  const detector = getDetector(device, signal);
+  const classify = (candidate: ObserveResult): "dismissed" | "present" | "indeterminate" => {
+    const hierarchy = candidate.viewHierarchy;
+    if (!hierarchy || !detector.isTrayOpen(hierarchy)) {
+      return "indeterminate";
+    }
+    return countNotificationMatches(hierarchy, criteria, appMatchTexts) < swiped.matchCountBefore
+      ? "dismissed"
+      : "present";
+  };
+  let verified = observation;
+  let outcome = classify(verified);
+  if (outcome === "present") {
+    await sleep(SYSTEM_TRAY_DISMISS_SETTLE_MS, signal);
+    throwIfAborted(signal);
+    verified = await awaitWhileRequestIsLive(
+      getSystemTrayDependencies().observeScreenFactory(device).execute({
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+        skipPerformanceAudit: true,
+        signal,
+      }),
+      signal,
+    );
+    outcome = classify(verified);
+  }
+  if (outcome === "present") {
+    return {
+      outcome: "still-present",
+      observation: verified,
+      nonClearable: isRowWithoutDismissAction(swiped.match.candidate.node),
+    };
+  }
+  return { outcome, observation: verified };
+};
+
 /** Which evidence class attributed a listed row to its app (#6875). */
 export type TrayOwnershipEvidence = "header" | "dumpsys";
 

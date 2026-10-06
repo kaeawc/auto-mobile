@@ -194,6 +194,8 @@ import {
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   expandAndRematchIfCollapsed,
+  countNotificationMatches,
+  verifyNotificationDismissed,
   resolveNotificationGroupExpansionState,
   isSwipeTargetIsolatedFromGroup,
   tapElement,
@@ -2999,7 +3001,7 @@ export function registerInteractionTools() {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
-        const { match } = await expandAndRematchIfCollapsed(
+        const { match, observation: swipeObservation } = await expandAndRematchIfCollapsed(
           device,
           notification,
           appMatchTexts,
@@ -3049,12 +3051,48 @@ export function registerInteractionTools() {
           }),
           signal,
         );
-        await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
+        // #10010: only Android is verified here; the swipe itself says nothing
+        // about whether the row left the shade (ongoing rows snap back).
+        const verification =
+          device.platform === "android" && swipeObservation.viewHierarchy
+            ? await verifyNotificationDismissed(
+                device,
+                {
+                  match,
+                  matchCountBefore: countNotificationMatches(
+                    swipeObservation.viewHierarchy,
+                    notification,
+                    appMatchTexts,
+                  ),
+                },
+                notification,
+                appMatchTexts,
+                nextObservation,
+                signal,
+              )
+            : undefined;
+        const finalObservation = verification?.observation ?? nextObservation;
+        await captureSystemTrayTerminalEvidence(device, finalObservation, signal);
+
+        if (verification?.outcome === "still-present") {
+          return {
+            ...createJSONToolResponse({
+              message: verification.nonClearable
+                ? "Could not dismiss notification: it is still in the system tray and appears to be " +
+                  "ongoing/non-clearable (its row exposes no dismiss action)."
+                : "Could not dismiss notification: it is still present in the system tray after the swipe.",
+              match: match.match.matches,
+              observation: finalObservation,
+              success: false,
+            }),
+            isError: true as const,
+          };
+        }
 
         return createJSONToolResponse({
           message: "Dismissed notification",
           match: match.match.matches,
-          observation: nextObservation,
+          observation: finalObservation,
           success: true,
         });
       }

@@ -226,3 +226,52 @@ internal class FileCrossProcessLock(
     private const val LOCK_POLL_MS = 100L
   }
 }
+
+private const val POST_RECOVERY_CONNECT_ATTEMPTS = 3
+private const val POST_RECOVERY_BACKOFF_MS = 100L
+
+/**
+ * Connects to the daemon, treating a refused/missing socket as "daemon not running" (#10169): a
+ * daemon that dies without unlinking its socket leaves a file behind that [connect] cannot use.
+ * After the first failure, [recover] (clear the cached client, run the ensure-running path once) is
+ * invoked, then the connect is retried a bounded number of times with [sleep] between attempts. A
+ * daemon that is still unreachable surfaces as a [DaemonUnavailableException] naming [socketPath],
+ * never a raw [java.net.ConnectException]. This never removes a socket file: the daemon's own
+ * launcher decides whether the incumbent is live.
+ */
+internal fun <T : Any> connectWithDaemonRecovery(
+  socketPath: String,
+  connect: () -> T,
+  sleep: (Long) -> Unit,
+  recover: () -> Unit,
+): T {
+  var lastFailure: Exception? = null
+  connectOrNull(connect) { lastFailure = it }
+    ?.let {
+      return it
+    }
+  recover()
+  for (attempt in 1..POST_RECOVERY_CONNECT_ATTEMPTS) {
+    connectOrNull(connect) { lastFailure = it }
+      ?.let {
+        return it
+      }
+    if (attempt < POST_RECOVERY_CONNECT_ATTEMPTS) sleep(POST_RECOVERY_BACKOFF_MS * attempt)
+  }
+  throw DaemonUnavailableException(
+    "AutoMobile daemon is not reachable at $socketPath even after attempting to restart it: " +
+      "${lastFailure?.message}",
+    lastFailure,
+  )
+}
+
+private fun <T : Any> connectOrNull(connect: () -> T, onFailure: (Exception) -> Unit): T? =
+  try {
+    connect()
+  } catch (e: IOException) {
+    onFailure(e)
+    null
+  } catch (e: DaemonUnavailableException) {
+    onFailure(e)
+    null
+  }

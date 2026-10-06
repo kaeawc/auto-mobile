@@ -36,10 +36,12 @@ import kotlinx.serialization.serializer
 internal object DaemonSocketClientManager {
   // Use ThreadLocal to give each thread its own socket connection
   // This enables true parallel execution since socket server queues requests per connection
-  private val threadLocalClient = ThreadLocal<DaemonSocketClient>()
+  private val threadLocalClient = ThreadLocal<DaemonToolClient>()
   private val clientLock = Any()
   @Volatile private var daemonEnsured = false
+  @Volatile private var ensureGeneration = 0L
   @JvmStatic internal var testClient: DaemonToolClient? = null
+  @JvmStatic internal var testConnector: DaemonSocketConnector? = null
 
   fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse {
     val overrideClient = testClient
@@ -61,43 +63,69 @@ internal object DaemonSocketClientManager {
     return testClient?.sessionUuid ?: getOrCreateClient().sessionUuid
   }
 
-  private fun getOrCreateClient(): DaemonSocketClient {
+  private fun getOrCreateClient(): DaemonToolClient {
     // Each thread gets its own connection for parallel execution
     val existing = threadLocalClient.get()
     if (existing != null && existing.isConnected()) {
       return existing
     }
 
-    val socketPath = DaemonSocketPaths.socketPath()
+    val connector = testConnector ?: DefaultDaemonConnector
+    val socketPath = connector.socketPath()
 
     // Ensure daemon is running (restart if socket disappeared after crash/exit)
     synchronized(clientLock) {
       // Reset daemonEnsured if socket doesn't exist (daemon crashed/exited)
-      if (!File(socketPath).exists()) {
+      if (!connector.socketExists()) {
         daemonEnsured = false
       }
 
       if (!daemonEnsured) {
-        ensureDaemonRunning()
+        connector.ensureDaemonRunning()
         daemonEnsured = true
+        ensureGeneration++
       }
     }
 
-    // Create new client for this thread
-    val newClient = DaemonSocketClient(socketPath)
+    // Create new client for this thread. A daemon that died without unlinking its socket leaves
+    // the file behind, so the existence check above passes while connecting is refused (#10169).
+    val observedGeneration = ensureGeneration
+    val newClient =
+      connectWithDaemonRecovery(
+        socketPath = socketPath,
+        connect = connector::connect,
+        sleep = connector::sleep,
+        recover = { recoverDaemon(connector, observedGeneration) },
+      )
     threadLocalClient.set(newClient)
     return newClient
   }
 
-  private fun ensureDaemonRunning() {
-    val lockTimeoutMs =
-      DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true) +
-        DaemonSocketPaths.daemonStartTimeoutMs()
-    DaemonLauncher(
-        DefaultDaemonLaunchEnvironment,
-        FileCrossProcessLock(File(DaemonSocketPaths.restartLockPath()).toPath(), lockTimeoutMs),
-      )
-      .ensureRunning()
+  /**
+   * Re-runs the ensure-running path after a refused connect. Threads that failed against the same
+   * dead daemon queue on [clientLock]; only the first re-ensures, the rest see the bumped
+   * generation and just retry their connect against the daemon it brought back.
+   */
+  private fun recoverDaemon(connector: DaemonSocketConnector, observedGeneration: Long) {
+    threadLocalClient.remove()
+    synchronized(clientLock) {
+      if (ensureGeneration != observedGeneration) {
+        return
+      }
+      daemonEnsured = false
+      connector.ensureDaemonRunning()
+      daemonEnsured = true
+      ensureGeneration++
+    }
+  }
+
+  /** Clears per-JVM manager state so tests that swap [testConnector] start from a clean slate. */
+  internal fun resetStateForTest() {
+    threadLocalClient.remove()
+    synchronized(clientLock) {
+      daemonEnsured = false
+      ensureGeneration = 0
+    }
   }
 
   /**
@@ -224,6 +252,40 @@ internal object DaemonSocketClientManager {
       )
     return candidates.firstOrNull { it.exists() }?.absolutePath
   }
+}
+
+/** Seam over the manager's hard-wired socket, daemon launcher and sleeping, for fast unit tests. */
+internal interface DaemonSocketConnector {
+  fun socketPath(): String
+
+  fun socketExists(): Boolean
+
+  fun connect(): DaemonToolClient
+
+  fun ensureDaemonRunning()
+
+  fun sleep(ms: Long)
+}
+
+internal object DefaultDaemonConnector : DaemonSocketConnector {
+  override fun socketPath(): String = DaemonSocketPaths.socketPath()
+
+  override fun socketExists(): Boolean = File(socketPath()).exists()
+
+  override fun connect(): DaemonToolClient = DaemonSocketClient(socketPath())
+
+  override fun ensureDaemonRunning() {
+    val lockTimeoutMs =
+      DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true) +
+        DaemonSocketPaths.daemonStartTimeoutMs()
+    DaemonLauncher(
+        DefaultDaemonLaunchEnvironment,
+        FileCrossProcessLock(File(DaemonSocketPaths.restartLockPath()).toPath(), lockTimeoutMs),
+      )
+      .ensureRunning()
+  }
+
+  override fun sleep(ms: Long) = Thread.sleep(ms)
 }
 
 /** The real daemon launch environment: PID file, shared socket and the launcher command. */
@@ -956,7 +1018,7 @@ internal class DaemonSocketClient(
       thread(start = true, isDaemon = true, name = "auto-mobile-daemon-reader") { readLoop() }
   }
 
-  fun isConnected(): Boolean {
+  override fun isConnected(): Boolean {
     return !closed && channel.isOpen
   }
 
@@ -1086,7 +1148,16 @@ internal class DaemonSocketClient(
       throw DaemonUnavailableException("Daemon socket not found: $socketPath")
     }
 
-    return SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+    // A refused connect (the daemon died but left its socket file) is an IOException; report it as
+    // the daemon being unavailable so callers' retry/failure handling sees it (#10169).
+    return try {
+      SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+    } catch (e: IOException) {
+      throw DaemonUnavailableException(
+        "Cannot connect to daemon socket $socketPath: ${e.message}",
+        e,
+      )
+    }
   }
 
   private fun registerAndSend(
@@ -1240,6 +1311,9 @@ internal interface DaemonToolClient {
   fun readResource(uri: String, timeoutMs: Long): DaemonResponse
 
   var sessionUuid: String
+
+  /** False once the connection is closed and a fresh client is needed. Fakes are always live. */
+  fun isConnected(): Boolean = true
 }
 
 internal class DaemonUnavailableException(message: String, cause: Throwable? = null) :

@@ -106,7 +106,7 @@ export interface DisplayFenceOption {
 const NO_OP_DISPLAY_FENCE: DisplayFence = Object.freeze({ assertCurrent: () => {} });
 
 /** Intermediate action reads resolve targets and effects; terminal evidence is captured once. */
-const INTERMEDIATE_OBSERVATION_OPTIONS = {
+export const INTERMEDIATE_OBSERVATION_OPTIONS = {
   skipScreenshot: true,
   skipAccessibilityAudit: true,
 } satisfies ObserveScreenExecuteOptions;

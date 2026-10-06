@@ -14,7 +14,12 @@ export interface TerminateAppResult extends BaseActionResult {
   wasInstalled?: boolean;
   /** Whether the app had a running process that was terminated. Omitted on `success:false` (unknown). */
   wasRunning?: boolean;
-  wasForeground: boolean;
+  /**
+   * Whether the app was the foreground app before termination. Omitted when it
+   * could not be determined (e.g. an iOS terminate without a pre-action
+   * observation, or a failed termination) — never asserted as `false` then.
+   */
+  wasForeground?: boolean;
   /** Android user ID where the app was terminated (0 for primary user, 10+ for work profiles) */
   userId?: number;
 }

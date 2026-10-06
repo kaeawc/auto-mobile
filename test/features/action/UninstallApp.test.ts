@@ -202,6 +202,8 @@ describe("UninstallApp (iOS simulator)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("simctl uninstall failed");
+    // The pre-uninstall listing showed the app, so this was observed.
+    expect(result.wasInstalled).toBe(true);
   });
 
   test("returns failure for empty package name", async () => {
@@ -793,6 +795,32 @@ describe("UninstallApp (iOS listing failure)", () => {
     expect(result.error).toContain("com.example.app");
     expect(result.wasInstalled).toBeUndefined();
     // The destructive step must not run on an unknown install state.
+    expect(fakeUninstaller.calls).toHaveLength(0);
+  });
+
+  test("omits wasInstalled when an error occurs before the install state was observed", async () => {
+    let createCalls = 0;
+    // The constructor consumes the first create(); the iOS pre-check's
+    // ListInstalledApps consumes the second and throws before any listing.
+    const throwingFactory = {
+      create: () => {
+        createCalls++;
+        if (createCalls > 1) {
+          throw new Error("adb client unavailable");
+        }
+        return {} as never;
+      },
+    };
+
+    const uninstall = new UninstallApp(iosSimDevice, throwingFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
+    const result = await uninstall.execute("com.example.app");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("adb client unavailable");
+    expect("wasInstalled" in result).toBe(false);
     expect(fakeUninstaller.calls).toHaveLength(0);
   });
 

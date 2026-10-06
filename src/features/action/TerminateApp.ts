@@ -7,7 +7,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, TerminateAppResult } from "../../models";
+import { ActionableError, BootedDevice, ObserveResult, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -24,6 +24,7 @@ import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
@@ -52,6 +53,48 @@ registerDeviceIncarnationListener({
       platform: "android",
     }),
 });
+
+/**
+ * Whether `bundleId` was the foreground iOS app in the pre-terminate
+ * observation. `undefined` means it could not be determined (no observation,
+ * a stale/unverified capture, or no identifiable foreground window); callers
+ * omit `wasForeground` rather than assert `false`.
+ */
+function iosWasForeground(
+  bundleId: string,
+  observation: ObserveResult | undefined,
+): boolean | undefined {
+  const foregroundAppId = observation && usableForegroundAppId(observation);
+  return foregroundAppId ? foregroundAppId === bundleId : undefined;
+}
+
+/** The foreground app id of a fresh, verified observation, else `undefined`. */
+function usableForegroundAppId(observation: ObserveResult): string | undefined {
+  const { freshness } = observation;
+  if (
+    freshness?.isFresh === false ||
+    freshness?.verified === false ||
+    // The runner reports com.apple.springboard when it cannot identify the
+    // foreground app, so that identity is a guess, not an observation.
+    observation.viewHierarchy?.fallbackToSpringboard === true ||
+    resolveMissingForegroundWindow(observation)
+  ) {
+    return undefined;
+  }
+  return observedAppId(observation);
+}
+
+function observedAppId(observation: ObserveResult): string | undefined {
+  return (
+    observation.activeWindow?.appId ||
+    observation.viewHierarchy?.packageName ||
+    observation.viewHierarchy?.foregroundActivity?.split("/")[0] ||
+    undefined
+  );
+}
+
+const wasForegroundField = (value: boolean | undefined): { wasForeground?: boolean } =>
+  value === undefined ? {} : { wasForeground: value };
 
 export interface TerminateAppOptions {
   simctl?: SimCtlClient;
@@ -375,10 +418,17 @@ export class TerminateApp extends BaseVisualChange {
         deviceAppTerminator: this.deviceTerminator,
       });
       const terminateTransport = backend.requiresInstalledAppCheck
-        ? () => this.terminateSimulator(bundleId, perf, backend)
-        : () => this.terminatePhysicalDevice(bundleId, perf, backend);
-      const terminateLogic = async (): Promise<TerminateAppResult> => {
-        const result = await terminateTransport();
+        ? (foreground: boolean | undefined) =>
+            this.terminateSimulator(bundleId, perf, backend, foreground)
+        : (foreground: boolean | undefined) =>
+            this.terminatePhysicalDevice(bundleId, perf, backend, foreground);
+      const terminateLogic = async (
+        previousObservation?: ObserveResult,
+      ): Promise<TerminateAppResult> => {
+        // Read before terminating: afterwards the app is no longer foreground.
+        // The skipObservation path has no pre-action observation, so the state
+        // is unknown there and `wasForeground` is omitted.
+        const result = await terminateTransport(iosWasForeground(bundleId, previousObservation));
         if (result.success) {
           if (result.wasInstalled !== false) {
             this.cacheInvalidator.invalidate(this.device);
@@ -426,6 +476,7 @@ export class TerminateApp extends BaseVisualChange {
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     backend: IosTerminateBackend,
+    foreground: boolean | undefined,
   ): Promise<TerminateAppResult> {
     const listApps = new ListInstalledApps(this.device, { create: () => this.adb }, this.simctl, {
       cacheEnabled: false,
@@ -433,12 +484,11 @@ export class TerminateApp extends BaseVisualChange {
     const listing = await perf.track("checkInstalled", () => listApps.executeIosDetailedResult());
 
     if (!listing.successful) {
-      // Omit wasInstalled/wasRunning: install state was never established, so
-      // reporting them as `false` would assert a fact we do not have.
+      // Omit wasInstalled/wasRunning/wasForeground: install state was never
+      // established, so reporting them as `false` would assert a fact we do not have.
       return {
         success: false,
         packageName: bundleId,
-        wasForeground: false,
         error:
           `Could not determine whether ${bundleId} is installed on iOS device ` +
           `${this.device.deviceId}: the installed-app listing failed. Confirm the device ` +
@@ -483,7 +533,10 @@ export class TerminateApp extends BaseVisualChange {
       packageName: bundleId,
       wasInstalled: true,
       wasRunning,
-      wasForeground: false,
+      // A process that was already gone cannot have been foreground; a failed
+      // terminate leaves the pre-terminate state unverified, so only report the
+      // observed value on success.
+      ...wasForegroundField(errorMsg ? undefined : wasRunning ? foreground : false),
       ...(errorMsg ? { error: errorMsg } : {}),
     };
   }
@@ -500,6 +553,7 @@ export class TerminateApp extends BaseVisualChange {
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     backend: IosTerminateBackend,
+    foreground: boolean | undefined,
   ): Promise<TerminateAppResult> {
     try {
       const { wasInstalled, wasRunning } = await perf.track("terminateApp", () =>
@@ -510,7 +564,7 @@ export class TerminateApp extends BaseVisualChange {
         packageName: bundleId,
         wasInstalled,
         wasRunning,
-        wasForeground: false,
+        ...wasForegroundField(wasRunning ? foreground : false),
       };
     } catch (error) {
       const message = errorMessage(error);
@@ -527,7 +581,6 @@ export class TerminateApp extends BaseVisualChange {
       return {
         success: false,
         packageName: bundleId,
-        wasForeground: false,
         error: message,
       };
     }

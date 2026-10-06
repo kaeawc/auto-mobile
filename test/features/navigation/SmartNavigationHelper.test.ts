@@ -73,7 +73,9 @@ describe("SmartNavigationHelper", function () {
 
       expect(result.shouldUseBack).toBe(true);
       expect(result.backPresses).toBe(1);
-      expect(result.reason).toContain("Depth difference is 1");
+      // ScreenA -> ScreenB is a recorded edge, so the parent is verified by path
+      // (not only by the unverified depth-1 fallback).
+      expect(result.reason).toContain("matches depth difference");
     });
 
     test("should not recommend back button when current depth is lower", async function () {
@@ -183,12 +185,11 @@ describe("SmartNavigationHelper", function () {
         2, // Current depth
       );
 
-      // findPath(target="ScreenA") searches outward from ScreenA, but the only
-      // recorded edges point forward (A->B->C), so no path back to ScreenA is
-      // found and a depth-2 gap cannot be safely closed with the back button.
-      expect(result.shouldUseBack).toBe(false);
-      expect(result.backPresses).toBe(0);
-      expect(result.reason).toBe("No known navigation path to verify safety");
+      // The recorded edges point forward (A->B->C): ScreenA reaches ScreenC in two
+      // edges, matching the depth gap of 2, so Back retraces exactly that route.
+      expect(result.shouldUseBack).toBe(true);
+      expect(result.backPresses).toBe(2);
+      expect(result.reason).toContain("matches depth difference");
     });
   });
 

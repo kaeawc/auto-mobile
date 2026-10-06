@@ -9,6 +9,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDir
 import { logger } from "../utils/logger";
 import { buildToolOutputResourceUri } from "./toolOutputResources";
 import {
+  hasWriterIssuedFilenameShape,
   toolOutputArtifactLedger,
   type ToolOutputArtifactLedger,
 } from "./toolOutputArtifactLedger";
@@ -168,7 +169,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       const nowMs = this.timer.now();
       const candidates = this.fileSystem
         .listFiles(this.outputDirectory)
-        .filter((entry) => entry.isFile && entry.name.endsWith(".json"))
+        .filter((entry) => entry.isFile && this.isIssuedArtifact(entry))
         .sort((a, b) => a.mtimeMs - b.mtimeMs);
       const expired = candidates.filter((entry) => nowMs - entry.mtimeMs > retention.maxAgeMs);
       const expiredPaths = new Set(expired.map((entry) => entry.path));
@@ -188,6 +189,20 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
     } catch (error) {
       logger.warn(`Failed to prune old tool output artifacts: ${error}`, error);
     }
+  }
+
+  /**
+   * Whether the prune may delete this file. The output directory can be one the
+   * user chose and share with other content (`--tool-outputs-dir .`), so an
+   * extension match is not enough (issue #10078): the file must be one this
+   * process recorded in the ledger, or carry the writer's own filename shape
+   * (which covers artifacts a previous daemon process issued).
+   */
+  private isIssuedArtifact(entry: ToolOutputArtifactDirectoryEntry): boolean {
+    return (
+      this.ledger.resolve(entry.name)?.path === entry.path ||
+      hasWriterIssuedFilenameShape(entry.name)
+    );
   }
 
   private deletePrunedFile(filePath: string): void {

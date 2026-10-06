@@ -3,6 +3,10 @@ import { z } from "zod/v4";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import type { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
+import type {
+  ForegroundObservation,
+  ForegroundObserver,
+} from "../../../src/features/navigation/foregroundOverlay";
 import type { BootedDevice } from "../../../src/models";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -33,6 +37,9 @@ describe("navigateTo edge fallback (#10031)", () => {
   /** What a replayed tapOn does, keyed by the selector text it targets. */
   let tapBehaviour: Record<string, "navigates" | "no-effect" | "tool-error">;
   let backNavigates: boolean;
+  /** What a fresh observation after a failed replay reports; null = the observation fails. */
+  let observation: ForegroundObservation | null;
+  let observations: number;
 
   const device: BootedDevice = { deviceId: "fake", platform: "ios", name: "Fake" };
   const noSetup: UIStateSetup = {
@@ -48,6 +55,8 @@ describe("navigateTo edge fallback (#10031)", () => {
     dispatched = [];
     tapBehaviour = {};
     backNavigates = true;
+    observation = {};
+    observations = 0;
     await manager.setCurrentApp(APP_ID);
     registerTools();
   });
@@ -103,6 +112,16 @@ describe("navigateTo edge fallback (#10031)", () => {
     });
   }
 
+  const observer: ForegroundObserver = {
+    execute: async () => {
+      observations += 1;
+      if (!observation) {
+        throw new Error("observe unavailable");
+      }
+      return observation;
+    },
+  };
+
   function navigate(target: string) {
     return new NavigateTo(
       device,
@@ -111,6 +130,9 @@ describe("navigateTo edge fallback (#10031)", () => {
       { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
       manager,
       new FakeTimer(),
+      undefined,
+      undefined,
+      () => observer,
     ).execute({ targetScreen: target, platform: "ios" });
   }
 
@@ -232,5 +254,98 @@ describe("navigateTo edge fallback (#10031)", () => {
     expect(result.success).toBe(false);
     expect(dispatched).toEqual(["tapOn:Settings"]);
     expect(result.currentScreen).toBe("Elsewhere");
+  });
+
+  describe("re-observing before a fallback edge (#10133)", () => {
+    beforeEach(async () => {
+      await recordTwoTapEdges();
+      tapBehaviour = { Settings: "no-effect", Stale: "navigates" };
+    });
+
+    test("a clean observation still lets the fallback edge run", async () => {
+      const result = await navigate("Settings");
+
+      expect(result.success).toBe(true);
+      expect(observations).toBe(1);
+      expect(dispatched).toEqual(["tapOn:Settings", "tapOn:Stale"]);
+    });
+
+    test("an overlay the graph does not report stops the fallback and names it", async () => {
+      observation = { notificationPermissionDetected: true };
+
+      const result = await navigate("Settings");
+
+      expect(result.success).toBe(false);
+      expect(dispatched).toEqual(["tapOn:Settings"]);
+      expect(result.error).toContain("Not trying a fallback edge");
+      expect(result.error).toContain("a notification permission dialog");
+      expect(result.error).toContain("did not reach expected screen");
+    });
+
+    test("a Back-press fallback is not sent onto an unreported system dialog", async () => {
+      await go("Home");
+      await go("Settings");
+      await go("Home");
+      await go("Settings", { name: "tapOn", args: SETTINGS_TAP });
+      await go("Home");
+      tapBehaviour = { Settings: "no-effect" };
+      observation = {
+        activeWindow: {
+          appId: "com.android.permissioncontroller",
+          activityName: "",
+          layoutSeqSum: 0,
+        },
+      };
+
+      const result = await navigate("Settings");
+
+      expect(result.success).toBe(false);
+      expect(dispatched).toEqual(["tapOn:Settings"]);
+      expect(result.error).toContain("another app window (com.android.permissioncontroller)");
+    });
+
+    test("an observation that moved the graph elsewhere reports where the device is", async () => {
+      const unobserved: ForegroundObserver = {
+        execute: async () => {
+          await go("Elsewhere");
+          return {};
+        },
+      };
+      const result = await new NavigateTo(
+        device,
+        new FakeAdbClientFactory(),
+        noSetup,
+        { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+        manager,
+        new FakeTimer(),
+        undefined,
+        undefined,
+        () => unobserved,
+      ).execute({ targetScreen: "Settings", platform: "ios" });
+
+      expect(result.success).toBe(false);
+      expect(dispatched).toEqual(["tapOn:Settings"]);
+      expect(result.currentScreen).toBe("Elsewhere");
+      expect(result.error).toContain('the observed screen is "Elsewhere"');
+    });
+
+    test("an observation failure never lets the fallback run blind", async () => {
+      observation = null;
+
+      const result = await navigate("Settings");
+
+      expect(result.success).toBe(false);
+      expect(dispatched).toEqual(["tapOn:Settings"]);
+      expect(result.error).toContain("the device could not be observed (observe unavailable)");
+    });
+
+    test("no observation is taken when the replayed step reached its target", async () => {
+      tapBehaviour = { Settings: "navigates", Stale: "navigates" };
+
+      const result = await navigate("Settings");
+
+      expect(result.success).toBe(true);
+      expect(observations).toBe(0);
+    });
   });
 });

@@ -533,6 +533,8 @@ export interface DeviceLocksTable {
   device_id: string;
   lock_type: string;
   lock_credential: string | null;
+  /** Stable identity (AVD name / serial) the row was learned on; null = unverified, never replayed. */
+  device_identity: string | null;
   updated_at: Generated<string>;
 }
 

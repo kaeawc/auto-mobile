@@ -8,13 +8,22 @@ export type DeviceLockType = "none" | "swipe" | "pin" | "password" | "pattern";
  * narrow interface (YAGNI) so WakeAndUnlock does not depend on the repository.
  */
 export interface LockCredentialStore {
-  /** The credential remembered for a device, or `null` if none is recorded. */
-  getRecordedCredential(deviceId: string): Promise<string | null>;
-  /** Remember how to unlock a device (lock type + optional credential). */
+  /**
+   * The credential remembered for a device, or `null` if none is recorded.
+   * `identity` is the device's stable identity (see `stableDeviceIdentityOf`): a
+   * credential is only replayed on the device it was learned on, so an unknown
+   * (`undefined`) or different identity behind the same serial yields `null`.
+   */
+  getRecordedCredential(deviceId: string, identity: string | undefined): Promise<string | null>;
+  /**
+   * Remember how to unlock a device (lock type + optional credential), tagged
+   * with the stable identity it was learned on.
+   */
   rememberLock(
     deviceId: string,
     lockType: DeviceLockType,
     credential: string | null,
+    identity: string | undefined,
   ): Promise<void>;
 }
 

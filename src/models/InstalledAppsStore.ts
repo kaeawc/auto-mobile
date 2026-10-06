@@ -21,6 +21,7 @@ export interface InstalledAppsStore {
   getProfileCacheVerifiedAt(deviceId: string, userId: number): Promise<number | null>;
   listInstalledApps(deviceId: string): Promise<InstalledApp[]>;
   replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void>;
+  /** Patches a row of an existing snapshot; a no-op on a device with no rows (#10041). */
   upsertInstalledApp(
     deviceId: string,
     userId: number,

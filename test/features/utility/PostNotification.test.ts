@@ -3,8 +3,8 @@ import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
-import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { BootedDevice } from "../../../src/models";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
@@ -15,8 +15,6 @@ describe("PostNotification", () => {
   let device: BootedDevice;
   let fakeAdb: FakeAdbExecutor;
   let fakeWindow: FakeWindow;
-  let hostFiles: FakeFileSystem;
-  const hostDir = path.resolve("/fake-host-images");
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   beforeEach(() => {
@@ -27,7 +25,6 @@ describe("PostNotification", () => {
     } as BootedDevice;
 
     fakeAdb = new FakeAdbExecutor();
-    hostFiles = new FakeFileSystem();
     fakeWindow = new FakeWindow();
     fakeWindow.configureCachedActiveWindow({
       appId: "com.example.app",
@@ -49,6 +46,19 @@ describe("PostNotification", () => {
       process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
     }
   });
+
+  // Signature bytes only: the host sniffs the container, it never decodes pixels.
+  const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const IMAGE_DIR = path.join(path.sep, "fake-host", "images");
+  const newNotifier = (fileSystem: FakeFileSystem) =>
+    new PostNotification(device, fakeAdb, fakeWindow, null, fileSystem);
+  const configureBroadcastResult = (code: number) => {
+    configureReceiverProbe();
+    fakeAdb.setCommandResponse("am broadcast", {
+      stdout: `Broadcast completed: result=${code}`,
+      stderr: "",
+    });
+  };
 
   const configureReceiverProbe = (appId: string = "com.example.app") => {
     fakeAdb.setCommandResponse("cmd package query-receivers", {
@@ -91,30 +101,19 @@ describe("PostNotification", () => {
   });
 
   test("logs missing host images and preserves the image failure", async () => {
-    const imagePath = path.join(hostDir, "missing.png");
-    const result = await new PostNotification(device, fakeAdb, fakeWindow, null, hostFiles).execute(
-      {
-        title: "Picture",
-        body: "Body",
-        imageType: "bigPicture",
-        imagePath,
-      },
-    );
+    const imagePath = path.join(IMAGE_DIR, "missing.png");
+    const result = await newNotifier(new FakeFileSystem()).execute({
+      title: "Picture",
+      body: "Body",
+      imageType: "bigPicture",
+      imagePath,
+    });
     expect(result).toEqual({
       success: false,
       supported: false,
       imageType: "bigPicture",
       error: `Image file not found at ${imagePath}`,
     });
-    expect(
-      loggerCallsWithPrefix(
-        warn.mock.calls,
-        "[PostNotification]",
-        "Failed to post notification:",
-        "Image file not found at ",
-        "Failed to push image to device:",
-      ),
-    ).toHaveLength(1);
     const warnings = loggerCallsWithPrefix(
       warn.mock.calls,
       "[PostNotification]",
@@ -122,24 +121,24 @@ describe("PostNotification", () => {
       "Image file not found at ",
       "Failed to push image to device:",
     );
+    expect(warnings).toHaveLength(1);
     expect(warnings[0][0]).toStartWith(`Image file not found at ${imagePath}: `);
     expect(warnings[0][1]).toBeInstanceOf(Error);
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
 
   test("logs image push failures and preserves the image failure", async () => {
-    const imagePath = path.join(hostDir, "image.png");
+    const imagePath = path.join(IMAGE_DIR, "image.png");
     const error = new Error("push failed");
     fakeAdb.setCommandError("push ", error);
-    hostFiles.setFile(imagePath, "fake-image-content");
-    const result = await new PostNotification(device, fakeAdb, fakeWindow, null, hostFiles).execute(
-      {
-        title: "Picture",
-        body: "Body",
-        imageType: "bigPicture",
-        imagePath,
-      },
-    );
+    const fileSystem = new FakeFileSystem();
+    fileSystem.setBinaryFile(imagePath, PNG_BYTES);
+    const result = await newNotifier(fileSystem).execute({
+      title: "Picture",
+      body: "Body",
+      imageType: "bigPicture",
+      imagePath,
+    });
     expect(result).toEqual({
       success: false,
       supported: false,
@@ -308,23 +307,12 @@ describe("PostNotification", () => {
   });
 
   test("pushes host image for bigPicture imageType", async () => {
-    const imagePath = path.join(hostDir, "image.png");
-    hostFiles.setFile(imagePath, "fake-image-content");
+    const imagePath = path.join(IMAGE_DIR, "image.png");
+    const fileSystem = new FakeFileSystem();
+    fileSystem.setBinaryFile(imagePath, PNG_BYTES);
+    configureBroadcastResult(1);
 
-    configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
-
-    const postNotification = new PostNotification(
-      device,
-      fakeAdb as any,
-      fakeWindow as any,
-      null,
-      hostFiles,
-    );
-    const result = await postNotification.execute({
+    const result = await newNotifier(fileSystem).execute({
       title: "Picture",
       body: "Body",
       imageType: "bigPicture",
@@ -332,6 +320,7 @@ describe("PostNotification", () => {
     });
 
     expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
     expect(fakeAdb.wasCommandExecuted("shell mkdir -p /sdcard/Download/automobile")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("push")).toBe(true);
     expect(
@@ -342,25 +331,17 @@ describe("PostNotification", () => {
   });
 
   test("resolves relative bigPicture image path from daemon launch cwd", async () => {
-    const launchDir = path.resolve("/fake-daemon-launch-cwd");
+    // path.resolve anchors the root with the current drive on Windows, matching what the
+    // source's path.resolve produces for a relative imagePath; a drive-less rooted path would
+    // not match the FakeFileSystem key there.
+    const launchDir = path.resolve(path.sep, "fake-host", "launch-cwd");
     const imagePath = path.join(launchDir, "fixtures", "pic.png");
-    hostFiles.setFile(imagePath, "fake-image-content");
+    const fileSystem = new FakeFileSystem();
+    fileSystem.setBinaryFile(imagePath, PNG_BYTES);
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchDir;
+    configureBroadcastResult(1);
 
-    configureReceiverProbe();
-    fakeAdb.setCommandResponse("am broadcast", {
-      stdout: "Broadcast completed: result=1",
-      stderr: "",
-    });
-
-    const postNotification = new PostNotification(
-      device,
-      fakeAdb as any,
-      fakeWindow as any,
-      null,
-      hostFiles,
-    );
-    const result = await postNotification.execute({
+    const result = await newNotifier(fileSystem).execute({
       title: "Picture",
       body: "Body",
       imageType: "bigPicture",
@@ -373,6 +354,265 @@ describe("PostNotification", () => {
       .find((command) => command.startsWith("push "));
     expect(pushCommand?.replace(/\\\\/g, "\\")).toContain(`"${imagePath}"`);
     expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/pic.png")).toBe(true);
+  });
+
+  describe("host image validation (#10014)", () => {
+    const bigPicture = (imagePath: string) => ({
+      title: "Picture",
+      body: "Body",
+      imageType: "bigPicture" as const,
+      imagePath,
+      appId: "com.example.app",
+    });
+
+    test("rejects an empty image file without pushing or broadcasting", async () => {
+      const imagePath = path.join(IMAGE_DIR, "empty.png");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, Buffer.alloc(0));
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(`Image file is empty: ${imagePath}`);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("rejects a file that is not a supported image type", async () => {
+      const imagePath = path.join(IMAGE_DIR, "notes.png");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setFile(imagePath, "fake-image-content");
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Unsupported image type");
+      expect(result.error).toContain(imagePath);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("accepts GIF and BMP signatures that BitmapFactory can decode", async () => {
+      for (const [name, bytes] of [
+        ["a.gif", Buffer.from("GIF89a\0\0")],
+        ["b.bmp", Buffer.from("BM\0\0\0\0")],
+      ] as const) {
+        const imagePath = path.join(IMAGE_DIR, name);
+        const fileSystem = new FakeFileSystem();
+        fileSystem.setBinaryFile(imagePath, bytes);
+        configureBroadcastResult(1);
+        const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+        expect(result.success).toBe(true);
+      }
+    });
+
+    test("reads only the header bytes, never the whole file", async () => {
+      const headReads: number[] = [];
+      class HeadOnlyFileSystem extends FakeFileSystem {
+        async readFileBuffer(): Promise<Buffer> {
+          throw new Error("the whole file must not be read");
+        }
+        async readFileHead(_path: string, byteCount: number): Promise<Buffer> {
+          headReads.push(byteCount);
+          return PNG_BYTES;
+        }
+      }
+      const imagePath = path.join(IMAGE_DIR, "big.png");
+      const fileSystem = new HeadOnlyFileSystem();
+      fileSystem.setBinaryFile(imagePath, PNG_BYTES);
+      configureBroadcastResult(1);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(true);
+      expect(headReads).toEqual([32]);
+    });
+
+    test("rejects an oversized file from its size alone, without reading it", async () => {
+      let reads = 0;
+      class HugeFileSystem extends FakeFileSystem {
+        async stat() {
+          return { size: 17 * 1024 * 1024, mtimeMs: 0, isFile: () => true };
+        }
+        async readFileHead(): Promise<Buffer> {
+          reads += 1;
+          return PNG_BYTES;
+        }
+      }
+      const imagePath = path.join(IMAGE_DIR, "huge.png");
+      const result = await newNotifier(new HugeFileSystem()).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("too large");
+      expect(result.error).toContain("17.0 MiB");
+      expect(result.error).toContain("at most 16 MiB");
+      expect(reads).toBe(0);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("accepts a file exactly at the size limit", async () => {
+      class LimitFileSystem extends FakeFileSystem {
+        async stat() {
+          return { size: 16 * 1024 * 1024, mtimeMs: 0, isFile: () => true };
+        }
+        async readFileHead(): Promise<Buffer> {
+          return PNG_BYTES;
+        }
+      }
+      configureBroadcastResult(1);
+      const result = await newNotifier(new LimitFileSystem()).execute(
+        bigPicture(path.join(IMAGE_DIR, "limit.png")),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    // ISO-BMFF `ftyp` box: 4-byte size, "ftyp", major brand.
+    const ftyp = (brand: string) =>
+      Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from(`ftyp${brand}`, "latin1")]);
+
+    test.each([
+      ["heic", "HEIF/HEIC images are decoded by Android 8.0"],
+      ["mif1", "HEIF/HEIC images are decoded by Android 8.0"],
+      ["avif", "AVIF images are decoded by Android 14"],
+    ])("accepts a %s image with a version warning instead of refusing it", async (brand, text) => {
+      const imagePath = path.join(IMAGE_DIR, `photo.${brand}`);
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, ftyp(brand));
+      configureBroadcastResult(1);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain(text);
+      expect(fakeAdb.wasCommandExecuted("push ")).toBe(true);
+    });
+
+    test("still refuses an ftyp container whose brand is not an image brand", async () => {
+      const imagePath = path.join(IMAGE_DIR, "movie.png");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, ftyp("mp42"));
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Unsupported image type");
+    });
+
+    test("keeps the version warning alongside the app's posted-without-image warning", async () => {
+      const imagePath = path.join(IMAGE_DIR, "photo.heic");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, ftyp("heic"));
+      configureBroadcastResult(2);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("HEIF/HEIC images are decoded by Android 8.0");
+      expect(result.warning).toContain("could not load the bigPicture image");
+    });
+
+    test("rejects a path that is not a regular file", async () => {
+      class DirectoryFileSystem extends FakeFileSystem {
+        async stat() {
+          return { size: 4096, mtimeMs: 0, isFile: () => false };
+        }
+      }
+      const imagePath = path.join(IMAGE_DIR, "folder");
+      const result = await newNotifier(new DirectoryFileSystem()).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(`Image path is not a file: ${imagePath}`);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    });
+
+    test("reports an unreadable file as an actionable error", async () => {
+      class UnreadableFileSystem extends FakeFileSystem {
+        async readFileBuffer(): Promise<Buffer> {
+          throw new Error("EACCES: permission denied");
+        }
+      }
+      const imagePath = path.join(IMAGE_DIR, "locked.png");
+      const fileSystem = new UnreadableFileSystem();
+      fileSystem.setBinaryFile(imagePath, PNG_BYTES);
+      const result = await newNotifier(fileSystem).execute(bigPicture(imagePath));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not readable");
+      expect(result.error).toContain("EACCES");
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+    });
+  });
+
+  describe("imagePath without bigPicture (#10014)", () => {
+    test("does not push or send image_path and warns that the image was ignored", async () => {
+      configureBroadcastResult(1);
+      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        title: "Hello",
+        body: "World",
+        imagePath: "./hero.png",
+        appId: "com.example.app",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("imagePath was ignored");
+      expect(result.warning).toContain("bigPicture");
+      expect(fakeAdb.wasCommandExecuted("image_path")).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("hero.png")).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("push ")).toBe(false);
+    });
+
+    test("explicit normal imageType with imagePath also warns", async () => {
+      configureBroadcastResult(1);
+      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        title: "Hello",
+        body: "World",
+        imageType: "normal",
+        imagePath: "./x.png",
+        appId: "com.example.app",
+      });
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("imagePath was ignored");
+      expect(fakeAdb.wasCommandExecuted("image_path")).toBe(false);
+    });
+
+    test("no warning when imagePath is absent", async () => {
+      configureBroadcastResult(1);
+      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        title: "Hello",
+        body: "World",
+        appId: "com.example.app",
+      });
+      expect(result.success).toBe(true);
+      expect(result.warning).toBeUndefined();
+    });
+  });
+
+  describe("receiver result code 2: posted without image (#10014)", () => {
+    test("maps result=2 to a posted result carrying a warning, not a clean success", async () => {
+      const imagePath = path.join(IMAGE_DIR, "image.png");
+      const fileSystem = new FakeFileSystem();
+      fileSystem.setBinaryFile(imagePath, PNG_BYTES);
+      configureBroadcastResult(2);
+      const result = await newNotifier(fileSystem).execute({
+        title: "Picture",
+        body: "Body",
+        imageType: "bigPicture",
+        imagePath,
+        appId: "com.example.app",
+      });
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("sdk");
+      expect(result.warning).toContain("could not load the bigPicture image");
+    });
+
+    test("result=0 stays a failure", async () => {
+      configureBroadcastResult(0);
+      const failed = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+        title: "Hello",
+        body: "World",
+        appId: "com.example.app",
+      });
+      expect(failed.success).toBe(false);
+      expect(failed.error).toBe("SDK notification receiver reported a failure.");
+    });
+
+    test.each([3, 7, -1])(
+      "fails closed on result code %i, which this host does not know, and says to update the host",
+      async (code) => {
+        configureBroadcastResult(code);
+        const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+          title: "Hello",
+          body: "World",
+          appId: "com.example.app",
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain(`result code ${code}`);
+        expect(result.error).toContain("update AutoMobile");
+      },
+    );
   });
 
   test("reports an absent receiver without broadcasting", async () => {

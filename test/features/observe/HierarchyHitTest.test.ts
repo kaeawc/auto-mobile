@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
+import type {
+  AccessibilityHierarchy,
+  HierarchyDelegateContext,
+} from "../../../src/features/observe/android/types";
 import { previewHierarchyHitTest } from "../../../src/features/observe/HierarchyHitTest";
 import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
 import { nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
@@ -38,6 +45,40 @@ describe("hierarchy hitTest preview", () => {
     expect(result.candidates.map((entry) => entry.elementId)).toEqual(["upper", "lower"]);
     expect(result.firstCandidate?.elementId).toBe("upper");
     expect(result.dispatchGuaranteed).toBe(false);
+  });
+
+  test("lists a node once with its owning window's rank on a captured linked-window hierarchy", () => {
+    const hierarchy = new CtrlProxyHierarchy({
+      timer: new FakeTimer(),
+    } as HierarchyDelegateContext).convertToViewHierarchyResult(
+      structuredClone(capturedIme) as AccessibilityHierarchy,
+    );
+    // The capture links each accessibility window to the merged tree's own root object.
+    expect(hierarchy.windows).toHaveLength(3);
+    expect(hierarchy.windows!.every((window) => window.hierarchy !== undefined)).toBe(true);
+    const result = previewHierarchyHitTest(
+      { x: 540, y: 60 },
+      { ...captured, screenSize: { width: 1080, height: 2400 }, viewHierarchy: hierarchy },
+      "android",
+    );
+    const countOf = (elementId: string) =>
+      result.candidates.filter((entry) => entry.elementId === elementId);
+    // Status-bar window (layer 2 -> rank 0) and the app window (layer 0 -> rank 2).
+    expect(countOf("com.android.systemui:id/status_bar").map((entry) => entry.windowRank)).toEqual([
+      0,
+    ]);
+    expect(countOf("android:id/content").map((entry) => entry.windowRank)).toEqual([2]);
+    expect(countOf("s2-26081265664861f5").map((entry) => entry.windowRank)).toEqual([2]);
+    expect(result.firstCandidate?.windowRank).toBe(0);
+    // Only the three unlinked owner wrappers keep the merged roots' rank; no node is repeated
+    // under it, and each is a distinct node from every linked-window node.
+    const merged = result.candidates.filter((entry) => entry.windowRank === 3);
+    expect(merged.map((entry) => entry.depth)).toEqual([0, 0]);
+    expect(merged.map((entry) => entry.elementId)).toEqual([
+      "s2-e9921704644e6fde",
+      "s2-b1b5fa46393e3a9c",
+    ]);
+    expect(result.candidates).toHaveLength(16);
   });
 
   test("prefers the smallest containing interactive nested element", () => {

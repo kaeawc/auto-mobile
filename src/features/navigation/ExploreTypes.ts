@@ -63,6 +63,8 @@ export interface EdgeValidationResult {
   expectedTo: string;
   actualTo: string | null;
   success: boolean;
+  /** True when the edge has no replayable element interaction; neither a pass nor a failure. */
+  skipped?: boolean;
   timestamp: number;
   error?: string;
   matchConfidence?: number;

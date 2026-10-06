@@ -114,6 +114,8 @@ const VALID_IDS: readonly string[] = [
   "Etc/GMT-14",
   // tzdata rule zones.
   "EST5EDT",
+  "CST6CDT",
+  "MST7MDT",
   "PST8PDT",
   // Legacy aliases: absent from Intl.supportedValuesOf, still resolved by devices.
   "US/Pacific",
@@ -136,6 +138,31 @@ describe("validateTimeZoneId (#10190)", () => {
       expect(validateTimeZoneId(id)).toBeNull();
     });
   }
+
+  it("accepts the tzdata rule zones even when the host runtime does not know them (CI's ICU throws for them)", () => {
+    const original = Intl.DateTimeFormat;
+    const rejected = new Set(["EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT"]);
+    class RuleZoneRejectingFormat extends original {
+      constructor(locales?: string | string[], options?: Intl.DateTimeFormatOptions) {
+        if (options?.timeZone !== undefined && rejected.has(options.timeZone)) {
+          throw new RangeError(`Invalid time zone specified: ${options.timeZone}`);
+        }
+        super(locales, options);
+      }
+    }
+    Intl.DateTimeFormat = RuleZoneRejectingFormat;
+    try {
+      for (const id of rejected) {
+        expect(checkTimeZoneId(id)).toEqual({ error: null });
+        expect(checkTimeZoneId(id, "android")).toEqual({ error: null });
+        expect(checkTimeZoneId(id, "ios")).toEqual({ error: null });
+      }
+      // Only the exact names are exempt: a case variant is still refused.
+      expect(validateTimeZoneId("est5edt")).toContain('Invalid time zone "est5edt"');
+    } finally {
+      Intl.DateTimeFormat = original;
+    }
+  });
 
   it("refuses the Java custom ids by default and for iOS (no platform accepts them but Android)", () => {
     for (const id of ANDROID_CUSTOM_IDS) {

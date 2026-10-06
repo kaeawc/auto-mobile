@@ -12,7 +12,10 @@ import { StaleDisplayError, staleDisplayError } from "../../models/StaleDisplayE
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import { DisplaySelectionError, resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
-import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import type {
+  ObserveScreen,
+  ObserveScreenExecuteOptions,
+} from "../observe/interfaces/ObserveScreen";
 import { buildDisconnectedPanelMessage, type DisplayPanel } from "../../models/DisplayPanel";
 import {
   logicalDisplayIdForPanel,
@@ -20,6 +23,7 @@ import {
   type AndroidDisplayInfo,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectedDisplayPin } from "../observe/SessionDisplayContext";
+import { INTERMEDIATE_OBSERVATION_OPTIONS } from "./BaseVisualChange";
 
 export { buildDisconnectedPanelMessage } from "../../models/DisplayPanel";
 
@@ -184,6 +188,20 @@ async function inputDisplayId(
   return new ObservedAndroidDisplayCache(defaultTimer).logicalIdForPanel(device, adb, key, signal);
 }
 
+/**
+ * The pre-dispatch read only resolves the panel, its hierarchy and the stale-display fence. Every
+ * consumer of the returned observation reads hierarchy, screen size, display identity or geometry;
+ * none reads a screenshot or audit, and the action's own post-dispatch capture is the single one.
+ */
+function targetDisplayRead(display: string, signal?: AbortSignal) {
+  return {
+    ...INTERMEDIATE_OBSERVATION_OPTIONS,
+    display,
+    freshness: "cached-ok",
+    signal,
+  } satisfies ObserveScreenExecuteOptions;
+}
+
 /** Resolve explicit action targeting against the caller's last visible panel. */
 // oxlint-disable-next-line max-params -- Append the injectable tracker without breaking existing positional reader/signal callers.
 export async function prepareTargetDisplayAction(
@@ -212,7 +230,7 @@ export async function prepareTargetDisplayAction(
   // re-observe instruction for a panel the simulator cannot accept input on.
   const iosObservation =
     device.platform === "ios"
-      ? await observe.execute({ display, freshness: "cached-ok", signal })
+      ? await observe.execute(targetDisplayRead(display, signal))
       : undefined;
   if (previous?.display.key !== panel.key) {
     await assertActionPanelConnected(device, panel, adb, signal);
@@ -222,8 +240,7 @@ export async function prepareTargetDisplayAction(
   }
   const callerRevision = renderedRevision(device.deviceId, previous);
   assertCallerCurrent(callerRevision);
-  const observation =
-    iosObservation ?? (await observe.execute({ display, freshness: "cached-ok", signal }));
+  const observation = iosObservation ?? (await observe.execute(targetDisplayRead(display, signal)));
   assertCurrent();
   if (observation.display.key !== panel.key) {
     throw stale();

@@ -283,6 +283,61 @@ describe("sessionless identity quarantine", () => {
     }
   });
 
+  describe("input resolved for a session that has since left the device (#9958)", () => {
+    const newServer = () =>
+      new UnixSocketServer(
+        "scratch/never-listened.sock",
+        "http://localhost:0/mcp",
+        DaemonState.getInstance(),
+        new FakeTimer(),
+      );
+
+    test("is refused instead of running as an unowned call", async () => {
+      const h = await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
+      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      const server = newServer();
+      server["captureInputTargetOwner"](device);
+
+      const sessions = DaemonState.getInstance().getSessionManager();
+      await sessions.rebindSession("owner", "emulator-5556", "android");
+      expect(sessions.getSessionForDevice(device.deviceId)).toBe(null);
+
+      let ran = false;
+      await expect(
+        server["runTrackedDeviceInput"]("input/tap", device, async () => {
+          ran = true;
+        }),
+      ).rejects.toThrow(/Session owner no longer owns device 'emulator-5554'/);
+      expect(ran).toBe(false);
+      expect(executionTracker.hasActiveDeviceExecutions(device.deviceId)).toBe(false);
+    });
+
+    test("still runs while the resolving session owns the device", async () => {
+      const h = await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
+      await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+      const server = newServer();
+      server["captureInputTargetOwner"](device);
+
+      let ran = false;
+      await server["runTrackedDeviceInput"]("input/tap", device, async () => {
+        ran = true;
+      });
+      expect(ran).toBe(true);
+    });
+
+    test("an input resolved on an unowned device still runs sessionless", async () => {
+      await setup(new ExecutionTracker(new FakeTimer(), new FakeIdGenerator()));
+      const server = newServer();
+      server["captureInputTargetOwner"](device);
+
+      let ran = false;
+      await server["runTrackedDeviceInput"]("input/tap", device, async () => {
+        ran = true;
+      });
+      expect(ran).toBe(true);
+    });
+  });
+
   test("daemon sessionless input carries execution context, binding, and ambient abort", async () => {
     const h = await setup(executionTracker);
     const server = new UnixSocketServer(

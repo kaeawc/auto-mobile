@@ -306,9 +306,21 @@ export function scanFile(file: string, source: string): FileScanResult {
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      // `sendCommand(context, { messageType, ... })` — discriminator in the 2nd arg.
-      if (ts.isIdentifier(callee) && callee.text === "sendCommand") {
+      // `sendCommand(context, { messageType, ... })` — discriminator in the 2nd arg. The iOS
+      // dispatch wrapper `sendIOSPressCommand(context, { messageType, ... })` takes the same shape.
+      if (
+        ts.isIdentifier(callee) &&
+        (callee.text === "sendCommand" || callee.text === "sendIOSPressCommand")
+      ) {
         const obj = resolveSinkObject(node.arguments[1]);
+        if (obj) {
+          recordEmitObject(obj, SINK_DISCRIMINATOR.sendCommand);
+        }
+      }
+      // `this.sendSwipeCommand({ messageType, ... })` — the delegate's swipe transport seam takes
+      // the request options as its sole argument.
+      if (ts.isPropertyAccessExpression(callee) && callee.name.text === "sendSwipeCommand") {
+        const obj = resolveSinkObject(node.arguments[0]);
         if (obj) {
           recordEmitObject(obj, SINK_DISCRIMINATOR.sendCommand);
         }
@@ -324,6 +336,15 @@ export function scanFile(file: string, source: string): FileScanResult {
         if (obj) {
           recordEmitObject(obj, SINK_DISCRIMINATOR.jsonStringify);
         }
+      }
+    }
+    // `return { messageType, ... }` from a request-options builder (`tapCommandOptions`,
+    // `pinchCommandOptions`) whose result a delegate hands to `sendCommand`/`sendIOSPressCommand`
+    // as a call expression, which the call-site scan above cannot follow.
+    if (ts.isReturnStatement(node) && node.expression) {
+      const obj = resolveSinkObject(node.expression);
+      if (obj) {
+        recordEmitObject(obj, SINK_DISCRIMINATOR.sendCommand);
       }
     }
     ts.forEachChild(node, visit);

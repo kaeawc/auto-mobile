@@ -716,6 +716,12 @@
           "description": "Deprecated alias for name",
           "type": "string"
         },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -3904,7 +3910,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -4000,7 +4006,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -9760,7 +9766,7 @@
                       }
                     },
                     "occluded": {
-                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                       "type": "boolean",
                       "const": true
                     },
@@ -9855,7 +9861,7 @@
                       }
                     },
                     "occluded": {
-                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                       "type": "boolean",
                       "const": true
                     },
@@ -11545,7 +11551,7 @@
                 }
               },
               "occluded": {
-                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                 "type": "boolean",
                 "const": true
               },
@@ -11641,7 +11647,7 @@
                 }
               },
               "occluded": {
-                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                 "type": "boolean",
                 "const": true
               },
@@ -16430,7 +16436,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -16526,7 +16532,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -20663,6 +20669,12 @@
           "description": "Key",
           "type": "string"
         },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -21245,7 +21257,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -21341,7 +21353,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -25862,6 +25874,12 @@
             "UNKNOWN"
           ]
         },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -28567,7 +28585,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -28663,7 +28681,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -32243,7 +32261,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -32339,7 +32357,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },

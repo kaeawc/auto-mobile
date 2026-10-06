@@ -145,6 +145,10 @@ export class UninstallApp {
    * @param bundleId - The bundle identifier to uninstall
    */
   private async executeiOS(bundleId: string): Promise<UninstallAppResult> {
+    // Set only once the pre-uninstall listing actually showed the app. An error
+    // before that point (e.g. the listing throwing) leaves install state unknown,
+    // so the catch below omits `wasInstalled` rather than asserting it.
+    let observedInstalled = false;
     try {
       // Check if app is installed. Keep the cache disabled so the pre-uninstall
       // check always reflects live device state (the previous executor-arg path
@@ -183,6 +187,7 @@ export class UninstallApp {
         };
       }
 
+      observedInstalled = true;
       await resolveIosDeviceBackend(this.device.deviceId, {
         simctl: this.simctl,
         deviceAppUninstaller: this.deviceAppUninstaller,
@@ -227,7 +232,7 @@ export class UninstallApp {
       return {
         success: false,
         packageName: bundleId,
-        wasInstalled: true,
+        ...(observedInstalled ? { wasInstalled: true } : {}),
         keepData: false,
         error: errorMessage(error),
       };

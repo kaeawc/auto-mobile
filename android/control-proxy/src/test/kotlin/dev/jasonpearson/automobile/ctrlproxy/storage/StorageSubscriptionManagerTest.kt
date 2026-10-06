@@ -380,6 +380,61 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
+  fun `later disabled subscribes remember the refused start after the stopped flag clears`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply())
+    val firstError = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+    assertTrue(firstError is StorageError.AppStartedByRequest)
+
+    givenInstalledPackage("com.example.app", stopped = false)
+    repeat(2) {
+      val error = manager.subscribe("com.example.app", "settings").exceptionOrNull()
+      assertTrue(error is StorageError.AppStartedByRequest)
+      assertEquals(firstError?.message, error?.message)
+    }
+
+    assertEquals(3, pauses.size)
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+    verify(exactly = 6) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `successful subscribe clears refused start guidance for the package`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply(), disabledReply(), disabledReply(), successReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "auth").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
+
+    givenInstalledPackage("com.example.app", stopped = false)
+    assertTrue(manager.subscribe("com.example.app", "settings").isSuccess)
+    givenSubscribeReplies(disabledReply())
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", error?.message)
+    assertEquals(3, pauses.size)
+  }
+
+  @Test
+  fun `unsubscribe clears refused start guidance even without an active subscription`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "auth").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
+
+    assertTrue(manager.unsubscribe("com.example.app", "auth"))
+    givenInstalledPackage("com.example.app", stopped = false)
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", error?.message)
+  }
+
+  @Test
   fun `subscribe to a stopped app whose inspection comes up on the retry succeeds`() {
     givenInstalledPackage("com.example.app", stopped = true)
     givenSubscribeReplies(disabledReply(), successReply())

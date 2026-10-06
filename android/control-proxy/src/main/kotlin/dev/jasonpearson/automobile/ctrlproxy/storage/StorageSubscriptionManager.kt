@@ -80,6 +80,7 @@ class StorageSubscriptionManager(
     private const val CHANGES_PATH = "changes"
     private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
     private const val DISABLED_RETRY_DELAY_MS = 500L
+    private const val MAX_REFUSED_START_PACKAGES = 64
   }
 
   /** State for a single subscription. */
@@ -116,6 +117,11 @@ class StorageSubscriptionManager(
   private val subscriptionLocks = ConcurrentHashMap<String, Any>()
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
+
+  // Guarded by lifecycleLock, oldest entries evicted first. DISABLED cannot distinguish delayed
+  // initialization from a later intentional disable. Retain the launch guidance only until a
+  // non-DISABLED reply, explicit unsubscribe, or destroy; never claim the app is currently stopped.
+  private val refusedStartPackages = linkedSetOf<String>()
 
   // Bound events independently per subscribed file. If one file overflows, its newest event is
   // retained and exposes the sequence gap needed for snapshot recovery; unrelated files cannot
@@ -478,12 +484,24 @@ class StorageSubscriptionManager(
     // Read before the call: the call itself starts the process and clears the stopped state.
     val wasStopped = isPackageStopped(packageName)
     val first = callSubscribeToFile(packageName, fileName)
-    if (!first.disabled) return first.result
-    if (!pauseBeforeRetry()) return first.result
-    val second = callSubscribeToFile(packageName, fileName)
-    if (!second.disabled) return second.result
-    if (wasStopped) return Result.failure(StorageError.AppStartedByRequest(packageName))
-    return second.result
+    if (first.disabled && !pauseBeforeRetry()) return first.result
+    val outcome = if (first.disabled) callSubscribeToFile(packageName, fileName) else first
+    synchronized(lifecycleLock) {
+      if (!outcome.disabled) {
+        refusedStartPackages.remove(packageName)
+      } else if (!destroyed) {
+        if (wasStopped) {
+          refusedStartPackages.add(packageName)
+          if (refusedStartPackages.size > MAX_REFUSED_START_PACKAGES) {
+            refusedStartPackages.remove(refusedStartPackages.first())
+          }
+        }
+        if (packageName in refusedStartPackages) {
+          return Result.failure(StorageError.AppStartedByRequest(packageName))
+        }
+      }
+    }
+    return outcome.result
   }
 
   private fun pauseBeforeRetry(): Boolean =
@@ -585,6 +603,7 @@ class StorageSubscriptionManager(
     subscriptionId: String,
   ): Boolean {
     synchronized(lifecycleLock) {
+      refusedStartPackages.remove(packageName)
       if (subscriptions.remove(subscriptionId) == null) return true
       changeEventBuffers.remove(eventBufferKey(packageName, fileName))
       unregisterPackageObserverIfUnused(packageName, fileName)
@@ -806,6 +825,7 @@ class StorageSubscriptionManager(
       subscriptions.clear()
       subscriptionLocks.clear()
       packageObservers.clear()
+      refusedStartPackages.clear()
       changeEventBuffers.clear()
       changeEventSignal.close()
     }

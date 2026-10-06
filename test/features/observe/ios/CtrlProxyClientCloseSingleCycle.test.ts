@@ -208,7 +208,8 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     );
 
     expect(await client.ensureConnected()).toBe(true);
-    const request = client.requestSwipe(0, 0, 10, 10, 300, 60_000);
+    // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
+    const request = client.requestDrag(0, 0, 10, 10, 0, 300, 0, 60_000);
     await flushSetImmediate();
     const requestManager = (
       client as unknown as {

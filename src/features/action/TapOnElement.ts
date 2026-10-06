@@ -147,6 +147,7 @@ import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
+  dispatchIosSecondTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
@@ -206,6 +207,8 @@ const IOS_STATUS_BAR_CLASSES = new Set([
 ]);
 
 /** Internal action context; never part of the public tapOn schema. */
+type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
+
 type ResolvedAndroidTapOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
   /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
@@ -4435,7 +4438,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   isAccessibilityServiceEnabled,
-                  { displayFence: fence },
+                  { displayFence: fence, signal },
                 );
                 break;
               default:
@@ -5273,17 +5276,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element?: Element,
     isVoiceOverEnabled?: boolean,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: IosTapOptions = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
     if (isVoiceOverEnabled && element) {
-      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, {
-        displayFence: fence,
-      });
+      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fenceOptions);
       return;
     }
 
-    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fenceOptions);
   }
 
   /**
@@ -5294,9 +5294,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: IosTapOptions = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
+    const { displayFence: fence, signal } = fenceOptions;
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
     const tapDuration = action === "longPress" ? durationMs : 50;
 
@@ -5306,20 +5306,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Double tap - perform two taps
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
       await this.timer.sleep(200);
 
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, "second tap");
+      await dispatchIosSecondTap(client, { x, y }, tapDuration, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     }
   }
@@ -5346,9 +5346,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fenceOptions?: DisplayFenceOption,
+    fenceOptions?: IosTapOptions,
   ): Promise<void> {
-    const fence = this.readOptionalDisplayFence(fenceOptions);
+    const { displayFence: fence, signal } = this.readIosTapOptions(fenceOptions);
     // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
     const label =
       (element["ios-accessibility-label"] as string | undefined) ??
@@ -5359,7 +5359,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (!label) {
       logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
+        displayFence: fence,
+        signal,
+      });
       return;
     }
 
@@ -5386,7 +5389,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
           `falling back to coordinate tap at (${x}, ${y})`,
       );
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
+        displayFence: fence,
+        signal,
+      });
     }
   }
 
@@ -5395,6 +5401,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throw indeterminateTapError(result.error);
     }
     this.invalidateIosCacheOnSuccess(result);
+  }
+
+  private readIosTapOptions(options?: IosTapOptions): IosTapOptions {
+    return options ?? {};
   }
 
   private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {

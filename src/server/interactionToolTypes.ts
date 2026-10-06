@@ -154,10 +154,7 @@ export interface PinchOnArgs {
   duration?: number;
   rotationDegrees?: number;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
   autoTarget?: boolean;
   platform?: Platform;
 }

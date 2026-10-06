@@ -931,7 +931,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Use full screen including status/nav bars"),
-        container: nestedElementContainerSchema.optional().describe("Scope search to a container"),
+        container: nestedElementContainerSchema
+          .optional()
+          .describe(
+            "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
+          ),
         autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on

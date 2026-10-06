@@ -3057,29 +3057,36 @@
           "type": "string"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
           "anyOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/__schema0"
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "description": "Container resource ID",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["elementId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "description": "Container text",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["text"],
+                  "additionalProperties": false
                 }
-              },
-              "required": ["text"],
-              "additionalProperties": false
+              ]
             }
           ]
         },
@@ -3090,7 +3097,7 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3104,7 +3111,61 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -17036,7 +17097,7 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
           "$ref": "#/$defs/__schema0"
         },
         "autoTarget": {

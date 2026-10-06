@@ -16,6 +16,7 @@ import {
   type NavigationGraphService,
 } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
+import { UIStateExtractor } from "./UIStateExtractor";
 import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
@@ -52,6 +53,7 @@ import {
   filterUnexhaustedElements,
   tapSelectorFor,
   tapCoordinatesFor,
+  publicTapOnArgs,
 } from "./ExploreElementExtraction";
 
 // Import element scoring functions
@@ -80,7 +82,8 @@ import {
   markNodeVisited,
   markEdgeTraversed,
   selectNextEdgeToTraverse,
-  findElementMatchingEdge,
+  resolveEdgeTarget,
+  markEdgeSkipped,
   validateNavigation,
 } from "./ExploreValidateMode";
 
@@ -130,6 +133,8 @@ export class Explore extends BaseVisualChange {
   /** @internal Exposed for focused traversal report tests. */
   graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
+  /** Validate mode: the recorded Back edge selected for the next iteration (no element to tap). */
+  private recordedBackEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;
   private readonly tapActionFactory?: DialogTapActionFactory;
@@ -243,6 +248,7 @@ export class Explore extends BaseVisualChange {
     this.loopDetection.clear();
     this.rootScreens.clear();
     this.pendingBackScreen = null;
+    this.recordedBackEdge = null;
     this.awaitingRelaunchScreen = false;
     this.hasObservedTargetApp = false;
     this.elementSelections = [];
@@ -290,8 +296,9 @@ export class Explore extends BaseVisualChange {
       }
 
       if (!nextElement) {
-        logger.info("[Explore] No suitable element found, checking dead-end recovery");
-        await this.handleDeadEnd(progress);
+        if (!(await this.recoverWithoutElement(context, observation))) {
+          break;
+        }
         continue;
       }
 
@@ -318,6 +325,68 @@ export class Explore extends BaseVisualChange {
 
       await this.reportProgressAndReset(context);
     }
+  }
+
+  /**
+   * No element was selected. In validate mode a recorded Back edge is replayed
+   * with the Back button and its resulting screen checked; otherwise this is a
+   * dead end. Returns false when the run must stop.
+   */
+  private async recoverWithoutElement(
+    context: ExplorationLoopContext,
+    observation: ObserveResult,
+  ): Promise<boolean> {
+    const { progress } = context;
+    if (!this.recordedBackEdge) {
+      logger.info("[Explore] No suitable element found, checking dead-end recovery");
+      await this.handleDeadEnd(progress, observation);
+      return true;
+    }
+    if (!(await this.validateRecordedBack(this.recordedBackEdge, observation, progress))) {
+      return false;
+    }
+    await this.reportProgressAndReset(context);
+    return true;
+  }
+
+  /**
+   * Validate a recorded Back edge: press Back (recorded like any other action,
+   * so the resulting navigation event is attributed to it) and check the screen
+   * it lands on. A Back that cannot be dispatched fails the edge and stops the
+   * run.
+   */
+  private async validateRecordedBack(
+    edge: NavigationEdge,
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+  ): Promise<boolean> {
+    this.recordedBackEdge = null;
+    if (progress) {
+      await progress(
+        this.interactionCount,
+        this.interactionCount + 1,
+        `Validating Back edge ${edge.from}->${edge.to}...`,
+      );
+    }
+    try {
+      await this.dispatchBack(observation);
+    } catch (error) {
+      this.stopReason = `Validate mode: Back press failed for edge ${edge.from}->${edge.to}: ${errorMessage(error)}`;
+      logger.warn(`[Explore] ${this.stopReason}`, error);
+      if (this.graphTraversalState) {
+        markEdgeTraversed(
+          this.graphTraversalState,
+          edge,
+          null,
+          false,
+          this.timer,
+          "Back press failed",
+        );
+      }
+      return false;
+    }
+    this.consecutiveBackCount = 0;
+    return await this.recordInteractionResult(true, "validate");
   }
 
   private async prepareExplorationObservation(
@@ -758,6 +827,7 @@ export class Explore extends BaseVisualChange {
     perf: PerformanceTracker,
   ): Promise<Element | null> {
     return await perf.track("selectNextElement", async () => {
+      this.recordedBackEdge = null;
       const viewHierarchy = observation.viewHierarchy;
       const safeCandidates = this.getSafeExplorationCandidates(observation);
 
@@ -833,26 +903,54 @@ export class Explore extends BaseVisualChange {
       markNodeVisited(state, currentScreen);
     }
 
-    const targetEdge = selectNextEdgeToTraverse(state, currentScreen);
-    if (!targetEdge) {
-      if (state.pendingEdges.size === 0) {
-        this.stopReason = "All edges in navigation graph have been traversed";
-        logger.info(`[Explore] ${this.stopReason}`);
+    // Each skipped edge leaves the pending set, so this terminates.
+    for (;;) {
+      const targetEdge = selectNextEdgeToTraverse(state, currentScreen);
+      if (!targetEdge) {
+        if (state.pendingEdges.size === 0) {
+          this.stopReason = "All edges in navigation graph have been traversed";
+          logger.info(`[Explore] ${this.stopReason}`);
+        }
+        // Pending sources elsewhere: let the loop use its bounded back recovery.
+        return null;
       }
-      // Pending sources elsewhere: let the loop use its bounded back recovery.
-      return null;
-    }
 
-    const match = findElementMatchingEdge(candidates, targetEdge);
-    if (!match) {
-      this.stopReason =
-        `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
-        `App may have diverged from known graph.`;
-      logger.error(`[Explore] ${this.stopReason}`);
-      markEdgeTraversed(state, targetEdge, null, false, this.timer, "Element not found on screen");
-      return null;
+      const resolution = resolveEdgeTarget(candidates, targetEdge);
+      if (resolution.status === "not-validatable") {
+        // A property of the recorded edge, not of the app: skip it and try the next one.
+        markEdgeSkipped(state, targetEdge, resolution.reason, this.timer);
+        continue;
+      }
+      if (resolution.status === "back") {
+        // Nothing to tap: the loop replays this edge with the Back button.
+        this.currentTargetEdge = targetEdge;
+        this.currentElementConfidence = 1;
+        this.recordedBackEdge = targetEdge;
+        return null;
+      }
+      if (resolution.status === "not-found") {
+        this.stopReason =
+          `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
+          `App may have diverged from known graph.`;
+        logger.error(`[Explore] ${this.stopReason}`);
+        markEdgeTraversed(
+          state,
+          targetEdge,
+          null,
+          false,
+          this.timer,
+          "Element not found on screen",
+        );
+        return null;
+      }
+      return this.targetValidateEdge(targetEdge, resolution);
     }
+  }
 
+  private targetValidateEdge(
+    targetEdge: NavigationEdge,
+    match: { element: Element; confidence: number },
+  ): Element {
     logger.info(
       `[Explore] Validate mode: targeting edge ${targetEdge.from}->${targetEdge.to} ` +
         `(confidence: ${(match.confidence * 100).toFixed(0)}%)`,
@@ -975,64 +1073,162 @@ export class Explore extends BaseVisualChange {
       // Check if element is scrollable - perform swipe instead of tap
       const isScrollable = isTruthy(element.scrollable);
 
-      if (isScrollable) {
-        // Perform swipe on scrollable container
-        logger.info(
-          `[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`,
-        );
-        const swipeOn = new SwipeOnElement(this.device, this.adb);
-
-        const swipeResult = await swipeOn.execute(
-          element,
-          "up",
-          { duration: 600 }, // Slow swipe
-          progress,
-          signal,
-        );
-
-        // Reset consecutive back count since we did a swipe
+      const success = isScrollable
+        ? await this.swipeContainer(element, observation, progress, signal)
+        : await this.tapElement(element, observation, progress, signal);
+      // Reset consecutive back count since we did a swipe or tap (not when
+      // there was no tap target to dispatch).
+      if (success !== null) {
         this.consecutiveBackCount = 0;
-
-        return swipeResult.success;
-      } else {
-        // Perform tap interaction
-        const selector = observation.viewHierarchy
-          ? tapSelectorFor(element, observation.viewHierarchy)
-          : null;
-        const coordinates = selector ? null : tapCoordinatesFor(element);
-        if (!selector && !coordinates) {
-          logger.warn(
-            `[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=${element["class"] || "<empty>"}; bounds=${JSON.stringify(element.bounds)}`,
-          );
-          return false;
-        }
-        const tapResult = selector
-          ? await new TapOnElement(this.device, this.adb).execute(
-              { ...selector, action: "tap" },
-              progress,
-              signal,
-            )
-          : await new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
-              { ...coordinates!, action: "tap" },
-              progress,
-              signal,
-            );
-
-        // Reset consecutive back count since we did a tap
-        this.consecutiveBackCount = 0;
-
-        return tapResult.success;
       }
+      return success ?? false;
     } catch (error) {
       logger.warn(`[Explore] Failed to interact with element: ${error}`);
       return false;
     }
   }
 
+  /** Swipe a scrollable container; the swipeOn record needs a selector to replay it. */
+  private async swipeContainer(
+    element: Element,
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    logger.info(
+      `[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`,
+    );
+    const swipeOn = new SwipeOnElement(this.device, this.adb);
+    const container = observation.viewHierarchy
+      ? tapSelectorFor(element, observation.viewHierarchy)
+      : null;
+    const result = await this.runRecorded(
+      container ? "swipeOn" : null,
+      container ? { container, direction: "up", speed: "slow" } : {},
+      observation,
+      () =>
+        swipeOn.execute(
+          element,
+          "up",
+          { duration: 600 }, // Slow swipe
+          progress,
+          signal,
+        ),
+    );
+    return result.success;
+  }
+
+  /** Tap an element by selector, else its centre; null when it has no tap target. */
+  private async tapElement(
+    element: Element,
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<boolean | null> {
+    const selector = observation.viewHierarchy
+      ? tapSelectorFor(element, observation.viewHierarchy)
+      : null;
+    const coordinates = selector ? null : tapCoordinatesFor(element);
+    if (!selector && !coordinates) {
+      logger.warn(
+        `[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=${element["class"] || "<empty>"}; bounds=${JSON.stringify(element.bounds)}`,
+      );
+      return null;
+    }
+    const result = selector
+      ? await this.runRecorded("tapOn", publicTapOnArgs(selector), observation, () =>
+          new TapOnElement(this.device, this.adb).execute(
+            { ...selector, action: "tap" },
+            progress,
+            signal,
+          ),
+        )
+      : await this.runRecorded("tapAt", { ...coordinates!, action: "tap" }, observation, () =>
+          new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
+            { ...coordinates!, action: "tap" },
+            progress,
+            signal,
+          ),
+        );
+    return result.success;
+  }
+
+  /**
+   * Run one explore action while the navigation graph holds the tool call that
+   * would replay it, so an edge it produces carries that call instead of
+   * reading as unknown (Back press) in navigateTo (#9989). Mirrors the registry
+   * wrapper: the record is recorded before dispatch and withdrawn when the
+   * action fails, throws or is aborted. A null tool name skips recording when
+   * the action has no replayable public form.
+   */
+  private async runRecorded<T extends { success: boolean }>(
+    toolName: string | null,
+    args: Record<string, unknown>,
+    observation: ObserveResult | undefined,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const withdraw = toolName
+      ? this.navigationManager.recordToolCall(
+          toolName,
+          args,
+          new UIStateExtractor().extractFromObservation(observation),
+        )
+      : undefined;
+    let succeeded = false;
+    try {
+      const result = await run();
+      succeeded = result.success;
+      return result;
+    } finally {
+      if (!succeeded) {
+        withdraw?.();
+      }
+    }
+  }
+
+  /**
+   * Press Back on the device, recorded as `pressButton { button: "back" }` so the
+   * edge the resulting navigation creates replays (and validates) as a recorded
+   * Back instead of an unknown interaction.
+   */
+  private async dispatchBack(observation?: ObserveResult): Promise<void> {
+    // Recovery dispatches below bypass BaseVisualChange's action boundary.
+    await beginPostActionCaptureAction();
+    await this.runRecorded("pressButton", { button: "back" }, observation, async () => {
+      await this.pressBackOnPlatform();
+      return { success: true };
+    });
+  }
+
+  private async pressBackOnPlatform(): Promise<void> {
+    if (this.device.platform === "android") {
+      // Preserve the Explore instance's injected transport and timer. Calling
+      // press() avoids nested observed-interaction progress on this operation.
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      if (!result.success) {
+        throw new Error(result.error ?? "Android back navigation failed");
+      }
+      return;
+    }
+    // iOS recovery must route through the selected device/session tool.
+    // Do not forward the outer progress callback: the nested action has a
+    // different scale and would make exploration progress jump backward.
+    const response = await ToolRegistry.callInternal("pressButton", {
+      button: "back",
+      platform: this.device.platform,
+      deviceId: this.device.deviceId,
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+    });
+    throwIfInternalToolFailed(response, "pressButton", this.device.platform);
+  }
+
   /**
    * Handle dead-end situation by going back
    */
-  private async handleDeadEnd(progress?: ProgressCallback): Promise<void> {
+  private async handleDeadEnd(
+    progress?: ProgressCallback,
+    observation?: ObserveResult,
+  ): Promise<void> {
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
@@ -1048,27 +1244,7 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Recovery dispatches below bypass BaseVisualChange's action boundary.
-      await beginPostActionCaptureAction();
-      if (this.device.platform === "android") {
-        // Preserve the Explore instance's injected transport and timer. Calling
-        // press() avoids nested observed-interaction progress on this operation.
-        const result = await new PressButton(this.device, this.adb, this.timer).press("back");
-        if (!result.success) {
-          throw new Error(result.error ?? "Android back navigation failed");
-        }
-      } else {
-        // iOS recovery must route through the selected device/session tool.
-        // Do not forward the outer progress callback: the nested action has a
-        // different scale and would make exploration progress jump backward.
-        const response = await ToolRegistry.callInternal("pressButton", {
-          button: "back",
-          platform: this.device.platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        });
-        throwIfInternalToolFailed(response, "pressButton", this.device.platform);
-      }
+      await this.dispatchBack(observation);
       this.pendingBackScreen = currentScreen === "unknown" ? null : currentScreen;
       this.consecutiveBackCount++;
 
@@ -1204,7 +1380,9 @@ export class Explore extends BaseVisualChange {
 
     const results = Array.from(state.edgeValidationResults.values());
     const validated = results.filter((result) => result.success).length;
-    const failed = results.length - validated;
+    const skipped = results.filter((result) => result.skipped).length;
+    const failed = results.length - validated - skipped;
+    const skippedNote = skipped > 0 ? `${skipped} skipped (not replayable); ` : "";
     const pending = Array.from(
       state.pendingEdges,
       ([key, edge]) => `${edge.from}->${edge.to} (${key})`,
@@ -1213,7 +1391,7 @@ export class Explore extends BaseVisualChange {
     // they are globally unreachable. Preserve its reason alongside the remainder.
     return (
       `${reason}. Validated ${validated} of ${state.totalEdgesInGraph} edges; ` +
-      `${failed} failed validation; ${state.pendingEdges.size} remain pending. ` +
+      `${failed} failed validation; ${skippedNote}${state.pendingEdges.size} remain pending. ` +
       `Pending edges not reached before stopping (source->destination): ${pending.join(", ")}`
     );
   }

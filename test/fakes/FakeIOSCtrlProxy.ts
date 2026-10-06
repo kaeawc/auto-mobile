@@ -1,4 +1,5 @@
 import { IOSCtrlProxy } from "../../src/features/observe/ios";
+import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
   CtrlProxyScreenshotResult,
   CtrlProxyDragResult,
@@ -101,6 +102,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     rotationDegrees: number;
     duration?: number;
     timeoutMs?: number;
+    signal?: AbortSignal;
   }> = [];
 
   private setTextHistory: Array<{
@@ -131,7 +133,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private currentOrientation: string = "portrait";
   private launchAppHistory: string[] = [];
   private dragResult: CtrlProxyDragResult | null = null;
-  private pinchResult: CtrlProxyPinchResult | null = null;
+  private pinchResult: IOSDispatchResult<CtrlProxyPinchResult> | null = null;
   private tapResult: CtrlProxyTapResult | null = null;
   private swipeResult: CtrlProxySwipeResult | null = null;
   private recentAppsResult: CtrlProxyRecentAppsResult | null = null;
@@ -273,7 +275,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Configure pinch result
    */
-  setPinchResult(result: CtrlProxyPinchResult | null): void {
+  setPinchResult(result: IOSDispatchResult<CtrlProxyPinchResult> | null): void {
     this.pinchResult = result;
   }
 
@@ -433,6 +435,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     rotationDegrees: number;
     duration?: number;
     timeoutMs?: number;
+    signal?: AbortSignal;
   }> {
     return [...this.pinchHistory];
   }
@@ -830,7 +833,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
 
@@ -842,7 +847,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       rotationDegrees,
       duration,
       timeoutMs,
+      signal,
     });
+    onDispatch?.();
 
     if (this.pinchResult) {
       return {

@@ -134,8 +134,17 @@ export async function parseAndroidPreferencesXml(
       explicitArray: true,
       explicitRoot: true,
       trim: false,
+      // xml2js deletes the text of any element whose text is whitespace-only (and, for an
+      // element with attributes, that is the only copy), so a `<string name="k"> </string>`
+      // value reads back as "" (issue #9916). Ordered children + `includeWhiteChars` make the
+      // parser also keep every text run as a `__text__` child under `$$`; the legacy
+      // `{ $, _, <tag>: [...] }` shape is rebuilt from those by `restoreWhitespaceText`.
+      explicitChildren: true,
+      preserveChildrenOrder: true,
+      charsAsChildren: true,
+      includeWhiteChars: true,
     });
-    return normalizeAndroidPreferencesDocument(parsed);
+    return normalizeAndroidPreferencesDocument(restoreWhitespaceText(parsed));
   } catch (error) {
     throw toActionableError(error, "Failed to parse Android SharedPreferences XML");
   }
@@ -169,6 +178,50 @@ export function arrayOfNodes(nodes: unknown): any[] {
 
 export function findNamedNode(nodes: unknown, key: string): any | null {
   return arrayOfNodes(nodes).find((node) => node?.$?.name === key) ?? null;
+}
+
+const ORDERED_CHILDREN_KEY = "$$";
+const ORDERED_NAME_KEY = "#name";
+const ORDERED_TEXT_NAME = "__text__";
+
+/**
+ * Collapses the ordered-children bookkeeping that `parseAndroidPreferencesXml` asks xml2js for
+ * back into the default `{ $, _, <tag>: [...] }` shape, keeping the text of whitespace-only
+ * elements that xml2js would otherwise have dropped. Text-only elements without attributes
+ * collapse to plain strings, exactly as xml2js does by default.
+ */
+function restoreWhitespaceText(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(restoreWhitespaceText);
+  }
+  if (!isRecord(value)) {
+    return value;
+  }
+  const node: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== ORDERED_CHILDREN_KEY && key !== ORDERED_NAME_KEY) {
+      node[key] = key === "$" ? child : restoreWhitespaceText(child);
+    }
+  }
+  const text = wholeTextOf(value[ORDERED_CHILDREN_KEY]);
+  if (node._ === undefined && text !== undefined) {
+    node._ = text;
+  }
+  return Object.keys(node).length === 1 && typeof node._ === "string" ? node._ : node;
+}
+
+/** The concatenated text of an ordered-children list made only of text runs, else undefined. */
+function wholeTextOf(children: unknown): string | undefined {
+  if (!Array.isArray(children) || children.length === 0) {
+    return undefined;
+  }
+  const runs = children.filter(
+    (child) => isRecord(child) && child[ORDERED_NAME_KEY] === ORDERED_TEXT_NAME,
+  );
+  if (runs.length !== children.length) {
+    return undefined;
+  }
+  return runs.map((run) => String(run._ ?? "")).join("");
 }
 
 function normalizeAndroidPreferencesDocument(parsed: unknown): AndroidPreferencesXmlDocument {

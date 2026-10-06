@@ -24,6 +24,12 @@ import type {
 } from "./VideoRecorderService";
 import { capBitrateKbps, VideoCaptureFinalizationError } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
+import {
+  buildPidReportingScreenrecordArgs,
+  isOwnRecorderCmdline,
+  trackDeviceRecorderPid,
+  type DeviceRecorderPid,
+} from "./androidRecorderPid";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 import {
   probeScreenrecordDisplayFlag,
@@ -38,6 +44,11 @@ interface AndroidBackendHandle {
   stderr: string[];
   device: BootedDevice;
   deviceTempPath: string;
+  /**
+   * The recorder's device-side pid, learned from the launch shell's first stdout line.
+   * Absent or unresolved means stop/force-stop fall back to signalling by name.
+   */
+  devicePid?: DeviceRecorderPid;
 }
 
 const gracefulExitTimeout = new Error("Video capture graceful exit deadline elapsed");
@@ -54,10 +65,13 @@ const DEVICE_FILE_FINALIZE_POLL_ATTEMPTS = 5;
 const DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS = 300;
 const PULL_MAX_ATTEMPTS = 3;
 const PULL_RETRY_DELAY_MS = 500;
+// Budget for each of the two device commands (own-process check, then kill) that
+// signal the recorder by pid.
+const SIGNAL_RECORDER_COMMAND_TIMEOUT_MS = 4000;
 
 async function startScreenrecordProcess(
   adb: Pick<AdbExecutor, "spawn">,
-  args: string[],
+  screenrecordArgv: string[],
   config: VideoCaptureConfig,
   device: BootedDevice,
   physicalDisplayId: string | undefined,
@@ -67,13 +81,15 @@ async function startScreenrecordProcess(
   exitState: ProcessExitState;
   exitPromise: Promise<void>;
   stderr: string[];
+  devicePid: DeviceRecorderPid;
   warning?: string;
   physicalDisplayId?: string;
 }> {
-  let process = await adb.spawn(args, {
+  let process = await adb.spawn(buildPidReportingScreenrecordArgs(screenrecordArgv), {
     signal: config.abortSignal,
     abortSignalScope: "startup",
   });
+  let devicePid = trackDeviceRecorderPid(process.stdout);
   const abortStartup = () => process.kill("SIGTERM");
   config.abortSignal?.addEventListener("abort", abortStartup, { once: true });
   try {
@@ -89,9 +105,15 @@ async function startScreenrecordProcess(
         warning = "Android screenrecord rejected --display-id; recording the default display.";
         logger.warn(`[VideoCapture] ${warning}`);
         process = await adb.spawn(
-          args.filter((arg, index) => arg !== "--display-id" && args[index - 1] !== "--display-id"),
+          buildPidReportingScreenrecordArgs(
+            screenrecordArgv.filter(
+              (arg, index) =>
+                arg !== "--display-id" && screenrecordArgv[index - 1] !== "--display-id",
+            ),
+          ),
           { signal: config.abortSignal, abortSignalScope: "startup" },
         );
+        devicePid = trackDeviceRecorderPid(process.stdout);
         stderr = [];
         ({ exitState, exitPromise } = createExitTracker(process, stderr));
         effectivePhysicalId = undefined;
@@ -102,6 +124,7 @@ async function startScreenrecordProcess(
       exitState,
       exitPromise,
       stderr,
+      devicePid,
       warning,
       physicalDisplayId: effectivePhysicalId,
     };
@@ -167,19 +190,11 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
     // `adb shell screenrecord` process, ADB can drop the session before the device writes
     // the MP4 moov atom — leading to tiny/corrupt files that show a single frozen frame.
-    // NOTE: pkill -2 signals *all* screenrecord processes on the device. This is fine for
-    // single-recording usage but would interfere with concurrent recordings on the same device.
+    // The recorder's own device pid is signalled when known; only a recording whose pid
+    // could not be learned falls back to `pkill -2 screenrecord`, which signals *all*
+    // recorders on the device and would interfere with concurrent recordings.
     const adbForStop = this.adbFactory.create(backendHandle.device);
-    try {
-      const pk = await adbForStop.executeCommand("shell pkill -2 screenrecord", 8000);
-      logger.info(
-        `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`,
-      );
-    } catch (error) {
-      logger.warn(
-        `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${errorMessage(error)}`,
-      );
-    }
+    await this.requestDeviceRecorderStop(adbForStop, backendHandle);
 
     // Wait for the host adb process to exit now that remote screenrecord should have finalized
     try {
@@ -271,6 +286,87 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
           : `Android capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
         { cause: error, retainOwnership: retainDeviceFile },
       );
+    }
+  }
+
+  private async requestDeviceRecorderStop(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+  ): Promise<void> {
+    const pid = backendHandle.devicePid?.pid;
+    try {
+      if (pid !== undefined) {
+        const outcome = await this.signalDeviceRecorder(adb, backendHandle, pid, 2);
+        logger.info(`[VideoCapture] Device recorder pid ${pid} SIGINT: ${outcome}`);
+        return;
+      }
+      const pk = await adb.executeCommand("shell pkill -2 screenrecord", 8000);
+      logger.info(
+        `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`,
+      );
+    } catch (error) {
+      logger.warn(
+        `[VideoCapture] Device-side SIGINT of screenrecord failed; will rely on host SIGINT: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Signals exactly this recording's device-side recorder. The pid is verified to still
+   * be our `screenrecord` (same unique output file) right before the kill so a reused
+   * pid is never signalled; a pid that is gone or no longer ours reports "not-ours".
+   */
+  private async signalDeviceRecorder(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+    pid: number,
+    signal: 2 | 9,
+  ): Promise<"signalled" | "not-ours"> {
+    // `; true` keeps the exit status 0 when the process is gone (no /proc entry), so
+    // only a transport failure throws.
+    const probe = await adb.executeCommand(
+      `shell 'cat /proc/${pid}/cmdline 2>/dev/null; true'`,
+      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+      undefined,
+      true,
+    );
+    if (!isOwnRecorderCmdline(probe.stdout, backendHandle.deviceTempPath)) {
+      logger.warn(
+        `[VideoCapture] Device pid ${pid} is no longer this recording's screenrecord; not signalling it`,
+      );
+      return "not-ours";
+    }
+    await adb.executeCommand(`shell kill -${signal} ${pid}`, SIGNAL_RECORDER_COMMAND_TIMEOUT_MS);
+    return "signalled";
+  }
+
+  /** Returns a failure description, or undefined when the recorder was handled or skipped. */
+  private async forceKillDeviceRecorder(
+    adb: AdbExecutor,
+    backendHandle: AndroidBackendHandle,
+    recordingId: string,
+    options?: ForceStopOptions,
+  ): Promise<string | undefined> {
+    const pid = backendHandle.devicePid?.pid;
+    if (pid === undefined && options?.deviceWide === false) {
+      // Without our pid, `pkill -9 screenrecord` would signal every recorder on the
+      // device, and the device may now belong to another session. The host `adb shell`
+      // reap and our uniquely named temp file's removal are the only scoped cleanup.
+      logger.warn(
+        `[VideoCapture] Skipping device-wide screenrecord kill for ${recordingId}; its device pid is unknown so the device-side recorder may run until its own time limit`,
+      );
+      return undefined;
+    }
+    try {
+      if (pid === undefined) {
+        await adb.executeCommand("shell pkill -9 screenrecord", 8000);
+      } else {
+        await this.signalDeviceRecorder(adb, backendHandle, pid, 9);
+      }
+      return undefined;
+    } catch (error) {
+      logger.warn(`[VideoCapture] Device-side force-stop failed: ${errorMessage(error)}`);
+      return `screenrecord force-stop failed: ${errorMessage(error)}`;
     }
   }
 
@@ -489,21 +585,14 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // directly owned adb process. Shutdown has a short outer deadline.
     const adb = this.adbFactory.create(backendHandle.device);
     const failures: string[] = [];
-    if (options?.deviceWide === false) {
-      // `pkill -9 screenrecord` signals every recorder on the device, and the device may
-      // now belong to another session. The recorder's device-side pid is not tracked, so
-      // skip the kill: the host `adb shell` reap above and our uniquely named temp file's
-      // removal below are the only cleanup we can scope to this recording.
-      logger.warn(
-        `[VideoCapture] Skipping device-wide screenrecord kill for ${handle.recordingId}; the device-side recorder may run until its own time limit`,
-      );
-    } else {
-      try {
-        await adb.executeCommand("shell pkill -9 screenrecord", 8000);
-      } catch (error) {
-        logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
-        failures.push(`screenrecord force-stop failed: ${errorMessage(error)}`);
-      }
+    const killFailure = await this.forceKillDeviceRecorder(
+      adb,
+      backendHandle,
+      handle.recordingId,
+      options,
+    );
+    if (killFailure) {
+      failures.push(killFailure);
     }
     try {
       await adb.execute(["shell", "rm", "-f", backendHandle.deviceTempPath], {
@@ -555,7 +644,6 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     const deviceTempPath = `/sdcard/auto-mobile-${config.recordingId}.mp4`;
 
     const args = [
-      "shell",
       "screenrecord",
       "--bit-rate",
       String(bitrateBps),
@@ -591,6 +679,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       exitState,
       exitPromise,
       stderr,
+      devicePid,
       warning,
       physicalDisplayId: effectivePhysicalId,
     } = await startScreenrecordProcess(adb, args, config, device, physicalDisplayId, this.timer);
@@ -603,6 +692,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       stderr,
       device,
       deviceTempPath,
+      devicePid,
     };
     return {
       recordingId: config.recordingId,

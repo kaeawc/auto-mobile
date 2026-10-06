@@ -26,6 +26,7 @@ import {
   SwipeOnOptions,
   SwipeOnResult,
   ScrollableCandidate,
+  SwipeResult,
   ViewHierarchyResult,
 } from "../../../models";
 import { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
@@ -45,7 +46,11 @@ import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { resolveSwipeDirection } from "./swipeOnUtils";
-import { AccessibilityDetector } from "../../accessibility/interfaces/AccessibilityDetector";
+import {
+  AccessibilityDetector,
+  TALKBACK_STATE_UNKNOWN_WARNING,
+} from "../../accessibility/interfaces/AccessibilityDetector";
+import { talkBackDisplayRefusal } from "../../talkback/talkBackDisplayRefusal";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import {
   DEFAULT_VISION_CONFIG,
@@ -100,6 +105,17 @@ const DISPLAY_SWIPE_OPTIONS = [
   "includeSystemInsets",
   "scrollMode",
 ] as const;
+
+/** TalkBack state for an explicit-display swipe; `unknownWarning` is set when detection is unconfirmed. */
+type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
+
+/** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
+function withUnknownTalkBackWarning(result: SwipeOnResult, warning?: string): SwipeOnResult {
+  if (!warning || result.warnings?.includes(warning)) {
+    return result;
+  }
+  return { ...result, warnings: [...(result.warnings ?? []), warning] };
+}
 
 type AutoTargetDecision = {
   element?: Element;
@@ -158,6 +174,7 @@ export class SwipeOn extends BaseVisualChange {
   private geometry!: ElementGeometry;
   private accessibilityService!: AndroidCtrlProxyClient;
   private accessibilityDetector!: AccessibilityDetector;
+  private featureFlags!: FeatureFlagService;
   private overlayDetector: OverlayDetector;
   private autoTargetSelector: AutoTargetSelectorService;
   private talkBackExecutor: TalkBackSwipeExecutor;
@@ -180,6 +197,7 @@ export class SwipeOn extends BaseVisualChange {
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     const parser = this.initializeGestureDependencies(device, adb, dependencies);
     const featureFlags = dependencies.featureFlags ?? FeatureFlagService.getInstance();
+    this.featureFlags = featureFlags;
     this.visionConfig = dependencies.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer =
       dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
@@ -355,10 +373,12 @@ export class SwipeOn extends BaseVisualChange {
     options: requestedOptions,
     target,
     signal,
+    talkBack,
   }: {
     options: SwipeOnOptions;
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
+    talkBack: DisplayTalkBackState;
   }): Promise<SwipeOnResult> {
     let resolutionObservation = target.observation;
     if (requestedOptions.container || requestedOptions.autoTarget === true) {
@@ -390,9 +410,25 @@ export class SwipeOn extends BaseVisualChange {
       observation,
     });
     const duration = resolveSwipeDuration({ ...options, geometry: this.geometry });
+    const boomerang = resolveBoomerangConfig(options);
+    if (talkBack.enabled) {
+      // A raw one-finger swipe only moves TalkBack focus; reuse the default route's executor.
+      const swipe = await this.dispatchTalkBackDisplaySwipe({
+        options,
+        element: decision.element,
+        coordinates: { x1, y1, x2, y2 },
+        duration,
+        boomerang,
+        target,
+        signal,
+      });
+      return this.withAutoTargetDecision({
+        result: { ...swipe, targetType, warning },
+        decision,
+      });
+    }
     const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
     await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
-    const boomerang = resolveBoomerangConfig(options);
     let totalDuration = duration;
     if (boomerang) {
       if (boomerang.apexPauseMs > 0) {
@@ -426,9 +462,84 @@ export class SwipeOn extends BaseVisualChange {
         y2,
         duration: totalDuration,
         warning,
+        ...(talkBack.unknownWarning ? { warnings: [talkBack.unknownWarning] } : {}),
       },
       decision,
     });
+  }
+
+  /**
+   * TalkBack on for an explicit display: refuse a non-default display before any dispatch (the
+   * shared TalkBack driver has no display-addressed request); an unknown state keeps the raw
+   * gesture and carries the same warning as the default route (#9905).
+   */
+  private async resolveDisplayTalkBack(
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+    signal?: AbortSignal,
+  ): Promise<DisplayTalkBackState> {
+    const state = await this.accessibilityDetector.resolveTalkBackState(
+      this.device.deviceId,
+      this.adb,
+      this.featureFlags,
+    );
+    throwIfAborted(signal);
+    if (state !== true) {
+      return {
+        enabled: false,
+        unknownWarning: state === null ? TALKBACK_STATE_UNKNOWN_WARNING : undefined,
+      };
+    }
+    const refusal = talkBackDisplayRefusal(target.displayId, "scrolling");
+    if (refusal) {
+      throw refusal;
+    }
+    return { enabled: true };
+  }
+
+  private async dispatchTalkBackDisplaySwipe({
+    options,
+    element,
+    coordinates,
+    duration,
+    boomerang,
+    target,
+    signal,
+  }: {
+    options: SwipeOnOptions;
+    element?: Element | null;
+    coordinates: { x1: number; y1: number; x2: number; y2: number };
+    duration: number;
+    boomerang?: BoomerangConfig;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+  }): Promise<SwipeResult> {
+    const direction = resolveSwipeDirection(options);
+    if (!direction.direction) {
+      throw new ActionableError(direction.error ?? "direction is required");
+    }
+    target.assertCurrent();
+    const { x1, y1, x2, y2 } = coordinates;
+    const swipe = await this.talkBackExecutor.executeSwipeGesture(
+      x1,
+      y1,
+      x2,
+      y2,
+      direction.direction,
+      element ?? null,
+      {
+        displayFence: { assertCurrent: target.assertCurrent },
+        duration,
+        scrollMode: options.scrollMode,
+      },
+      undefined,
+      boomerang,
+      signal,
+    );
+    throwIfAborted(signal);
+    if (!swipe.success) {
+      throw new ActionableError(swipe.error ?? "TalkBack swipe failed");
+    }
+    return swipe;
   }
 
   private resolveDisplaySwipeCoordinates({
@@ -599,11 +710,13 @@ export class SwipeOn extends BaseVisualChange {
     target,
     progress,
     signal,
+    talkBack,
   }: {
     options: SwipeOnOptions;
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     progress?: ProgressCallback;
     signal?: AbortSignal;
+    talkBack: DisplayTalkBackState;
   }): Promise<SwipeOnResult> {
     const direction = resolveSwipeDirection(options);
     if (direction.error) {
@@ -674,20 +787,38 @@ export class SwipeOn extends BaseVisualChange {
                 dispatched = true;
                 return { ...coordinates, success: true };
               };
-              const gesture = await (useCtrlProxy
-                ? executeAndroidSearchDrag({
-                    ...coordinates,
-                    searchDragState,
-                    client: this.accessibilityService,
-                    signal,
-                    displayId: target.displayId === 0 ? undefined : target.displayId,
-                    beforeSend: target.assertCurrent,
-                    fallback,
-                    onIndeterminate: (cause) => {
-                      throw new DispatchedObservationError(cause);
+              const gesture = await (talkBack.enabled
+                ? this.talkBackExecutor.executeSwipeGesture(
+                    coordinates.x1,
+                    coordinates.y1,
+                    coordinates.x2,
+                    coordinates.y2,
+                    direction.direction as SwipeDirection,
+                    null,
+                    {
+                      displayFence: { assertCurrent: target.assertCurrent },
+                      duration: coordinates.duration,
+                      scrollMode: options.scrollMode,
+                      searchDragState,
                     },
-                  })
-                : fallback());
+                    undefined,
+                    undefined,
+                    signal,
+                  )
+                : useCtrlProxy
+                  ? executeAndroidSearchDrag({
+                      ...coordinates,
+                      searchDragState,
+                      client: this.accessibilityService,
+                      signal,
+                      displayId: target.displayId === 0 ? undefined : target.displayId,
+                      beforeSend: target.assertCurrent,
+                      fallback,
+                      onIndeterminate: (cause) => {
+                        throw new DispatchedObservationError(cause);
+                      },
+                    })
+                  : fallback());
               dispatched ||= gesture.success;
               return gesture;
             },
@@ -725,7 +856,7 @@ export class SwipeOn extends BaseVisualChange {
     } else {
       target.assertCurrent();
     }
-    return result;
+    return withUnknownTalkBackWarning(result, talkBack.unknownWarning);
   }
 
   private async dispatchDisplaySwipeLeg(options: {
@@ -826,10 +957,11 @@ export class SwipeOn extends BaseVisualChange {
             target,
             includeSystemInsets: options.includeSystemInsets,
           });
+          const talkBack = await this.resolveDisplayTalkBack(target, signal);
           return options.lookFor
-            ? await this.searchOnAndroidDisplay({ options, target, progress, signal })
+            ? await this.searchOnAndroidDisplay({ options, target, progress, signal, talkBack })
             : await this.observedSwipeInteraction(
-                () => this.executeOnAndroidDisplay({ options, target, signal }),
+                () => this.executeOnAndroidDisplay({ options, target, signal, talkBack }),
                 {
                   changeExpected: false,
                   display: target.observation.display.key,

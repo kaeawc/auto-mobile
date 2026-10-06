@@ -130,6 +130,7 @@ describe("MultiPlatformDeviceManager", () => {
       physical?: BootedDevice[] | Error;
       physicalComplete?: boolean;
       physicalError?: { code: "timeout" | "failed"; message: string };
+      onPhysicalList?: () => void;
     }): MultiPlatformDeviceManager {
       const resolve = <T>(value: T | Error): Promise<T> =>
         value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
@@ -139,18 +140,21 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedSimulatorsChecked: () => resolve(options.simulators ?? []),
       } as unknown as SimCtlClient;
       const fakeLister: IosPhysicalDeviceLister = {
-        listConnectedDevices: async () => ({
-          devices: await resolve(options.physical ?? []),
-          ...(options.physicalComplete === false
-            ? {
-                complete: false as const,
-                error: options.physicalError ?? {
-                  code: "failed" as const,
-                  message: "devicectl could not list physical iOS devices (failed): fake",
-                },
-              }
-            : { complete: true as const }),
-        }),
+        listConnectedDevices: async () => {
+          options.onPhysicalList?.();
+          return {
+            devices: await resolve(options.physical ?? []),
+            ...(options.physicalComplete === false
+              ? {
+                  complete: false as const,
+                  error: options.physicalError ?? {
+                    code: "failed" as const,
+                    message: "devicectl could not list physical iOS devices (failed): fake",
+                  },
+                }
+              : { complete: true as const }),
+          };
+        },
       };
 
       return new MultiPlatformDeviceManager(
@@ -198,6 +202,46 @@ describe("MultiPlatformDeviceManager", () => {
         });
 
         expect(await manager.getBootedDevices("ios")).toEqual([simulator]);
+      });
+    });
+
+    test("skipPhysicalIosDiscovery never asks devicectl and reports only the simulator source (#9920)", async () => {
+      await withProcessPlatform("darwin", async () => {
+        let physicalListings = 0;
+        const manager = makeManager({
+          simulators: [simulator],
+          physical: [physicalDevice],
+          onPhysicalList: () => {
+            physicalListings++;
+          },
+        });
+
+        const discovery = await manager.getBootedDevicesDetailed("ios", {
+          skipPhysicalIosDiscovery: true,
+        });
+
+        expect(physicalListings).toBe(0);
+        expect(discovery.devices).toEqual([simulator]);
+        expect(discovery.succeededPlatforms.has("ios")).toBe(true);
+        expect([...discovery.succeededSources]).toEqual(["ios-simulator"]);
+        expect(discovery.sourceErrors).toBeUndefined();
+        expect([...discovery.freshDeviceIds]).toEqual([simulator.deviceId]);
+      });
+    });
+
+    test("physical discovery still runs by default", async () => {
+      await withProcessPlatform("darwin", async () => {
+        let physicalListings = 0;
+        const manager = makeManager({
+          simulators: [simulator],
+          onPhysicalList: () => {
+            physicalListings++;
+          },
+        });
+
+        await manager.getBootedDevicesDetailed("ios");
+
+        expect(physicalListings).toBe(1);
       });
     });
 

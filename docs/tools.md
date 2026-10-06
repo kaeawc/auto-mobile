@@ -1705,6 +1705,20 @@ booting the OS and `automationReadyTimeoutMs` for installing, updating, starting
 and verifying the automation runner. Each defaults to 180000 ms; their sum,
 including defaults for omitted fields, must not exceed 890000 ms.
 
+`setDeviceResources` and `provisionDevice.resources` results include `requested`
+and an independent `observed` full-platform resource snapshot after configuration,
+including unrequested groups. No read path yields `unsupported` with a reason;
+failed reads yield `unknown`. Explicit opposite enabled/disabled states set
+`success: false` and name the resources in `observationContradictions`, using the
+existing MCP error response (provisioning retains the device/session). Unknown or
+unsupported observations do not add failures. Existing mutation fields retain
+their shape and meaning. Observation uses at most half the remaining resource deadline and shares the abort
+signal; exhausted reads report `unknown`, and provisioning replay refreshes it.
+Identical package and launchctl reads are reused only within one observation.
+Cancellation after mutation carries the completed result on the propagated error
+as `deviceResourceResult` (including any restore receipt). Non-abort observation errors are
+logged and omit `observed` while retaining the mutation result.
+
 `provisionDevice.operationId` is a caller-generated idempotency key.
 `deleteDevice.operationId` is a caller-generated idempotency and diagnostic
 correlation ID. `verifyAbsence` requires a complete inventory observation proving

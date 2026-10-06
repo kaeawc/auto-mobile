@@ -509,7 +509,9 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Plan YAML schema validation passed");
 
     this.perfLog("Parsing plan from YAML");
-    const plan = importPlanFromYaml(yamlContent);
+    // The YAML's platform hint is optional, so hand the migrator the platform the caller runs on
+    // (#10130); a legacy inputText step must not turn into a field-clearing replace on iOS.
+    const plan = importPlanFromYaml(yamlContent, { platform: this.request.platform });
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);

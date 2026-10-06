@@ -403,7 +403,7 @@ exports[`PlanMigrator complete step migration results preserves the full result 
           "commands": [
             {
               "action": "type",
-              "operation": "replace",
+              "operation": "insert",
               "text": "new",
             },
           ],
@@ -449,7 +449,7 @@ exports[`PlanMigrator complete step migration results preserves the full result 
           "commands": [
             {
               "action": "type",
-              "operation": "replace",
+              "operation": "insert",
               "text": undefined,
             },
           ],

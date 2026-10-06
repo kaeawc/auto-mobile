@@ -5,7 +5,7 @@ import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import { PlanNormalizer } from "./PlanNormalizer";
-import { migratePlan } from "./PlanMigrator";
+import { migratePlan, type PlanMigrationOptions } from "./PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
 import { PlanValidator } from "./PlanValidator";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
@@ -37,10 +37,12 @@ export interface PlanSerializer {
   /**
    * Import a plan from YAML content
    * @param yamlContent YAML string containing plan definition
+   * @param options `platform`: the platform the plan is being executed on, used by legacy-step
+   *   migrations when the YAML does not say (#10130)
    * @returns Parsed Plan object
    * @throws Error if YAML is invalid or plan structure is incorrect
    */
-  importPlanFromYaml(yamlContent: string): Plan;
+  importPlanFromYaml(yamlContent: string, options?: PlanMigrationOptions): Plan;
 }
 
 interface LoggedToolCall {
@@ -232,10 +234,11 @@ export class YamlPlanSerializer implements PlanSerializer {
   /**
    * Import a plan from YAML content
    * @param yamlContent YAML string containing plan definition
+   * @param options `platform`: the platform the plan is being executed on (#10130)
    * @returns Parsed Plan object
    * @throws Error if YAML is invalid or plan structure is incorrect
    */
-  importPlanFromYaml(yamlContent: string): Plan {
+  importPlanFromYaml(yamlContent: string, options?: PlanMigrationOptions): Plan {
     try {
       logger.info("=== Starting importPlanFromYaml ===");
       logger.info("Parsing YAML content:", yamlContent.substring(0, 200) + "...");
@@ -250,7 +253,7 @@ export class YamlPlanSerializer implements PlanSerializer {
 
       logger.info("Raw plan loaded:", JSON.stringify(rawPlan, null, 2));
 
-      const { plan: migratedPlan, report } = migratePlan(rawPlan);
+      const { plan: migratedPlan, report } = migratePlan(rawPlan, options);
 
       // Handle both legacy and new field names
       const planName = migratedPlan.name;

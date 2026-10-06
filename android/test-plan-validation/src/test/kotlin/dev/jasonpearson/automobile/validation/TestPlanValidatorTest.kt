@@ -2523,6 +2523,177 @@ class TestPlanValidatorTest {
     )
   }
 
+  // ========== Mirrors of the TypeScript PlanSchemaValidator tests (#10124, #10125) ==========
+  // The Kotlin validator runs the same schema (with the js-yaml-compatible loader), so every
+  // snippet test/plan/PlanSchemaValidator.test.ts accepts must be valid here and vice versa.
+
+  private fun planWith(vararg stepLines: String): String =
+    "name: p\nsteps:\n" + stepLines.joinToString("\n") { "  $it" } + "\n"
+
+  private fun assertPlanValid(yaml: String) {
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertTrue(result.valid, "expected valid but got ${result.errors}\n$yaml")
+  }
+
+  private fun assertPlanInvalid(yaml: String) {
+    assertFalse(TestPlanValidator.validateYaml(yaml).valid, "expected invalid:\n$yaml")
+  }
+
+  @Test
+  fun `validates a dragAndDrop endpoint with a nested container and selectionStrategy`() {
+    assertPlanValid(
+      """
+      name: drag-container
+      steps:
+        - tool: dragAndDrop
+          source:
+            text: "Item 1"
+            selectionStrategy: unique
+            container:
+              elementId: "com.example:id/list_a"
+              container:
+                text: "Lists"
+                index: 1
+          target:
+            text: "Item 2"
+          dragDurationMs: 2000
+      """
+        .trimIndent()
+    )
+  }
+
+  @Test
+  fun `rejects an unknown dragAndDrop endpoint key and a malformed container`() {
+    listOf(
+        "{ text: a, bogus: 1 }",
+        "{ text: a, container: { index: 1 } }",
+        "{ text: a, container: { elementId: x, text: y } }",
+        "{ text: a, selectionStrategy: sometimes }",
+      )
+      .forEach { endpoint ->
+        assertPlanInvalid(
+          planWith("- tool: dragAndDrop", "  source: $endpoint", "  target: { text: b }")
+        )
+      }
+  }
+
+  @Test
+  fun `validates a highlight step selected by elementId inline and under params`() {
+    assertPlanValid(planWith("- tool: highlight", "  elementId: com.example:id/btn_login"))
+    assertPlanValid(
+      planWith(
+        "- tool: highlight",
+        "  params:",
+        "    elementId: com.example:id/btn_login",
+        "    description: Login button",
+      )
+    )
+  }
+
+  @Test
+  fun `validates an inline highlight description`() {
+    assertPlanValid(
+      planWith(
+        "- tool: highlight",
+        "  elementId: com.example:id/btn_login",
+        "  description: Login button",
+      )
+    )
+    assertPlanInvalid(
+      planWith("- tool: highlight", "  elementId: com.example:id/btn_login", "  description: 5")
+    )
+  }
+
+  @Test
+  fun `rejects a highlight box shape and a circle style the live tool would reject`() {
+    val box = "{ type: box, bounds: { x: 1, y: 2, width: 3, height: 4 } }"
+    assertPlanInvalid(planWith("- tool: highlight", "  shape: $box"))
+    assertPlanInvalid(planWith("- tool: highlight", "  params:", "    shape: $box"))
+    val circle = "{ type: circle, bounds: { x: 1, y: 2, width: 3, height: 4 } }"
+    assertPlanValid(planWith("- tool: highlight", "  shape: $circle"))
+    assertPlanInvalid(
+      planWith(
+        "- tool: highlight",
+        "  shape: { type: circle, bounds: { x: 1, y: 2, width: 3, height: 4 }, style: { strokeWidth: 2 } }",
+      )
+    )
+  }
+
+  @Test
+  fun `rejects a highlight step with neither a selector nor a shape`() {
+    assertPlanInvalid(planWith("- tool: highlight", "  description: Login button"))
+  }
+
+  @Test
+  fun `validates a legacy highlight id that the migrator renames to elementId`() {
+    assertPlanValid(planWith("- tool: highlight", "  id: com.example:id/btn_login"))
+    assertPlanValid(planWith("- tool: highlight", "  params:", "    id: com.example:id/btn_login"))
+    assertPlanInvalid(planWith("- tool: highlight", "  id: 5"))
+  }
+
+  @Test
+  fun `validates a legacy plan with an inputText step and a highlight using id`() {
+    assertPlanValid(
+      """
+      name: legacy-highlight
+      steps:
+        - tool: inputText
+          text: hello
+        - tool: highlight
+          id: com.example:id/btn_login
+          description: Login button
+        - tool: highlight
+          params:
+            id: com.example:id/btn_other
+      """
+        .trimIndent()
+    )
+  }
+
+  @Test
+  fun `validates setDeviceState with only connectivity or only location`() {
+    assertPlanValid(planWith("- tool: setDeviceState", "  connectivity:", "    airplaneMode: true"))
+    assertPlanValid(
+      planWith(
+        "- tool: setDeviceState",
+        "  params:",
+        "    connectivity:",
+        "      airplaneMode: true",
+      )
+    )
+    assertPlanValid(
+      planWith(
+        "- tool: setDeviceState",
+        "  location:",
+        "    mode: static",
+        "    latitude: 37.77",
+        "    longitude: -122.42",
+      )
+    )
+    assertPlanValid(
+      planWith("- tool: setDeviceState", "  params:", "    location:", "      mode: stop")
+    )
+  }
+
+  @Test
+  fun `rejects malformed setDeviceState connectivity and location`() {
+    listOf(
+        "connectivity: { airplaneMode: maybe }",
+        "connectivity: {}",
+        "location: { mode: static, latitude: 91, longitude: 0 }",
+        "location: { mode: teleport }",
+      )
+      .forEach { field ->
+        assertPlanInvalid(planWith("- tool: setDeviceState", "  $field"))
+        assertPlanInvalid(planWith("- tool: setDeviceState", "  params:", "    $field"))
+      }
+  }
+
+  @Test
+  fun `still requires at least one setDeviceState field`() {
+    assertPlanInvalid(planWith("- tool: setDeviceState", "  params: {}"))
+  }
+
   // ========== Error Reporting Tests ==========
 
   @Test

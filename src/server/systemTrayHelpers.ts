@@ -35,6 +35,7 @@ import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+import type { IosGestureResult } from "./system-tray/IosNotificationUIDetector";
 import {
   attributeRowByDumpsys,
   intersectDumpsysRecordsForRow,
@@ -102,7 +103,7 @@ export interface SystemTrayIosClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<IosGestureResult>;
   requestTapCoordinates(
     x: number,
     y: number,
@@ -111,7 +112,7 @@ export interface SystemTrayIosClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<IosGestureResult>;
 }
 
 export interface SystemTrayDependencies {
@@ -136,16 +137,24 @@ export interface SystemTrayDependencies {
 
 let systemTrayDependencies: SystemTrayDependencies | null = null;
 
+// Keep the dispatch markers so a sent-but-unanswered gesture stays distinguishable from a refusal.
+const toIosGestureResult = (result: IosGestureResult): IosGestureResult => ({
+  success: result.success,
+  error: result.error,
+  dispatched: result.dispatched,
+  acknowledged: result.acknowledged,
+});
+
 const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (device) => {
   const client = IOSCtrlProxyClient.getInstance(device);
   return {
     requestSwipe: async (...args) => {
       const result = await client.requestSwipe(...args);
-      return { success: result.success, error: result.error };
+      return toIosGestureResult(result);
     },
     requestTapCoordinates: async (...args) => {
       const result = await client.requestTapCoordinates(...args);
-      return { success: result.success, error: result.error };
+      return toIosGestureResult(result);
     },
   };
 };

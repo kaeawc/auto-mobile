@@ -189,7 +189,12 @@ export interface CtrlProxyScreenshotResult {
 export type CtrlProxySwipeResult = GestureTimingResult;
 
 /** Tap coordinates result */
-export type CtrlProxyTapResult = BaseResult & { tapDiagnostics?: CtrlProxyTapDiagnostics };
+export type CtrlProxyTapResult = BaseResult & {
+  tapDiagnostics?: CtrlProxyTapDiagnostics;
+  /** Host-side dispatch metadata, as on presses: written to the socket / answered by the runner. */
+  dispatched?: boolean;
+  acknowledged?: boolean;
+};
 
 /** Optional, best-effort runner readings; these are resolved locations, not delivered touches. */
 export interface CtrlProxyTapDiagnostics {

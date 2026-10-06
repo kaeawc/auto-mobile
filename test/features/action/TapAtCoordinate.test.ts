@@ -25,7 +25,10 @@ import {
 } from "../../../src/features/action/tapAtGesture";
 import { tapAtSchema } from "../../../src/server/interactionTools";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
-import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
+import type {
+  CoordinateTapClient,
+  IosCoordinateTapClient,
+} from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
 import { computeFreshness } from "../../../src/features/observe/observationFreshness";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
@@ -336,38 +339,45 @@ describe("TapAtCoordinate", () => {
     let current = scenario === "first stale" ? "epoch:8" : "epoch:7";
     let delivered = 0;
     const sent: Array<string | undefined> = [];
+    const request = async (frameContext: string | undefined, onDispatch?: () => void) => {
+      sent.push(frameContext);
+      onDispatch?.();
+      if (frameContext !== undefined && frameContext !== current) {
+        return { success: false, error: "Stale frame context for input/tap" };
+      }
+      if (sent.length === 2 && scenario === "second failure") {
+        return { success: false, error: "Synthetic second tap failure" };
+      }
+      delivered++;
+      if (scenario !== "static") {
+        current = `epoch:${7 + delivered}`;
+      }
+      if (scenario === "display change") {
+        displayTransitions.notifyTransition(device.deviceId, "changed after first tap");
+      }
+      return { success: true };
+    };
     const client: CoordinateTapClient<() => void> = {
-      requestTapCoordinates: async (
+      requestTapCoordinates: (_x, _y, _duration, _timeout, _perf, frameContext, onDispatch) =>
+        request(frameContext, onDispatch),
+    };
+    // The iOS client takes its abort signal before the dispatch marker.
+    const iosClient: IosCoordinateTapClient = {
+      requestTapCoordinates: (
         _x,
         _y,
         _duration,
         _timeout,
         _perf,
         frameContext,
+        _signal,
         onDispatch,
-      ) => {
-        sent.push(frameContext);
-        onDispatch?.();
-        if (frameContext !== undefined && frameContext !== current) {
-          return { success: false, error: "Stale frame context for input/tap" };
-        }
-        if (sent.length === 2 && scenario === "second failure") {
-          return { success: false, error: "Synthetic second tap failure" };
-        }
-        delivered++;
-        if (scenario !== "static") {
-          current = `epoch:${7 + delivered}`;
-        }
-        if (scenario === "display change") {
-          displayTransitions.notifyTransition(device.deviceId, "changed after first tap");
-        }
-        return { success: true };
-      },
+      ) => request(frameContext, onDispatch),
     };
     const tapAt = new TapAtCoordinate(device, adb, {
       timer,
       androidClient: client,
-      iosClient: client,
+      iosClient,
       invalidateIosCache: () => {},
       lastRenderedObservation: () => ({ display: { key: "0" }, displayRevision: 0 }),
     });

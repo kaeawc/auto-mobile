@@ -348,6 +348,97 @@ describe("NotificationUIDetector", () => {
       // here (#4183 R13).
       expect(taps[0]).toEqual({ x: 55, y: 50 });
     });
+
+    describe("gesture dispatch contract", () => {
+      const unconfirmed = {
+        success: false,
+        error: "Swipe timed out after 5000ms",
+        dispatched: true,
+        acknowledged: false,
+      };
+      const gestures: Array<{
+        name: string;
+        run: (detector: IosNotificationUIDetector) => Promise<void>;
+        label: string;
+      }> = [
+        {
+          name: "dismissing a notification",
+          label: "dismiss notification",
+          run: (detector) => detector.swipeElement(sampleElement),
+        },
+        {
+          name: "tapping a notification",
+          label: "tap notification",
+          run: (detector) => detector.tapElement(sampleElement),
+        },
+        {
+          name: "opening Notification Center",
+          label: "open Notification Center",
+          run: (detector) => detector.expandTray(observationWithSize),
+        },
+        {
+          name: "closing Notification Center",
+          label: "close Notification Center",
+          run: (detector) => detector.collapseTray(observationWithSize),
+        },
+      ];
+      const detectorReturning = (result: {
+        success: boolean;
+        error?: string;
+        dispatched?: boolean;
+        acknowledged?: boolean;
+      }) =>
+        new IosNotificationUIDetector(iosDevice, {
+          requestSwipe: async () => result,
+          requestTapCoordinates: async () => result,
+          now: () => 0,
+        });
+
+      for (const gesture of gestures) {
+        it(`${gesture.name} sent without a reply is indeterminate`, async () => {
+          const error = await gesture.run(detectorReturning(unconfirmed)).catch((e: unknown) => e);
+
+          expect(error).toBeInstanceOf(ActionableError);
+          const message = (error as Error).message;
+          expect(message).toContain(`Outcome of ${gesture.label} is indeterminate`);
+          expect(message).toContain("Swipe timed out after 5000ms");
+          expect(message).toContain("Do not retry automatically");
+          expect(message).not.toContain("Failed to");
+        });
+
+        it(`${gesture.name} refused by the runner stays a plain failure`, async () => {
+          await expect(
+            gesture.run(
+              detectorReturning({
+                success: false,
+                error: "Runner refused",
+                dispatched: true,
+                acknowledged: true,
+              }),
+            ),
+          ).rejects.toThrow(`Failed to ${gesture.label}: Runner refused`);
+        });
+
+        it(`${gesture.name} never sent stays a plain failure`, async () => {
+          await expect(
+            gesture.run(
+              detectorReturning({
+                success: false,
+                error: "Not connected",
+                dispatched: false,
+                acknowledged: false,
+              }),
+            ),
+          ).rejects.toThrow(`Failed to ${gesture.label}: Not connected`);
+        });
+      }
+
+      it("a result without dispatch markers stays a plain failure", async () => {
+        await expect(
+          detectorReturning({ success: false, error: "boom" }).swipeElement(sampleElement),
+        ).rejects.toThrow("Failed to dismiss notification: boom");
+      });
+    });
   });
 
   describe("createNotificationUIDetector factory", () => {
@@ -399,6 +490,25 @@ describe("NotificationUIDetector", () => {
       const detector = createNotificationUIDetector(iosDevice, buildDeps);
       expect(detector).toBeInstanceOf(IosNotificationUIDetector);
       expect(detector.device).toBe(iosDevice);
+    });
+
+    it("keeps the iOS client's dispatch markers so an unanswered dismiss swipe is indeterminate", async () => {
+      const deps = (): SystemTrayDependencies => ({
+        ...buildDeps(),
+        iosClientFactory: () => ({
+          requestSwipe: async () => ({
+            success: false,
+            error: "Swipe timed out after 5000ms",
+            dispatched: true,
+            acknowledged: false,
+          }),
+          requestTapCoordinates: async () => ({ success: true }),
+        }),
+      });
+      const detector = createNotificationUIDetector(iosDevice, deps);
+      await expect(detector.swipeElement(sampleElement)).rejects.toThrow(
+        "Outcome of dismiss notification is indeterminate",
+      );
     });
 
     it("throws when iOS client factory is missing", async () => {

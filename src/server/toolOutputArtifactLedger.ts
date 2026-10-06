@@ -35,6 +35,25 @@ export interface IssuedArtifact {
   sha256?: string;
 }
 
+/**
+ * The filename shape the writer produces: `<epoch-ms>-<tool>-<id>.json`.
+ *
+ * The leading epoch-ms is `Math.trunc(timer.now())`, which is 13 digits for any
+ * real wall-clock time between 2001 and 2286, and the tool segment never
+ * contains `-` for the camelCase tool names the server registers. This is
+ * deliberately narrower than the read-side `SAFE_ARTIFACT_ID`: that check only
+ * has to reject path traversal, while the retention prune uses this to decide
+ * which files in a possibly shared `--tool-outputs-dir` are safe to DELETE, so a
+ * `package.json`, `2024-01-15-report.json` or `1-note.json` must not match
+ * (issue #10078).
+ */
+const WRITER_ISSUED_FILENAME = /^\d{13}-[A-Za-z0-9_.]+-[A-Za-z0-9._-]+\.json$/;
+
+/** True when `filename` has the shape the artifact writer gives the files it issues. */
+export function hasWriterIssuedFilenameShape(filename: string): boolean {
+  return WRITER_ISSUED_FILENAME.test(filename);
+}
+
 export class ToolOutputArtifactLedger {
   // basename -> issued artifact. Insertion order is recency order (a re-record
   // deletes then re-sets), so eviction drops the least-recent.

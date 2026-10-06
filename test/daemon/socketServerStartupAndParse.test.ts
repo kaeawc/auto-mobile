@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { Socket } from "node:net";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
@@ -6,6 +6,7 @@ import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 
 interface ServerInternals {
   acceptingRequests: boolean;
@@ -173,6 +174,47 @@ describe("daemon socket startup and parsing", () => {
     expect(responses.find((response) => response.id === "call-1")?.success).toBe(false);
     expect(harness.forwarded()).toBe(0);
     harness.socket.destroy();
+  });
+
+  test("a cancel that arrives after the request was answered is a no-op that leaves a trace (#10151)", async () => {
+    const harness = createHarness(Promise.resolve());
+    callTool(harness.socket);
+    await drainHandlers();
+    expect(harness.socket.getWrittenMessages<DaemonResponse>()[0]).toMatchObject({
+      id: "call-1",
+      success: true,
+    });
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      harness.socket.simulateData(
+        JSON.stringify({
+          id: "cancel-1",
+          type: "daemon_request",
+          method: DAEMON_CANCEL_REQUEST_METHOD,
+          params: { requestId: "call-1" },
+        }) + "\n",
+      );
+      await drainHandlers();
+      const responses = harness.socket.getWrittenMessages<DaemonResponse>();
+      expect(responses.find((response) => response.id === "cancel-1")).toMatchObject({
+        success: true,
+        result: { cancelled: false },
+      });
+      // Without this line a cancel that lost the race with the answer is invisible in the daemon
+      // log, which made a client that delivered its cancel late look like one that never sent it.
+      expect(
+        debug.mock.calls.some(
+          ([message]) =>
+            typeof message === "string" &&
+            message.includes("[SocketCancel]") &&
+            message.includes("call-1") &&
+            message.includes("no in-flight request"),
+        ),
+      ).toBe(true);
+    } finally {
+      debug.mockRestore();
+      harness.socket.destroy();
+    }
   });
 
   test("uses null id and JSON-RPC parse code for malformed JSON", async () => {

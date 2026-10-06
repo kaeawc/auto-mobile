@@ -58,9 +58,7 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
     expect(deviceLocks).toBeGreaterThan(-1);
     expect(storage).toBe(deviceLocks + 1);
     expect(edgeCoverage).toBe(storage + 1);
-    const livenessRelease = names.indexOf("2026_10_05_003_device_session_liveness_release");
-    expect(livenessRelease).toBe(edgeCoverage + 1);
-    expect(livenessRelease).toBe(names.length - 1);
+    expect(edgeCoverage).toBe(names.length - 1);
 
     const column = await sql<{ name: string }>`
       SELECT name FROM pragma_table_info('device_locks') WHERE name = 'device_identity'

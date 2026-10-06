@@ -32,7 +32,6 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
-  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
@@ -43,6 +42,7 @@ import {
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+  DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
@@ -136,7 +136,6 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
-const CLI_LIVENESS_RELEASE_TIMEOUT_MS = 200;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -276,13 +275,14 @@ function isLivenessOwnerConflictError(error: unknown): boolean {
   );
 }
 
-/** The daemon answered that another token owns this session's liveness now (#10050). */
-function isLivenessOwnerSupersededError(error: unknown): boolean {
+/** The daemon answered that this token no longer owns liveness (#10050, #10260). */
+function isLivenessOwnershipLostError(error: unknown): boolean {
   return (
     error !== null &&
     typeof error === "object" &&
     "code" in error &&
-    error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+    (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
+      error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
   );
 }
 
@@ -3802,8 +3802,7 @@ export class DaemonMcpProxy {
    * reading the previous result. Sending one heartbeat that also carries
    * {@link CLI_SESSION_LIVENESS_POLICY} records ownership AND moves the session
    * onto a wall-clock idle timeout measured in minutes, so the next invocation
-   * still finds it. The final release clears this process's token so an independent
-   * proxy can claim immediately. Returns the declared session uuid, or undefined when there
+   * still finds it. Returns the declared session uuid, or undefined when there
    * was nothing to declare.
    *
    * Long-lived clients (stdio/HTTP MCP) never call this and keep the strict
@@ -3846,35 +3845,15 @@ export class DaemonMcpProxy {
         },
         { timeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS },
       );
-      await raceWithDeadline(
-        this.client.callDaemonMethod(
-          DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
-          { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
-          { timeoutMs: CLI_LIVENESS_RELEASE_TIMEOUT_MS },
-        ),
-        {
-          timer: this.timer,
-          timeoutMs: CLI_LIVENESS_RELEASE_TIMEOUT_MS,
-          label: "CLI liveness release",
-        },
-      );
       return sessionUuid;
     } catch (error) {
       // Best-effort: the tool call already succeeded and its result is the
       // caller's answer. A failed declaration only means the next invocation may
       // have to re-acquire, which is the pre-#6870 behaviour — never a reason to
       // fail the invocation that just ran.
-      if (isLivenessOwnerConflictError(error)) {
-        // A tool call on a proxy-owned session is valid; exit must leave that owner alone.
-        logger.debug(
-          `[DaemonMcpProxy] CLI session liveness handoff refused: ${errorMessage(error)}`,
-        );
-      } else {
-        logger.warn(
-          `[DaemonMcpProxy] CLI session liveness handoff failed: ${errorMessage(error)}`,
-          error,
-        );
-      }
+      logger.debug(
+        `[DaemonMcpProxy] CLI session liveness declaration failed: ${errorMessage(error)}`,
+      );
       return undefined;
     }
   }
@@ -4097,7 +4076,7 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       return "session-gone";
     }
-    if (isLivenessOwnerSupersededError(error)) {
+    if (isLivenessOwnershipLostError(error)) {
       // Another token took the session over while this proxy could not heartbeat it.
       return "superseded";
     }
@@ -4228,7 +4207,7 @@ export class DaemonMcpProxy {
         typeof error === "object" &&
         "code" in error &&
         error.code === DAEMON_SESSION_NOT_FOUND_CODE) ||
-      isLivenessOwnerSupersededError(error) ||
+      isLivenessOwnershipLostError(error) ||
       isLivenessOwnerConflictError(error)
     );
   }
@@ -4407,7 +4386,7 @@ export class DaemonMcpProxy {
     if (isLivenessOwnerConflictError(error)) {
       return false;
     }
-    return !isLivenessOwnerSupersededError(error);
+    return !isLivenessOwnershipLostError(error);
   }
 
   private recordHeldSessionHeartbeatSuccess(
@@ -4433,7 +4412,7 @@ export class DaemonMcpProxy {
     if (this.closing) {
       return;
     }
-    if (isLivenessOwnerSupersededError(error)) {
+    if (isLivenessOwnershipLostError(error)) {
       // Same informational outcome as the latest binding: no fencing or re-claim.
       this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
       return;
@@ -4603,7 +4582,8 @@ export class DaemonMcpProxy {
       error !== null &&
       typeof error === "object" &&
       "code" in error &&
-      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+      (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
+        error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
     ) {
       // #10115: a refusal proves transport reachability, not ownership. Do not
       // fence or re-claim: that would undo a deliberate handoff. Report the loss
@@ -4611,7 +4591,7 @@ export class DaemonMcpProxy {
       if (!this.livenessSupersessionLogged) {
         this.livenessSupersessionLogged = true;
         logger.warn(
-          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded; this proxy no longer protects its deadline. Stop its keeper after handoff or explicitly claim with a fresh token.`,
+          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership lost; this proxy no longer protects its deadline. Stop its keeper after handoff or explicitly claim with a fresh token.`,
         );
       }
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);

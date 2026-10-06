@@ -29,6 +29,7 @@ import type { DaemonOptions, DaemonStatus } from "../types";
 import {
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+  DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
 } from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
 import { parseDaemonArgs } from "./daemonArgs";
@@ -432,19 +433,18 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
     const daemonState = manager.getDaemonState();
     if (daemonState.isInitialized()) {
       // Running inside daemon process
-      const response = await handleDaemonRequest(
-        {
-          id: "session-info",
-          type: "daemon_request",
-          method: "daemon/sessionInfo",
-          params: { sessionId },
-        },
-        daemonState,
+      const sessionManager = daemonState.getSessionManager();
+      const session = requireDaemonSession(sessionManager, sessionId);
+      console.log(
+        JSON.stringify({
+          sessionId: session.sessionId,
+          assignedDevice: session.assignedDevice,
+          createdAt: session.createdAt,
+          lastUsedAt: session.lastUsedAt,
+          expiresAt: session.expiresAt,
+          cacheSize: JSON.stringify(session.cacheData).length,
+        }),
       );
-      if (!response.success) {
-        throw new ActionableError(response.error ?? `Session not found: ${sessionId}`);
-      }
-      console.log(JSON.stringify(response.result));
       return;
     }
     {
@@ -542,6 +542,9 @@ function heartbeatFailureMessage(sessionId: string, error: unknown): string {
     error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
   if (code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE) {
     return `The token no longer owns session ${sessionId}'s liveness. Re-claim with a fresh --liveness-owner-token and --claim-liveness-ownership, or stop the keeper.`;
+  }
+  if (code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE) {
+    return `Session ${sessionId}'s liveness is unowned. Explicitly claim with --claim-liveness-ownership before sending keeper ticks, or stop the keeper. [${DAEMON_LIVENESS_OWNER_UNOWNED_CODE}]`;
   }
   if (code === DAEMON_LIVENESS_OWNER_IS_PROXY_CODE) {
     // The daemon's message names the proxy-owned session; keep the code visible for scripts.

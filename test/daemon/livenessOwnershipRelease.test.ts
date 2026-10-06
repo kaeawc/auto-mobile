@@ -74,73 +74,55 @@ describe("deliberate liveness ownership release", () => {
     manager.stopCleanupTimer();
   });
 
-  test("CLI then proxy claims immediately, restores policy, and excludes other proxies/keepers", async () => {
-    await claim(OWNER, "cli");
+  test("explicit release preserves policy, device and deadline, then another proxy claims", async () => {
     const session = manager.getSession(SESSION)!;
+    timer.advanceTime(2_000);
+    // Tool activity is later than the owner's heartbeat. Release must preserve this clock too.
+    await manager.getOrCreateSession(SESSION);
     const before = { ...session };
     expect(await release()).toEqual({
       success: true,
       result: { sessionId: SESSION, alreadyUnowned: false },
     });
-    expect(session).toMatchObject({
-      assignedDevice: DEVICE,
-      livenessPolicy: "cli-idle",
+    expect(session).toEqual({
+      ...before,
       livenessOwnerToken: undefined,
-      lastHeartbeat: before.lastHeartbeat,
-      lastOwnerHeartbeat: before.lastOwnerHeartbeat,
-      expiresAt: before.expiresAt,
-      heartbeatTimeoutMs: before.heartbeatTimeoutMs,
+      activityGeneration: before.activityGeneration + 1,
     });
-    expect(await persistence.getSession?.(SESSION)).toMatchObject({
-      liveness_owner_token: null,
-      liveness_released_by: OWNER,
-      liveness_released_heartbeat_ms: before.lastOwnerHeartbeat,
-      liveness_released_grace_ms: 0,
-    });
+    expect(await persistence.getSession(SESSION)).toMatchObject({ liveness_owner_token: null });
     expect(await request("daemon/sessionInfo")).toMatchObject({
-      result: {
-        livenessOwner: "unowned",
-        liveness: { state: "unowned", leasePhase: "live", remainingMs: 60_000 },
-      },
+      result: { liveness: { state: "live", remainingMs: LEASE } },
     });
     expect((await claim("proxy-a")).success).toBe(true);
-    expect(session).toMatchObject({
-      livenessOwnerToken: "proxy-a",
-      livenessPolicy: "heartbeat",
-      heartbeatTimeoutMs: LEASE,
-    });
     expect(await claim("proxy-b")).toMatchObject({
       success: false,
       code: "liveness_owner_conflict",
     });
-    expect(
-      await request("daemon/heartbeat", {
-        livenessOwnerKind: "cli-keeper",
-        livenessOwnerToken: "proxy-a",
-        claimLivenessOwnership: true,
-      }),
-    ).toMatchObject({ success: false, code: "liveness_owner_is_proxy" });
+    expect(manager.hasLivenessOwnership(SESSION, "proxy-a")).toBe(true);
+    expect(await release()).toMatchObject({ success: false, code: "liveness_owner_not_owner" });
   });
 
-  test("release requires proof even on a never-owned session", async () => {
+  test("already-unowned release is a successful no-op for any valid token", async () => {
     await manager.createSession("never-owned", DEVICE, "android");
     const before = { ...manager.getSession("never-owned")! };
     expect(
       await request("daemon/releaseLivenessOwnership", {
         sessionId: "never-owned",
-        livenessOwnerToken: OWNER,
+        livenessOwnerToken: "any-token",
       }),
-    ).toMatchObject({ success: false, code: "liveness_owner_superseded" });
+    ).toEqual({ success: true, result: { sessionId: "never-owned", alreadyUnowned: true } });
     expect(manager.getSession("never-owned")).toEqual(before);
   });
 
   test("foreign release is a typed no-op; unknown and malformed calls fail", async () => {
     const before = { ...manager.getSession(SESSION)! };
+    const row = await persistence.getSession(SESSION);
     expect(await release("foreign")).toMatchObject({
       success: false,
-      code: "liveness_owner_superseded",
+      code: "liveness_owner_not_owner",
     });
     expect(manager.getSession(SESSION)).toEqual(before);
+    expect(await persistence.getSession(SESSION)).toEqual(row);
     expect(
       await request("daemon/releaseLivenessOwnership", {
         sessionId: "unknown",
@@ -149,33 +131,46 @@ describe("deliberate liveness ownership release", () => {
     ).toMatchObject({ success: false, code: "daemon_session_not_found" });
     for (const token of [undefined, "", "   ", 42]) {
       expect(
-        (await request("daemon/releaseLivenessOwnership", { livenessOwnerToken: token })).success,
-      ).toBe(false);
+        await request("daemon/releaseLivenessOwnership", { livenessOwnerToken: token }),
+      ).toMatchObject({
+        success: false,
+        error: expect.stringContaining("Invalid releaseLivenessOwnership"),
+      });
     }
+    expect(
+      await request("daemon/releaseLivenessOwnership", {
+        sessionId: "",
+        livenessOwnerToken: OWNER,
+      }),
+    ).toMatchObject({
+      success: false,
+      error: expect.stringContaining("Invalid releaseLivenessOwnership"),
+    });
   });
 
-  test("release retries are no-ops; stale and tokenless ticks cannot revive ownership", async () => {
+  test("release retries and stale or tokenless ticks cannot change the released session", async () => {
     await release();
     timer.advanceTime(2_000);
     const before = { ...manager.getSession(SESSION)! };
-    expect(await release()).toEqual({
-      success: true,
-      result: { sessionId: SESSION, alreadyUnowned: true },
-    });
-    expect(await release("foreign")).toMatchObject({
-      success: false,
-      code: "liveness_owner_superseded",
-    });
-    expect(await tick(OWNER)).toMatchObject({ success: false, code: "liveness_owner_superseded" });
+    for (const token of [OWNER, "foreign"]) {
+      expect(await release(token)).toEqual({
+        success: true,
+        result: { sessionId: SESSION, alreadyUnowned: true },
+      });
+      expect(await tick(token)).toMatchObject({
+        success: false,
+        code: "liveness_owner_unowned",
+        error: expect.stringContaining("is unowned"),
+      });
+    }
     expect(await request("daemon/heartbeat")).toMatchObject({ success: true });
     expect(manager.getSession(SESSION)).toEqual(before);
-    // The explicit unowned rule admits even a previously used token, but only by a claim.
     expect((await claim(OWNER)).success).toBe(true);
     expect(manager.hasLivenessOwnership(SESSION, OWNER)).toBe(true);
   });
 
   test.each(["heartbeat", "cli"])(
-    "unclaimed %s session expires with its truthful existing reason",
+    "unclaimed %s session retains its existing expiry window",
     async (policy) => {
       await claim(OWNER, policy);
       const session = manager.getSession(SESSION)!;
@@ -183,7 +178,6 @@ describe("deliberate liveness ownership release", () => {
       timer.advanceTime(1_000);
       await release();
       timer.advanceTime(window - 1_000);
-      // With no activity, both policies retain the original expiry window.
       await monitor.tick();
       expect(reaped).toEqual([]);
       timer.advanceTime(1);
@@ -191,158 +185,43 @@ describe("deliberate liveness ownership release", () => {
       expect(reaped).toEqual([
         { sessionId: SESSION, reason: policy === "cli" ? "cli-idle-timeout" : "heartbeat-timeout" },
       ]);
-      expect(manager.getSession(SESSION)).toBeNull();
     },
   );
 
-  test("release of a restored awaiting owner retains its deadline without adding grace", async () => {
+  test("release retains the later activity-based heartbeat deadline and its suspect grace", async () => {
+    timer.advanceTime(8_000);
+    await manager.getOrCreateSession(SESSION);
+    await release();
+    timer.advanceTime(LEASE + SUSPECT_GRACE_MS);
+    await monitor.tick();
+    expect(reaped).toEqual([]);
+    timer.advanceTime(1);
+    await monitor.tick();
+    expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
+  });
+
+  test("release retains an awaiting-owner deadline through main's existing path", async () => {
     const session = manager.getSession(SESSION)!;
     session.ownership = "awaiting-owner";
     session.awaitingOwnerSince = timer.now();
     session.hasReceivedHeartbeat = false;
     await release();
-    timer.advanceTime(LEASE + 1);
-    await monitor.tick();
-    expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
-  });
-
-  test.each(["heartbeat", "cli"])(
-    "release survives rehydration on %s without moving its deadline",
-    async (policy) => {
-      await claim(OWNER, policy);
-      timer.advanceTime(1_000);
-      await release();
-      const before = { ...manager.getSession(SESSION)! };
-      await persistence.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
-      manager.stopCleanupTimer();
-      manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
-      timer.advanceTime(2_000);
-      expect(
-        await manager.rehydratePersistedSessions({
-          assignDeviceToSession: async (id, _platform, target) => {
-            await manager.createSession(
-              id,
-              DEVICE,
-              "android",
-              target?.liveness?.sessionTimeoutMs,
-              target?.liveness?.heartbeatTimeoutMs,
-              target?.stableDeviceId,
-              target?.liveness,
-              target?.initialOwnership,
-            );
-            return DEVICE;
-          },
-        }),
-      ).toMatchObject({ rehydrated: [SESSION], skipped: [] });
-      const restored = manager.getSession(SESSION)!;
-      expect(restored).toMatchObject({
-        livenessOwnershipReleased: true,
-        livenessOwnerToken: undefined,
-        lastHeartbeat: before.lastHeartbeat,
-        lastOwnerHeartbeat: before.lastOwnerHeartbeat,
-        expiresAt: before.expiresAt,
-      });
-      const unchanged = { ...restored };
-      expect((await request("daemon/heartbeat")).success).toBe(true);
-      expect(await tick(OWNER)).toMatchObject({
-        success: false,
-        code: "liveness_owner_superseded",
-      });
-      expect(restored).toEqual(unchanged);
-      expect(await request("daemon/sessionInfo")).toMatchObject({
-        result: {
-          livenessOwner: "unowned",
-          liveness: { state: "unowned", remainingMs: before.heartbeatTimeoutMs - timer.now() },
-        },
-      });
-      const restartedMonitor = new SessionHeartbeatMonitor(
-        manager,
-        () => false,
-        async (id, reason) => {
-          reaped.push({ sessionId: id, reason });
-          await manager.releaseSession(id, reason);
-        },
-        timer,
-      );
-      const deadline = before.heartbeatTimeoutMs + (policy === "heartbeat" ? SUSPECT_GRACE_MS : 0);
-      timer.advanceTime(deadline - timer.now());
-      await restartedMonitor.tick();
-      expect(reaped).toEqual([]);
-      timer.advanceTime(1);
-      await restartedMonitor.tick();
-      expect(reaped).toEqual([
-        {
-          sessionId: SESSION,
-          reason: policy === "heartbeat" ? "heartbeat-timeout" : "cli-idle-timeout",
-        },
-      ]);
-      await restartedMonitor.stop();
-    },
-  );
-
-  test("an explicit claim adopts a rehydrated released session", async () => {
-    await release();
-    const row = (await persistence.getSession?.(SESSION))!;
-    // Rehydrate through the same persisted-row path used by startup recovery.
-    await persistence.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
-    manager.stopCleanupTimer();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
-    await manager.rehydratePersistedSessions({
-      assignDeviceToSession: async (id, _platform, target) => {
-        await manager.createSession(
-          id,
-          DEVICE,
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          row.stable_device_id ?? undefined,
-          target?.liveness,
-          target?.initialOwnership,
-        );
-        return DEVICE;
-      },
-    });
-    expect((await claim("next")).success).toBe(true);
-    expect(manager.getSession(SESSION)?.livenessOwnershipReleased).toBeUndefined();
-    expect((await persistence.getSession?.(SESSION))?.liveness_released_by).toBeNull();
-  });
-
-  test("released CLI activity keeps the idle window alive, then a claim restores heartbeat expiry", async () => {
-    await claim(OWNER, "cli");
-    await release();
-    for (let call = 0; call < 4; call++) {
-      timer.advanceTime(40_000);
-      await manager.getOrCreateSession(SESSION);
-      await monitor.tick();
-      expect(reaped).toEqual([]);
-    }
-    timer.advanceTime(60_000);
+    timer.advanceTime(LEASE);
     await monitor.tick();
     expect(reaped).toEqual([]);
     timer.advanceTime(1);
     await monitor.tick();
-    expect(reaped).toEqual([{ sessionId: SESSION, reason: "cli-idle-timeout" }]);
+    expect(reaped).toEqual([{ sessionId: SESSION, reason: "rehydration-owner-timeout" }]);
   });
 
-  test("claim switches a released CLI session from tool idleness to heartbeat policy", async () => {
+  test("a claim restores a released CLI session to heartbeat policy", async () => {
     await claim(OWNER, "cli");
     await release();
-    timer.advanceTime(40_000);
-    await manager.getOrCreateSession(SESSION);
     expect((await claim("next")).success).toBe(true);
     expect(manager.getSession(SESSION)?.livenessPolicy).toBe("heartbeat");
     timer.advanceTime(LEASE + SUSPECT_GRACE_MS + 1);
     await monitor.tick();
     expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
-  });
-
-  test("daemon stall forgiveness advances the unowned owner clock only by the lost interval", async () => {
-    await release();
-    timer.advanceTime(8_000);
-    manager.getSessionCache(SESSION);
-    timer.advanceTime(4_000);
-    manager.forgiveDaemonStall(timer.now(), 4_000);
-    expect(manager.getSessionLeaseState(SESSION)).toEqual({ phase: "live", remainingMs: 2_000 });
   });
 
   test.each([false, true])("two claims wait at persistence, reverse=%s", async (reverse) => {
@@ -406,7 +285,7 @@ describe("deliberate liveness ownership release", () => {
         // The other operation completes while the first response is suspended.
         expect(await second).toMatchObject(
           !releaseFirst && lapsed
-            ? { success: false, code: "liveness_owner_superseded" }
+            ? { success: false, code: "liveness_owner_not_owner" }
             : { success: true },
         );
         resume.resolve();
@@ -456,7 +335,7 @@ describe("deliberate liveness ownership release", () => {
         await entered.promise;
         const second = releaseFirst ? tick(OWNER) : release();
         expect(await second).toMatchObject(
-          releaseFirst ? { success: false, code: "liveness_owner_superseded" } : { success: true },
+          releaseFirst ? { success: false, code: "liveness_owner_unowned" } : { success: true },
         );
         resume.resolve();
         expect((await first).success).toBe(true);
@@ -486,7 +365,7 @@ describe("deliberate liveness ownership release", () => {
       await release();
       const before = { ...manager.getSession(SESSION)! };
       resume.resolve();
-      expect(await heartbeat).toMatchObject({ success: false, code: "liveness_owner_superseded" });
+      expect(await heartbeat).toMatchObject({ success: false, code: "liveness_owner_unowned" });
       expect(manager.getSession(SESSION)).toEqual(before);
     } finally {
       resume.resolve();
@@ -500,9 +379,76 @@ describe("deliberate liveness ownership release", () => {
     );
     await expect(release()).rejects.toThrow("write failed");
     expect(manager.hasLivenessOwnership(SESSION, OWNER)).toBe(true);
-    expect(manager.getSession(SESSION)?.livenessOwnershipReleased).toBeUndefined();
     spy.mockRestore();
     expect((await release()).success).toBe(true);
+  });
+
+  test("a queued release refuses a session removed while waiting for the claim mutex", async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const write = persistence.recordLivenessOwnership.bind(persistence);
+    const spy = spyOn(persistence, "recordLivenessOwnership").mockImplementation(
+      async (...args) => {
+        await write(...args);
+        entered.resolve();
+        await resume.promise;
+      },
+    );
+    try {
+      const first = manager.releaseLivenessOwnership(SESSION, OWNER);
+      await entered.promise;
+      const queued = manager.releaseLivenessOwnership(SESSION, OWNER);
+      await manager.releaseSession(SESSION, "explicit-release");
+      resume.resolve();
+      expect(await first).toBe("released");
+      expect(await queued).toBe("not-found");
+    } finally {
+      resume.resolve();
+      spy.mockRestore();
+    }
+  });
+
+  test("a failed reclaim retains claim history so stale ticks remain refused", async () => {
+    await release();
+    const spy = spyOn(persistence, "recordLivenessOwnership").mockRejectedValueOnce(
+      new Error("claim write failed"),
+    );
+    try {
+      await expect(claim(OWNER)).rejects.toThrow("claim write failed");
+      expect(await tick(OWNER)).toMatchObject({ success: false, code: "liveness_owner_unowned" });
+      expect(manager.getSession(SESSION)?.livenessOwnerToken).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("an older failed heartbeat cannot roll back activity across release", async () => {
+    const entered = Promise.withResolvers<void>();
+    const failed = Promise.withResolvers<void>();
+    const logged = Promise.withResolvers<void>();
+    const activitySpy = spyOn(persistence, "recordActivity").mockImplementation(async () => {
+      entered.resolve();
+      await failed.promise;
+      throw new Error("heartbeat write failed");
+    });
+    const { logger } = await import("../../src/utils/logger");
+    const warning = spyOn(logger, "warn").mockImplementation(() => {
+      logged.resolve();
+    });
+    try {
+      timer.advanceTime(4_000);
+      await tick(OWNER);
+      await entered.promise;
+      await release();
+      const before = { ...manager.getSession(SESSION)! };
+      failed.resolve();
+      await logged.promise;
+      expect(manager.getSession(SESSION)).toEqual(before);
+    } finally {
+      failed.resolve();
+      activitySpy.mockRestore();
+      warning.mockRestore();
+    }
   });
 
   test("a claim waits for release persistence before acknowledging its takeover", async () => {
@@ -510,12 +456,12 @@ describe("deliberate liveness ownership release", () => {
     const finish = Promise.withResolvers<void>();
     const write = persistence.recordLivenessOwnership.bind(persistence);
     const spy = spyOn(persistence, "recordLivenessOwnership").mockImplementation(
-      async (id, token, releaseState) => {
+      async (id, token) => {
         if (token === null) {
           started.resolve();
           await finish.promise;
         }
-        await write(id, token, releaseState);
+        await write(id, token);
       },
     );
     try {
@@ -530,7 +476,7 @@ describe("deliberate liveness ownership release", () => {
       expect(settled).toBe(false);
       expect(await tick(OWNER)).toMatchObject({
         success: false,
-        code: "liveness_owner_superseded",
+        code: "liveness_owner_unowned",
       });
       finish.resolve();
       expect((await released).success).toBe(true);

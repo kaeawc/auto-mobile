@@ -80,23 +80,12 @@ export interface DeviceSessionActivityUpdate {
   preCliSessionTimeoutMs?: number;
 }
 
-/** Durable proof and deadline of an explicit release; never exposed as an owner token. */
-export interface LivenessOwnershipRelease {
-  releasedBy: string;
-  lastOwnerHeartbeat: number;
-  graceMs: number;
-}
-
 export interface DeviceSessionPersistence {
   upsertActiveSession(record: DeviceSessionRecord): Promise<void>;
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   listRecoverableSessions?(): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
-  recordLivenessOwnership?(
-    sessionUuid: string,
-    ownerToken: string | null,
-    release?: LivenessOwnershipRelease,
-  ): Promise<void>;
+  recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
     sessionUuid: string,
@@ -287,28 +276,16 @@ export class DeviceSessionRepository {
     }
   }
 
-  async recordLivenessOwnership(
-    sessionUuid: string,
-    ownerToken: string | null,
-    release?: LivenessOwnershipRelease,
-  ): Promise<void> {
-    await this.replaceLivenessOwnership(sessionUuid, ownerToken, release);
+  async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
+    await this.replaceLivenessOwnership(sessionUuid, ownerToken);
   }
 
-  async replaceLivenessOwnership(
-    sessionUuid: string,
-    ownerToken: string | null,
-    release?: LivenessOwnershipRelease,
-  ): Promise<void> {
+  async replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
     try {
       const result = await this.getDb()
         .updateTable("device_sessions")
         .set({
           liveness_owner_token: ownerToken,
-          liveness_released_by: release?.releasedBy ?? null,
-          liveness_released_heartbeat_ms: release?.lastOwnerHeartbeat ?? null,
-          liveness_released_grace_ms: release?.graceMs ?? null,
-          liveness_contract_generation: sql`liveness_contract_generation + 1`,
           updated_at: this.nowIso(),
         })
         .where("session_uuid", "=", sessionUuid)
@@ -376,14 +353,7 @@ export class DeviceSessionRepository {
           status,
           released_at_ms: releasedAtMs,
           release_reason: reason,
-          ...(shouldRetainLivenessOwner(reason)
-            ? {}
-            : {
-                liveness_owner_token: null,
-                liveness_released_by: null,
-                liveness_released_heartbeat_ms: null,
-                liveness_released_grace_ms: null,
-              }),
+          ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
           updated_at: this.nowIso(),
         })
         .where("session_uuid", "=", sessionUuid)
@@ -420,14 +390,7 @@ export class DeviceSessionRepository {
         status: "expired",
         released_at_ms: releasedAtMs,
         release_reason: reason,
-        ...(shouldRetainLivenessOwner(reason)
-          ? {}
-          : {
-              liveness_owner_token: null,
-              liveness_released_by: null,
-              liveness_released_heartbeat_ms: null,
-              liveness_released_grace_ms: null,
-            }),
+        ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
         updated_at: this.nowIso(),
       })
       .where("status", "=", "active")

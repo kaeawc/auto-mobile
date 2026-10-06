@@ -516,9 +516,6 @@ export interface DeviceSessionsTable {
   pre_cli_heartbeat_timeout_source?: string | null;
   pre_cli_session_timeout_ms?: number | null;
   liveness_owner_token?: string | null;
-  liveness_released_by?: string | null;
-  liveness_released_heartbeat_ms?: number | null;
-  liveness_released_grace_ms?: number | null;
   created_at: Generated<string>;
   updated_at: Generated<string>;
 }

@@ -3,7 +3,6 @@ import {
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
-  type LivenessOwnershipRelease,
 } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 
@@ -45,9 +44,6 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       pre_cli_heartbeat_timeout_source: record.preCliHeartbeatTimeoutSource ?? null,
       pre_cli_session_timeout_ms: record.preCliSessionTimeoutMs ?? null,
       liveness_owner_token: existing?.liveness_owner_token ?? null,
-      liveness_released_by: existing?.liveness_released_by ?? null,
-      liveness_released_heartbeat_ms: existing?.liveness_released_heartbeat_ms ?? null,
-      liveness_released_grace_ms: existing?.liveness_released_grace_ms ?? null,
       created_at: existing?.created_at ?? new Date(record.createdAtMs).toISOString(),
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });
@@ -83,27 +79,16 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     });
   }
 
-  async recordLivenessOwnership(
-    sessionUuid: string,
-    ownerToken: string | null,
-    release?: LivenessOwnershipRelease,
-  ): Promise<void> {
-    await this.replaceLivenessOwnership(sessionUuid, ownerToken, release);
+  async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
+    await this.replaceLivenessOwnership(sessionUuid, ownerToken);
   }
 
-  async replaceLivenessOwnership(
-    sessionUuid: string,
-    ownerToken: string | null,
-    release?: LivenessOwnershipRelease,
-  ): Promise<void> {
+  async replaceLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {
     const row = this.rows.get(sessionUuid);
     if (!row || row.status !== "active") {
       return;
     }
     row.liveness_owner_token = ownerToken;
-    row.liveness_released_by = release?.releasedBy ?? null;
-    row.liveness_released_heartbeat_ms = release?.lastOwnerHeartbeat ?? null;
-    row.liveness_released_grace_ms = release?.graceMs ?? null;
   }
 
   async markReleased(
@@ -124,9 +109,6 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     row.release_reason = reason;
     if (!isRecoverableDaemonReleaseReason(reason)) {
       row.liveness_owner_token = null;
-      row.liveness_released_by = null;
-      row.liveness_released_heartbeat_ms = null;
-      row.liveness_released_grace_ms = null;
     }
   }
 

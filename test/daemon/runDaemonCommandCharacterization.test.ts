@@ -354,7 +354,6 @@ describe("daemon command characterization with fake I/O", () => {
       await runDaemonCommand("heartbeat", ["fake"], {}, Manager);
       expect(events).toEqual([
         "get-session",
-        "get-releasing",
         JSON.stringify({
           sessionId: "fake",
           assignedDevice: "device",

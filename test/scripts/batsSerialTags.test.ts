@@ -104,6 +104,15 @@ function hasFileTag(text: string, tag: string): boolean {
   );
 }
 
+function usesRealCoverageDirectory(text: string): boolean {
+  return (
+    /scripts\/ci\/run-ts-coverage\.sh/.test(text) ||
+    (/\bbash\s+(?:"\$SCRIPT"|scripts\/test-ts\.sh)\s+coverage\b/.test(text) &&
+      !/TEST_TS_PRINT_CMD/.test(text)) ||
+    /\brm\s+-rf\s+(?:"?\$\{?[^\s}"']*\/)?coverage(?:\/|\b)/.test(text)
+  );
+}
+
 describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
   const files = loadBatsFiles();
 
@@ -114,6 +123,15 @@ describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
   test("every real-tree-mutating bats file carries the `serial` tag", () => {
     const offenders = files
       .filter((f) => mutatesRealTree(f.text))
+      .filter((f) => !hasFileTag(f.text, "serial"))
+      .map((f) => f.name);
+
+    expect(offenders).toEqual([]);
+  });
+
+  test("every bats file using the real coverage directory carries the `serial` tag", () => {
+    const offenders = files
+      .filter((f) => usesRealCoverageDirectory(f.text))
       .filter((f) => !hasFileTag(f.text, "serial"))
       .map((f) => f.name);
 

@@ -53,6 +53,7 @@ describe("app ID device-shell boundaries", () => {
       ).performLaunch(appId, undefined, 0, perf);
 
       expect(adb.getExecutedCommands()).toEqual([
+        `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER ${quoted}`,
         `shell am start --user 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${quoted}`,
         `shell monkey -p ${quoted} -c android.intent.category.LAUNCHER 1`,
       ]);

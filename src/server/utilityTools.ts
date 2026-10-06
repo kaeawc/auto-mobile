@@ -609,6 +609,10 @@ interface LocalizationChanges {
   calendarSystem?: string;
 }
 
+interface LocalizationTimeZoneMetadata {
+  timeZoneWarning?: string;
+}
+
 interface LocalizationLocaleMetadata {
   localeScope?: "app" | "system";
   localeAppId?: string;
@@ -664,20 +668,31 @@ async function applyTextDirectionChange(
   }
 }
 
+async function applyTimeZoneChange(
+  manager: SystemConfigurationManager,
+  timeZone: string,
+  changes: LocalizationChanges,
+  errors: string[],
+): Promise<LocalizationTimeZoneMetadata> {
+  const result = await manager.setTimeZone(timeZone);
+  if (!result.success) {
+    errors.push(result.error ?? "Failed to set time zone");
+    return {};
+  }
+  changes.timeZone = result.zoneId;
+  return result.warning ? { timeZoneWarning: result.warning } : {};
+}
+
 async function applyAdditionalLocalizationChanges(
   manager: SystemConfigurationManager,
   args: ChangeLocalizationArgs,
   changes: LocalizationChanges,
   errors: string[],
-): Promise<void> {
-  if (args.timeZone !== undefined) {
-    const result = await manager.setTimeZone(args.timeZone);
-    if (result.success) {
-      changes.timeZone = result.zoneId;
-    } else {
-      errors.push(result.error ?? "Failed to set time zone");
-    }
-  }
+): Promise<LocalizationTimeZoneMetadata> {
+  const timeZoneMetadata =
+    args.timeZone === undefined
+      ? {}
+      : await applyTimeZoneChange(manager, args.timeZone, changes, errors);
 
   if (args.textDirection !== undefined) {
     await applyTextDirectionChange(manager, args.textDirection, changes, errors);
@@ -701,6 +716,7 @@ async function applyAdditionalLocalizationChanges(
       errors.push(result.error ?? "Failed to set calendar system");
     }
   }
+  return timeZoneMetadata;
 }
 
 const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocalizationArgs) => {
@@ -715,7 +731,7 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
     localeMetadata = await applyLocaleChange(manager, device, args, changes, errors);
   }
 
-  await applyAdditionalLocalizationChanges(manager, args, changes, errors);
+  const timeZoneMetadata = await applyAdditionalLocalizationChanges(manager, args, changes, errors);
 
   const success = errors.length === 0;
   let intentBroadcast = false;
@@ -737,6 +753,7 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
       changes,
       intentBroadcast,
       ...localeMetadata,
+      ...timeZoneMetadata,
       ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
       ...(success ? {} : { error: errors.join("; ") }),
     }),

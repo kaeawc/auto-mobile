@@ -93,7 +93,7 @@ describe("iOS navigation-event graph workflow", () => {
     const replay = await navigateTo.execute({ targetScreen: "Settings", platform: "ios" });
 
     expect(replay.success).toBe(true);
-    expect(replay.path).toEqual(['tapOn({"text":"Settings","action":"tap","platform":"ios"})']);
+    expect(replay.path).toEqual(['tapOn({"text":"Settings","action":"tap"})']);
     expect(replayArgs).toEqual({
       text: "Settings",
       action: "tap",

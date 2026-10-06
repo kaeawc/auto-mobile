@@ -54,6 +54,7 @@ import { registerNavigationTools } from "../../../src/server/navigationTools";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../../src/utils/logger";
+import { reportToolDispatched } from "../../../src/utils/ToolDispatchContext";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 
@@ -842,6 +843,21 @@ describe("Explore", () => {
       } finally {
         back.mockRestore();
         launch.mockRestore();
+      }
+    });
+
+    test("a run that only re-traverses known transitions reports no edges added (#10194)", async () => {
+      const initialGraph = seedTargetGraph();
+      // Re-traversal appends rows to the log; the distinct transitions are unchanged.
+      const retraversed = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue({
+        ...initialGraph,
+        edges: [...initialGraph.edges, ...initialGraph.edges, ...initialGraph.edges],
+      });
+      try {
+        const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
+        expect(result.edgesAdded).toBe(0);
+      } finally {
+        retraversed.mockRestore();
       }
     });
 
@@ -1732,6 +1748,28 @@ describe("Explore", () => {
       expect(args).toEqual({ selector: { elementId: "com.test:id/settings_btn" }, action: "tap" });
       expect(tapOnSchema.safeParse(args).success).toBe(true);
       expect(await historySize()).toBe(1);
+    });
+
+    test("a dispatch the tap reports reaches the recorded call (#10196)", async () => {
+      const dispatched: number[] = [];
+      const record = spyOn(fakeGraph, "recordToolCall").mockImplementation(() =>
+        Object.assign(() => {}, { markDispatched: () => dispatched.push(1) }),
+      );
+      const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async () => {
+        reportToolDispatched();
+        return { success: true };
+      });
+      try {
+        await perform()(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+      } finally {
+        tap.mockRestore();
+        record.mockRestore();
+      }
+
+      expect(dispatched).toEqual([1]);
     });
 
     test("a repeated control records the occurrence index beside the selector", async () => {

@@ -22,6 +22,7 @@ import {
 } from "../../src/server/videoRecordingManager";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 import { logger } from "../../src/utils/logger";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -417,8 +418,10 @@ describe("each rotated Android segment is confirmed exited by its own pid (#1001
       device,
     };
     const handle = await backend.start(config);
-    // Let the buffered launch stdout reach the pid reader.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Let the buffered launch stdout reach the pid reader. A real macrotask turn rather than
+    // setImmediate: start's settle probe leaves a FakeTimer dispatch immediate queued, and an
+    // immediate-based flush here lost that chain, hanging the later fake sleeps.
+    await defaultTimer.sleep(0);
     return handle;
   }
 

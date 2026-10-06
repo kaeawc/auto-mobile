@@ -1,6 +1,7 @@
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 export { DEFAULT_EXPLORE_TIMEOUT_MS } from "./exploreTimeout";
 import { beginPostActionCaptureAction } from "../../utils/PostActionCaptureContext";
+import { runWithToolDispatchReporter } from "../../utils/ToolDispatchContext";
 import { toActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
@@ -78,6 +79,7 @@ import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlocke
 
 // Import validate mode functions
 import {
+  countNewTransitions,
   initializeGraphTraversal,
   markNodeVisited,
   markEdgeTraversed,
@@ -1200,7 +1202,9 @@ export class Explore extends BaseVisualChange {
       : undefined;
     let succeeded = false;
     try {
-      const result = await run();
+      // The action reports when its gesture goes out (#10196); a swipe that reports
+      // nothing is attributed from the start of the call.
+      const result = await runWithToolDispatchReporter(withdraw?.markDispatched, run);
       succeeded = result.success;
       return result;
     } finally {
@@ -1468,7 +1472,7 @@ export class Explore extends BaseVisualChange {
       ? await this.navigationManager.exportGraphForApp(initialGraph.appId)
       : await this.navigationManager.exportGraph();
     const screensDiscovered = Math.max(0, finalGraph.nodes.length - initialGraph.nodes.length);
-    const edgesAdded = Math.max(0, finalGraph.edges.length - initialGraph.edges.length);
+    const edgesAdded = countNewTransitions(initialGraph.edges, finalGraph.edges);
 
     // Calculate coverage
     const totalScreens = finalGraph.nodes.length;

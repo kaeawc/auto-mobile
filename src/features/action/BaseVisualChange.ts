@@ -57,7 +57,10 @@ import {
   deferTerminalScreenshot,
 } from "../../utils/PostActionCaptureContext";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
-import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
+import {
+  resolveNavigationGraphForDevice,
+  type NavigationGraphResolver,
+} from "../navigation/deviceNavigationGraph";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
@@ -205,6 +208,9 @@ export class BaseVisualChange {
   }
 
   windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
+
+  /** Selects the navigation graph this device records on; a seam for tests (#10197). */
+  navigationGraphResolver: NavigationGraphResolver = resolveNavigationGraphForDevice;
 
   device: BootedDevice;
   adb: AdbExecutor;
@@ -1158,7 +1164,9 @@ export class BaseVisualChange {
       return undefined;
     }
 
-    const navigationGraph = NavigationGraphManager.getInstance();
+    // The graph this device's navigation events are recorded on (its bound session's, else the
+    // global one); resolved once so the outcome is judged on the graph the context came from.
+    const navigationGraph = this.navigationGraphResolver(this.device);
     const appId = navigationGraph.getCurrentAppId();
     const fromScreen = navigationGraph.getCurrentScreen();
 
@@ -1171,6 +1179,7 @@ export class BaseVisualChange {
       fromScreen,
       toolName: context.toolName,
       toolArgs: context.toolArgs,
+      navigationGraph,
     };
   }
 

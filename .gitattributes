@@ -31,6 +31,10 @@ scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
 # Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
 android/junit-runner/src/test/resources/captured/*.json text eol=lf
+# Real `am start` / `monkey` failure captures from two emulators (#10192).
+test/fixtures/android-am-start/*.txt text eol=lf
+# Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
+test/fixtures/android-install/*.txt text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling

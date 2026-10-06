@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
+import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { resolveTapAtCoordinates } from "../../../src/features/action/TapAtCoordinate";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import {
   isElementCenterOffScreen,
   screenSizeForOffscreenCheck,
@@ -17,6 +18,7 @@ import type {
 import type { ScreenSizeForOffscreenCheckOptions } from "../../../src/models/ScreenSize";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { selectionFixtureDevice } from "../../fixtures/issue8379SelectionHierarchy";
 
@@ -95,19 +97,34 @@ test("helper: unknown or zero size never refuses", () => {
   expect(isElementCenterOffScreen(target.bounds, { width: 0, height: 0 })).toBe(false);
 });
 
-test("selector path rejects a centre outside the targeted panel", () => {
-  const selector = new DefaultElementSelector(new DefaultElementFinder(), options);
+// The default display's size is supplied as the observation size in the next
+// two tests, so they fail if the check reads it instead of the panel's capture.
+const wrongSizeOptions: ScreenSizeForOffscreenCheckOptions = {
+  ...options,
+  observationScreenSize: defaultDisplay,
+};
+const inside: Element = { ...target, bounds: { left: 100, right: 200, top: 100, bottom: 200 } };
+
+test("resolver selector path rejects a centre outside the targeted panel", () => {
+  // ResolverElementSelector is the selector tapOn and tapAny construct by default.
+  const selector = new ResolverElementSelector(undefined, undefined, wrongSizeOptions);
   expect(selector.selectByText(coverHierarchy(), target.text!).element).toBeNull();
+  // Positive control: same hierarchy shape and text, centre inside the panel.
+  const found = selector.selectByText(
+    coverHierarchy({ hierarchy: { node: [{ ...inside }] } }),
+    target.text!,
+  ).element;
+  expect(found?.bounds).toEqual(inside.bounds);
 });
 
 test("tapAny path rejects a centre outside the targeted panel and accepts one inside", () => {
-  const tapAny = newTapAny(target);
   expect(
-    tapAny["findClickableElement"]({ action: "tap" }, coverHierarchy(), options).element,
+    newTapAny(target)["findClickableElement"]({ action: "tap" }, coverHierarchy(), wrongSizeOptions)
+      .element,
   ).toBeNull();
-  const inside: Element = { ...target, bounds: { left: 100, right: 200, top: 100, bottom: 200 } };
   expect(
-    newTapAny(inside)["findClickableElement"]({ action: "tap" }, coverHierarchy(), options).element,
+    newTapAny(inside)["findClickableElement"]({ action: "tap" }, coverHierarchy(), wrongSizeOptions)
+      .element,
   ).toBe(inside);
 });
 
@@ -122,19 +139,65 @@ test("tapOn default path resolves the panel's size and refuses the off-panel tar
   expect(tapOn["isElementTapTargetOffScreen"](selectionFor(target), hierarchy, size)).toBe(true);
 });
 
-test("tapOn keeps tapping the visible part of an element straddling the screen edge", () => {
-  // Deliberate difference (owner note on #6523): tapOn clips to the screen and
-  // taps the visible part, while the selector and tapAny reject a centre that is
-  // outside the screen. Pinned so the divergence stays an explicit decision.
-  const straddling: Element = {
-    ...target,
-    bounds: { left: 1070, right: 1100, top: 100, bottom: 200 },
+async function runTapOn(bounds: Element["bounds"]) {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const tapOn = new TapOnElement(selectionFixtureDevice("android", 1), new FakeAdbExecutor(), {
+    timer,
+    tapStrategy: new FakeTapStrategy(),
+    visionConfig: { ...DEFAULT_VISION_CONFIG, enabled: false },
+    selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+  });
+  const capture: ViewHierarchyResult = {
+    screenWidth: cover.width,
+    screenHeight: cover.height,
+    hierarchy: {
+      bounds: { left: 0, top: 0, right: cover.width, bottom: cover.height },
+      node: { ...target, bounds },
+    },
   };
-  const hierarchy = coverHierarchy({ hierarchy: { node: [{ ...straddling }] } });
-  expect(isElementCenterOffScreen(straddling.bounds, cover)).toBe(true);
-  expect(
-    newTapOn()["isElementTapTargetOffScreen"](selectionFor(straddling), hierarchy, cover),
-  ).toBe(false);
+  const observation: ObserveResult = {
+    observationId: "straddle",
+    updatedAt: 1,
+    // Wrong on purpose: the default display's size must not win over the capture.
+    screenSize: defaultDisplay,
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy: capture,
+  };
+  const points: Array<{ x: number; y: number }> = [];
+  tapOn.observedInteraction = async (action) => ({
+    ...(await action(recordObservationRead(observation))),
+    observation,
+  });
+  tapOn.refreshViewHierarchy = async () => capture;
+  tapOn.executeAndroidTap = async (_action, x, y) => {
+    points.push({ x, y });
+  };
+  tapOn.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+    observation: current,
+  });
+  tapOn.captureTerminalObservationScreenshot = async () => {};
+  tapOn.recordDeferredPredictionOutcome = async () => {};
+  tapOn.enforceFreshnessConsistencyWithEffect = () => {};
+  const result = await tapOn.execute({ text: target.text, action: "tap" });
+  return { result, points };
+}
+
+test("tapOn end to end taps an element whose centre is inside the panel", async () => {
+  const { result, points } = await runTapOn({ left: 1000, right: 1060, top: 100, bottom: 200 });
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 1030, y: 150 }]);
+});
+
+test("tapOn end to end refuses an element straddling the panel edge, like tapAny", async () => {
+  // Centre x=1085 is outside the 1080-wide panel; 1070..1080 is the visible part.
+  // The resolver's centre filter rejects it before tapOn's own screen clip runs,
+  // so tapOn does not tap the visible part. With the default display's size
+  // (2076 wide, supplied as the observation size) it would have been tapped.
+  const { result, points } = await runTapOn({ left: 1070, right: 1100, top: 100, bottom: 200 });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("Element not found");
+  expect(points).toEqual([]);
 });
 
 test("tapAt path refuses a coordinate outside the targeted panel's observation size", () => {

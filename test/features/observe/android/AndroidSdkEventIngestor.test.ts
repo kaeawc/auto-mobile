@@ -502,6 +502,28 @@ describe("AndroidSdkEventIngestor failure analytics", () => {
     });
   });
 
+  it("records the message the device frame carries under `message` (#10068)", async () => {
+    // The event object of WebSocketResponseTest.kt's handled_exception_event encoding.
+    const frame: { event: AndroidHandledExceptionEvent } = JSON.parse(
+      '{"type":"handled_exception_event","timestamp":1700000001000,"event":{"exceptionClass":"java.lang.IllegalStateException","message":"cart is empty","stackTrace":"at com.example.Main.run(Main.java:42)","customMessage":null,"currentScreen":null,"packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34},"applicationId":null}}',
+    );
+    const { ingestor, failure } = makeIngestor();
+    await ingestor.recordHandledException(frame.event);
+    expect(failure.nonFatals[0].exceptionMessage).toBe("cart is empty");
+  });
+
+  it("still reads the legacy exceptionMessage name when `message` is absent", async () => {
+    const { ingestor, failure } = makeIngestor();
+    await ingestor.recordHandledException({ ...handled, exceptionMessage: "legacy" });
+    expect(failure.nonFatals[0].exceptionMessage).toBe("legacy");
+  });
+
+  it("uses the placeholder when the device sent a null message", async () => {
+    const { ingestor, failure } = makeIngestor();
+    await ingestor.recordHandledException({ ...handled, message: null });
+    expect(failure.nonFatals[0].exceptionMessage).toBe("Handled exception");
+  });
+
   it("prefers the event currentScreen over the nav graph", async () => {
     const { ingestor, failure } = makeIngestor({ currentScreen: "NavScreen" });
     await ingestor.recordHandledException({ ...handled, currentScreen: "EventScreen" });

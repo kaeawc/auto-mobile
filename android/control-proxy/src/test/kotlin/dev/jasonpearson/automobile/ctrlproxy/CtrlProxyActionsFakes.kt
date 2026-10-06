@@ -136,13 +136,14 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     occlusionEnabled: Boolean,
   ) {}
 
-  override fun setNetworkMockRules(rulesJson: String) {}
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) {}
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   ) {}
 
   override fun getCurrentFocus(requestId: String?) {}
@@ -480,14 +481,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(rulesJson: String) = record("setNetworkMockRules", rulesJson)
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+    record("setNetworkMockRules", rulesJson, requestId)
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
-  ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs)
+    remainingMs: Long?,
+  ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override fun getCurrentFocus(requestId: String?) = record("getCurrentFocus", requestId)
 

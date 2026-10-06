@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
+import dev.jasonpearson.automobile.protocol.RejectedNetworkMockRule
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.ControlBroadcastReply
 import dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.builtins.ListSerializer
@@ -16,7 +19,16 @@ import kotlinx.serialization.json.Json
  * Updated via BroadcastReceiver from control-proxy process. Queried by
  * [AutoMobileNetworkInterceptor] on every HTTP request.
  */
-class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeMillis() }) {
+class NetworkMockRuleStore
+@JvmOverloads
+constructor(
+  private val clock: () -> Long = { System.currentTimeMillis() },
+  /**
+   * Monotonic clock in milliseconds, immune to wall-clock steps and to the host/device skew that
+   * made an absolute host expiry unusable (issue #10062). Only elapsed time is meaningful.
+   */
+  private val monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
+) {
 
   companion object {
     private const val TAG = "NetworkMockRuleStore"
@@ -28,6 +40,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     const val EXTRA_ERROR_SIM_TYPE = "error_type"
     const val EXTRA_ERROR_SIM_LIMIT = "limit"
     const val EXTRA_ERROR_SIM_EXPIRES_AT = "expires_at"
+    const val EXTRA_ERROR_SIM_REMAINING_MS = "remaining_ms"
     @Volatile private var instance: NetworkMockRuleStore? = null
 
     fun getInstance(): NetworkMockRuleStore {
@@ -80,14 +93,19 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     val limit: Int?,
     val remaining: AtomicInteger?,
     val expiresAtEpochMs: Long,
+    /**
+     * Deadline on the store's monotonic clock when the host sent a remaining duration. When
+     * non-null it decides expiry and [expiresAtEpochMs] is informational only.
+     */
+    val deadlineMonotonicMs: Long? = null,
   )
 
   @Volatile private var rules: List<CompiledMockRule> = emptyList()
   @Volatile private var errorSimulation: ErrorSimulationConfig? = null
 
   private val json = Json { ignoreUnknownKeys = true }
-  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent ->
-    handleControlBroadcast(intent)
+  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent, reply ->
+    handleControlBroadcast(intent, reply)
   }
 
   val ruleMatcher: RuleMatcher =
@@ -105,10 +123,29 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       }
     }
 
+  /**
+   * Replace the rule list. The host re-sends its whole list on every change and on every reconnect,
+   * so a rule the store already holds keeps its use counter instead of being re-armed from the
+   * incoming `remaining` (issue #10060). Identity is the host-assigned `mockId` (never reused
+   * within a daemon run) plus an unchanged definition; a changed rule, or a new app process, starts
+   * with a fresh counter.
+   */
   fun setRules(dtos: List<NetworkMockRuleDto>) {
+    applyRules(dtos)
+  }
+
+  /**
+   * [setRules] that also returns the rules this device's regex engine refused (ICU on Android
+   * differs from the host's JavaScript engine), each with the compiler's message, so the host can
+   * report them as not installed instead of assuming every pushed rule took (issue #10101).
+   */
+  fun applyRules(dtos: List<NetworkMockRuleDto>): List<RejectedNetworkMockRule> {
+    val previousById = rules.associateBy { it.mockId }
+    val rejected = mutableListOf<RejectedNetworkMockRule>()
     val compiledRules = buildList {
       for (dto in dtos) {
         try {
+          val previous = previousById[dto.mockId]?.takeIf { it.isSameDefinitionAs(dto) }
           add(
             CompiledMockRule(
               mockId = dto.mockId,
@@ -116,7 +153,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
               pathRegex = Regex(dto.path),
               method = dto.method,
               limit = dto.limit,
-              remaining = dto.remaining?.let { AtomicInteger(it) },
+              remaining =
+                if (previous != null) previous.remaining
+                else dto.remaining?.let { AtomicInteger(it) },
               statusCode = dto.statusCode,
               responseHeaders = dto.responseHeaders,
               responseBody = dto.responseBody,
@@ -124,29 +163,43 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
             )
           )
         } catch (e: Exception) {
-          AutoMobileSDK.logger.w(TAG) {
-            "Skipping mock rule ${dto.mockId}: invalid regex: ${e.message}"
-          }
+          val reason = "invalid regex: ${e.message}"
+          AutoMobileSDK.logger.w(TAG) { "Skipping mock rule ${dto.mockId}: $reason" }
+          rejected += RejectedNetworkMockRule(dto.mockId, reason)
         }
       }
     }
     rules = compiledRules
     AutoMobileSDK.logger.d(TAG) { "Updated mock rules: ${compiledRules.size} active" }
+    return rejected
   }
 
+  private fun CompiledMockRule.isSameDefinitionAs(dto: NetworkMockRuleDto): Boolean =
+    limit == dto.limit &&
+      method == dto.method &&
+      hostRegex.pattern == dto.host &&
+      pathRegex.pattern == dto.path
+
+  @JvmOverloads
   fun setErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long? = null,
   ) {
+    // A remaining duration is measured on this device's monotonic clock; the absolute host epoch
+    // is only the fallback for older hosts that send nothing else.
+    val boundedRemainingMs = remainingMs?.coerceAtLeast(0L)
+    val epochMs = expiresAtEpochMs ?: boundedRemainingMs?.let { clock() + it }
     errorSimulation =
-      if (enabled && errorType != null && expiresAtEpochMs != null) {
+      if (enabled && errorType != null && epochMs != null) {
         ErrorSimulationConfig(
           errorType = errorType,
           limit = limit,
           remaining = limit?.let { AtomicInteger(it) },
-          expiresAtEpochMs = expiresAtEpochMs,
+          expiresAtEpochMs = epochMs,
+          deadlineMonotonicMs = boundedRemainingMs?.let { monotonicClock() + it },
         )
       } else {
         null
@@ -181,7 +234,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
 
   fun getActiveErrorSimulation(): ErrorSimulationConfig? {
     val sim = errorSimulation ?: return null
-    if (clock() >= sim.expiresAtEpochMs) {
+    if (isExpired(sim)) {
       errorSimulation = null
       return null
     }
@@ -194,6 +247,11 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       }
     }
     return sim
+  }
+
+  private fun isExpired(sim: ErrorSimulationConfig): Boolean {
+    val deadline = sim.deadlineMonotonicMs
+    return if (deadline != null) monotonicClock() >= deadline else clock() >= sim.expiresAtEpochMs
   }
 
   fun clear() {
@@ -221,7 +279,8 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     controlReceiverRegistrar.unregister(context)
   }
 
-  private fun handleControlBroadcast(intent: Intent?) {
+  /** Visible to tests: applies one control broadcast and answers it when it is ordered. */
+  internal fun handleControlBroadcast(intent: Intent?, reply: ControlBroadcastReply? = null) {
     if (intent == null) return
     when (intent.action) {
       ACTION_NETWORK_MOCK_RULES -> {
@@ -232,7 +291,12 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
               ListSerializer(NetworkMockRuleDto.serializer()),
               rulesJson,
             )
-          setRules(dtos)
+          val rejected = applyRules(dtos)
+          // Only an ordered broadcast has a reply channel; a plain one (an older CtrlProxy, or a
+          // reconnect resync) cannot be answered and nothing waits for it.
+          if (reply != null && reply.isOrdered) {
+            reply.resultData = NetworkMockRuleReportContract.append(reply.resultData, rejected)
+          }
         } catch (e: Exception) {
           AutoMobileSDK.logger.e(TAG) { "Failed to parse mock rules: ${e.message}" }
         }
@@ -245,7 +309,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
           intent.getLongExtra(EXTRA_ERROR_SIM_EXPIRES_AT, -1).let {
             if (it == -1L) null else it
           }
-        setErrorSimulation(enabled, errorType, limit, expiresAt)
+        val remainingMs =
+          intent.getLongExtra(EXTRA_ERROR_SIM_REMAINING_MS, -1L).let { if (it < 0L) null else it }
+        setErrorSimulation(enabled, errorType, limit, expiresAt, remainingMs)
       }
     }
   }

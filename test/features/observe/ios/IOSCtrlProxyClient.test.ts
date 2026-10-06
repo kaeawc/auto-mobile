@@ -759,12 +759,11 @@ describe("IOSCtrlProxyClient", function () {
     test("does not issue SDK-backed syncs when the foreground app has no SDK server", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.addMock({
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: { "X-Test": "yes" },
         responseBody: '{"ok":true}',
@@ -839,9 +838,135 @@ describe("IOSCtrlProxyClient", function () {
         );
         await respondToSdkCapabilityQuery(socket, false);
 
-        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("noCapability");
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toEqual({
+          outcome: "noCapability",
+        });
         const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
         expect(sentTypes).not.toContain("set_network_mock_rules");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    // Issue #10101: the push carries a requestId and the runner's reply names the rejected rules.
+    const answerMockRulesPush = async (
+      socket: CapturingWebSocket,
+      reply: Record<string, unknown> | null,
+    ): Promise<void> => {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const push = socket.sentMessages
+          .map((message) => JSON.parse(message))
+          .filter((payload) => payload.type === "set_network_mock_rules" && payload.requestId)
+          .at(-1);
+        if (push) {
+          if (reply) {
+            socket.simulateMessage(
+              JSON.stringify({
+                type: "set_network_mock_rules_result",
+                requestId: push.requestId,
+                ...reply,
+              }),
+            );
+          }
+          return;
+        }
+        await Promise.resolve();
+      }
+      throw new Error("set_network_mock_rules push with a requestId was not sent");
+    };
+
+    const connectWithNetworkMocking = async (): Promise<{
+      testClient: IOSCtrlProxyClient;
+      socket: CapturingWebSocket;
+    }> => {
+      serverConfig.setNetworkMockableEnabled(true);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      await testClient.ensureConnected();
+      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+      await waitForSocketOpen(socket);
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          supportedCommands: ["get_sdk_capabilities", "set_network_mock_rules"],
+        }),
+      );
+      await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+      return { testClient, socket };
+    };
+
+    test("syncNetworkMockRulesIfAvailable returns the rules the runner says the app rejected", async function () {
+      const { testClient, socket } = await connectWithNetworkMocking();
+      try {
+        const sync = testClient.syncNetworkMockRulesIfAvailable();
+        await answerMockRulesPush(socket, {
+          ok: true,
+          rejectedMockIds: ["mock-1"],
+          rejectedReasons: { "mock-1": "invalid regex" },
+        });
+
+        expect(await sync).toEqual({
+          outcome: "sent",
+          report: { status: "reported", rejected: [{ mockId: "mock-1", reason: "invalid regex" }] },
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncNetworkMockRulesIfAvailable reports an empty rejection list as everything installed", async function () {
+      const { testClient, socket } = await connectWithNetworkMocking();
+      try {
+        const sync = testClient.syncNetworkMockRulesIfAvailable();
+        await answerMockRulesPush(socket, { ok: true, rejectedMockIds: [] });
+
+        expect(await sync).toEqual({
+          outcome: "sent",
+          report: { status: "reported", rejected: [] },
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncNetworkMockRulesIfAvailable is unconfirmed, not failed, for an older runner's reply", async function () {
+      const { testClient, socket } = await connectWithNetworkMocking();
+      try {
+        const sync = testClient.syncNetworkMockRulesIfAvailable();
+        await answerMockRulesPush(socket, { ok: true });
+
+        expect(await sync).toEqual({ outcome: "sent", report: { status: "unconfirmed" } });
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncNetworkMockRulesIfAvailable is unconfirmed when no reply arrives in time", async function () {
+      const { testClient, socket } = await connectWithNetworkMocking();
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const sync = testClient.syncNetworkMockRulesIfAvailable();
+        await answerMockRulesPush(socket, null);
+
+        expect(await sync).toEqual({ outcome: "sent", report: { status: "unconfirmed" } });
+      } finally {
+        warnSpy.mockRestore();
+        await testClient.close();
+      }
+    });
+
+    test("syncNetworkMockRulesIfAvailable fails when the runner could not reach the SDK", async function () {
+      const { testClient, socket } = await connectWithNetworkMocking();
+      try {
+        const sync = testClient.syncNetworkMockRulesIfAvailable();
+        await answerMockRulesPush(socket, { ok: false });
+
+        expect(await sync).toEqual({ outcome: "failed" });
       } finally {
         await testClient.close();
       }
@@ -868,15 +993,17 @@ describe("IOSCtrlProxyClient", function () {
           }),
         );
         await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
-        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("sent");
+        const sync = testClient.syncNetworkMockRulesIfAvailable();
+        await answerMockRulesPush(socket, { ok: true });
+        expect((await sync).outcome).toBe("sent");
 
         const sendSpy = spyOn(testClient, "sendMessage").mockReturnValue(false);
-        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("failed");
+        expect((await testClient.syncNetworkMockRulesIfAvailable()).outcome).toBe("failed");
         sendSpy.mockImplementation(() => {
           throw new Error("send exploded");
         });
         const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("failed");
+        expect((await testClient.syncNetworkMockRulesIfAvailable()).outcome).toBe("failed");
         warnSpy.mockRestore();
         sendSpy.mockRestore();
       } finally {
@@ -887,13 +1014,12 @@ describe("IOSCtrlProxyClient", function () {
     test("syncs SDK-backed state after capability detection", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation("tlsFailure", 20, 4);
-      state.addMock({
+      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, 4);
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: { "X-Test": "yes" },
         responseBody: '{"ok":true}',
@@ -930,6 +1056,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "tlsFailure",
           limit: 4,
           expiresAtEpochMs: expect.any(Number),
+          remainingMs: expect.any(Number),
         });
         expect(sync).toContainEqual({
           type: "set_network_mock_rules",
@@ -953,21 +1080,67 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("does not push another device's rules or simulation on connect (#10061)", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const state = NetworkState.getInstance();
+      state.startSimulation("emulator-5554", "tlsFailure", 20, 4);
+      state.addMock("emulator-5554", {
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        statusCode: 201,
+        responseHeaders: {},
+        responseBody: "{}",
+        contentType: "application/json",
+      });
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "set_network_mock_rules",
+              "set_network_error_simulation",
+            ],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+
+        const sync = socket.sentMessages.map((message) => JSON.parse(message));
+        expect(sync).toContainEqual({ type: "set_network_mock_rules", rules: [] });
+        expect(sync).toContainEqual({ type: "set_network_error_simulation", enabled: false });
+        expect(sync.some((message) => message.enabled === true)).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("syncs mock rules for legacy runners that advertise the command", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.addMock({
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 1,
-        remaining: 1,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "{}",
         contentType: "application/json",
       });
-      state.startSimulation("timeout", 10, 2);
+      state.startSimulation(testDevice.deviceId, "timeout", 10, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -1144,6 +1317,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: 1_720_000_000_000,
+          remainingMs: 30_000,
         });
         for (let attempt = 0; attempt < 10; attempt += 1) {
           if (
@@ -1171,6 +1345,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: 1_720_000_000_000,
+          remainingMs: 30_000,
         });
 
         socket!.simulateMessage(
@@ -1283,7 +1458,7 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("SDK capability transitions", function () {
     test("refreshes capabilities and syncs simulation after launching an SDK-enabled app", async function () {
-      NetworkState.getInstance().startSimulation("timeout", 20, 2);
+      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -1331,6 +1506,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: expect.any(Number),
+          remainingMs: expect.any(Number),
         });
       } finally {
         await testClient.close();

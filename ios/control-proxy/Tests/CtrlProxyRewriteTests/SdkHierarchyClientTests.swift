@@ -106,6 +106,49 @@ final class SdkHierarchyClientTests: XCTestCase {
         XCTAssertFalse(ok)
     }
 
+    // MARK: - Network mock rule report (#10101)
+
+    func testPushMockRulesReturnsTheRulesTheSdkRejected() async {
+        let body = Data(#"{"status":"ok","rejected":[{"mockId":"m1","reason":"invalid regex: x"}]}"#.utf8)
+        let stub = StubHTTPTransport(status: 200, body: body)
+
+        let outcome = await makeClient(stub).pushMockRules([])
+
+        XCTAssertEqual(
+            outcome,
+            SdkMockRulesOutcome(ok: true, rejectedMockIds: ["m1"], rejectedReasons: ["m1": "invalid regex: x"])
+        )
+        XCTAssertEqual(stub.recordedRequests.first?.url?.path, "/network/mock")
+        XCTAssertEqual(stub.recordedRequests.first?.httpMethod, "POST")
+    }
+
+    func testPushMockRulesTreatsAnEmptyRejectedListAsAReportThatNothingWasRejected() async {
+        let stub = StubHTTPTransport(status: 200, body: Data(#"{"status":"ok","rejected":[]}"#.utf8))
+
+        let outcome = await makeClient(stub).pushMockRules([])
+
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: true, rejectedMockIds: [], rejectedReasons: [:]))
+    }
+
+    func testPushMockRulesHasNoReportFromAnSdkThatPredatesIt() async {
+        let stub = StubHTTPTransport(status: 200, body: Data(#"{"status":"ok"}"#.utf8))
+
+        let outcome = await makeClient(stub).pushMockRules([])
+
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: true))
+        XCTAssertNil(outcome.rejectedMockIds)
+    }
+
+    func testPushMockRulesFailsOnNon200() async {
+        let outcome = await makeClient(StubHTTPTransport(status: 500)).pushMockRules([])
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: false))
+    }
+
+    func testPushMockRulesFailsOnTransportError() async {
+        let outcome = await makeClient(StubHTTPTransport([.transportError])).pushMockRules([])
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: false))
+    }
+
     func testSetNetworkErrorSimulationHitsPath() async {
         let stub = StubHTTPTransport(status: 200)
         let ok = await makeClient(stub)

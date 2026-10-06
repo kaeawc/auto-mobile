@@ -32,10 +32,31 @@ function reportedTextSizePx(element: Element): number | null {
   return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : null;
 }
 
+/** Whether the whole element rectangle lies inside the decoded image (hierarchy px == raster px on Android). */
+function boundsInsideImage(image: RawImage, bounds: Element["bounds"]): boolean {
+  return (
+    bounds.left >= 0 &&
+    bounds.top >= 0 &&
+    bounds.right <= image.width &&
+    bounds.bottom <= image.height
+  );
+}
+
 interface RGB {
   r: number;
   g: number;
   b: number;
+}
+
+interface ColorCluster {
+  color: RGB;
+  count: number;
+  coreCount: number;
+}
+
+interface ElementColors {
+  textColor: RGB;
+  backgroundColor: RGB;
 }
 
 interface RGBA extends RGB {
@@ -344,7 +365,23 @@ export class ContrastChecker {
     wcagLevel: WcagLevel,
     density?: number,
   ): Promise<Map<Element, ContrastResult | null>> {
+    return (await this.checkContrastBatchWithCoverage(screenshotPath, elements, wcagLevel, density))
+      .results;
+  }
+
+  /**
+   * {@link checkContrastBatch} that also reports the elements whose bounds are not entirely
+   * inside the decoded screenshot (#10220). Those are never measured: their pixels are not the
+   * element's, and the edge-clamped read would invent a colour. They are absent from `results`.
+   */
+  async checkContrastBatchWithCoverage(
+    screenshotPath: string,
+    elements: Element[],
+    wcagLevel: WcagLevel,
+    density?: number,
+  ): Promise<{ results: Map<Element, ContrastResult | null>; outsideImage: Element[] }> {
     const results = new Map<Element, ContrastResult | null>();
+    const outsideImage: Element[] = [];
 
     try {
       // Load screenshot once for all elements
@@ -352,6 +389,10 @@ export class ContrastChecker {
       const screenshotFingerprint = await this.getScreenshotFingerprint(screenshotPath);
 
       for (const element of elements) {
+        if (!boundsInsideImage(image, element.bounds)) {
+          outsideImage.push(element);
+          continue;
+        }
         try {
           const cached = this.getBatchCachedContrast(
             element,
@@ -382,12 +423,13 @@ export class ContrastChecker {
     } catch (error) {
       logger.warn(`Batch contrast checking error: ${errorMessage(error)}`, error);
       // Return null for all elements on screenshot load failure
+      outsideImage.length = 0;
       for (const element of elements) {
         results.set(element, null);
       }
     }
 
-    return results;
+    return { results, outsideImage };
   }
 
   /**
@@ -409,11 +451,19 @@ export class ContrastChecker {
       return null;
     }
 
-    // Sample text color (from center region of element)
-    const textColor = await this.sampleTextColor(image, element.bounds);
+    // Pixels outside the raster are not the element's: never measure an edge-clamped guess.
+    if (!boundsInsideImage(image, element.bounds)) {
+      return null;
+    }
+
+    // Separate glyphs from the dominant background instead of averaging a gap between letters.
+    const { textColor, backgroundColor: dominantBackground } = this.sampleElementColors(
+      image,
+      element.bounds,
+    );
 
     if (!this.config.useMultiPointSampling) {
-      const backgroundColor = await this.sampleBackgroundEdgeColor(image, element.bounds);
+      const backgroundColor = dominantBackground;
       const ratio = this.getCachedContrast(textColor, backgroundColor);
       const shadowDetected = this.config.detectTextShadows
         ? this.detectTextShadow(image, element.bounds, textColor, backgroundColor)
@@ -455,11 +505,12 @@ export class ContrastChecker {
     const baseSamples = await this.sampleBackgroundColors(
       image,
       element.bounds,
-      textColor,
+      { textColor, backgroundColor: dominantBackground },
       samplePoints,
     );
     const baseGradient = this.config.detectGradients ? this.detectGradient(baseSamples) : null;
 
+    // Preserve local backgrounds even when their variation has no linear gradient axis.
     let samples = baseSamples;
     let gradient: GradientInfo | undefined;
     if (baseGradient?.isGradient) {
@@ -468,7 +519,7 @@ export class ContrastChecker {
       const gradientSamples = await this.sampleBackgroundColors(
         image,
         element.bounds,
-        textColor,
+        { textColor, backgroundColor: dominantBackground },
         gradientPoints,
       );
       samples = this.mergeSamples(baseSamples, gradientSamples);
@@ -737,28 +788,137 @@ export class ContrastChecker {
     }
   }
 
-  /**
-   * Sample the text color from the center of the element
-   */
-  private async sampleTextColor(image: RawImage, bounds: Element["bounds"]): Promise<RGB> {
-    const { left, top, right, bottom } = bounds;
-    const centerX = Math.floor((left + right) / 2);
-    const centerY = Math.floor((top + bottom) / 2);
-
-    // Sample a small region around the center
-    const sampleSize = 3;
-    const colors: RGB[] = [];
-
-    for (let x = centerX - sampleSize; x <= centerX + sampleSize; x++) {
-      for (let y = centerY - sampleSize; y <= centerY + sampleSize; y++) {
-        if (x >= left && x < right && y >= top && y < bottom) {
-          colors.push(this.resolvePixelColor(image, x, y));
-        }
+  /** Quantized clusters retain their actual mean colour; anti-aliasing does not dominate a bin. */
+  private colorClusters(colors: RGB[], quantized = true): ColorCluster[] {
+    const bins = new Map<string, RGB[]>();
+    for (const color of colors) {
+      const key = quantized
+        ? `${color.r >> 3},${color.g >> 3},${color.b >> 3}`
+        : `${color.r},${color.g},${color.b}`;
+      const bin = bins.get(key);
+      if (bin) {
+        bin.push(color);
+      } else {
+        bins.set(key, [color]);
       }
     }
+    return Array.from(bins.values(), (bin) => ({
+      color: this.averageColor(bin),
+      count: bin.length,
+      coreCount: quantized ? this.colorClusters(bin, false)[0].count : bin.length,
+    })).sort((a, b) => b.count - a.count);
+  }
 
-    // Return average color
-    return this.averageColor(colors);
+  /** At most 4096 evenly spaced pixels, independent of the element's area. */
+  private elementPixels(image: RawImage, bounds: Element["bounds"]): RGB[] {
+    const width = Math.ceil(bounds.right) - Math.ceil(bounds.left);
+    const height = Math.ceil(bounds.bottom) - Math.ceil(bounds.top);
+    const area = width * height;
+    const count = Math.min(area, 4096);
+    return Array.from({ length: count }, (_, i) => {
+      const offset = Math.floor((i * area) / count);
+      return this.resolvePixelColor(
+        image,
+        Math.ceil(bounds.left) + (offset % width),
+        Math.ceil(bounds.top) + Math.floor(offset / width),
+      );
+    });
+  }
+
+  /** A dense glyph/block may occupy most of the box; its surrounding perimeter still owns the background. */
+  private perimeterPixels(image: RawImage, bounds: Element["bounds"]): RGB[] {
+    const colors: RGB[] = [];
+    for (let i = 0; i < 128; i++) {
+      const x = bounds.left + Math.floor(((bounds.right - bounds.left - 1) * i) / 127);
+      const y = bounds.top + Math.floor(((bounds.bottom - bounds.top - 1) * i) / 127);
+      colors.push(this.resolvePixelColor(image, x, bounds.top));
+      colors.push(this.resolvePixelColor(image, x, bounds.bottom - 1));
+      colors.push(this.resolvePixelColor(image, bounds.left, y));
+      colors.push(this.resolvePixelColor(image, bounds.right - 1, y));
+    }
+    return colors;
+  }
+
+  /** Ignore the border, while retaining the same bounded interior sampling budget. */
+  private interiorBounds(bounds: Element["bounds"]): Element["bounds"] {
+    const inset = Math.min(
+      4,
+      Math.floor((bounds.right - bounds.left - 2) / 2),
+      Math.floor((bounds.bottom - bounds.top - 2) / 2),
+    );
+    return {
+      left: bounds.left + inset,
+      top: bounds.top + inset,
+      right: bounds.right - inset,
+      bottom: bounds.bottom - inset,
+    };
+  }
+
+  private sampleElementColors(
+    image: RawImage,
+    bounds: Element["bounds"],
+  ): { textColor: RGB; backgroundColor: RGB } {
+    const pixels = this.elementPixels(image, this.interiorBounds(bounds));
+    const clusters = this.colorClusters(pixels);
+    let backgroundColor = clusters[0].color;
+    const perimeterPixels = this.perimeterPixels(image, bounds);
+    const perimeter = this.colorClusters(perimeterPixels);
+    const edgeSupport = perimeter
+      .filter((cluster) => this.isSimilarColor(cluster.color, backgroundColor))
+      .reduce((sum, cluster) => sum + cluster.count, 0);
+    const interiorEdgeSupport = clusters
+      .filter(
+        (cluster) =>
+          !this.isSimilarColor(cluster.color, backgroundColor) &&
+          perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)),
+      )
+      .reduce((sum, cluster) => sum + cluster.count, 0);
+    // A dense foreground may dominate; edge background must also occur INSIDE
+    // the inset box (>=10%) and most of its inset perimeter (>=50%). A border-coloured
+    // icon cannot make the outside border replace the element fill.
+    const supportedEdges = perimeter.filter((edge) => edge.count >= 512 * 0.1);
+    const insetEdgeSupport = this.perimeterPixels(image, this.interiorBounds(bounds)).filter(
+      (color) => supportedEdges.some((edge) => this.colorDistance(color, edge.color) <= 40),
+    ).length;
+    if (
+      edgeSupport < 512 * 0.1 &&
+      interiorEdgeSupport >= pixels.length * 0.1 &&
+      insetEdgeSupport >= 512 * 0.5
+    ) {
+      backgroundColor = this.averageColor(perimeterPixels);
+    }
+    const supported = clusters.filter(
+      (cluster) =>
+        cluster.count >= Math.max(2, pixels.length * 0.0025) &&
+        !this.isSimilarColor(cluster.color, backgroundColor),
+    );
+    const textColor = this.selectTextColor(supported, backgroundColor, perimeter);
+    return { textColor, backgroundColor };
+  }
+
+  /** Population orders the candidates; when supported core colours are ambiguous,
+   * keep the LOWER contrast. An icon cannot displace a smaller supported glyph bin.
+   * Keep bins with >=25% of the largest foreground population; smaller bins
+   * must have >=80% identical pixels and be absent from the background perimeter.
+   * This retains small flat glyphs beside a large icon without retaining fringes.
+   */
+  private selectTextColor(
+    clusters: ColorCluster[],
+    background: RGB,
+    perimeter: ColorCluster[],
+  ): RGB {
+    const largest = clusters[0]?.count ?? 0;
+    const candidates = clusters.filter(
+      (cluster) =>
+        cluster.count >= largest * 0.25 ||
+        (cluster.coreCount >= cluster.count * 0.8 &&
+          !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color))),
+    );
+    return candidates.reduce((selected, candidate) => {
+      const ratio = this.getCachedContrast(candidate.color, background);
+      const selectedRatio = this.getCachedContrast(selected, background);
+      return ratio < selectedRatio ? candidate.color : selected;
+    }, candidates[0]?.color ?? background);
   }
 
   /**
@@ -767,7 +927,7 @@ export class ContrastChecker {
   private async sampleBackgroundColors(
     image: RawImage,
     bounds: Element["bounds"],
-    textColor: RGB,
+    elementColors: ElementColors,
     points: Array<{ x: number; y: number }>,
   ): Promise<ContrastSample[]> {
     const samples: ContrastSample[] = [];
@@ -775,7 +935,7 @@ export class ContrastChecker {
       const backgroundColor = await this.sampleBackgroundAtPoint(
         image,
         bounds,
-        textColor,
+        elementColors,
         point.x,
         point.y,
       );
@@ -814,82 +974,36 @@ export class ContrastChecker {
   private async sampleBackgroundAtPoint(
     image: RawImage,
     bounds: Element["bounds"],
-    textColor: RGB,
+    elementColors: ElementColors,
     x: number,
     y: number,
   ): Promise<RGB> {
     const searchRadii = [2, 4, 6, 8];
     for (const radius of searchRadii) {
-      const colors = this.backgroundColorsAtRadius(image, bounds, textColor, x, y, radius);
-      if (colors.length > 0) {
-        return this.averageColor(colors);
+      const colors = this.backgroundColorsAtRadius(
+        image,
+        bounds,
+        elementColors.textColor,
+        x,
+        y,
+        radius,
+      );
+      const background = this.colorClusters(colors)[0];
+      // A few remaining fringe pixels inside a stroke are not a background.
+      // Expand until a locally supported colour is found, then retain its variation.
+      if (
+        background &&
+        colors.length >= (2 * radius + 1) ** 2 * 0.2 &&
+        background.count >= colors.length * 0.2
+      ) {
+        return this.colorClusters(
+          colors.filter((color) => this.isSimilarColor(color, background.color)),
+          false,
+        )[0].color;
       }
     }
 
-    if (this.config.enableBackgroundCache) {
-      const cached = this.getBackgroundCache(bounds);
-      if (cached) {
-        return cached;
-      }
-    }
-
-    return await this.sampleBackgroundEdgeColor(image, bounds);
-  }
-
-  private async sampleBackgroundEdgeColor(
-    image: RawImage,
-    bounds: Element["bounds"],
-  ): Promise<RGB> {
-    const cached = this.config.enableBackgroundCache ? this.getBackgroundCache(bounds) : null;
-    if (cached) {
-      return cached;
-    }
-
-    const { left, top, right, bottom } = bounds;
-    const colors: RGB[] = [];
-    const edgeSampleSize = 2;
-
-    for (let x = left; x < right; x += 3) {
-      for (let y = top; y < top + edgeSampleSize; y++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-      for (let y = bottom - edgeSampleSize; y < bottom; y++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-    }
-
-    for (let y = top; y < bottom; y += 3) {
-      for (let x = left; x < left + edgeSampleSize; x++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-      for (let x = right - edgeSampleSize; x < right; x++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-    }
-
-    if (colors.length === 0) {
-      const margin = 5;
-      for (let x = Math.max(0, left - margin); x < left; x++) {
-        for (let y = top; y < bottom; y += 3) {
-          colors.push(this.resolvePixelColor(image, x, y));
-        }
-      }
-    }
-
-    const color = this.averageColor(colors);
-    this.setBackgroundCache(bounds, color);
-    return color;
-  }
-
-  private getBackgroundCache(bounds: Element["bounds"]): RGB | null {
-    const key = `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
-    const cached = this.bgColorCache.get(key);
-    if (cached) {
-      this.bgColorHits++;
-      return cached;
-    }
-    this.bgColorMisses++;
-    return null;
+    return elementColors.backgroundColor;
   }
 
   private setBackgroundCache(bounds: Element["bounds"], color: RGB): void {
@@ -972,6 +1086,10 @@ export class ContrastChecker {
 
     const byAxis = this.calculateGradientAxes(samples);
     const direction = byAxis.direction;
+    // A glyph/anti-aliasing outlier amid a uniform background is not a gradient.
+    if (this.colorDistance(byAxis.startColor, byAxis.endColor) < 20) {
+      return null;
+    }
     return {
       isGradient: true,
       direction,

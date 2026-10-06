@@ -1,5 +1,5 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
-import { waitForTimeoutError } from "./waitForTimeout";
+import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -107,6 +107,15 @@ interface StepExecutionResult {
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
+}
+
+/** The optional-step skip record shared by every "tool answered but the step failed" branch. */
+function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResult {
+  return {
+    status: "skipped",
+    error,
+    details: { params: step.params, error, optional: true },
+  };
 }
 
 interface ParallelTrackFailure {
@@ -543,6 +552,50 @@ export class DefaultPlanExecutor implements PlanExecutor {
     return enhancedParams;
   }
 
+  /**
+   * A tool answered but the step failed (`success: false` or a `waitFor` timeout):
+   * capture the failure observation, copy the tool's diagnostics into the step
+   * details, and return the tool's warnings so the plan result can promote them.
+   */
+  private async buildToolAnsweredFailure(
+    step: PlanStep,
+    context: StepExecutionContext,
+    deviceLabel: string | undefined,
+    failure: {
+      response: unknown;
+      toolResult: unknown;
+      error: string;
+      waitForTimeout?: Record<string, unknown>;
+    },
+  ): Promise<StepExecutionResult> {
+    const { response, toolResult, error, waitForTimeout } = failure;
+    const failureObservation = await this.buildFailureObservationContext(
+      step.tool,
+      response,
+      context.platform,
+      context.deviceId,
+      context.sessionUuid,
+      { deviceLabel, signal: context.signal },
+    );
+    const details: Record<string, unknown> = {
+      params: step.params,
+      error,
+      ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
+        ? { toolDebug: toolResult.debug }
+        : {}),
+      ...(waitForTimeout ? { waitForTimeout } : {}),
+      ...(failureObservation ? { failureObservation } : {}),
+    };
+    const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+    return {
+      status: "failed",
+      error,
+      details,
+      failureObservation,
+      ...(warnings ? { warnings } : {}),
+    };
+  }
+
   private async executeStep(
     step: PlanStep,
     context: StepExecutionContext,
@@ -613,63 +666,30 @@ export class DefaultPlanExecutor implements PlanExecutor {
         const error =
           "error" in checkResult ? formatToolError(checkResult.error) : "Tool execution failed";
         if (step.optional) {
-          return {
-            status: "skipped",
-            error,
-            details: {
-              params: step.params,
-              error,
-              optional: true,
-            },
-          };
+          return skippedOptionalResult(step, error);
         }
-
-        const failureObservation = await this.buildFailureObservationContext(
-          step.tool,
+        return await this.buildToolAnsweredFailure(step, context, deviceLabel, {
           response,
-          context.platform,
-          context.deviceId,
-          context.sessionUuid,
-          { deviceLabel, signal: context.signal },
-        );
-        const details: Record<string, unknown> = {
-          params: step.params,
+          toolResult,
           error,
-          ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
-            ? { toolDebug: toolResult.debug }
-            : {}),
-          ...(failureObservation ? { failureObservation } : {}),
-        };
-        this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
-        return {
-          status: "failed",
-          error,
-          details,
-          failureObservation,
-        };
+        });
       }
 
-      const error = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, step.tool);
+      const timeoutPayload = getStructuredPayload(toolResult) ?? toolResult;
+      const error = waitForTimeoutError(timeoutPayload, step.tool);
       if (error) {
         if (step.optional) {
-          return {
-            status: "skipped",
-            error,
-            details: {
-              params: step.params,
-              error,
-              optional: true,
-            },
-          };
+          return skippedOptionalResult(step, error);
         }
-        return {
-          status: "failed",
+        // A waitFor timeout is a failed step like any other: it gets the same
+        // failure observation and diagnostics as a `success: false` result, plus
+        // what the timeout itself reported (#10024).
+        return await this.buildToolAnsweredFailure(step, context, deviceLabel, {
+          response,
+          toolResult,
           error,
-          details: {
-            params: step.params,
-            error,
-          },
-        };
+          waitForTimeout: waitForTimeoutDiagnostics(timeoutPayload),
+        });
       }
 
       const details: Record<string, unknown> = {

@@ -3756,6 +3756,7 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
   type RawNode = { [key: string]: unknown; node?: RawNode | RawNode[] };
   const SWIPE_SETTLE_MS = 400;
   const HEADERLESS_ROW_ID = "android:id/notification_headerless_view_row";
+  const NOTIFICATION_ROW_ID = "com.android.systemui:id/expandableNotificationRow";
 
   afterEach(() => {
     resetSystemTrayDependencies();
@@ -3806,6 +3807,64 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
         ? renameTexts(child, from, to)
         : child,
     );
+
+  // The row keeps its title and app label but its body changed, as an ongoing
+  // notification (download progress, timer, media position) does when it snaps back.
+  const withBodyChanged = (title: string, from: string, to: string): ViewHierarchyResult =>
+    editedExpandedGroup((child) =>
+      child["resource-id"] === HEADERLESS_ROW_ID && subtreeTexts(child).includes(title)
+        ? renameTexts(child, from, to)
+        : child,
+    );
+
+  const shiftBounds = (node: RawNode, dy: number): RawNode => ({
+    ...node,
+    ...(Array.isArray(node.bounds)
+      ? {
+          bounds: (node.bounds as number[]).map((value, index) =>
+            index % 2 === 1 ? value + dy : value,
+          ),
+        }
+      : {}),
+    node: childrenOf(node).map((child) => shiftBounds(child, dy)),
+  });
+
+  const containsRow = (node: RawNode): boolean =>
+    childrenOf(node).some(
+      (child) => child["resource-id"] === NOTIFICATION_ROW_ID || containsRow(child),
+    );
+
+  // The child row itself (not the group row enclosing it), which is what the
+  // tool counts as one notification.
+  const isChildRowTitled = (candidate: RawNode, title: string): boolean =>
+    candidate["resource-id"] === NOTIFICATION_ROW_ID &&
+    !containsRow(candidate) &&
+    subtreeTexts(candidate).includes(title);
+
+  const withRowShifted = (title: string, from: string, to: string, dy: number) =>
+    editedExpandedGroup((child) =>
+      isChildRowTitled(child, title) ? shiftBounds(renameTexts(child, from, to), dy) : child,
+    );
+
+  // The captured group with the titled row repeated once, so two rows read identically.
+  const withRowDuplicated = (
+    title: string,
+    edit: (copy: RawNode) => RawNode = (copy) => copy,
+  ): ViewHierarchyResult => {
+    const expanded = structuredClone(headerlessTwoNotificationGroups.expanded);
+    const root = (expanded.hierarchy as unknown as { node: RawNode }).node;
+    const isTitledRow = (candidate: RawNode): boolean => isChildRowTitled(candidate, title);
+    const duplicate = (node: RawNode): RawNode => ({
+      ...node,
+      node: childrenOf(node)
+        .flatMap((child) => (isTitledRow(child) ? [child, edit(structuredClone(child))] : [child]))
+        .map(duplicate),
+    });
+    return {
+      ...expanded,
+      hierarchy: { node: duplicate(root) },
+    } as unknown as ViewHierarchyResult;
+  };
 
   // The captured shade with every row removed and a status-bar style node left
   // behind that still names the dismissed app text outside any row.
@@ -3940,6 +3999,104 @@ describe("systemTray dismiss verification on captured groups (#10010)", () => {
     expect(result.isError).toBeUndefined();
     expect(result.timer.getSleepHistory()).toEqual([]);
     expect(result.observe.getExecuteCallCount()).toBe(2);
+  });
+
+  describe("a row whose body text changed (ongoing notification)", () => {
+    const snappedBack = () =>
+      createObservation(withBodyChanged("Gamma", "gamma body", "gamma body 42%"));
+
+    test("fails when the row snaps back with new body text", async () => {
+      const result = await runGroupDismiss(gammaCriteria, [
+        expandedObservation(),
+        snappedBack(),
+        snappedBack(),
+      ]);
+
+      expect(result.isError).toBe(true);
+      expect(result.payload.success).toBe(false);
+      expect(result.payload.message).toContain("still present");
+      expect(result.timer.getSleepHistory()).toEqual([SWIPE_SETTLE_MS]);
+      expect(result.observe.getExecuteCallCount()).toBe(3);
+    });
+
+    test("succeeds once the changed row slides out on the settle read", async () => {
+      const result = await runGroupDismiss(gammaCriteria, [
+        expandedObservation(),
+        snappedBack(),
+        createObservation(withoutChildRow("Gamma")),
+      ]);
+
+      expect(result.payload.success).toBe(true);
+      expect(result.isError).toBeUndefined();
+    });
+
+    test("succeeds when the row is gone and nothing with its title is left", async () => {
+      const result = await runGroupDismiss(gammaCriteria, [
+        expandedObservation(),
+        createObservation(withoutChildRow("Gamma")),
+      ]);
+
+      expect(result.payload.success).toBe(true);
+      expect(result.timer.getSleepHistory()).toEqual([]);
+    });
+
+    test("succeeds when a same-titled row with a new body is far from the swiped position", async () => {
+      const result = await runGroupDismiss(gammaCriteria, [
+        expandedObservation(),
+        createObservation(withRowShifted("Gamma", "gamma body", "other body", 1500)),
+      ]);
+
+      expect(result.payload.success).toBe(true);
+      expect(result.isError).toBeUndefined();
+    });
+  });
+
+  describe("identical duplicate rows", () => {
+    const duplicated = () => createObservation(withRowDuplicated("Gamma"));
+
+    test("succeeds when one of two identical rows left", async () => {
+      const result = await runGroupDismiss(gammaCriteria, [duplicated(), expandedObservation()]);
+
+      expect(result.payload.success).toBe(true);
+      expect(result.isError).toBeUndefined();
+      expect(result.timer.getSleepHistory()).toEqual([]);
+    });
+
+    test("fails when both identical rows remain", async () => {
+      const result = await runGroupDismiss(gammaCriteria, [
+        duplicated(),
+        duplicated(),
+        duplicated(),
+      ]);
+
+      expect(result.isError).toBe(true);
+      expect(result.payload.success).toBe(false);
+    });
+
+    test("fails when one identical row left but the other snapped back with new text", async () => {
+      const snapped = () =>
+        createObservation(
+          withRowDuplicated("Gamma", (copy) => renameTexts(copy, "gamma body", "gamma body 42%")),
+        );
+      const result = await runGroupDismiss(gammaCriteria, [duplicated(), snapped(), snapped()]);
+
+      // Strict: the unchanged duplicate is still listed. This pins that an
+      // unchanged survivor plus a changed one is reported as still present
+      // (the changed row names the same notification at the same position).
+      expect(result.isError).toBe(true);
+      expect(result.payload.success).toBe(false);
+    });
+  });
+
+  test("a new unrelated notification taking the swiped row's place does not hide the dismissal", async () => {
+    const result = await runGroupDismiss(gammaCriteria, [
+      expandedObservation(),
+      createObservation(withTitleReplaced("Gamma", "Zeta")),
+    ]);
+
+    expect(result.payload.success).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(result.timer.getSleepHistory()).toEqual([]);
   });
 });
 

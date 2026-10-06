@@ -378,6 +378,7 @@ describe("SystemConfigurationAdapter", () => {
 
         it("falls back to user 0 with a warning when the user list comes back empty", async () => {
           const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "0\n");
 
           const result = await setJa(adb);
 
@@ -392,6 +393,7 @@ describe("SystemConfigurationAdapter", () => {
         it("falls back to user 0 when the only listed user is not marked running", async () => {
           // dumpsys State: line missing or further than 10 lines from UserInfo.
           const adb = unreadable([{ ...OWNER, running: false }]);
+          adb.setCommandResult("shell am get-current-user", "0\n");
 
           const result = await setJa(adb);
 
@@ -423,6 +425,28 @@ describe("SystemConfigurationAdapter", () => {
         it("keeps failing on an empty user list when the current user is not user 0", async () => {
           const adb = unreadable([]);
           adb.setCommandResult("shell am get-current-user", "10\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("keeps failing when the user list is empty and the current-user probe fails too", async () => {
+          const adb = unreadable([]);
+          adb.setCommandError("shell am get-current-user", new Error("adb timeout"));
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("keeps failing when the user list is empty and the current user is unparseable", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "Error: system not ready\n");
 
           const result = await setJa(adb);
 

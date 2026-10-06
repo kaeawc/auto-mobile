@@ -289,8 +289,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
    * That refusal is right when another user exists, but on a device with only
    * user 0 it turned a working call into a failure. Fall back to user 0, with a
    * warning, only when the failure is that missing target (not an ambiguous
-   * one), no user other than 0 was listed, and the current user is not a
-   * secondary one. A known managed profile keeps the failure.
+   * one), no user other than 0 was listed, and `am get-current-user` positively
+   * reports user 0. An unreadable current user (probe failed or printed
+   * something unparseable) is no evidence at all, and the failure stands. A known
+   * managed profile keeps the failure.
    */
   private async singleUserFallback(
     appId: string,
@@ -300,7 +302,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       !(error instanceof AndroidUserTargetUnavailableError) ||
       error.details.kind !== "unavailable" ||
       error.details.users.some((user) => user.userId !== 0) ||
-      (await this.currentUserIsSecondary())
+      !(await this.currentUserIsPrimary())
     ) {
       return null;
     }
@@ -310,7 +312,8 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     };
   }
 
-  private async currentUserIsSecondary(): Promise<boolean> {
+  /** True only when the device itself says the current user is user 0. */
+  private async currentUserIsPrimary(): Promise<boolean> {
     try {
       const result = await this.adb.executeCommand(
         "shell am get-current-user",
@@ -319,10 +322,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         true,
       );
       const currentUserId = Number.parseInt(result.stdout.trim(), 10);
-      return Number.isSafeInteger(currentUserId) && currentUserId > 0;
+      return currentUserId === 0;
     } catch (error) {
-      // Unreadable current user is the same absence of multi-user evidence the caller already
-      // has; the fallback still carries a warning, so proceeding is safe.
+      // No evidence either way: the caller keeps its failure rather than guess user 0.
       logger.warn(
         `[SystemConfigurationManager] Could not read the current Android user: ${errorMessage(error)}`,
         error,

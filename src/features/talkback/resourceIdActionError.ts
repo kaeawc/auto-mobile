@@ -151,7 +151,7 @@ function sameCapturedIdentity(selected: Element, current: Element): boolean {
   ).every((field) => selected[field] === undefined || selected[field] === current[field]);
 }
 
-function isCompleteHierarchy(
+export function isCompleteHierarchy(
   hierarchy: ViewHierarchyResult | null,
 ): hierarchy is ViewHierarchyResult {
   return (

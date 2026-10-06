@@ -489,6 +489,18 @@ export class ScrollUntilVisible {
         break;
       }
 
+      if (
+        !swipeResult.success &&
+        swipeResult.outcomeIndeterminate &&
+        this.deps.device.platform === "ios"
+      ) {
+        // The swipe was dispatched but unconfirmed: report it, never `found: false`.
+        perf.end();
+        throw new ActionableError(
+          `${swipeResult.error ?? "iOS scroll swipe outcome is indeterminate."} The scroll may have happened. Observe before retrying.`,
+        );
+      }
+
       if (!swipeResult.success && this.deps.device.platform === "ios") {
         perf.end();
         throwIfAborted(signal);
@@ -990,7 +1002,11 @@ export class ScrollUntilVisible {
               boomerang,
               signal,
             );
-            if (this.deps.device.platform === "ios" && result.success) {
+            // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+            if (
+              this.deps.device.platform === "ios" &&
+              (result.success || result.outcomeIndeterminate)
+            ) {
               iosDispatchTimestamp = this.deps.timer.now();
               IOSCtrlProxyClient.getExistingInstance(this.deps.device.deviceId)?.invalidateCache();
             }

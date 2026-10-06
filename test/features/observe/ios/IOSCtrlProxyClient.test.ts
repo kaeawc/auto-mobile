@@ -3987,7 +3987,8 @@ describe("IOSCtrlProxyClient", function () {
         // Register an in-flight request over the live socket. A long timeout keeps
         // it pending so it can only settle via the port-change cancellation, never
         // by timing out during the test.
-        const inFlight = testClient.requestSwipe(0, 0, 10, 10, 300, 60000);
+        // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
+        const inFlight = testClient.requestDrag(0, 0, 10, 10, 0, 300, 0, 60000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -4012,6 +4013,116 @@ describe("IOSCtrlProxyClient", function () {
       } finally {
         await testClient.close();
       }
+    });
+
+    describe("on a live connection", function () {
+      const connectLive = async (
+        notifier?: DeviceConnectionLostNotifier,
+      ): Promise<{ client: IOSCtrlProxyClient; socket: CapturingWebSocket }> => {
+        const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+        const client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          factory,
+          fakeTimer,
+          undefined,
+          undefined,
+          notifier,
+        );
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        if (!socket) {
+          throw new Error("no socket was created");
+        }
+        await waitForSocketOpen(socket);
+        return { client, socket };
+      };
+
+      test("keeps an error listener on the retired socket so a late error cannot crash the process", async function () {
+        const { client, socket } = await connectLive();
+        try {
+          client["updatePort"](serverPort + 1);
+
+          // removeAllListeners() with nothing re-attached would make this emit throw.
+          expect(socket.listenerCount("error")).toBe(1);
+          expect(() => socket.emit("error", new Error("write after close"))).not.toThrow();
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("detaches the retired socket's lifecycle listeners and drops it from the client", async function () {
+        const { client, socket } = await connectLive();
+        try {
+          client["updatePort"](serverPort + 1);
+
+          expect(client["ws"]).toBeNull();
+          expect(client["lifecycleSocket"]).toBeNull();
+          expect(socket.listenerCount("close")).toBe(0);
+          expect(socket.listenerCount("message")).toBe(0);
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("runs the lost-connection teardown so old-connection state does not leak to the new socket", async function () {
+        const lostDeviceIds: string[] = [];
+        const { client } = await connectLive({
+          onDeviceConnectionLost: (deviceId) => {
+            lostDeviceIds.push(deviceId);
+          },
+        });
+        try {
+          client["supportedCommands"] = new Set(["request_hierarchy"]);
+          client["cachedHierarchy"] = {
+            hierarchy: {
+              updatedAt: 1,
+              packageName: "com.test.app",
+              hierarchy: { text: "old" },
+            },
+            receivedAt: 0,
+            fresh: true,
+          };
+
+          client["updatePort"](serverPort + 1);
+
+          expect(lostDeviceIds).toEqual([testDevice.deviceId]);
+          expect(client["supportedCommands"]).toBeNull();
+          expect(client["cachedHierarchy"]).toBeNull();
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("does not schedule a reconnect or count a failed attempt for the old endpoint", async function () {
+        const { client } = await connectLive();
+        try {
+          client["updatePort"](serverPort + 1);
+
+          expect(client["reconnectTimeoutId"]).toBeNull();
+          expect(client["consecutiveConnectionFailures"]).toBe(0);
+          expect(client["autoReconnectEnabled"]).toBe(true);
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("is a no-op teardown when the port is unchanged", async function () {
+        const lostDeviceIds: string[] = [];
+        const { client, socket } = await connectLive({
+          onDeviceConnectionLost: (deviceId) => {
+            lostDeviceIds.push(deviceId);
+          },
+        });
+        try {
+          client["updatePort"](serverPort);
+
+          expect(client["ws"]).toBe(socket);
+          expect(lostDeviceIds).toEqual([]);
+        } finally {
+          await client.close();
+        }
+      });
     });
   });
 

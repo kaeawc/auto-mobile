@@ -1096,6 +1096,57 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `show_overlay carries an absent or explicit displayId to the action`() = runTest {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
+    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec}""")
+    assertNull(lastCall.second[2])
+    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":null}""")
+    assertNull(lastCall.second[2])
+    // The handler's default SDK is Build.VERSION.SDK_INT (0 off-device); API 30+ may route.
+    val api30 = CtrlProxyMessageHandler(actions, sdkInt = { 30 })
+    api30.handleMessage(
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":2}"""
+      )
+    )
+    assertEquals("showOverlay", lastCall.first)
+    assertEquals(2, lastCall.second[2])
+  }
+
+  @Test
+  fun `show_overlay rejects an unroutable displayId with a correlated result and no action`() =
+    runTest {
+      val spec =
+        """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
+      for ((sdk, displayId) in listOf(29 to 7, 29 to -1, 30 to -1)) {
+        val before = calls.size
+        val response =
+          CtrlProxyMessageHandler(actions, sdkInt = { sdk })
+            .handleMessage(
+              json.decodeFromString<WebSocketRequest>(
+                """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":$displayId}"""
+              )
+            )
+        assertTrue(response is OverlayResult)
+        response as OverlayResult
+        assertFalse(response.success)
+        assertEquals("s", response.requestId)
+        assertTrue(response.error.orEmpty().contains("display", ignoreCase = true))
+        assertEquals("No action on API $sdk displayId $displayId", before, calls.size)
+      }
+      // Display 0 is the default display on every API level.
+      CtrlProxyMessageHandler(actions, sdkInt = { 29 })
+        .handleMessage(
+          json.decodeFromString<WebSocketRequest>(
+            """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":0}"""
+          )
+        )
+      assertEquals("showOverlay", lastCall.first)
+      assertEquals(0, lastCall.second[2])
+    }
+
+  @Test
   fun `dispatch typed overlay asset requests`() = runTest {
     dispatch(
       """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""

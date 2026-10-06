@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import android.view.Display
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -41,17 +42,23 @@ import kotlinx.coroutines.withContext
 const val MIN_TOUCH_THROUGH_SETTLE_MILLIS = 100L
 const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
 
-/** Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException. */
+/**
+ * Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException.
+ * [displayId] is the Android logical display the window attaches to; the default display keeps the
+ * service context. A request for another display shows there or throws, and never falls back.
+ */
 data class InteractiveOverlayRequest(
   val placement: OverlayPlacement = OverlayPlacement.Floating(),
   /** True only while a text field is visible: the window is focusable (takes keys) just then. */
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
+  val displayId: Int = Display.DEFAULT_DISPLAY,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { InteractiveOverlayTestContent() },
 ) {
   init {
     require(opacityPercent in 0..100) { "Opacity must be in 0..100" }
+    require(displayId >= 0) { "displayId must be non-negative: $displayId" }
   }
 }
 
@@ -131,8 +138,12 @@ interface InteractiveOverlayHost {
  * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
  * text field the window is not focusable and never sees Back at all.
  *
- * [context] must be the service/display context used for this window; [densityProvider] defaults to
- * its resources. All other platform access is constructor-injected. No permission probe occurs.
+ * [context] must be the service/display context used for the default display; [densityProvider]
+ * defaults to its resources. A request for any other display takes its context, WindowManager and
+ * density from [displayWindows] (an unknown display throws IllegalArgumentException from show and
+ * replace, leaving the current window untouched). Relayout, touch-through and removal always use
+ * the window's own display. All other platform access is constructor-injected. No permission probe
+ * occurs.
  */
 class DefaultInteractiveOverlayHost(
   private val context: Context,
@@ -145,6 +156,7 @@ class DefaultInteractiveOverlayHost(
   private val onWindowAttached: () -> Unit = {},
   private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
+  private val displayWindows: OverlayDisplayWindows = OverlayDisplayWindows { null },
   private val backScope: CoroutineScope =
     CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
   private val backRegistrarFactory: (View) -> OverlayBackCallbackRegistrar = { view ->
@@ -156,6 +168,8 @@ class DefaultInteractiveOverlayHost(
     val view: OverlayComposeView,
     val back: OverlayBackBinding,
     val owner: OverlayWindowOwner,
+    val target: OverlayDisplayWindow,
+    val displayId: Int,
     var params: WindowManager.LayoutParams,
     var request: InteractiveOverlayRequest,
   )
@@ -181,30 +195,62 @@ class DefaultInteractiveOverlayHost(
 
   override suspend fun replace(request: InteractiveOverlayRequest): Boolean = show(request)
 
+  private fun windowFor(displayId: Int): OverlayDisplayWindow =
+    if (displayId == Display.DEFAULT_DISPLAY) {
+      OverlayDisplayWindow(context, windowManager, densityProvider)
+    } else {
+      requireNotNull(displayWindows.open(displayId)) {
+        "Unknown or disconnected display: $displayId"
+      }
+    }
+
   private fun showOnMain(request: InteractiveOverlayRequest): Boolean {
     if (destroyed || isBlocked()) return false
+    val current = window
+    // An in-place update keeps the window's own display target; a fresh context per update would
+    // be created on every non-default-display request only to be discarded.
+    val inPlace = current?.takeIf { it.displayId == request.displayId }
+    val target = inPlace?.target ?: windowFor(request.displayId)
     val params =
       interactiveOverlayLayoutParams(
         request.placement,
         request.hasTextField,
-        densityProvider(),
+        target.density(),
         sdkInt,
       )
-    val current = window
-    if (current != null) {
-      if (touchThroughToken != null) {
-        params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-      }
-      if (!update(current, params)) return false
-      current.request = request
-      placement = request.placement
-      applyContent(current)
-      current.back.sync(request.hasTextField)
-      return true
+    if (touchThroughToken != null) {
+      params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     }
+    return if (inPlace != null) updateInPlace(inPlace, request, params)
+    else addWindow(target, request, params, replacing = current)
+  }
+
+  private fun updateInPlace(
+    current: Window,
+    request: InteractiveOverlayRequest,
+    params: WindowManager.LayoutParams,
+  ): Boolean {
+    if (!update(current, params)) return false
+    current.request = request
+    placement = request.placement
+    applyContent(current)
+    current.back.sync(request.hasTextField)
+    return true
+  }
+
+  /**
+   * Attaches a new window on the request's display. A window being replaced on another display is
+   * removed only after the new one is attached, so a failed add leaves the old overlay in place.
+   */
+  private fun addWindow(
+    target: OverlayDisplayWindow,
+    request: InteractiveOverlayRequest,
+    params: WindowManager.LayoutParams,
+    replacing: Window?,
+  ): Boolean {
     val owner = OverlayWindowOwner()
     val view =
-      OverlayComposeView(context, ::backDecision, ::dismissFromBack).apply {
+      OverlayComposeView(target.context, ::backDecision, ::dismissFromBack).apply {
         setViewTreeLifecycleOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
         setViewTreeViewModelStoreOwner(owner)
@@ -215,12 +261,14 @@ class DefaultInteractiveOverlayHost(
         view,
         OverlayBackBinding(sdkInt, backRegistrarFactory(view), ::dismissFromBack),
         owner,
+        target,
+        request.displayId,
         params,
         request,
       )
     applyContent(added)
     try {
-      windowManager.addView(view, params)
+      target.windowManager.addView(view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to add interactive overlay", error)
       owner.destroy()
@@ -230,9 +278,23 @@ class DefaultInteractiveOverlayHost(
     window = added
     placement = request.placement
     owner.resume()
+    replacing?.let(::retire)
     added.back.sync(request.hasTextField)
     onWindowAttached()
     return true
+  }
+
+  /** Best-effort removal of a window superseded on another display; it is no longer tracked. */
+  private fun retire(old: Window) {
+    try {
+      old.target.windowManager.removeViewImmediate(old.view)
+    } catch (error: Exception) {
+      // The old display may already be gone, taking its windows with it; nothing else to undo.
+      Log.w(TAG, "Superseded interactive overlay was already removed", error)
+    }
+    old.back.release()
+    old.owner.destroy()
+    old.view.disposeComposition()
   }
 
   private fun applyContent(current: Window) {
@@ -253,7 +315,7 @@ class DefaultInteractiveOverlayHost(
       interactiveOverlayLayoutParams(
         current.request.placement,
         current.request.hasTextField,
-        densityProvider(),
+        current.target.density(),
         sdkInt,
       )
     if (touchThroughToken != null)
@@ -307,7 +369,7 @@ class DefaultInteractiveOverlayHost(
   private fun dismissOnMain(): Boolean {
     val current = window ?: return true
     try {
-      windowManager.removeViewImmediate(current.view)
+      current.target.windowManager.removeViewImmediate(current.view)
     } catch (error: Exception) {
       if (isNotAttached(error)) {
         Log.w(TAG, "Interactive overlay already detached; clearing window", error)
@@ -378,7 +440,7 @@ class DefaultInteractiveOverlayHost(
 
   private fun update(current: Window, params: WindowManager.LayoutParams): Boolean {
     try {
-      windowManager.updateViewLayout(current.view, params)
+      current.target.windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update interactive overlay", error)
       if (isNotAttached(error)) {

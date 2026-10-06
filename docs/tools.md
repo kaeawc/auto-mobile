@@ -584,9 +584,22 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
+`show` accepts the same optional `display` selector as the tap tools (a panel
+key, a role such as `inner` or `cover`, or `active`), resolved with the same
+precedence: an explicit `display`, then the session display pin, then the default
+display. Omitting it sends no display and behaves exactly as before. A resolved
+non-default display is sent as the panel's logical `displayId` and needs a
+CtrlProxy advertising `overlay_display_id_v1`; an older APK is refused with an
+error rather than showing the overlay on the default display. An unknown or
+disconnected panel is refused with the usual disconnected-panel guidance. If the
+panel disappears while the overlay is up (fold), the device dismisses it with
+reason `teardown`; it is never moved to another display. `update` and `dismiss`
+act on the overlay where it is shown and do not take `display`.
+
 `status` performs no device request. It reports only overlays successfully
 shown by this host in the current session and device, with their last action,
-result, and host timestamp in milliseconds. It also returns the last attempted
+result, and host timestamp in milliseconds, plus the logical `displayId` when a
+display was requested. It also returns the last attempted
 mutation as `lastResult`, including a failed show without claiming it is shown.
 Failed updates or dismissals retain known presence. Successful dismissal removes
 the id from that device's host records; successful dismiss-all clears that device's entries across host sessions.
@@ -1989,6 +2002,15 @@ users have it, the call fails and asks for `userId`. If the device's users canno
 user 0 is used (with a warning). The result always reports the `userId` that was read or
 written. `userId` is rejected for other scopes.
 
+`setKeyValue`, `removeKeyValue` and `clearKeyValueFile` accept the same optional `userId` on
+Android. It applies to their direct-file fallback (the `run-as` XML edit used when the SDK route
+is disabled by inspection or mutation policy) and resolve the default identically: an explicit
+`userId` wins, otherwise user 0 when the package is installed for it, else the one other running
+user that has it (several such users: the call fails and asks for `userId`). The SDK route itself is not user-scoped.
+The mutation queue is keyed per user, so the same file in two users never serializes together.
+`userId` is rejected on iOS devices. The `automobile:devices/{deviceId}/storage/...` entries
+resource has no input, so its `run-as` fallback reads the same default user.
+
 ### iOS UserDefaults preferences
 
 `getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),
@@ -2100,7 +2122,8 @@ A stale launch observation may be replaced by `observationOmitted` containing
 actionable errors; a successful launch with unverified foreground still returns
 its verification fields.
 
-`terminateApp` reports `success`, `packageName`, and `wasForeground`, with optional
+`terminateApp` reports `success` and `packageName`, with optional `wasForeground`
+(omitted when the pre-terminate foreground app could not be determined),
 `wasInstalled`, `wasRunning`, `userId`, and action observation metadata. Already
 absent or stopped apps are successful no-ops. Failed terminations throw actionable
 errors.

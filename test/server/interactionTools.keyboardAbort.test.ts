@@ -2,7 +2,12 @@ import { warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
-import { registerInteractionTools } from "../../src/server/interactionTools";
+import { KeyboardOpenIndeterminateError } from "../../src/features/action/Keyboard";
+import {
+  registerInteractionTools,
+  resetKeyboardFactory,
+  setKeyboardFactory,
+} from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -107,4 +112,47 @@ test("registered keyboard setIme completes verification after cancellation follo
     registration.mockRestore();
     ToolRegistry.clearTools();
   }
+});
+
+async function openKeyboardWithAbortedFailure(failure: Error) {
+  const originalRegister = ToolRegistry.registerDeviceAware.bind(ToolRegistry);
+  let keyboardHandler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;
+  const registration = spyOn(ToolRegistry, "registerDeviceAware").mockImplementation((...args) => {
+    if (args[0] === "keyboard") {
+      keyboardHandler = args[3];
+    }
+    return originalRegister(...args);
+  });
+  const controller = new AbortController();
+  setKeyboardFactory(() => ({
+    execute: async () => {
+      controller.abort();
+      throw failure;
+    },
+  }));
+  try {
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    const device = { deviceId: "fake-keyboard-open", platform: "android" } as BootedDevice;
+    return await keyboardHandler!(device, { action: "open" }, undefined, controller.signal).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  } finally {
+    resetKeyboardFactory();
+    registration.mockRestore();
+    ToolRegistry.clearTools();
+  }
+}
+
+test("registered keyboard open keeps the indeterminate error when the abort lands after a click", async () => {
+  const failure = new KeyboardOpenIndeterminateError("node click", "request cancelled");
+  const error = await openKeyboardWithAbortedFailure(failure);
+  expect(error).toBe(failure);
+});
+
+test("registered keyboard open still reports a plain cancellation for other failures", async () => {
+  const error = await openKeyboardWithAbortedFailure(new Error("adb offline"));
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain("cancelled");
 });

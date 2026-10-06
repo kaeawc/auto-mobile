@@ -8,6 +8,7 @@
     "test/fixtures/android-display/fold-pixel10pf-api36/README.md",
     "test/fixtures/release/CHANGELOG-0.0.82.md",
     "android/junit-runner/src/test/resources/captured/*.json",
+    "test/fixtures/android-notification-policy/*.txt",
     "test/fixtures/ios-sdk-network/*.json",
     "test/fixtures/ios-lock-state/**",
     "test/fixtures/ios-devicectl/list-devices-*.json",

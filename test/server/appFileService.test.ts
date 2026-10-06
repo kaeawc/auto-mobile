@@ -113,8 +113,12 @@ describe("AppFileService", () => {
               .filter((args) => args[0] === "push")
               .map((args) => args[2]),
           ).toEqual([
-            "/storage/emulated/0/Download/fixtures/a.txt",
-            "/storage/emulated/0/Download/fixtures/b.png",
+            expect.stringMatching(
+              /^\/storage\/emulated\/0\/Download\/fixtures\/\.automobile-.*\.part$/,
+            ),
+            expect.stringMatching(
+              /^\/storage\/emulated\/0\/Download\/fixtures\/\.automobile-.*\.part$/,
+            ),
           ]);
           expect(
             adb.getExecutedCommands().filter((command) => command.startsWith("shell rm -f")),
@@ -531,6 +535,33 @@ describe("AppFileService", () => {
         // The partial `.part` never reaches the backup path, and the original is never rewritten.
         expect(commands.filter((command) => command.includes("rm -f 'files/a.txt'"))).toEqual([]);
         expect(commands.filter((command) => command.includes("rc=0"))).toEqual([]);
+      });
+
+      test("file 1 committed, then file 2's backup copy fails: file 1 is restored and file 2's original is never touched", async () => {
+        // Matches only the backup `cp` of b.txt (its `.bak.part` target), not its staging copy.
+        const adb = createOverwriteAdb({
+          existing: ["a.txt", "b.txt"],
+          failing: ".automobile-tmp-2.bak.part",
+        });
+        const error = await serviceFor(adb)
+          .putFile({ device, userId: 0, target, files: files("a.txt", "b.txt") })
+          .then(
+            () => undefined,
+            (caught: unknown) => caught,
+          );
+        expect((error as Error).message).toEndWith("Rolled back: a.txt. Rollback failures: none.");
+        const commands = adb.getExecutedCommands();
+        expect(commands).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(
+            `rc=0; mv -f 'files/.automobile-tmp-1.bak' 'files/a.txt' || rc=1; exit $rc`,
+          )}`,
+        );
+        // b.txt's own cleanup drops the partial copy and only restores a complete saved copy.
+        expect(commands).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(restoreOrDrop("tmp-2", "b.txt"))}`,
+        );
+        expect(commands.filter((command) => command.includes("rm -f 'files/b.txt'"))).toEqual([]);
+        expect(commands.filter((command) => command.includes("rm -f 'files/a.txt'"))).toEqual([]);
       });
 
       test("a cancelled backup copy still removes the partial copy with a detached cleanup", async () => {
@@ -1236,8 +1267,15 @@ describe("AppFileService", () => {
     expect(executor.getExecutedArgv()).toContainEqual([
       "push",
       expect.stringContaining("automobile-app-file-"),
-      "/storage/emulated/12/Download/automobile-media/photo.png",
+      expect.stringMatching(
+        /^\/storage\/emulated\/12\/Download\/automobile-media\/\.automobile-.*\.part$/,
+      ),
     ]);
+    expect(executor.getExecutedCommands()).toContainEqual(
+      expect.stringMatching(
+        /^shell mv -f '[^']*\.automobile-[^']*\.part' '\/storage\/emulated\/12\/Download\/automobile-media\/photo\.png'$/,
+      ),
+    );
     expect(
       executor.getExecutedCommands().some((command) => command.includes("content query")),
     ).toBe(true);
@@ -1246,7 +1284,11 @@ describe("AppFileService", () => {
   test("rolls back earlier media files when writing the third of five fails", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    executor.setCommandError("third.png", new Error("index query failed"));
+    // Fail the rename into place (the push goes to a hidden temp), not the backup probe.
+    executor.setCommandError(
+      ".part' '/storage/emulated/12/Download/automobile-media/third.png'",
+      new Error("index query failed"),
+    );
     const sharedStorageService = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
@@ -1270,10 +1312,18 @@ describe("AppFileService", () => {
 
     expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
     expect(
-      executor.getExecutedCommands().filter((command) => command.includes("shell rm -f")),
+      executor
+        .getExecutedCommands()
+        .filter((command) => command.includes("shell rm -f") && !command.includes(".part'")),
     ).toEqual([
       "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png' '/storage/emulated/12/Download/automobile-media/first.png'",
     ]);
+    // The failed rename's hidden temp copy is removed too.
+    expect(
+      executor
+        .getExecutedCommands()
+        .filter((command) => command.includes(".part'") && command.includes("shell rm -f")),
+    ).toHaveLength(1);
   });
 
   test("rolls back the staged prefix when MediaStore indexing fails", async () => {
@@ -1343,7 +1393,11 @@ describe("AppFileService", () => {
   test("reports and warns when rolling back a media file fails", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    executor.setCommandError("third.png", new Error("index query failed"));
+    // Fail the rename into place (the push goes to a hidden temp), not the backup probe.
+    executor.setCommandError(
+      ".part' '/storage/emulated/12/Download/automobile-media/third.png'",
+      new Error("index query failed"),
+    );
     executor.setCommandError(
       "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png'",
       new Error("device unavailable"),

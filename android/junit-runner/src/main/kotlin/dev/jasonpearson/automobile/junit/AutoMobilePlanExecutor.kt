@@ -260,7 +260,9 @@ internal object AutoMobilePlanExecutor {
   }
 
   private fun loadAndProcessPlan(planContent: String, parameters: Map<String, Any>): String {
-    val processedContent = substituteParameters(planContent, parameters)
+    // Substituted on the parsed YAML tree, not the source text, so a value cannot alter the plan
+    // (#10093).
+    val processedContent = PlanParameterSubstitution.substitutePlan(planContent, parameters)
 
     // Validate YAML schema after parameter substitution
     val validationResult = PlanSchemaValidator.validateYaml(processedContent)
@@ -281,20 +283,13 @@ internal object AutoMobilePlanExecutor {
   }
 
   /**
-   * Substitute `${key}` placeholders with parameter values in a single ordered pass. Deterministic
-   * (sorted) key order so the result is reproducible — the redaction path re-runs this same
-   * function to derive exactly what landed (#6029), and a hash-ordered pass would make that mapping
-   * (and the daemon payload) non-reproducible. Kept in sync with the iOS executor's sorted
-   * substitution.
+   * Substitute `${key}` placeholders in a plain string (secret key names, the redaction path's bare
+   * `${key}`) in a single pass that never rescans substituted text. The plan itself is substituted
+   * on the parsed YAML tree by [PlanParameterSubstitution.substitutePlan] (#10093). Kept in sync
+   * with the iOS executor's substitution.
    */
-  private fun substituteParameters(content: String, parameters: Map<String, Any>): String {
-    if (parameters.isEmpty()) return content
-    var result = content
-    for ((key, value) in parameters.entries.sortedBy { it.key }) {
-      result = result.replace("\${$key}", SecretRedactor.parameterStringValue(value))
-    }
-    return result
-  }
+  private fun substituteParameters(content: String, parameters: Map<String, Any>): String =
+    PlanParameterSubstitution.substituteText(content, parameters)
 
   /**
    * The concrete secret strings to scrub, derived entirely from THIS executor's substitution so

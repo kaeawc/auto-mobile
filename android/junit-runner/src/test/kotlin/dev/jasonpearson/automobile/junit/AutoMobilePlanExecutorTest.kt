@@ -15,6 +15,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.yaml.snakeyaml.LoaderOptions
+import org.yaml.snakeyaml.Yaml
+import org.yaml.snakeyaml.constructor.SafeConstructor
 
 class AutoMobilePlanExecutorTest {
   private val json = Json { ignoreUnknownKeys = true }
@@ -169,6 +172,34 @@ class AutoMobilePlanExecutorTest {
     assertTrue(result.success)
     assertEquals(0, result.exitCode)
     assertEquals("", result.errorMessage)
+  }
+
+  @Test
+  fun `plan parameters reach the daemon exactly as supplied whatever characters they contain`() {
+    fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(successPayload()))
+    val quoted = "C:\\temp#1 \"x\" ' \${plain}"
+    val plain = "shoes #1: size\nlarge"
+
+    val result =
+      AutoMobilePlanExecutor.execute(
+        "test-plans/parameter-substitution.yaml",
+        mapOf("quoted" to quoted, "plain" to plain),
+        AutoMobilePlanExecutionOptions(),
+      )
+
+    assertTrue(result.errorMessage, result.success)
+    val raw =
+      fakeDaemonClient.lastExecutePlanArguments
+        ?.get("planContent")
+        ?.jsonPrimitive
+        ?.content
+        .orEmpty()
+    val sent = String(java.util.Base64.getDecoder().decode(raw.removePrefix("base64:")))
+    val steps =
+      (Yaml(SafeConstructor(LoaderOptions())).load<Any?>(sent) as Map<*, *>)["steps"] as List<*>
+    assertEquals(2, steps.size)
+    assertEquals(quoted, (steps[0] as Map<*, *>)["text"])
+    assertEquals(plain, (steps[1] as Map<*, *>)["text"])
   }
 
   @Test
@@ -549,6 +580,9 @@ private class FakeDaemonToolClient : DaemonToolClient {
   var executePlanCalls = 0
     private set
 
+  var lastExecutePlanArguments: JsonObject? = null
+    private set
+
   override var sessionUuid: String = "test-session"
 
   fun setResponse(toolName: String, response: DaemonResponse) {
@@ -569,7 +603,10 @@ private class FakeDaemonToolClient : DaemonToolClient {
       return toolSelectionResponses.removeFirstOrNull()
         ?: DaemonResponse(id = "tool-selection", type = "mcp_response", success = true)
     }
-    if (toolName == "executePlan") executePlanCalls++
+    if (toolName == "executePlan") {
+      executePlanCalls++
+      lastExecutePlanArguments = arguments
+    }
     return responses[toolName]
       ?: throw IllegalStateException("No response configured for tool: $toolName")
   }

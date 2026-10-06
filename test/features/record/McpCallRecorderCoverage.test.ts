@@ -20,8 +20,10 @@ afterAll(() => {
 
 const DEVICE_MANAGEMENT = "Device or image management, not a replayable step in a plan";
 const READ_ONLY = "Read-only query; changes no device state so a plan gains nothing from it";
-const NOT_YET =
-  "State-changing but not yet recorded; follow-up to #9928, which scopes UI/device actions";
+const EMBEDDED_SDK_ONLY =
+  "Embedded-SDK-only tool, not planExecutable: getToolForPlan refuses it unless the daemon runs with --embedded-sdk, so a recorded step would fail as an unknown tool on replay (#9966)";
+const DEBUG_ONLY =
+  "Debug-only tool, not planExecutable: getToolForPlan refuses it unless the daemon runs with --debug, so a recorded step would fail as an unknown tool on replay (#9966)";
 const SESSION_META = "Session, recording or plan meta-tool; recording it would be self-referential";
 const HOST_LOCAL = "Host-local aid, not part of the app interaction a plan replays";
 
@@ -68,25 +70,13 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   listDataStores: READ_ONLY,
   getPreference: READ_ONLY,
   sqlQuery: READ_ONLY,
-  accessibility: NOT_YET,
-  accessibilityFocus: NOT_YET,
-  biometricAuth: NOT_YET,
-  phoneCall: NOT_YET,
-  sendSms: NOT_YET,
-  setNotificationPolicy: NOT_YET,
-  setPreference: NOT_YET,
-  setKeyValue: NOT_YET,
-  removeKeyValue: NOT_YET,
-  clearKeyValueFile: NOT_YET,
-  resetKeychain: NOT_YET,
-  resetAppLogs: NOT_YET,
-  putAppFile: NOT_YET,
-  stageSessionDownloads: NOT_YET,
-  stageSharedStorage: NOT_YET,
-  stageSharedStorageFixtures: NOT_YET,
-  network: NOT_YET,
-  mockNetwork: NOT_YET,
-  clearMockNetwork: NOT_YET,
+  accessibilityFocus: DEBUG_ONLY,
+  setKeyValue: EMBEDDED_SDK_ONLY,
+  removeKeyValue: EMBEDDED_SDK_ONLY,
+  clearKeyValueFile: EMBEDDED_SDK_ONLY,
+  network: EMBEDDED_SDK_ONLY,
+  mockNetwork: EMBEDDED_SDK_ONLY,
+  clearMockNetwork: EMBEDDED_SDK_ONLY,
 };
 
 describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
@@ -183,6 +173,157 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     recorder.start();
     recorder.record("listDevices", {});
     recorder.record("recordSteps", { action: "end" });
+    expect(recorder.stop()).toEqual([]);
+  });
+
+  test("no excluded tool carries a placeholder reason", () => {
+    const placeholders = Object.entries(EXCLUDED_TOOLS).filter(([, reason]) =>
+      /not yet recorded/i.test(reason),
+    );
+    expect(placeholders).toEqual([]);
+  });
+
+  test("a tool excluded as gated is really unreachable for plans in the default registry", () => {
+    const gated = Object.entries(EXCLUDED_TOOLS)
+      .filter(([, reason]) => reason === EMBEDDED_SDK_ONLY || reason === DEBUG_ONLY)
+      .map(([name]) => name);
+    const reachable = gated.filter((name) => ToolRegistry.getToolForPlan(name) !== undefined);
+    expect(gated.length).toBeGreaterThan(0);
+    expect(reachable).toEqual([]);
+  });
+});
+
+// Params as a client sends them, per tool recorded by #9966. A recorded step
+// must parse with the tool's live schema, exactly as PlanExecutor does it.
+const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+  ["accessibility", { talkback: true }],
+  ["accessibility", { voiceover: false }],
+  ["biometricAuth", { action: "match", modality: "fingerprint" }],
+  ["biometricAuth", { action: "error", errorCode: 7 }],
+  ["phoneCall", { action: "call", phoneNumber: "5551234" }],
+  ["sendSms", { phoneNumber: "5551234", message: "hello" }],
+  ["setNotificationPolicy", { appId: "com.example", policyAccess: true }],
+  [
+    "setPreference",
+    { scope: "sharedPreferences", appId: "com.example", key: "flag", value: true, type: "bool" },
+  ],
+  ["setPreference", { scope: "systemProperty", key: "debug.flag", value: "1", type: "string" }],
+  ["resetKeychain", { appId: "com.example", confirm: true }],
+  ["resetAppLogs", { appId: "com.example", container: "documents", paths: ["logs/app.log"] }],
+  [
+    "putAppFile",
+    {
+      target: { domain: "app_containers", appId: "com.example", container: "documents" },
+      files: [{ destinationPath: "fixtures/a.json", contentText: "{}" }],
+    },
+  ],
+  [
+    "putAppFile",
+    {
+      target: { domain: "user_files", namespace: "fixtures", reset: true },
+      files: [{ destinationPath: "pic.png", contentBase64: "iVBORw0KGgo=" }],
+    },
+  ],
+  [
+    "putAppFile",
+    {
+      appId: "com.example",
+      container: "documents",
+      destinationPath: "legacy.txt",
+      contentText: "hi",
+    },
+  ],
+  [
+    "stageSharedStorage",
+    { namespace: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
+  ],
+  [
+    "stageSharedStorageFixtures",
+    { namespace: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
+  ],
+  [
+    "stageSessionDownloads",
+    { directory: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
+  ],
+];
+
+const RECORDED_TOOLS_9966 = [
+  "accessibility",
+  "biometricAuth",
+  "phoneCall",
+  "sendSms",
+  "setNotificationPolicy",
+  "setPreference",
+  "resetKeychain",
+  "resetAppLogs",
+  "putAppFile",
+  "stageSharedStorage",
+  "stageSharedStorageFixtures",
+  "stageSessionDownloads",
+];
+
+describe("tools recorded by #9966", () => {
+  test.each(RECORDED_STEP_CALLS)("%s step parses with the live schema", (tool, args) => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    // Session and routing params are injected by the registry and must be stripped.
+    recorder.record(tool, {
+      ...args,
+      platform: "android",
+      deviceId: "emulator-5554",
+      sessionUuid: "session-1",
+    });
+    const steps = recorder.stop();
+
+    expect(steps).toEqual([{ tool, params: args }]);
+    const schema = ToolRegistry.getToolForPlan(tool)?.schema;
+    expect(schema).toBeDefined();
+    // PlanExecutor re-injects the session for device-aware tools before parsing;
+    // stageSessionDownloads declares it as required.
+    expect(() => schema.parse({ ...steps[0].params, sessionUuid: "session-2" })).not.toThrow();
+  });
+
+  test("every tool recorded by #9966 is covered by a parse case and reachable for plans", () => {
+    const covered = new Set(RECORDED_STEP_CALLS.map(([tool]) => tool));
+    expect(RECORDED_TOOLS_9966.filter((name) => !covered.has(name))).toEqual([]);
+    expect(RECORDED_TOOLS_9966.filter((name) => !PLAN_RELEVANT_TOOLS.has(name))).toEqual([]);
+    expect(
+      RECORDED_TOOLS_9966.filter((name) => ToolRegistry.getToolForPlan(name) === undefined),
+    ).toEqual([]);
+  });
+
+  test("accessibility state queries are not recorded", () => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    recorder.record("accessibility", {});
+    recorder.record("accessibility", { deviceId: "emulator-5554" });
+    expect(recorder.stop()).toEqual([]);
+  });
+
+  test("a file-staging call that copies a host file is not recorded", () => {
+    const recorder = new McpCallRecorder();
+    recorder.start();
+    recorder.record("putAppFile", {
+      target: { domain: "media_library" },
+      files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
+    });
+    recorder.record("putAppFile", {
+      appId: "com.example",
+      container: "documents",
+      destinationPath: "legacy.txt",
+      sourcePath: "fixtures/legacy.txt",
+    });
+    recorder.record("stageSharedStorage", {
+      namespace: "fixtures",
+      files: [
+        { destinationPath: "a.txt", contentText: "a" },
+        { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },
+      ],
+    });
+    recorder.record("stageSessionDownloads", {
+      directory: "fixtures",
+      files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
+    });
     expect(recorder.stop()).toEqual([]);
   });
 });

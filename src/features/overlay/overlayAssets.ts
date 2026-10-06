@@ -12,6 +12,9 @@ export const {
   MAX_OVERLAY_ASSET_ID_LENGTH,
 } = contract.limits;
 
+/** A 4 MiB asset is about 5.6 MB of base64 over adb forward, so allow more than a plain request. */
+export const DEFAULT_OVERLAY_ASSET_TIMEOUT_MS = 15000;
+
 export type OverlayAssetMimeType = "image/png" | "image/jpeg" | "image/webp";
 
 export const OVERLAY_ASSET_MIME_TYPES: readonly OverlayAssetMimeType[] = contract.mimeTypes.map(

@@ -77,7 +77,11 @@ class StorageSubscriptionManager(
   /** State for a single subscription. */
   private data class SubscriptionState(
     val subscription: StorageSubscription,
-    var lastSequence: Long = 0,
+    // The cursor and token describe the inspected app's current process: its in-memory sequence
+    // counter restarts at 1 whenever the app does, so both are reset on a detected restart
+    // (#10069).
+    @Volatile var lastSequence: Long = 0,
+    @Volatile var processToken: String? = null,
   )
 
   /** State for a package being observed. */
@@ -404,10 +408,50 @@ class StorageSubscriptionManager(
     fileName: String,
     subscriptionId: String,
   ): Result<StorageSubscription> {
-    subscriptions[subscriptionId]?.let {
-      return Result.success(it.subscription)
+    // Always ask the app to (re-)arm its listener: the app-side half of a subscription lives in
+    // the app process and is gone after a restart even though this local entry survives (#10069).
+    // The SDK treats a repeat for an already-listening file as a no-op.
+    val token =
+      requestSubscribeToFile(packageName, fileName).getOrElse {
+        return Result.failure(it)
+      }
+    subscriptions[subscriptionId]?.let { existing ->
+      if (isProcessRestartOnResubscribe(existing.processToken, token)) {
+        Log.i(TAG, "Inspected app restarted; resetting storage sequence for $subscriptionId")
+        existing.lastSequence = 0
+      }
+      existing.processToken = token
+      return Result.success(existing.subscription)
     }
 
+    val subscription = StorageSubscription(packageName, fileName, subscriptionId)
+
+    // Do not claim success until the local observer is active. Otherwise a registration
+    // failure leaves an entry that makes later retries falsely report an existing observer.
+    val observerRegistration =
+      synchronized(lifecycleLock) {
+        if (destroyed) {
+          Result.failure(StorageError.SdkError("Storage subscription manager is destroyed"))
+        } else {
+          registerPackageObserver(packageName, fileName).also { registration ->
+            if (registration.isSuccess) {
+              subscriptions[subscriptionId] = SubscriptionState(subscription, processToken = token)
+            }
+          }
+        }
+      }
+    val observerRegistrationError = observerRegistration.exceptionOrNull()
+    if (observerRegistrationError != null) {
+      rollBackSubscribeToFile(packageName, fileName, subscriptionId)
+      return Result.failure(observerRegistrationError)
+    }
+
+    Log.d(TAG, "Subscribed to $subscriptionId")
+    return Result.success(subscription)
+  }
+
+  /** Calls the SDK's `subscribeToFile`; the success value is the app's process token, if any. */
+  private fun requestSubscribeToFile(packageName: String, fileName: String): Result<String?> {
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
@@ -420,34 +464,8 @@ class StorageSubscriptionManager(
         val error = result.getString("error") ?: "Unknown error"
         Result.failure(StorageError.SdkError(error))
       } else {
-        val subscription = StorageSubscription(packageName, fileName, subscriptionId)
-
-        // Do not claim success until the local observer is active. Otherwise a registration
-        // failure leaves an entry that makes later retries falsely report an existing observer.
-        val observerRegistration =
-          synchronized(lifecycleLock) {
-            if (destroyed) {
-              Result.failure(StorageError.SdkError("Storage subscription manager is destroyed"))
-            } else {
-              registerPackageObserver(packageName, fileName).also { registration ->
-                if (registration.isSuccess) {
-                  subscriptions[subscriptionId] = SubscriptionState(subscription)
-                }
-              }
-            }
-          }
-        val observerRegistrationError = observerRegistration.exceptionOrNull()
-        if (observerRegistrationError != null) {
-          try {
-            context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
-          } catch (rollbackError: Exception) {
-            Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
-          }
-          return Result.failure(observerRegistrationError)
-        }
-
-        Log.d(TAG, "Subscribed to $subscriptionId")
-        Result.success(subscription)
+        val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
+        Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
       }
     } catch (e: SecurityException) {
       Result.failure(StorageError.SdkNotInstalled(packageName))
@@ -456,6 +474,28 @@ class StorageSubscriptionManager(
       Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
+
+  private fun rollBackSubscribeToFile(
+    packageName: String,
+    fileName: String,
+    subscriptionId: String,
+  ) {
+    try {
+      val uri = Uri.parse("content://$packageName$AUTHORITY_SUFFIX")
+      val extras = Bundle().apply { putString("fileName", fileName) }
+      context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
+    } catch (rollbackError: Exception) {
+      Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
+    }
+  }
+
+  /**
+   * A repeat subscribe restarts the sequence cursor unless the app proves it is the same process.
+   * Resetting is safe even when it is not a restart: the SDK drops changes from its queue once
+   * delivered, so reading from 0 returns only undelivered changes.
+   */
+  private fun isProcessRestartOnResubscribe(known: String?, reported: String?): Boolean =
+    known == null || reported == null || known != reported
 
   /**
    * Unsubscribes from changes on a SharedPreferences file.
@@ -844,47 +884,90 @@ class StorageSubscriptionManager(
       val subState = subscriptions[subscriptionId] ?: continue
 
       try {
-        val extras =
-          Bundle().apply {
-            putString("fileName", fileName)
-            putLong("sinceSequence", subState.lastSequence)
-          }
-        val result = backgroundCalls.call(uri, "getChanges", extras)
-        coroutineContext.ensureActive()
-
-        if (result != null && result.getBoolean("success", false)) {
-          val responseJson = result.getString("result") ?: "{}"
-          val response = StorageProtocolSerializer.responseFromJson(responseJson)
-
-          if (response is StorageResponse.Changes) {
-            for (change in response.changes) {
-              val event =
-                PreferenceChangeEvent(
-                  packageName = packageName,
-                  fileName = fileName,
-                  key = change.key,
-                  value = change.value,
-                  type = change.type,
-                  timestamp = change.timestamp,
-                  sequenceNumber = change.sequenceNumber,
-                  previousValue = change.previousValue,
-                  previousValueType = change.previousValueType,
-                )
-
-              if (!enqueueChangeEvent(event, subState)) {
-                Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
-                return
-              }
-              subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
-            }
-          }
-        }
+        if (!fetchChangesForFile(packageName, fileName, uri, subState)) return
       } catch (e: CancellationException) {
         throw e
       } catch (e: Exception) {
         Log.e(TAG, "Error fetching changes for $packageName:$fileName", e)
       }
     }
+  }
+
+  /** Returns false when event delivery has closed and the caller should stop fetching. */
+  private suspend fun fetchChangesForFile(
+    packageName: String,
+    fileName: String,
+    uri: Uri,
+    subState: SubscriptionState,
+  ): Boolean {
+    val firstReply = requestChanges(uri, fileName, subState.lastSequence) ?: return true
+    val reportedToken = firstReply.processToken
+    val knownToken = subState.processToken
+    var pending = firstReply.changes
+    var advanceCursor = true
+    if (knownToken != null && reportedToken != null && knownToken != reportedToken) {
+      // The app restarted: its sequence counter began again at 1, so the old cursor would hide
+      // every new change. The SDK removes the changes it returns, so the first reply (filtered by
+      // the stale cursor) already holds new-process changes that a re-read will never return
+      // again. Keep them and merge with the read from 0, de-duplicated by sequence number.
+      Log.i(
+        TAG,
+        "Inspected app restarted; resetting storage sequence for ${subState.subscription.subscriptionId}",
+      )
+      subState.lastSequence = 0
+      subState.processToken = reportedToken
+      val reread = requestChanges(uri, fileName, 0)
+      // If the re-read failed, its changes are still queued in the app. Deliver the first reply
+      // but leave the cursor at 0 so the next poll reads them.
+      advanceCursor = reread != null
+      pending =
+        (pending + reread?.changes.orEmpty())
+          .distinctBy { it.sequenceNumber }
+          .sortedBy { it.sequenceNumber }
+    } else if (knownToken == null) {
+      subState.processToken = reportedToken
+    }
+
+    for (change in pending) {
+      val event =
+        PreferenceChangeEvent(
+          packageName = packageName,
+          fileName = fileName,
+          key = change.key,
+          value = change.value,
+          type = change.type,
+          timestamp = change.timestamp,
+          sequenceNumber = change.sequenceNumber,
+          previousValue = change.previousValue,
+          previousValueType = change.previousValueType,
+        )
+
+      if (!enqueueChangeEvent(event, subState)) {
+        Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
+        return false
+      }
+      if (advanceCursor) {
+        subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
+      }
+    }
+    return true
+  }
+
+  private suspend fun requestChanges(
+    uri: Uri,
+    fileName: String,
+    sinceSequence: Long,
+  ): StorageResponse.Changes? {
+    val extras =
+      Bundle().apply {
+        putString("fileName", fileName)
+        putLong("sinceSequence", sinceSequence)
+      }
+    val result = backgroundCalls.call(uri, "getChanges", extras)
+    coroutineContext.ensureActive()
+    if (result == null || !result.getBoolean("success", false)) return null
+    val responseJson = result.getString("result") ?: "{}"
+    return StorageProtocolSerializer.responseFromJson(responseJson) as? StorageResponse.Changes
   }
 
   private fun enqueueChangeEvent(event: PreferenceChangeEvent, state: SubscriptionState): Boolean {

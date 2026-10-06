@@ -20,6 +20,13 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
   private outputPayload: Buffer = Buffer.from("fake-video");
   private nowProvider: () => Date = () => new Date();
 
+  private liveCapturePathFor: ((config: VideoCaptureConfig) => string) | null = null;
+
+  /** Make start() report a live capture path distinct from the output path. */
+  setLiveCapturePath(derive: (config: VideoCaptureConfig) => string): void {
+    this.liveCapturePathFor = derive;
+  }
+
   setStopResultOverrides(overrides: Partial<RecordingResult>): void {
     this.stopResultOverrides = overrides;
   }
@@ -39,6 +46,7 @@ export class FakeVideoCaptureBackend implements VideoCaptureBackend {
       recordingId: config.recordingId,
       outputPath: config.outputPath,
       startedAt: config.startedAt,
+      ...(this.liveCapturePathFor ? { liveCapturePath: this.liveCapturePathFor(config) } : {}),
     };
     this.startResults.push(handle);
     return handle;

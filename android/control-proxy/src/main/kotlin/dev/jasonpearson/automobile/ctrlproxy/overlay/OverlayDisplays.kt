@@ -15,11 +15,13 @@ fun interface OverlayDisplayProvider {
 /**
  * Everything the host needs to attach a window to one display: a display-specific context (also
  * used to inflate the content, so density and insets are the display's own), its WindowManager, and
- * a density read taken afresh at every layout.
+ * a density read taken afresh at every layout. [navigationBarBottomPx] is the visible navigation
+ * bar's height on this display, read afresh (0 when hidden or unknown).
  */
 class OverlayDisplayWindow(
   val context: Context,
   val windowManager: WindowManager,
+  val navigationBarBottomPx: () -> Int = { 0 },
   val density: () -> Float,
 )
 
@@ -53,7 +55,12 @@ class AndroidOverlayDisplays(
         .createWindowContext(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, null)
     val windowManager = windowContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
     return windowManager?.let {
-      OverlayDisplayWindow(windowContext, it) { windowContext.resources.displayMetrics.density }
+      OverlayDisplayWindow(
+        windowContext,
+        it,
+        navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },
+        density = { windowContext.resources.displayMetrics.density },
+      )
     }
   }
 }

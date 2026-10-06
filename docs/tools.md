@@ -570,11 +570,46 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 The Android-only `overlay` tool is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
-`show`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; use a replacement spec to change it.
+
+`showVariants` requires `id` and a nonempty `variants` array (maximum 12).
+Each variant is `{ label?, image: { asset, contentScale? } }` or
+`{ label?, spec: OverlayNode }`, with exactly one content field. Labels are
+limited to 256 characters; image scale is `fit`, `crop`, or `fill`. An image
+variant names an opaque asset ID that already exists on the device or that the
+same call uploads through `assets` (below); a variant never carries a file path,
+URL or screenshot reference itself. Repeated asset IDs are allowed; each image
+use counts toward the contract image limit.
+
+`presentation` defaults to `fullscreen`, showing each alternative with controls.
+`floating` shows only controls over the live app; it does not apply the variant
+content. All supplied content is validated before floating omission. Floating-only
+`gravity` and `offset` default to `bottomCenter` and `{ x: 0, y: 0 }`. Optional
+integer `opacity` (0–100) passes to `window.opacity`; omission uses the spec
+default. The generated horizontal pager has controls inside each page:
+`◀ {page}/{pageCount} ▶ ✓`. Pick emits `selected` with static zero-based
+`{ index, label? }`, without dismissing the overlay. The carousel is shown through
+the normal `show` path, so like any show it replaces another shown overlay on the
+device and starts a fresh event sequence.
+
+By default `showVariants` returns the normal show result immediately. Then use
+`awaitEvent` with `id` and `eventName: "selected"`, or set `waitForSelection: true`
+to wait after a successful show. `timeoutMs` bounds the show request only; the
+selection wait uses the existing 30000 ms event-wait default. The MCP request
+deadline for such a call is the show stage (the request's `timeoutMs`, default
+5000 ms; with `assets`, the upload-and-send budget described under `assets` below),
+plus that 30000 ms wait, plus 30 s of headroom. The wait is the
+`awaitEvent` wait, so cancellation, timeout, session release, device removal and a
+device-side dismissal all settle it. The combined result
+retains `lastResult` and event/count fields, and adds `selection: { index, label? }`
+only on a valid pick. The payload index and label must match a shown variant;
+malformed payloads return `success: false` with a clear error. Timeout and dismissal
+without a pick retain `timedOut: true` and `reason: "dismissed"`, respectively,
+with no selection. Cancellation and progress notifications match `awaitEvent`.
 
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
@@ -584,7 +619,7 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
-`show` accepts the same optional `display` selector as the tap tools (a panel
+`show` (and `showVariants`) accepts the same optional `display` selector as the tap tools (a panel
 key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
@@ -595,6 +630,52 @@ disconnected panel is refused with the usual disconnected-panel guidance. If the
 panel disappears while the overlay is up (fold), the device dismisses it with
 reason `teardown`; it is never moved to another display. `update` and `dismiss`
 act on the overlay where it is shown and do not take `display`.
+
+`showVariants` accepts `display` and `assets` and treats them exactly like `show`: it
+is a show of the composed carousel, so the same display resolution and refusals, the
+same asset staging and the same single missing-asset re-send apply (the re-send carries
+the same composed spec to the same resolved display). Image variants may reference ids
+uploaded in the same call; uploads happen before the carousel is shown. The same field
+restrictions as `show` apply (`state`, `all`, `eventName`, `kind`, `afterSequence` and
+`spec` are rejected), and, like `show`, it takes the session display pin when `display`
+is omitted.
+
+`display` and `assets` combine on `show`: the display is resolved and checked first, so a
+refused display uploads nothing; assets are then uploaded and the overlay is shown on that
+display. The one missing-asset re-send goes to the same resolved display without re-reading the
+display inventory. `update` with `assets` stays on the display the overlay is already on.
+
+`show`, `showVariants`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
+or `{ id, observation }` that uploads images before the overlay is sent, so no
+separate upload step is needed. `path` is an absolute path the daemon can read
+(relative paths are rejected); `observation` is an
+`automobile:observation/{deviceId}/{observationId}/screenshot` URI (the
+`observationScreenshotResourceUri` that `observe` returns) and resolves exactly
+as reading that resource does: the observation must still be its device's
+current one, a capture still in flight is awaited, and no session ownership is
+needed because the resource itself needs none. Each entry has exactly one of
+the two. The type is detected from the bytes' signature and must be PNG, JPEG
+or WebP, up to 4 MiB per asset, 16 MiB and 32 assets per call, with unique ids.
+Image nodes reference an `id` (`image.asset`; nav items use `image`); the spec
+never carries paths or bytes. Every file is read and checked first, so an
+unreadable file, unsupported format or exceeded cap fails the call with nothing
+sent. Uploads then run one at a time. Any failure (a device refusal, an old
+CtrlProxy without asset support, a cancelled request, or a write that was never
+answered, reported as indeterminate) fails the call before the overlay is shown
+or updated; the error and `uploadedAssets` name the assets already stored, which
+stay on the device until the overlay session ends and are replaced if the call is
+repeated. On success `uploadedAssets` lists each `{ id, mimeType, bytes }`.
+
+When the device accepts a `show` or `update` but lists referenced asset ids it has
+no copy of, the result stays successful and adds `missingAssets` (the ids; absent
+when none) and a `warning` naming what to upload. If the same call supplied
+`assets` for some of those ids (the upload-then-cleared race), they are
+re-uploaded from the bytes already read and the overlay re-sent exactly once; the
+result is the re-sent one. A retry that fails, or a cancelled request, keeps the
+first result and says so in `warning`. The MCP request deadline grows by 15 s per
+asset plus the request's `timeoutMs` (default 5000 ms), doubled for that one
+retry, plus 10 s per `observation` source for a capture still in flight, and
+30 s of headroom.
 
 `status` performs no device request. It reports only overlays successfully
 shown by this host in the current session and device, with their last action,
@@ -1770,6 +1851,14 @@ allowed); `slowThresholdMs` is the positive duration threshold in milliseconds
 at or above which a request counts as slow.
 
 `clearMockNetwork.mockId` selects one mock to clear; omit it to clear all.
+Mock rules and error simulation are kept per device. When a session is released
+or leaves a device, only the rules and simulation that session installed are
+removed, and the rest of the device's set is pushed to it. Rules and a
+simulation installed without a session (direct mode), or by another session, are
+never removed by a session release, even on the same device; sessionless state
+has no automatic lifetime and stays until `clearMockNetwork`, a cancelled or
+expired simulation, or removal of the device. A replaced simulation belongs to
+the session that installed the replacement.
 `getNetworkGraph.sinceSeconds` sets the lookback in seconds, and `minRequests`
 sets the minimum request count.
 

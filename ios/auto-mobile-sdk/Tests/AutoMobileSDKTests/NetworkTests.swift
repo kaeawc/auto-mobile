@@ -77,7 +77,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         let task = session.dataTask(with: request)
-        XCTAssertFalse(proto.storeTaskIfRunning(task, session: session))
+        XCTAssertFalse(proto.storeTaskIfRunning(task))
         XCTAssertEqual(task.state, .suspended, "rejected tasks are never resumed")
         XCTAssertTrue(client.calls.isEmpty)
     }

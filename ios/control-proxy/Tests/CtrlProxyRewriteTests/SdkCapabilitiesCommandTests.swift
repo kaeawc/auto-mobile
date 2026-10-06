@@ -248,7 +248,9 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
     private func mockRulesResponseJSON(
         _ sdkClient: FakeSdkHierarchyClient,
         foregroundBundleId: String = "com.example.sdk"
-    ) async throws -> [String: Any] {
+    )
+        async throws -> [String: Any]
+    {
         let handler = handler(foregroundBundleId: foregroundBundleId, sdkClient: sdkClient)
         let response = try await handler.handle(
             request(#"{"type":"set_network_mock_rules","requestId":"mock-1","rules":[]}"#)

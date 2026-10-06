@@ -198,6 +198,66 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
     expect(result.warnings).toBeUndefined();
   });
 
+  describe("the section's required device label", () => {
+    afterEach(() => unregisterTemporaryTools("strictNoDeviceProbe", "strictDeviceProbe"));
+
+    test("is not rejected as an unknown key by a strict schema that has no device field", async () => {
+      const received: unknown[] = [];
+      ToolRegistry.register(
+        "strictNoDeviceProbe",
+        "strict tool without a device field (like listDevices)",
+        z.strictObject({ query: z.string().optional() }),
+        async (params: unknown) => {
+          received.push(params);
+          return createStructuredToolResponse({ success: true });
+        },
+      );
+      const result = await executor.executePlan(
+        sectionPlan([{ tool: "strictNoDeviceProbe", params: { device: "A", query: "x" } }]),
+        0,
+      );
+      expect(result.failedStep).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(received).toEqual([expect.objectContaining({ query: "x" })]);
+      expect(received[0]).not.toHaveProperty("device");
+    });
+
+    test("is kept when the tool declares a device field", async () => {
+      const received: unknown[] = [];
+      ToolRegistry.register(
+        "strictDeviceProbe",
+        "strict tool that declares device",
+        z.strictObject({ device: z.string().optional() }),
+        async (params: unknown) => {
+          received.push(params);
+          return createStructuredToolResponse({ success: true });
+        },
+      );
+      const result = await executor.executePlan(
+        sectionPlan([{ tool: "strictDeviceProbe", params: { device: "A" } }]),
+        0,
+      );
+      expect(result.success).toBe(true);
+      expect(received).toEqual([expect.objectContaining({ device: "A" })]);
+    });
+
+    test("other unknown keys on a no-device strict tool are still rejected", async () => {
+      ToolRegistry.register(
+        "strictNoDeviceProbe",
+        "strict tool without a device field",
+        z.strictObject({ query: z.string().optional() }),
+        async () => createStructuredToolResponse({ success: true }),
+      );
+      const result = await executor.executePlan(
+        sectionPlan([{ tool: "strictNoDeviceProbe", params: { device: "A", bogus: 1 } }]),
+        0,
+      );
+      expect(result.success).toBe(false);
+      expect(result.failedStep?.error).toContain("Invalid parameters for tool strictNoDeviceProbe");
+      expect(result.failedStep?.error).toContain("bogus");
+    });
+  });
+
   describe("schema defaults reach the handler", () => {
     afterEach(() => unregisterTemporaryTools("subStepDefaultsProbe"));
 

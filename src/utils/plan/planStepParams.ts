@@ -1,4 +1,4 @@
-import { ZodError, type z } from "zod/v4";
+import { ZodError, ZodObject, type z } from "zod/v4";
 import { formatToolParamError } from "../toolParamError";
 import { stripUndeclaredSessionUuid } from "../toolParams";
 
@@ -37,3 +37,22 @@ export function parseStepParams(schema: z.ZodType, params: unknown): Record<stri
  */
 export const UNEVALUATED_EXPECTATIONS_WARNING =
   "This step declares `expectations`, but expectations are not evaluated yet; the step ran without checking them.";
+
+/**
+ * Drop the `device` label from a `criticalSection` sub-step's params when the tool's schema does
+ * not declare it. The section schema requires every sub-step to carry the owner label, and routing
+ * uses the section's own device rather than this param, but a strict schema without a `device`
+ * field (listDevices, setActiveDevice, ...) would reject it as an unknown key. Schemas that do
+ * declare `device` keep it. Mirrors `stripUndeclaredSessionUuid`.
+ */
+export function stripUndeclaredDeviceLabel(
+  params: Record<string, unknown>,
+  schema: z.ZodType,
+): Record<string, unknown> {
+  if (!(schema instanceof ZodObject) || "device" in schema.shape || !("device" in params)) {
+    return params;
+  }
+  const rest = { ...params };
+  delete rest.device;
+  return rest;
+}

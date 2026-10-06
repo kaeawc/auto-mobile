@@ -18,6 +18,7 @@ import {
   UNEVALUATED_EXPECTATIONS_WARNING,
   formatStepError,
   parseStepParams,
+  stripUndeclaredDeviceLabel,
 } from "../utils/plan/planStepParams";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
@@ -222,7 +223,12 @@ async function executeCriticalSectionSteps(
 
       // callInternal does not parse, so apply the same schema parse a top-level
       // plan step gets: defaults, aliases and strict unknown-key rejection (#9927).
-      const params = parseStepParams(tool.schema, step.params);
+      // The section requires the owner label on every sub-step; drop it for a tool
+      // whose schema has no `device` field (routing uses `targetDevice` below).
+      const params = parseStepParams(
+        tool.schema,
+        stripUndeclaredDeviceLabel(step.params, tool.schema),
+      );
       const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,

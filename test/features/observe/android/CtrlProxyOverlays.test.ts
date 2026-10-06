@@ -138,6 +138,69 @@ describe("CtrlProxy overlays", () => {
     },
   );
 
+  test.each(["show_overlay", "update_overlay"])(
+    "%s surfaces missingAssets as a warning on a successful result",
+    async (type) => {
+      const { client, socket, receive } = await harness();
+      let finish!: (value: Record<string, unknown>) => void;
+      const sent = new Promise<Record<string, unknown>>((resolve) => {
+        finish = resolve;
+      });
+      const send = spyOn(socket, "send").mockImplementation((data) =>
+        finish(JSON.parse(String(data))),
+      );
+      try {
+        const pending =
+          type === "show_overlay"
+            ? client.requestShowOverlay(spec)
+            : client.requestUpdateOverlay({ id: "panel", state: { enabled: false } });
+        const message = await sent;
+        await receive({
+          type: "overlay_result",
+          timestamp: 42,
+          requestId: message.requestId,
+          success: true,
+          error: null,
+          missingAssets: ["hero", "logo"],
+        });
+        expect(await pending).toEqual({
+          timestamp: 42,
+          requestId: message.requestId,
+          success: true,
+          error: null,
+          missingAssets: ["hero", "logo"],
+        });
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
+  test("a result from a device that predates missingAssets has no such key", async () => {
+    const { client, socket, receive } = await harness();
+    let finish!: (value: Record<string, unknown>) => void;
+    const sent = new Promise<Record<string, unknown>>((resolve) => {
+      finish = resolve;
+    });
+    const send = spyOn(socket, "send").mockImplementation((data) =>
+      finish(JSON.parse(String(data))),
+    );
+    try {
+      const pending = client.requestShowOverlay(spec);
+      const message = await sent;
+      await receive({
+        type: "overlay_result",
+        timestamp: 42,
+        requestId: message.requestId,
+        success: true,
+        error: null,
+      });
+      expect("missingAssets" in (await pending)).toBe(false);
+    } finally {
+      send.mockRestore();
+    }
+  });
+
   test.each(
     [[], ["full_command_set_v1"], ["full_command_set_v1", "update_overlay", "dismiss_overlay"]].map(
       (commands) => ({ commands }),

@@ -751,6 +751,21 @@ describe("network tool schema", () => {
     expect(NetworkState.getInstance().getMockSummary(androidDevice.deviceId)).toEqual({});
   });
 
+  test("mockNetwork validates the pattern before recording per-device state or session ownership (#10059/#10060)", async () => {
+    await expect(
+      ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(androidDevice, {
+        host: "api\\.example\\.com",
+        path: "/users/{id}",
+        sessionUuid: "session-1",
+      }),
+    ).rejects.toThrow("Invalid path regex");
+
+    const state = NetworkState.getInstance();
+    expect(state.getMocks(androidDevice.deviceId).size).toBe(0);
+    expect(state.clearDeviceOwnedBySession(androidDevice.deviceId, "session-1")).toBe(false);
+    expect(androidMessages).toHaveLength(0);
+  });
+
   describe("per-device scope (#10061)", () => {
     const otherAndroid: BootedDevice = {
       deviceId: "emulator-5556",

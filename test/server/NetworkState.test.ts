@@ -398,6 +398,29 @@ describe("NetworkState", () => {
       expect(state.pendingNotificationCount).toBe(1);
     });
 
+    it("filters mocked and simulated events by outcome while per-device rules and simulation are active", () => {
+      state.setCapture(true);
+      state.setNotifFilter("errors");
+      state.addMock(DEVICE, {
+        host: "api.example.com",
+        path: "/data",
+        method: "*",
+        limit: null,
+        statusCode: 200,
+        responseHeaders: {},
+        responseBody: "",
+        contentType: "application/json",
+      });
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, null);
+
+      // A response served by DEVICE's mock rule is provenance, not a failure.
+      state.onNetworkEvent(makeNotification({ statusCode: 200, error: "mocked:mock-1" }));
+      expect(state.pendingNotificationCount).toBe(0);
+      // OTHER_DEVICE's simulated transport failure still passes the errors filter.
+      state.onNetworkEvent(makeNotification({ statusCode: 0, error: "simulated:timeout" }));
+      expect(state.pendingNotificationCount).toBe(1);
+    });
+
     it("does not notify when capture is off", () => {
       state.onNetworkEvent(makeNotification());
       timer.advanceTime(200);

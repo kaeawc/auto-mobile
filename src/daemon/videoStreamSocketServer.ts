@@ -1,5 +1,6 @@
 import {
   getDefaultDeviceCaptureRegistry,
+  createDeviceCaptureRegistry,
   canRetainSharedCapture,
   stopStaleCapture,
   type DeviceCaptureRegistry,
@@ -98,6 +99,7 @@ function tracksConsumers(
 
 export interface VideoStreamSocketServerDependencies {
   createCaptureSource: CaptureSourceFactory;
+  /** Share across transports by injection; omitted registries are local to this server. */
   captureRegistry?: DeviceCaptureRegistry;
   resolveDevice: (deviceId?: string) => Promise<BootedDevice>;
   /** Monotonic microseconds, used for packet presentation timestamps. */
@@ -353,6 +355,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
+  private readonly captureRegistry: DeviceCaptureRegistry;
 
   constructor(
     private readonly deps: VideoStreamSocketServerDependencies,
@@ -368,6 +371,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     super(socketPath, timer, "VideoStream", 0);
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
+    this.captureRegistry = deps.captureRegistry ?? createDeviceCaptureRegistry();
   }
 
   /** Devices with an active capture, for diagnostics and tests. */
@@ -959,7 +963,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       }
       this.broadcast(deviceId, chunk);
     };
-    return (this.deps.captureRegistry ?? getDefaultDeviceCaptureRegistry()).acquire({
+    return this.captureRegistry.acquire({
       device,
       create: (options) => this.deps.createCaptureSource({ ...options, onError: options.onError! }),
       hasConsumers: this.hasSubscribers(capture),
@@ -1829,6 +1833,7 @@ async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
 
 function defaultDependencies(): VideoStreamSocketServerDependencies {
   return {
+    captureRegistry: getDefaultDeviceCaptureRegistry(),
     ownershipChanges: () => {
       const state = DaemonState.getInstance();
       return state.isInitialized() ? state.getSessionManager() : null;

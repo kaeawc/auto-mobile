@@ -219,6 +219,19 @@ Broad `backgroundSync` and `icloudSync` remain unsupported. Physical iOS devices
 remain unsupported. Android controls are described below; requests can apply
 supported entries and report unsupported entries in the same result.
 
+After mutation, `setDeviceResources` and `provisionDevice.resources` also return
+an independent `observed` platform snapshot alongside `requested`. This read-only
+snapshot covers the full platform resource map, including unrequested groups;
+missing read paths report `unsupported` with a reason, and failed reads report
+`unknown`. The existing `resources`, `services`, `changed`, `verification`, and
+`restore` mutation evidence is preserved. An explicitly opposite enabled/disabled
+observation sets `success: false` and lists the resource names in
+`observationContradictions`; unknown/unsupported observations do not add failures.
+Observation uses the mutation's same deadline and abort signal, including the
+readiness reserve during provisioning and fresh observation on replay. A non-abort
+observation failure is logged and omits `observed`, preserving mutation results;
+cancellation still propagates through the existing tool failure handling.
+
 Results contain `requested`, a `resources` map of observed states for requested
 entries, `services` with per-daemon evidence, `changed` (resource groups with
 acknowledged native writes), `verification: "current_boot"`,

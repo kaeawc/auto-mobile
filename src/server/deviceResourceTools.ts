@@ -1,3 +1,11 @@
+import type {
+  DeviceResourceConfigurationResult,
+  ConfigurableDeviceResource,
+} from "../models/DeviceResourceConfiguration";
+import type { DeviceResourceObservationRequest } from "../utils/deviceResourceObserver";
+import type { DeviceResourceStatus } from "../models/DeviceResource";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import type { z } from "zod/v4";
 import type { DeviceToolsDependencies } from "./deviceTools";
 import { setDeviceResourcesSchema } from "./deviceResourceSchemas";
@@ -50,12 +58,17 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
           : lease.signal;
         const result = await trackDeviceAcquisitionReadiness(
           deviceReadinessLockKey(device.platform, device.deviceId),
-          () => {
+          async () => {
             operationSignal.throwIfAborted();
-            return deps.deviceResourceControllerFactory().setResources({
+            const configured = await deps.deviceResourceControllerFactory().setResources({
               device,
               resources: parsed.resources ?? {},
               restore: parsed.restore,
+              deadlineMs,
+              signal: operationSignal,
+            });
+            return observeConfiguredDeviceResources(deps, configured, {
+              device,
               deadlineMs,
               signal: operationSignal,
             });
@@ -71,4 +84,45 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
     },
     { defaultEnabled: false },
   );
+}
+
+/** Observation is best-effort, but explicit contradictions invalidate configuration success. */
+export async function observeConfiguredDeviceResources(
+  deps: Pick<DeviceToolsDependencies, "deviceResourceObserverFactory">,
+  result: DeviceResourceConfigurationResult,
+  request: DeviceResourceObservationRequest,
+): Promise<DeviceResourceConfigurationResult> {
+  request.signal?.throwIfAborted();
+  try {
+    const observed = await deps.deviceResourceObserverFactory().observeResources(request);
+    request.signal?.throwIfAborted();
+    const states: Partial<Record<ConfigurableDeviceResource, DeviceResourceStatus>> =
+      observed.resources;
+    const contradictions = (Object.keys(result.requested) as ConfigurableDeviceResource[]).filter(
+      (resource) => {
+        const state = states[resource]?.state;
+        const requested = result.requested[resource];
+        return (
+          requested !== undefined &&
+          (state === "enabled" || state === "disabled") &&
+          state !== requested
+        );
+      },
+    );
+    return {
+      ...result,
+      observed,
+      ...(contradictions.length
+        ? { success: false, observationContradictions: contradictions }
+        : {}),
+    };
+  } catch (error) {
+    request.signal?.throwIfAborted();
+    if (error instanceof Error && error.name === "AbortError") {
+      throw error;
+    }
+    logger.warn(`Device resource observation failed: ${errorMessage(error)}`, error);
+    // Keep mutation evidence usable when independent observation cannot complete.
+    return result;
+  }
 }

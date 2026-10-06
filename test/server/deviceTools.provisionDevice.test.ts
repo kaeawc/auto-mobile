@@ -1,3 +1,4 @@
+import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
@@ -621,6 +622,7 @@ function configurePostCreateAndroidDiscoveryFailure(manager: FakeDeviceUtils): (
 
 describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
+  let resourceObserver: FakeDeviceResourceObserver;
   let exactProvisioner: FakeExactDeviceProvisioner;
   let operationStore: FakeProvisionDeviceOperationStore;
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
@@ -630,11 +632,17 @@ describe("provisionDevice handler", () => {
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
     });
+    resourceObserver = new FakeDeviceResourceObserver();
+    resourceObserver.result.resources.wallpaperRendering = {
+      state: "unknown",
+      reason: "Not verified in fake",
+    };
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
     operationStore = new FakeProvisionDeviceOperationStore();
     teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
+      deviceResourceObserverFactory: () => resourceObserver,
       deviceManagerFactory: () => deviceManager,
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
       exactDeviceProvisionerFactory: () => exactProvisioner,
@@ -709,6 +717,14 @@ describe("provisionDevice handler", () => {
       };
       const response = await ToolRegistry.getTool("provisionDevice")!.handler(args);
       expect(order).toEqual(["resources", "readiness"]);
+      expect(resourceObserver.requests[0]).toEqual({
+        device: resources.requests[0]!.device,
+        deadlineMs: resources.requests[0]!.deadlineMs,
+        signal: resources.requests[0]!.signal,
+      });
+      expect(operationStore.getStoredResult(args.operationId)?.resources?.observed).toEqual(
+        resourceObserver.result,
+      );
       expect(resources.requests[0]!.device.platform).toBe(platform);
       expect(JSON.parse((response as any).content[0].text)).toMatchObject({
         success: true,
@@ -923,6 +939,65 @@ describe("provisionDevice handler", () => {
     );
   });
 
+  test("fresh provisioning surfaces an observation contradiction while retaining the device", async () => {
+    const controller = new FakeDeviceResourceController();
+    resourceObserver.result.resources.wallpaperRendering = { state: "enabled" };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", true);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    setDeviceToolsDependencies({
+      deviceResourceControllerFactory: () => controller,
+      ensureCtrlProxyReady: async () => {},
+    });
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler({
+      ...provisionTestArgs("android", "observation-contradiction"),
+      resources: { wallpaperRendering: "disabled" },
+    });
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text)).toMatchObject({
+      success: false,
+      created: true,
+      resources: {
+        ...controller.result,
+        success: false,
+        observed: resourceObserver.result,
+        observationContradictions: ["wallpaperRendering"],
+      },
+    });
+    expect(operationStore.failCalls).toBe(0);
+  });
+
+  test("observation cancellation prevents provision readiness and binding", async () => {
+    const controller = new FakeDeviceResourceController();
+    const abort = new AbortController();
+    let readinessCalls = 0;
+    resourceObserver.onRequest = async () => {
+      abort.abort(new Error("observation preempted"));
+    };
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    setDeviceToolsDependencies({
+      deviceResourceControllerFactory: () => controller,
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+      },
+    });
+    const response = await ToolRegistry.getTool("provisionDevice")!.handler(
+      {
+        ...provisionTestArgs("android", "observation-cancel"),
+        resources: { wallpaperRendering: "disabled" },
+      },
+      undefined,
+      abort.signal,
+    );
+    expect(response.isError).toBe(true);
+    expect(readinessCalls).toBe(0);
+    expect(resourceObserver.requests).toHaveLength(1);
+    expect(JSON.parse(response.content[0].text).sessionId).toBeUndefined();
+  });
   test("resource timeout leaves readiness time and returns the retained device and session", async () => {
     const timer = new FakeTimer();
     const resources = new FakeDeviceResourceController();
@@ -3328,6 +3403,24 @@ describe("provisionDevice handler", () => {
       expect(deviceManager.getCallCount("startDevice")).toBe(1);
       expect(readinessCalls).toBe(2);
       expect(resourceController.requests).toHaveLength(configureResources ? 2 : 0);
+      expect(resourceObserver.requests).toHaveLength(configureResources ? 2 : 0);
+      if (configureResources) {
+        expect(operationStore.getStoredResult(args.operationId)?.resources?.observed).toEqual(
+          resourceObserver.result,
+        );
+        expect(resourceObserver.requests[1]).toEqual({
+          device: resourceController.requests[1]!.device,
+          deadlineMs: resourceController.requests[1]!.deadlineMs,
+          signal: resourceController.requests[1]!.signal,
+        });
+        resourceObserver.result.resources.wallpaperRendering = { state: "enabled" };
+        await tool.handler(args);
+        expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
+          success: false,
+          observationContradictions: ["wallpaperRendering"],
+          observed: resourceObserver.result,
+        });
+      }
       if (configureResources) {
         resourceController.onRequest = async (request) => {
           timer.advanceTime(request.deadlineMs - timer.now());
@@ -3344,7 +3437,7 @@ describe("provisionDevice handler", () => {
         expect(Object.hasOwn(driftPayload, "sessionId")).toBe(true);
         expect(driftPayload.sessionId).toBe(first.sessionId);
         expect(exactProvisioner.requests).toHaveLength(1);
-        expect(readinessCalls).toBe(3);
+        expect(readinessCalls).toBe(4);
         expect(operationStore.getStoredResult(args.operationId)?.resources).toMatchObject({
           success: false,
         });

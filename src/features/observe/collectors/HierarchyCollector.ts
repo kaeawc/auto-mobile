@@ -19,6 +19,11 @@ export interface HierarchyCollectorOptions {
   adbFactory: AdbClientFactory;
   timer: Timer;
   onAvailabilityLost?: (reason: string) => void;
+  /** Test seam for the Android raw read; defaults to the per-device CtrlProxy singleton. */
+  androidRawClient?: (
+    device: BootedDevice,
+    adbFactory: AdbClientFactory,
+  ) => Pick<AndroidCtrlProxyClient, "requestHierarchySync" | "invalidateCache">;
 }
 
 /**
@@ -211,16 +216,24 @@ export class HierarchyCollector {
    * Fetch raw (unfiltered) view hierarchy and attach it to the result.
    * Invalidates the shared cache after fetching so that the unfiltered snapshot
    * does not bleed into subsequent normal observe calls.
+   *
+   * `displayId` (Android only) is the logical display of the observation the raw
+   * tree is attached to; omitted, CtrlProxy answers for its default display.
    */
-  async collectRaw(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+  async collectRaw(result: ObserveResult, signal?: AbortSignal, displayId?: number): Promise<void> {
     const { device, adbFactory, timer } = this.opts;
     try {
       if (device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(device, adbFactory);
+        const client = (
+          this.opts.androidRawClient ?? ((d, f) => AndroidCtrlProxyClient.getInstance(d, f))
+        )(device, adbFactory);
         const syncResult = await client.requestHierarchySync(
           new NoOpPerformanceTracker(),
           true, // disableAllFiltering
           signal,
+          undefined,
+          undefined,
+          displayId,
         );
         client.invalidateCache();
         if (syncResult?.hierarchy) {

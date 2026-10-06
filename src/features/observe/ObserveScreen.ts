@@ -1116,7 +1116,12 @@ export class RealObserveScreen implements ObserveScreen {
     if (!result.viewHierarchy) {
       return;
     }
-    await this.hierarchyCollector.collectRaw(result, signal);
+    // The raw tree must come from the display the observation describes: an
+    // explicit panel (or a session pin, which arrives as `requestedDisplay`)
+    // resolves to its logical id exactly like the filtered read and screenshot;
+    // the default display sends no id.
+    const displayId = await this.resolveReadDisplayId(result, { signal });
+    await this.hierarchyCollector.collectRaw(result, signal, displayId);
   }
 
   private async readCachedObservationForTarget(): Promise<ObserveResult | undefined> {

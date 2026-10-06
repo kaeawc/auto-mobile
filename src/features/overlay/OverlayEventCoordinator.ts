@@ -7,6 +7,8 @@ import {
 } from "./OverlayEventBuffer";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 
 import {
@@ -194,7 +196,6 @@ export class OverlayEventCoordinator {
       return;
     }
     this.store.recordEvent(entry.scope, event);
-    this.telemetry?.recordOverlayEvent(entry.scope, event);
     if (event.kind === "dismissed") {
       entry.shown = false;
       entry.terminal = true;
@@ -204,6 +205,11 @@ export class OverlayEventCoordinator {
       notify();
     }
     this.pruneSources();
+    try {
+      this.telemetry?.recordOverlayEvent(entry.scope, event);
+    } catch (error) {
+      logger.warn(`[OverlayEventCoordinator] Telemetry recording failed: ${errorMessage(error)}`);
+    }
   }
 
   private take(entry: Entry, filter: OverlayEventFilter): OverlayAwaitResult | undefined {

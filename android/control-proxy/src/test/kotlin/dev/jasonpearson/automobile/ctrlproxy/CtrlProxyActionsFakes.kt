@@ -401,6 +401,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
     record("requestCommitText", requestId, text, priorImeId)
 
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
+    timeoutMs: Long?,
+  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs)
+
   override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
     record("requestCancelImeCommit", requestId, targetRequestId)
 

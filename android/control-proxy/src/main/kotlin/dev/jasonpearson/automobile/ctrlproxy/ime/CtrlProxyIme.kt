@@ -196,6 +196,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     priorImeId: String?,
     isCancelled: () -> Boolean = { false },
     delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
+    timeoutMs: Long? = null,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
@@ -234,6 +235,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         generation = generation,
         isCancelled = isCancelled,
         delivery = delivery,
+        commitBudgetMs = commitTimeoutMs(timeoutMs, ImeGraphemes.split(text).size),
         onResult = ::finish,
       )
     }
@@ -247,6 +249,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     generation: Long,
     isCancelled: () -> Boolean,
     delivery: ImeTextDelivery,
+    commitBudgetMs: Long,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     if (generation != commitGeneration) return
@@ -258,7 +261,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       driver.commit(
         text,
         priorImeId,
-        SystemClock.uptimeMillis() + COMMIT_TIMEOUT_MS,
+        SystemClock.uptimeMillis() + commitBudgetMs,
         isCancelled,
         delivery,
       ) { result ->
@@ -285,6 +288,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           generation,
           isCancelled,
           delivery,
+          commitBudgetMs,
           onResult,
         )
       },
@@ -426,6 +430,16 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       return connection.performEditorAction(actionId)
     }
 
+    internal fun commitTimeoutMs(timeoutMs: Long?, unitCount: Int): Long =
+      if (timeoutMs != null && timeoutMs > 0L) {
+        minOf(COMMIT_TIMEOUT_CAP_MS, timeoutMs)
+      } else {
+        minOf(
+          COMMIT_TIMEOUT_CAP_MS,
+          maxOf(COMMIT_TIMEOUT_MS, COMMIT_TIMEOUT_MS + 30L * unitCount.coerceAtLeast(0)),
+        )
+      }
+
     /** A prompt null/empty read is valid; an exception or timed-out read is not. */
     internal fun editorSyncSucceeded(
       connection: ImeConnection?,
@@ -443,6 +457,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     private const val INPUT_CONNECTION_SYNC_TIMEOUT_MS = 2_000L
     internal const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
     internal const val COMMIT_TIMEOUT_MS = 4_000L
+    private const val COMMIT_TIMEOUT_CAP_MS = 25_000L
     internal const val INPUT_CONNECTION_POLL_MS = 50L
     private const val IDLE_RESTORE_DELAY_MS = 10_000L
 

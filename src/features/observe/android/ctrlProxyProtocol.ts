@@ -226,6 +226,7 @@ export interface RequestCommitTextMessage {
   text: string;
   priorImeId?: string;
   delivery?: "keyEvents";
+  timeoutMs?: number;
 }
 
 export interface RequestCancelImeCommitMessage {

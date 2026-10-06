@@ -280,7 +280,12 @@ export class CtrlProxyText extends SharedTextDelegate {
         idPrefix: "commitText",
         responseType: "commit_text",
         messageType: "request_commit_text",
-        params: { text, priorImeId, ...(delivery === "keyEvents" ? { delivery } : {}) },
+        params: {
+          text,
+          priorImeId,
+          ...(delivery === "keyEvents" ? { delivery } : {}),
+          timeoutMs: Math.max(1, timeoutMs - 500),
+        },
         timeoutMs,
         perf,
         abortSignal: signal,

@@ -2754,6 +2754,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     text: String,
     priorImeId: String?,
     delivery: ImeTextDelivery,
+  ) = requestCommitText(requestId, text, priorImeId, delivery, null)
+
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+    timeoutMs: Long?,
   ) {
     rememberedInsert = null
     val start = System.currentTimeMillis()
@@ -2800,7 +2808,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
         return@launchRequestScope
       }
-      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery) { result ->
+      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery, timeoutMs) {
+        result ->
         finish(result)
         launchRequestScope(requestId) {
           broadcastCommitTextResult(

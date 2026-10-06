@@ -1,3 +1,7 @@
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
@@ -88,20 +92,30 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse
 > {
+  private readonly authenticator: StreamSocketAuthenticator;
+
   private readonly repository: FailuresStreamRepository;
 
   constructor(
     socketPath: string = getSocketPath(FAILURES_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     repository: FailuresStreamRepository = failureAnalyticsRepository,
+    options: { authenticator?: StreamSocketAuthenticator } = {},
   ) {
     super(socketPath, timer, "FailuresStream");
     this.repository = repository;
+    this.authenticator =
+      options.authenticator ??
+      createDefaultStreamSocketAuthenticator("failuresStream", { allowObserverSessions: true });
   }
 
   protected async handleRequest(
     request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
+    this.authenticator.authorize({
+      sessionUuid: typeof request.sessionUuid === "string" ? request.sessionUuid : undefined,
+    });
+
     switch (request.command) {
       case "poll_notifications":
         return await this.handlePollNotifications(request);

@@ -9,8 +9,52 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonPrimitive
 
 class OneShotSocketRequestTest {
+
+  @Test
+  fun `failures notifications poll sends the current session`() {
+    assertFailuresSession("poll_notifications") {
+      it.pollNotifications(FailuresNotificationsRequest())
+    }
+  }
+
+  @Test
+  fun `failures groups poll sends the current session`() {
+    assertFailuresSession("poll_groups") { it.pollGroups(FailuresGroupsRequest()) }
+  }
+
+  @Test
+  fun `failures timeline poll sends the current session`() {
+    assertFailuresSession("poll_timeline") { it.pollTimeline(FailuresTimelineRequest()) }
+  }
+
+  @Test
+  fun `failures acknowledge sends the current session`() {
+    assertFailuresSession("acknowledge") { it.acknowledge(listOf(7)) }
+  }
+
+  private fun assertFailuresSession(
+    command: String,
+    operation: (FailuresStreamSocketClient) -> Unit,
+  ) {
+    var sessionUuid = "old-session"
+    TestConfigSocketServer(responseType = "unused", rawBodyJson = """{"acknowledgedCount":1}""")
+      .use { server ->
+        val client =
+          FailuresStreamSocketClient(
+            socketPathValue = server.socketPath.toString(),
+            sessionUuidProvider = { sessionUuid },
+          )
+        sessionUuid = "current-session"
+        operation(client)
+        val request = server.awaitRequest()
+        assertEquals(command, request["command"]?.jsonPrimitive?.content)
+        assertEquals(sessionUuid, request["sessionUuid"]?.jsonPrimitive?.content)
+      }
+  }
+
   @Test
   fun `a hung reply expires on demand and cancels the watchdog`() {
     val watchdog = FakeSocketRequestWatchdog()

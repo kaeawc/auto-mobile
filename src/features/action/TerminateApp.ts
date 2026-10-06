@@ -74,6 +74,9 @@ function usableForegroundAppId(observation: ObserveResult): string | undefined {
   if (
     freshness?.isFresh === false ||
     freshness?.verified === false ||
+    // The runner reports com.apple.springboard when it cannot identify the
+    // foreground app, so that identity is a guess, not an observation.
+    observation.viewHierarchy?.fallbackToSpringboard === true ||
     resolveMissingForegroundWindow(observation)
   ) {
     return undefined;

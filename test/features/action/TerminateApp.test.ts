@@ -692,6 +692,26 @@ describe("TerminateApp (iOS wasForeground from the pre-terminate observation)", 
     expect("wasForeground" in result).toBe(false);
   });
 
+  test("omits wasForeground when the runner fell back to SpringBoard (foreground app unidentified)", async () => {
+    // The runner reports com.apple.springboard when it cannot identify the
+    // foreground app; asserting `false` would misreport a genuinely foreground app.
+    const result = await terminateObserved(
+      simDevice,
+      observationFor("com.apple.springboard", {
+        viewHierarchy: {
+          packageName: "com.apple.springboard",
+          fallbackToSpringboard: true,
+          updatedAt: fakeTimer.now(),
+          hierarchy: { node: { text: "screen" } },
+        },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.wasRunning).toBe(true);
+    expect("wasForeground" in result).toBe(false);
+  });
+
   test("omits wasForeground when the observation names no foreground app", async () => {
     const result = await terminateObserved(
       simDevice,

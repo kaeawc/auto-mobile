@@ -8,7 +8,10 @@ import {
   ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS,
   ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
 } from "./freshTapHierarchy";
-import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
+import {
+  isRejectedSemanticAction,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
@@ -5548,7 +5551,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      if (
+        isRejectedSemanticAction(
+          hasAccessibilityAction(element.actions, "long_click"),
+          result.error,
+        )
+      ) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );

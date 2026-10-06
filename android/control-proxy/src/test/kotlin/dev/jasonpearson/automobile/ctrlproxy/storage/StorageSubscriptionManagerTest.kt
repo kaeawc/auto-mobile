@@ -324,7 +324,7 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
-  fun `subscribe returns same subscription when already subscribed`() {
+  fun `subscribe returns same subscription when already subscribed and re-arms the app`() {
     val bundle =
       Bundle().apply {
         putBoolean("success", true)
@@ -340,8 +340,10 @@ class StorageSubscriptionManagerTest {
     assertTrue(result2.isSuccess)
     assertEquals(result1.getOrNull()?.subscriptionId, result2.getOrNull()?.subscriptionId)
 
-    // Should only call SDK once since second subscribe reuses existing
-    verify(exactly = 1) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+    // The app-side listener dies with the app process, so a repeat subscribe must re-arm it even
+    // though the local entry is reused (#10069). The SDK treats the repeat as a no-op.
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+    verify(exactly = 1) { contentResolver.registerContentObserver(any(), any(), any()) }
   }
 
   @Test
@@ -535,6 +537,161 @@ class StorageSubscriptionManagerTest {
         received.filter { it.fileName == "noisy" }.map { it.sequenceNumber },
       )
     }
+
+  // ================= Inspected app restart (#10069) =================
+
+  private fun tokenSubscribeBundle(token: String?) =
+    Bundle().apply {
+      putBoolean("success", true)
+      putString(
+        "result",
+        StorageProtocolSerializer.responseToJson(
+          StorageResponse.SubscriptionResult("auth", subscribed = true, processToken = token)
+        ),
+      )
+    }
+
+  private fun tokenChangesBundle(token: String?, sequences: List<Long>) =
+    Bundle().apply {
+      putBoolean("success", true)
+      putString(
+        "result",
+        StorageProtocolSerializer.responseToJson(
+          StorageResponse.Changes(
+            "auth",
+            sequences.map { sequence ->
+              StorageChangeEvent(
+                fileName = "auth",
+                key = "key-$sequence",
+                value = sequence.toString(),
+                type = "LONG",
+                timestamp = sequence,
+                sequenceNumber = sequence,
+              )
+            },
+            processToken = token,
+          )
+        ),
+      )
+    }
+
+  /** A fake app: replies to `getChanges` by applying the real SDK's `sequence > since` filter. */
+  private fun fakeAppProcess(
+    token: String?,
+    queued: List<Long>,
+    requestedSince: MutableList<Long>,
+  ) {
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+      {
+        val since = arg<Bundle>(3).getLong("sinceSequence", 0L)
+        requestedSince.add(since)
+        tokenChangesBundle(token, queued.filter { it > since })
+      }
+  }
+
+  @Test
+  fun `re-subscribing after the app restarts resets the cursor so the new process is heard`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+
+      // Old process: five changes delivered, cursor advances to 5.
+      fakeAppProcess("process-a", (1L..5L).toList(), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      assertEquals(
+        (1L..5L).toList(),
+        withTimeout(1_000) { manager.changeEvents.take(5).toList() }.map { it.sequenceNumber },
+      )
+
+      // The app is relaunched: new token, counter restarts, changes numbered from 1.
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-b")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      requestedSince.clear()
+      fakeAppProcess("process-b", listOf(1L, 2L, 3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(0L), requestedSince)
+      assertEquals(
+        listOf(1L, 2L, 3L),
+        withTimeout(1_000) { manager.changeEvents.take(3).toList() }.map { it.sequenceNumber },
+      )
+    }
+
+  @Test
+  fun `a changes reply from a different process resets the cursor and re-reads from zero`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      fakeAppProcess("process-a", (1L..5L).toList(), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      withTimeout(1_000) { manager.changeEvents.take(5).toList() }
+
+      // No re-subscribe: the first notification after the restart already reveals the new token.
+      requestedSince.clear()
+      fakeAppProcess("process-b", listOf(1L, 2L, 3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(5L, 0L), requestedSince)
+      assertEquals(
+        listOf(1L, 2L, 3L),
+        withTimeout(1_000) { manager.changeEvents.take(3).toList() }.map { it.sequenceNumber },
+      )
+    }
+
+  @Test
+  fun `re-subscribing to the same process keeps the cursor`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      fakeAppProcess("process-a", (1L..5L).toList(), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      withTimeout(1_000) { manager.changeEvents.take(5).toList() }
+
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      requestedSince.clear()
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(5L), requestedSince)
+    }
+
+  @Test
+  fun `a failed re-subscribe reports the failure and keeps the existing entry`() {
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      tokenSubscribeBundle("process-a")
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("error", "provider unavailable")
+      }
+    val retried = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(retried.exceptionOrNull() is StorageError.SdkError)
+    assertEquals(1, manager.getActiveSubscriptions().size)
+  }
 
   // ================= Unsubscribe Tests =================
 

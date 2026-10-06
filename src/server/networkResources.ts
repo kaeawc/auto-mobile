@@ -452,11 +452,11 @@ export function registerNetworkResources(
   ResourceRegistry.register(
     NETWORK_RESOURCE_URIS.MOCKS,
     "Network Mocks",
-    "Currently active mock network response rules.",
+    "Currently active mock network response rules, each tagged with the device it applies to.",
     "application/json",
     async () => {
       const state = NetworkState.getInstance();
-      const mocks = Array.from(state.getMocks().values());
+      const mocks = state.getAllMocks();
       return {
         uri: NETWORK_RESOURCE_URIS.MOCKS,
         mimeType: "application/json",

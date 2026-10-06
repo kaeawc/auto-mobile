@@ -643,6 +643,30 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 1000 });
     });
 
+    test("falls back to coordinates when an advertised long click reports node not found", async () => {
+      // The device lookup missed (e.g. the element sits in another window); that is not a
+      // rejected press, so the coordinate gesture must still run (#10070).
+      const element = {
+        "test-tag": "message_row_42",
+        actions: ["long_click"],
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      } as Element;
+      driver.setActionResult({
+        success: false,
+        action: "long_click",
+        totalTimeMs: 1,
+        error: "Element not found with NodeSelector(testTag=message_row_42)",
+      });
+
+      const result = await strategy.executeLongPress(50, 50, 1000, element, driver);
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("coordinate-fallback");
+      expect(result.semanticActionFailure).toBeUndefined();
+      expect(driver.getTapCount()).toBe(1);
+      expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 1000 });
+    });
+
     test("returns error when coordinate fallback also fails", async () => {
       const element = {
         "resource-id": "test:id/button",

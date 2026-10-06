@@ -6,6 +6,9 @@ import {
 } from "../../src/server/NetworkState";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+const DEVICE = "emulator-5554";
+const OTHER_DEVICE = "emulator-5556";
+
 class FakeNotifier implements ResourceNotifier {
   notifications: string[] = [];
 
@@ -56,8 +59,8 @@ describe("NetworkState", () => {
 
   describe("simulation", () => {
     it("starts simulation with expiration", () => {
-      state.startSimulation("http500", 30, null);
-      const sim = state.simulation;
+      state.startSimulation(DEVICE, "http500", 30, null);
+      const sim = state.getSimulation(DEVICE);
       expect(sim).not.toBeNull();
       expect(sim!.errorType).toBe("http500");
       expect(sim!.limit).toBeNull();
@@ -65,56 +68,56 @@ describe("NetworkState", () => {
     });
 
     it("rounds fractional duration expirations up to integer milliseconds", () => {
-      state.startSimulation("http500", 1.2345, null);
+      state.startSimulation(DEVICE, "http500", 1.2345, null);
 
-      expect(state.simulation?.expiresAt).toBe(1_235);
+      expect(state.getSimulation(DEVICE)?.expiresAt).toBe(1_235);
     });
 
     it("starts simulation with an absolute expiration", () => {
       timer.advanceTime(5_000);
-      state.startSimulationUntil("http500", 30_000, null);
-      const sim = state.simulation;
+      state.startSimulationUntil(DEVICE, "http500", 30_000, null);
+      const sim = state.getSimulation(DEVICE);
       expect(sim).not.toBeNull();
       expect(sim!.expiresAt).toBe(30_000);
 
       timer.advanceTime(24_999);
-      expect(state.simulation).not.toBeNull();
+      expect(state.getSimulation(DEVICE)).not.toBeNull();
       timer.advanceTime(1);
-      expect(state.simulation).toBeNull();
+      expect(state.getSimulation(DEVICE)).toBeNull();
     });
 
     it("does not keep already-expired absolute simulations active", () => {
       timer.advanceTime(30_000);
-      state.startSimulationUntil("http500", 30_000, null);
+      state.startSimulationUntil(DEVICE, "http500", 30_000, null);
 
-      expect(state.simulation).toBeNull();
+      expect(state.getSimulation(DEVICE)).toBeNull();
     });
 
     it("expires simulation after duration", () => {
-      state.startSimulation("timeout", 10, null);
-      expect(state.simulation).not.toBeNull();
+      state.startSimulation(DEVICE, "timeout", 10, null);
+      expect(state.getSimulation(DEVICE)).not.toBeNull();
 
       timer.advanceTime(10_000);
-      expect(state.simulation).toBeNull();
+      expect(state.getSimulation(DEVICE)).toBeNull();
     });
 
     it("cancels simulation", () => {
-      state.startSimulation("http500", 30, null);
-      state.cancelSimulation();
-      expect(state.simulation).toBeNull();
+      state.startSimulation(DEVICE, "http500", 30, null);
+      state.cancelSimulation(DEVICE);
+      expect(state.getSimulation(DEVICE)).toBeNull();
     });
 
     it("tracks limit", () => {
-      state.startSimulation("dnsFailure", 60, 5);
-      const sim = state.simulation;
+      state.startSimulation(DEVICE, "dnsFailure", 60, 5);
+      const sim = state.getSimulation(DEVICE);
       expect(sim!.limit).toBe(5);
       expect(sim!.remaining).toBe(5);
     });
 
     it("replaces previous simulation", () => {
-      state.startSimulation("http500", 30, null);
-      state.startSimulation("timeout", 60, 3);
-      const sim = state.simulation;
+      state.startSimulation(DEVICE, "http500", 30, null);
+      state.startSimulation(DEVICE, "timeout", 60, 3);
+      const sim = state.getSimulation(DEVICE);
       expect(sim!.errorType).toBe("timeout");
       expect(sim!.limit).toBe(3);
     });
@@ -145,12 +148,11 @@ describe("NetworkState", () => {
 
   describe("mocks", () => {
     it("adds mock with generated id", () => {
-      const mock = state.addMock({
+      const mock = state.addMock(DEVICE, {
         host: "api.example.com",
         path: "/data",
         method: "GET",
         limit: null,
-        remaining: null,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "{}",
@@ -158,86 +160,189 @@ describe("NetworkState", () => {
       });
 
       expect(mock.mockId).toMatch(/^mock-\d+$/);
-      expect(state.getMocks().size).toBe(1);
+      expect(state.getMocks(DEVICE).size).toBe(1);
     });
 
     it("removes specific mock", () => {
-      const mock = state.addMock({
+      const mock = state.addMock(DEVICE, {
         host: "a.com",
         path: "/x",
         method: "*",
         limit: null,
-        remaining: null,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "",
         contentType: "application/json",
       });
 
-      expect(state.removeMock(mock.mockId)).toBe(true);
-      expect(state.getMocks().size).toBe(0);
+      expect(state.removeMock(DEVICE, mock.mockId)).toBe(true);
+      expect(state.getMocks(DEVICE).size).toBe(0);
     });
 
     it("returns false for unknown mock id", () => {
-      expect(state.removeMock("mock-999")).toBe(false);
+      expect(state.removeMock(DEVICE, "mock-999")).toBe(false);
     });
 
     it("clears all mocks", () => {
-      state.addMock({
+      state.addMock(DEVICE, {
         host: "a.com",
         path: "/1",
         method: "*",
         limit: null,
-        remaining: null,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "",
         contentType: "application/json",
       });
-      state.addMock({
+      state.addMock(DEVICE, {
         host: "b.com",
         path: "/2",
         method: "POST",
         limit: 5,
-        remaining: 5,
         statusCode: 201,
         responseHeaders: {},
         responseBody: "",
         contentType: "application/json",
       });
 
-      const cleared = state.clearAllMocks();
+      const cleared = state.clearAllMocks(DEVICE);
       expect(cleared).toBe(2);
-      expect(state.getMocks().size).toBe(0);
+      expect(state.getMocks(DEVICE).size).toBe(0);
     });
 
     it("builds mock summary", () => {
-      state.addMock({
+      state.addMock(DEVICE, {
         host: "a.com",
         path: "/x",
         method: "GET",
         limit: null,
-        remaining: null,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "",
         contentType: "application/json",
       });
-      state.addMock({
+      state.addMock(DEVICE, {
         host: "b.com",
         path: "/y",
         method: "POST",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: {},
         responseBody: "",
         contentType: "application/json",
       });
 
-      const summary = state.getMockSummary();
+      const summary = state.getMockSummary(DEVICE);
       expect(summary["GET a.com/x"]).toBe(-1);
       expect(summary["POST b.com/y"]).toBe(3);
+    });
+  });
+
+  describe("per-device scope (#10061)", () => {
+    const rule = (host: string) => ({
+      host,
+      path: "/x",
+      method: "*",
+      limit: null,
+      statusCode: 200,
+      responseHeaders: {},
+      responseBody: "",
+      contentType: "application/json",
+    });
+
+    it("keeps rules and simulation separate per device", () => {
+      const a = state.addMock(DEVICE, rule("a.com"));
+      const b = state.addMock(OTHER_DEVICE, rule("b.com"));
+      state.startSimulation(DEVICE, "timeout", 30, null);
+
+      expect(Array.from(state.getMocks(DEVICE).keys())).toEqual([a.mockId]);
+      expect(Array.from(state.getMocks(OTHER_DEVICE).keys())).toEqual([b.mockId]);
+      expect(state.getSimulation(OTHER_DEVICE)).toBeNull();
+      expect(state.getAllMocks().map((m) => [m.deviceId, m.mockId])).toEqual([
+        [DEVICE, a.mockId],
+        [OTHER_DEVICE, b.mockId],
+      ]);
+    });
+
+    it("clearing one device leaves the other device's rules and simulation", () => {
+      state.addMock(DEVICE, rule("a.com"));
+      const b = state.addMock(OTHER_DEVICE, rule("b.com"));
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, null);
+
+      expect(state.clearAllMocks(DEVICE)).toBe(1);
+      state.cancelSimulation(DEVICE);
+
+      expect(Array.from(state.getMocks(OTHER_DEVICE).keys())).toEqual([b.mockId]);
+      expect(state.getSimulation(OTHER_DEVICE)).not.toBeNull();
+      expect(state.removeMock(DEVICE, b.mockId)).toBe(false);
+    });
+
+    it("never reuses a mockId after the rule is removed", () => {
+      const first = state.addMock(DEVICE, rule("a.com"));
+      state.removeMock(DEVICE, first.mockId);
+      expect(state.addMock(DEVICE, rule("a.com")).mockId).not.toBe(first.mockId);
+    });
+
+    it("reports per-device simulation on a device-less snapshot", () => {
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, 2);
+
+      expect(state.getSnapshot().simulatingErrors).toBeUndefined();
+      expect(state.getSnapshot().simulatingErrorsByDevice).toEqual({
+        [OTHER_DEVICE]: { errorType: "timeout", remainingSeconds: 30, limit: 2 },
+      });
+      expect(state.getSnapshot(DEVICE).simulatingErrors).toBeUndefined();
+    });
+
+    it("expires one device's simulation without touching the other", () => {
+      state.startSimulation(DEVICE, "timeout", 10, null);
+      state.startSimulation(OTHER_DEVICE, "timeout", 60, null);
+
+      timer.advanceTime(10_000);
+
+      expect(state.getSimulation(DEVICE)).toBeNull();
+      expect(state.getSimulation(OTHER_DEVICE)).not.toBeNull();
+    });
+
+    it("clearDeviceOwnedBySession removes only state its session installed", () => {
+      state.noteSessionOwner(DEVICE, "session-1");
+      state.addMock(DEVICE, rule("a.com"));
+      state.startSimulation(DEVICE, "timeout", 30, null);
+      state.noteSessionOwner(OTHER_DEVICE, "session-2");
+      state.addMock(OTHER_DEVICE, rule("b.com"));
+
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-2")).toBe(false);
+      expect(state.getMocks(DEVICE).size).toBe(1);
+
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(true);
+      expect(state.getMocks(DEVICE).size).toBe(0);
+      expect(state.getSimulation(DEVICE)).toBeNull();
+      expect(state.getMocks(OTHER_DEVICE).size).toBe(1);
+    });
+
+    it("leaves sessionless state in place when a session is released", () => {
+      state.noteSessionOwner(DEVICE, undefined);
+      state.addMock(DEVICE, rule("a.com"));
+
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(false);
+      expect(state.getMocks(DEVICE).size).toBe(1);
+    });
+
+    it("retireDevice drops a device's state regardless of owner and cancels its timer", () => {
+      state.noteSessionOwner(DEVICE, "session-1");
+      state.addMock(DEVICE, rule("a.com"));
+      state.startSimulation(DEVICE, "timeout", 30, null);
+
+      state.retireDevice(DEVICE);
+
+      expect(state.getMocks(DEVICE).size).toBe(0);
+      expect(state.getSimulation(DEVICE)).toBeNull();
+      expect(state.getAllMocks()).toEqual([]);
+    });
+
+    it("summarizes the configured limit, not a live remaining count (#10060)", () => {
+      state.addMock(DEVICE, { ...rule("a.com"), limit: 1 });
+      expect(state.getMockSummary(DEVICE)).toEqual({ "* a.com/x": 1 });
+      expect(state.getMockSummary(OTHER_DEVICE)).toEqual({});
     });
   });
 
@@ -257,8 +362,8 @@ describe("NetworkState", () => {
     });
 
     it("includes simulation when active", () => {
-      state.startSimulation("http500", 60, 10);
-      const snap = state.getSnapshot();
+      state.startSimulation(DEVICE, "http500", 60, 10);
+      const snap = state.getSnapshot(DEVICE);
       expect(snap.simulatingErrors).toBeDefined();
       expect(snap.simulatingErrors!.errorType).toBe("http500");
       expect(snap.simulatingErrors!.limit).toBe(10);
@@ -283,6 +388,38 @@ describe("NetworkState", () => {
         expect(state.pendingNotificationCount).toBe(0);
       },
     );
+
+    it("keeps a mocked 200 out of the errors filter but admits a mocked 503", () => {
+      state.setCapture(true);
+      state.setNotifFilter("errors");
+      state.onNetworkEvent(makeNotification({ statusCode: 200, error: "mocked:mock-1" }));
+      expect(state.pendingNotificationCount).toBe(0);
+      state.onNetworkEvent(makeNotification({ statusCode: 503, error: "mocked:mock-1" }));
+      expect(state.pendingNotificationCount).toBe(1);
+    });
+
+    it("filters mocked and simulated events by outcome while per-device rules and simulation are active", () => {
+      state.setCapture(true);
+      state.setNotifFilter("errors");
+      state.addMock(DEVICE, {
+        host: "api.example.com",
+        path: "/data",
+        method: "*",
+        limit: null,
+        statusCode: 200,
+        responseHeaders: {},
+        responseBody: "",
+        contentType: "application/json",
+      });
+      state.startSimulation(OTHER_DEVICE, "timeout", 30, null);
+
+      // A response served by DEVICE's mock rule is provenance, not a failure.
+      state.onNetworkEvent(makeNotification({ statusCode: 200, error: "mocked:mock-1" }));
+      expect(state.pendingNotificationCount).toBe(0);
+      // OTHER_DEVICE's simulated transport failure still passes the errors filter.
+      state.onNetworkEvent(makeNotification({ statusCode: 0, error: "simulated:timeout" }));
+      expect(state.pendingNotificationCount).toBe(1);
+    });
 
     it("does not notify when capture is off", () => {
       state.onNetworkEvent(makeNotification());
@@ -381,12 +518,12 @@ describe("NetworkState", () => {
   describe("dispose", () => {
     it("cleans up timers and state", () => {
       state.setCapture(true);
-      state.startSimulation("http500", 60, null);
+      state.startSimulation(DEVICE, "http500", 60, null);
       state.onNetworkEvent(makeNotification());
 
       state.dispose();
 
-      expect(state.simulation).toBeNull();
+      expect(state.getSimulation(DEVICE)).toBeNull();
       expect(state.pendingNotificationCount).toBe(0);
     });
   });

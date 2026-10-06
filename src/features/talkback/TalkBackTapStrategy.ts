@@ -8,6 +8,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
 import {
+  isRejectedSemanticAction,
   resourceIdActionError,
   resolveTalkBackActionTarget,
   type TalkBackTargetContext,
@@ -752,7 +753,9 @@ export class TalkBackTapStrategy {
       if (longClickResult.dispatched && longClickResult.acknowledged !== true) {
         throw indeterminateTapError(longClickResult.error);
       }
-      if (advertisesAction(element, "long_click")) {
+      if (
+        isRejectedSemanticAction(advertisesAction(element, "long_click"), longClickResult.error)
+      ) {
         return {
           success: false,
           ...confirmedElement,

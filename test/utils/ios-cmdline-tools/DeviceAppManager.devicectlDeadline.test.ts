@@ -4,7 +4,10 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import { wrapCommandError } from "../../../src/utils/CommandError";
 import { createExecResult } from "../../../src/utils/execResult";
 import type { HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
-import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import {
+  DeviceAppManager,
+  SIMULATOR_UNINSTALL_TIMEOUT_MS,
+} from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 type Execute = NonNullable<ConstructorParameters<typeof DeviceAppManager>[0]>["execute"];
@@ -239,5 +242,86 @@ describe("DeviceAppManager devicectl deadlines", () => {
     await expect(manager.getDevicectlVersion()).rejects.toBe(failure);
     expect(events).toEqual([]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
+describe("DeviceAppManager simulator uninstall bound (issue #10077)", () => {
+  const udid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
+
+  test("bounds simctl uninstall with a timeout, a kill signal and the request signal", async () => {
+    const { manager, calls } = harness();
+    const controller = new AbortController();
+
+    await manager.uninstallApp(udid, "com.example.app", true, { signal: controller.signal });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.args).toEqual(["simctl", "uninstall", udid, "com.example.app"]);
+    expect(calls[0]?.options).toEqual({
+      timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      signal: controller.signal,
+    });
+  });
+
+  test("still bounds simctl uninstall when no request signal exists", async () => {
+    const { manager, calls } = harness();
+
+    await manager.uninstallApp(udid, "com.example.app", true);
+
+    expect(calls[0]?.options).toEqual({
+      timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
+  });
+
+  test("a timed-out uninstall is indeterminate, not a plain failure", async () => {
+    const timeout = wrapCommandError(
+      Object.assign(new Error("node timeout"), { killed: true, signal: "SIGKILL" }),
+      { command: "xcrun" },
+    );
+    const { manager, events } = harness(async () => {
+      throw timeout;
+    });
+
+    const error = await manager.uninstallApp(udid, "com.example.app", true).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toHaveProperty("message", expect.stringContaining("indeterminate"));
+    expect(error).toHaveProperty("message", expect.stringContaining("com.example.app"));
+    expect(error).toHaveProperty("message", expect.stringContaining("Do not retry automatically"));
+    expect(error).toHaveProperty("cause", timeout);
+    expect(events).toHaveLength(1);
+  });
+
+  test("a cancelled uninstall propagates the cancellation, not an indeterminate error", async () => {
+    const controller = new AbortController();
+    const reason = new DOMException("Cancelled by caller", "AbortError");
+    const killed = wrapCommandError(Object.assign(new Error("aborted"), { killed: true }), {
+      command: "xcrun",
+    });
+    const { manager, events } = harness(async () => {
+      controller.abort(reason);
+      throw killed;
+    });
+
+    await expect(
+      manager.uninstallApp(udid, "com.example.app", true, { signal: controller.signal }),
+    ).rejects.toBe(reason);
+    expect(events).toEqual([]);
+  });
+
+  test("a non-timeout uninstall failure passes through unchanged", async () => {
+    const failure = wrapCommandError(Object.assign(new Error("not found"), { code: 1 }), {
+      command: "xcrun",
+    });
+    const { manager, events } = harness(async () => {
+      throw failure;
+    });
+
+    await expect(manager.uninstallApp(udid, "com.example.app", true)).rejects.toBe(failure);
+    expect(events).toEqual([]);
   });
 });

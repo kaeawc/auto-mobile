@@ -88,3 +88,117 @@ describe("FakeIOSCtrlProxy operation delays", () => {
     expect((await proxy.requestPressKey("tab", [])).success).toBe(true);
   });
 });
+
+describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
+  type GestureResult = Parameters<FakeIOSCtrlProxy["setTapResult"]>[0];
+  const gestures: Array<{
+    name: string;
+    setResult: (proxy: FakeIOSCtrlProxy, result: GestureResult) => void;
+    send: (
+      proxy: FakeIOSCtrlProxy,
+      onDispatch: () => void,
+    ) => ReturnType<FakeIOSCtrlProxy["requestTapCoordinates"]>;
+  }> = [
+    {
+      name: "tap",
+      setResult: (proxy, result) => proxy.setTapResult(result),
+      send: (proxy, onDispatch) =>
+        proxy.requestTapCoordinates(1, 2, 0, 5000, undefined, undefined, undefined, onDispatch),
+    },
+    {
+      name: "swipe",
+      setResult: (proxy, result) => proxy.setSwipeResult(result),
+      send: (proxy, onDispatch) =>
+        proxy.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, undefined, onDispatch),
+    },
+    {
+      name: "pinch",
+      setResult: (proxy, result) => proxy.setPinchResult(result),
+      send: (proxy, onDispatch) =>
+        proxy.requestPinch(1, 2, 3, 4, 0, 300, 5000, undefined, undefined, onDispatch),
+    },
+  ];
+
+  for (const gesture of gestures) {
+    describe(gesture.name, () => {
+      test("defaults to dispatched and acknowledged", async () => {
+        const proxy = new FakeIOSCtrlProxy();
+        let dispatches = 0;
+
+        const result = await gesture.send(proxy, () => dispatches++);
+
+        expect(result).toMatchObject({ success: true, dispatched: true, acknowledged: true });
+        expect(dispatches).toBe(1);
+      });
+
+      test("a failure result is a runner refusal: dispatched and acknowledged", async () => {
+        const proxy = new FakeIOSCtrlProxy();
+        gesture.setResult(proxy, { success: false, error: "refused", totalTimeMs: 1 });
+        let dispatches = 0;
+
+        const result = await gesture.send(proxy, () => dispatches++);
+
+        expect(result).toMatchObject({
+          success: false,
+          error: "refused",
+          dispatched: true,
+          acknowledged: true,
+        });
+        expect(dispatches).toBe(1);
+      });
+
+      test("dispatched without a reply is unacknowledged", async () => {
+        const proxy = new FakeIOSCtrlProxy();
+        gesture.setResult(proxy, {
+          success: false,
+          error: "timed out",
+          totalTimeMs: 5000,
+          dispatched: true,
+          acknowledged: false,
+        });
+        let dispatches = 0;
+
+        const result = await gesture.send(proxy, () => dispatches++);
+
+        expect(result).toMatchObject({ success: false, dispatched: true, acknowledged: false });
+        expect(dispatches).toBe(1);
+      });
+
+      test("never dispatched fires no dispatch marker and is unacknowledged", async () => {
+        const proxy = new FakeIOSCtrlProxy();
+        gesture.setResult(proxy, {
+          success: false,
+          error: "not connected",
+          totalTimeMs: 0,
+          dispatched: false,
+        });
+        let dispatches = 0;
+
+        const result = await gesture.send(proxy, () => dispatches++);
+
+        expect(result).toMatchObject({ success: false, dispatched: false, acknowledged: false });
+        expect(dispatches).toBe(0);
+      });
+    });
+  }
+
+  test("a tap aborted before dispatch is never dispatched", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    let dispatches = 0;
+
+    const result = await proxy.requestTapCoordinates(
+      1,
+      2,
+      0,
+      5000,
+      undefined,
+      undefined,
+      AbortSignal.abort(),
+      () => dispatches++,
+    );
+
+    expect(result).toMatchObject({ success: false, dispatched: false, acknowledged: false });
+    expect(dispatches).toBe(0);
+    expect(proxy.getTapHistory()).toEqual([]);
+  });
+});

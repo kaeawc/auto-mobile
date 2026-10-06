@@ -268,7 +268,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       } else {
         await expect(starting).rejects.toThrow(
           branch === "throws"
-            ? failure.message
+            ? failure
             : branch === "failed"
               ? "remote refused"
               : "Failed to start iproxy tunnel via remote runner",

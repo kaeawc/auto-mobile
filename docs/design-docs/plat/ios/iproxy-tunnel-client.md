@@ -4,8 +4,8 @@
 
 Option 1 is chosen: retain libusbmuxd's `iproxy` behind an injected
 `IosTunnelClient`. `DefaultIosTunnelClient` owns the child/PID, local and device
-ports, argv-only launch, startup liveness polling, output capture, supervision,
-and graceful/forced cleanup. `FakeIosTunnelClient` supports deterministic manager
+ports (device port only for remote tunnels), argv-only launch, startup liveness
+polling, output capture, supervision, and graceful/forced cleanup. `FakeIosTunnelClient` supports deterministic manager
 tests without USB hardware. No new dependency or transport fallback is added.
 
 The manager still owns runner sequencing and host-port allocation. Its callbacks
@@ -22,25 +22,25 @@ supported Xcode/iOS combinations; existing physical CtrlProxy prerequisites appl
 
 The binary is requested as `iproxy` through the existing executor, resolved by the
 host's PATH (the remote host for remote execution). Binary provenance/version
-pinning is NOT done here. Diagnostics explicitly mark the version as unverified;
-they do not claim an inspected absolute binary path, signature, or provenance.
-The installation and connected USB device remain trusted host prerequisites.
+pinning is NOT done here. Existing logs do not claim an inspected absolute binary
+path, signature, version, or provenance. The installation and connected USB device remain trusted host prerequisites.
 
 ## Lifecycle and diagnostics
 
-Lifecycle log records include the requested binary, UDID, local/device ports,
-and start, ready, exit, and restart events. Existing stdout/stderr logging trims
-whitespace and caps each excerpt at 500 characters; no additional redaction work
+The refactor preserves existing lifecycle log lines and levels. Stdout/stderr
+logging trims whitespace and caps each excerpt at 500 characters; no additional redaction work
 is introduced. Ready retains the existing process-liveness definition, rather
 than claiming an HTTP, TCP-bind, or device-service readiness proof.
 
 The existing `ProcessSupervisor` checks every five seconds and retries with
 exponential delay from one second, capped at fifteen seconds. Retry count remains
 unlimited until stop or device disconnect; this refactor does not add an attempt
-limit. Stop cancels scheduled restarts. Startup failure surfaces an actionable
-error and cleans the owned tunnel; stopping during readiness prevents a late
-successful status response from rearming supervision. Exit-wait listeners are
-removed after each graceful/forced wait.
+limit. Stop cancels scheduled restarts. Startup failure preserves the original
+error type and text and leaves a launched tunnel tracked on readiness failure.
+Stopping during readiness retains the old polling interleaving: a late successful
+status response can rearm supervision. Exit-wait listeners retain their existing
+once-listener lifecycle. Local restarts use the current service port for both
+argv ports; remote restarts retain the recorded device port.
 
 Cleanup retains the existing tracked-child graceful signal, one-second wait,
 forced signal, and one-second wait, plus the shutdown force-stop path and

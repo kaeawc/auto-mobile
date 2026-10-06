@@ -4001,7 +4001,7 @@ describe("IOSCtrlProxyManager", function () {
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
         fakeTimer.advanceTime(1000);
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 5; i++) {
           await Promise.resolve();
         }
 

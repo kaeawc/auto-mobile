@@ -8,7 +8,6 @@ import { exponentialBackoff } from "../../utils/Backoff";
 import { runDetachedFromPerf, trackAmbient } from "../../utils/PerfContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError, toActionableError } from "../../models/ActionableError";
 
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1000;
 export interface IosTunnelStart {
@@ -23,12 +22,13 @@ export interface IosTunnelClient {
   readonly devicePort: number | null;
   start(options: IosTunnelStart): Promise<void>;
   isAlive(): Promise<boolean>;
-  stop(options?: {
-    clearDevicePort?: boolean;
-    stopSupervisor?: boolean;
-    force?: boolean;
-  }): Promise<void>;
+  stop(options?: { clearDevicePort?: boolean; stopSupervisor?: boolean }): Promise<void>;
   supervise(): Promise<void>;
+  /** Stop supervision and detach tracking now; invoke the returned kill at shutdown ordering point. */
+  prepareForcedStop(): {
+    stopRemote(): Promise<unknown> | undefined;
+    killLocal(): void;
+  };
 }
 export interface RemoteIosTunnelRunner {
   startIproxy(params: {
@@ -48,7 +48,11 @@ interface TunnelOptions {
   useRemoteRunner(): boolean;
   isRunning(pid: number): Promise<boolean>;
   isConnected(): Promise<boolean>;
-  prepareRemoteStart(options: IosTunnelStart): Promise<number>;
+  prepareRemoteStart(options: IosTunnelStart): Promise<void>;
+  getServicePort(): number;
+  getDeviceId(): string;
+  isStopping(): boolean;
+  isSimulator(): boolean;
   restart(): Promise<void>;
 }
 
@@ -58,9 +62,6 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   private iproxyProcess: ChildProcess | null = null;
   private iproxyDevicePort: number | null = null;
   private iproxyLocalPort: number | null = null;
-  private stopping = false;
-  private generation = 0;
-  private lastStart: IosTunnelStart | null = null;
   private readonly iproxySupervisor: DefaultProcessSupervisor;
   private readonly timer: Timer;
   private readonly processExecutor: HostProcessExecutor;
@@ -72,13 +73,9 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       timer: this.timer,
       monitorIntervalMs: 5000,
       restartBackoff: exponentialBackoff({ initialDelayMs: 1000, maxDelayMs: 15000 }),
-      restart: () => {
-        this.diagnostic("restart");
-        return options.restart();
-      },
+      restart: () => options.restart(),
       isAlive: () => this.isSupervisedIproxyTunnelAlive(),
       onExit: () => {
-        this.diagnostic("exit");
         this.iproxyProcessId = null;
         this.iproxyProcess = null;
         this.iproxyLocalPort = null;
@@ -96,30 +93,13 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   supervise(): Promise<void> {
     return this.iproxySupervisor.start();
   }
-  private diagnostic(event: string): void {
-    logger.info(
-      `[IosTunnel] ${JSON.stringify({ event, binary: "iproxy", version: "unverified", udid: this.lastStart?.udid, localPort: this.iproxyLocalPort, devicePort: this.iproxyDevicePort })}`,
-    );
-  }
   public async start(options: IosTunnelStart): Promise<void> {
-    this.stopping = false;
-    this.lastStart = options;
     if (this.options.useRemoteRunner()) {
-      return this.startRemoteIproxyTunnel(options);
+      await this.startRemoteIproxyTunnel(options);
+      return;
     }
-    try {
-      await this.startLocal(options);
-    } catch (error) {
-      await this.stop({ stopSupervisor: options.supervise !== false });
-      throw toActionableError(
-        error,
-        `Failed to start iproxy for ${options.udid} on localhost:${options.localPort}; verify libusbmuxd and USB connectivity`,
-      );
-    }
-  }
-  private async startLocal(options: IosTunnelStart): Promise<void> {
     if (this.iproxyProcessId && (await this.options.isRunning(this.iproxyProcessId))) {
-      if (this.iproxyLocalPort === options.localPort) {
+      if (this.iproxyLocalPort === this.options.getServicePort()) {
         if (options.supervise !== false) {
           await this.iproxySupervisor.start();
         }
@@ -131,15 +111,14 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       // recorded handle before the new one is spawned.
       logger.warn(
         `[IOSCtrlProxy] Live iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "unknown"} ` +
-          `but the runner port is ${options.localPort}; restarting the tunnel`,
+          `but the runner port is ${this.options.getServicePort()}; restarting the tunnel`,
       );
     }
 
     await this.stop({ stopSupervisor: options.supervise !== false });
-    const generation = this.generation;
 
     logger.info(
-      `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${options.localPort} -> device:${options.localPort})`,
+      `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.options.getServicePort()} -> device:${this.options.getServicePort()})`,
     );
     // Spawn the resident iproxy tunnel detached from any request perf tracker,
     // so its `exit`/`error` callbacks (which drive supervisor restarts) do not
@@ -148,26 +127,24 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     const child = runDetachedFromPerf(() =>
       this.processExecutor.spawn(
         "iproxy",
-        [String(options.localPort), String(options.devicePort ?? options.localPort), options.udid],
+        [
+          String(this.options.getServicePort()),
+          String(this.options.getServicePort()),
+          options.udid,
+        ],
         { stdio: ["ignore", "pipe", "pipe"] },
       ),
     );
     if (!child.pid) {
-      throw new ActionableError(
-        "Failed to start iproxy tunnel (no PID); verify libusbmuxd is installed and the USB device is connected",
-      );
+      throw new Error("Failed to start iproxy tunnel (no PID)");
     }
 
     this.iproxyProcess = child;
     this.iproxyProcessId = child.pid;
-    this.iproxyLocalPort = options.localPort;
-    this.stopping = false;
-    this.iproxyDevicePort = options.devicePort ?? options.localPort;
-    this.diagnostic("start");
+    this.iproxyLocalPort = this.options.getServicePort();
     this.captureOutput(child);
     this.watchChild(child);
-    await trackAmbient("iproxy startup", () => this.waitForStartup(generation));
-    this.diagnostic("ready");
+    await trackAmbient("iproxy startup", () => this.waitForStartup());
     if (options.supervise !== false) {
       await this.iproxySupervisor.start();
     }
@@ -178,7 +155,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       if (this.iproxyProcess !== child) {
         return;
       }
-      if (!this.stopping) {
+      if (!this.options.isStopping()) {
         logger.warn("[IOSCtrlProxy] iproxy exited unexpectedly");
         this.iproxySupervisor.processExited();
       }
@@ -188,7 +165,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       if (this.iproxyProcess !== child) {
         return;
       }
-      if (!this.stopping) {
+      if (!this.options.isStopping()) {
         logger.warn(`[IOSCtrlProxy] iproxy error: ${error.message}`);
         this.iproxySupervisor.processExited();
       }
@@ -211,74 +188,53 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   private async launchRemoteIproxyTunnel(options: IosTunnelStart): Promise<void> {
     const fixedDevicePort = options.devicePort ?? this.iproxyDevicePort;
     await this.stop({ stopSupervisor: options.supervise !== false });
-    const generation = this.generation;
-    const localPort = await this.options.prepareRemoteStart(options);
-    this.assertGeneration(generation);
+    await this.options.prepareRemoteStart(options);
+    const localPort = this.options.getServicePort();
     const devicePort = fixedDevicePort ?? localPort;
 
-    const result = await this.launchRemote(options, localPort, devicePort);
-    this.iproxyProcessId = result;
-    this.iproxyProcess = null;
-    this.iproxyLocalPort = localPort;
-    this.iproxyDevicePort = devicePort;
-    this.stopping = false;
-    this.diagnostic("start");
-    try {
-      this.assertGeneration(generation);
-      await this.waitForStartup(generation);
-    } catch (error) {
-      await this.stop({ stopSupervisor: options.supervise !== false });
-      throw toActionableError(
-        error,
-        `Failed to start host iproxy for ${options.udid}; verify host USB connectivity`,
-      );
+    const result = await this.options.remoteRunner.startIproxy({
+      deviceId: options.udid,
+      localPort,
+      devicePort,
+    });
+    if (!result.success || !result.data) {
+      throw new Error(result.error || "Failed to start iproxy tunnel via remote runner");
     }
-    this.diagnostic("ready");
+    this.iproxyProcessId = result.data.pid;
+    this.iproxyProcess = null;
+    this.iproxyLocalPort = this.options.getServicePort();
+    this.iproxyDevicePort = devicePort;
+    await this.waitForStartup();
     if (options.supervise !== false) {
       await this.iproxySupervisor.start();
     }
   }
 
-  private async launchRemote(
-    options: IosTunnelStart,
-    localPort: number,
-    devicePort: number,
-  ): Promise<number> {
-    try {
-      const result = await this.options.remoteRunner.startIproxy({
-        deviceId: options.udid,
-        localPort: localPort,
-        devicePort,
-      });
-      if (!result.success || !result.data) {
-        throw new ActionableError(
-          result.error ||
-            "Failed to start iproxy tunnel via remote runner; verify host libusbmuxd and USB connection",
-        );
-      }
-
-      return result.data.pid;
-    } catch (error) {
-      throw toActionableError(
-        error,
-        `Failed to start iproxy tunnel via remote runner for ${options.udid}; verify host libusbmuxd and USB connectivity`,
-      );
-    }
-  }
-
   public async stop(
-    options: { clearDevicePort?: boolean; stopSupervisor?: boolean; force?: boolean } = {},
+    options: { clearDevicePort?: boolean; stopSupervisor?: boolean } = {},
   ): Promise<void> {
-    this.generation++;
-    this.stopping = true;
     if (options.stopSupervisor !== false) {
       this.iproxySupervisor.stop();
     }
-
-    if (this.iproxyProcessId || this.iproxyProcess) {
-      await this.stopOwnedProcess(options.force);
+    if (this.options.useRemoteRunner()) {
+      if (this.iproxyProcessId) {
+        const result = await this.options.remoteRunner.stopIproxy({ pid: this.iproxyProcessId });
+        if (!result.success) {
+          logger.warn(
+            `[IOSCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`,
+          );
+        }
+      }
+    } else if (this.iproxyProcess && typeof this.iproxyProcess.kill === "function") {
+      await this.stopLocalIproxyProcess(this.iproxyProcess);
+    } else if (this.iproxyProcessId) {
+      try {
+        process.kill(this.iproxyProcessId);
+      } catch (error) {
+        // iproxy may have exited before cleanup; forgetting its retired PID remains safe.
+        logger.debug(`[IOSCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
+      }
     }
-
     this.iproxyProcessId = null;
     this.iproxyProcess = null;
     this.iproxyLocalPort = null;
@@ -287,38 +243,29 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     }
   }
 
-  private async stopRemote(): Promise<void> {
-    if (!this.iproxyProcessId) {
-      return;
-    }
-    const result = await this.options.remoteRunner.stopIproxy({ pid: this.iproxyProcessId });
-    if (!result.success) {
-      logger.warn(`[IOSCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`);
-    }
-  }
-
-  private async stopOwnedProcess(force = false): Promise<void> {
-    if (this.options.useRemoteRunner()) {
-      await this.stopRemote();
-    } else if (this.iproxyProcess && typeof this.iproxyProcess.kill === "function") {
-      if (force) {
+  public prepareForcedStop(): ReturnType<IosTunnelClient["prepareForcedStop"]> {
+    this.iproxySupervisor.stop();
+    const pid = this.iproxyProcessId;
+    const child = this.iproxyProcess;
+    this.iproxyProcessId = null;
+    this.iproxyProcess = null;
+    this.iproxyLocalPort = null;
+    this.iproxyDevicePort = null;
+    return {
+      stopRemote: () => (pid ? this.options.remoteRunner.stopIproxy({ pid }) : undefined),
+      killLocal: () => {
         try {
-          this.iproxyProcess.kill("SIGKILL");
+          if (child && typeof child.kill === "function") {
+            child.kill("SIGKILL");
+          } else if (pid) {
+            process.kill(pid, "SIGKILL");
+          }
         } catch (error) {
-          // The tracked child can exit during forced shutdown.
-          logger.debug(`[IosTunnel] Forced termination already complete: ${errorMessage(error)}`);
+          // A child can exit between tracking and shutdown.
+          logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
         }
-      } else {
-        await this.stopLocalIproxyProcess(this.iproxyProcess);
-      }
-    } else if (this.iproxyProcessId) {
-      try {
-        process.kill(this.iproxyProcessId, force ? "SIGKILL" : undefined);
-      } catch (error) {
-        // iproxy may have exited before cleanup; forgetting its retired PID remains safe.
-        logger.debug(`[IOSCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
-      }
-    }
+      },
+    };
   }
 
   /**
@@ -355,9 +302,8 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       return true;
     }
     let timeout: NodeJS.Timeout | undefined;
-    let complete: () => void = () => {};
     const exited = new Promise<boolean>((resolve) => {
-      complete = () => resolve(true);
+      const complete = () => resolve(true);
       iproxyProcess.once("exit", complete);
       iproxyProcess.once("error", complete);
       timeout = this.timer.setTimeout(() => resolve(false), IPROXY_GRACEFUL_STOP_TIMEOUT_MS);
@@ -365,26 +311,17 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     try {
       return await exited;
     } finally {
-      iproxyProcess.removeListener("exit", complete);
-      iproxyProcess.removeListener("error", complete);
       if (timeout) {
         this.timer.clearTimeout(timeout);
       }
     }
   }
 
-  private assertGeneration(generation: number): void {
-    if (generation !== this.generation) {
-      throw new ActionableError("iproxy startup cancelled by tunnel stop; retry the call");
-    }
-  }
-
-  public async waitForStartup(generation = this.generation): Promise<void> {
+  public async waitForStartup(): Promise<void> {
     const timeoutMs = this.getStartTimeoutMs();
     const deadline = this.timer.now() + timeoutMs;
 
     while (this.timer.now() < deadline) {
-      this.assertGeneration(generation);
       if (!this.iproxyProcessId) {
         await this.timer.sleep(100);
         continue;
@@ -394,19 +331,15 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
           pid: this.iproxyProcessId,
         });
         if (status.success && status.data?.running) {
-          this.assertGeneration(generation);
           return;
         }
       } else if (await this.options.isRunning(this.iproxyProcessId)) {
-        this.assertGeneration(generation);
         return;
       }
       await this.timer.sleep(100);
     }
 
-    throw new ActionableError(
-      `iproxy failed to stay running within ${timeoutMs}ms; verify USB connectivity and that the host port is free`,
-    );
+    throw new Error(`iproxy failed to stay running within ${timeoutMs}ms`);
   }
 
   public getStartTimeoutMs(): number {
@@ -445,10 +378,13 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   }
 
   private async isSupervisedIproxyTunnelAlive(): Promise<boolean> {
+    if (this.options.isSimulator()) {
+      return true;
+    }
     const isConnected = await this.options.isConnected();
     if (!isConnected) {
       logger.warn(
-        `[IOSCtrlProxy] Device ${this.lastStart?.udid} not detected, stopping iproxy monitoring`,
+        `[IOSCtrlProxy] Device ${this.options.getDeviceId()} not detected, stopping iproxy monitoring`,
       );
       await this.stop({ clearDevicePort: true });
       return true;

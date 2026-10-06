@@ -499,15 +499,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         timer: this.timer,
         remoteRunner: this.remoteRunner,
         useRemoteRunner: () => this.useRemoteRunner(),
-        isRunning: (pid) => this.processClient.isRunning(pid),
+        isRunning: (pid) => this.isProcessRunning(pid),
+        getServicePort: () => this.servicePort,
+        getDeviceId: () => this.device.deviceId,
+        isStopping: () => this.isStopping,
+        isSimulator: () => this.isSimulator(),
         isConnected: () => this.isDeviceDetected(),
         restart: () => this.restartIproxyTunnel(),
-        prepareRemoteStart: async (start) => {
-          await this.ensureRemoteServicePortAvailable({
+        prepareRemoteStart: (start) =>
+          this.ensureRemoteServicePortAvailable({
             allowReallocation: start.allowServicePortReallocation ?? true,
-          });
-          return this.servicePort;
-        },
+          }),
       });
   }
 
@@ -833,6 +835,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async forceStopForShutdown(deadline: number): Promise<void> {
     this.isStopping = true;
     this.processSupervisor.stop();
+    const stopTunnel = this.tunnelClient.prepareForcedStop();
 
     const runnerPid = this.xcTestProcessId;
     this.xcTestProcessId = null;
@@ -845,12 +848,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         runnerPid
           ? this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid })
           : undefined,
-        this.tunnelClient.stop({ force: true, clearDevicePort: true }),
+        stopTunnel.stopRemote(),
       ]);
       return;
     }
 
-    await this.tunnelClient.stop({ force: true, clearDevicePort: true });
+    stopTunnel.killLocal();
     if (runnerPid) {
       const preKillDeadlineMs = deadline - FORCE_STOP_KILL_RESERVE_MS;
       if (preKillDeadlineMs <= this.timer.now()) {
@@ -3903,24 +3906,24 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs, options);
   }
 
-  private async startIproxyTunnel(options: IproxyTunnelStartOptions = {}): Promise<void> {
+  private startIproxyTunnel(options: IproxyTunnelStartOptions = {}): Promise<void> {
     if (this.isSimulator()) {
-      return;
+      return Promise.resolve();
     }
-    await this.tunnelClient.start({
+    return this.tunnelClient.start({
+      ...options,
       localPort: this.servicePort,
       devicePort: this.useRemoteRunner()
         ? (options.devicePort ?? this.tunnelClient.devicePort ?? undefined)
         : this.servicePort,
       udid: this.device.deviceId,
-      ...options,
     });
   }
 
-  private async stopIproxyTunnel(
+  private stopIproxyTunnel(
     options: { clearDevicePort?: boolean; stopSupervisor?: boolean } = {},
   ): Promise<void> {
-    await this.tunnelClient.stop(options);
+    return this.tunnelClient.stop(options);
   }
 
   private async restartIproxyTunnel(): Promise<void> {

@@ -6,7 +6,6 @@ import {
 } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
-import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import { PortManager } from "../../src/utils/PortManager";
 import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
@@ -56,7 +55,7 @@ function fixture(remoteMode = false) {
     stopIproxy: async () => ({ success: true }),
     getIproxyStatus: async () => ({ success: true, data: { running: true } }),
   };
-  const state = { connected: true };
+  const state = { connected: true, stopping: false, simulator: false, port: request.localPort };
   const processClient = new IosCtrlProxyProcessClient(executor, timer);
   const client = new DefaultIosTunnelClient({
     processExecutor: executor,
@@ -65,7 +64,11 @@ function fixture(remoteMode = false) {
     useRemoteRunner: () => remoteMode,
     isRunning: (pid) => processClient.isRunning(pid),
     isConnected: async () => state.connected,
-    prepareRemoteStart: async (options) => options.localPort,
+    prepareRemoteStart: async () => {},
+    getServicePort: () => state.port,
+    getDeviceId: () => request.udid,
+    isStopping: () => state.stopping,
+    isSimulator: () => state.simulator,
     restart: () =>
       client.start({
         ...request,
@@ -77,35 +80,38 @@ function fixture(remoteMode = false) {
 }
 
 describe("IosTunnelClient", () => {
-  test("argv-only startup records both ports; a live duplicate reuses its owned child", async () => {
+  test("argv-only local startup records only the host port; a live duplicate reuses its owned child", async () => {
     const { client, executor } = fixture();
     await client.start(request);
     await client.start(request);
     expect(executor.getSpawnedProcesses()).toHaveLength(1);
-    expect(executor.getSpawnedProcesses()[0].args).toEqual(["8765", "9100", "usb-device"]);
+    expect(executor.getSpawnedProcesses()[0].args).toEqual(["8765", "8765", "usb-device"]);
     expect(client.localPort).toBe(8765);
-    expect(client.devicePort).toBe(9100);
+    expect(client.devicePort).toBeNull();
     expect(await client.isAlive()).toBe(true);
   });
 
   test("moving the host port stops the old child before acquiring another", async () => {
-    const { client, executor, child } = fixture();
+    const { client, executor, child, state } = fixture();
     await client.start(request);
+    state.port = 8766;
     await client.start({ ...request, localPort: 8766 });
     expect(child.killed).toBe(true);
     expect(client.localPort).toBe(8766);
     expect(executor.getSpawnedProcesses()).toHaveLength(2);
   });
 
-  test("a failed liveness/readiness probe yields actionable failure and cleans its child", async () => {
+  test("a failed readiness probe keeps the child tracked and preserves the exact Error", async () => {
     const { client, executor, child, timer } = fixture();
     timer.enableAutoAdvance();
     executor.setCommandHandler("kill -0", () => {
       throw new Error("no process");
     });
-    await expect(client.start(request)).rejects.toBeInstanceOf(ActionableError);
-    expect(child.killed).toBe(true);
-    expect(client.localPort).toBeNull();
+    await expect(client.start(request)).rejects.toEqual(
+      new Error("iproxy failed to stay running within 5000ms"),
+    );
+    expect(child.killed).toBe(false);
+    expect(client.localPort).toBe(8765);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
@@ -119,7 +125,7 @@ describe("IosTunnelClient", () => {
     timer.advanceTime(1000);
     await flush();
     expect(executor.getSpawnedProcesses()).toHaveLength(2);
-    expect(client.devicePort).toBe(9100);
+    expect(client.devicePort).toBeNull();
     await client.stop({ clearDevicePort: true });
     timer.advanceTime(30000);
     await flush();
@@ -159,8 +165,8 @@ describe("IosTunnelClient", () => {
     expect(executor.getSpawnedProcesses()).toHaveLength(1);
   });
 
-  test("stop cancels an in-flight remote readiness probe and retires its PID", async () => {
-    const { client, remote } = fixture(true);
+  test("stop during an in-flight remote readiness probe permits late supervision", async () => {
+    const { client, remote, timer } = fixture(true);
     let entered!: () => void;
     const entry = new Promise<void>((resolve) => {
       entered = resolve;
@@ -179,21 +185,22 @@ describe("IosTunnelClient", () => {
     await entry;
     await client.stop();
     release();
-    await expect(starting).rejects.toThrow("cancelled");
+    await starting;
+    expect(timer.getPendingIntervals()).toHaveLength(1);
     expect(stop).toHaveBeenCalledWith({ pid: 123 });
     expect(client.localPort).toBeNull();
     stop.mockRestore();
   });
 
-  test("remote launch reports a port collision as an actionable error without transport fallback", async () => {
+  test("remote launch reports the original port collision Error without transport fallback", async () => {
     const { client, remote, executor } = fixture(true);
     remote.startIproxy = async () => ({ success: false, error: "host port collision" });
-    await expect(client.start(request)).rejects.toBeInstanceOf(ActionableError);
+    await expect(client.start(request)).rejects.toEqual(new Error("host port collision"));
     expect(client.localPort).toBeNull();
     expect(executor.getSpawnedProcesses()).toHaveLength(0);
   });
 
-  test("graceful cleanup escalates to forced kill and removes temporary exit listeners", async () => {
+  test("graceful cleanup retains the old signal sequence and exit listeners", async () => {
     const { client, child, timer } = fixture();
     await client.start(request);
     timer.enableAutoAdvance();
@@ -206,27 +213,23 @@ describe("IosTunnelClient", () => {
       }
       return true;
     };
-    const before = child.listenerCount("exit");
+    const before = child.listenerCount("error");
     await client.stop();
     expect(signals).toEqual([undefined, "SIGKILL"]);
-    expect(child.listenerCount("exit")).toBe(before);
+    expect(child.listenerCount("error")).toBe(before + 1);
     expect(client.localPort).toBeNull();
   });
 
-  test("diagnostics include identity and bounded output with explicit unverified binary version", async () => {
+  test("logs retain the old lifecycle line and bounded output", async () => {
     const { client, child } = fixture();
     const info = spyOn(logger, "info").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       await client.start(request);
       child.stderr.emit("data", "  " + "x".repeat(700) + "  ");
-      expect(
-        info.mock.calls.some(
-          ([line]) =>
-            String(line).includes('"event":"ready"') &&
-            String(line).includes('"udid":"usb-device"'),
-        ),
-      ).toBe(true);
+      expect(info.mock.calls).toEqual([
+        ["[IOSCtrlProxy] Starting iproxy tunnel (localhost:8765 -> device:8765)"],
+      ]);
       expect(warn.mock.calls.some(([line]) => line === "[iproxy stderr] " + "x".repeat(500))).toBe(
         true,
       );
@@ -250,10 +253,13 @@ describe("IosTunnelClient", () => {
     await manager["stopIproxyTunnel"]({ clearDevicePort: true });
     expect(await fake.isAlive()).toBe(false);
     expect(executor.getSpawnedProcesses()).toHaveLength(0);
-    expect(
-      Object.keys(manager).some((key) =>
-        /^iproxyProcess|^iproxyLocalPort|^iproxyDevicePort/.test(key),
-      ),
-    ).toBe(false);
+    expect(Object.values(manager)).toContain(fake);
+    expect(fake.starts).toEqual([
+      {
+        localPort: manager.getServicePort(),
+        devicePort: manager.getServicePort(),
+        udid: request.udid,
+      },
+    ]);
   });
 });

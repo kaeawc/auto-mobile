@@ -4,6 +4,7 @@ import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
@@ -966,7 +967,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
     if (isRunning) {
-      throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
+      throw new DeviceAlreadyRunningError(
+        `${device.platform} device '${device.name}' is already running`,
+        device.platform,
+        device.deviceId,
+      );
     }
 
     switch (device.platform) {

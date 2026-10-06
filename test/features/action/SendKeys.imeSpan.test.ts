@@ -1,5 +1,10 @@
-import { expect, test } from "bun:test";
-import { SendKeys, type SendKeysCommand } from "../../../src/features/action/SendKeys";
+import { expect, mock, spyOn, test } from "bun:test";
+import {
+  DefaultSendKeysCommandExecutor,
+  SendKeys,
+  type SendKeysCommand,
+  type SendKeysObserver,
+} from "../../../src/features/action/SendKeys";
 import { AUTO_MOBILE_IME_ID } from "../../../src/features/action/AndroidImeCatalog";
 import {
   clearAndroidImeQuarantine,
@@ -8,7 +13,10 @@ import {
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { android, createSendKeysHarness, observer } from "./SendKeysTestHarness";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { android, createSendKeysHarness, focused, observer } from "./SendKeysTestHarness";
 
 const priorIme = "com.example.keyboard/.Ime";
 const activate = `shell ime set ${AUTO_MOBILE_IME_ID}`;
@@ -16,9 +24,9 @@ const restore = `shell ime set ${priorIme}`;
 const type = (text: string): SendKeysCommand => ({ action: "type", text, mode: "ime" });
 let serial = 0;
 
-function harness() {
+function harness(observe: SendKeysObserver = observer) {
   const device = { ...android, deviceId: `ime-span-10406-${++serial}` };
-  const h = createSendKeysHarness(device);
+  const h = createSendKeysHarness(device, observe);
   const timer = new FakeTimer();
   // Model selection across repeated captures, beyond the harness's two-read stub.
   let selectedIme = priorIme;
@@ -34,7 +42,7 @@ function harness() {
   };
   const action = new SendKeys(device, h.adbFactory, {
     executor: h.executor,
-    observer,
+    observer: observe,
     timer,
     timestampProvider: { now: async () => 1 },
   });
@@ -42,6 +50,128 @@ function harness() {
     h.adb.getExecutedCommands().filter((command) => command.startsWith("shell ime set "));
   return { ...h, action, device, timer, selections };
 }
+
+test("IME commit verification skips full observe and performance audit", async () => {
+  const fullObserve = mock(() => {});
+  const audit = mock(() => {});
+  const h = harness({
+    execute: async (options) => {
+      // Model the existing observer's expensive paths, independently of its text result.
+      if (!options?.hierarchyOnly) {
+        fullObserve();
+      }
+      if (!options?.hierarchyOnly) {
+        audit();
+      }
+      return focused;
+    },
+  });
+  expect(await h.executor.type(type("a"))).toMatchObject({ success: true });
+  expect(fullObserve).not.toHaveBeenCalled();
+  expect(audit).not.toHaveBeenCalled();
+});
+
+test("three IME commands perform one light verification read each", async () => {
+  const reads: Parameters<SendKeysObserver["execute"]>[0][] = [];
+  const verifiedCommands: number[] = [];
+  const h = harness({
+    execute: async (options) => {
+      reads.push(options);
+      if (options?.hierarchyOnly) {
+        verifiedCommands.push(h.committed.length);
+      }
+      return {
+        ...focused,
+        viewHierarchy: {
+          hierarchy: {
+            node: {
+              $: {
+                focused: "true",
+                class: "android.widget.EditText",
+                text: h.committed.join(""),
+              },
+            },
+          },
+        },
+      };
+    },
+  });
+  expect(await h.action.execute([type("a"), type("b"), type("c")])).toMatchObject({
+    success: true,
+    completedCommands: 3,
+  });
+  // SendKeys also takes a terminal observation after the command span.
+  expect(reads.filter((read) => read?.hierarchyOnly)).toHaveLength(3);
+  expect(verifiedCommands).toEqual([1, 2, 3]);
+});
+
+test("light IME verification still rejects a mismatched multi-segment suffix", async () => {
+  const read: SendKeysObserver = {
+    execute: async () => ({
+      ...focused,
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { focused: "true", class: "android.widget.EditText", text: "one bold tai" } },
+        },
+      },
+    }),
+  };
+  const h = harness(read);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const executor = new DefaultSendKeysCommandExecutor(h.device, h.adbFactory, read, {
+    textClient: h.client,
+    timer,
+  });
+  const result = await executor.type(type("one *bold* tail"));
+  expect(result).toMatchObject({ success: false, partialApplication: true });
+  expect(result.error).toContain('the focused field holds "one bold tai"');
+  expect(timer.getSleepHistory()).toEqual([150, 150]);
+});
+
+test("real observer commit verification only captures hierarchy, never device state or audits", async () => {
+  const h = harness();
+  const hierarchy = {
+    hierarchy: {
+      node: { $: { focused: "true", class: "android.widget.EditText", text: "a" } },
+    },
+  };
+  const capture = new FakeHierarchyCapture(() => hierarchy);
+  const viewHierarchy = new FakeViewHierarchy();
+  const screen = new RealObserveScreen(
+    h.device,
+    h.adbFactory,
+    { hierarchyCapture: capture, viewHierarchy },
+    h.timer,
+  );
+  const audit = spyOn(screen["performanceAuditor"], "run").mockResolvedValue(undefined);
+  const deviceState = screen["deviceStateCollector"];
+  const stateReads = [
+    spyOn(deviceState, "collectForegroundSnapshot").mockResolvedValue(null),
+    spyOn(deviceState, "collectWakefulness").mockResolvedValue(undefined),
+    spyOn(deviceState, "collectDeviceLock").mockResolvedValue(undefined),
+    spyOn(deviceState, "collectBackStack").mockResolvedValue(undefined),
+    spyOn(deviceState, "collectActiveWindow").mockResolvedValue(undefined),
+  ];
+  try {
+    const executor = new DefaultSendKeysCommandExecutor(h.device, h.adbFactory, screen, {
+      textClient: h.client,
+      timer: h.timer,
+    });
+    expect(await executor.type(type("a"))).toMatchObject({ success: true });
+    expect(capture.requests).toHaveLength(1);
+    expect(capture.requests[0]?.freshness).toBe("fresh");
+    expect(audit).not.toHaveBeenCalled();
+    for (const read of stateReads) {
+      expect(read).not.toHaveBeenCalled();
+    }
+  } finally {
+    audit.mockRestore();
+    for (const read of stateReads) {
+      read.mockRestore();
+    }
+  }
+});
 
 function modelDeviceSideRestore(h: ReturnType<typeof harness>) {
   const commit = h.client.commitViaIme;

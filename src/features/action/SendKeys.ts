@@ -316,6 +316,7 @@ export interface SendKeysKeyboard {
 
 export interface SendKeysObserver extends Pick<ObserveScreen, "captureScreenshot"> {
   execute(options?: {
+    hierarchyOnly?: boolean;
     display?: string;
     signal?: AbortSignal;
     freshness?: HierarchyCaptureRequest["freshness"];
@@ -1494,6 +1495,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           signal,
           freshness: "fresh",
           skipScreenshot: true,
+          // Reuse focused-element extraction without device-state collection or audits.
+          hierarchyOnly: true,
           ...(display === undefined ? {} : { display }),
         });
         this.checkAbort(signal);

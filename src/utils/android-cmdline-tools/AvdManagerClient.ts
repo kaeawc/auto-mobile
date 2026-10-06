@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { appendBounded } from "./appendBounded";
+import { runAndroidCommand } from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
@@ -393,117 +393,30 @@ export class AvdManagerClient {
     },
     options: AvdManagerExecutionOptions,
   ): Promise<CommandResult> {
-    return new Promise((resolvePromise, reject) => {
-      if (options.signal?.aborted) {
-        return reject(new Error("avdmanager command cancelled"));
-      }
-      const invocation = this.windowsBatchInvocation(path, args, inputOptions.env);
-      const child = this.dependencies.spawn(invocation.command, invocation.args, {
-        env: inputOptions.env,
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: false,
-      });
-      let settled = false;
-      let terminationError: Error | undefined;
-      let escalationTimeout: NodeJS.Timeout | undefined;
-      let forcedSettlementTimeout: NodeJS.Timeout | undefined;
-      let stdout = "";
-      let stderr = "";
-      let stdoutTruncated = false;
-      let stderrTruncated = false;
-      const settle = (callback: () => void) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.dependencies.timer.clearTimeout(timeout);
-        if (escalationTimeout) {
-          this.dependencies.timer.clearTimeout(escalationTimeout);
-        }
-        if (forcedSettlementTimeout) {
-          this.dependencies.timer.clearTimeout(forcedSettlementTimeout);
-        }
-        options.signal?.removeEventListener("abort", onAbort);
-        callback();
-      };
-      const rejectTermination = () => {
-        settle(() => reject(terminationError));
-      };
-      const requestTermination = (error: Error) => {
-        if (settled || terminationError) {
-          return;
-        }
-        terminationError = error;
-        this.dependencies.timer.clearTimeout(timeout);
-        options.signal?.removeEventListener("abort", onAbort);
-        child.kill("SIGTERM");
-        if (settled) {
-          return;
-        }
-        escalationTimeout = this.dependencies.timer.setTimeout(() => {
-          child.kill("SIGKILL");
-          if (settled) {
-            return;
-          }
-          forcedSettlementTimeout = this.dependencies.timer.setTimeout(
-            rejectTermination,
-            TERMINATION_ESCALATION_MS,
-          );
-        }, TERMINATION_ESCALATION_MS);
-      };
-      const onAbort = () => requestTermination(new Error("avdmanager command cancelled"));
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-      const timeout = this.dependencies.timer.setTimeout(
-        () =>
-          requestTermination(
-            new Error(`avdmanager command timed out after ${inputOptions.timeoutMs}ms`),
-          ),
-        inputOptions.timeoutMs,
-      );
-      this.dependencies.logger.info(`Executing: ${path} ${args.join(" ")}`);
-      child.stdout?.on("data", (data) => {
-        const output = data.toString();
-        const appended = appendBounded(
-          stdout,
-          output,
-          inputOptions.maxStdoutChars ?? DEFAULT_MAX_OUTPUT_CHARS,
-        );
-        stdout = appended.value;
-        stdoutTruncated ||= appended.truncated;
+    // Preserve pre-abort ordering: Windows argument validation must not run when cancelled.
+    if (options.signal?.aborted) {
+      throw new Error("avdmanager command cancelled");
+    }
+    const invocation = this.windowsBatchInvocation(path, args, inputOptions.env);
+    return runAndroidCommand(this.dependencies, {
+      ...invocation,
+      env: inputOptions.env,
+      input: inputOptions.input,
+      signal: options.signal,
+      timeoutMs: inputOptions.timeoutMs,
+      maxStdoutChars: inputOptions.maxStdoutChars ?? DEFAULT_MAX_OUTPUT_CHARS,
+      maxStderrChars: DEFAULT_MAX_OUTPUT_CHARS,
+      name: "avdmanager",
+      spawnErrorPrefix: "Failed to spawn avdmanager: ",
+      terminationGraceMs: TERMINATION_ESCALATION_MS,
+      forcedSettlementDelayMs: TERMINATION_ESCALATION_MS,
+      onStart: () => this.dependencies.logger.info(`Executing: ${path} ${args.join(" ")}`),
+      onOutput: (stream, output) => {
         if (output.trim()) {
-          this.dependencies.logger.info(`[${path}] ${output.trim()}`);
+          const level = stream === "stdout" ? "info" : "warn";
+          this.dependencies.logger[level](`[${path}] ${output.trim()}`);
         }
-      });
-      child.stderr?.on("data", (data) => {
-        const output = data.toString();
-        const appended = appendBounded(stderr, output, DEFAULT_MAX_OUTPUT_CHARS);
-        stderr = appended.value;
-        stderrTruncated ||= appended.truncated;
-        if (output.trim()) {
-          this.dependencies.logger.warn(`[${path}] ${output.trim()}`);
-        }
-      });
-      child.on("close", (code) =>
-        settle(() => {
-          if (terminationError) {
-            reject(terminationError);
-            return;
-          }
-          resolvePromise({ stdout, stderr, exitCode: code, stdoutTruncated, stderrTruncated });
-        }),
-      );
-      child.on("exit", () => {
-        if (terminationError) {
-          rejectTermination();
-        }
-      });
-      child.on("error", (error) =>
-        settle(() => reject(new Error(`Failed to spawn avdmanager: ${error.message}`))),
-      );
-      if (inputOptions.input) {
-        child.stdin?.write(inputOptions.input);
-        child.stdin?.end();
-      }
+      },
     });
   }
 

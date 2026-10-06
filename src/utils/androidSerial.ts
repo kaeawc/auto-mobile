@@ -51,6 +51,7 @@ function transportIdFor(device: BootedDevice): string | undefined {
 interface TransportIdentity {
   key: string;
   avdName?: string;
+  physicalSerial?: string;
 }
 
 interface TransportGroup {
@@ -58,12 +59,14 @@ interface TransportGroup {
   name: string;
   serials: Set<string>;
   avdName?: string;
+  physicalSerial?: string;
   transportIds: Map<string, string | undefined>;
 }
 
 interface ConnectionEvidence {
   transportId?: string;
   identity: Promise<TransportIdentity | undefined>;
+  provenIdentity?: TransportIdentity;
 }
 
 /** Only a loopback adb port identifies a local emulator's console slot. */
@@ -85,6 +88,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
   needsNormalization(devices: readonly BootedDevice[]): boolean {
     return (
       this.groups.size > 0 ||
+      this.connections.size > 0 ||
       devices.some(
         (device) =>
           device.platform === "android" && isAndroidTransportAddressSerial(device.deviceId),
@@ -119,7 +123,9 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
           timeoutMs: 2000,
         })
       ).stdout.trim();
-      return bootId ? { key: `physical:${JSON.stringify([serial, bootId])}` } : undefined;
+      return bootId
+        ? { key: `physical:${JSON.stringify([serial, bootId])}`, physicalSerial: serial }
+        : undefined;
     } catch (error) {
       logger.warn(
         `Android transport identity unavailable for ${device.deviceId}: ${errorMessage(error)}`,
@@ -189,6 +195,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       );
       return undefined;
     }
+    connection.provenIdentity = identity;
     return identity;
   }
 
@@ -199,6 +206,8 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     pooledIds: ReadonlySet<string>,
     completeSnapshot = true,
   ): BootedDevice[] {
+    const claimedSerials = this.claimedPhysicalSerials(evidence);
+    const blockedKeys = this.unprovenPooledPeerKeys(evidence, pooledIds);
     if (completeSnapshot) {
       this.pruneConnectionEvidence(devices);
     }
@@ -207,12 +216,13 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       if (device.platform !== "android") {
         continue;
       }
-      if (isAndroidTransportAddressSerial(device.deviceId) && !evidence.has(device.deviceId)) {
-        this.unproven.add(device.deviceId);
-      } else {
-        this.unproven.delete(device.deviceId);
-      }
       const key = evidence.get(device.deviceId)?.key ?? device.deviceId;
+      this.recordUnprovenTransport(
+        device.deviceId,
+        evidence.get(device.deviceId),
+        claimedSerials,
+        blockedKeys,
+      );
       const rows = byIdentity.get(key) ?? [];
       rows.push(device);
       byIdentity.set(key, rows);
@@ -225,6 +235,54 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       result.push(this.foldGroup(key, rows, evidence, pooledIds, completeSnapshot));
     }
     return result;
+  }
+
+  private recordUnprovenTransport(
+    serial: string,
+    identity: TransportIdentity | undefined,
+    claimedSerials: ReadonlySet<string>,
+    blockedKeys: ReadonlySet<string>,
+  ): void {
+    const unproven = identity
+      ? blockedKeys.has(identity.key)
+      : isAndroidTransportAddressSerial(serial) || claimedSerials.has(serial);
+    if (unproven) {
+      this.unproven.add(serial);
+    } else {
+      this.unproven.delete(serial);
+    }
+  }
+
+  private unprovenPooledPeerKeys(
+    evidence: ReadonlyMap<string, TransportIdentity>,
+    pooledIds: ReadonlySet<string>,
+  ): Set<string> {
+    // A lone USB row can have been acquired before any peer was proven. Keep
+    // that reservation without inferring an alias from serial-only evidence.
+    return new Set(
+      [...evidence.values()]
+        .filter(
+          (identity) =>
+            identity.physicalSerial !== undefined &&
+            pooledIds.has(identity.physicalSerial) &&
+            !evidence.has(identity.physicalSerial) &&
+            this.groups.get(identity.key)?.canonical !== identity.physicalSerial,
+        )
+        .map((identity) => identity.key),
+    );
+  }
+
+  private claimedPhysicalSerials(evidence: ReadonlyMap<string, TransportIdentity>): Set<string> {
+    // Read before pruning: cached proof still claims a serial even when a peer is
+    // absent from this snapshot. Missing evidence must not create another owner.
+    const identities = [
+      ...evidence.values(),
+      ...this.groups.values(),
+      ...[...this.connections.values()].map((connection) => connection.provenIdentity),
+    ];
+    return new Set(
+      identities.flatMap((identity) => (identity?.physicalSerial ? [identity.physicalSerial] : [])),
+    );
   }
 
   private pruneConnectionEvidence(devices: readonly BootedDevice[]): void {
@@ -291,6 +349,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       name,
       serials,
       avdName: avdName ?? previous?.avdName,
+      physicalSerial: rows.map((row) => evidence.get(row.deviceId)?.physicalSerial).find(Boolean),
       transportIds: this.connectionIdsFor(rows, previous, completeSnapshot),
     });
     this.routes.set(canonical, live.includes(canonical) ? canonical : live[0]);

@@ -4903,6 +4903,11 @@ export class DevicePool {
   private isIdleDeviceEligible(device: PooledDevice): boolean {
     return (
       device.status === "idle" &&
+      this.androidTransportAliases.isAssignable({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }) &&
       !this.isReservedForAssignment(device) &&
       !this.getDeviceHealthMarker(device.id)
     );
@@ -6843,12 +6848,7 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    );
+    return Array.from(this.devices.values()).filter((device) => this.isIdleDeviceEligible(device));
   }
 
   /**
@@ -7096,12 +7096,7 @@ export class DevicePool {
     error: number;
   } {
     const devices = this.getDevicesByPlatform(platform);
-    const idle = devices.filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    ).length;
+    const idle = devices.filter((device) => this.isIdleDeviceEligible(device)).length;
     const assigned = devices.filter(
       (device) => device.status === "busy" || this.isReservedForAssignment(device),
     ).length;

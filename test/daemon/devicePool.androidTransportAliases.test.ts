@@ -115,6 +115,86 @@ describe("Android transport aliases (#10201)", () => {
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
+  test("a failed USB boot_id read beside proven wireless cannot create a second owner", async () => {
+    const h = harness([booted(usb), booted(wireless)]);
+    const failedUsb = new FakeAdbExecutor();
+    failedUsb.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+    failedUsb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    failedUsb.setCommandError("boot_id", new Error("USB boot_id timeout"));
+    let usbRecovered = false;
+    const factory = spyOn(h.adbFactory, "create").mockImplementation((target) =>
+      target?.deviceId === usb && !usbRecovered ? failedUsb : h.adb,
+    );
+    try {
+      expect((await h.pool.refreshDevicesWithOutcome()).failure).toBeUndefined();
+      expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([wireless]);
+      expect(await h.pool.assignDeviceToSession("owner-a", "android")).toBe(wireless);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+      await expect(
+        settleWithFakeTime(h.timer, h.pool.assignDeviceToSession("owner-b", "android"), {
+          stepMs: 1000,
+          maxSteps: 70,
+          description: "mixed USB failure second owner refusal",
+        }),
+      ).rejects.toThrow("Timed out");
+      usbRecovered = true;
+      await h.pool.refreshDevices();
+      expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([wireless]);
+      expect(h.pool.getDevice(wireless)?.sessionId).toBe("owner-a");
+      expect(h.pool.getAndroidTransportAliases(wireless)).toEqual([usb]);
+    } finally {
+      factory.mockRestore();
+    }
+  });
+
+  test.each([true, false])(
+    "late wireless proof reserves an already pooled unproven USB (held=%s)",
+    async (held) => {
+      const h = harness([booted(usb), booted(wireless)]);
+      const failedUsb = new FakeAdbExecutor();
+      failedUsb.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+      failedUsb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+      failedUsb.setCommandError("boot_id", new Error("USB timeout"));
+      let wirelessProven = false;
+      let usbProven = false;
+      const factory = spyOn(h.adbFactory, "create").mockImplementation((target) =>
+        (target?.deviceId === usb ? usbProven : wirelessProven) ? h.adb : failedUsb,
+      );
+      try {
+        await h.pool.refreshDevices();
+        expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
+        if (held) {
+          expect(await h.pool.assignDeviceToSession("owner-a", "android")).toBe(usb);
+        }
+        const incarnation = h.pool.getDevice(usb)?.incarnation;
+        wirelessProven = true;
+        await h.pool.refreshDevices();
+        expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
+        expect(h.pool.getIdleDevices()).toEqual([]);
+        expect(h.pool.getAvailableDeviceCount()).toBe(0);
+        expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
+        await expect(
+          settleWithFakeTime(h.timer, h.pool.assignDeviceToSession("owner-b", "android"), {
+            stepMs: 1000,
+            maxSteps: 70,
+            description: "late proof second owner refusal",
+          }),
+        ).rejects.toThrow();
+        usbProven = true;
+        await h.pool.refreshDevices();
+        expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
+        expect(h.pool.getDevice(usb)?.incarnation).toBe(incarnation);
+        expect(h.pool.getDevice(usb)?.sessionId).toBe(held ? "owner-a" : null);
+        expect(h.pool.getAndroidTransportAliases(usb)).toEqual([wireless]);
+        if (!held) {
+          expect(await h.pool.assignDeviceToSession("owner-b", "android")).toBe(usb);
+        }
+      } finally {
+        factory.mockRestore();
+      }
+    },
+  );
+
   test.each([true, false])(
     "failed first probes retry and pool after boot_id recovers (USB present=%s)",
     async (usbPresent) => {

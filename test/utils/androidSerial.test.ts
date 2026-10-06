@@ -141,6 +141,31 @@ describe("Android physical transport evidence", () => {
     expect(adb.getExecutedCommands()).toHaveLength(5);
   });
 
+  test.each(["snapshot", "cached"])(
+    "failed durable evidence is unassignable when %s physical evidence claims its serial",
+    async (claim) => {
+      const usb = executor("PHONE-A", "boot-a");
+      usb.setCommandError("boot_id", new Error("USB timeout"));
+      const wifi = executor("PHONE-A", "boot-a");
+      const aliases = new AndroidTransportAliases({
+        create: (target) => (target?.deviceId === "PHONE-A" ? usb : wifi),
+      });
+      const wireless = device("host-a:5555");
+      if (claim === "cached") {
+        // prepare alone must retain successful evidence; folding is not its source.
+        await aliases.prepare([wireless]);
+      }
+      const rows = claim === "cached" ? [device("PHONE-A")] : [device("PHONE-A"), wireless];
+      // Keep the cached connection on a partial discovery snapshot.
+      aliases.fold(rows, await aliases.prepare(rows), new Set(), claim !== "cached");
+      expect(aliases.isAssignable(rows[0])).toBe(false);
+      expect(aliases.aliases("PHONE-A")).toEqual([]);
+      await aliases.prepare(rows);
+      expect(usb.getExecutedCommands()).toHaveLength(6);
+      expect(wifi.getExecutedCommands()).toHaveLength(3);
+    },
+  );
+
   test("an older failed probe cannot evict a replacement transport's successful evidence", async () => {
     const old = executor("", "boot-a");
     const replacement = executor("PHONE-A", "boot-a");

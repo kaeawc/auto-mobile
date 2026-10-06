@@ -1684,6 +1684,10 @@ export class RealObserveScreen implements ObserveScreen {
               (this.timer.now() - startTime),
           ),
           eligible: !observerMode && !preserveDisplayState && !explicitlyRouted,
+          sideSamples: {
+            skipBackStack,
+            displayId: requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
+          },
         });
       }
 
@@ -2189,18 +2193,26 @@ export class RealObserveScreen implements ObserveScreen {
    * unverified, so the next action re-observes in full. Replace such a hit with one
    * synchronous extraction of the same window. Only an unverified same-package tree is
    * replaced. Samples taken alongside the cached tree are kept when the new tree itself
-   * names the same activity as the kept `activeWindow`, and dropped (identity unknown)
-   * when it names another one or cannot be compared. When the read fails the cached
-   * tree stays and its freshness verdict keeps saying it was not verified.
+   * names the same activity as the kept `activeWindow`. When it names another one or
+   * cannot be compared, they are dropped and re-read for the new window with the budget
+   * left over (#9982), so the field is only absent if that re-read fails or runs out of
+   * time. When the read fails the cached tree stays and its freshness verdict keeps
+   * saying it was not verified.
    */
   private async verifyCachedAndroidHierarchy(
     result: ObserveResult,
-    options: { signal?: AbortSignal; remainingMs: number; eligible: boolean },
+    options: {
+      signal?: AbortSignal;
+      remainingMs: number;
+      eligible: boolean;
+      sideSamples: { skipBackStack: boolean; displayId: number };
+    },
   ): Promise<void> {
     const cached = result.viewHierarchy;
     if (!cached || !this.needsCachedVerification(cached, options)) {
       return;
     }
+    const startedAt = this.timer.now();
     const hierarchy = await this.readIndependentHierarchy(
       cached.updatedAt,
       options.signal,
@@ -2215,10 +2227,16 @@ export class RealObserveScreen implements ObserveScreen {
     if (!sameWindow) {
       // A same-package A->B move between the adb reads and this read would publish
       // B's tree under A's identity. The kept samples cannot be tied to the new tree,
-      // so re-correlate exactly as the other recapture paths do; no device read.
+      // so re-correlate exactly as the other recapture paths do, then re-read the
+      // samples for the window now being published. Only this path reads the device.
       this.recorrelateActiveWindowToRecapture(result, hierarchy);
       delete result.backStack;
       delete result.deviceLock;
+      await this.resampleAfterStaleWindowRecovery(result, {
+        ...options.sideSamples,
+        signal: options.signal,
+        budgetMs: options.remainingMs - (this.timer.now() - startedAt),
+      });
     }
   }
 

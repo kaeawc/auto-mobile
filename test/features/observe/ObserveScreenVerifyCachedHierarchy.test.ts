@@ -11,8 +11,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import type { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import type { ViewHierarchyResult } from "../../../src/models";
+import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
@@ -86,38 +88,58 @@ function synced(
   });
 }
 
+const SAMPLED_LOCK = { locked: true, keyguardShowing: true, secure: true };
+const RESAMPLED_LOCK = { locked: false, keyguardShowing: false, secure: false };
+
 function setup(
   hierarchies: ViewHierarchyResult[],
-  overrides: { backStackActivity?: string; foreground?: string } = {},
-): { screen: RealObserveScreen; hierarchy: FakeViewHierarchy } {
-  const timer = new FakeTimer();
+  overrides: {
+    /** Activity per back-stack read; the last entry repeats. */
+    backStackActivities?: string[];
+    foreground?: string;
+    onBackStackRead?: (readNumber: number) => Promise<void> | void;
+    timer?: FakeTimer;
+    hierarchyCapture?: HierarchyCapture;
+  } = {},
+): { screen: RealObserveScreen; hierarchy: FakeViewHierarchy; backStackReads: () => number } {
+  const timer = overrides.timer ?? new FakeTimer();
   timer.setCurrentTime(NOW);
   const hierarchy = new FakeViewHierarchy();
   hierarchy.configureHierarchySequence(hierarchies);
   const adb = new FakeAdbExecutor();
   adb.setForegroundApp({ packageName: overrides.foreground ?? PLAYGROUND, userId: 0 });
+  adb.setDeviceLockSequence([SAMPLED_LOCK, RESAMPLED_LOCK]);
+  const activities = overrides.backStackActivities ?? [PLAYGROUND_ACTIVITY];
+  let backStackReads = 0;
   const screen = createObserveScreenForTest(
     device,
     new FakeAdbClientFactory(adb),
     {
       viewHierarchy: hierarchy,
       backStack: {
-        execute: async () => ({
-          depth: 1,
-          activities: [],
-          tasks: [{ id: 421, packageName: PLAYGROUND }],
-          currentActivity: {
-            name: overrides.backStackActivity ?? PLAYGROUND_ACTIVITY,
-            taskId: 421,
-          },
-          source: "adb",
-        }),
+        execute: async () => {
+          const read = backStackReads++;
+          if (overrides.onBackStackRead) {
+            await overrides.onBackStackRead(read + 1);
+          }
+          return {
+            depth: 1,
+            activities: [],
+            tasks: [{ id: 421, packageName: PLAYGROUND }],
+            currentActivity: {
+              name: activities[Math.min(read, activities.length - 1)],
+              taskId: 421,
+            },
+            source: "adb" as const,
+          };
+        },
       },
       cacheStore: new FakeObserveCacheStore(timer),
+      ...(overrides.hierarchyCapture ? { hierarchyCapture: overrides.hierarchyCapture } : {}),
     },
     timer,
   );
-  return { screen, hierarchy };
+  return { screen, hierarchy, backStackReads: () => backStackReads };
 }
 
 const EXPLICIT_OBSERVE = {
@@ -143,7 +165,7 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
   });
 
   test("a cache hit is replaced by one synchronous read and reported verified", async () => {
-    const { screen, hierarchy } = setup([cachedHit(), synced()]);
+    const { screen, hierarchy, backStackReads } = setup([cachedHit(), synced()]);
 
     const result = await screen.execute({ ...EXPLICIT_OBSERVE, verifyCachedHierarchy: true });
 
@@ -158,8 +180,11 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
     expect(result.freshness?.warning).toBeUndefined();
     expect(result.updatedAt).toBe(CACHED_UPDATED_AT + 40);
     expect(JSON.stringify(result.elements)).toContain("Regular Button (pressed)");
-    // Output shape: the side samples taken with the tree are kept, not discarded.
+    // Output shape: the side samples taken with the tree are kept, not discarded, and
+    // the same-window path adds no lock or back-stack device call.
     expect(result.backStack?.currentActivity?.name).toBe(PLAYGROUND_ACTIVITY);
+    expect(result.deviceLock).toEqual(SAMPLED_LOCK);
+    expect(backStackReads()).toBe(1);
     expect(result.activeWindow).toEqual({
       appId: PLAYGROUND,
       activityName: PLAYGROUND_ACTIVITY,
@@ -168,32 +193,88 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
   });
 
   test("a same-package A->B move during the verifying read does not publish B under A", async () => {
-    const { screen, hierarchy } = setup([
-      cachedHit(),
-      synced({ foregroundActivity: `${PLAYGROUND}/.DetailActivity`, label: "Detail" }),
-    ]);
+    const { screen, hierarchy, backStackReads } = setup(
+      [
+        cachedHit(),
+        synced({ foregroundActivity: `${PLAYGROUND}/.DetailActivity`, label: "Detail" }),
+      ],
+      { backStackActivities: [PLAYGROUND_ACTIVITY, `${PLAYGROUND}.DetailActivity`] },
+    );
 
     const result = await screen.execute({ ...EXPLICIT_OBSERVE, verifyCachedHierarchy: true });
 
-    // No device read beyond the verifying one.
+    // No hierarchy read beyond the verifying one.
     expect(hierarchy.getCallCount()).toBe(2);
     expect(JSON.stringify(result.elements)).toContain("Detail");
     expect(result.freshness).toMatchObject({ verified: true, isFresh: true });
     // Identity from the replaced tree is not carried over: unknown, as the other recapture paths.
     expect(result.activeWindow).toEqual({ appId: PLAYGROUND, activityName: "", layoutSeqSum: 0 });
+    // The samples taken with A are replaced by a re-read of B's, not left absent (#9982).
+    expect(backStackReads()).toBe(2);
+    expect(result.backStack?.currentActivity?.name).toBe(`${PLAYGROUND}.DetailActivity`);
+    expect(result.deviceLock).toEqual(RESAMPLED_LOCK);
+  });
+
+  test("skipBackStack re-reads only the lock state after a same-package move", async () => {
+    const { screen, backStackReads } = setup([
+      cachedHit(),
+      synced({ foregroundActivity: `${PLAYGROUND}/.DetailActivity`, label: "Detail" }),
+    ]);
+
+    const result = await screen.execute({
+      ...EXPLICIT_OBSERVE,
+      skipBackStack: true,
+      verifyCachedHierarchy: true,
+    });
+
+    expect(backStackReads()).toBe(0);
     expect(result.backStack).toBeUndefined();
+    expect(result.deviceLock).toEqual(RESAMPLED_LOCK);
   });
 
   test("a verifying tree that names no activity cannot be compared and is re-correlated", async () => {
-    const { screen } = setup([
-      cachedHit(),
-      synced({ foregroundActivity: `${PLAYGROUND}/android.widget.FrameLayout` }),
-    ]);
+    const { screen, backStackReads } = setup(
+      [cachedHit(), synced({ foregroundActivity: `${PLAYGROUND}/android.widget.FrameLayout` })],
+      { backStackActivities: [PLAYGROUND_ACTIVITY, `${PLAYGROUND}.OtherActivity`] },
+    );
 
     const result = await screen.execute({ ...EXPLICIT_OBSERVE, verifyCachedHierarchy: true });
 
     expect(result.freshness?.verified).toBe(true);
     expect(result.activeWindow).toEqual({ appId: PLAYGROUND, activityName: "", layoutSeqSum: 0 });
+    expect(backStackReads()).toBe(2);
+    expect(result.backStack?.currentActivity?.name).toBe(`${PLAYGROUND}.OtherActivity`);
+  });
+
+  test("a back-stack re-read that outlives the remaining budget is dropped, not published late", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(NOW);
+    let release: (() => void) | undefined;
+    const { screen, backStackReads } = setup(
+      [cachedHit(), synced({ foregroundActivity: `${PLAYGROUND}/.DetailActivity` })],
+      {
+        backStackActivities: [PLAYGROUND_ACTIVITY, `${PLAYGROUND}.DetailActivity`],
+        onBackStackRead: (readNumber) =>
+          readNumber === 2
+            ? new Promise<void>((resolve) => {
+                release = resolve;
+              })
+            : undefined,
+        timer,
+      },
+    );
+
+    const pending = screen.execute({ ...EXPLICIT_OBSERVE, verifyCachedHierarchy: true });
+    // Let the verifying read finish and the re-read start, then run out the 500 ms budget.
+    for (let i = 0; i < 200 && backStackReads() < 2; i++) {
+      await Promise.resolve();
+    }
+    expect(backStackReads()).toBe(2);
+    timer.advanceTime(600);
+    const result = await pending;
+    release?.();
+
+    expect(result.freshness?.verified).toBe(true);
     expect(result.backStack).toBeUndefined();
   });
 
@@ -245,7 +326,9 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
   });
 
   test("session-free observer reads never verify", async () => {
-    const { screen, hierarchy } = setup([cachedHit(), synced()]);
+    // Observer reads go through the capture seam; inject it so nothing dials a real client.
+    const capture = new FakeHierarchyCapture(() => cachedHit());
+    const { screen, hierarchy } = setup([cachedHit(), synced()], { hierarchyCapture: capture });
 
     await screen.execute({
       ...EXPLICIT_OBSERVE,
@@ -255,5 +338,6 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
     });
 
     expect(hierarchy.getReadOptions().filter((options) => options !== undefined)).toEqual([]);
+    expect(capture.requests).toHaveLength(1);
   });
 });

@@ -641,6 +641,189 @@ steps:
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(true);
     });
+
+    it("validates a dragAndDrop endpoint with a nested container and selectionStrategy (#10124)", () => {
+      const yaml = `
+name: drag-container
+steps:
+  - tool: dragAndDrop
+    source:
+      text: "Item 1"
+      selectionStrategy: unique
+      container:
+        elementId: "com.example:id/list_a"
+        container:
+          text: "Lists"
+          index: 1
+    target:
+      text: "Item 2"
+    dragDurationMs: 2000
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+    });
+
+    it("rejects an unknown dragAndDrop endpoint key and a malformed container (#10124)", () => {
+      for (const endpoint of [
+        "{ text: a, bogus: 1 }",
+        "{ text: a, container: { index: 1 } }",
+        "{ text: a, container: { elementId: x, text: y } }",
+        "{ text: a, selectionStrategy: sometimes }",
+      ]) {
+        const yaml = `
+name: drag-bad
+steps:
+  - tool: dragAndDrop
+    source: ${endpoint}
+    target: { text: b }
+`;
+        expect(validator.validateYaml(yaml).valid).toBe(false);
+      }
+    });
+
+    it.each(["inline", "params"])(
+      "validates a highlight step selected by elementId (%s) (#10124)",
+      (form) => {
+        const yaml =
+          form === "inline"
+            ? `
+name: highlight-login
+steps:
+  - tool: highlight
+    elementId: com.example:id/btn_login
+`
+            : `
+name: highlight-login
+steps:
+  - tool: highlight
+    params:
+      elementId: com.example:id/btn_login
+      description: Login button
+`;
+        expect(validator.validateYaml(yaml).valid).toBe(true);
+      },
+    );
+
+    it.each(["inline", "params"])(
+      "rejects a highlight shape the live tool would reject (%s) (#10124)",
+      (form) => {
+        const shape = "{ type: box, bounds: { x: 1, y: 2, width: 3, height: 4 } }";
+        const yaml =
+          form === "inline"
+            ? `
+name: highlight-box
+steps:
+  - tool: highlight
+    shape: ${shape}
+`
+            : `
+name: highlight-box
+steps:
+  - tool: highlight
+    params:
+      shape: ${shape}
+`;
+        expect(validator.validateYaml(yaml).valid).toBe(false);
+      },
+    );
+
+    it("validates a circle highlight and rejects a style property the tool does not have (#10124)", () => {
+      const circle = "{ type: circle, bounds: { x: 1, y: 2, width: 3, height: 4 } }";
+      const valid = `
+name: highlight-circle
+steps:
+  - tool: highlight
+    shape: ${circle}
+`;
+      expect(validator.validateYaml(valid).valid).toBe(true);
+      const styled = `
+name: highlight-circle
+steps:
+  - tool: highlight
+    shape: { type: circle, bounds: { x: 1, y: 2, width: 3, height: 4 }, style: { strokeWidth: 2 } }
+`;
+      expect(validator.validateYaml(styled).valid).toBe(false);
+    });
+
+    it("validates setDeviceState with only connectivity, inline and under params (#10125)", () => {
+      const inline = `
+name: airplane-inline
+steps:
+  - tool: setDeviceState
+    connectivity:
+      airplaneMode: true
+`;
+      const viaParams = `
+name: airplane-params
+steps:
+  - tool: setDeviceState
+    params:
+      connectivity:
+        airplaneMode: true
+`;
+      expect(validator.validateYaml(inline).valid).toBe(true);
+      expect(validator.validateYaml(viaParams).valid).toBe(true);
+    });
+
+    it("validates setDeviceState with only location, inline and under params (#10125)", () => {
+      const inline = `
+name: location-inline
+steps:
+  - tool: setDeviceState
+    location:
+      mode: static
+      latitude: 37.77
+      longitude: -122.42
+`;
+      const viaParams = `
+name: location-params
+steps:
+  - tool: setDeviceState
+    params:
+      location:
+        mode: stop
+`;
+      expect(validator.validateYaml(inline).valid).toBe(true);
+      expect(validator.validateYaml(viaParams).valid).toBe(true);
+    });
+
+    it.each(["inline", "params"])(
+      "rejects malformed connectivity and location (%s) (#10125)",
+      (form) => {
+        for (const field of [
+          "connectivity: { airplaneMode: maybe }",
+          "connectivity: {}",
+          "location: { mode: static, latitude: 91, longitude: 0 }",
+          "location: { mode: teleport }",
+        ]) {
+          const yaml =
+            form === "inline"
+              ? `
+name: bad-device-state
+steps:
+  - tool: setDeviceState
+    ${field}
+`
+              : `
+name: bad-device-state
+steps:
+  - tool: setDeviceState
+    params:
+      ${field}
+`;
+          expect(validator.validateYaml(yaml).valid).toBe(false);
+        }
+      },
+    );
+
+    it("still requires at least one device state field (#10125)", () => {
+      const yaml = `
+name: empty-device-state
+steps:
+  - tool: setDeviceState
+    params: {}
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(false);
+    });
   });
 
   describe("Invalid YAML syntax", () => {

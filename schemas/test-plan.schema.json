@@ -259,9 +259,9 @@
               },
               "dragDurationMs": {
                 "type": "number",
-                "description": "Drag duration ms (min: 300, max: 1000, default: 300)",
+                "description": "Drag duration ms (min: 300, max: 2000, default: 300)",
                 "minimum": 300,
-                "maximum": 1000
+                "maximum": 2000
               },
               "holdDurationMs": {
                 "type": "number",
@@ -327,15 +327,12 @@
             "required": ["tool"]
           },
           "then": {
+            "$comment": "An inline `description` is intentionally NOT declared for highlight: PlanMigrator.migrateStepMetadata treats every inline step description as the deprecated step label (copies it to `label` and deletes it), so it never reaches the tool. Put the highlight description under `params` (#10124). The inline selector spelling is `elementId` (the live tool is strict; `id` is not a highlight field).",
             "properties": {
               "params": {
                 "$ref": "#/$defs/highlightParams"
               },
-              "description": {
-                "type": "string",
-                "description": "Optional highlight description"
-              },
-              "id": {
+              "elementId": {
                 "type": "string",
                 "description": "Element resource ID / accessibility identifier"
               },
@@ -374,6 +371,10 @@
               "keepScreenAwake": {
                 "type": "boolean",
                 "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
               }
             },
             "allOf": [
@@ -383,7 +384,7 @@
                     "required": ["shape"]
                   },
                   {
-                    "required": ["id"]
+                    "required": ["elementId"]
                   },
                   {
                     "required": ["text"]
@@ -399,7 +400,7 @@
                   {
                     "properties": {
                       "params": {
-                        "required": ["id"]
+                        "required": ["elementId"]
                       }
                     },
                     "required": ["params"]
@@ -731,7 +732,13 @@
                 "required": ["biometrics"]
               },
               {
+                "required": ["connectivity"]
+              },
+              {
                 "required": ["networkCondition"]
+              },
+              {
+                "required": ["location"]
               },
               {
                 "required": ["clock"]
@@ -813,6 +820,44 @@
                   "properties": {
                     "clock": {
                       "$ref": "#/$defs/deviceClockStateInput"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.connectivity overrides inline connectivity at normalization; validate only the effective inline value when params.connectivity is absent (#10125).",
+                "if": {
+                  "required": ["params"],
+                  "properties": {
+                    "params": {
+                      "required": ["connectivity"]
+                    }
+                  }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "connectivity": {
+                      "$ref": "#/$defs/connectivityStateInput"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.location overrides inline location at normalization; validate only the effective inline value when params.location is absent (#10125).",
+                "if": {
+                  "required": ["params"],
+                  "properties": {
+                    "params": {
+                      "required": ["location"]
+                    }
+                  }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "location": {
+                      "$ref": "#/$defs/locationStateInput"
                     }
                   }
                 }
@@ -1209,6 +1254,44 @@
         }
       ]
     },
+    "dragAndDropContainer": {
+      "type": "object",
+      "properties": {
+        "elementId": {
+          "type": "string",
+          "description": "Container element ID",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "description": "Container text",
+          "minLength": 1
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Zero-based match index within this scope"
+        },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"],
+          "description": "Container selection strategy"
+        },
+        "container": {
+          "$ref": "#/$defs/dragAndDropContainer"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Nested container scope for a dragAndDrop endpoint; the outermost container resolves first",
+      "oneOf": [
+        {
+          "required": ["elementId"]
+        },
+        {
+          "required": ["text"]
+        }
+      ]
+    },
     "dragAndDropSelector": {
       "type": "object",
       "properties": {
@@ -1221,6 +1304,14 @@
           "type": "string",
           "description": "Element ID",
           "minLength": 1
+        },
+        "container": {
+          "$ref": "#/$defs/dragAndDropContainer"
+        },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random", "unique"],
+          "description": "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target"
         }
       },
       "additionalProperties": false,
@@ -1253,9 +1344,9 @@
         },
         "dragDurationMs": {
           "type": "number",
-          "description": "Drag duration ms (min: 300, max: 1000, default: 300)",
+          "description": "Drag duration ms (min: 300, max: 2000, default: 300)",
           "minimum": 300,
-          "maximum": 1000
+          "maximum": 2000
         },
         "holdDurationMs": {
           "type": "number",
@@ -1288,30 +1379,30 @@
       "type": "object",
       "properties": {
         "x": {
-          "type": "number",
+          "type": "integer",
           "description": "Bounds x-coordinate"
         },
         "y": {
-          "type": "number",
+          "type": "integer",
           "description": "Bounds y-coordinate"
         },
         "width": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0,
           "description": "Bounds width"
         },
         "height": {
-          "type": "number",
+          "type": "integer",
           "exclusiveMinimum": 0,
           "description": "Bounds height"
         },
         "sourceWidth": {
-          "type": ["number", "null"],
+          "type": ["integer", "null"],
           "exclusiveMinimum": 0,
           "description": "Optional source width for coordinate normalization"
         },
         "sourceHeight": {
-          "type": ["number", "null"],
+          "type": ["integer", "null"],
           "exclusiveMinimum": 0,
           "description": "Optional source height for coordinate normalization"
         }
@@ -1320,47 +1411,16 @@
       "additionalProperties": false,
       "description": "Highlight bounds"
     },
-    "highlightStyle": {
-      "type": ["object", "null"],
-      "properties": {
-        "strokeColor": {
-          "type": "string",
-          "description": "Stroke color (hex or CSS color)"
-        },
-        "strokeWidth": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "description": "Stroke width"
-        },
-        "fillColor": {
-          "type": "string",
-          "description": "Fill color (hex or CSS color)"
-        },
-        "dashPattern": {
-          "type": "array",
-          "items": {
-            "type": "number"
-          },
-          "minItems": 1,
-          "description": "Dash pattern lengths"
-        }
-      },
-      "additionalProperties": false,
-      "description": "Highlight style"
-    },
     "highlightShape": {
       "type": "object",
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["box", "circle"],
-          "description": "Highlight shape type"
+          "const": "circle",
+          "description": "Highlight shape type (the live tool draws a hand-drawn circle only)"
         },
         "bounds": {
           "$ref": "#/$defs/highlightBounds"
-        },
-        "style": {
-          "$ref": "#/$defs/highlightStyle"
         }
       },
       "required": ["type", "bounds"],
@@ -1375,7 +1435,7 @@
           "description": "Element text",
           "minLength": 1
         },
-        "id": {
+        "elementId": {
           "type": "string",
           "description": "Element ID",
           "minLength": 1
@@ -1388,7 +1448,7 @@
           "required": ["text"]
         },
         {
-          "required": ["id"]
+          "required": ["elementId"]
         }
       ]
     },
@@ -1424,7 +1484,7 @@
           "type": "string",
           "description": "Optional highlight description"
         },
-        "id": {
+        "elementId": {
           "type": "string",
           "description": "Element resource ID / accessibility identifier"
         },
@@ -1539,8 +1599,14 @@
         "biometrics": {
           "$ref": "#/$defs/biometricStateInput"
         },
+        "connectivity": {
+          "$ref": "#/$defs/connectivityStateInput"
+        },
         "networkCondition": {
           "$ref": "#/$defs/networkConditionStateInput"
+        },
+        "location": {
+          "$ref": "#/$defs/locationStateInput"
         },
         "clock": {
           "$ref": "#/$defs/deviceClockStateInput"
@@ -1554,13 +1620,180 @@
           "required": ["biometrics"]
         },
         {
+          "required": ["connectivity"]
+        },
+        {
           "required": ["networkCondition"]
+        },
+        {
+          "required": ["location"]
         },
         {
           "required": ["clock"]
         }
       ],
       "description": "Parameters for setDeviceState"
+    },
+    "connectivityStateInput": {
+      "description": "Android connectivity toggles to apply.",
+      "type": "object",
+      "properties": {
+        "airplaneMode": {
+          "description": "Enable or disable Airplane mode on Android.",
+          "type": "boolean"
+        },
+        "wifiEnabled": {
+          "description": "Enable or disable Wi-Fi on Android.",
+          "type": "boolean"
+        },
+        "bluetoothEnabled": {
+          "description": "Enable or disable Bluetooth on Android.",
+          "type": "boolean"
+        },
+        "locationEnabled": {
+          "description": "Enable or disable Location on Android.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["airplaneMode"] },
+        { "required": ["wifiEnabled"] },
+        { "required": ["bluetoothEnabled"] },
+        { "required": ["locationEnabled"] }
+      ]
+    },
+    "locationStateInput": {
+      "description": "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "description": "Apply one static coordinate.",
+              "type": "string",
+              "const": "static"
+            },
+            "latitude": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "longitude": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
+          },
+          "required": ["mode", "latitude", "longitude"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "route"
+            },
+            "waypoints": {
+              "minItems": 2,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "latitude": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "altitude": {
+                    "type": "number"
+                  }
+                },
+                "required": ["latitude", "longitude"],
+                "additionalProperties": false
+              }
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "updateIntervalMs": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 60000
+            },
+            "speedMetersPerSecond": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": ["mode", "waypoints", "speedMetersPerSecond"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "route"
+            },
+            "waypoints": {
+              "minItems": 2,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "latitude": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  },
+                  "altitude": {
+                    "type": "number"
+                  }
+                },
+                "required": ["latitude", "longitude"],
+                "additionalProperties": false
+              }
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "updateIntervalMs": {
+              "type": "integer",
+              "minimum": 200,
+              "maximum": 60000
+            },
+            "durationMs": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": ["mode", "waypoints", "durationMs"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "stop"
+            }
+          },
+          "required": ["mode"],
+          "additionalProperties": false
+        }
+      ]
     },
     "deviceClockStateInput": {
       "description": "Set the real clock within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z, advance by integer byMs >= 1000 with second-level precision, or reset to host time and original auto_time (1 without a recorded slot). Rootable Android emulators only.",

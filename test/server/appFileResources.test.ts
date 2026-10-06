@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAppFileResources } from "../../src/server/appFileResources";
 import type { AppFileService } from "../../src/server/appFileService";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { ActionableError } from "../../src/models/ActionableError";
 
 describe("App file resources", () => {
   const fakeService: AppFileService = {
@@ -124,6 +125,31 @@ describe("App file resources", () => {
     expect(content.text).toBe('{"enabled":true}\n');
     expect(content.blob).toBeUndefined();
   });
+  test.each([
+    ["list, deviceId", "automobile:devices/dev%/apps/com.example.app/files/documents"],
+    ["list, appId", "automobile:devices/device/apps/com.example%zz/files/documents"],
+    ["list, container", "automobile:devices/device/apps/com.example.app/files/docu%E0%A4"],
+    ["read, path", "automobile:devices/device/apps/com.example.app/files/documents/a%.txt"],
+  ])(
+    "rejects a malformed percent-escape in %s with a structured error, not a URIError (#10117)",
+    async (_label, uri) => {
+      registerAppFileResources(fakeService);
+      const match = ResourceRegistry.matchTemplate(uri);
+      expect(match).toBeDefined();
+
+      const error = await match!.template.handler(match!.params).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).not.toBeInstanceOf(URIError);
+      expect((error as Error).message).toBe(
+        "Malformed resource URI: a path segment is not valid percent-encoding.",
+      );
+    },
+  );
+
   test.each(["list", "read"])("rejects unsupported query keys in %s handler", async (operation) => {
     registerAppFileResources(fakeService);
     const base = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}`;

@@ -4,6 +4,7 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import { serverConfig } from "../utils/ServerConfig";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
+import { safeDecodeSegment } from "./resourceUriSegments";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
 import {
   computeStorageCapabilities,
@@ -119,20 +120,6 @@ function buildEntriesUri(
 
 function jsonContent(uri: string, body: Record<string, unknown>): ResourceContent {
   return { uri, mimeType: "application/json", text: JSON.stringify(body, null, 2) };
-}
-
-// Decode a percent-encoded path segment, returning null when the encoding is
-// malformed. A host-defined adapter or store name may contain a literal `%`
-// that is not valid percent-encoding; letting decodeURIComponent's URIError
-// escape would bypass the JSON diagnostic envelope, exactly the failure mode
-// #5686 fixed for query params — here for path params.
-function safeDecodeSegment(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch (error) {
-    logger.debug(`[DataStoreResources] Malformed URI segment '${value}': ${error}`);
-    return null;
-  }
 }
 
 // Structured diagnostic for a URI whose path segments are not valid

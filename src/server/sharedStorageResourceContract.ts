@@ -2,6 +2,7 @@ import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
 } from "./sharedStorageContract";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
 
 /**
  * Read-only MCP resources for files staged into a bounded, user-visible
@@ -93,12 +94,12 @@ function buildUserFilesUri(parts: SharedStorageResourceParts, canonical: boolean
 export function parseSharedStorageResourceParams(
   params: Record<string, string>,
 ): SharedStorageResourceParts {
-  const namespace = normalizeSharedStorageNamespace(decodeURIComponent(params.namespace));
+  const namespace = normalizeSharedStorageNamespace(decodeSegmentOrThrow(params.namespace));
   return {
-    deviceId: decodeURIComponent(params.deviceId),
+    deviceId: decodeSegmentOrThrow(params.deviceId),
     namespace,
     ...(params.path !== undefined
-      ? { path: normalizeSharedStorageRelativePath(decodeURIComponent(params.path)) }
+      ? { path: normalizeSharedStorageRelativePath(decodeSegmentOrThrow(params.path)) }
       : {}),
   };
 }

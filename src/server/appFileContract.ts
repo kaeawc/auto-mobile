@@ -9,6 +9,7 @@ import {
 } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 import { getRequestedResourceUri } from "./resourceRegistry";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
 
 export const APP_FILE_CONTAINERS = [
   "documents",
@@ -496,7 +497,7 @@ export function parseAppFileResourceParams(params: Record<string, string>): AppF
     }
   }
 
-  const container = decodeURIComponent(params.container);
+  const container = decodeSegmentOrThrow(params.container);
   if (!APP_FILE_CONTAINERS.includes(container as AppFileContainer)) {
     throw new Error(`Unsupported app file container: ${container}`);
   }
@@ -510,11 +511,11 @@ export function parseAppFileResourceParams(params: Record<string, string>): AppF
   }
   return {
     ...(userId === undefined ? {} : { userId }),
-    deviceId: decodeURIComponent(params.deviceId),
-    appId: decodeURIComponent(params.appId),
+    deviceId: decodeSegmentOrThrow(params.deviceId),
+    appId: decodeSegmentOrThrow(params.appId),
     container: container as AppFileContainer,
     ...(params.path !== undefined
-      ? { path: normalizeAppFileRelativePath(decodeURIComponent(params.path)) }
+      ? { path: normalizeAppFileRelativePath(decodeSegmentOrThrow(params.path)) }
       : {}),
   };
 }

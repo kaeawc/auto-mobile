@@ -1,4 +1,4 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import {
   DatabaseInspector,
   DatabaseInfo,
@@ -14,6 +14,7 @@ import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 import { ActionableError } from "../models/ActionableError";
 import { iosStorageErrorMessage } from "./storageSdkErrors";
 import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
+import { MALFORMED_URI_SEGMENT_MESSAGE, safeDecodeSegment } from "./resourceUriSegments";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
@@ -270,12 +271,26 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
   }
 }
 
+// Typed JSON envelope for a URI whose {databasePath}/{table} segment is not valid
+// percent-encoding, served on the originally-requested URI (the segments cannot be
+// decoded to build a canonical one) — matching storage/data-store/observation (#10117).
+function malformedUriContent(params: Record<string, string>): ResourceContent {
+  return {
+    uri: getRequestedResourceUri(params) ?? "",
+    mimeType: "application/json",
+    text: JSON.stringify({ error: MALFORMED_URI_SEGMENT_MESSAGE }, null, 2),
+  };
+}
+
 /**
  * Get tables resource content
  */
 async function getTablesResource(params: Record<string, string>): Promise<ResourceContent> {
   const { deviceId, databasePath, appId } = params;
-  const decodedPath = decodeURIComponent(databasePath);
+  const decodedPath = safeDecodeSegment(databasePath);
+  if (decodedPath === null) {
+    return malformedUriContent(params);
+  }
   const uri = buildTablesUri(deviceId, decodedPath, appId);
 
   try {
@@ -327,8 +342,11 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
  */
 async function getTableDataResource(params: Record<string, string>): Promise<ResourceContent> {
   const { deviceId, databasePath, table, appId } = params;
-  const decodedPath = decodeURIComponent(databasePath);
-  const decodedTable = decodeURIComponent(table);
+  const decodedPath = safeDecodeSegment(databasePath);
+  const decodedTable = safeDecodeSegment(table);
+  if (decodedPath === null || decodedTable === null) {
+    return malformedUriContent(params);
+  }
   // Always the canonical URI (no limit/offset), never the exact requested
   // URI. notifyDatabaseChanged / table-schema invalidation both fire
   // notifyResourceUpdated against this canonical form. The registry treats
@@ -421,8 +439,11 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
  */
 async function getTableStructureResource(params: Record<string, string>): Promise<ResourceContent> {
   const { deviceId, databasePath, table, appId } = params;
-  const decodedPath = decodeURIComponent(databasePath);
-  const decodedTable = decodeURIComponent(table);
+  const decodedPath = safeDecodeSegment(databasePath);
+  const decodedTable = safeDecodeSegment(table);
+  if (decodedPath === null || decodedTable === null) {
+    return malformedUriContent(params);
+  }
   const uri = buildTableStructureUri(deviceId, decodedPath, decodedTable, appId);
 
   try {

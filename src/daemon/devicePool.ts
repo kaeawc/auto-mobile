@@ -10,6 +10,7 @@ import { type BackoffPolicy } from "../utils/Backoff";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { displayTransitions } from "../features/observe/DisplayTransition";
@@ -764,6 +765,7 @@ export class DevicePool {
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
   private readonly onDeviceFramesInvalidated: ((deviceId: string) => void) | undefined;
   private readonly cancelDeviceSessionExecutions: DeviceSessionExecutionCanceller;
+  private readonly ambientExecutionIdReader: AmbientExecutionIdReader | undefined;
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly deviceSessionContinuityEnabled: boolean;
@@ -960,15 +962,7 @@ export class DevicePool {
       emulatorProcessPort,
       emulatorProcessLifecycleFactory,
     );
-    this.idleDeviceReaper = new IdleDeviceReaper(
-      {
-        getDevice: (deviceId) => this.getDevice(deviceId),
-        removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
-          this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
-        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
-      },
-      this.deviceManager,
-    );
+    this.idleDeviceReaper = this.createIdleDeviceReaper();
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
     this.autolockManager = this.createAutolockManager();
@@ -977,6 +971,7 @@ export class DevicePool {
     this.onDeviceRemoved = onDeviceRemoved;
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
+    this.ambientExecutionIdReader = ambientExecutionIdReader;
     const runtimeIdentityPort: DeviceRuntimeIdentityPoolPort =
       this.createRuntimeIdentityPort(ambientExecutionIdReader);
     this.runtimeIdentity = createDeviceRuntimeIdentity(runtimeIdentityPort, runtimeIdentityFactory);
@@ -1038,6 +1033,18 @@ export class DevicePool {
       });
 
     this.registerSessionReleaseHandlers();
+  }
+
+  private createIdleDeviceReaper(): IdleDeviceReaper {
+    return new IdleDeviceReaper(
+      {
+        getDevice: (deviceId) => this.getDevice(deviceId),
+        removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
+          this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
+      },
+      this.deviceManager,
+    );
   }
 
   private createRuntimeIdentityPort(
@@ -6169,9 +6176,42 @@ export class DevicePool {
       if (previousDevice) {
         this.autolockManager.clearRebindAutolockLock(sessionId, previousDeviceId, previousDevice);
       }
+      await this.cancelOldDeviceWorkForRebind(previousDeviceId, sessionId);
       await this.releaseDevice(previousDeviceId, sessionId);
       return session;
     };
+  }
+
+  /**
+   * Stop work still driving the device a session just left, and wait for it to
+   * settle, before the device returns to the pool as idle (#9944). The caller
+   * (`setActiveDevice`) is excluded so the rebind does not cancel itself; the
+   * injected canceller drains with its own bounded, timer-injected wait.
+   */
+  private async cancelOldDeviceWorkForRebind(
+    previousDeviceId: string,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      const cancelled =
+        (await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
+          previousDeviceId,
+          `session-rebound:${sessionId}:${previousDeviceId}`,
+          { excludeExecutionId: this.ambientExecutionIdReader?.getExecutionId() },
+        )) ?? 0;
+      if (cancelled > 0) {
+        logger.info(
+          `[DevicePool] Cancelled ${cancelled} in-flight execution(s) on ${previousDeviceId} ` +
+            `after session ${sessionId} rebound to another device`,
+        );
+      }
+    } catch (error) {
+      // Rebind already committed; a failed cancel must not strand the old device.
+      logger.warn(
+        `[DevicePool] Failed to cancel work on ${previousDeviceId} after rebinding session ${sessionId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private async reuseExistingDeviceSession(

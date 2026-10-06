@@ -22,6 +22,7 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -2741,8 +2742,11 @@ export class DevicePool {
           return undefined;
         }
       }
-      const childProcess = await runWithAbortSignal(signal, () =>
-        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      const childProcess = await this.startCoordinatedDeviceProcess(
+        device,
+        deadlineMs,
+        signal,
+        retainLeaseUntil,
       );
       return await action(childProcess, signal, retainLeaseUntil);
     } finally {
@@ -2755,6 +2759,29 @@ export class DevicePool {
         lifecycleLease.release();
       }
       this.timer.clearTimeout(timeoutHandle);
+    }
+  }
+
+  /**
+   * Starts the device under the coordinated lease. A launch cancelled after the
+   * emulator spawned carries its child on the error; stop it here so the lease is
+   * held until the exit is confirmed (#10075), since `action` never runs for it.
+   */
+  private async startCoordinatedDeviceProcess(
+    device: DeviceInfo,
+    deadlineMs: number,
+    signal: AbortSignal,
+    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await runWithAbortSignal(signal, () =>
+        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        await this.cancelCoordinatedDeviceStart(device, error.process, retainLeaseUntil);
+      }
+      throw error;
     }
   }
 

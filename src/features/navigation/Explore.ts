@@ -16,6 +16,7 @@ import {
   type NavigationGraphService,
 } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
+import { UIStateExtractor } from "./UIStateExtractor";
 import { TapAtCoordinate } from "../action/TapAtCoordinate";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
@@ -52,6 +53,7 @@ import {
   filterUnexhaustedElements,
   tapSelectorFor,
   tapCoordinatesFor,
+  publicTapOnArgs,
 } from "./ExploreElementExtraction";
 
 // Import element scoring functions
@@ -127,6 +129,12 @@ export class Explore extends BaseVisualChange {
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
   private hasObservedTargetApp: boolean = false;
+  /**
+   * Withdraws the record of the last successful recorded action. A gesture that
+   * caused no navigation would otherwise stay correlatable for the manager's
+   * window and stamp the next navigation, e.g. a dead-end Back (#9989).
+   */
+  private withdrawPendingToolCall: (() => void) | null = null;
   /** @internal Exposed for focused traversal report tests. */
   graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
@@ -227,7 +235,16 @@ export class Explore extends BaseVisualChange {
     } catch (error) {
       perf.end();
       throw toActionableError(error, `Failed to execute exploration`);
+    } finally {
+      this.discardPendingToolCall();
     }
+  }
+
+  /** Withdraw the pending record: explore is moving on from that action. */
+  private discardPendingToolCall(): void {
+    const withdraw = this.withdrawPendingToolCall;
+    this.withdrawPendingToolCall = null;
+    withdraw?.();
   }
 
   private async initializeValidateTraversal(): Promise<void> {
@@ -325,6 +342,9 @@ export class Explore extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<"none" | "continue" | "break"> {
+    // Everything this step may dispatch (permission/blocker taps, relaunch,
+    // Back) is unrecorded, so the previous action's record must not claim it.
+    this.discardPendingToolCall();
     const permissionOutcome = await this.handlePermissionDialogFastPath(observation, progress);
     if (permissionOutcome === "break") {
       return "break";
@@ -975,57 +995,123 @@ export class Explore extends BaseVisualChange {
       // Check if element is scrollable - perform swipe instead of tap
       const isScrollable = isTruthy(element.scrollable);
 
-      if (isScrollable) {
-        // Perform swipe on scrollable container
-        logger.info(
-          `[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`,
-        );
-        const swipeOn = new SwipeOnElement(this.device, this.adb);
+      const success = isScrollable
+        ? await this.swipeContainer(element, observation, progress, signal)
+        : await this.tapElement(element, observation, progress, signal);
+      // Reset consecutive back count since we did a swipe or tap (not when
+      // there was no tap target to dispatch).
+      if (success !== null) {
+        this.consecutiveBackCount = 0;
+      }
+      return success ?? false;
+    } catch (error) {
+      logger.warn(`[Explore] Failed to interact with element: ${error}`);
+      return false;
+    }
+  }
 
-        const swipeResult = await swipeOn.execute(
+  /** Swipe a scrollable container; the swipeOn record needs a selector to replay it. */
+  private async swipeContainer(
+    element: Element,
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    logger.info(
+      `[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`,
+    );
+    const swipeOn = new SwipeOnElement(this.device, this.adb);
+    const container = observation.viewHierarchy
+      ? tapSelectorFor(element, observation.viewHierarchy)
+      : null;
+    const result = await this.runRecorded(
+      container ? "swipeOn" : null,
+      container ? { container, direction: "up", speed: "slow" } : {},
+      observation,
+      () =>
+        swipeOn.execute(
           element,
           "up",
           { duration: 600 }, // Slow swipe
           progress,
           signal,
+        ),
+    );
+    return result.success;
+  }
+
+  /** Tap an element by selector, else its centre; null when it has no tap target. */
+  private async tapElement(
+    element: Element,
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<boolean | null> {
+    const selector = observation.viewHierarchy
+      ? tapSelectorFor(element, observation.viewHierarchy)
+      : null;
+    const coordinates = selector ? null : tapCoordinatesFor(element);
+    if (!selector && !coordinates) {
+      logger.warn(
+        `[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=${element["class"] || "<empty>"}; bounds=${JSON.stringify(element.bounds)}`,
+      );
+      return null;
+    }
+    const result = selector
+      ? await this.runRecorded("tapOn", publicTapOnArgs(selector), observation, () =>
+          new TapOnElement(this.device, this.adb).execute(
+            { ...selector, action: "tap" },
+            progress,
+            signal,
+          ),
+        )
+      : await this.runRecorded("tapAt", { ...coordinates!, action: "tap" }, observation, () =>
+          new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
+            { ...coordinates!, action: "tap" },
+            progress,
+            signal,
+          ),
         );
+    return result.success;
+  }
 
-        // Reset consecutive back count since we did a swipe
-        this.consecutiveBackCount = 0;
-
-        return swipeResult.success;
+  /**
+   * Run one explore action while the navigation graph holds the tool call that
+   * would replay it, so an edge it produces carries that call instead of
+   * reading as unknown (Back press) in navigateTo (#9989). Mirrors the registry
+   * wrapper: the record is recorded before dispatch and withdrawn when the
+   * action fails, throws or is aborted. A null tool name skips recording when
+   * the action has no replayable public form.
+   */
+  private async runRecorded<T extends { success: boolean }>(
+    toolName: string | null,
+    args: Record<string, unknown>,
+    observation: ObserveResult,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    // The previous action is over once the next one is recorded.
+    this.discardPendingToolCall();
+    const withdraw = toolName
+      ? this.navigationManager.recordToolCall(
+          toolName,
+          args,
+          new UIStateExtractor().extractFromObservation(observation),
+        )
+      : undefined;
+    let succeeded = false;
+    try {
+      const result = await run();
+      succeeded = result.success;
+      return result;
+    } finally {
+      if (succeeded) {
+        // Keep the record until explore moves on: the navigation it causes may
+        // land after the gesture returns, but a gesture that causes none must
+        // not be attributed to whatever navigates next.
+        this.withdrawPendingToolCall = withdraw ?? null;
       } else {
-        // Perform tap interaction
-        const selector = observation.viewHierarchy
-          ? tapSelectorFor(element, observation.viewHierarchy)
-          : null;
-        const coordinates = selector ? null : tapCoordinatesFor(element);
-        if (!selector && !coordinates) {
-          logger.warn(
-            `[Explore] Element has no tap target: missing resource-id, text/content-desc (including descendants), and usable bounds; class=${element["class"] || "<empty>"}; bounds=${JSON.stringify(element.bounds)}`,
-          );
-          return false;
-        }
-        const tapResult = selector
-          ? await new TapOnElement(this.device, this.adb).execute(
-              { ...selector, action: "tap" },
-              progress,
-              signal,
-            )
-          : await new TapAtCoordinate(this.device, this.adb, { timer: this.timer }).execute(
-              { ...coordinates!, action: "tap" },
-              progress,
-              signal,
-            );
-
-        // Reset consecutive back count since we did a tap
-        this.consecutiveBackCount = 0;
-
-        return tapResult.success;
+        withdraw?.();
       }
-    } catch (error) {
-      logger.warn(`[Explore] Failed to interact with element: ${error}`);
-      return false;
     }
   }
 
@@ -1033,6 +1119,7 @@ export class Explore extends BaseVisualChange {
    * Handle dead-end situation by going back
    */
   private async handleDeadEnd(progress?: ProgressCallback): Promise<void> {
+    this.discardPendingToolCall();
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
@@ -1084,6 +1171,7 @@ export class Explore extends BaseVisualChange {
    * Reset to home screen
    */
   private async resetToHome(progress?: ProgressCallback, signal?: AbortSignal): Promise<void> {
+    this.discardPendingToolCall();
     try {
       if (progress) {
         await progress(

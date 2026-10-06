@@ -4910,7 +4910,7 @@ describe("DevicePool", () => {
       test("with the real tracker, stops only the rebinding session's work with a clear message", async () => {
         const tracker = new ExecutionTracker(
           fakeTimer,
-          new FakeIdGenerator(["own", "peer", "sessionless", "caller"]),
+          new FakeIdGenerator(["own", "peer", "sessionless", "caller", "pending"]),
         );
         devicePool = new DevicePool(
           createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
@@ -4934,11 +4934,21 @@ describe("DevicePool", () => {
         const peer = tracker.startExecution("observe", undefined, "session-2");
         const sessionless = tracker.startExecution("observe");
         const caller = tracker.startExecution("setActiveDevice", undefined, "session-1");
+        // Admitted for session-1 but not yet bound to the old device when the rebind lands (#9958).
+        const pending = tracker.startExecution("tapOn", undefined, "session-1");
         for (const execution of [own, peer, sessionless, caller]) {
           tracker.bindDeviceExecution(execution.id, "emulator-old");
         }
 
         await rebind();
+
+        expect(() => tracker.bindDeviceExecution(pending.id, "emulator-old")).toThrow(
+          /was rebound from device 'emulator-old'/,
+        );
+        expect(() => tracker.bindDeviceExecution(own.id, "emulator-old")).toThrow(ActionableError);
+        tracker.bindDeviceExecution(pending.id, "emulator-new");
+        tracker.bindDeviceExecution(peer.id, "emulator-old");
+        tracker.bindDeviceExecution(sessionless.id, "emulator-old");
 
         const reason = own.abortController.signal.reason;
         expect(reason).toBeInstanceOf(ActionableError);

@@ -2122,7 +2122,8 @@ A stale launch observation may be replaced by `observationOmitted` containing
 actionable errors; a successful launch with unverified foreground still returns
 its verification fields.
 
-`terminateApp` reports `success`, `packageName`, and `wasForeground`, with optional
+`terminateApp` reports `success` and `packageName`, with optional `wasForeground`
+(omitted when the pre-terminate foreground app could not be determined),
 `wasInstalled`, `wasRunning`, `userId`, and action observation metadata. Already
 absent or stopped apps are successful no-ops. Failed terminations throw actionable
 errors.

@@ -199,6 +199,68 @@ describe("SafeAreaAuditor", () => {
     ]);
   });
 
+  describe("dedupe identity (#10040)", () => {
+    function gestureHierarchy(
+      nodes: Array<{
+        contentDesc?: string;
+        bounds: { left: number; top: number; right: number; bottom: number };
+      }>,
+    ): ObserveResult {
+      const result = observation();
+      result.insets!.systemBars!.visible = { top: 0, right: 0, bottom: 0, left: 0 };
+      result.insets!.systemGestures = { top: 0, right: 0, bottom: 20, left: 0 };
+      result.viewHierarchy!.hierarchy.node = {
+        node: nodes.map(({ contentDesc, bounds }) => ({
+          bounds,
+          $: {
+            clickable: "true",
+            ...(contentDesc === undefined ? {} : { "content-desc": contentDesc }),
+          },
+        })),
+      };
+      return result;
+    }
+
+    test("keeps content-desc-only buttons with different bounds as separate warnings", () => {
+      const warnings = new SafeAreaAuditor().inspect(
+        gestureHierarchy([
+          { contentDesc: "Home", bounds: { left: 0, top: 180, right: 30, bottom: 200 } },
+          { contentDesc: "Search", bounds: { left: 35, top: 180, right: 65, bottom: 200 } },
+          { contentDesc: "Profile", bounds: { left: 70, top: 180, right: 100, bottom: 200 } },
+        ]),
+      );
+
+      expect(warnings.map((warning) => warning.element.contentDesc)).toEqual([
+        "Home",
+        "Search",
+        "Profile",
+      ]);
+    });
+
+    test("keeps fully unlabeled elements with different bounds as separate warnings", () => {
+      const warnings = new SafeAreaAuditor().inspect(
+        gestureHierarchy([
+          { bounds: { left: 0, top: 180, right: 30, bottom: 200 } },
+          { bounds: { left: 40, top: 180, right: 70, bottom: 200 } },
+        ]),
+      );
+
+      expect(warnings).toHaveLength(2);
+    });
+
+    test("still collapses a true duplicate of the same unlabeled element", () => {
+      const sameBounds = { left: 0, top: 180, right: 30, bottom: 200 };
+      const warnings = new SafeAreaAuditor().inspect(
+        gestureHierarchy([
+          { contentDesc: "Home", bounds: sameBounds },
+          { contentDesc: "Home", bounds: sameBounds },
+        ]),
+      );
+
+      expect(warnings).toHaveLength(1);
+    });
+  });
+
   test("collapses an under-inset container into its flagged leaf", () => {
     const result = observation();
     result.screenSize = { width: 1440, height: 3120 };

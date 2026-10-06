@@ -8,7 +8,10 @@ import {
   ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS,
   ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
 } from "./freshTapHierarchy";
-import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
+import {
+  isSemanticActionRejected,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
@@ -5548,7 +5551,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      const rejected = await isSemanticActionRejected({
+        advertised: hasAccessibilityAction(element.actions, "long_click"),
+        error: result.error,
+        needsNodeSelector,
+        selected: element,
+        // Fresh and unfiltered, like the target guard: the cached tree may predate the miss.
+        readHierarchy: () =>
+          this.accessibilityService.getAccessibilityHierarchy(
+            undefined,
+            undefined,
+            true,
+            undefined,
+            true,
+            signal,
+          ),
+      });
+      // The hierarchy reader turns cancellation into null; never degrade it to a press.
+      throwIfAborted(signal);
+      if (rejected) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );

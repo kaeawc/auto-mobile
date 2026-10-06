@@ -1791,6 +1791,7 @@ public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriv
   public static final java.lang.String CHANGES_PATH = "changes";
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations);
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getProcessToken$auto_mobile_sdk();
   public java.util.List<dev.jasonpearson.automobile.sdk.storage.PreferenceFileDescriptor> getPreferenceFiles();
   public java.util.List<dev.jasonpearson.automobile.sdk.storage.KeyValuePair> getPreferences(java.lang.String);
   public void registerOnChangeListener(dev.jasonpearson.automobile.sdk.storage.OnPreferenceChangeListener);

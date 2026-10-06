@@ -1754,13 +1754,7 @@ export class UnixSocketServer {
     }
 
     if (!this.acceptingRequests) {
-      return {
-        id: request.id,
-        type: "mcp_response",
-        success: false,
-        error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-        daemonShuttingDown: daemonShuttingDownFailure(),
-      };
+      return this.shuttingDownBeforeStartResponse(request);
     }
     const handshakeError = this.rejectOnHandshakeMismatch(request);
     if (handshakeError) {
@@ -1951,14 +1945,11 @@ export class UnixSocketServer {
       .run<DaemonResponse | undefined>(
         resolveSocketAdmissionLane(request),
         () => {
-          if (this.closing) {
-            return Promise.resolve({
-              id: request.id,
-              type: "mcp_response" as const,
-              success: false,
-              error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              daemonShuttingDown: daemonShuttingDownFailure(),
-            });
+          // Same predicate as the entry check: a request still queued when quiesce() began
+          // has not started, so it is refused as provably undispatched rather than admitted
+          // mid-shutdown. close() also clears acceptingRequests, so this covers both stages.
+          if (!this.acceptingRequests) {
+            return Promise.resolve(this.shuttingDownBeforeStartResponse(request));
           }
           onAdmitted?.(deadline);
           if (this.onFrameTrace) {
@@ -1986,6 +1977,17 @@ export class UnixSocketServer {
         },
       )
       .finally(cancellation.dispose);
+  }
+
+  /** Retryable refusal for a request that has not started work (no `requestMayHaveDispatched`). */
+  private shuttingDownBeforeStartResponse(request: DaemonRequest): DaemonResponse {
+    return {
+      id: request.id,
+      type: "mcp_response",
+      success: false,
+      error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+      daemonShuttingDown: daemonShuttingDownFailure(),
+    };
   }
 
   private mcpForwardFailureResponse({

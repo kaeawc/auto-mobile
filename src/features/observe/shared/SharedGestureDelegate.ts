@@ -14,7 +14,7 @@ import type {
   BaseResult,
   SwipeRequestOptions,
 } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 
 /** Default transport budget for coordinate taps and VoiceOver activation. */
 export const DEFAULT_GESTURE_REQUEST_TIMEOUT_MS = 5000;
@@ -23,6 +23,21 @@ interface SharedGestureConfig {
   logTag: string;
   roundCoordinates: boolean;
   includeSwipeTimeoutMs?: boolean;
+}
+
+/** Everything `request_pinch` needs; an object because the positional form is already too wide. */
+export interface PinchRequest {
+  centerX: number;
+  centerY: number;
+  distanceStart: number;
+  distanceEnd: number;
+  rotationDegrees: number;
+  duration?: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  displayId?: number;
+  beforeSend?: () => void;
 }
 
 export interface TapDiagnosticParameters {
@@ -229,8 +244,41 @@ export class SharedGestureDelegate {
     displayId?: number,
     beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
+    return sendCommand<GestureTimingResult>(
+      this.context,
+      this.pinchCommandOptions({
+        centerX,
+        centerY,
+        distanceStart,
+        distanceEnd,
+        rotationDegrees,
+        duration,
+        timeoutMs,
+        perf,
+        signal,
+        displayId,
+        beforeSend,
+      }),
+    );
+  }
+
+  /** The wire request for a pinch; platform delegates reuse it to wrap their own dispatch contract. */
+  protected pinchCommandOptions(request: PinchRequest): SendCommandOptions<GestureTimingResult> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration = 300,
+      timeoutMs = 5000,
+      perf,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
     const displayParams = this.gestureDisplayParams(displayId);
-    return sendCommand<GestureTimingResult>(this.context, {
+    return {
       idPrefix: "pinch",
       responseType: "pinch",
       messageType: "request_pinch",
@@ -250,6 +298,6 @@ export class SharedGestureDelegate {
       errorLabel: "Pinch",
       abortSignal: signal,
       beforeSend,
-    });
+    };
   }
 }

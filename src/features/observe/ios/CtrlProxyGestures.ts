@@ -8,6 +8,7 @@ import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch
 
 import {
   SharedGestureDelegate,
+  type PinchRequest,
   type TapDiagnosticParameters,
 } from "../shared/SharedGestureDelegate";
 import type { DelegateContext } from "./types";
@@ -83,6 +84,21 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       onDispatch,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Multi-finger swipe",
+    });
+  }
+
+  /**
+   * Send a two-finger pinch. A request the runner never answered (socket close, timeout or
+   * cancellation after the send) is reported `dispatched` and not `acknowledged`, and not retryable:
+   * the pinch may already have zoomed the screen.
+   */
+  async requestPinchWithDispatch(
+    request: PinchRequest,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    return sendIOSPressCommand(this.context, {
+      ...this.pinchCommandOptions(request),
+      onDispatch,
     });
   }
 }

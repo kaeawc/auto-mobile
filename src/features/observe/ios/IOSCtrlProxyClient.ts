@@ -447,7 +447,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult>;
 
@@ -3761,16 +3763,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    return this.gestures.requestPinchWithDispatch(
+      {
+        centerX,
+        centerY,
+        distanceStart,
+        distanceEnd,
+        rotationDegrees,
+        duration,
+        timeoutMs,
+        perf,
+        signal,
+      },
+      onDispatch,
     );
   }
 

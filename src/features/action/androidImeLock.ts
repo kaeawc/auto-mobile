@@ -6,10 +6,18 @@ type ImeLockRelease = Awaited<ReturnType<Mutex["acquire"]>>;
 // IME selection is global to an Android device. Share this lock between temporary typing
 // sessions and persistent keyboard selection so neither can restore over the other.
 const imeLocks = new Map<string, Mutex>();
-const unsafeImeDevices = new Set<string>();
+export interface AndroidImeRecoverySnapshot {
+  imeId: string;
+  subtypeId: number | null;
+}
 
-export function quarantineAndroidIme(deviceId: string): void {
-  unsafeImeDevices.add(deviceId);
+const unsafeImeDevices = new Map<string, AndroidImeRecoverySnapshot | undefined>();
+
+export function quarantineAndroidIme(
+  deviceId: string,
+  snapshot?: AndroidImeRecoverySnapshot,
+): void {
+  unsafeImeDevices.set(deviceId, snapshot);
 }
 
 /**
@@ -56,7 +64,10 @@ export async function withAndroidImeLock<T>(
   deviceId: string,
   action: () => Promise<T>,
   signal?: AbortSignal,
-  options: { allowQuarantined?: boolean } = {},
+  options: {
+    allowQuarantined?: boolean;
+    recoverQuarantined?: (snapshot: AndroidImeRecoverySnapshot) => Promise<boolean>;
+  } = {},
 ): Promise<T> {
   let lock = imeLocks.get(deviceId);
   if (!lock) {
@@ -65,6 +76,12 @@ export async function withAndroidImeLock<T>(
   }
   const release = await acquireImeLock(lock, signal);
   try {
+    if (unsafeImeDevices.has(deviceId) && !options.allowQuarantined) {
+      const snapshot = unsafeImeDevices.get(deviceId);
+      if (snapshot && (await options.recoverQuarantined?.(snapshot))) {
+        clearAndroidImeQuarantine(deviceId);
+      }
+    }
     if (unsafeImeDevices.has(deviceId) && !options.allowQuarantined) {
       throw new Error(
         'IME state is unknown after an unacknowledged cancellation; run "keyboard setIme <imeId>" with an enabled IME, or restart AutoMobile before other IME operations.',

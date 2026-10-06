@@ -108,6 +108,11 @@ import {
 } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
+import {
+  isOwnOverlayNode,
+  resolveOverlayTapUnderSystemBar,
+  type OverlayBarTapDecision,
+} from "./overlayTapUnderSystemBars";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
   getToggleContentDescription,
@@ -707,6 +712,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const elements = new DefaultObserveElementCollector().collect(hierarchy, platform);
     const ime = elements && getImeOccluderForElement(elements, element);
     return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
+  }
+
+  /** Judge an Android tap on one of CtrlProxy's own overlay controls against the system bars (#10086). */
+  private overlayBarTapDecision(
+    hierarchy: ViewHierarchyResult,
+    element: Element,
+    point: { x: number; y: number },
+  ): OverlayBarTapDecision {
+    if (this.device.platform !== "android") {
+      return { kind: "proceed", point };
+    }
+    const owner = findTapTargetNode(new SearchableHierarchy().project(hierarchy), element)?.source;
+    return resolveOverlayTapUnderSystemBar({
+      hierarchy,
+      ownedByOverlay: isOwnOverlayNode(hierarchy, owner),
+      bounds: element.bounds,
+      point,
+    });
   }
 
   private resolveImeSafeTapPoint(
@@ -4355,19 +4378,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
-          const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
-            options,
-            screenSize,
-            chromeElements: [
-              this.matchedTapElement(
-                finalSelection,
+          const visibleTapPoint = this.resolveVisibleTapPoint(
+            tapElement,
+            viewHierarchy,
+            visibleBounds,
+            {
+              options,
+              screenSize,
+              chromeElements: [
+                this.matchedTapElement(
+                  finalSelection,
+                  tapElement,
+                  requestedAction === "focus" ? { ...options, action: "focus" } : options,
+                ),
                 tapElement,
-                requestedAction === "focus" ? { ...options, action: "focus" } : options,
-              ),
-              tapElement,
-            ],
-          });
-          if (!tapPoint) {
+              ],
+            },
+          );
+          if (!visibleTapPoint) {
             throw this.invisibleMatchFailure(
               finalSelection,
               options,
@@ -4376,6 +4404,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               "Matched element has no unobstructed visible tap area. " +
                 "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
+          }
+          const barDecision = this.overlayBarTapDecision(
+            viewHierarchy,
+            tapElement,
+            visibleTapPoint,
+          );
+          if (barDecision.kind === "refuse") {
+            throw new ActionableError(
+              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile overlay control is under the ${barDecision.bar} and the touch would not reach it. ` +
+                "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
+            );
+          }
+          const tapPoint = barDecision.point;
+          if (barDecision.warning) {
+            activationWarnings.push(barDecision.warning);
           }
           const tapBounds = tapElement.bounds;
           logger.info(

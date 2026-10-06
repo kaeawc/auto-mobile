@@ -1844,6 +1844,10 @@ accept the recording `display` argument.
 `accessibilityFocus.resourceId` targets a resource ID. `contentDesc` matches the
 exact content description or accessible label, distinct from visible `text`.
 
+Setting focus on a node that already holds accessibility focus, or clearing focus
+on one that does not, succeeds without sending an action and reports
+`alreadySatisfied: true`.
+
 Before acquiring a device, read `automobile:tools` for every tool's default discovery state. Startup enable/disable settings also affect discovery only, not direct `tools/call` by name.
 
 On Android and iOS, compact observations fold soft-keyboard keys into a single

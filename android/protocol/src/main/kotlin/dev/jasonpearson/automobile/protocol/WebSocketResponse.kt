@@ -493,6 +493,10 @@ data class ActionResult(
   val totalTimeMs: Long,
   val error: String? = null,
   val perfTiming: String? = null,
+  /**
+   * The node was already in the requested state (e.g. focus on a focused node); nothing was sent.
+   */
+  val alreadySatisfied: Boolean = false,
 ) : WebSocketResponse()
 
 // =============================================================================

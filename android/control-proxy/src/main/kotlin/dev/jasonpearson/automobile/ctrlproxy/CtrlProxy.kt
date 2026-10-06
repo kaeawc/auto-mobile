@@ -276,6 +276,43 @@ internal fun nodeActionFailure(action: String, availableActionIds: Collection<In
   return null
 }
 
+/** What to do with a node action request given the node's current state (issue #10148). */
+internal sealed interface NodeActionDecision {
+  /** Send [actionId] to the node. */
+  data class Perform(val actionId: Int) : NodeActionDecision
+
+  /** The node is already in the requested state; no action is sent and the request succeeds. */
+  data object AlreadySatisfied : NodeActionDecision
+
+  /** The request cannot be honored; [message] is the failure reported to the host. */
+  data class Refused(val message: String) : NodeActionDecision
+}
+
+/**
+ * Accessibility focus is state, not a one-shot action: a node holding accessibility focus
+ * advertises only ACTION_CLEAR_ACCESSIBILITY_FOCUS and an unfocused node only
+ * ACTION_ACCESSIBILITY_FOCUS. So `focus` on an already-focused node and `clear_focus` on an
+ * unfocused node are satisfied as-is, rather than refused as "unavailable". Every other case keeps
+ * the availability check.
+ */
+internal fun decideNodeAction(
+  action: String,
+  isAccessibilityFocused: Boolean,
+  availableActionIds: Collection<Int>?,
+): NodeActionDecision {
+  if (action == "focus" && isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
+  if (action == "clear_focus" && !isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
+  nodeActionFailure(action, availableActionIds)?.let {
+    return NodeActionDecision.Refused(it)
+  }
+  val actionId = nodeActionId(action)
+  return if (actionId == null) {
+    NodeActionDecision.Refused("Unsupported accessibility action: $action")
+  } else {
+    NodeActionDecision.Perform(actionId)
+  }
+}
+
 internal fun nodeActionId(action: String): Int? =
   when (action) {
     "click" -> AccessibilityNodeInfo.ACTION_CLICK
@@ -6030,9 +6067,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("executeAction")
-      val actionId = nodeActionId(action)
-      val actionError = nodeActionFailure(action, targetNode.actionList?.map { it.id })
-      val success = actionId != null && actionError == null && targetNode.performAction(actionId)
+      val decision =
+        decideNodeAction(
+          action,
+          targetNode.isAccessibilityFocused,
+          targetNode.actionList?.map { it.id },
+        )
+      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
+      val actionError = (decision as? NodeActionDecision.Refused)?.message
+      val success =
+        alreadySatisfied ||
+          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
       perfProvider.endOperation("executeAction")
 
       targetNode.recycle()
@@ -6063,6 +6108,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success,
           if (success) null else actionError ?: "performAction returned false",
           totalTime,
+          alreadySatisfied,
         )
       }
     } catch (e: Exception) {
@@ -7426,6 +7472,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    alreadySatisfied: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping action result broadcast")
@@ -7440,6 +7487,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (error != null) {
             put("error", error)
+          }
+          if (alreadySatisfied) {
+            put("alreadySatisfied", true)
           }
         }
       }

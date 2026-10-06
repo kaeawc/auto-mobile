@@ -150,6 +150,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
+  getOverlayListenerCount(): number {
+    return this.overlayListeners.size;
+  }
+
   emitOverlayEvent(event: OverlayEvent): void {
     for (const listener of this.overlayListeners) {
       listener(event);

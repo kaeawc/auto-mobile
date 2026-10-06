@@ -563,14 +563,14 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>overlay</code>              | Shows, updates, dismisses, or reports host-local Android overlays.        |
+| 🪟 <code>overlay</code>              | Shows, updates, dismisses, awaits events, or reports Android overlays.    |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### overlay
 
 The Android-only `overlay` tool is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
-`show`, `update`, `dismiss`, or `status`. `show` requires a full `spec` (id,
+`show`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
@@ -590,7 +590,56 @@ result, and host timestamp in milliseconds. It also returns the last attempted
 mutation as `lastResult`, including a failed show without claiming it is shown.
 Failed updates or dismissals retain known presence. Successful dismissal removes
 the id from that device's host records; successful dismiss-all clears that device's entries across host sessions.
-Device-side actions, disconnects, and events are not reflected.
+After an event arrives, each shown entry also reports `pendingCount`, `lastSequence`
+(the highest accepted sequence), and cumulative overflow `droppedCount`. Before any
+event, these optional fields are omitted to preserve existing responses.
+A device-side `dismissed` event removes shown presence across that device's host
+sessions. `page_changed` events change only event bookkeeping, not host mutation
+status. Raw transport disconnects are not observed; session release, device removal,
+and device unbinding clear the corresponding buffers and host status.
+
+`awaitEvent` requires `id`; it waits for one event in the current session/device/id
+scope. Optional `eventName` (matching `name`), `kind` (`emit`, `page_changed`, or
+`dismissed`), and `afterSequence` (a nonnegative integer, strictly exclusive cursor)
+are valid only for `awaitEvent`. Its `timeoutMs` defaults to 30000 ms and cannot
+exceed 60000 ms; the MCP request deadline for an `awaitEvent` call is that wait plus 30 s of
+headroom, so a quiet wait ends with `timedOut: true` rather than a transport timeout. Request cancellation preserves the abort reason and removes the
+waiter's timer and abort listener. When the client supplies an MCP progress callback,
+wait start/finish notifications are best-effort and do not delay event delivery. Background subscriptions for shown overlays
+remain active to buffer events between calls.
+
+The result is `{ success: true, event, pendingCount, lastSequence, droppedCount }`,
+with `event` containing `id`, `sequence`, `kind`, `name`, `payload`, `state`, `pages`,
+and `timestamp` (device clock milliseconds). If the wait expires, it returns
+`success: true, timedOut: true` with counts and no event. If the scope ends without
+a matching event, it returns `success: true, reason: "dismissed"` with counts.
+
+The exported `OVERLAY_EVENT_BUFFER_CAPACITY` is 64 events per scope. Overflow drops
+the oldest event and increments `droppedCount`; that count is cumulative until
+explicit dismiss or scope release. Calls consume one matching event; excluded events
+remain pending, including those skipped by a cursor. Accepted events are ordered
+by sequence. Lower-or-equal sequences are ignored across reconnects, including
+previously unseen late lower arrivals; this implements the wire high-water rule.
+
+Because pushes carry no session id, the latest show of a device/id owns its events;
+awaiting that id from another scope is rejected until it is shown in that scope.
+Awaiting an unknown id can establish ownership without a show; an unused scope is
+removed on timeout/abort. Multiple overlays on a device share one subscription.
+Explicit successful dismiss (id or all) clears buffers across that device's host
+sessions. Each show starts a fresh sequence epoch for that id: pending events and the
+sequence high-water mark are cleared (the device's sequence ledger is in memory, so a
+CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCount`
+is kept until explicit dismiss or scope release. Events carry only id, sequence and
+timestamp, so a late event from the previous showing cannot be told apart from the new
+showing's and is accepted if it arrives after the new show. A successful show of
+another id replaces the device's overlay: the replaced overlay's waiters settle with
+`reason: "dismissed"` and its buffers are removed. A terminal `dismissed` event remains
+buffered until consumed or the next explicit show/dismiss. Consuming it clears all
+remaining pending events and, once no waiter remains, removes the entry, so a later
+await behaves as for an unknown id (it waits, then times out). Session release clears
+the buffers, waiters and subscription of every scope on each device the release
+clears from host status, so event state and status never disagree.
+The device subscription ends when no nonterminal overlays remain.
 
 ```json
 {

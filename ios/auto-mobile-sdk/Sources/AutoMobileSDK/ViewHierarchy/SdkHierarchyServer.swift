@@ -31,6 +31,7 @@
     /// - `GET /health` -> status, bundle ID, capabilities, and optional simulator UDID
     /// - `GET /hierarchy` -> latest cached hierarchy (fast, no main-thread work)
     /// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
+    /// - `POST /accessibility/magic-tap` -> invoke the app responder chain, returning handled
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
@@ -46,6 +47,7 @@
             case networkMock = "/network/mock"
             case networkErrorSimulation = "/network/error-simulation"
             case networkFaultRules = "/network/fault-rules"
+            case magicTap = "/accessibility/magic-tap"
             case highlight = "/highlight"
             case dbExecute = "/db/execute"
             case dbList = "/db/list"
@@ -347,6 +349,17 @@
                 handleNetworkErrorSimulation(connection, initialData: requestData)
             case .networkFaultRules:
                 handleNetworkFaultRules(connection, initialData: requestData)
+            case .magicTap:
+                DispatchQueue.main.async {
+                    guard self.requireApplicationActive(connection) else { return }
+                    #if canImport(UIKit)
+                        let handled = SdkMagicTap.performInApplication()
+                        let body = try? JSONEncoder().encode(["handled": handled])
+                        self.sendResponse(connection, statusCode: 200, body: body)
+                    #else
+                        self.sendResponse(connection, statusCode: 501, body: nil)
+                    #endif
+                }
             case .highlight:
                 handleHighlight(connection, initialData: requestData)
             case .dbExecute:
@@ -400,11 +413,19 @@
             return nil
         }
 
+        static var capabilities: Set<String> {
+            #if canImport(UIKit)
+                ["network-fault-rules", "magic-tap"]
+            #else
+                ["network-fault-rules"]
+            #endif
+        }
+
         func healthResponse() -> SdkRouteResponse {
             let payload = HealthPayload(
                 status: "ok",
                 bundleId: tracker?.bundleId,
-                capabilities: ["network-fault-rules"],
+                capabilities: Self.capabilities,
                 simulatorUdid: identity.udid
             )
             guard let data = try? JSONEncoder().encode(payload) else {

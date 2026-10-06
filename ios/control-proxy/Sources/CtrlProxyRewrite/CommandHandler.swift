@@ -237,6 +237,9 @@ final class CommandHandler: CommandHandling {
             case let .addHighlight(payload):
                 return await handleAddHighlight(payload, startTime: startTime)
 
+            case let .magicTap(payload):
+                return await handleMagicTap(payload, startTime: startTime)
+
             case let .getVoiceOverState(payload):
                 return await handleGetVoiceOverState(payload, startTime: startTime)
 

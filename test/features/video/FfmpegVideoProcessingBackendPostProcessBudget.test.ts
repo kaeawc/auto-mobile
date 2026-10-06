@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import {
+  boundPostProcessBudgetToRequest,
   ffmpegPostProcessBudgetMs,
   FfmpegVideoProcessingBackend,
   type ProcessTracker,
@@ -36,6 +38,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
   let removed: string[];
   let encoder: FakeChildProcess;
   let encoderKills: Array<NodeJS.Signals | number | undefined>;
+  let encoderStarts: number;
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -43,6 +46,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
     timer.setCurrentTime(1_000_000_000);
     removed = [];
     encoderKills = [];
+    encoderStarts = 0;
   });
 
   function config(overrides: Partial<VideoCaptureConfig> = {}): VideoCaptureConfig {
@@ -75,6 +79,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
     return {
       binaryPath: "fake-ffmpeg",
       start: () => {
+        encoderStarts++;
         let naturalExit: NodeJS.Timeout | undefined;
         if (behavior.kind === "exits") {
           naturalExit = timer.setTimeout(() => finish(behavior.code, null), behavior.afterMs);
@@ -205,6 +210,85 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
       ProcessTeardownUnconfirmedError,
     );
     expect(removed).not.toContain(RAW_PATH);
+  });
+
+  describe("bounded by the stop request's remaining time", () => {
+    /** Runs the stop as a tool call whose request ends `requestMs` from now. */
+    function stopWithinRequest(
+      requestMs: number,
+      behavior: EncoderBehavior,
+      recording: VideoCaptureConfig,
+    ): Promise<RecordingResult> {
+      const deadlineMs = timer.now() + requestMs;
+      return runWithAbortSignal(undefined, () => stopIos(behavior, recording), {
+        getDeadlineMs: () => deadlineMs,
+        textState: { dispatched: () => () => undefined },
+      });
+    }
+
+    test("a re-encode that cannot finish inside the request returns the raw capture at once", async () => {
+      // 30 minutes recorded asks for 900 s; the request has 90 s.
+      const result = await stopWithinRequest(
+        90 * SECOND_MS,
+        { kind: "exits", afterMs: SECOND_MS, code: 0 },
+        config(),
+      );
+
+      expect(encoderStarts).toBe(0);
+      expect(result.outputPath).toBe(RAW_PATH);
+      expect(result.warnings?.[0]).toContain("post-processing did not finish");
+      expect(result.warnings?.[0]).toContain("does not have the 900 s");
+      expect(removed).not.toContain(RAW_PATH);
+    });
+
+    test("a re-encode that fits in the request still runs", async () => {
+      // 30 s recorded asks for the 60 s floor; the request has 90 s.
+      const result = await stopWithinRequest(
+        90 * SECOND_MS,
+        { kind: "exits", afterMs: 5 * SECOND_MS, code: 0 },
+        config({ startedAt: new Date(timer.now() - 30 * SECOND_MS).toISOString() }),
+      );
+
+      expect(encoderStarts).toBe(1);
+      expect(result.outputPath).toBe(OUTPUT_PATH);
+      expect(result.warnings).toBeUndefined();
+    });
+
+    test("a stream copy is held to the time left in the request and falls back when it overruns", async () => {
+      const result = await stopWithinRequest(
+        20 * SECOND_MS,
+        { kind: "exits", afterMs: 40 * SECOND_MS, code: 0 },
+        config({ resolution: undefined }),
+      );
+
+      expect(encoderStarts).toBe(1);
+      expect(result.outputPath).toBe(RAW_PATH);
+      // 20 s of request, less the 5 s response margin (and a few fake ms already spent).
+      expect(result.warnings?.[0]).toMatch(/timed out after 1[45]\d{3}ms/);
+    });
+
+    test("a request with no time left returns the raw capture without starting ffmpeg", async () => {
+      const result = await stopWithinRequest(
+        3 * SECOND_MS,
+        { kind: "exits", afterMs: SECOND_MS, code: 0 },
+        config({ resolution: undefined }),
+      );
+
+      expect(encoderStarts).toBe(0);
+      expect(result.outputPath).toBe(RAW_PATH);
+    });
+
+    test.each([
+      ["no ambient deadline leaves the budget alone", true, 900_000, undefined, 900_000],
+      ["a re-encode needs its whole budget", false, 300_000, 200_000, undefined],
+      ["a re-encode that fits keeps its budget", false, 60_000, 90_000, 60_000],
+      ["a stream copy takes what is left", true, 60_000, 30_000, 25_000],
+      ["a stream copy never exceeds its budget", true, 60_000, 500_000, 60_000],
+      ["nothing left after the margin", true, 60_000, 5_000, undefined],
+    ])("boundPostProcessBudgetToRequest: %s", (_name, copy, budgetMs, remainingMs, expected) => {
+      const cfg = config(copy ? { resolution: undefined } : {});
+      expect(boundPostProcessBudgetToRequest(cfg, budgetMs, remainingMs)).toBe(expected);
+    });
   });
 
   describe("ffmpegPostProcessBudgetMs", () => {

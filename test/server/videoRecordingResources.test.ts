@@ -150,6 +150,19 @@ describe("getLatestVideoRecording", () => {
     expect(content.blob).toBe(Buffer.from("abc").toString("base64"));
     expect((parse(content.text).metadata as VideoRecordingMetadata).recordingId).toBe("latest-1");
   });
+
+  test("serves a kept raw QuickTime capture as video/quicktime, not video/mp4 (#10188)", async () => {
+    const raw = metadata({ recordingId: "raw-1", format: "mov", fileName: "raw-1.mov" });
+    const content = await getLatestVideoRecording(
+      store({
+        lookupLatest: async () => ({ recording: raw }),
+        getById: async () => raw,
+        readFile: async () => Buffer.from("abc"),
+      }),
+    );
+    expect(content.mimeType).toBe("video/quicktime");
+    expect(content.blob).toBe(Buffer.from("abc").toString("base64"));
+  });
 });
 
 describe("getVideoArchiveList", () => {

@@ -1645,18 +1645,46 @@ async function hasPlayableFile(
   return record.sizeBytes > 0 && (await statFileSize(record.filePath)) > 0;
 }
 
+/** Newest-first rows read before "latest" widens to every row (the common case needs one). */
+const LATEST_LOOKUP_FIRST_PAGE = 20;
+
+async function firstPlayable(
+  records: VideoRecordingRecord[],
+  deps: VideoRecordingManagerDependencies,
+): Promise<VideoRecordingRecord | undefined> {
+  for (const record of records) {
+    if (await hasPlayableFile(record, deps)) {
+      return record;
+    }
+  }
+  return undefined;
+}
+
 export async function lookupLatestVideoRecording(
   scope: { ownerSessionUuid?: string } = {},
 ): Promise<LatestVideoRecordingLookup> {
   const deps = await getVideoRecordingDependencies();
-  const recordings = await deps.recordingRepository.listRecordings({
-    status: ["completed", "interrupted"],
-    orderByStartedAt: "desc",
+  const query = {
+    status: ["completed", "interrupted"] as VideoRecordingRecord["status"][],
+    orderByStartedAt: "desc" as const,
     ownerSessionUuid: scope.ownerSessionUuid,
+  };
+  let recordings = await deps.recordingRepository.listRecordings({
+    ...query,
+    limit: LATEST_LOOKUP_FIRST_PAGE,
   });
-  for (const record of recordings) {
-    if (await hasPlayableFile(record, deps)) {
-      return { recording: toMetadata(record) };
+  const newestPlayable = await firstPlayable(recordings, deps);
+  if (newestPlayable) {
+    return { recording: toMetadata(newestPlayable) };
+  }
+  if (recordings.length === LATEST_LOOKUP_FIRST_PAGE) {
+    // Every one of the newest rows lacks a file: widen to all rows rather than miss an
+    // older playable one. The common case reads only a page.
+    const firstPageSize = recordings.length;
+    recordings = await deps.recordingRepository.listRecordings(query);
+    const older = await firstPlayable(recordings.slice(firstPageSize), deps);
+    if (older) {
+      return { recording: toMetadata(older) };
     }
   }
   const newest = recordings[0];

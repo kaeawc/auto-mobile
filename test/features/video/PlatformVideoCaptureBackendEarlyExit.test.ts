@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import os from "node:os";
+import path from "node:path";
+import { promises as fsPromises } from "node:fs";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { PlatformVideoCaptureBackend } from "../../../src/features/video/PlatformVideoCaptureBackend";
 import type {
   RecordingHandle,
@@ -15,13 +19,20 @@ const RECORDING_ID = "early-exit";
 const DEVICE_FILE = `/sdcard/auto-mobile-${RECORDING_ID}.mp4`;
 const LAUNCH = "exec screenrecord";
 const SETTLE_MS = 300;
+const OUR_CMDLINE = `screenrecord\u0000--bit-rate\u0000100\u0000${DEVICE_FILE}\u0000`;
+const PROBE = "shell 'cat /proc/4321/cmdline 2>/dev/null; true'";
+const STAT = `shell stat -c %s ${DEVICE_FILE}`;
 
 describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
   let factory: FakeAdbClientFactory;
   let timer: FakeTimer;
   let backend: PlatformVideoCaptureBackend;
+  let tempDir: string;
+  let outputFile: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-early-"));
+    outputFile = path.join(tempDir, "video.mp4");
     factory = new FakeAdbClientFactory();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -30,6 +41,10 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
         return "h264";
       },
     });
+  });
+
+  afterEach(async () => {
+    await fsPromises.rm(tempDir, { recursive: true, force: true });
   });
 
   function config(overrides: Partial<VideoCaptureConfig> = {}): VideoCaptureConfig {
@@ -50,11 +65,18 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
     };
   }
 
-  /** Starts a recorder that stays alive until the test ends it. */
-  async function startRunning(): Promise<{ handle: RecordingHandle; recorder: FakeAdbProcess }> {
+  /** Starts a recorder (device pid 4321) that stays alive until the test ends it. */
+  async function startRunning(
+    overrides: Partial<VideoCaptureConfig> = {},
+  ): Promise<{ handle: RecordingHandle; recorder: FakeAdbProcess }> {
     const client = factory.getFakeClient();
     client.setSpawnRunning(LAUNCH);
-    const handle = await backend.start(config());
+    client.setSpawnStdout(LAUNCH, "4321\n");
+    client.setCommandResult(PROBE, OUR_CMDLINE);
+    const handle = await backend.start(config(overrides));
+    // Let the buffered launch stdout reach the pid reader (a real macrotask turn, as in the
+    // device-pid tests: an immediate-based flush loses the settle probe's queued dispatch).
+    await defaultTimer.sleep(0);
     return { handle, recorder: client.getSpawnedProcesses()[0] };
   }
 
@@ -143,17 +165,82 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
       expect((error as VideoCaptureFinalizationError).retainOwnership).toBe(false);
     });
 
-    test("skips the finalize polling and pull retries when the recorder is already gone", async () => {
+    test("a crash with no file still stops the device recorder by pid, tries the pull, and cleans up", async () => {
       const { handle, recorder } = await startRunning();
       await crash(recorder, 1, "ERROR: encoder died\n");
 
       await backend.stop(handle).catch(() => undefined);
 
-      expect(commands().filter((command) => command.includes("stat -c"))).toEqual([]);
+      // The host process dying does not prove the device recorder did: it is still signalled.
+      expect(commands()).toContain("shell kill -2 4321");
       const spawned = factory.getFakeClient().getSpawnCalls();
-      expect(spawned.some((argv) => argv[0] === "pull")).toBe(false);
-      // The partial device file is still cleaned up.
+      expect(spawned.some((argv) => argv[0] === "pull")).toBe(true);
       expect(spawned.some((argv) => argv.join(" ") === `shell rm ${DEVICE_FILE}`)).toBe(true);
+    });
+
+    test("the client-facing error does not quote the device temp path", async () => {
+      const { handle, recorder } = await startRunning();
+      await crash(recorder, 1, `Unable to open '${DEVICE_FILE}': No space left on device\n`);
+
+      const error = await backend.stop(handle).catch((caught: unknown) => caught);
+
+      const message = (error as Error).message;
+      expect(message).toContain("No space left on device");
+      expect(message).not.toContain(DEVICE_FILE);
+    });
+
+    test("the host adb dropping mid-recording with the device recorder alive still returns the file", async () => {
+      const { handle, recorder } = await startRunning({ outputPath: outputFile });
+      await crash(recorder, 1, "adb: device offline\n");
+      // The device recorder is still writing, then settles at 2048 bytes.
+      factory.getFakeClient().setCommandResultSequence(STAT, ["1024", "2048", "2048"]);
+      await fsPromises.writeFile(outputFile, Buffer.alloc(2048, 1));
+
+      const result = await backend.stop(handle);
+
+      expect(commands()[1]).toBe("shell kill -2 4321");
+      expect(
+        factory
+          .getFakeClient()
+          .getSpawnCalls()
+          .some((argv) => argv[0] === "pull"),
+      ).toBe(true);
+      expect(result.sizeBytes).toBe(2048);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings?.[0]).toContain("code 1");
+      expect(result.warnings?.[0]).toContain("adb: device offline");
+    });
+
+    test("a retried stop pulls the retained file instead of reading its own kill as a crash", async () => {
+      const { handle, recorder } = await startRunning({ outputPath: outputFile });
+      // The host adb ignores the first signals and only ends when it is killed.
+      recorder.kill = (signal?: NodeJS.Signals | number) => {
+        recorder.killed = true;
+        if (signal === "SIGKILL") {
+          recorder.emit("exit", null, "SIGKILL");
+        }
+        return true;
+      };
+      // First stop: the device file keeps growing, so it is retained and ownership kept.
+      factory
+        .getFakeClient()
+        .setCommandResultSequence(STAT, ["128", "256", "384", "512", "640", "640", "640"]);
+
+      const first = await backend.stop(handle).catch((caught: unknown) => caught);
+      expect((first as VideoCaptureFinalizationError).retainOwnership).toBe(true);
+      expect((first as Error).message).toContain("retained");
+      expect(
+        factory
+          .getFakeClient()
+          .getSpawnCalls()
+          .some((argv) => argv.join(" ") === `shell rm ${DEVICE_FILE}`),
+      ).toBe(false);
+
+      await fsPromises.writeFile(outputFile, Buffer.alloc(640, 1));
+      const second = await backend.stop(handle);
+
+      expect(second.sizeBytes).toBe(640);
+      expect(second.warnings).toBeUndefined();
     });
 
     test("a recorder that finished by its own time limit (exit 0) still goes through the pull path", async () => {

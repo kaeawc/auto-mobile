@@ -1726,6 +1726,33 @@ describe("videoRecordingManager", () => {
       expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
     });
 
+    test("skips a newer recording whose file exists on disk but is 0 bytes", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      const emptyPath = await seed("empty-on-disk", "completed", 2_000, 1024);
+      await filesOnDisk({ [olderPath]: 1024, [emptyPath]: 0 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+
+    test("reads and stats only the newest playable recording when there is one", async () => {
+      const newestPath = await seed("newest", "completed", 3_000, 1024);
+      const olderPath = await seed("older", "completed", 2_000, 1024);
+      const statted = await filesOnDisk({ [newestPath]: 1024, [olderPath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("newest");
+      expect(statted).toEqual([newestPath]);
+    });
+
+    test("still finds an older playable recording behind a full page of rows with no file", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      for (let index = 0; index < 25; index++) {
+        await seed(`gone-${index}`, "completed", 2_000 + index, 1024);
+      }
+      await filesOnDisk({ [olderPath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+
     test.each([
       ["interrupted", 0],
       ["completed", 1024],

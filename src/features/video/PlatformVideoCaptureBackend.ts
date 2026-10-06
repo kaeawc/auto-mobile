@@ -49,6 +49,13 @@ interface AndroidBackendHandle {
    * Absent or unresolved means stop/force-stop fall back to signalling by name.
    */
   devicePid?: DeviceRecorderPid;
+  /**
+   * Set by the first `stop`, which also records whether the host recorder process had
+   * already exited abnormally at that moment. A retried stop must not mistake the exit this
+   * backend's own SIGINT/SIGKILL caused for a crash, so this is recorded, not inferred.
+   */
+  stopRequested?: boolean;
+  exitedBeforeStop?: boolean;
 }
 
 const gracefulExitTimeout = new Error("Video capture graceful exit deadline elapsed");
@@ -80,6 +87,7 @@ const SCREENRECORD_STDERR_MAX_CHARS = 8192;
 const SCREENRECORD_STDERR_REPORT_CHARS = 1000;
 // Node may report `exit` before the last stderr chunk is read; wait this long for the pipe to end.
 const SCREENRECORD_STDERR_DRAIN_MS = 100;
+const DEVICE_RECORDING_PATH_PATTERN = /\/sdcard\/auto-mobile-[^\s'":]+\.mp4/g;
 const STDERR_TRACKER_OPTIONS = { maxStderrChars: SCREENRECORD_STDERR_MAX_CHARS };
 
 /**
@@ -95,7 +103,12 @@ function describeAbnormalExit(exitState: ProcessExitState, stderr: string[]): st
   }
   const how = exitState.signal ? `signal ${exitState.signal}` : `code ${code}`;
   const at = exitState.endedAt ? ` at ${exitState.endedAt}` : "";
-  const detail = stderr.join("").trim().slice(-SCREENRECORD_STDERR_REPORT_CHARS);
+  // screenrecord can quote its output file; the device temp path stays diagnostic-only.
+  const detail = stderr
+    .join("")
+    .replace(DEVICE_RECORDING_PATH_PATTERN, "<device recording file>")
+    .trim()
+    .slice(-SCREENRECORD_STDERR_REPORT_CHARS);
   return `exited${at} with ${how}${detail ? `: ${detail}` : ""}`;
 }
 
@@ -267,20 +280,16 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     logger.info(`[VideoCapture] Stopping recording ${handle.recordingId}`);
 
-    // A recorder that died before this stop was requested (#10186) has nothing to
-    // finalize: polling the device file and retrying the pull would only bury the
-    // recorder's own exit and stderr under a pull failure.
-    const earlyExit = describeAbnormalExit(backendHandle.exitState, backendHandle.stderr);
-    if (earlyExit) {
-      await this.cleanupDeviceRecording(
-        this.adbFactory.create(backendHandle.device),
-        backendHandle,
-        false,
-      );
-      throw new VideoCaptureFinalizationError(
-        `Android recorder ${earlyExit}, before the stop was requested, so the recording produced no usable video. Start a new recording.`,
-        { retainOwnership: false },
-      );
+    // Whether the host recorder had already died when the FIRST stop arrived (#10186). It is
+    // recorded once so a retried stop, which sees the exit this backend's own SIGINT/SIGKILL
+    // caused, does not read it as a crash. It never skips the device stop or the pull: the
+    // host process dying (an adb server restart, a dropped transport) does not mean the
+    // device recorder did, and a recorder that wrote a complete file before dying is still
+    // a recording.
+    if (!backendHandle.stopRequested) {
+      backendHandle.stopRequested = true;
+      backendHandle.exitedBeforeStop =
+        describeAbnormalExit(backendHandle.exitState, backendHandle.stderr) !== undefined;
     }
 
     // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
@@ -361,6 +370,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       const codec = await this.codecProbe.codec(handle.outputPath);
 
       this.logRecordingExit(backendHandle);
+      const earlyExit = this.earlyExitDescription(backendHandle);
       return {
         recordingId: handle.recordingId,
         outputPath: handle.outputPath,
@@ -368,18 +378,51 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
         endedAt: backendHandle.exitState.endedAt ?? new Date().toISOString(),
         sizeBytes,
         codec,
+        ...(earlyExit && {
+          warnings: [
+            `The Android recorder ${earlyExit} before the stop was requested; the recording may end sooner than requested.`,
+          ],
+        }),
       };
     } catch (error) {
       // This point is reached only after awaiting the tracked host exit above.
       // Artifact finalization cannot revive that process, so make the proof
       // available to the ownership layer instead of retaining a dead handle.
-      throw new VideoCaptureFinalizationError(
-        retainDeviceFile
-          ? `Android capture exited but finalization failed: ${errorMessage(error)}`
-          : `Android capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
-        { cause: error, retainOwnership: retainDeviceFile },
+      throw this.finalizationError(backendHandle, retainDeviceFile, error);
+    }
+  }
+
+  /** What the recorder's exit looked like, when it had died before the first stop was requested. */
+  private earlyExitDescription(backendHandle: AndroidBackendHandle): string | undefined {
+    return backendHandle.exitedBeforeStop
+      ? describeAbnormalExit(backendHandle.exitState, backendHandle.stderr)
+      : undefined;
+  }
+
+  private finalizationError(
+    backendHandle: AndroidBackendHandle,
+    retainDeviceFile: boolean,
+    error: unknown,
+  ): VideoCaptureFinalizationError {
+    const earlyExit = this.earlyExitDescription(backendHandle);
+    if (earlyExit && !retainDeviceFile) {
+      // Nothing usable could be pulled from a recorder that had already died: say why it
+      // died rather than burying it under the pull failure, which stays in the log.
+      logger.warn(
+        `[VideoCapture] No usable recording after the recorder exited early: ${errorMessage(error)}`,
+        error,
+      );
+      return new VideoCaptureFinalizationError(
+        `Android recorder ${earlyExit}, before the stop was requested, so the recording produced no usable video. Start a new recording.`,
+        { cause: error, retainOwnership: false },
       );
     }
+    return new VideoCaptureFinalizationError(
+      retainDeviceFile
+        ? `Android capture exited but finalization failed: ${errorMessage(error)}`
+        : `Android capture exited but the recording produced no usable video (zero bytes / finalization failed). Start a new recording. ${errorMessage(error)}`,
+      { cause: error, retainOwnership: retainDeviceFile },
+    );
   }
 
   private async requestDeviceRecorderStop(

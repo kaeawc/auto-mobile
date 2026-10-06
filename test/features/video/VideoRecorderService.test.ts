@@ -780,9 +780,18 @@ describe("VideoRecorderService", () => {
       const metadata = await service.stopRecording(recording.recordingId);
 
       expect(metadata.filePath).toBe(kept);
+      expect(metadata.fileName).toBe("kept-raw.mov");
+      // The metadata describes the file that was returned, not the requested container.
+      expect(metadata.format).toBe("mov");
       expect(metadata.warnings).toEqual([
         "iOS post-processing did not finish (timed out); returning the raw capture.",
       ]);
+    });
+
+    test("keeps the requested format when the backend returns the file it was asked for", async () => {
+      const recording = await service.startRecording();
+
+      expect((await service.stopRecording(recording.recordingId)).format).toBe("mp4");
     });
 
     test("has no warnings when neither the start nor the stop produced one", async () => {

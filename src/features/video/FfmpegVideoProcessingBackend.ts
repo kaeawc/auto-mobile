@@ -13,6 +13,7 @@ import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlC
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { logger } from "../../utils/logger";
+import { getRequestContext } from "../../utils/AbortContext";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
@@ -103,6 +104,32 @@ export function ffmpegPostProcessBudgetMs(
       Math.ceil(Math.max(0, outputSeconds) * FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS),
     ),
   );
+}
+
+// Left for the stop's own tail (codec probe, size read, database update) and the response.
+// A judgment, not measured.
+const POST_PROCESS_RESPONSE_MARGIN_MS = 5000;
+
+/**
+ * Cuts a post-process budget to the time left in the stop request, or returns undefined
+ * when it cannot finish there. A stream copy takes whatever is left (it finishes in a
+ * small part of its budget); a re-encode needs its full budget, because ffmpeg cut off
+ * mid-encode leaves nothing usable. `remainingMs` is undefined when no request deadline
+ * is ambient, which leaves the budget as is.
+ */
+export function boundPostProcessBudgetToRequest(
+  config: VideoCaptureConfig,
+  budgetMs: number,
+  remainingMs: number | undefined,
+): number | undefined {
+  if (remainingMs === undefined) {
+    return budgetMs;
+  }
+  const availableMs = remainingMs - POST_PROCESS_RESPONSE_MARGIN_MS;
+  if (availableMs <= 0 || (!isStreamCopyPostProcess(config) && availableMs < budgetMs)) {
+    return undefined;
+  }
+  return Math.min(budgetMs, availableMs);
 }
 
 /** What iOS post-processing produced: the processed output, or the raw capture kept instead. */
@@ -1341,6 +1368,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     backendHandle: FfmpegBackendHandle,
     capturePath: string,
   ): Promise<void> {
+    // Decided before ffmpeg starts: a post-process that cannot finish inside the stop
+    // request would time the request out with an indeterminate result while ffmpeg keeps
+    // running, so it takes the raw-capture fallback now instead.
+    const budgetMs = this.requestBoundedPostProcessBudgetMs(backendHandle.config);
     const hwAccel = await this.detectHardwareAccel();
     const ffmpegArgs = await this.buildFfmpegArgs(backendHandle.config, hwAccel, {
       type: "file",
@@ -1366,10 +1397,6 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const ffmpegTracker = trackProcess(ffmpegProcess);
     backendHandle.ffmpegTracker = ffmpegTracker;
 
-    const budgetMs = ffmpegPostProcessBudgetMs(
-      backendHandle.config,
-      this.recordedSeconds(backendHandle.config),
-    );
     await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise, {
       timeoutMs: budgetMs,
       signal: null,
@@ -1386,6 +1413,27 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
 
     await this.assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker);
+  }
+
+  /**
+   * The post-process budget, cut to what is left of the stop request. Throws when the
+   * request cannot hold the post-process, which the caller turns into the raw-capture
+   * fallback. Without an ambient request deadline the unbounded budget applies.
+   */
+  private requestBoundedPostProcessBudgetMs(config: VideoCaptureConfig): number {
+    const budgetMs = ffmpegPostProcessBudgetMs(config, this.recordedSeconds(config));
+    const deadlineMs = getRequestContext()?.getDeadlineMs?.();
+    const boundedMs = boundPostProcessBudgetToRequest(
+      config,
+      budgetMs,
+      deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
+    );
+    if (boundedMs === undefined) {
+      throw new ActionableError(
+        `the stop request does not have the ${Math.round(budgetMs / 1000)} s that post-processing could take`,
+      );
+    }
+    return boundedMs;
   }
 
   /** Seconds the recording has been running, or undefined when its start time is unusable. */

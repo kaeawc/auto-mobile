@@ -70,6 +70,9 @@ function getVideoMimeType(metadata: VideoRecordingMetadata): string {
   if (metadata.format === "mp4") {
     return "video/mp4";
   }
+  if (metadata.format === "mov") {
+    return "video/quicktime";
+  }
   return "application/octet-stream";
 }
 

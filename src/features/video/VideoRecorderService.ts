@@ -2,6 +2,7 @@ import { promises as fsPromises, type Stats } from "node:fs";
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import path from "node:path";
 import type {
+  VideoContainerFormat,
   VideoFormat,
   VideoRecordingConfig,
   VideoRecordingConfigInput,
@@ -441,7 +442,7 @@ export class VideoRecorderService {
       recordingId: active.recordingId,
       fileName,
       filePath: outputPath,
-      format: active.config.format,
+      format: containerFormatOf(outputPath, active.config.format),
       sizeBytes,
       durationMs,
       codec: stopResult.codec,
@@ -749,6 +750,17 @@ function parsePositiveNumber(
   }
 
   return allowFloat ? parsed : Math.round(parsed);
+}
+
+/**
+ * The container of the file a backend actually returned. It normally is the requested
+ * format, but a backend that keeps its raw capture instead of the processed output (iOS
+ * post-processing that did not finish, #10188) returns a `.mov`, and metadata must describe
+ * that file, not the one that was asked for.
+ */
+function containerFormatOf(filePath: string, requested: VideoFormat): VideoContainerFormat {
+  const extension = path.extname(filePath).slice(1).toLowerCase();
+  return extension === "mp4" || extension === "mov" ? extension : requested;
 }
 
 function buildRecordingFileName(name: string, startedAt: string, format: VideoFormat): string {

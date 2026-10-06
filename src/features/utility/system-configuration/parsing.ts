@@ -144,6 +144,97 @@ export function validateLocaleTag(languageTag: string): string | null {
   return null;
 }
 
+/** What the runtime reports for a zone id, or null when it does not know the id. */
+function resolveTimeZone(zoneId: string): string | null {
+  try {
+    return new Intl.DateTimeFormat("en-US", { timeZone: zoneId }).resolvedOptions().timeZone;
+  } catch (error) {
+    // Intl throws RangeError for an id that is not a time zone; that is the
+    // rejection signal the callers of this helper report.
+    logger.debug(`time zone "${zoneId}" is not known to the runtime: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * The spelling the runtime knows for an id that differs only by case, or null.
+ * `Intl` matches ids case-insensitively but a device looks the string up
+ * exactly: `america/los_angeles` is stored as typed and resolves to GMT.
+ */
+function caseCorrectedTimeZone(zoneId: string, resolved: string): string | null {
+  const lower = zoneId.toLowerCase();
+  const known = [resolved, ...Intl.supportedValuesOf("timeZone")].find(
+    (candidate) => candidate.toLowerCase() === lower,
+  );
+  return known === undefined || known === zoneId ? null : known;
+}
+
+/**
+ * Check, before anything is sent to a device, that a time zone id is one a
+ * device can resolve. Android and the iOS simulator both store whatever string
+ * they are given (`setprop persist.sys.timezone`, `defaults write AppleTimeZone`)
+ * and a string that is not a zone id is left on the device and read back
+ * unchanged, so a typo would otherwise be reported as applied (issue #10190).
+ *
+ * The runtime's own IANA database is the authority: `Intl.DateTimeFormat`
+ * throws `RangeError` for an unknown id. `Intl.supportedValuesOf("timeZone")` is
+ * NOT used as an allow-list, because it lists canonical ids only and omits the
+ * legacy aliases a device still resolves.
+ *
+ * Accepts `America/Los_Angeles`, `UTC`, `GMT`, the fixed-offset tzdata zones
+ * (`Etc/GMT+5`, `Etc/GMT-14`), the tzdata rule zones (`EST5EDT`, `PST8PDT`) and
+ * legacy aliases (`US/Pacific`, `Asia/Calcutta`): each is a name in the tz
+ * database that Android and Foundation ship. Rejects an unknown id
+ * (`Pacific/Los_Angeles`, `America/Los Angeles`, `PST8`, `GMT+5`), a case
+ * variant (the device lookup is case-sensitive), and a bare UTC offset
+ * (`+05:00`, `-0800`): the runtime accepts those as offset ids but neither
+ * device's database has an entry for them, so the device would fall back to GMT.
+ * A case variant of a legacy alias the runtime lists nowhere (`us/pacific`) is
+ * not detectable and is left for the device's read-back to judge.
+ *
+ * Returns an error message naming the id and the reason when it is rejected,
+ * otherwise `null`.
+ */
+export function validateTimeZoneId(zoneId: string): string | null {
+  const expected = 'e.g. "America/Los_Angeles", "Asia/Kolkata" or "UTC"';
+  if (/^[+-]/.test(zoneId)) {
+    return `Invalid time zone "${zoneId}": a bare UTC offset is not a zone id and the device has no entry for it. Use an IANA id (${expected}) or a fixed-offset zone such as "Etc/GMT-5" (the sign is inverted: Etc/GMT-5 is UTC+5).`;
+  }
+  const resolved = resolveTimeZone(zoneId);
+  if (resolved === null) {
+    return `Invalid time zone "${zoneId}": not an IANA time zone id (${expected}).`;
+  }
+  const corrected = caseCorrectedTimeZone(zoneId, resolved);
+  if (corrected !== null) {
+    return `Invalid time zone "${zoneId}": zone ids are case-sensitive on the device; did you mean "${corrected}"?`;
+  }
+  return null;
+}
+
+/**
+ * Whether the zone a device reports back is the zone that was requested.
+ * Compares the runtime's canonical form of each id rather than the strings, so
+ * ids the runtime links as aliases of one zone are equal. A null, empty or
+ * unknown report never matches, and neither does a report that is only a case
+ * variant of the requested id: the device would not resolve it.
+ *
+ * Which legacy alias pairs the runtime links (`US/Pacific` and
+ * `America/Los_Angeles`) depends on the engine, so only identical spellings are
+ * guaranteed to match; a device that rewrites an id to a different alias is
+ * reported as not applied.
+ */
+export function timeZoneIdsEquivalent(actual: string | null, requested: string): boolean {
+  if (!actual) {
+    return false;
+  }
+  if (actual === requested) {
+    return true;
+  }
+  const reported = resolveTimeZone(actual);
+  const wanted = resolveTimeZone(requested);
+  return reported !== null && reported === wanted && validateTimeZoneId(actual) === null;
+}
+
 interface LocaleParts {
   language: string;
   script: string;

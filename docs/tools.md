@@ -1563,7 +1563,10 @@ Android buttons, each with `label` and `actionId`.
 `wakeAndUnlock.pin` supplies a secure Android unlock credential; it may be omitted
 if one is already remembered for the session and is ignored on iOS.
 
-`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`.
+`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`. An ID that
+is not in the IANA database (or a bare UTC offset such as `+05:00`) is refused before
+anything is written. A successful change reports `timeZoneWarning`: the stored value read
+back, which does not confirm that running apps observe the new zone.
 `timeFormat` selects `"12"` or `"24"`, and `textDirection` selects `ltr` or `rtl`.
 `calendarSystem` accepts calendar identifiers such as `gregory`, `japanese`,
 `buddhist`, or `islamic-civil`. `restartApp` is the iOS bundle ID to relaunch

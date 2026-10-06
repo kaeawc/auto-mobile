@@ -13,6 +13,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
 import { buildAppleLanguages, isIosSimulator } from "./system-configuration/iosHelpers";
+import { validateTimeZoneId } from "./system-configuration/parsing";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -79,6 +80,12 @@ export class SystemConfigurationManager {
         zoneId,
         error: "zoneId must be a non-empty string",
       };
+    }
+    // Validate once, before any adapter writes: both platforms store whatever
+    // string they are given and read it back unchanged (issue #10190).
+    const invalidZoneError = validateTimeZoneId(trimmedZone);
+    if (invalidZoneError) {
+      return { success: false, zoneId, error: invalidZoneError };
     }
     return this.adapter.setTimeZone(trimmedZone);
   }

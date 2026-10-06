@@ -1769,7 +1769,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     if (interaction.dispatchedAt === undefined) {
       // Dispatch reports carry no observation. State captured at tool start belongs to a
       // different source if searchUntil crossed screens; never replay that stale state.
-      if (this.currentAppId !== startApp || this.currentScreen !== startScreen) {
+      if (
+        (startApp && this.currentAppId && this.currentAppId !== startApp) ||
+        (startScreen && this.currentScreen && this.currentScreen !== startScreen)
+      ) {
         interaction.uiState = undefined;
       }
       interaction.dispatchedAt = Math.max(this.timer.now(), interaction.timestamp);

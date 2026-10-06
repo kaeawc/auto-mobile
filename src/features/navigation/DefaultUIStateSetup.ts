@@ -15,6 +15,7 @@ import { defaultTimer, Timer } from "../../utils/SystemTimer";
 import { ActionableError } from "../../models/ActionableError";
 import { isTruthy } from "../../models/Element";
 import { ElementResolver, matchedSourceNode } from "../utility/ElementResolver";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 
 /**
@@ -384,11 +385,22 @@ export class DefaultUIStateSetup implements UIStateSetup {
     identifier: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    const after = await awaitWhileRequestIsLive(
-      this.observeScreenProvider().execute(signal ? { signal } : undefined),
-      signal,
-    );
-    throwIfAborted(signal);
+    let after: ObserveResult;
+    try {
+      throwIfAborted(signal);
+      after = await awaitWhileRequestIsLive(
+        this.observeScreenProvider().execute(signal ? { signal } : undefined),
+        signal,
+      );
+      throwIfAborted(signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      // Observation is best effort: only positive screen-change evidence aborts replay.
+      logger.warn(
+        `[UI_STATE_SETUP] Could not verify screen after tapping "${identifier}": ${errorMessage(error)}`,
+      );
+      return;
+    }
     let from = before.screenIdentity?.key;
     let to = after.screenIdentity?.key;
     if (!from || !to) {
@@ -444,6 +456,9 @@ export class DefaultUIStateSetup implements UIStateSetup {
     ) {
       return true;
     }
+    if (this.hasSelectedCollectionSibling(node, nodes)) {
+      return true;
+    }
     // UIKit captures expose unselected tab buttons as UIButton children of UITabBar.
     let parent = node.parentIndex;
     while (parent !== undefined) {
@@ -454,6 +469,29 @@ export class DefaultUIStateSetup implements UIStateSetup {
       parent = ancestor.parentIndex;
     }
     return false;
+  }
+
+  private hasSelectedCollectionSibling(
+    node: SearchableEntry,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
+    // Android captures expose tabs as clickable collection items next to the selected item,
+    // with no selected attribute on unselected items (playground-tap-resource.json).
+    if (
+      !node.categories.clickable ||
+      node.parentIndex === undefined ||
+      !node.properties["collection-item-info"]
+    ) {
+      return false;
+    }
+    const parent = nodes[node.parentIndex];
+    return (
+      Boolean(parent.properties["collection-info"]) &&
+      nodes.some(
+        (sibling) =>
+          sibling.parentIndex === node.parentIndex && isTruthy(sibling.properties.selected),
+      )
+    );
   }
 
   /**

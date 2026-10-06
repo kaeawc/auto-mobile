@@ -16,6 +16,7 @@ import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { readFileSync } from "node:fs";
+import { logger } from "../../../src/utils/logger";
 
 const selectionCapture: { structuredContent: ObserveResult } = JSON.parse(
   readFileSync(
@@ -882,4 +883,74 @@ describe("DefaultUIStateSetup cancellation", () => {
     ).rejects.toThrow("Operation cancelled");
     expect(actions).toEqual(["swipe"]);
   });
+});
+
+describe("DefaultUIStateSetup captured Android selections", () => {
+  const resource: { contents: Array<{ text: string }> } = JSON.parse(
+    readFileSync(
+      new URL("../../fixtures/identify-interactions/playground-tap-resource.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const capture: ObserveResult = JSON.parse(resource.contents[0].text);
+  afterEach(() => ToolRegistry.clearTools());
+
+  function edge(text: string): NavigationEdge {
+    return { from: "Tap", to: "Target", timestamp: 0, uiState: { selectedElements: [{ text }] } };
+  }
+
+  for (const text of ["Demos", "Button"]) {
+    test(`captured Android ${text}: unselected tab taps, exact ordinary button skips`, async () => {
+      const taps: unknown[] = [];
+      ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+        taps.push(args.selector);
+        return createStructuredToolResponse({ success: true });
+      });
+      const actions = await makeSetup(() => ({ execute: async () => capture })).setupUIState(
+        edge(text),
+        "android",
+      );
+      expect(taps).toEqual(text === "Demos" ? [{ text }] : []);
+      expect(actions).toEqual(text === "Demos" ? ['tapOn({"text":"Demos"})'] : []);
+    });
+  }
+
+  for (const cancelled of [false, true]) {
+    test(`post-tap observe throws: cancellation=${cancelled}`, async () => {
+      const controller = new AbortController();
+      let observations = 0;
+      let taps = 0;
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      ToolRegistry.register("tapOn", "Fake tap", {}, async () => {
+        taps++;
+        return createStructuredToolResponse({ success: true });
+      });
+      const setup = makeSetup(() => ({
+        execute: async () => {
+          if (++observations === 3) {
+            if (cancelled) {
+              controller.abort();
+              return selectionCapture.structuredContent;
+            }
+            throw new Error("Post-tap observation unavailable");
+          }
+          return selectionCapture.structuredContent;
+        },
+      }));
+      try {
+        const result = setup.setupUIState(edge("Discover"), "ios", controller.signal);
+        if (cancelled) {
+          await expect(result).rejects.toThrow("Operation cancelled");
+        } else {
+          expect(await result).toEqual(['tapOn({"text":"Discover"})']);
+          expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining("Post-tap observation unavailable"),
+          );
+        }
+        expect(taps).toBe(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
 });

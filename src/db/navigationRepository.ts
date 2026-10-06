@@ -377,8 +377,10 @@ export class NavigationRepository {
     );
   }
 
-  private collapseReplayEquivalentEdges(rows: NavigationEdge[]): NavigationEdge[] {
-    const newest = new Map<string, NavigationEdge>();
+  private collapseReplayEquivalentEdges<
+    T extends Pick<NavigationEdge, "id" | "from_screen" | "to_screen" | "tool_name" | "tool_args">,
+  >(rows: T[]): T[] {
+    const newest = new Map<string, T>();
     for (const row of rows) {
       const key = JSON.stringify([
         row.from_screen,
@@ -1027,7 +1029,13 @@ export class NavigationRepository {
       .executeTakeFirst();
 
     // Count distinct transitions, not traversal rows (#10194); see getDistinctEdges.
-    const transitions = await this.getDistinctEdges(appId);
+    // Payloads such as ui_state are unnecessary for replay identity or counts.
+    const transitions = this.collapseReplayEquivalentEdges(
+      await this.selectNewestEdgePerTransition(appId)
+        .clearSelect()
+        .select(["id", "from_screen", "to_screen", "tool_name", "tool_args"])
+        .execute(),
+    );
     const edgeCount = transitions.length;
     const toolEdgeCount = transitions.filter((edge) => edge.tool_name !== null).length;
 

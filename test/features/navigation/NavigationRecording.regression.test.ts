@@ -101,6 +101,26 @@ describe("navigation recording source state and routing", () => {
     expect(edges[0].uiState).toBeUndefined();
   });
 
+  for (const knownApp of [false, true]) {
+    test(`unknown start screen preserves selections on dispatch, known app=${knownApp}`, async () => {
+      manager = NavigationGraphManager.createForTesting(
+        repository,
+        new TestCoverageRepository(undefined, harness.db),
+        timer,
+      );
+      if (knownApp) {
+        await manager.setCurrentApp(APP);
+      }
+      const uiState = { selectedElements: [{ text: "Demos" }] };
+      const call = manager.recordToolCall("tapOn", args, uiState);
+      await navigate("DemoIndex");
+      call.markDispatched?.();
+      await navigate("DemoStartup");
+      const edges = await manager.getEdgesFrom("DemoIndex");
+      expect(edges[0].uiState).toEqual(uiState);
+    });
+  }
+
   test("same-screen dispatch preserves selections even with a later report after navigation", async () => {
     const call = record();
     call.markDispatched?.();

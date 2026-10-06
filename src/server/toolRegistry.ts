@@ -37,11 +37,17 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { resolveTransportDeadlineMs } from "./formTools";
-import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
+import {
+  type AppCleanupConfig,
+  type AppCleanupStep,
+  AppCleanupService,
+  DefaultAppCleanupService,
+} from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
@@ -93,7 +99,8 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-import { getAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -1412,6 +1419,37 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
   }
 }
 
+/**
+ * Upper bound on one executePlan's whole app cleanup, which runs under a private
+ * signal because the request signal may already have aborted. Sized above a normal
+ * terminate / `pm clear` and far below ClearAppData's own 60s action bound.
+ */
+export const PLAN_APP_CLEANUP_CAP_MS = 20_000;
+
+/**
+ * Deadline for one background app-cleanup retry (device-health recovery). The retry is a
+ * full cleanup, so it gets the cleanup's own cap plus a margin: the cap's clean failure
+ * must win the race, and a slow-but-successful retry must be able to clear the marker.
+ */
+export const PLAN_APP_CLEANUP_RETRY_DEADLINE_MS = PLAN_APP_CLEANUP_CAP_MS + 1_000;
+
+/** One device whose app cleanup did not complete; `step` is absent when the service rejected. */
+export interface PlanCleanupFailure {
+  deviceId: string;
+  step?: AppCleanupStep;
+  reason: string;
+}
+
+/** What an executePlan app cleanup visibly did not do (the service logs its own soft failures). */
+export interface PlanCleanupOutcome {
+  /** Devices whose cleanup reported `failed` or rejected. */
+  failures: PlanCleanupFailure[];
+  /** Devices still running when {@link PLAN_APP_CLEANUP_CAP_MS} cut the cleanup short. */
+  unfinishedDeviceIds: string[];
+  /** The cleanup hit {@link PLAN_APP_CLEANUP_CAP_MS} and was cut short. */
+  capExceeded: boolean;
+}
+
 // Exported for focused unit coverage (issue #3208). Production wires this via
 // the ToolRegistry constructor; tests instantiate it directly to exercise
 // executePlan cleanup and the auto-release guard without a live daemon session.
@@ -1479,6 +1517,127 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     );
   }
 
+  constructor(private readonly timer: Timer = defaultTimer) {}
+
+  /**
+   * Cleans independent devices concurrently and drains them all before any session is
+   * released. The request signal is often already aborted here (request deadline,
+   * client cancel, a sibling device lost), so every adb call under it would fail at
+   * once and leave the app running on a device about to return to the pool. Cleanup
+   * therefore runs under its own signal, bounded by {@link PLAN_APP_CLEANUP_CAP_MS} so
+   * a dead device cannot hang the release; reaching the cap aborts that private signal,
+   * which fails the remaining adb calls. Every failure is logged at warn and returned
+   * as a {@link PlanCleanupOutcome} so the caller can say what the cleanup did not do.
+   */
+  private async cleanupDevicesShielded(
+    devices: BootedDevice[],
+    cleanupService: AppCleanupService,
+    config: AppCleanupConfig,
+  ): Promise<PlanCleanupOutcome> {
+    const shield = new AbortController();
+    const failures: PlanCleanupFailure[] = [];
+    const finished = new Set<string>();
+    const cleanOne = async (cleanupDevice: BootedDevice): Promise<void> => {
+      const { deviceId } = cleanupDevice;
+      try {
+        const result = await cleanupService.cleanup(cleanupDevice, config);
+        if (result.status === "failed") {
+          failures.push({ deviceId, step: result.step, reason: result.reason });
+        }
+      } catch (error) {
+        failures.push({ deviceId, reason: errorMessage(error) });
+        logger.warn(`[PlanLifecycle] App cleanup failed for device ${deviceId}`, error);
+      }
+      finished.add(deviceId);
+    };
+    try {
+      await runWithAbortSignal(shield.signal, () =>
+        raceWithDeadline(() => Promise.allSettled(devices.map(cleanOne)), {
+          timer: this.timer,
+          timeoutMs: PLAN_APP_CLEANUP_CAP_MS,
+          label: "Plan app cleanup",
+          onTimeout: () => shield.abort(new ActionableError("Plan app cleanup exceeded its cap")),
+        }),
+      );
+      return { failures, unfinishedDeviceIds: [], capExceeded: false };
+    } catch (error) {
+      logger.warn(
+        `[PlanLifecycle] App cleanup did not finish for ${devices.map((d) => d.deviceId).join(", ")}; releasing anyway`,
+        error,
+      );
+      const unfinishedDeviceIds = devices
+        .map((d) => d.deviceId)
+        .filter((deviceId) => !finished.has(deviceId));
+      return { failures, unfinishedDeviceIds, capExceeded: true };
+    }
+  }
+
+  /**
+   * The plan's response was finalized (envelope, spill, structuredContent) and the plan's
+   * outcome decided before this runs, so an incomplete cleanup cannot be added to it. State
+   * that once, at warn, so the daemon log shows that the reported outcome does not cover it.
+   */
+  private reportIncompleteCleanup(
+    outcome: PlanCleanupOutcome,
+    appId: string,
+    sessionUuid: string | undefined,
+  ): void {
+    if (outcome.failures.length === 0 && !outcome.capExceeded) {
+      return;
+    }
+    const failed = outcome.failures.map(
+      ({ deviceId, step, reason }) => `${deviceId} (${step ?? "cleanup"}: ${reason})`,
+    );
+    const problems = [
+      failed.length > 0 ? `failed on ${failed.join(", ")}` : "",
+      outcome.unfinishedDeviceIds.length > 0
+        ? `unfinished on ${outcome.unfinishedDeviceIds.join(", ")}`
+        : "",
+      outcome.capExceeded ? `did not finish within ${PLAN_APP_CLEANUP_CAP_MS}ms` : "",
+    ].filter(Boolean);
+    logger.warn(
+      `[PlanLifecycle] executePlan app cleanup for ${appId} was incomplete (${problems.join("; ")}); ` +
+        `the plan result was already finalized and does not report this (session ${sessionUuid ?? "none"})`,
+    );
+  }
+
+  /**
+   * A device whose cleanup did not complete must not return to the pool looking clean. Mark
+   * it with the pool's existing device-health marker (it cannot be allocated while marked)
+   * and let the session manager's bounded health recovery retry the cleanup once the device
+   * is idle. The retry gets its own capped signal because recovery runs detached from this
+   * call but inherits its ambient (often aborted) request signal.
+   */
+  private markIncompleteCleanupDevices(
+    outcome: PlanCleanupOutcome,
+    devices: BootedDevice[],
+    cleanupService: AppCleanupService,
+    config: AppCleanupConfig,
+  ): void {
+    const dirty = new Set([
+      ...outcome.failures.map((failure) => failure.deviceId),
+      ...outcome.unfinishedDeviceIds,
+    ]);
+    if (dirty.size === 0 || !DaemonState.getInstance().isInitialized()) {
+      return;
+    }
+    const sessionManager = DaemonState.getInstance().getSessionManager();
+    for (const cleanupDevice of devices.filter((d) => dirty.has(d.deviceId))) {
+      sessionManager.markDeviceNeedsAppCleanup(
+        cleanupDevice.deviceId,
+        async () => {
+          const retry = await this.cleanupDevicesShielded([cleanupDevice], cleanupService, config);
+          if (retry.failures.length > 0 || retry.capExceeded) {
+            throw new ActionableError(
+              `App cleanup retry for ${config.appId} did not complete on ${cleanupDevice.deviceId}`,
+            );
+          }
+        },
+        PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
+      );
+    }
+  }
+
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
     const {
       name,
@@ -1492,24 +1651,14 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionToolSelectionService,
     } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
+      // Resolved under the request signal: a device-loss abort names the lost device
+      // to skip. A deadline or client cancel aborts it too but names no device, so
+      // those plans still clean every device they own (#10022).
       const devices = this.getCleanupDevices(device, baseSessionUuid ?? sessionUuid);
-      // Independent devices clean concurrently using the service's existing
-      // action/command bounds. Drain all cleanups before releasing any session.
-      await Promise.allSettled(
-        devices.map(async (cleanupDevice) => {
-          try {
-            await cleanupService.cleanup(cleanupDevice, {
-              appId: args.cleanupAppId,
-              clearAppData: args.cleanupClearAppData,
-            });
-          } catch (error) {
-            logger.warn(
-              `[PlanLifecycle] App cleanup failed for device ${cleanupDevice.deviceId}`,
-              error,
-            );
-          }
-        }),
-      );
+      const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
+      const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
+      this.reportIncompleteCleanup(outcome, args.cleanupAppId, baseSessionUuid ?? sessionUuid);
+      this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
     }
 
     if (
@@ -1780,7 +1929,7 @@ export class ToolRegistryClass {
     this.auditRunner = new DefaultAuditRunner(loggerInstance);
     this.navigationToolCallRecorder = new DefaultNavigationToolCallRecorder();
     this.afterToolCall = new DefaultAfterToolCallHandler();
-    this.planLifecycleManager = new DefaultPlanLifecycleManager();
+    this.planLifecycleManager = new DefaultPlanLifecycleManager(timer);
   }
 
   setToolCallRepositoryForTesting(repository: Pick<ToolCallRepository, "recordToolCall">): void {

@@ -1747,6 +1747,51 @@
             "required": ["stepIndex", "tool", "error"],
             "additionalProperties": false
           }
+        },
+        "toolResults": {
+          "description": "Completed steps' tool payloads in plan step order (stepIndex is the plan step index), without bulky fields (observation, view hierarchies, screenshots, tap diagnostics, warnings); capped per step and, across all device tracks, per plan, with truncated:true when a payload was narrowed. Once the plan budget is spent later steps get no entry and toolResultsTruncated counts them. Executed only; failed and skipped steps are in failedStep/skippedSteps.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": ["stepIndex", "tool", "result"],
+            "additionalProperties": false
+          }
+        },
+        "toolResultsTruncated": {
+          "description": "Present only when the plan-wide toolResults budget ran out: omittedSteps is how many completed steps with a payload have no toolResults entry.",
+          "type": "object",
+          "properties": {
+            "omittedSteps": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["omittedSteps"],
+          "additionalProperties": false
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],
@@ -6811,7 +6856,7 @@
                 "properties": {
                   "reason": {
                     "type": "string",
-                    "enum": ["biometric-enrollment", "network-condition", "clock"]
+                    "enum": ["biometric-enrollment", "network-condition", "clock", "app-cleanup"]
                   },
                   "since": {
                     "type": "number"
@@ -7484,7 +7529,7 @@
                 "properties": {
                   "reason": {
                     "type": "string",
-                    "enum": ["biometric-enrollment", "network-condition", "clock"]
+                    "enum": ["biometric-enrollment", "network-condition", "clock", "app-cleanup"]
                   },
                   "since": {
                     "type": "number"
@@ -19768,7 +19813,7 @@
               "properties": {
                 "reason": {
                   "type": "string",
-                  "enum": ["biometric-enrollment", "network-condition", "clock"]
+                  "enum": ["biometric-enrollment", "network-condition", "clock", "app-cleanup"]
                 },
                 "since": {
                   "type": "number"

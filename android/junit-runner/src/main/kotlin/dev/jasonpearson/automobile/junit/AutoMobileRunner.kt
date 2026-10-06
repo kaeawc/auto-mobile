@@ -168,6 +168,10 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     println(message)
   }
 
+  /** History is keyed by fully qualified class name; pre-#10091 rows used the simple name. */
+  private fun timingFor(method: FrameworkMethod): TestTimingEntry? =
+    TestTimingCache.getTiming(klass.name, method.name, legacySimpleName = klass.simpleName)
+
   private fun orderChildrenByTiming(
     children: List<FrameworkMethod>,
     strategy: TimingOrderingStrategy,
@@ -176,12 +180,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       return children
     }
 
-    val className = klass.simpleName
     val candidates = children.mapIndexed { index, method ->
       TimingCandidate(
         method = method,
         index = index,
-        durationMs = TestTimingCache.getTiming(className, method.name)?.averageDurationMs,
+        durationMs = timingFor(method)?.averageDurationMs,
       )
     }
 

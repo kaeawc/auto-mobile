@@ -1014,9 +1014,14 @@ describe("network tool schema", () => {
   // Issue #10101: the device compiles host/path with its own regex engine, so a rule the host
   // accepted can still be skipped. The device's report decides what the tool says was installed.
   describe("device rule report (#10101)", () => {
+    // The host pre-check (#10059) refuses an unescaped brace, so the device-only rejection is
+    // exercised with a pattern JavaScript and the host accept but the device's engine does not:
+    // a named group with an underscore (JavaScript allows it; Java/ICU allow letters and digits).
+    const DEVICE_ONLY_BAD_PATH = "/items/(?<item_id>\\d+)";
+    const DEVICE_REJECTION_REASON = "invalid regex: named capturing group is missing trailing '>'";
     const rejectedReport: NetworkMockSyncReport = {
       status: "reported",
-      rejected: [{ mockId: "mock-1", reason: "invalid regex: Illegal repetition" }],
+      rejected: [{ mockId: "mock-1", reason: DEVICE_REJECTION_REASON }],
     };
     const unconfirmedReport: NetworkMockSyncReport = { status: "unconfirmed" };
 
@@ -1043,14 +1048,14 @@ describe("network tool schema", () => {
         const payload = parseToolJson(
           await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
             host: "api.example.com",
-            path: "/items/{id}",
+            path: DEVICE_ONLY_BAD_PATH,
           }),
         );
 
         expect(payload.deviceSynced).toBe(false);
         expect(payload.notInstalled).toEqual(rejectedReport.rejected);
         expect(payload.warning).toContain("NOT installed");
-        expect(payload.warning).toContain("mock-1 (invalid regex: Illegal repetition)");
+        expect(payload.warning).toContain(`mock-1 (${DEVICE_REJECTION_REASON})`);
         expect(payload).not.toHaveProperty("deviceConfirmed");
       });
 
@@ -1090,11 +1095,11 @@ describe("network tool schema", () => {
         });
         await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
           host: "api.example.com",
-          path: "/two/{id}",
+          path: DEVICE_ONLY_BAD_PATH,
         });
         platform.report({
           status: "reported",
-          rejected: [{ mockId: "mock-2", reason: "invalid regex: Illegal repetition" }],
+          rejected: [{ mockId: "mock-2", reason: DEVICE_REJECTION_REASON }],
         });
         const payload = parseToolJson(
           await ToolRegistry.getTool("clearMockNetwork")!.deviceAwareHandler!(platform.device, {
@@ -1103,9 +1108,49 @@ describe("network tool schema", () => {
         );
 
         expect(payload.notInstalled).toEqual([
-          { mockId: "mock-2", reason: "invalid regex: Illegal repetition" },
+          { mockId: "mock-2", reason: DEVICE_REJECTION_REASON },
         ]);
         expect(payload.cleared).toBe(1);
+      });
+
+      // Host pre-check (#10059) x device report (#10101): the two layers answer different
+      // questions and must not mask each other.
+      test(`a pattern the host pre-check rejects never reaches the ${platform.name} device, even if the device would report a rejection`, async () => {
+        platform.report(rejectedReport);
+
+        await expect(
+          ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+            host: "api.example.com",
+            path: "/items/{id}",
+            sessionUuid: "session-1",
+          }),
+        ).rejects.toThrow("Invalid path regex: /items/{id}");
+
+        const state = NetworkState.getInstance();
+        expect(state.getMocks(platform.device.deviceId).size).toBe(0);
+        expect(state.clearDeviceOwnedBySession(platform.device.deviceId, "session-1")).toBe(false);
+        expect(androidMessages).toHaveLength(0);
+        expect(iosMockRuleSyncCalls).toBe(0);
+      });
+
+      test(`a ${platform.name} rule the host accepts but the device rejects stays stored and session-owned, listed as notInstalled`, async () => {
+        platform.report(rejectedReport);
+        const payload = parseToolJson(
+          await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+            host: "api.example.com",
+            path: DEVICE_ONLY_BAD_PATH,
+            sessionUuid: "session-1",
+          }),
+        );
+
+        expect(payload.notInstalled).toEqual([
+          { mockId: "mock-1", reason: DEVICE_REJECTION_REASON },
+        ]);
+        const state = NetworkState.getInstance();
+        expect(Array.from(state.getMocks(platform.device.deviceId).keys())).toEqual(["mock-1"]);
+        // Ownership survives the rejection so the session's release still cleans the rule up.
+        expect(state.clearDeviceOwnedBySession(platform.device.deviceId, "session-1")).toBe(true);
+        expect(state.getMocks(platform.device.deviceId).size).toBe(0);
       });
     }
   });

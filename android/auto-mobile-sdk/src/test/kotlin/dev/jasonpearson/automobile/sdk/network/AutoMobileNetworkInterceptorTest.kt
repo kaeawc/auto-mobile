@@ -1164,4 +1164,126 @@ class AutoMobileNetworkInterceptorTest {
 
     assertEquals("", (flushed.single().single() as SdkNetworkRequestEvent).responseBody)
   }
+
+  // --- Lazy response capture (#10137) x mocked responses and error simulation ---
+
+  private fun bodyCapturingInterceptor(
+    buffer: SdkEventBuffer,
+    ruleStore: NetworkMockRuleStore.RuleMatcher,
+  ) =
+    AutoMobileNetworkInterceptor(
+      buffer,
+      ruleStore = ruleStore,
+      captureBodies = true,
+      policyProvider = { SdkCapturePolicy(captureBodies = true, allowMutations = true) },
+      networkControlProvider = { true },
+    )
+
+  @Test
+  fun `mocked response with body capture on is emitted once, before the app reads it`() {
+    val (buffer, flushed) = collectingBuffer()
+    val mockRule =
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 200,
+        responseHeaders = emptyMap(),
+        responseBody = """{"mocked":true}""",
+        contentType = "application/json",
+      )
+    var chainCalled = false
+    val chain = FakeInterceptorChain(onProceed = { chainCalled = true })
+    val interceptor = bodyCapturingInterceptor(buffer, fakeRuleMatcher(matchResult = mockRule))
+
+    val response = interceptor.intercept(chain)
+    drainDelivery()
+
+    // The synthetic body is already known, so its event does not wait for the app to finish it.
+    val event = flushed.single().single() as SdkNetworkRequestEvent
+    assertEquals("mocked:mock-1", event.error)
+    assertEquals("""{"mocked":true}""", event.responseBody)
+    assertEquals(false, chainCalled)
+
+    assertEquals("""{"mocked":true}""", response.body.string())
+    response.close()
+    drainDelivery()
+    assertEquals(1, flushed.size) // reading and closing the mocked body emits nothing more
+  }
+
+  @Test
+  fun `http500 error simulation with body capture on is emitted once`() {
+    val (buffer, flushed) = collectingBuffer()
+    val sim =
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "http500",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
+    val interceptor = bodyCapturingInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
+
+    val response = interceptor.intercept(fakeChain())
+    drainDelivery()
+    assertEquals("", response.body.string())
+    response.close()
+    drainDelivery()
+
+    val event = flushed.single().single() as SdkNetworkRequestEvent
+    assertEquals(500, event.statusCode)
+    assertEquals("simulated:http500", event.error)
+  }
+
+  @Test
+  fun `thrown error simulation with body capture on is emitted once`() {
+    val (buffer, flushed) = collectingBuffer()
+    val sim =
+      NetworkMockRuleStore.ErrorSimulationConfig(
+        errorType = "timeout",
+        limit = null,
+        remaining = null,
+        expiresAtEpochMs = 99999L,
+      )
+    val interceptor = bodyCapturingInterceptor(buffer, fakeRuleMatcher(errorSim = sim))
+
+    assertFailsWith<java.net.SocketTimeoutException> { interceptor.intercept(fakeChain()) }
+    drainDelivery()
+
+    assertEquals("simulated:timeout", (flushed.single().single() as SdkNetworkRequestEvent).error)
+  }
+
+  @Test
+  fun `a real response after a mocked one is still captured lazily and emitted once`() {
+    val (buffer, flushed) = collectingBuffer()
+    var rule: NetworkMockRuleStore.MatchedMockRule? =
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 200,
+        responseHeaders = emptyMap(),
+        responseBody = "mocked",
+        contentType = "text/plain",
+      )
+    val ruleStore =
+      object : NetworkMockRuleStore.RuleMatcher {
+        override fun findMatchingRule(host: String, path: String, method: String) = rule
+
+        override fun getErrorSimulation() = null
+      }
+    val interceptor = bodyCapturingInterceptor(buffer, ruleStore)
+
+    interceptor.intercept(fakeChain()).body.string()
+    drainDelivery()
+    assertEquals(1, flushed.size)
+
+    rule = null // the mock is consumed or cleared: the next request goes to the network
+    val real = interceptor.intercept(fakeChain(responseBody = """{"real":true}"""))
+    drainDelivery()
+    assertEquals(1, flushed.size) // the real event waits for the app to finish the body
+
+    assertEquals("""{"real":true}""", real.body.string())
+    drainDelivery()
+    assertEquals(2, flushed.size)
+    assertEquals(
+      """{"real":true}""",
+      (flushed[1].single() as SdkNetworkRequestEvent).responseBody,
+    )
+  }
 }

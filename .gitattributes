@@ -5,6 +5,7 @@ test/fixtures/android-display-config/*.txt text eol=lf
 # break the byte-exact fixture premise.
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
+test/fixtures/android-notification-policy/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/release/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf

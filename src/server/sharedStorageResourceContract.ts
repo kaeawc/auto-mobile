@@ -5,7 +5,7 @@ import {
 
 /**
  * Read-only MCP resources for files staged into a bounded, user-visible
- * Downloads namespace (the read counterpart of {@link stageSharedStorageSchema}).
+ * Downloads namespace (the read counterpart of putAppFile with target.domain user_files).
  * The namespace-list resource enumerates normalized relative paths with bounded
  * verification metadata; the file resource returns UTF-8 text or a binary blob.
  */

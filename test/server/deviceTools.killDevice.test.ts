@@ -43,6 +43,8 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -575,6 +577,18 @@ class AlreadyStoppedKillDeviceManager extends FailingKillDeviceManager {
 
   override async killDevice(): Promise<void> {
     throw new Error(this.message);
+  }
+}
+
+/** Routes the platform kill through the real Android client over a fake adb. */
+class RealAndroidClientKillDeviceManager extends FailingKillDeviceManager {
+  constructor(private readonly client: AndroidEmulatorClient) {
+    super();
+  }
+
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
+    this.killedDeviceIds.push(device.deviceId);
+    await this.client.killDevice(device, options);
   }
 }
 
@@ -5150,6 +5164,66 @@ describe("killDevice handler", () => {
       }
     },
   );
+
+  test("an unforced kill of an ADB-offline emulator is not an already-stopped result and retires nothing (#10074)", async () => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([]);
+    adb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
+    const offlineManager = new RealAndroidClientKillDeviceManager(
+      new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb)),
+    );
+    manager = offlineManager;
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => offlineManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    offlineManager.setDeviceImages("android", [image]);
+    const { pool, registry } = createRegistryWiredDevicePool(
+      sessionManager,
+      timer,
+      new FakeInstalledAppsRepository(),
+      offlineManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool, registry);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    const pooled = pool.getDevice(image.deviceId!);
+    expect(pooled).not.toBeNull();
+    const sessionUuid = registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid;
+    expect(sessionUuid).toBeDefined();
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const outcome = await tool
+      .handler({ device: { name: image.name, platform: "android", deviceId: image.deviceId! } })
+      .then(
+        (response) => ({ response }),
+        (error: unknown) => ({ error }),
+      );
+
+    expect("error" in outcome).toBe(true);
+    expect(String((outcome as { error: unknown }).error)).toContain("attached to adb");
+    expect(adb.getExecutedArgv().filter((args) => args.includes("kill"))).toEqual([]);
+    expect(pool.getDevice(image.deviceId!)).toBe(pooled);
+    expect(registry.getByDeviceId(image.deviceId!)?.deviceSessionUuid).toBe(sessionUuid);
+    expect(registry.getByUuid(sessionUuid!)).toBeDefined();
+  });
 
   test("returns success when an iOS shutdown is confirmed after its command deadline", async () => {
     const timer = new FakeTimer();

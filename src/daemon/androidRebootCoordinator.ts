@@ -1,4 +1,5 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -19,6 +20,18 @@ interface SameAvdRecoveryContext {
   recoveryImage: DeviceInfo;
   incidentId: string | undefined;
   handoffOwner: symbol;
+}
+
+function trackLateShutdowns(retainLeaseUntil: (settlement: Promise<unknown>) => void) {
+  const settlements: Promise<unknown>[] = [];
+  return {
+    retainLeaseUntil: (settlement: Promise<unknown>): void => {
+      settlements.push(settlement);
+      retainLeaseUntil(settlement);
+    },
+    settledWhen: (retained: boolean): Promise<unknown> | undefined =>
+      retained ? Promise.allSettled(settlements) : undefined,
+  };
 }
 
 export class UnconfirmedRecoveryShutdownError extends ActionableError {
@@ -65,6 +78,7 @@ export interface AndroidRebootCoordinatorPoolPort {
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
     replacementHandoffOwner: symbol,
+    lateShutdownSettled?: Promise<unknown>,
   ): void;
   stopAndroidEmulatorForRecovery(
     device: PooledDevice,
@@ -183,13 +197,17 @@ export class AndroidRebootCoordinator {
     const replacementHandoffOwner = Symbol("same-avd-recovery-handoff");
     let recoveryAttempt = 0;
     let retainRecoveryImage = false;
+    // Late kills this attempt fenced via the lifecycle lease. When the image is
+    // retained, the pool lifts it only after these settle and a fresh
+    // observation proves the AVD's state (see finishAndroidRecoveryAttempt).
+    const lateShutdowns = trackLateShutdowns(retainLeaseUntil);
     try {
       let replacementState: "stopped" | "same-avd" | "declined";
       try {
         replacementState = await this.pool.stopAndroidEmulatorForRecovery(
           device,
           avdName,
-          retainLeaseUntil,
+          lateShutdowns.retainLeaseUntil,
           allowActiveStop,
           replacementHandoffOwner,
           preservedSessionId,
@@ -265,6 +283,7 @@ export class AndroidRebootCoordinator {
         recoveryDeviceIds,
         retainRecoveryImage,
         replacementHandoffOwner,
+        lateShutdowns.settledWhen(retainRecoveryImage),
       );
     }
   }
@@ -384,6 +403,11 @@ export class AndroidRebootCoordinator {
           outcome: "succeeded",
         });
       } catch (error) {
+        if (isEmulatorLaunchCancelledError(error) && error.process) {
+          // A launch cancelled after the spawn throws instead of returning its child
+          // (#10075); adopt it so the stop step below confirms its exit.
+          childProcess = error.process;
+        }
         if (
           signal.aborted ||
           this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)

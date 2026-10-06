@@ -38,6 +38,27 @@ data class OverlayAssetLimits(
  */
 data class OverlayAssetInfo(val id: String, val mimeType: String, val byteCount: Int)
 
+/**
+ * Tells the renderer's decoded-image cache that stored assets changed. [ids] names the assets whose
+ * bytes were added, replaced or removed; null means every asset (a clear or a session change).
+ * Called while the store monitor is held, so implementations must be quick and must not call back
+ * into the store.
+ */
+fun interface OverlayAssetChangeListener {
+  fun onAssetsChanged(ids: Set<String>?)
+}
+
+/** What the renderer needs from the store: metadata, bytes, and a change signal. */
+interface OverlayAssetSource {
+  fun lookup(id: String): OverlayAssetInfo?
+
+  /** Call off the main thread. Null when unknown, or when the OS evicted the file. */
+  fun read(id: String): ByteArray?
+
+  /** Replaces the single registered listener; null unregisters. */
+  fun setChangeListener(listener: OverlayAssetChangeListener?)
+}
+
 enum class OverlayAssetRejection {
   INVALID_ID,
   UNSUPPORTED_MIME_TYPE,
@@ -82,7 +103,7 @@ class OverlayAssetStore(
   val limits: OverlayAssetLimits = OverlayAssetLimits(),
   private val session: () -> Int = { 0 },
   private val fileWorker: Executor = Executor { it.run() },
-) {
+) : OverlayAssetSource {
   private class Entry(val info: OverlayAssetInfo, val fileName: String)
 
   /** Either a slot to write into or the rejection that explains why there is none. */
@@ -104,6 +125,15 @@ class OverlayAssetStore(
   // Serializes puts and the one-time orphan purge; never taken by clear, lookup or read.
   private val putLock = Any()
   private var orphansPurged = false
+  @Volatile private var changeListener: OverlayAssetChangeListener? = null
+
+  override fun setChangeListener(listener: OverlayAssetChangeListener?) {
+    changeListener = listener
+  }
+
+  private fun notifyChanged(ids: Set<String>?) {
+    changeListener?.onAssetsChanged(ids)
+  }
 
   val count: Int
     @Synchronized
@@ -185,6 +215,8 @@ class OverlayAssetStore(
     entries[info.id] = Entry(info, reservation.fileName)
     totalBytes += info.byteCount - (replaced?.info?.byteCount ?: 0)
     replaced?.let { discardFile(it.fileName) }
+    // Also for a new id: a placeholder drawn while it was missing must now pick it up.
+    notifyChanged(setOf(info.id))
     return OverlayAssetPutResult.Stored(info, replaced != null)
   }
 
@@ -195,6 +227,7 @@ class OverlayAssetStore(
     val entry = entries.remove(id) ?: return false
     totalBytes -= entry.info.byteCount
     discardFile(entry.fileName)
+    notifyChanged(setOf(id))
     return true
   }
 
@@ -232,6 +265,7 @@ class OverlayAssetStore(
     entries.clear()
     totalBytes = 0
     names.forEach(::discardFile)
+    notifyChanged(null)
   }
 
   /** A new observer session starts with an empty store; the previous session's assets are gone. */
@@ -254,13 +288,13 @@ class OverlayAssetStore(
 
   /** Renderer lookup: null means the id is unknown, which the renderer shows as a placeholder. */
   @Synchronized
-  fun lookup(id: String): OverlayAssetInfo? {
+  override fun lookup(id: String): OverlayAssetInfo? {
     dropStaleSessionLocked()
     return entries[id]?.info
   }
 
   /** Stored bytes for [id], or null when unknown or unreadable. Call off the main thread. */
-  fun read(id: String): ByteArray? {
+  override fun read(id: String): ByteArray? {
     val fileName =
       synchronized(this) {
         dropStaleSessionLocked()

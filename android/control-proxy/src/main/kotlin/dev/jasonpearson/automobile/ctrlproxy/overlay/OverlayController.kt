@@ -14,6 +14,18 @@ import kotlinx.serialization.json.Json
 
 fun interface OverlayResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
+
+  /**
+   * A successful `show_overlay` or `update_overlay` that references assets the device does not
+   * have: a warning carried by the same single `overlay_result`, so the host can re-upload. Sinks
+   * that predate it drop the list.
+   */
+  suspend fun sendWithMissingAssets(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    missingAssets: List<String>,
+  ) = send(requestId, success, error)
 }
 
 /**
@@ -38,6 +50,10 @@ class OverlayController(
    * show replacement or a temporary lock-screen hide.
    */
   private val clearAssets: () -> Unit = {},
+  /** Whether the asset store holds [id]; `show` and `update` report referenced ids that fail. */
+  private val hasAsset: (String) -> Boolean = { true },
+  /** Decoded-image cache the rendered overlay draws `image` nodes from. */
+  private val images: OverlayImageCache? = null,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -68,6 +84,7 @@ class OverlayController(
         replace = activeRuntime != null,
         displayId = displayId ?: Display.DEFAULT_DISPLAY,
       )
+      missingAssets()
     }
 
   suspend fun update(
@@ -94,6 +111,7 @@ class OverlayController(
         ensureShowing(runtime)
         syncTextFieldFocus(runtime)
       }
+      missingAssets()
     }
 
   suspend fun dismiss(requestId: String?, id: String?, all: Boolean?) =
@@ -108,7 +126,14 @@ class OverlayController(
         notifyDetached()
         releaseAssets()
       }
+      emptyList()
     }
+
+  /** Referenced assets the store lacks, for the active spec. Never fails the request. */
+  private fun missingAssets(): List<String> {
+    val spec = activeRuntime?.current?.spec ?: return emptyList()
+    return overlayAssetReferences(spec.root).filterNot(hasAsset)
+  }
 
   private fun validate(spec: OverlaySpec): OverlaySpec {
     guardOverlayTree(spec.root)
@@ -156,7 +181,7 @@ class OverlayController(
         hasTextField = mapOverlaySpec(validated, runtime.current.pages).hasTextField,
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
-          OverlayRuntimeContent(runtime) { interaction -> interact(runtime, interaction) }
+          OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }
         },
       )
     val blocked = lifecycle.isBlocked()
@@ -226,20 +251,24 @@ class OverlayController(
       }
     }
 
-  private suspend fun execute(requestId: String?, action: suspend () -> Unit) = mutex.withLock {
-    val error =
-      try {
-        check(!destroyed) { "Overlay host destroyed" }
-        action()
-        null
-      } catch (error: CancellationException) {
-        throw error
-      } catch (error: Exception) {
-        Log.w("OverlayController", "Overlay request failed", error)
-        error.message ?: "Overlay request failed (${error.javaClass.simpleName})"
-      }
-    sink.send(requestId, error == null, error)
-  }
+  /** [action] returns the referenced asset ids the device lacks, reported as a warning. */
+  private suspend fun execute(requestId: String?, action: suspend () -> List<String>) =
+    mutex.withLock {
+      var missing = emptyList<String>()
+      val error =
+        try {
+          check(!destroyed) { "Overlay host destroyed" }
+          missing = action()
+          null
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          Log.w("OverlayController", "Overlay request failed", error)
+          error.message ?: "Overlay request failed (${error.javaClass.simpleName})"
+        }
+      if (missing.isEmpty()) sink.send(requestId, error == null, error)
+      else sink.sendWithMissingAssets(requestId, error == null, error, missing)
+    }
 
   private fun armIdle(
     runtime: OverlayRuntime,

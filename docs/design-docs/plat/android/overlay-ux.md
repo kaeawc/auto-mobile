@@ -215,9 +215,50 @@ the put with a clear error and never evicts. Removing an unknown ID succeeds. As
 sit in the CtrlProxy cache directory and are cleared when the overlay session ends:
 on any dismissal, on service start, unbind or teardown, on `dismiss_overlay` with
 `all`, and when the last client disconnects (even with no overlay showing). A show
-replacement and a temporary lock-screen hide keep them. Decoding, `contentScale`
-and the placeholder are not part of this slice: an `image` node still renders a plain
-gray box, and a nav item shows its built-in icon or a gray square.
+replacement and a temporary lock-screen hide keep them.
+
+### Rendering assets (#9301, second slice)
+
+An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the
+box and clips, `fill` stretches. Bytes are decoded off the main thread with
+`BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (the screen
+size when an axis wraps content) and never above 4 Mi pixels (16 MiB as ARGB_8888). The
+decoded-bitmap cache keys on asset id and a power-of-two size bucket, evicts least
+recently used first, and holds at most 32 MiB of decoded pixels; a single bitmap larger
+than that is drawn but not retained. A replaced, removed or cleared asset drops its
+decoded copies immediately and the nodes showing it reload; uploading an id that was
+missing makes the placeholder load it.
+
+A nav item draws its `image` when it is ready, then its built-in `icon`, then a gray
+square. While an image decodes the node shows a plain gray box. An unknown asset id, a
+file the OS evicted from the cache directory (the store still lists it but `read`
+returns null) or undecodable bytes renders a gray box with a broken-image glyph.
+
+`show_overlay` and `update_overlay` list the referenced ids the device has no copy of in
+`overlay_result.missingAssets`, in first-use order. It is a warning: `success` stays true
+and the overlay is shown with placeholders, so the host can upload the assets and the
+nodes fill in without another `show`. The field is omitted when nothing is missing and
+from every other result, so older hosts see the frame they always did. An id the store
+lists but whose file was evicted is not reported at `show` time; it renders the
+placeholder. Dismissal clearing is unchanged.
+
+Host surface: the `overlay` tool's `show` and `update` (with `spec`) take
+`assets: [{id, path}]`, an absolute daemon-readable file path per asset. The host
+reads and validates every file first (signature-detected MIME type, the contract
+limits, unique ids), then uploads sequentially before the overlay request; any
+failure fails the call before the overlay changes and names the assets already
+stored. An entry may instead be `{id, observation}`, an
+`automobile:observation/{deviceId}/{observationId}/screenshot` URI; the host reads it
+through the same handler as that resource (current-observation check, pending-capture
+wait, retention lease), which is readable by any client, so no access is widened.
+
+When `overlay_result.missingAssets` lists an id the same call uploaded (the device
+cleared its store between the upload and the show), the host re-uploads those assets
+once from the bytes it already holds and re-sends the show or update once. It never
+loops: if they are still missing, or the retry fails or is cancelled, the first
+successful result is returned with `missingAssets` and a `warning` on the tool output.
+Ids the call did not supply are only reported. See `docs/tools.md` for the result and
+deadline model.
 
 ## Actions and state
 

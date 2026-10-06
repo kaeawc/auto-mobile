@@ -5615,6 +5615,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         error: message.error,
         requestId: message.requestId,
         timestamp: message.timestamp,
+        ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
+          ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
+          : {}),
       })),
 
     highlight_response: (message) =>

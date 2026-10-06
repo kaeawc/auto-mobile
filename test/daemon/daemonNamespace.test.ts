@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
@@ -595,5 +595,82 @@ describe("--daemon stop keeps the proof a stale control socket needs (issue #101
     await h.manager.stop();
 
     expect(existsSync(h.pidPath)).toBe(false);
+  });
+});
+
+describe("--daemon stop keeping a dead record x the unit-test launch-log guard (#10107 x #10030)", () => {
+  const committed = { entryScript: "/opt/auto-mobile/index.js", buildId: "deadbeefcafef00d" };
+
+  /** A dead committed daemon (PID 301) left its record and its socket file behind. */
+  function deadCommittedDaemon(h: ReturnType<typeof harness>): void {
+    const dead: PidFileData = {
+      pid: 301,
+      socketPath: h.socket,
+      port: 3001,
+      startedAt: 1,
+      version: "test",
+      ...committed,
+    };
+    h.identity.record = dead;
+    h.identity.exists = true;
+    // The listener died with its daemon: a probe of the leftover file is refused.
+    h.identity.onProbe = () => {
+      throw new Error("connect ECONNREFUSED");
+    };
+    writeFileSync(h.pidPath, JSON.stringify(dead));
+  }
+
+  function launchLogs(): string[] {
+    const logsDir = join(isolatedDataDir!, "logs");
+    return existsSync(logsDir)
+      ? readdirSync(logsDir).filter((name) => name.startsWith("daemon-launch-"))
+      : [];
+  }
+
+  test("the kept dead record does not stop the next start, whose launch log lands in the data-dir override", async () => {
+    const h = harness();
+    deadCommittedDaemon(h);
+
+    await h.manager.stop();
+    expect(existsSync(h.pidPath)).toBe(true);
+    expect(launchLogs()).toEqual([]);
+
+    await expect(h.manager.start()).resolves.toBe("started");
+
+    expect(h.calls).toHaveLength(1);
+    expect(h.signals).toEqual([]);
+    expect(launchLogs()).toHaveLength(1);
+  });
+
+  test("without a data-dir override the guard refuses the start before spawning, and the kept record survives", async () => {
+    const h = harness();
+    deadCommittedDaemon(h);
+    await h.manager.stop();
+    const overrides = [
+      "AUTOMOBILE_DATA_DIR",
+      "AUTO_MOBILE_DATA_DIR",
+      "AUTOMOBILE_LOG_DIR",
+      "AUTO_MOBILE_LOG_DIR",
+    ];
+    const saved = overrides.map((key) => [key, process.env[key]] as const);
+    for (const key of overrides) {
+      delete process.env[key];
+    }
+    try {
+      await expect(h.manager.start()).rejects.toThrow(
+        "Unit test is about to write to the real AutoMobile logs directory",
+      );
+    } finally {
+      for (const [key, value] of saved) {
+        if (value !== undefined) {
+          process.env[key] = value;
+        }
+      }
+    }
+
+    expect(h.calls).toHaveLength(0);
+    expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(true);
+    expect(launchLogs()).toEqual([]);
   });
 });

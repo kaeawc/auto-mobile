@@ -1867,7 +1867,7 @@ describe("Explore", () => {
         });
       }
 
-      test("does not stamp the dead-end Back that navigates next", async () => {
+      test("the dead-end Back edge carries the Back itself, never the withdrawn swipe", async () => {
         const dead = await swipeWithoutNavigation();
         const press = unrecordedPress("Previous");
         try {
@@ -1876,10 +1876,16 @@ describe("Explore", () => {
           press.mockRestore();
         }
 
-        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual(
-          [],
-        );
-        expect(await historySize()).toBe(0);
+        // Two records were made (swipe, then Back); the swipe's was withdrawn before the
+        // Back was recorded, so the edge the Back created is stamped pressButton back.
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
+        expect(
+          fakeGraph
+            .getEdgesFrom("Home")
+            .map((edge) => [edge.interaction?.toolName, edge.interaction?.args]),
+        ).toEqual([["pressButton", { button: "back" }]]);
+        // Only the Back's own record is held (the fake does not consume on navigation).
+        expect(await historySize()).toBe(1);
       });
 
       test("is not attributed to resetToHome navigation", async () => {
@@ -1944,7 +1950,10 @@ describe("Explore", () => {
 
       const [edge] = fakeGraph.getEdgesFrom("Home");
       expect(edge.interaction?.toolName).toBe("tapOn");
-      expect(await historySize()).toBe(0);
+      // The tap's record was withdrawn when the dead end began; only the Back's own
+      // record is held (the fake does not consume records on navigation).
+      expect(fakeGraph.getMethodCallArgs("recordToolCall", 1)?.[0]).toBe("pressButton");
+      expect(await historySize()).toBe(1);
     });
 
     test("a failed swipe withdraws its record, and a selector-less container records nothing", async () => {
@@ -2053,7 +2062,9 @@ describe("Explore", () => {
         succeed = false;
         await run();
         expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
-        expect(await historySize()).toBe(1);
+        // The first Back caused no navigation, so the next dead end withdraws it
+        // (#9989 review); the failed second Back withdraws itself. Nothing is pending.
+        expect(await historySize()).toBe(0);
       } finally {
         warn.mockRestore();
       }

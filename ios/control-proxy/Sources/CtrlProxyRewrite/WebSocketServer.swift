@@ -632,6 +632,7 @@ final class WebSocketServer: @unchecked Sendable {
                         success: false,
                         totalTimeMs: encoded.totalTimeMs,
                         error: error.errorDescription,
+                        errorCode: original.errorCode,
                         blockingCommandType: original.blockingCommandType,
                         blockingElapsedMs: original.blockingElapsedMs,
                         blockingDeadlineRemainingMs: original.blockingDeadlineRemainingMs,

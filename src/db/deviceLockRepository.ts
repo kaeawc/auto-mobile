@@ -1,7 +1,25 @@
+import { createHash } from "node:crypto";
 import { type Kysely, sql } from "kysely";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
 import { logger } from "../utils/logger";
+
+/**
+ * What `device_identity` stores: a digest of the device identity TOGETHER with the
+ * lock type and credential it was learned with, not the bare identity. During a
+ * mixed-version window an older daemon's upsert rewrites `lock_type` and
+ * `lock_credential` but never touches `device_identity`; with a bare identity the
+ * surviving tag would vouch for another AVD's PIN after an AVD swap (#10065).
+ * Bound to the credential, an old writer's rewrite changes the inputs, the stored
+ * digest no longer matches, and the row reads as "nothing recorded". (An old
+ * writer storing the SAME credential still matches, which is harmless: that PIN
+ * is the one that unlocks.) No migration is needed: the column is unreleased.
+ */
+function identityBinding(identity: string, lockType: string, credential: string | null): string {
+  return createHash("sha256")
+    .update(JSON.stringify([identity, lockType, credential]))
+    .digest("hex");
+}
 
 /**
  * Persists how to unlock a device, keyed by `device_id` (issue #4360).
@@ -39,10 +57,14 @@ export class DeviceLockRepository {
     const db = await this.getDb();
     const row = await db
       .selectFrom("device_locks")
-      .select(["lock_credential", "device_identity"])
+      .select(["lock_type", "lock_credential", "device_identity"])
       .where("device_id", "=", deviceId)
       .executeTakeFirst();
-    return row?.device_identity === identity ? (row.lock_credential ?? null) : null;
+    if (!row?.device_identity) {
+      return null;
+    }
+    const bound = identityBinding(identity, row.lock_type, row.lock_credential ?? null);
+    return row.device_identity === bound ? (row.lock_credential ?? null) : null;
   }
 
   /**
@@ -75,20 +97,22 @@ export class DeviceLockRepository {
       // canonical format matching the column default (and still refreshes on
       // update, which a bare column default would not do).
       const now = sql<string>`(datetime('now'))`;
+      const binding =
+        identity === undefined ? null : identityBinding(identity, lockType, credential);
       await db
         .insertInto("device_locks")
         .values({
           device_id: deviceId,
           lock_type: lockType,
           lock_credential: credential,
-          device_identity: identity ?? null,
+          device_identity: binding,
           updated_at: now,
         })
         .onConflict((oc) =>
           oc.column("device_id").doUpdateSet({
             lock_type: lockType,
             lock_credential: credential,
-            device_identity: identity ?? null,
+            device_identity: binding,
             updated_at: now,
           }),
         )

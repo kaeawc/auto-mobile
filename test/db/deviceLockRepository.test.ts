@@ -81,6 +81,43 @@ describe("DeviceLockRepository device identity", () => {
     expect(await repo.getCredential("emulator-5556", "avd-c")).toBe("9999");
   });
 
+  describe("mixed-version window (an older daemon's upsert never writes device_identity)", () => {
+    /** The pre-#10065 upsert: rewrites type, credential and timestamp only. */
+    async function olderDaemonUpsert(deviceId: string, credential: string | null): Promise<void> {
+      await db
+        .updateTable("device_locks")
+        .set({ lock_type: "pin", lock_credential: credential })
+        .where("device_id", "=", deviceId)
+        .execute();
+    }
+
+    test("another AVD's PIN written by an older daemon is not replayed to the first AVD", async () => {
+      await repo.rememberLock("emulator-5554", "pin", "1111", "avd-a");
+      await olderDaemonUpsert("emulator-5554", "2222");
+
+      expect(await repo.getCredential("emulator-5554", "avd-a")).toBeNull();
+      expect(await repo.getCredential("emulator-5554", "avd-b")).toBeNull();
+    });
+
+    test("an older daemon re-storing the same PIN keeps it usable", async () => {
+      await repo.rememberLock("emulator-5554", "pin", "1111", "avd-a");
+      await olderDaemonUpsert("emulator-5554", "1111");
+
+      expect(await repo.getCredential("emulator-5554", "avd-a")).toBe("1111");
+    });
+
+    test("the stored column is a binding digest, not the raw identity", async () => {
+      await repo.rememberLock("emulator-5554", "pin", "1111", "avd-a");
+      const row = await db
+        .selectFrom("device_locks")
+        .select("device_identity")
+        .where("device_id", "=", "emulator-5554")
+        .executeTakeFirstOrThrow();
+
+      expect(row.device_identity).toMatch(/^[0-9a-f]{64}$/);
+    });
+  });
+
   test("the store passes identity through to the repository", async () => {
     const store = new DeviceLockStore(repo);
     await store.rememberLock("emulator-5554", "pin", "1234", "avd-a");

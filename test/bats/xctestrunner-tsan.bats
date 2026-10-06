@@ -79,11 +79,30 @@ run_lane() {
   run /bin/bash "${fixture}/scripts/ci/xctestrunner-tsan.sh" "$@"
 }
 
+# SIGKILL is delivered asynchronously, and an orphaned grandchild (the stubborn
+# stub's `sleep`) is reaped by init rather than by the script, so right after the
+# script exits `kill -0` can still succeed on a dying process or an unreaped
+# zombie (#9960). Poll until the pid is gone or a zombie; a process that really
+# survived the KILL stays alive for 30 seconds and still fails the bound.
+pid_is_gone() {
+  local stat
+  stat="$(ps -o stat= -p "$1" 2> /dev/null || true)"
+  stat="${stat//[[:space:]]/}"
+  [[ -z ${stat} || ${stat} == Z* ]]
+}
+
+assert_pid_gone() {
+  local attempt
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if pid_is_gone "$1"; then return 0; fi
+    sleep 0.05
+  done
+  echo "pid $1 is still running after the script exited" >&2
+  return 1
+}
+
 assert_stub_gone() {
-  local pid
-  pid="$(cat "${1:-${TSAN_PID_FILE}}")"
-  run kill -0 "${pid}"
-  [ "$status" -ne 0 ]
+  assert_pid_gone "$(cat "${1:-${TSAN_PID_FILE}}")"
 }
 
 @test "clean run saves complete output and uses sanitized simulator-free discovery and CI" {
@@ -142,13 +161,15 @@ assert_stub_gone() {
 
 @test "timeout escalates to KILL for a group ignoring TERM" {
   export TSAN_MODE=stubborn XCTESTRUNNER_TSAN_TIMEOUT_SECONDS=2
+  local started elapsed
+  started=$(date +%s)
   run_lane
+  elapsed=$(($(date +%s) - started))
   [ "$status" -eq 124 ]
+  # The stub's sleep lasts 30s and ignores TERM, so only KILL ends the run early.
+  [ "${elapsed}" -lt 20 ]
   assert_stub_gone
-  local child
-  child="$(cat "${TSAN_PID_FILE}.child")"
-  run kill -0 "${child}"
-  [ "$status" -ne 0 ]
+  assert_stub_gone "${TSAN_PID_FILE}.child"
 }
 
 @test "Swift failure without a sanitizer report propagates its exit and last start" {

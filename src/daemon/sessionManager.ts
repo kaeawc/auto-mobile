@@ -43,6 +43,7 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
+import { isLivenessOwnerLeaseLive } from "./livenessOwnerLease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 /**
@@ -276,6 +277,16 @@ export interface PreCliLivenessSnapshot {
  *   period measured in minutes, and never for a missing first heartbeat.
  */
 export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
+
+/**
+ * Result of an explicit liveness-ownership claim (#10050).
+ *
+ * - `claimed`: the token now owns (or already owned) the session.
+ * - `conflict`: a different token owns it and that owner's lease is live; nothing changed.
+ * - `superseded`: this token already claimed and was displaced; it can never reclaim.
+ * - `not-found`: the session is unknown or was replaced while the claim waited.
+ */
+export type LivenessClaimOutcome = "claimed" | "conflict" | "superseded" | "not-found";
 
 function persistedHeartbeatTimeoutSource(value: string | null | undefined): "default" | "custom" {
   return value === "custom" ? "custom" : "default";
@@ -4818,22 +4829,27 @@ export class SessionManager {
   }
 
   /**
-   * Make `ownerToken` the current liveness owner for a session.
+   * Make `ownerToken` the current liveness owner for a session, unless another
+   * token owns it with a live lease (#10050).
    *
    * This intentionally does not record activity. The request handler claims
    * ownership before applying the requested policy and recording its heartbeat,
-   * so a stale token can be rejected without changing any liveness deadline.
+   * so a rejected or stale token can be refused without changing any liveness
+   * deadline, and a rejected claim leaves the session's owner and policy intact.
    */
-  async claimLivenessOwnership(sessionId: string, ownerToken: string): Promise<boolean> {
+  async claimLivenessOwnership(
+    sessionId: string,
+    ownerToken: string,
+  ): Promise<LivenessClaimOutcome> {
     const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
-      return false;
+      return "not-found";
     }
     const mutex = this.livenessOwnershipClaimMutexFor(session);
     return await mutex.runExclusive(async () => {
       if (this.getSession(sessionId) !== session) {
-        return false;
+        return "not-found";
       }
       return await this.claimLivenessOwnershipForSession(session, ownerToken);
     });
@@ -4852,21 +4868,43 @@ export class SessionManager {
   private async claimLivenessOwnershipForSession(
     session: Session,
     ownerToken: string,
-  ): Promise<boolean> {
+  ): Promise<LivenessClaimOutcome> {
     const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
     session.livenessOwnershipClaims = processedClaims;
     if (processedClaims.has(ownerToken)) {
-      return session.livenessOwnerToken === ownerToken;
+      // A retried claim whose token has since been displaced must never take
+      // the session back, whatever the new owner's lease says.
+      return session.livenessOwnerToken === ownerToken ? "claimed" : "superseded";
+    }
+    const previousOwnerToken = session.livenessOwnerToken;
+    if (this.isForeignLiveOwner(session, ownerToken)) {
+      logger.warn(
+        `Rejected liveness ownership claim for session ${session.sessionId}: another owner holds a live lease`,
+      );
+      return "conflict";
     }
     processedClaims.add(ownerToken);
-    const previousOwnerToken = session.livenessOwnerToken;
     session.livenessOwnerToken = ownerToken;
-    return await this.persistNewLivenessOwnershipClaim(
+    await this.persistNewLivenessOwnershipClaim(
       session,
       ownerToken,
       previousOwnerToken,
       processedClaims,
     );
+    return "claimed";
+  }
+
+  /** Whether a different token owns `session` and its lease is still live. */
+  private isForeignLiveOwner(session: Session, ownerToken: string): boolean {
+    if (session.livenessOwnerToken === undefined || session.livenessOwnerToken === ownerToken) {
+      return false;
+    }
+    return isLivenessOwnerLeaseLive({
+      now: this.timer.now(),
+      lastHeartbeat: session.lastHeartbeat,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+      livenessPolicy: session.livenessPolicy,
+    });
   }
 
   private async persistNewLivenessOwnershipClaim(
@@ -4874,14 +4912,13 @@ export class SessionManager {
     ownerToken: string,
     previousOwnerToken: string | undefined,
     processedClaims: Set<string>,
-  ): Promise<boolean> {
+  ): Promise<void> {
     try {
       if (this.deviceSessionRepository.recordLivenessOwnership) {
         await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
       } else {
         await this.recordSessionActivity(session);
       }
-      return true;
     } catch (error) {
       processedClaims.delete(ownerToken);
       session.livenessOwnerToken = previousOwnerToken;

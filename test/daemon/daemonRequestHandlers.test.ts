@@ -5,7 +5,11 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  type LivenessClaimOutcome,
+  type SessionDeviceAssigner,
+} from "../../src/daemon/sessionManager";
 import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -189,7 +193,7 @@ describe("handleDaemonRequest", () => {
       sessionManager,
       new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
     );
-    const claim = Promise.withResolvers<boolean>();
+    const claim = Promise.withResolvers<LivenessClaimOutcome>();
     const ownership = spyOn(sessionManager, "claimLivenessOwnership").mockImplementation(
       () => claim.promise,
     );
@@ -205,7 +209,7 @@ describe("handleDaemonRequest", () => {
       );
       expect(ownership).toHaveBeenCalledTimes(1);
       await sessionManager.releaseSession(sessionId);
-      claim.resolve(true);
+      claim.resolve("claimed");
       expect(await response).toEqual({
         success: false,
         error: `Session not found: ${sessionId}`,
@@ -307,7 +311,7 @@ describe("handleDaemonRequest", () => {
       const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
       const state = new FakeDaemonState(sessionManager, devicePool);
       const sessionId = "liveness-owner-session";
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 10_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
 
       await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
@@ -318,7 +322,8 @@ describe("handleDaemonRequest", () => {
         }),
         state,
       );
-      fakeTimer.advanceTime(1_000);
+      // The first owner's lease must lapse or the daemon rejects the second claim (#10050).
+      fakeTimer.advanceTime(10_001);
       const claim = await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
           sessionId,
@@ -371,20 +376,22 @@ describe("handleDaemonRequest", () => {
       ).toEqual({ success: true, result: { sessionId } });
       expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
 
-      // Replaying a displaced claim remains the existing successful no-op.
+      // Replaying a displaced claim is a structured failure that records nothing (#10050).
       expect(
-        (
-          await handleDaemonRequest(
-            buildRequest("daemon/heartbeat", {
-              sessionId,
-              livenessOwnerToken: first,
-              claimLivenessOwnership: true,
-              livenessPolicy: firstPolicy,
-            }),
-            state,
-          )
-        ).success,
-      ).toBe(true);
+        await handleDaemonRequest(
+          buildRequest("daemon/heartbeat", {
+            sessionId,
+            livenessOwnerToken: first,
+            claimLivenessOwnership: true,
+            livenessPolicy: firstPolicy,
+          }),
+          state,
+        ),
+      ).toEqual({
+        success: false,
+        code: "liveness_owner_superseded",
+        error: expect.stringContaining("no longer owns"),
+      });
       expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
 
       expect(
@@ -405,6 +412,143 @@ describe("handleDaemonRequest", () => {
       });
     },
   );
+
+  describe("liveness ownership contention (#10050)", () => {
+    const sessionId = "contended-session";
+    const claimRequest = (token: string, livenessPolicy = "heartbeat") =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy,
+        livenessOwnerToken: token,
+        claimLivenessOwnership: true,
+      });
+    const tickRequest = (token: string) =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: token,
+      });
+
+    async function stateWithSession(): Promise<FakeDaemonState> {
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      return new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      );
+    }
+
+    function snapshotOf(name: string) {
+      const session = sessionManager.getSession(name)!;
+      return {
+        livenessPolicy: session.livenessPolicy,
+        livenessOwnerToken: session.livenessOwnerToken,
+        lastUsedAt: session.lastUsedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        expiresAt: session.expiresAt,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      };
+    }
+
+    test.each([
+      { owner: "proxy-a", challenger: "proxy-b" },
+      { owner: "proxy-b", challenger: "proxy-a" },
+    ])(
+      "rejects $challenger while $owner's lease is live and leaves $owner's state unchanged",
+      async ({ owner, challenger }) => {
+        const state = await stateWithSession();
+        expect((await handleDaemonRequest(claimRequest(owner), state)).success).toBe(true);
+        fakeTimer.advanceTime(5_000);
+        expect((await handleDaemonRequest(tickRequest(owner), state)).success).toBe(true);
+        const before = snapshotOf(sessionId);
+        fakeTimer.advanceTime(4_000);
+
+        // Even a claim that would widen the policy changes nothing.
+        for (const policy of ["heartbeat", "cli"]) {
+          expect(await handleDaemonRequest(claimRequest(challenger, policy), state)).toEqual({
+            success: false,
+            code: "liveness_owner_conflict",
+            error: expect.stringContaining(sessionId),
+          });
+          expect(snapshotOf(sessionId)).toEqual(before);
+        }
+
+        // The rejected challenger holds no ownership: its ticks are superseded
+        // no-ops, while the owner's tick still refreshes the lease.
+        expect(await handleDaemonRequest(tickRequest(challenger), state)).toMatchObject({
+          success: false,
+          code: "liveness_owner_superseded",
+        });
+        expect(snapshotOf(sessionId)).toEqual(before);
+        expect((await handleDaemonRequest(tickRequest(owner), state)).success).toBe(true);
+        expect(snapshotOf(sessionId)).toMatchObject({
+          livenessOwnerToken: owner,
+          lastHeartbeat: fakeTimer.now(),
+        });
+      },
+    );
+
+    test.each([
+      { owner: "proxy-a", challenger: "proxy-b" },
+      { owner: "proxy-b", challenger: "proxy-a" },
+    ])(
+      "accepts $challenger once $owner's lease has expired and never lets $owner reclaim",
+      async ({ owner, challenger }) => {
+        const state = await stateWithSession();
+        await handleDaemonRequest(claimRequest(owner), state);
+        const leaseMs = sessionManager.getSession(sessionId)!.heartbeatTimeoutMs;
+
+        // The lease is inclusive of its last millisecond.
+        fakeTimer.advanceTime(leaseMs);
+        expect(await handleDaemonRequest(claimRequest(challenger), state)).toMatchObject({
+          success: false,
+          code: "liveness_owner_conflict",
+        });
+        fakeTimer.advanceTime(1);
+        expect((await handleDaemonRequest(claimRequest(challenger), state)).success).toBe(true);
+        expect(snapshotOf(sessionId)).toMatchObject({
+          livenessOwnerToken: challenger,
+          lastHeartbeat: fakeTimer.now(),
+        });
+
+        // The displaced owner's retried claim is a structured failure, not a
+        // silent success, and records nothing, even after the new owner lapses.
+        const afterTakeover = snapshotOf(sessionId);
+        for (const elapsed of [0, leaseMs + 1]) {
+          fakeTimer.advanceTime(elapsed);
+          expect(await handleDaemonRequest(claimRequest(owner), state)).toEqual({
+            success: false,
+            code: "liveness_owner_superseded",
+            error: expect.stringContaining(sessionId),
+          });
+          expect(snapshotOf(sessionId)).toEqual(afterTakeover);
+        }
+      },
+    );
+
+    test("lets the owner's stable token claim again while its lease is live", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(claimRequest("stable-token"), state);
+      fakeTimer.advanceTime(3_000);
+
+      expect((await handleDaemonRequest(claimRequest("stable-token"), state)).success).toBe(true);
+      expect(snapshotOf(sessionId)).toMatchObject({
+        livenessOwnerToken: "stable-token",
+        livenessPolicy: "heartbeat",
+        lastHeartbeat: fakeTimer.now(),
+      });
+    });
+
+    test("does not hold a one-shot CLI owner's lease against the next invocation", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(claimRequest("cli-1", "cli"), state);
+      fakeTimer.advanceTime(1_000);
+
+      expect((await handleDaemonRequest(claimRequest("cli-2", "cli"), state)).success).toBe(true);
+      expect(snapshotOf(sessionId)).toMatchObject({ livenessOwnerToken: "cli-2" });
+    });
+  });
 
   test("reports every displaced keeper tick while a stalled proxy times out", async () => {
     const sessionId = "stalled-proxy";

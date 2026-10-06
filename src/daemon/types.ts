@@ -113,6 +113,9 @@ export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded";
 
+/** A claim from a different token was rejected because the owner's lease is live (#10050). */
+export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
+
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
 export interface BoundSessionLoss {

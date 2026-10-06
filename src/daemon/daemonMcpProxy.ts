@@ -247,6 +247,12 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   return Math.max(1, interval);
 }
 
+/** The harness-supplied stable owner token when given, otherwise a per-process one (#10050). */
+function resolveLivenessOwnerToken(config: DaemonMcpProxyConfig): string {
+  const suppliedToken = config.livenessOwnerToken?.trim();
+  return suppliedToken ? suppliedToken : (config.idGenerator ?? defaultIdGenerator).next();
+}
+
 function heartbeatLeashMs(config: DaemonMcpProxyConfig): number {
   return config.heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs();
 }
@@ -483,7 +489,14 @@ export interface DaemonMcpProxyConfig {
   clientVersion?: string;
   /** Existing device-pool session bound before the first discovery request. */
   initialSessionUuid?: string;
-  /** Supplies this proxy's stable liveness-owner token (injectable for tests). */
+  /**
+   * Harness-supplied stable liveness-owner token (`--liveness-owner-token`). A
+   * proxy restarted with the same token resumes the sessions it owned instead of
+   * being locked out by the daemon's live-owner rule (#10050). When absent the
+   * proxy mints a per-process token from `idGenerator`.
+   */
+  livenessOwnerToken?: string;
+  /** Mints the per-process liveness-owner token when none is supplied (injectable for tests). */
   idGenerator?: IdGenerator;
   /**
    * Supplies the static tool surface served by `listAdvertisedTools()` before a
@@ -963,7 +976,7 @@ export class DaemonMcpProxy {
     this.timer = config.timer ?? defaultTimer;
     this.heartbeatLeashMs = heartbeatLeashMs(config);
     this.heartbeatIntervalMs = heartbeatIntervalMs(config);
-    this.livenessOwnerToken = (config.idGenerator ?? defaultIdGenerator).next();
+    this.livenessOwnerToken = resolveLivenessOwnerToken(config);
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
       this.heartbeatIntervalMs,

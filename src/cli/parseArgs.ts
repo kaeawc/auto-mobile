@@ -62,7 +62,7 @@ const booleanOptions = Object.fromEntries(
   ].map((name) => [name, { type: "boolean" as const }]),
 );
 
-const cliOptions = {
+export const cliOptions = {
   ...booleanOptions,
   // Process-discovery marker only; namespace paths still come from launch ENV.
   "daemon-socket-path": { type: "string" as const },

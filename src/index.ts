@@ -123,6 +123,15 @@ async function main() {
     process.exit(0);
   }
 
+  // Reject an unrecognized command line before any server import or startup work,
+  // so a mistyped command cannot fall through to a silent stdio MCP wait (#10132).
+  const { findUsageError } = await import("./cli/usageError");
+  const usageError = findUsageError(rawArgs);
+  if (usageError !== undefined) {
+    console.error(`auto-mobile: ${usageError}`);
+    process.exit(1);
+  }
+
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer, registerMcpTools } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");

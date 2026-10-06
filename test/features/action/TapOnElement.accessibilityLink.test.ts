@@ -145,3 +145,76 @@ describe("tapOn semantic link outcomes", () => {
     }
   }
 });
+
+describe("tapOn semantic link runner warning (#10082)", () => {
+  const OWNER_NOTE =
+    "Using owner 'row-a', the first of 2 candidate owners; scope with container/subtext for a specific owner.";
+
+  for (const scoped of [false, true]) {
+    for (const warning of [OWNER_NOTE, undefined]) {
+      test(`ios ${scoped ? "subtext" : "accessibilityLink"}: runner warning ${warning ? "reaches" : "is absent from"} the tool result`, async () => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const ios = new FakeIOSCtrlProxy();
+        const iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+          ios as unknown as IOSCtrlProxyClient,
+        );
+        const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
+          ios as unknown as IOSCtrlProxyClient,
+        );
+        const activate = spyOn(ios, "requestActivateAccessibilityLink").mockResolvedValue({
+          success: true,
+          action: "activate_accessibility_link",
+          totalTimeMs: 1,
+          dispatched: true,
+          acknowledged: true,
+          ...(warning ? { warning } : {}),
+        });
+        const element: Element = {
+          text: "Owner",
+          "resource-id": "owner",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        };
+        const observation: ObserveResult = {
+          timestamp: 1,
+          screenSize: { width: 100, height: 100 },
+          viewHierarchy: { hierarchy: { node: element } },
+          systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+        };
+        const tap = new TapOnElement(
+          { deviceId: "semantic-link-warning", name: "Test Device", platform: "ios" },
+          new FakeAdbClient(),
+          {
+            timer,
+            hierarchyCapture: new FakeHierarchyCapture(() => observation.viewHierarchy!, "ios"),
+            accessibilityDetector: new FakeAccessibilityDetector(),
+            iosVoiceOverDetector: new FakeIosVoiceOverDetector(),
+            selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+          },
+        );
+        const capture = spyOn(tap, "prepareSelectionCapture").mockResolvedValue(null);
+        tap.observedInteraction = async (run) => run(observation);
+        try {
+          const outcome = await tap.execute({
+            action: "tap",
+            ...(scoped
+              ? { text: "Owner", subtext: { text: "Terms" } }
+              : { accessibilityLink: "Terms" }),
+          });
+          expect(outcome.success).toBe(true);
+          expect(activate).toHaveBeenCalledTimes(1);
+          if (warning) {
+            expect(outcome.warnings).toEqual([warning]);
+          } else {
+            expect(outcome).not.toHaveProperty("warnings");
+          }
+        } finally {
+          for (const spy of [capture, activate, iosInstance, iosExisting]) {
+            spy.mockRestore();
+          }
+        }
+      });
+    }
+  }
+});

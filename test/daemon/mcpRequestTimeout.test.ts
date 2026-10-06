@@ -1561,6 +1561,29 @@ describe("argument budget deadline gaps", () => {
         ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
       }
     });
+    test("showVariants waitForSelection gets the default wait plus headroom", () => {
+      const waiting = { action: "showVariants", id: "panel", waitForSelection: true };
+      expect(resolve(waiting)).toBe(DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+      expect(resolve(waiting)).toBeGreaterThan(DEFAULT_OVERLAY_EVENT_TIMEOUT_MS);
+      // timeoutMs bounds only the show request, never the selection wait.
+      for (const timeoutMs of [5, 45_000, 600_000, ...MALFORMED_MCP_BUDGETS]) {
+        expect(resolve({ ...waiting, timeoutMs })).toBe(
+          DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+        );
+      }
+    });
+    test("showVariants without a true waitForSelection keeps the default deadline", () => {
+      for (const waitForSelection of [undefined, false, "true", 1, null]) {
+        expect(resolve({ action: "showVariants", id: "panel", waitForSelection })).toBe(
+          DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+        );
+      }
+    });
+    test("a larger request timeout still wins over the showVariants wait", () => {
+      expect(
+        resolve({ action: "showVariants", id: "panel", waitForSelection: true }, 1_000_000),
+      ).toBe(1_000_000);
+    });
   });
   test("putAppFile legacy single-file shape uses one push floor", () => {
     expect(

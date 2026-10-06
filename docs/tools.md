@@ -570,11 +570,43 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 The Android-only `overlay` tool is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
-`show`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; use a replacement spec to change it.
+
+`showVariants` requires `id` and a nonempty `variants` array (maximum 12).
+Each variant is `{ label?, image: { asset, contentScale? } }` or
+`{ label?, spec: OverlayNode }`, with exactly one content field. Labels are
+limited to 256 characters; image scale is `fit`, `crop`, or `fill`. Image assets
+must already exist as opaque IDs. File paths, URLs, screenshot references, and
+uploads require the missing asset transport (#9301) and are rejected. Repeated
+asset IDs are allowed; each image use counts toward the contract image limit.
+
+`presentation` defaults to `fullscreen`, showing each alternative with controls.
+`floating` shows only controls over the live app; it does not apply the variant
+content. All supplied content is validated before floating omission. Floating-only
+`gravity` and `offset` default to `bottomCenter` and `{ x: 0, y: 0 }`. Optional
+integer `opacity` (0–100) passes to `window.opacity`; omission uses the spec
+default. The generated horizontal pager has controls inside each page:
+`◀ {page}/{pageCount} ▶ ✓`. Pick emits `selected` with static zero-based
+`{ index, label? }`, without dismissing the overlay. The carousel is shown through
+the normal `show` path, so like any show it replaces another shown overlay on the
+device and starts a fresh event sequence.
+
+By default `showVariants` returns the normal show result immediately. Then use
+`awaitEvent` with `id` and `eventName: "selected"`, or set `waitForSelection: true`
+to wait after a successful show. `timeoutMs` bounds the show request only; the
+selection wait uses the existing 30000 ms event-wait default, and the MCP request
+deadline for such a call is that wait plus 30 s of headroom. The wait is the
+`awaitEvent` wait, so cancellation, timeout, session release, device removal and a
+device-side dismissal all settle it. The combined result
+retains `lastResult` and event/count fields, and adds `selection: { index, label? }`
+only on a valid pick. The payload index and label must match a shown variant;
+malformed payloads return `success: false` with a clear error. Timeout and dismissal
+without a pick retain `timedOut: true` and `reason: "dismissed"`, respectively,
+with no selection. Cancellation and progress notifications match `awaitEvent`.
 
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests

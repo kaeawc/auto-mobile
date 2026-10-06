@@ -376,9 +376,21 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
 }
 
 function resolveOverlayAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits; every other overlay action keeps the default deadline. The
-  // tool's own maximum bounds the wait, so a larger value (rejected by its schema anyway)
-  // cannot inflate the deadline past that maximum plus headroom.
+  // Only `awaitEvent` and `showVariants` with `waitForSelection: true` wait; every other
+  // overlay action keeps the default deadline. The tool's own maximum bounds the wait, so a
+  // larger value (rejected by its schema anyway) cannot inflate the deadline past that maximum
+  // plus headroom.
+  if (args.action === "showVariants") {
+    // The selection wait is always the default event wait, independent of the show's
+    // `timeoutMs`; the headroom absorbs the show request that precedes it.
+    return args.waitForSelection === true
+      ? resolveArgumentTimeoutBudgetMs(
+          DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+          DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+          WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+        )
+      : 0;
+  }
   if (args.action !== "awaitEvent") {
     return 0;
   }

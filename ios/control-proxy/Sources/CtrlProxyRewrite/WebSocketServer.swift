@@ -65,7 +65,9 @@ enum QueuedCommandDisposition: Equatable {
 /// sender is gone, or whose host-side wait has already ended, must not touch the device.
 func queuedCommandDisposition(
     expiresAtMs: Int64?, nowMs: Int64, isConnectionOpen: Bool
-) -> QueuedCommandDisposition {
+)
+    -> QueuedCommandDisposition
+{
     guard isConnectionOpen else { return .connectionClosed }
     if let expiresAtMs, nowMs >= expiresAtMs { return .expired(expiresAtMs: expiresAtMs) }
     return .run

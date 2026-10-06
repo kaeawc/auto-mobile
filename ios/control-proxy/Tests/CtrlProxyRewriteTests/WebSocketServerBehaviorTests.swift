@@ -165,7 +165,8 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         wait(for: [started], timeout: 2)
         clock.advance(by: 1000)
         server.dispatchCommand(
-            Data(#"{"type":"request_rotate","requestId":"rotate","orientation":"landscape","timeoutMs":5000}"#.utf8), responder: queued
+            Data(#"{"type":"request_rotate","requestId":"rotate","orientation":"landscape","timeoutMs":5000}"#.utf8),
+            responder: queued
         )
         clock.advance(by: 7000)
         release.signal()
@@ -203,7 +204,10 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         )
         wait(for: [started], timeout: 2)
         clock.advance(by: 1000)
-        server.dispatchCommand(Data(#"{"type":"request_rotate","requestId":"legacy","orientation":"landscape"}"#.utf8), responder: second)
+        server.dispatchCommand(
+            Data(#"{"type":"request_rotate","requestId":"legacy","orientation":"landscape"}"#.utf8),
+            responder: second
+        )
         clock.advance(by: 7000)
         release.signal()
         wait(for: [secondDone], timeout: 2)

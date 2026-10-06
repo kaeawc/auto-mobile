@@ -1429,7 +1429,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
       commitResult = result;
       if (result.success && mode === "ime") {
-        const error = await this.verifyImeCommit(text, routing);
+        const error = await this.verifyImeCommit(text, routing, operation);
         if (error !== undefined) {
           return {
             outcome: {
@@ -1478,6 +1478,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async verifyImeCommit(
     text: string,
     routing: ImeCommitRouting,
+    operation: SendKeysOperation,
   ): Promise<string | undefined> {
     if (text.length === 0) {
       return undefined;
@@ -1503,7 +1504,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         if (this.imeReadBackLacksRequiredFocus(observation, routing)) {
           return ANDROID_TYPE_FOCUSED_INPUT_ERROR;
         }
-        const committedText = this.readFocusedText(observation);
+        const committedText = this.readImeCommitText(observation, operation);
         if (committedText === undefined) {
           return undefined;
         }
@@ -1539,6 +1540,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       observation.viewHierarchy !== undefined &&
       !hasFocusedTextInput(observation.viewHierarchy)
     );
+  }
+
+  private readImeCommitText(
+    observation: ObserveResult,
+    operation: SendKeysOperation,
+  ): string | undefined {
+    const text = this.readFocusedText(observation);
+    // Replace read-back must not report an Android placeholder as delivered text.
+    if (text !== undefined && operation === "replace") {
+      return this.readFocusedTextSnapshot(observation)?.length === 0 ? "" : text;
+    }
+    return text;
   }
 
   private describeImeCommitFailure(result: TextActionResult): TextActionResult {

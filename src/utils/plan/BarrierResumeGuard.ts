@@ -1,5 +1,7 @@
 import { ActionableError } from "../../models";
 import { Plan, PlanStep } from "../../models/Plan";
+import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 
 /**
  * A contiguous span of plan indices that must be resumed *as a unit* — the
@@ -15,9 +17,16 @@ interface GenerationSpan {
   firstIndex: number;
   /** Plan index of the last arrival in this generation. */
   lastIndex: number;
+  /** Every arrival of the generation, one per participating track. */
+  arrivals: Arrival[];
 }
 
 const COORDINATION_TOOLS = new Set(["barrier", "criticalSection"]);
+
+/** True for the plan tools that rendezvous several device tracks. */
+export function isCoordinationTool(tool: string): boolean {
+  return COORDINATION_TOOLS.has(tool);
+}
 
 /**
  * Resolve a coordination field (`lock`/`deviceCount`) honoring PlanNormalizer's
@@ -39,6 +48,8 @@ interface Arrival {
   deviceCount: number | undefined;
   /** The device label (`params.device`) whose track executes this arrival. */
   device: string | undefined;
+  /** The coordination tool (`barrier` or `criticalSection`) of this arrival. */
+  tool: string;
 }
 
 /**
@@ -150,7 +161,27 @@ function spansForLock(lock: string, arrivals: Arrival[]): GenerationSpan[] {
 
 /** The span of a single arrival that completes its generation by itself. */
 function singletonSpan(lock: string, arrival: Arrival): GenerationSpan {
-  return { lock, firstIndex: arrival.planIndex, lastIndex: arrival.planIndex };
+  return { lock, firstIndex: arrival.planIndex, lastIndex: arrival.planIndex, arrivals: [arrival] };
+}
+
+/**
+ * `spansForLock`, or no spans when the caller opted to tolerate an
+ * unrecoverable shape (`onInvalidLock`) instead of failing the whole plan.
+ */
+function spansForLockOrSkip(
+  lock: string,
+  arrivals: Arrival[],
+  onInvalidLock?: (lock: string, error: unknown) => void,
+): GenerationSpan[] {
+  if (onInvalidLock === undefined) {
+    return spansForLock(lock, arrivals);
+  }
+  try {
+    return spansForLock(lock, arrivals);
+  } catch (error) {
+    onInvalidLock(lock, error);
+    return [];
+  }
 }
 
 function invalidBarrierRecoveryShape(lock: string, reason: string): ActionableError {
@@ -204,7 +235,7 @@ function spanForArrivals(lock: string, arrivals: Arrival[]): GenerationSpan {
       lastIndex = planIndex;
     }
   }
-  return { lock, firstIndex, lastIndex };
+  return { lock, firstIndex, lastIndex, arrivals };
 }
 
 function readDeviceCount(step: PlanStep): number | undefined {
@@ -238,7 +269,10 @@ function pushArrival(bucket: Map<string, Arrival[]>, lock: string, arrival: Arri
  * rendezvous (validation enforces exactly `deviceCount` steps, one per device),
  * so all its steps form one generation.
  */
-function collectGenerationSpans(plan: Plan): GenerationSpan[] {
+function collectGenerationSpans(
+  plan: Plan,
+  onInvalidLock?: (lock: string, error: unknown) => void,
+): GenerationSpan[] {
   const barrierArrivals = new Map<string, Arrival[]>();
   const criticalSectionArrivals = new Map<string, Arrival[]>();
 
@@ -256,12 +290,13 @@ function collectGenerationSpans(plan: Plan): GenerationSpan[] {
       planIndex,
       deviceCount: readDeviceCount(step),
       device: readDevice(step),
+      tool: step.tool,
     });
   }
 
   const spans: GenerationSpan[] = [];
   for (const [lock, arrivals] of barrierArrivals.entries()) {
-    spans.push(...spansForLock(lock, arrivals));
+    spans.push(...spansForLockOrSkip(lock, arrivals, onInvalidLock));
   }
   for (const [lock, arrivals] of criticalSectionArrivals.entries()) {
     // A criticalSection lock is one rendezvous: every step sharing it belongs to
@@ -272,6 +307,7 @@ function collectGenerationSpans(plan: Plan): GenerationSpan[] {
         lock,
         firstIndex: arrivals[0].planIndex,
         lastIndex: arrivals[arrivals.length - 1].planIndex,
+        arrivals,
       });
     }
   }
@@ -434,4 +470,67 @@ export function computeSafeBarrierResumeStep(plan: Plan, startStep: number): num
     return 0;
   }
   return safe;
+}
+
+/** A surviving track's coordination step that can no longer be satisfied. */
+export interface BlockedArrival {
+  /** Plan index of the arrival. */
+  planIndex: number;
+  /** Device label of the surviving track that would arrive. */
+  device: string;
+  lock: string;
+  /** `barrier` or `criticalSection`. */
+  tool: string;
+}
+
+/**
+ * The other tracks' arrivals that a terminally failed track will never be
+ * joined by (issue #10025).
+ *
+ * A track that ended in failure at plan step `failedStepIndex` makes no later
+ * arrival of its own. Every barrier/criticalSection generation that still holds
+ * such an arrival can therefore never reach `deviceCount`, so the partner
+ * arrivals in it would otherwise wait out the full coordination timeout.
+ * Generations the failed track already passed, or is not part of, are not
+ * returned: a participant that is merely slow, or a pair that never needed the
+ * failed track, keeps running.
+ *
+ * The failing step itself is excluded (a failing coordination step already
+ * releases its own waiters). An unknown position (negative index) yields
+ * nothing so the caller falls back to the ordinary timeout instead of guessing.
+ */
+export function findArrivalsBlockedByFailedTrack(
+  plan: Plan,
+  failedDevice: string,
+  failedStepIndex: number,
+): BlockedArrival[] {
+  if (failedStepIndex < 0) {
+    return [];
+  }
+  const spans = collectGenerationSpans(plan, (lock, error) => {
+    logger.warn(
+      `Cannot tell which arrivals at "${lock}" depend on failed track "${failedDevice}": ${errorMessage(error)}`,
+      error,
+    );
+  });
+  return spans
+    .filter((span) =>
+      span.arrivals.some(
+        (arrival) => arrival.device === failedDevice && arrival.planIndex > failedStepIndex,
+      ),
+    )
+    .flatMap((span) =>
+      span.arrivals.flatMap((arrival) =>
+        arrival.device !== undefined && arrival.device !== failedDevice
+          ? [
+              {
+                planIndex: arrival.planIndex,
+                device: arrival.device,
+                lock: span.lock,
+                tool: arrival.tool,
+              },
+            ]
+          : [],
+      ),
+    );
 }

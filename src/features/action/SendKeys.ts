@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   resolveTextCtrlProxyTimeoutMs,
   getTextRequestDeadlineMs,
@@ -89,6 +90,15 @@ const CLEAR_UNCHANGED_WARNING =
   "The field still shows its pre-clear text after the clear was acknowledged; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.";
 
 class ImeRestorationError extends Error {}
+
+function isImeRestorationFailure(error: unknown): boolean {
+  return (
+    error instanceof ImeRestorationError ||
+    (error instanceof AggregateError &&
+      error.errors.some((entry) => entry instanceof ImeRestorationError))
+  );
+}
+
 class SendKeysBudgetError extends Error {
   constructor() {
     super(
@@ -263,8 +273,15 @@ interface SendKeysFailure {
   error: string;
 }
 
+interface SendKeysCommandExecution {
+  results: SendKeysCommandResult[];
+  failure?: SendKeysFailure;
+  restorationFailed?: boolean;
+}
+
 export interface SendKeysCommandExecutor {
   resetCaretState?(): void;
+  withImeSpan?(action: () => Promise<SendKeysCommandExecution>): Promise<SendKeysCommandExecution>;
   type(
     command: SendKeysTypeCommand,
     signal?: AbortSignal,
@@ -432,6 +449,16 @@ interface ActiveImeCommitOptions {
   mode?: "ime" | "imeKeyEvents";
 }
 
+type ImeSpanSnapshot = Pick<ActiveImeCommitOptions, "prior" | "wasEnabled" | "priorSubtype">;
+
+interface AndroidImeSpan {
+  snapshot?: ImeSpanSnapshot;
+  safeToRestore: boolean;
+  restorationFailed?: boolean;
+  releaseLock?: () => void;
+  lockCompletion?: Promise<void>;
+}
+
 interface AndroidTypeOptions {
   text: string;
   operation: SendKeysOperation;
@@ -450,6 +477,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly timer: Timer;
   private androidKeyCombinationSupported: Promise<boolean> | undefined;
   private androidCaretUnsafe = false;
+  private readonly imeSpanContext = new AsyncLocalStorage<AndroidImeSpan>();
+
+  private get imeSpan(): AndroidImeSpan | undefined {
+    return this.imeSpanContext.getStore();
+  }
 
   // IME-mode typing captures the prior IME and profile, then restores both. The shared
   // per-device lock also protects persistent keyboard selection from a concurrent restore.
@@ -465,6 +497,111 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     this.timer = dependencies.timer ?? defaultTimer;
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
+  }
+
+  async withImeSpan(
+    action: () => Promise<SendKeysCommandExecution>,
+  ): Promise<SendKeysCommandExecution> {
+    // Scope state to this call, including concurrent calls sharing this executor.
+    return this.imeSpanContext.run({ safeToRestore: true }, () => this.finishImeSpan(action));
+  }
+
+  private async acquireImeSpan(span: AndroidImeSpan, signal?: AbortSignal): Promise<void> {
+    if (span.releaseLock) {
+      return;
+    }
+    const admission = Promise.withResolvers<void>();
+    const active = Promise.withResolvers<void>();
+    // Keep the existing shared mutex callback alive until the loop's finally restores.
+    // Acquire lazily so non-IME commands never inherit IME admission/quarantine failures.
+    const completion = withAndroidImeLock(
+      this.device.deviceId,
+      async () => {
+        span.releaseLock = active.resolve;
+        admission.resolve();
+        await active.promise;
+      },
+      signal,
+      { recoverQuarantined: (snapshot) => this.verifySafeImeRecovery(snapshot, signal) },
+    );
+    void completion.catch(admission.reject);
+    await admission.promise;
+    span.lockCompletion = completion;
+  }
+
+  private async finishImeSpan(
+    action: () => Promise<SendKeysCommandExecution>,
+  ): Promise<SendKeysCommandExecution> {
+    let execution: SendKeysCommandExecution | undefined;
+    let failure: unknown;
+    try {
+      execution = await action();
+    } catch (error) {
+      logger.warn("[SendKeys] IME command span failed", error);
+      failure = error;
+    } finally {
+      try {
+        await this.restoreImeSpan();
+      } catch (restoreError) {
+        logger.warn("[SendKeys] IME span restoration failed", restoreError);
+        if (failure !== undefined) {
+          throw new AggregateError(
+            [failure, restoreError],
+            `${errorMessage(failure)}; ${errorMessage(restoreError)}`,
+          );
+        }
+        this.reportImeSpanRestoreFailure(execution!, restoreError);
+      }
+    }
+    if (failure !== undefined) {
+      throw failure;
+    }
+    execution!.restorationFailed = execution!.restorationFailed || this.imeSpan?.restorationFailed;
+    return execution!;
+  }
+
+  private reportImeSpanRestoreFailure(
+    execution: SendKeysCommandExecution,
+    restoreError: unknown,
+  ): void {
+    // Prefer the IME-backed type whose commit needed the restore; a span whose types all
+    // resolved elsewhere still reports the failure on the last command rather than crashing.
+    const result =
+      execution.results.findLast(
+        (entry) =>
+          entry.action === "type" &&
+          (entry.resolvedMode === "ime" || entry.resolvedMode === "imeKeyEvents"),
+      ) ?? execution.results.at(-1)!;
+    result.error = result.success
+      ? `Text commit succeeded, but ${errorMessage(restoreError)}`
+      : `${result.error ?? "Text commit failed."} ${errorMessage(restoreError)}`;
+    result.success = false;
+    execution.failure = { index: result.index, error: result.error };
+    execution.restorationFailed = true;
+  }
+
+  private async restoreImeSpan(): Promise<void> {
+    const span = this.imeSpan;
+    if (!span) {
+      return;
+    }
+    const snapshot = span.snapshot;
+    // Consume the snapshot before cleanup so a failed restore is never retried implicitly.
+    span.snapshot = undefined;
+    try {
+      if (snapshot && span.safeToRestore) {
+        await this.restoreIme(snapshot.prior, snapshot.wasEnabled, snapshot.priorSubtype);
+      }
+    } catch (error) {
+      span.restorationFailed = true;
+      logger.warn("[SendKeys] Active IME span restoration failed", error);
+      throw error;
+    } finally {
+      span.releaseLock?.();
+      span.releaseLock = undefined;
+      await span.lockCompletion;
+      span.lockCompletion = undefined;
+    }
   }
 
   async type(
@@ -536,7 +673,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       };
     } catch (error) {
       // A restore failure still needs its recovery instruction after cancellation.
-      if (!this.isImeRestorationFailure(error)) {
+      if (!isImeRestorationFailure(error)) {
         this.checkAbort(signal, error);
       }
       logger.warn("[SendKeys] Text command failed", error);
@@ -557,14 +694,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           keyboard: { component: this.commitImeId, package: AUTO_MOBILE_IME_ID.split("/")[0] },
         }
       : {};
-  }
-
-  private isImeRestorationFailure(error: unknown): boolean {
-    return (
-      error instanceof ImeRestorationError ||
-      (error instanceof AggregateError &&
-        error.errors.some((entry) => entry instanceof ImeRestorationError))
-    );
   }
 
   private validateTypeCommand(command: SendKeysTypeCommand): string | null {
@@ -969,6 +1098,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       focusedInputVerified = false,
     } = options;
     const { signal, display } = routing;
+    await this.prepareTypingMode(mode, signal);
     if (operation === "replace") {
       this.resetCaretState();
     }
@@ -999,6 +1129,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           routing,
           "imeKeyEvents",
         );
+    }
+  }
+
+  private async prepareTypingMode(mode: AndroidSendKeysTypingMode, signal?: AbortSignal) {
+    // A non-IME typing mode ends the span BEFORE delivery. A later IME type may
+    // reactivate; interleaved key/clear commands deliberately retain the active IME.
+    if (mode !== "ime" && mode !== "imeKeyEvents") {
+      await this.restoreImeSpan();
+      this.checkAbort(signal);
     }
   }
 
@@ -1047,6 +1186,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   > {
     const { signal } = routing;
     signal?.throwIfAborted();
+    if (this.imeSpan) {
+      await this.acquireImeSpan(this.imeSpan, signal);
+      return this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode);
+    }
     // Serialize the whole capture→activate→commit→restore section per device so a
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
     return withAndroidImeLock(
@@ -1129,6 +1272,27 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { ...profileSupport, resolvedMode: mode };
     }
 
+    const captured = await this.captureImeSpanSnapshot(signal);
+    if (!captured.success) {
+      return captured;
+    }
+
+    return this.commitWithActiveIme({
+      text,
+      operation,
+      keyboardProfile,
+      ...captured.snapshot,
+      routing,
+      mode,
+    });
+  }
+
+  private async captureImeSpanSnapshot(
+    signal?: AbortSignal,
+  ): Promise<{ success: true; snapshot: ImeSpanSnapshot } | { success: false; error: string }> {
+    if (this.imeSpan?.snapshot) {
+      return { success: true, snapshot: this.imeSpan.snapshot };
+    }
     const priorResult = await this.readDefaultIme();
     this.checkAbort(signal);
     if (!priorResult.success) {
@@ -1144,16 +1308,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
     const priorSubtype = await catalog.readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal);
 
-    return this.commitWithActiveIme({
-      text,
-      operation,
-      keyboardProfile,
-      prior,
-      wasEnabled,
-      priorSubtype,
-      routing,
-      mode,
-    });
+    return { success: true, snapshot: { prior, wasEnabled, priorSubtype } };
   }
 
   private async commitWithActiveIme(
@@ -1183,7 +1338,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       this.checkAbort(signal);
     }
 
-    if (!(await this.activateCommitIme(wasEnabled))) {
+    if (!(await this.activateCommitImeForSpan(options))) {
       let restoreFailure: string | undefined;
       try {
         await this.restoreIme(prior, wasEnabled, priorSubtype);
@@ -1216,6 +1371,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       throw failure;
     }
     return outcome!;
+  }
+
+  private async activateCommitImeForSpan(options: ActiveImeCommitOptions): Promise<boolean> {
+    if (this.imeSpan?.snapshot) {
+      return true;
+    }
+    const activated = await this.activateCommitIme(options.wasEnabled);
+    if (activated && this.imeSpan) {
+      const { prior, wasEnabled, priorSubtype } = options;
+      this.imeSpan.snapshot = { prior, wasEnabled, priorSubtype };
+    }
+    return activated;
   }
 
   private async performImeCommit(
@@ -1424,7 +1591,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     mode: "ime" | "imeKeyEvents",
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     try {
-      await this.restoreIme(prior, wasEnabled, priorSubtype);
+      if (!this.imeSpan) {
+        await this.restoreIme(prior, wasEnabled, priorSubtype);
+      }
     } catch (restoreError) {
       const restoreMessage = errorMessage(restoreError);
       if (failure !== undefined) {
@@ -1462,6 +1631,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     subtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
   ): boolean {
     if (result.sessionUnsafe) {
+      if (this.imeSpan) {
+        this.imeSpan.safeToRestore = false;
+      }
       quarantineAndroidIme(
         this.device.deviceId,
         prior === null
@@ -2678,13 +2850,20 @@ export class SendKeys {
         },
       });
     } catch (error) {
-      signal?.throwIfAborted();
+      if (!isImeRestorationFailure(error)) {
+        signal?.throwIfAborted();
+      }
       if (!isSendKeysBudgetExhausted(combined)) {
         // Preserve the same error identity as the no-deadline path.
         throw error;
       }
       logger.warn("[SendKeys] Request budget exhausted", error);
-      return this.budgetResult(commands.length, results, pending, remainingMs <= 0);
+      const result = this.budgetResult(commands.length, results, pending, remainingMs <= 0);
+      if (isImeRestorationFailure(error)) {
+        result.success = false;
+        result.error = `${result.error ?? "Text commit succeeded, but"} ${errorMessage(error)}`;
+      }
+      return result;
     } finally {
       if (handle !== undefined) {
         this.timer.clearTimeout(handle);
@@ -2957,7 +3136,7 @@ export class SendKeys {
 
   private terminalCommandFailure(
     commandCount: number,
-    execution: { results: SendKeysCommandResult[]; failure?: SendKeysFailure },
+    execution: SendKeysCommandExecution,
     signal?: AbortSignal,
   ): SendKeysResult | undefined {
     if (execution.failure && isSendKeysBudgetExhausted(signal)) {
@@ -2966,7 +3145,10 @@ export class SendKeys {
         warning: `Request budget exhausted: ${commandCount - execution.results.length} command(s) not sent. Already delivered commands are not rolled back.`,
       };
     }
-    if (execution.results.some((result) => result.retryable === false)) {
+    if (
+      execution.restorationFailed ||
+      execution.results.some((result) => result.retryable === false)
+    ) {
       return this.buildResult(execution.results, execution.failure);
     }
     return undefined;
@@ -3130,7 +3312,45 @@ export class SendKeys {
     progress?: ProgressCallback,
     signal?: AbortSignal,
     routing: SendKeysRouting = {},
-  ): Promise<{ results: SendKeysCommandResult[]; failure?: SendKeysFailure }> {
+  ): Promise<SendKeysCommandExecution> {
+    const results: SendKeysCommandResult[] = [];
+    const action = () =>
+      this.executeCommandLoop(commands, progress, signal, {
+        ...routing,
+        onCommandResult: (result) => {
+          results.push(result);
+          routing.onCommandResult?.(result);
+        },
+      });
+    const needsImeSpan = commands.some(
+      (command) =>
+        command.action === "type" &&
+        ["auto", "ime", "imeKeyEvents"].includes(command.mode ?? "auto"),
+    );
+    try {
+      return await (this.device.platform === "android" && needsImeSpan && this.executor.withImeSpan
+        ? this.executor.withImeSpan(action)
+        : action());
+    } catch (error) {
+      if (!isImeRestorationFailure(error) || isSendKeysBudgetExhausted(signal)) {
+        // Budget failures retain the delivery accounting in executeWithRequestBudget.
+        throw error;
+      }
+      logger.warn("[SendKeys] Command execution and IME restoration failed", error);
+      return {
+        results,
+        failure: { index: results.length, error: errorMessage(error) },
+        restorationFailed: true,
+      };
+    }
+  }
+
+  private async executeCommandLoop(
+    commands: SendKeysCommand[],
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    routing: SendKeysRouting = {},
+  ): Promise<SendKeysCommandExecution> {
     const results: SendKeysCommandResult[] = [];
     for (let index = 0; index < commands.length; index++) {
       signal?.throwIfAborted();

@@ -331,7 +331,7 @@ interface CtrlProxyActions {
 
   fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
 
-  fun showOverlay(requestId: String?, spec: OverlaySpec)
+  fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?)
 
   fun updateOverlay(
     requestId: String?,

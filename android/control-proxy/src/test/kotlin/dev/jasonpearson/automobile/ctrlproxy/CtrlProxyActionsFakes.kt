@@ -151,7 +151,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) {}
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec) {}
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {}
 
   override fun updateOverlay(
     requestId: String?,
@@ -496,8 +496,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     record("addHighlight", requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec) =
-    record("showOverlay", requestId, spec)
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) =
+    record("showOverlay", requestId, spec, displayId)
 
   override fun updateOverlay(
     requestId: String?,

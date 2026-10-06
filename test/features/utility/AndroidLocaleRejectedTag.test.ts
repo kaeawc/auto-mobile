@@ -51,7 +51,7 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
       "x-private",
       "fr-FR,de-DE",
       "qaa",
-      "zz",
+      "i-klingon",
     ]) {
       it(`rejects ${JSON.stringify(tag)} without sending any command`, async () => {
         const outcome = await adapter.setLocale(tag, { broadcast: false, appId: APP });
@@ -86,8 +86,10 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
       );
       expect(setCommands()).toEqual([
         `shell ${SET_APP} --locales 'fr-FR'`,
-        // No --locales clears the override.
-        `shell ${SET_APP}`,
+        // An empty --locales clears the override: the form the repo's probe
+        // script uses (`--locales ""`), quoted so the empty word survives the
+        // device shell.
+        `shell ${SET_APP} --locales ''`,
       ]);
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     });
@@ -163,6 +165,143 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
     });
   });
 
+  describe("unreadable read-back is indeterminate, not a failed apply", () => {
+    it("does not restore the app locale when the read-back cannot be parsed", async () => {
+      adb.setCommandResponseSequence(GET_APP, [
+        appLocales("en-US"),
+        result("Unknown package com.example.app for userId 0\n"),
+      ]);
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toContain("Locale change outcome is indeterminate");
+      expect(outcome.error).toContain(`"fr-FR" was sent`);
+      expect(outcome.error).toContain('previously "en-US"');
+      expect(outcome.error).toContain("Do not retry automatically");
+      expect(setCommands()).toEqual([`shell ${SET_APP} --locales 'fr-FR'`]);
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    it("treats a readable but different app locale as not applied and restores", async () => {
+      adb.setCommandResponseSequence(GET_APP, [
+        appLocales("en-US"),
+        appLocales("de"),
+        appLocales("en-US"),
+      ]);
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+      expect(outcome.error).toContain("Read-back verification failed");
+      expect(setCommands()).toHaveLength(2);
+    });
+
+    describe("device-wide (legacy) path", () => {
+      const PROP = "shell getprop persist.sys.locale";
+      const mutating = (): string[] =>
+        adb.getExecutedCommands().filter((c) => c.includes("setprop") || c.includes("stop; start"));
+
+      beforeEach(() => {
+        adb.setAndroidApiLevel(32);
+        adb.setCommandResponse("getprop ro.build.version.sdk", result("32"));
+        adb.setCommandResponse("shell id", result("uid=0(root) gid=0(root)\n"));
+        adb.setCommandResponse("getprop sys.boot_completed", result("1"));
+      });
+
+      it("does not restore (or restart the framework again) when the prop reads back empty", async () => {
+        adb.setCommandResponseSequence(PROP, [result("en-US"), result("")]);
+
+        const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(false);
+        expect(outcome.error).toContain("Locale change outcome is indeterminate");
+        expect(outcome.error).toContain("persist.sys.locale could not be read back");
+        expect(mutating()).toEqual([
+          "shell setprop persist.sys.locale 'fr-FR'",
+          "shell stop; start",
+        ]);
+        expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+      });
+
+      it("says the framework never came back when the read-back is unreadable and boot never completes", async () => {
+        adb.setCommandResponse("getprop sys.boot_completed", result("0"));
+        adb.setCommandResponseSequence(PROP, [result("en-US"), result("")]);
+
+        const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+        expect(outcome.error).toContain("did not report boot_completed");
+        expect(mutating()).toHaveLength(2);
+      });
+
+      it("reads the prop back only after boot_completed is reported", async () => {
+        adb.setCommandResponseSequence("getprop sys.boot_completed", [
+          result("0"),
+          result("0"),
+          result("1"),
+        ]);
+        adb.setCommandResponseSequence(PROP, [result("en-US"), result("fr-FR")]);
+
+        const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(true);
+        const commands = adb.getExecutedCommands();
+        const lastBootProbe = commands.lastIndexOf("shell getprop sys.boot_completed");
+        const readBack = commands.lastIndexOf(PROP);
+        expect(lastBootProbe).toBeGreaterThan(commands.indexOf("shell stop; start"));
+        expect(readBack).toBeGreaterThan(lastBootProbe);
+      });
+    });
+  });
+
+  describe("canonical read-back comparison", () => {
+    const cases: ReadonlyArray<readonly [requested: string, reported: string]> = [
+      ["iw", "he"],
+      ["in-ID", "id-ID"],
+      ["ji", "yi"],
+      ["he", "he-IL"],
+      ["zh-TW", "zh-Hant-TW"],
+      ["fr-FR", "fr-fr"],
+    ];
+    for (const [requested, reported] of cases) {
+      it(`app path: request ${requested} read back as ${reported} is applied`, async () => {
+        adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales(reported)]);
+
+        const outcome = await adapter.setLocale(requested, { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(true);
+        expect(setCommands()).toEqual([`shell ${SET_APP} --locales '${requested}'`]);
+      });
+
+      it(`legacy path: request ${requested} read back as ${reported} is applied`, async () => {
+        adb.setAndroidApiLevel(32);
+        adb.setCommandResponse("getprop ro.build.version.sdk", result("32"));
+        adb.setCommandResponse("shell id", result("uid=0(root) gid=0(root)\n"));
+        adb.setCommandResponse("getprop sys.boot_completed", result("1"));
+        adb.setCommandResponseSequence("shell getprop persist.sys.locale", [
+          result(""),
+          result(reported),
+        ]);
+
+        const outcome = await adapter.setLocale(requested, { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(true);
+      });
+    }
+
+    it("still restores when the device reports a different region than requested", async () => {
+      adb.setCommandResponseSequence(GET_APP, [
+        appLocales(""),
+        appLocales("fr-CA"),
+        appLocales(""),
+      ]);
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toContain("Restored the app's previous locale (unset)");
+    });
+  });
+
   describe("success path", () => {
     it("sends exactly the same commands as before", async () => {
       adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales("fr-FR")]);
@@ -183,6 +322,18 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
         `shell ${GET_APP}`,
         "shell am broadcast -a android.intent.action.LOCALE_CHANGED",
       ]);
+    });
+
+    it("sends real languages the runtime's ICU has no display name for and lets the device judge", async () => {
+      for (const tag of ["apc-SY", "lld-IT", "mhn-IT", "skr-PK"]) {
+        adb.clearHistory();
+        adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales(tag)]);
+
+        const outcome = await adapter.setLocale(tag, { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(true);
+        expect(setCommands()).toEqual([`shell ${SET_APP} --locales '${tag}'`]);
+      }
     });
 
     it("accepts the tag shapes the issue calls out", async () => {

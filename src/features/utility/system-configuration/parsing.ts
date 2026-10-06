@@ -97,41 +97,37 @@ export function extractCalendarFromLocale(locale: string): string | null {
 /** Private-use language range reserved by BCP 47 / ISO 639 (`qaa` through `qtz`). */
 const PRIVATE_USE_LANGUAGE = /^q[a-t][a-z]$/;
 
-function isKnownLanguageSubtag(primary: string): boolean {
-  try {
-    // With `fallback: "none"` an unrecognised language code yields undefined
-    // instead of echoing the code back (e.g. `zz`, `qaa`).
-    const names = new Intl.DisplayNames(["en"], { type: "language", fallback: "none" });
-    return names.of(primary) !== undefined;
-  } catch (error) {
-    // A runtime without Intl.DisplayNames language data cannot answer this;
-    // treat the language as acceptable rather than rejecting a real locale.
-    // The read-back verification still guards the apply.
-    logger.debug(`Intl.DisplayNames unavailable for language "${primary}": ${error}`);
-    return true;
-  }
-}
-
 /**
  * Check, before anything is sent to a device, that a locale tag is a
- * well-formed BCP 47 language tag whose primary language the runtime
- * recognises. Android turns a tag it cannot make sense of into `und` (or keeps
- * only its leading subtag, e.g. `zz`) and keeps that value applied, so a tag
- * that fails here would otherwise be left on the device (issue #10155).
+ * well-formed BCP 47 language tag. Android turns a tag it cannot make sense of
+ * into `und` (or keeps only its leading subtag, e.g. `zz`) and keeps that value
+ * applied, so a malformed tag would otherwise be left on the device (issue
+ * #10155).
  *
- * Accepts `fr-FR`, `sr-Latn-RS`, `zh-Hant-TW`, `en-u-ca-buddhist` and the
- * POSIX-style `en_US` spelling (`_` is read as `-`, as Android does). Rejects a
- * malformed tag (stray punctuation, over-long subtags, a comma-separated list,
- * a private-use-only tag), `und` and any `und-*` tag, the private-use language
- * range `qaa`-`qtz`, and a primary language the runtime does not know.
+ * Validation is structural only, via `Intl.Locale`. It deliberately does not ask
+ * the runtime whether it has a display name for the language: the runtime's ICU
+ * data lags the device's, and refusing real languages it does not know
+ * (`apc-SY`, `lld-IT`, `mhn-IT`, `skr-PK` on ICU 74) would leave no way to set
+ * them. Whether the device supports a well-formed language is the device's call;
+ * the adapter's read-back plus restore handles a tag it does not apply.
  *
- * Returns an error message when the tag is rejected, otherwise `null`.
+ * Accepts `fr-FR`, `sr-Latn-RS`, `zh-Hant-TW`, `en-u-ca-buddhist`, the
+ * POSIX-style `en_US` spelling (`_` is read as `-`, as Android does), the legacy
+ * `iw`/`in`/`ji` spellings, and regular grandfathered tags `Intl.Locale`
+ * canonicalises (`art-lojban`). Rejects a malformed tag (stray punctuation,
+ * over-long subtags, a comma-separated list, a private-use-only tag), the
+ * irregular grandfathered tags `Intl.Locale` throws on (`i-klingon`,
+ * `zh-min-nan`, `en-GB-oed`: deprecated, each has a modern replacement), `und`
+ * and any `und-*` tag, and the private-use language range `qaa`-`qtz`.
+ *
+ * Returns an error message naming the tag and the reason when it is rejected,
+ * otherwise `null`.
  */
 export function validateLocaleTag(languageTag: string): string | null {
   const expected = 'e.g. "fr-FR", "sr-Latn-RS" or "zh-Hant-TW"';
-  let canonical: string;
+  let primary: string;
   try {
-    canonical = Intl.getCanonicalLocales(languageTag.replace(/_/g, "-"))[0] ?? "";
+    primary = new Intl.Locale(languageTag.replace(/_/g, "-")).language.toLowerCase();
   } catch (error) {
     // Intl throws RangeError for a structurally invalid tag; that is the
     // rejection signal this validator exists to report.
@@ -139,12 +135,90 @@ export function validateLocaleTag(languageTag: string): string | null {
     return `Invalid locale "${languageTag}": not a well-formed BCP 47 language tag (${expected}).`;
   }
 
-  const primary = canonical.split("-")[0].toLowerCase();
   if (primary === "und") {
     return `Invalid locale "${languageTag}": "und" (undetermined) is not a real locale; use a language such as "fr-FR".`;
   }
-  if (PRIVATE_USE_LANGUAGE.test(primary) || !isKnownLanguageSubtag(primary)) {
-    return `Invalid locale "${languageTag}": "${primary}" is not a recognised language (${expected}).`;
+  if (PRIVATE_USE_LANGUAGE.test(primary)) {
+    return `Invalid locale "${languageTag}": "${primary}" is in the private-use language range (qaa-qtz), which is not a real locale (${expected}).`;
   }
   return null;
+}
+
+interface LocaleParts {
+  language: string;
+  script: string;
+  region: string;
+  /** Variants and extensions, lower-cased, in canonical order. */
+  rest: string;
+}
+
+/**
+ * Split a tag's likely-subtags-maximised canonical form into its parts. The
+ * maximised form fills in the script and region the tag left out and rewrites
+ * legacy languages (`iw` becomes `he`). Returns null for a tag `Intl.Locale`
+ * cannot parse.
+ */
+function maximizedLocaleParts(tag: string): LocaleParts | null {
+  let segments: string[];
+  try {
+    const locale = new Intl.Locale(tag.replace(/_/g, "-"));
+    // `und` maximises to en-Latn-US, which would make Android's `und` (what it
+    // keeps for a tag it rejects) equal to a genuine `en-US`. Leave it as is.
+    segments = (locale.language === "und" ? locale : locale.maximize()).toString().split("-");
+  } catch (error) {
+    // Expected for an unreadable or malformed device report: it never matches.
+    logger.debug(`locale tag "${tag}" is not comparable: ${error}`);
+    return null;
+  }
+  const language = (segments.shift() ?? "").toLowerCase();
+  const script =
+    segments[0] !== undefined && /^[A-Za-z]{4}$/.test(segments[0]) ? segments.shift() : "";
+  const region =
+    segments[0] !== undefined && /^([A-Za-z]{2}|\d{3})$/.test(segments[0]) ? segments.shift() : "";
+  return {
+    language,
+    script: (script ?? "").toLowerCase(),
+    region: (region ?? "").toUpperCase(),
+    rest: segments.join("-").toLowerCase(),
+  };
+}
+
+/** The region a tag names itself, before any likely-subtags filling. */
+function explicitRegion(tag: string): string | null {
+  try {
+    return new Intl.Locale(tag.replace(/_/g, "-")).region?.toUpperCase() ?? null;
+  } catch (error) {
+    // Unparseable: the caller already treats it as not comparable.
+    logger.debug(`locale tag "${tag}" has no readable region: ${error}`);
+    return null;
+  }
+}
+
+/**
+ * Whether the locale a device reports back is the locale that was requested.
+ * Compares canonical forms rather than strings, so the legacy `iw`/`in`/`ji`
+ * spellings match the `he`/`id`/`yi` Android reports, and a region or script the
+ * device fills in (`he-IL` for a request of `he`) is not a mismatch. When the
+ * request named a region the report must name the same one, so `fr-FR` matches
+ * neither `fr-CA` nor a report that dropped the region (`fr`). Variants and extensions must be equal. A null, empty or
+ * unparseable report never matches.
+ */
+export function localeTagsEquivalent(actual: string | null, requested: string): boolean {
+  if (!actual) {
+    return false;
+  }
+  const reported = maximizedLocaleParts(actual);
+  const wanted = maximizedLocaleParts(requested);
+  if (!reported || !wanted) {
+    return false;
+  }
+  if (
+    reported.language !== wanted.language ||
+    reported.script !== wanted.script ||
+    reported.rest !== wanted.rest
+  ) {
+    return false;
+  }
+  const requestedRegion = explicitRegion(requested);
+  return requestedRegion === null || explicitRegion(actual) === requestedRegion;
 }

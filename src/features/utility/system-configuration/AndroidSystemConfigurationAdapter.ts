@@ -27,6 +27,7 @@ import type {
 } from "../../../utils/interfaces/SystemConfigurationAdapter";
 import {
   extractCalendarFromLocale,
+  localeTagsEquivalent,
   normalizeSettingValue,
   normalizeTimeFormat,
   parseBooleanSetting,
@@ -66,6 +67,17 @@ function describeAppLocales(read: AppLocaleRead): string {
   }
   return read.list ? `"${read.list}"` : "unset";
 }
+
+/**
+ * Error for a locale change that was sent but whose result could not be read
+ * back. Nothing is restored: the device may or may not hold the new locale, and
+ * writing again on a guess is how a second framework restart or a clobbered
+ * locale happens.
+ */
+function indeterminateLocaleError(languageTag: string, reason: string, subject: string): string {
+  return `Locale change outcome is indeterminate: "${languageTag}" was sent but no result was confirmed (${reason}). ${subject} was not restored and may have changed. Do not retry automatically. Check the current locale before retrying.`;
+}
+
 const MIN_APP_LOCALE_API_LEVEL = 33;
 
 // Bounds for waiting on the framework to come back after the legacy (<33)
@@ -152,7 +164,23 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     // property, readable even while the framework is still coming up, so this
     // never races the restart the way the old `am get-config` read-back did.
     const persistedLanguageTag = await this.readSetting("shell getprop persist.sys.locale");
-    if (!this.localeTagsMatch(persistedLanguageTag, languageTag)) {
+    if (persistedLanguageTag === null) {
+      // An unreadable read-back proves nothing about the device. Restoring on it
+      // would issue a second `stop; start` against a framework that may still be
+      // coming up, so leave the device alone and say the outcome is unknown.
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        localeScope: "system",
+        error: indeterminateLocaleError(
+          languageTag,
+          `persist.sys.locale could not be read back${frameworkReady ? "" : ` and the framework did not report boot_completed within ${FRAMEWORK_RESTART_READY_TIMEOUT_MS}ms after stop; start`}`,
+          "the device-wide locale",
+        ),
+      };
+    }
+    if (!localeTagsEquivalent(persistedLanguageTag, languageTag)) {
       // The call is failing, so do not leave the device on a locale the caller
       // was told did not apply (issue #10155).
       const restoreNote = await this.restoreSystemLocale(previousLanguageTag, persistedLanguageTag);
@@ -197,7 +225,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     persisted: string | null,
   ): Promise<string> {
     const sameAsPrevious = (value: string | null): boolean =>
-      previous === null ? value === null : this.localeTagsMatch(value, previous);
+      previous === null ? value === null : localeTagsEquivalent(value, previous);
     if (sameAsPrevious(persisted)) {
       return "";
     }
@@ -308,8 +336,22 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
 
     const effectiveLocales = await this.readAppLocales(appId, targetUserId);
+    if (!effectiveLocales.readable) {
+      // Same as the device-wide path: an unreadable read-back is not evidence the
+      // change failed, so do not write the app's locale again on a guess.
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: indeterminateLocaleError(
+          languageTag,
+          `the app's locale could not be read back for ${appId}`,
+          `the app's locale (previously ${describeAppLocales(previousLocales)})`,
+        ),
+      };
+    }
     const effectiveLanguageTag = firstAppLocale(effectiveLocales);
-    if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
+    if (!localeTagsEquivalent(effectiveLanguageTag, languageTag)) {
       // The call is failing, so do not leave the app on whatever the device made
       // of the rejected tag (issue #10155): put the earlier locales back.
       const restoreNote = await this.restoreAppLocales(
@@ -787,13 +829,14 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return "";
     }
 
-    // `--locales` omitted clears the app's override, which is how an app that had
-    // none goes back to following the system.
-    const localesArg = previous.list ? ` --locales ${shellQuote(previous.list)}` : "";
+    // An empty `--locales` clears the app's override, which is how an app that
+    // had none goes back to following the system. This is the form
+    // scripts/local-dev/probe-android-locale.sh uses to reset; the quotes keep
+    // the empty argument alive through the device shell.
     let restoreFailure = "";
     try {
       await this.adb.executeCommand(
-        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId}${localesArg}`,
+        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId} --locales ${shellQuote(previous.list)}`,
       );
     } catch (error) {
       logger.warn(
@@ -845,12 +888,5 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     const languageOnlyMatch = normalized.match(/(?:^|[-\s])([a-z]{2,3})(?=[-\s]|$)/);
     return languageOnlyMatch?.[1] ?? null;
-  }
-
-  private localeTagsMatch(actual: string | null, expected: string): boolean {
-    if (!actual) {
-      return false;
-    }
-    return actual.replace(/_/g, "-").toLowerCase() === expected.replace(/_/g, "-").toLowerCase();
   }
 }

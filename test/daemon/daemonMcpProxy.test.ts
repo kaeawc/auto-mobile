@@ -6400,6 +6400,49 @@ describe("DaemonMcpProxy", () => {
       },
     );
 
+    // #10179 review: a marked gate rejection surfaces the gate reason even when the build
+    // identities differ; a restart cannot lift a gate.
+    test.each([
+      { entry: "/first/entry.js", mismatch: true },
+      { entry: "/same/entry.js", mismatch: false },
+    ])(
+      "a gate rejection never says wrong-build or restart (identities mismatch: $mismatch)",
+      async ({ entry, mismatch }) => {
+        const manager = matchingDaemonManager();
+        manager.statusResult = { ...manager.statusResult, entryScript: entry, buildId: "unknown" };
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => new FakeDaemonClient(),
+          daemonManager: manager,
+          autoStartDaemon: false,
+          buildIdentity: { entryScript: "/same/entry.js", buildId: "unknown" },
+        });
+        const rejection = "Unknown tool: setPreference. --debug is disabled";
+        try {
+          const gated = await proxy.buildToolUnavailableErrorForTesting(
+            "setPreference",
+            rejection,
+            true,
+          );
+          expect(gated).toBeInstanceOf(DaemonToolUnavailableError);
+          expect(gated.message).toContain(rejection);
+          expect(gated.message).not.toContain("wrong-build");
+          expect(gated.message).not.toContain("Restart the daemon");
+          expect(gated).toHaveProperty("code", DAEMON_TOOL_UNAVAILABLE_CODE);
+
+          // Control: the same identities without the marker still read as skew.
+          const unmarked = await proxy.buildToolUnavailableErrorForTesting(
+            "setPreference",
+            rejection,
+            false,
+          );
+          expect(unmarked.message.includes("wrong-build")).toBe(mismatch);
+          expect((unmarked as DaemonToolUnavailableError).code).toBeUndefined();
+        } finally {
+          await proxy.close();
+        }
+      },
+    );
+
     test("an unregistered unknown tool cannot establish a forwarded session lease", async () => {
       const fakeClient = new FakeDaemonClient({
         onCallTool: (name) => {

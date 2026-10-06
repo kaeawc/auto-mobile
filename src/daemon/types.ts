@@ -121,6 +121,16 @@ export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded"
  */
 export const DAEMON_TOOL_UNAVAILABLE_CODE = "daemon_tool_unavailable";
 
+/** True for an error carrying the gate marker (a daemon response `code`, or the proxy's own error). */
+export function isGatedToolErrorCode(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_TOOL_UNAVAILABLE_CODE
+  );
+}
+
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
 export interface BoundSessionLoss {

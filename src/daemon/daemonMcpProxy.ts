@@ -39,6 +39,7 @@ import {
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
+  isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
@@ -399,6 +400,8 @@ export class DaemonConnectionSessionReleasedError extends Error {
 
 /** Raised when a frontend-advertised tool is rejected by the daemon as unknown. */
 export class DaemonToolUnavailableError extends Error {
+  /** Set when the daemon's availability gate rejected the call, so callers can tell it from skew. */
+  readonly code?: typeof DAEMON_TOOL_UNAVAILABLE_CODE;
   readonly toolName: string;
   readonly clientBuildId: string;
   readonly daemonBuildId: string;
@@ -409,6 +412,7 @@ export class DaemonToolUnavailableError extends Error {
     daemon: BuildIdentity;
     buildMismatch?: boolean;
     daemonRejection?: string;
+    gated?: boolean;
   }) {
     const matchingReason =
       params.client.buildId !== "unknown" &&
@@ -435,6 +439,9 @@ export class DaemonToolUnavailableError extends Error {
             `${params.daemonRejection ? ` Daemon rejection: ${params.daemonRejection}.` : ""}`,
     );
     this.name = "DaemonToolUnavailableError";
+    if (params.gated) {
+      this.code = DAEMON_TOOL_UNAVAILABLE_CODE;
+    }
     this.toolName = params.toolName;
     this.clientBuildId = params.client.buildId;
     this.daemonBuildId = params.daemon.buildId;
@@ -999,8 +1006,12 @@ export class DaemonMcpProxy {
   }
 
   /** Test-only seam for building a tool-unavailable error. */
-  buildToolUnavailableErrorForTesting(name: string): Promise<Error> {
-    return this.toolUnavailableError(name);
+  buildToolUnavailableErrorForTesting(
+    name: string,
+    daemonRejection?: string,
+    daemonGated = false,
+  ): Promise<Error> {
+    return this.toolUnavailableError(name, daemonRejection, daemonGated);
   }
 
   /**
@@ -2422,12 +2433,7 @@ export class DaemonMcpProxy {
    * reconnect re-runs the build-identity reconciliation and replaces it.
    */
   private isGatedToolError(error: unknown): boolean {
-    return (
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === DAEMON_TOOL_UNAVAILABLE_CODE
-    );
+    return isGatedToolErrorCode(error);
   }
 
   private isRecoverableUnknownToolError(error: unknown): boolean {
@@ -4085,7 +4091,7 @@ export class DaemonMcpProxy {
       if (daemonGated && daemonRejection !== undefined) {
         // The daemon registers a tool this frontend has never heard of (a newer
         // daemon); its rejection already carries the gate reason.
-        return new Error(daemonRejection);
+        return Object.assign(new Error(daemonRejection), { code: DAEMON_TOOL_UNAVAILABLE_CODE });
       }
       const hint = getRemovedToolHint(name);
       return new Error(`Unknown tool "${name}".${hint ? ` ${hint}` : ""}`);
@@ -4094,8 +4100,13 @@ export class DaemonMcpProxy {
       toolName: name,
       client: this.buildIdentity,
       daemon: daemonIdentity,
-      buildMismatch: !buildIdentitiesMatch(this.buildIdentity, daemonIdentity),
+      // A gate is daemon configuration, not skew: whatever the build identities say,
+      // never tell the caller to restart the daemon for it.
+      buildMismatch: daemonGated
+        ? false
+        : !buildIdentitiesMatch(this.buildIdentity, daemonIdentity),
       daemonRejection,
+      gated: daemonGated,
     });
   }
 

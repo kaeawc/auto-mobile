@@ -59,8 +59,24 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   }
 
   override fun run(notifier: RunNotifier) {
+    val deviceChecker = AutoMobileSharedUtils.deviceChecker
     // Skip the entire class if no devices are available
-    if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
+    if (!deviceChecker.areDevicesAvailable()) {
+      // A failed adb probe is an infrastructure problem, not "no devices": report it instead of
+      // letting a broken adb turn the whole suite into skipped tests and a green build (#10171).
+      if (deviceChecker.checkFailed()) {
+        println("Android device check failed - failing test class: ${klass.simpleName}")
+        notifier.fireTestFailure(
+          Failure(
+            description,
+            IllegalStateException(
+              "Android device check failed, so ${klass.simpleName} cannot be skipped as " +
+                "\"no devices\": ${deviceChecker.getLastError() ?: "unknown adb error"}"
+            ),
+          )
+        )
+        return
+      }
       println("No Android devices found - skipping entire test class: ${klass.simpleName}")
 
       // Mark all tests in the class as ignored

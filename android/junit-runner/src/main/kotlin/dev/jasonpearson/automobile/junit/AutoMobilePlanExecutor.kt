@@ -157,6 +157,12 @@ internal object AutoMobilePlanExecutor {
     return envValue.equals("true", ignoreCase = true) || envValue == "1"
   }
 
+  /** Names the adb diagnostic (when there is one) that explains why no device is available. */
+  internal fun noDevicesMessage(deviceCheckError: String?): String {
+    val base = "No Android devices available for plan execution"
+    return if (deviceCheckError.isNullOrBlank()) base else "$base: $deviceCheckError"
+  }
+
   private fun firstNonBlank(vararg values: String?): String? {
     return values.firstOrNull { !it.isNullOrBlank() }
   }
@@ -180,7 +186,7 @@ internal object AutoMobilePlanExecutor {
         return AutoMobilePlanExecutionResult(
           success = false,
           exitCode = -1,
-          errorMessage = "No Android devices available for plan execution",
+          errorMessage = noDevicesMessage(AutoMobileSharedUtils.deviceChecker.getLastError()),
           executionTimeMs = executionTime,
           parametersUsed = parameters,
         )

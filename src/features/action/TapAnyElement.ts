@@ -6,7 +6,7 @@ import {
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { freshTapHierarchy } from "./freshTapHierarchy";
 import {
-  isRejectedSemanticAction,
+  isSemanticActionRejected,
   type TalkBackTargetContext,
 } from "../talkback/resourceIdActionError";
 import {
@@ -698,12 +698,17 @@ export class TapAnyElement extends BaseVisualChange {
       if (result.success) {
         return true;
       }
-      if (
-        isRejectedSemanticAction(
-          hasAccessibilityAction(element.actions, "long_click"),
-          result.error,
-        )
-      ) {
+      const rejected = await isSemanticActionRejected({
+        advertised: hasAccessibilityAction(element.actions, "long_click"),
+        error: result.error,
+        needsNodeSelector,
+        selected: element,
+        // A forced fresh capture: the tree the element came from may predate the lookup miss.
+        readHierarchy: () =>
+          this.refreshViewHierarchy(DEFAULT_HIERARCHY_READ_TIMEOUT_MS, undefined, signal, true),
+      });
+      throwIfAborted(signal);
+      if (rejected) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );

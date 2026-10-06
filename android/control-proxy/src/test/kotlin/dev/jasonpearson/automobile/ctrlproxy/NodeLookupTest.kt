@@ -19,8 +19,14 @@ class NodeLookupTest {
   private fun root(label: String): AccessibilityNodeInfo =
     mockk(relaxed = true, name = label) { every { viewIdResourceName } returns label }
 
-  private fun window(root: AccessibilityNodeInfo?): AccessibilityWindowInfo =
-    mockk(relaxed = true) { every { this@mockk.root } returns root }
+  private fun window(
+    root: AccessibilityNodeInfo?,
+    active: Boolean = false,
+  ): AccessibilityWindowInfo =
+    mockk(relaxed = true) {
+      every { this@mockk.root } returns root
+      every { isActive } returns active
+    }
 
   private fun matching(id: String): (AccessibilityNodeInfo) -> AccessibilityNodeInfo? = {
     if (it.viewIdResourceName == id) it else null
@@ -33,7 +39,7 @@ class NodeLookupTest {
 
     val found =
       findNodeAcrossWindows(
-        windows = listOf(window(activeRoot), window(otherRoot)),
+        windows = listOf(window(activeRoot, active = true), window(otherRoot)),
         activeRoot = { activeRoot },
         find = matching("right"),
       )
@@ -51,7 +57,7 @@ class NodeLookupTest {
   }
 
   @Test
-  fun `searches windows topmost first like the extractor and stops at the first hit`() {
+  fun `searches the other windows topmost first like the extractor and stops at the first hit`() {
     val top = root("dup")
     val bottom = root("dup")
 
@@ -64,6 +70,45 @@ class NodeLookupTest {
   }
 
   @Test
+  fun `a bare id present in the active app window and a higher IME window resolves to the app`() {
+    val ime = root("title")
+    val app = root("title")
+    val appWindow = window(app, active = true)
+    val imeWindow = window(ime)
+
+    // Framework z-order lists the IME window ahead of the app window.
+    val found = findNodeAcrossWindows(listOf(imeWindow, appWindow), { app }, matching("title"))
+
+    assertSame(app, found)
+    // The IME window is never consulted once the active window hits.
+    verify(exactly = 0) { imeWindow.root }
+    verify(exactly = 0) { ime.viewIdResourceName }
+  }
+
+  @Test
+  fun `an app node that vanished still widens to another window and the active window is searched once`() {
+    val ime = root("other")
+    val app = root("app")
+    val appWindow = window(app, active = true)
+
+    val found = findNodeAcrossWindows(listOf(window(ime), appWindow), { app }, matching("other"))
+
+    assertSame(ime, found)
+    verify(exactly = 1) { app.recycle() }
+    verify(exactly = 0) { appWindow.root }
+  }
+
+  @Test
+  fun `a miss in the active window is not searched a second time when it is also listed`() {
+    val app = root("app")
+
+    assertNull(findNodeAcrossWindows(listOf(window(app, active = true)), { app }, matching("gone")))
+
+    verify(exactly = 1) { app.recycle() }
+    verify(exactly = 1) { app.viewIdResourceName }
+  }
+
+  @Test
   fun `skips windows without a root`() {
     val other = root("right")
     val found =
@@ -72,12 +117,13 @@ class NodeLookupTest {
   }
 
   @Test
-  fun `falls back to the active root when no listed window matches or none are listed`() {
+  fun `searches the active root first and only widens to listed windows on a miss`() {
     val listed = root("left")
     val active = root("active")
-    val found = findNodeAcrossWindows(listOf(window(listed)), { active }, matching("active"))
+    val listedWindow = window(listed)
+    val found = findNodeAcrossWindows(listOf(listedWindow), { active }, matching("active"))
     assertSame(active, found)
-    verify(exactly = 1) { listed.recycle() }
+    verify(exactly = 0) { listedWindow.root }
     verify(exactly = 0) { active.recycle() }
 
     val onlyActive = root("active")

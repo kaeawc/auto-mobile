@@ -78,13 +78,23 @@ export interface NetworkStateConfig {
  * Mock rules and error simulation for ONE device (issue #10061). Keyed by device
  * so a rule set for device A is never pushed to device B, and so a session
  * release can remove exactly what that session installed.
+ *
+ * Ownership is per item, not per device: a rule or simulation belongs to the
+ * session that installed it (the last writer, for a simulation that is
+ * replaced). State installed without a session has no owner, so no session
+ * release ever removes it, even on a device where a session also installed
+ * state. It stays until it is cleared explicitly (`clearMockNetwork`, a cancelled
+ * or expired simulation) or the device is retired; this host keeps no other
+ * lifetime for it.
  */
 interface DeviceNetworkScope {
   mocks: Map<string, MockRule>;
+  /** Owning session per `mockId`; absent for a sessionless rule. */
+  mockOwners: Map<string, string>;
   simulation: SimulationConfig | null;
   simulationTimeout: NodeJS.Timeout | null;
-  /** Session that last installed state here; null for sessionless (direct) mode. */
-  ownerSessionUuid: string | null;
+  /** Session that installed the current simulation; null when sessionless or none. */
+  simulationOwner: string | null;
 }
 
 const defaultNotifier: ResourceNotifier = {
@@ -156,9 +166,10 @@ export class NetworkState {
     if (!scope) {
       scope = {
         mocks: new Map(),
+        mockOwners: new Map(),
         simulation: null,
         simulationTimeout: null,
-        ownerSessionUuid: null,
+        simulationOwner: null,
       };
       this._devices.set(deviceId, scope);
     }
@@ -173,28 +184,33 @@ export class NetworkState {
   }
 
   /**
-   * Record which session installed state on a device. A sessionless write leaves
-   * the existing owner alone, so direct mode keeps today's lifetime.
-   */
-  noteSessionOwner(deviceId: string, sessionUuid: string | undefined): void {
-    if (sessionUuid !== undefined) {
-      this.scopeFor(deviceId).ownerSessionUuid = sessionUuid;
-    }
-  }
-
-  /**
-   * Remove a device's rules and simulation when the session that installed them
-   * is released (or leaves the device). Returns true when state was removed so
-   * the caller knows to push the now-empty set to the device. State installed
-   * sessionless, or by a different session, is left in place.
+   * Remove the rules and the simulation that `sessionUuid` installed on a device,
+   * when that session is released (or leaves the device). Returns true when state
+   * was removed so the caller knows to push the remaining set to the device. State
+   * installed sessionless, or by a different session, is left in place even on the
+   * same device.
    */
   clearDeviceOwnedBySession(deviceId: string, sessionUuid: string): boolean {
     const scope = this._devices.get(deviceId);
-    if (!scope || scope.ownerSessionUuid !== sessionUuid) {
+    if (!scope) {
       return false;
     }
-    this.retireDevice(deviceId);
-    return true;
+    let removed = false;
+    for (const [mockId, owner] of Array.from(scope.mockOwners)) {
+      if (owner === sessionUuid) {
+        scope.mocks.delete(mockId);
+        scope.mockOwners.delete(mockId);
+        removed = true;
+      }
+    }
+    if (scope.simulation && scope.simulationOwner === sessionUuid) {
+      this.stopSimulationTimer(scope);
+      scope.simulation = null;
+      scope.simulationOwner = null;
+      removed = true;
+    }
+    this.pruneIfEmpty(deviceId);
+    return removed;
   }
 
   /** Drop everything held for a device, regardless of owner (device removed). */
@@ -216,6 +232,7 @@ export class NetworkState {
     }
     if (scope.simulation && this.timer.now() >= scope.simulation.expiresAt) {
       scope.simulation = null;
+      scope.simulationOwner = null;
       this.pruneIfEmpty(deviceId);
     }
     return scope.simulation;
@@ -226,12 +243,14 @@ export class NetworkState {
     errorType: SimulatedErrorType,
     durationSeconds: number,
     limit: number | null,
+    ownerSessionUuid?: string,
   ): void {
     this.startSimulationUntil(
       deviceId,
       errorType,
       Math.ceil(this.timer.now() + durationSeconds * 1000),
       limit,
+      ownerSessionUuid,
     );
   }
 
@@ -240,12 +259,12 @@ export class NetworkState {
     errorType: SimulatedErrorType,
     expiresAt: number,
     limit: number | null,
+    ownerSessionUuid?: string,
   ): void {
-    // Clear the previous simulation in place: cancelSimulation() prunes an empty
-    // scope, which would drop the owner recorded just before this call.
     const scope = this.scopeFor(deviceId);
     this.stopSimulationTimer(scope);
     scope.simulation = null;
+    scope.simulationOwner = null;
     const timeoutMs = Math.max(0, expiresAt - this.timer.now());
     if (timeoutMs === 0) {
       this.pruneIfEmpty(deviceId);
@@ -257,8 +276,10 @@ export class NetworkState {
       remaining: limit,
       expiresAt,
     };
+    scope.simulationOwner = ownerSessionUuid ?? null;
     scope.simulationTimeout = this.timer.setTimeout(() => {
       scope.simulation = null;
+      scope.simulationOwner = null;
       scope.simulationTimeout = null;
       if (this._devices.get(deviceId) === scope) {
         this.pruneIfEmpty(deviceId);
@@ -273,6 +294,7 @@ export class NetworkState {
     }
     this.stopSimulationTimer(scope);
     scope.simulation = null;
+    scope.simulationOwner = null;
     this.pruneIfEmpty(deviceId);
   }
 
@@ -311,15 +333,22 @@ export class NetworkState {
 
   // --- Mocks ---
 
-  addMock(deviceId: string, rule: Omit<MockRule, "mockId">): MockRule {
+  /** `ownerSessionUuid` marks the rule as that session's; omit it for a sessionless rule. */
+  addMock(deviceId: string, rule: Omit<MockRule, "mockId">, ownerSessionUuid?: string): MockRule {
     const mockId = `mock-${this._nextMockId++}`;
     const mock: MockRule = { ...rule, mockId };
-    this.scopeFor(deviceId).mocks.set(mockId, mock);
+    const scope = this.scopeFor(deviceId);
+    scope.mocks.set(mockId, mock);
+    if (ownerSessionUuid !== undefined) {
+      scope.mockOwners.set(mockId, ownerSessionUuid);
+    }
     return mock;
   }
 
   removeMock(deviceId: string, mockId: string): boolean {
-    const removed = this._devices.get(deviceId)?.mocks.delete(mockId) ?? false;
+    const scope = this._devices.get(deviceId);
+    const removed = scope?.mocks.delete(mockId) ?? false;
+    scope?.mockOwners.delete(mockId);
     this.pruneIfEmpty(deviceId);
     return removed;
   }
@@ -328,6 +357,7 @@ export class NetworkState {
     const scope = this._devices.get(deviceId);
     const count = scope?.mocks.size ?? 0;
     scope?.mocks.clear();
+    scope?.mockOwners.clear();
     this.pruneIfEmpty(deviceId);
     return count;
   }

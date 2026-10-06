@@ -653,6 +653,101 @@ class StorageSubscriptionManagerTest {
       )
     }
 
+  /**
+   * A fake app that, like the real SDK's `drainAfter`, REMOVES the changes it returns.
+   * [requestedSince] records the cursor of every call; [failRequestsWithSince] simulates a provider
+   * failure for requests with that cursor.
+   */
+  private fun drainingAppProcess(
+    token: String,
+    queue: MutableList<Long>,
+    requestedSince: MutableList<Long>,
+    failRequestsWithSince: Long? = null,
+  ) {
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+      {
+        val since = arg<Bundle>(3).getLong("sinceSequence", 0L)
+        requestedSince.add(since)
+        if (since == failRequestsWithSince) {
+          Bundle().apply {
+            putBoolean("success", false)
+            putString("error", "provider unavailable")
+          }
+        } else {
+          val drained = queue.filter { it > since }
+          queue.removeAll(drained.toSet())
+          tokenChangesBundle(token, drained)
+        }
+      }
+  }
+
+  @Test
+  fun `a restart seen by the poll still delivers the changes the stale-cursor read drained`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      drainingAppProcess("process-a", mutableListOf(1L, 2L, 3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      withTimeout(1_000) { manager.changeEvents.take(3).toList() }
+
+      // Old cursor is 3; the new process recorded 1..5 before the next poll. The cursor-3 read
+      // drains 4 and 5, then the re-read from 0 returns only 1..3.
+      requestedSince.clear()
+      drainingAppProcess("process-b", mutableListOf(1L, 2L, 3L, 4L, 5L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(3L, 0L), requestedSince)
+      assertEquals(
+        listOf(1L, 2L, 3L, 4L, 5L),
+        withTimeout(1_000) { manager.changeEvents.take(5).toList() }.map { it.sequenceNumber },
+      )
+    }
+
+  @Test
+  fun `a failed re-read after a restart keeps the cursor at zero so the rest is read next poll`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      drainingAppProcess("process-a", mutableListOf(1L, 2L, 3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      withTimeout(1_000) { manager.changeEvents.take(3).toList() }
+
+      requestedSince.clear()
+      val queue = mutableListOf(1L, 2L, 3L, 4L, 5L)
+      drainingAppProcess("process-b", queue, requestedSince, failRequestsWithSince = 0L)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      // The first reply's 4 and 5 are delivered; 1..3 are still queued in the app.
+      assertEquals(
+        listOf(4L, 5L),
+        withTimeout(1_000) { manager.changeEvents.take(2).toList() }.map { it.sequenceNumber },
+      )
+
+      requestedSince.clear()
+      drainingAppProcess("process-b", queue, requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(0L), requestedSince)
+      assertEquals(
+        listOf(1L, 2L, 3L),
+        withTimeout(1_000) { manager.changeEvents.take(3).toList() }.map { it.sequenceNumber },
+      )
+    }
+
   @Test
   fun `re-subscribing to the same process keeps the cursor`() =
     runTest(dispatcher) {

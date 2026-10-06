@@ -8,7 +8,7 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
 import {
-  isRejectedSemanticAction,
+  isSemanticActionRejected,
   resourceIdActionError,
   resolveTalkBackActionTarget,
   type TalkBackTargetContext,
@@ -753,9 +753,15 @@ export class TalkBackTapStrategy {
       if (longClickResult.dispatched && longClickResult.acknowledged !== true) {
         throw indeterminateTapError(longClickResult.error);
       }
-      if (
-        isRejectedSemanticAction(advertisesAction(element, "long_click"), longClickResult.error)
-      ) {
+      const rejected = await isSemanticActionRejected({
+        advertised: advertisesAction(element, "long_click"),
+        error: longClickResult.error,
+        needsNodeSelector: requiresNodeSelector(selector),
+        selected: element,
+        // Fresh read, not the target's hierarchy: it may predate the lookup miss.
+        readHierarchy: () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+      });
+      if (rejected) {
         return {
           success: false,
           ...confirmedElement,

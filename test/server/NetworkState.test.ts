@@ -304,11 +304,9 @@ describe("NetworkState", () => {
     });
 
     it("clearDeviceOwnedBySession removes only state its session installed", () => {
-      state.noteSessionOwner(DEVICE, "session-1");
-      state.addMock(DEVICE, rule("a.com"));
-      state.startSimulation(DEVICE, "timeout", 30, null);
-      state.noteSessionOwner(OTHER_DEVICE, "session-2");
-      state.addMock(OTHER_DEVICE, rule("b.com"));
+      state.addMock(DEVICE, rule("a.com"), "session-1");
+      state.startSimulation(DEVICE, "timeout", 30, null, "session-1");
+      state.addMock(OTHER_DEVICE, rule("b.com"), "session-2");
 
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-2")).toBe(false);
       expect(state.getMocks(DEVICE).size).toBe(1);
@@ -320,17 +318,50 @@ describe("NetworkState", () => {
     });
 
     it("leaves sessionless state in place when a session is released", () => {
-      state.noteSessionOwner(DEVICE, undefined);
       state.addMock(DEVICE, rule("a.com"));
+      state.startSimulation(DEVICE, "timeout", 30, null);
 
       expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(false);
       expect(state.getMocks(DEVICE).size).toBe(1);
+      expect(state.getSimulation(DEVICE)).not.toBeNull();
+    });
+
+    it("keeps sessionless and other-session state on a device whose session is released", () => {
+      const own = state.addMock(DEVICE, rule("own.com"), "session-1");
+      const sessionless = state.addMock(DEVICE, rule("sessionless.com"));
+      const other = state.addMock(DEVICE, rule("other.com"), "session-2");
+      state.startSimulation(DEVICE, "timeout", 30, null);
+
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(true);
+
+      expect(Array.from(state.getMocks(DEVICE).keys())).toEqual([sessionless.mockId, other.mockId]);
+      expect(state.getMocks(DEVICE).has(own.mockId)).toBe(false);
+      expect(state.getSimulation(DEVICE)).not.toBeNull();
+    });
+
+    it("the last writer owns a replaced simulation", () => {
+      state.startSimulation(DEVICE, "timeout", 30, null, "session-1");
+      state.startSimulation(DEVICE, "http500", 30, null);
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(false);
+      expect(state.getSimulation(DEVICE)?.errorType).toBe("http500");
+
+      state.startSimulation(DEVICE, "timeout", 30, null, "session-2");
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-2")).toBe(true);
+      expect(state.getSimulation(DEVICE)).toBeNull();
+    });
+
+    it("a rule removed or cleared explicitly is no longer owned", () => {
+      const removed = state.addMock(DEVICE, rule("a.com"), "session-1");
+      state.removeMock(DEVICE, removed.mockId);
+      state.addMock(DEVICE, rule("b.com"), "session-1");
+      state.clearAllMocks(DEVICE);
+
+      expect(state.clearDeviceOwnedBySession(DEVICE, "session-1")).toBe(false);
     });
 
     it("retireDevice drops a device's state regardless of owner and cancels its timer", () => {
-      state.noteSessionOwner(DEVICE, "session-1");
-      state.addMock(DEVICE, rule("a.com"));
-      state.startSimulation(DEVICE, "timeout", 30, null);
+      state.addMock(DEVICE, rule("a.com"), "session-1");
+      state.startSimulation(DEVICE, "timeout", 30, null, "session-1");
 
       state.retireDevice(DEVICE);
 

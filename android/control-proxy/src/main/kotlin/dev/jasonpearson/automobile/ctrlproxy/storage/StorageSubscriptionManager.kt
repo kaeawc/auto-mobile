@@ -900,24 +900,35 @@ class StorageSubscriptionManager(
     uri: Uri,
     subState: SubscriptionState,
   ): Boolean {
-    var changes = requestChanges(uri, fileName, subState.lastSequence) ?: return true
-    val reportedToken = changes.processToken
+    val firstReply = requestChanges(uri, fileName, subState.lastSequence) ?: return true
+    val reportedToken = firstReply.processToken
     val knownToken = subState.processToken
+    var pending = firstReply.changes
+    var advanceCursor = true
     if (knownToken != null && reportedToken != null && knownToken != reportedToken) {
       // The app restarted: its sequence counter began again at 1, so the old cursor would hide
-      // every new change. Drop this reply (it was filtered by the stale cursor) and read from 0.
+      // every new change. The SDK removes the changes it returns, so the first reply (filtered by
+      // the stale cursor) already holds new-process changes that a re-read will never return
+      // again. Keep them and merge with the read from 0, de-duplicated by sequence number.
       Log.i(
         TAG,
         "Inspected app restarted; resetting storage sequence for ${subState.subscription.subscriptionId}",
       )
       subState.lastSequence = 0
       subState.processToken = reportedToken
-      changes = requestChanges(uri, fileName, 0) ?: return true
+      val reread = requestChanges(uri, fileName, 0)
+      // If the re-read failed, its changes are still queued in the app. Deliver the first reply
+      // but leave the cursor at 0 so the next poll reads them.
+      advanceCursor = reread != null
+      pending =
+        (pending + reread?.changes.orEmpty())
+          .distinctBy { it.sequenceNumber }
+          .sortedBy { it.sequenceNumber }
     } else if (knownToken == null) {
       subState.processToken = reportedToken
     }
 
-    for (change in changes.changes) {
+    for (change in pending) {
       val event =
         PreferenceChangeEvent(
           packageName = packageName,
@@ -935,7 +946,9 @@ class StorageSubscriptionManager(
         Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
         return false
       }
-      subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
+      if (advanceCursor) {
+        subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
+      }
     }
     return true
   }

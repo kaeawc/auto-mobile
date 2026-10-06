@@ -22,6 +22,41 @@ export function isRejectedSemanticAction(advertised: boolean, error: string | un
   return advertised && !isNodeNotFoundReply(error);
 }
 
+/**
+ * Decide whether an advertised semantic action's failure must surface instead of degrading to the
+ * element's coordinates. A rejected action always surfaces. A lookup miss ("Element not found")
+ * degrades to coordinates, but for a stable node selector (test tag, unique id or collection
+ * position) nothing else proves the element still exists, so the coordinates may now hold a
+ * different row. Such a miss degrades only while a fresh complete hierarchy still shows the
+ * selected element, with its captured identity, at its captured bounds; otherwise it surfaces as
+ * a rejection, as before lookup misses were tolerated. Bare resource-id targets are already
+ * guarded by [resourceIdActionError].
+ */
+export async function isSemanticActionRejected(input: {
+  advertised: boolean;
+  error: string | undefined;
+  needsNodeSelector: boolean;
+  selected: Element;
+  readHierarchy: () => Promise<ViewHierarchyResult | null>;
+}): Promise<boolean> {
+  if (isRejectedSemanticAction(input.advertised, input.error)) {
+    return true;
+  }
+  // Left: not advertised (always coordinates), or advertised with a lookup miss.
+  if (!input.advertised || !input.needsNodeSelector) {
+    return false;
+  }
+  return !(await selectedElementStillPresent(input.selected, input.readHierarchy));
+}
+
+async function selectedElementStillPresent(
+  selected: Element,
+  readHierarchy: () => Promise<ViewHierarchyResult | null>,
+): Promise<boolean> {
+  const hierarchy = await readTalkBackTargetHierarchy(readHierarchy);
+  return isCompleteHierarchy(hierarchy) && selectedTargetPresent(selected, hierarchy);
+}
+
 /** Bare native IDs resolve globally; only a complete tree can prove uniqueness. */
 export async function resourceIdActionError(
   resourceId: string,

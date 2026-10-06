@@ -11,6 +11,12 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { logger } from "../../../src/utils/logger";
 import { notificationHierarchy, notificationRows } from "../talkback/capturedNotificationTargets";
+import {
+  testTagHierarchy,
+  testTagHierarchyWithFirstRowMoved,
+  testTagHierarchyWithoutFirstRow,
+  testTagRows,
+} from "../talkback/capturedTestTagTargets";
 
 const createTapOnElement = (selector: FakeElementSelector) => {
   return new TapOnElement(
@@ -721,19 +727,51 @@ describe("TapOnElement extended selectors", () => {
       }
     });
 
-    test("falls back to coordinates when an advertised selector long click reports node not found", async () => {
-      const { proxy, internals } = setup();
-      proxy.setActionResult(
-        longClickResult(false, "Element not found with NodeSelector(testTag=message_row_42)"),
+    describe("advertised selector long click reports node not found", () => {
+      const row: Element = { ...testTagRows[0]!, actions: ["long_click"] };
+      const rowCommand = "shell input touchscreen swipe 120 130 120 130 1000";
+      const notFound = "Element not found with NodeSelector(testTag=submit-form)";
+
+      test("falls back to coordinates while a fresh hierarchy still shows the element in place", async () => {
+        const { proxy, internals } = setup();
+        proxy.setViewHierarchyResult(testTagHierarchy);
+        proxy.setActionResult(longClickResult(false, notFound));
+        const warning = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          await internals.executeAndroidLongPress(120, 130, 1000, row);
+          expect(proxy.getNodeActionHistory()).toHaveLength(1);
+          expect(internals.adb.getAllCommands()).toEqual([rowCommand]);
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
+      test.each([
+        ["gone", testTagHierarchyWithoutFirstRow],
+        ["moved", testTagHierarchyWithFirstRowMoved],
+        ["incomplete", { ...testTagHierarchy, ctrlProxyIncomplete: true }],
+        ["unavailable", null],
+      ] satisfies [string, ViewHierarchyResult | null][])(
+        "fails instead of pressing a possibly stale coordinate (%s)",
+        async (_name, hierarchy) => {
+          const { proxy, internals } = setup();
+          proxy.setViewHierarchyResult(hierarchy);
+          if (!hierarchy) {
+            proxy.setHierarchyData(null);
+          }
+          proxy.setActionResult(longClickResult(false, notFound));
+          const warning = spyOn(logger, "warn").mockImplementation(() => {});
+          try {
+            await expect(internals.executeAndroidLongPress(120, 130, 1000, row)).rejects.toThrow(
+              `Semantic long press failed for the selected element: ${notFound}`,
+            );
+            expect(proxy.getNodeActionHistory()).toHaveLength(1);
+            expect(internals.adb.getAllCommands()).toEqual([]);
+          } finally {
+            warning.mockRestore();
+          }
+        },
       );
-      const warning = spyOn(logger, "warn").mockImplementation(() => {});
-      try {
-        await internals.executeAndroidLongPress(50, 25, 1000, testTagElement);
-        expect(proxy.getNodeActionHistory()).toHaveLength(1);
-        expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
-      } finally {
-        warning.mockRestore();
-      }
     });
 
     test("logs a thrown bare-id action and falls back", async () => {

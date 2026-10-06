@@ -306,6 +306,7 @@ async function setIosErrorSimulation(
   device: BootedDevice,
   state: NetworkState,
   config: { errorType: SimulatedErrorType; durationSeconds: number; limit: number | null } | null,
+  sessionUuid: string | undefined,
 ): Promise<void> {
   if (config === null) {
     state.cancelSimulation(device.deviceId);
@@ -327,7 +328,13 @@ async function setIosErrorSimulation(
   if (config === null) {
     return;
   }
-  state.startSimulationUntil(device.deviceId, config.errorType, expiresAtEpochMs!, config.limit);
+  state.startSimulationUntil(
+    device.deviceId,
+    config.errorType,
+    expiresAtEpochMs!,
+    config.limit,
+    sessionUuid,
+  );
 }
 
 function iosSimulationConfig(
@@ -357,6 +364,7 @@ function updateSimulation(
   state: NetworkState,
   device: BootedDevice,
   simulation: NonNullable<NetworkArgs["simulateErrors"]>,
+  sessionUuid: string | undefined,
 ): void {
   if (simulation.cancel) {
     state.cancelSimulation(device.deviceId);
@@ -370,6 +378,7 @@ function updateSimulation(
       errorType,
       simulation.durationSeconds,
       simulation.limit ?? null,
+      sessionUuid,
     );
   }
 }
@@ -383,14 +392,12 @@ function createNetworkHandler(state: NetworkState) {
 
     if (args.simulateErrors !== undefined) {
       if (device.platform === "ios") {
-        state.noteSessionOwner(device.deviceId, args.sessionUuid);
         const config = iosSimulationConfig(state, device, args.simulateErrors);
         if (config !== undefined) {
-          await setIosErrorSimulation(device, state, config);
+          await setIosErrorSimulation(device, state, config, args.sessionUuid);
         }
       } else {
-        state.noteSessionOwner(device.deviceId, args.sessionUuid);
-        updateSimulation(state, device, args.simulateErrors);
+        updateSimulation(state, device, args.simulateErrors, args.sessionUuid);
         syncResult = await syncErrorSimulationToDevice(device, state);
       }
     }
@@ -464,8 +471,7 @@ export function registerNetworkTools(): void {
       assertValidMockPattern("path", args.path);
       assertValidResponseHeaders(args.responseHeaders);
 
-      state.noteSessionOwner(device.deviceId, args.sessionUuid);
-      const mock = state.addMock(device.deviceId, mockRuleFields(args));
+      const mock = state.addMock(device.deviceId, mockRuleFields(args), args.sessionUuid);
 
       const syncResult = await syncMockRulesToDevice(device, state);
 

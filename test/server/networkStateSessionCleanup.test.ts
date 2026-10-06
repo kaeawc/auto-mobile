@@ -100,9 +100,8 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   });
 
   test("releasing the owning session empties the device store and pushes the empty set", async () => {
-    state.noteSessionOwner(DEVICE_A, "session-1");
-    state.addMock(DEVICE_A, rule("a.com"));
-    state.startSimulation(DEVICE_A, "timeout", 30, null);
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
 
     manager.release("session-1", DEVICE_A);
 
@@ -114,11 +113,9 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   });
 
   test("a second session's device keeps its rules when the first session is released", async () => {
-    state.noteSessionOwner(DEVICE_A, "session-1");
-    state.addMock(DEVICE_A, rule("a.com"));
-    state.noteSessionOwner(DEVICE_B, "session-2");
-    const keep = state.addMock(DEVICE_B, rule("b.com"));
-    state.startSimulation(DEVICE_B, "timeout", 30, null);
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    const keep = state.addMock(DEVICE_B, rule("b.com"), "session-2");
+    state.startSimulation(DEVICE_B, "timeout", 30, null, "session-2");
 
     manager.release("session-1", DEVICE_A);
     await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
@@ -129,8 +126,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   });
 
   test("a release for a different session or an unrelated device clears nothing", () => {
-    state.noteSessionOwner(DEVICE_A, "session-1");
-    state.addMock(DEVICE_A, rule("a.com"));
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
 
     manager.release("session-2", DEVICE_A);
     manager.release("session-1", DEVICE_B);
@@ -149,9 +145,38 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     expect(pusher.pushes).toEqual([]);
   });
 
+  test("releasing a session clears only its own rules and simulation on a shared device", async () => {
+    const own = state.addMock(DEVICE_A, rule("own.com"), "session-1");
+    const sessionless = state.addMock(DEVICE_A, rule("sessionless.com"));
+    const other = state.addMock(DEVICE_A, rule("other.com"), "session-2");
+    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+
+    manager.release("session-1", DEVICE_A);
+    await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
+
+    expect(Array.from(state.getMocks(DEVICE_A).keys())).toEqual([sessionless.mockId, other.mockId]);
+    expect(state.getMocks(DEVICE_A).has(own.mockId)).toBe(false);
+    expect(state.getSimulation(DEVICE_A)).toBeNull();
+    // The device is pushed what remains, not an emptied set.
+    expect(pusher.pushes).toEqual([
+      { deviceId: DEVICE_A, ruleIds: [sessionless.mockId, other.mockId], simulating: false },
+    ]);
+  });
+
+  test("a sessionless rule added after a session's rule survives that session's release", async () => {
+    state.addMock(DEVICE_A, rule("own.com"), "session-1");
+    const sessionless = state.addMock(DEVICE_A, rule("sessionless.com"));
+    state.startSimulation(DEVICE_A, "timeout", 30, null);
+
+    manager.release("session-1", DEVICE_A);
+    await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
+
+    expect(Array.from(state.getMocks(DEVICE_A).keys())).toEqual([sessionless.mockId]);
+    expect(state.getSimulation(DEVICE_A)).not.toBeNull();
+  });
+
   test("a session leaving the device without ending clears the device it left", async () => {
-    state.noteSessionOwner(DEVICE_A, "session-1");
-    state.addMock(DEVICE_A, rule("a.com"));
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
 
     manager.unbind("session-1", DEVICE_A);
     await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
@@ -161,8 +186,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
   });
 
   test("the next session on the device starts empty, and a reconnect resyncs nothing", async () => {
-    state.noteSessionOwner(DEVICE_A, "session-1");
-    state.addMock(DEVICE_A, rule("a.com"));
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
     manager.release("session-1", DEVICE_A);
     await Promise.all(manager.pendingCleanups.map((entry) => entry.cleanup));
 
@@ -174,8 +198,7 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
 
   test("a failing device push is contained and the host store is still cleared", async () => {
     pusher.failWith = new Error("socket closed");
-    state.noteSessionOwner(DEVICE_A, "session-1");
-    state.addMock(DEVICE_A, rule("a.com"));
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
 
     manager.release("session-1", DEVICE_A);
 

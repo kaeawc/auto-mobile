@@ -7043,9 +7043,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Search the windows the hierarchy extractor reports for the active display (topmost first), then
-   * the active window's root, for the first node [find] returns. The extractor's own window
-   * enumeration is reused so node actions and focus read-back cannot disagree with `observe`.
+   * Search the active window's root first, then the other windows the hierarchy extractor reports
+   * for the active display (topmost first), for the first node [find] returns. The extractor's own
+   * window enumeration is reused so node actions and focus read-back cannot disagree with
+   * `observe`; the active window goes first so a bare id prefers the app over an IME/system window.
    */
   private fun findNodeInDisplayWindows(
     find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?

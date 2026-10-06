@@ -845,6 +845,28 @@ describe("network tool schema", () => {
       expect(state.clearDeviceOwnedBySession(otherAndroid.deviceId, "session-2")).toBe(true);
     });
 
+    test("a session release leaves a sessionless rule on the same device in place", async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      const own = parseToolJson(
+        await mockTool.deviceAwareHandler!(androidDevice, {
+          host: "own.com",
+          path: "/feed",
+          sessionUuid: "session-1",
+        }),
+      );
+      const sessionless = parseToolJson(
+        await mockTool.deviceAwareHandler!(androidDevice, { host: "a.com", path: "/feed" }),
+      );
+      const state = NetworkState.getInstance();
+
+      expect(state.clearDeviceOwnedBySession(androidDevice.deviceId, "session-1")).toBe(true);
+
+      expect(Array.from(state.getMocks(androidDevice.deviceId).keys())).toEqual([
+        sessionless.mockId,
+      ]);
+      expect(state.getMocks(androidDevice.deviceId).has(own.mockId)).toBe(false);
+    });
+
     test("sessionless rules are never claimed by a session release", async () => {
       await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(androidDevice, {
         host: "a.com",

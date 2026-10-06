@@ -4,28 +4,41 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 
 /**
- * Run [find] over the same windows the hierarchy extractor reports, in the same order (the
- * framework's topmost-window-first order), and return the first hit. The extractor falls back to
- * the active window's root when the window list is empty or misses (see
- * [ViewHierarchyExtractor.extractFromAllWindows]); this lookup does the same, so a node that
- * `observe` listed from any window of the display is found by node actions and the accessibility
- * focus read-back, not only one in `rootInActiveWindow` (issue #10070).
+ * Run [find] over the active window first, then over the other windows the hierarchy extractor
+ * reports (in the extractor's own topmost-first order), and return the first hit. The widening
+ * keeps a node that `observe` listed from any window of the display actionable, not only one in
+ * `rootInActiveWindow` (issue #10070).
+ *
+ * The active window goes first so that a bare id that matches in both the app and a non-app window
+ * (the IME, a system bar, a permission dialog) resolves to the app node, and so that an app node
+ * that vanished replies "Element not found" from the app's own window before any other window is
+ * consulted. The framework's z-order lists the IME and system UI windows ahead of the app window,
+ * so a plain topmost-first scan would prefer them. The wire request carries no package, so the
+ * lookup cannot exclude the IME or system UI outright: a selector that matches nowhere in the
+ * active window can still resolve to a same-id node in another window of the display.
  *
  * Ownership: every root acquired here is recycled unless [find] returns it (a descendant it returns
- * is its own copy). The caller owns the returned node. [activeRoot] is read lazily, so the common
- * case of a hit in a listed window never pays for it.
+ * is its own copy). The caller owns the returned node. [activeRoot] is read once, up front; a
+ * listed window that reports itself active is not searched again when the active root was already
+ * searched.
  */
 internal fun findNodeAcrossWindows(
   windows: List<AccessibilityWindowInfo>,
   activeRoot: () -> AccessibilityNodeInfo?,
   find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
 ): AccessibilityNodeInfo? {
+  val active = activeRoot()
+  val activeSearched = active != null
+  findInRoot(active, find)?.let {
+    return it
+  }
   for (window in windows) {
+    if (activeSearched && window.isActive) continue
     findInRoot(window.root, find)?.let {
       return it
     }
   }
-  return findInRoot(activeRoot(), find)
+  return null
 }
 
 private fun findInRoot(

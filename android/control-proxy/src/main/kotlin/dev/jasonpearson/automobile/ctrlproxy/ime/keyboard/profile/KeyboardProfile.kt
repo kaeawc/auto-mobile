@@ -75,22 +75,21 @@ object KeyboardProfiles {
           composeWords = true,
           enterStrategy = EnterStrategy.KEY_EVENT,
           backspaceStrategy = BackspaceStrategy.DELETE_SURROUNDING,
-          recomposeOnCursorMove = false,
+          recomposeOnCursorMove = true,
           recomposeOnBackspaceIntoWord = true,
           batchEdits = true,
         ),
       evidenceStatus = "focused_trace",
       evidenceNote =
-        "A focused call sequence matched captured Gboard traces; full vendor equivalence is not claimed.",
+        "A focused call sequence matched captured Gboard traces; cursor-move recomposition is enabled pending emulator trace confirmation, and full vendor equivalence is not claimed.",
     )
 
   /**
    * Behavior verified functional on-device (2026-09-23): word composing, cursor-move recompose
-   * (`setComposingRegion` when the caret enters committed text — the distinctive path Gboard
-   * omits), no batch edits, commit-newline enter, and the green accent style. Triggers the
-   * rich-composer fenced-code autoformat. Fidelity against the real Samsung Keyboard (Honeyboard)
-   * prediction/composing nuances is still pending a trace from Samsung hardware, which cannot be
-   * installed on a non-Samsung device.
+   * (`setComposingRegion` when the caret enters committed text), no batch edits, commit-newline
+   * enter, and the green accent style. Triggers the rich-composer fenced-code autoformat. Fidelity
+   * against the real Samsung Keyboard (Honeyboard) prediction/composing nuances is still pending a
+   * trace from Samsung hardware, which cannot be installed on a non-Samsung device.
    */
   val SAMSUNG =
     KeyboardProfile(

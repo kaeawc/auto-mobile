@@ -71,20 +71,27 @@ describe("validateLocaleTag (#10155)", () => {
 });
 
 describe("localeTagsEquivalent (#10155)", () => {
+  // The device-observed pairs (he, iw, zz-ZZ, he-IL, fr-FR and in-ID as read back by an API 36
+  // emulator) are table-tested from the captured replies in androidLocaleCaptures.test.ts. The
+  // pairs below are the comparison's own rules, NOT device-observed: the rows tagged "unobserved"
+  // describe behaviour no capture shows.
   // [reported by the device, requested, equivalent]
   const pairs: ReadonlyArray<readonly [string | null, string, boolean]> = [
     ["fr-FR", "fr-FR", true],
     ["fr-fr", "fr-FR", true],
     ["fr_FR", "fr-FR", true],
-    // Legacy language codes: Android reports the modern code.
+    // Legacy language codes: Android reports the modern code (he for iw is captured; the rest
+    // are unobserved).
     ["he", "iw", true],
     ["id", "in", true],
     ["yi", "ji", true],
     ["he-IL", "iw-IL", true],
-    // Region defaulted by the device when the request named none.
+    // Unobserved tolerance: a report that names a region the request left out. The capture shows
+    // the device reporting [he] for a he request, not he-IL, so this is slack in the comparison
+    // rather than something the device does.
     ["he-IL", "he", true],
     ["en-US", "en", true],
-    // Script defaulted or spelled out.
+    // Unobserved: script defaulted or spelled out.
     ["zh-Hant-TW", "zh-TW", true],
     ["zh-TW", "zh-Hant-TW", true],
     // The request named a region, so a different region is a real mismatch.

@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { beforeAll, expect, spyOn, test } from "bun:test";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolRequestSchema,
@@ -35,6 +35,16 @@ function createHarness() {
   registration.mockRestore();
   return { ...harness, registrations };
 }
+
+beforeAll(async () => {
+  // Warm the SDK's one-off handler/schema initialization with a disposable server.
+  const { server, proxy } = createHarness();
+  try {
+    await server.close();
+  } finally {
+    await proxy.close();
+  }
+});
 
 const requests = [
   [

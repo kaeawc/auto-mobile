@@ -1107,21 +1107,24 @@ export class DevicePool {
 
   private registerSessionReleaseHandlers(): void {
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) => {
+      release: (sessionId, reason, attempt, options) => {
         const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
           sessionId,
           reason,
           attempt,
+          options,
         );
         if (recoveryRelease) {
+          options.deviceReleaseManaged = true;
           return recoveryRelease;
         }
         const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
         if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
           return undefined;
         }
-        // A retained explicit-release fence upgrades the expiry reason, so its
-        // notification captures ownership instead of freeing the device below.
+        // This handler returns the device after the attempt, including when a
+        // retained terminal fence upgrades the expiry's diagnostic reason.
+        options.deviceReleaseManaged = true;
         let releasedDeviceId: string | null = null;
         return releaseSessionAndDevice(
           this.sessionManager,
@@ -1143,9 +1146,10 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // connection ownership and autolock metadata are removed when their session
     // ends.
-    this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
       this.clearMcpSessionOwnership(sessionId);
-      if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
+      // An expiry handler that owns the ordered release consumes its capture after the attempt.
+      if (options.expiryOrigin && !options.deviceReleaseManaged) {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
         this.captureReleasedDevice(sessionId, deviceId);
@@ -3366,6 +3370,8 @@ export class DevicePool {
     return deferredUntil !== undefined && this.timer.now() >= deferredUntil;
   }
 
+  // rebindSameAvdReplacementSession and the recovery ports may have already
+  // detached the entry: their session fence does not require pooled-entry identity.
   private isPreservedSessionCurrent(session: Session, deviceId: string): boolean {
     return this.sessionManager.isCurrentSession(session) && session.assignedDevice === deviceId;
   }
@@ -4734,9 +4740,14 @@ export class DevicePool {
     return result;
   }
 
+  private isPooledEntryCurrent(device: PooledDevice): boolean {
+    return this.devices.get(device.id) === device;
+  }
+
+  // selectAssignableIdleDevice additionally requires eligibility and resolved identity.
   private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === null &&
       this.selectIdleDevice([device]) === device &&
       this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
@@ -5144,9 +5155,11 @@ export class DevicePool {
     }
   }
 
+  // createSessionOrRestore / DeviceAutolockManager check the session object and busy
+  // assignment, including a held suspect session; automation admission is separate.
   private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === session.sessionId &&
       device.status === "busy" &&
       this.sessionManager.getSession(session.sessionId) === session
@@ -5252,13 +5265,15 @@ export class DevicePool {
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
   }
 
+  // releaseCapturedDevice checks assignment generation, but permits release after
+  // the session has left SessionManager and does not require a busy status.
   private isCapturedReleaseCurrent(
     device: PooledDevice,
     expectedSessionId: string,
     expectedAssignmentCount: number,
   ): boolean {
     const deviceId = device.id;
-    if (this.devices.get(deviceId) !== device) {
+    if (!this.isPooledEntryCurrent(device)) {
       logger.debug(`Ignoring stale release for replacement device ${deviceId}`);
       return false;
     }

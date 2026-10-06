@@ -340,7 +340,26 @@ function hasCrossLockCycle(plan: Plan, safe: number): boolean {
  * For each device, the distinct locks it still visits at/after `safe`, in
  * track order (consecutive repeats of the same lock collapsed to one entry).
  */
+function lockArrivalsByLock(plan: Plan): Map<string, Arrival[]> {
+  const arrivalsByLock = new Map<string, Arrival[]>();
+  for (let planIndex = 0; planIndex < plan.steps.length; planIndex++) {
+    const step = plan.steps[planIndex];
+    if (!COORDINATION_TOOLS.has(step.tool)) {
+      continue;
+    }
+    const lock = effectiveField(step, "lock");
+    if (typeof lock !== "string" || lock.length === 0) {
+      continue;
+    }
+    const arrivals = arrivalsByLock.get(lock) ?? [];
+    arrivals.push({ planIndex, deviceCount: readDeviceCount(step), device: readDevice(step) });
+    arrivalsByLock.set(lock, arrivals);
+  }
+  return arrivalsByLock;
+}
+
 function collectDeviceLockOrder(plan: Plan, safe: number): Map<string, string[]> {
+  const arrivalsByLock = lockArrivalsByLock(plan);
   const deviceLockOrder = new Map<string, string[]>();
   for (let planIndex = safe; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
@@ -349,7 +368,7 @@ function collectDeviceLockOrder(plan: Plan, safe: number): Map<string, string[]>
     }
     const lock = effectiveField(step, "lock");
     const device = readDevice(step);
-    if (typeof lock !== "string" || lock.length === 0 || device === undefined) {
+    if (!isTrackedLock(lock, device, arrivalsByLock) || device === undefined) {
       continue;
     }
     const order = deviceLockOrder.get(device) ?? [];
@@ -359,6 +378,19 @@ function collectDeviceLockOrder(plan: Plan, safe: number): Map<string, string[]>
     deviceLockOrder.set(device, order);
   }
   return deviceLockOrder;
+}
+
+function isTrackedLock(
+  lock: unknown,
+  device: string | undefined,
+  arrivalsByLock: Map<string, Arrival[]>,
+): lock is string {
+  return (
+    typeof lock === "string" &&
+    lock.length > 0 &&
+    device !== undefined &&
+    consistentDeviceCount(arrivalsByLock.get(lock) ?? []) !== 1
+  );
 }
 
 /**

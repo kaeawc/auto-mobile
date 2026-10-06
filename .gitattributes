@@ -31,6 +31,8 @@ scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
 # Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
 android/junit-runner/src/test/resources/captured/*.json text eol=lf
+# Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.
+test/fixtures/android-locale/*.txt text eol=lf
 # Real `am start` / `monkey` failure captures from two emulators (#10192).
 test/fixtures/android-am-start/*.txt text eol=lf
 # Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
@@ -99,3 +101,6 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 test/fixtures/overlay-spec/**/*.json text eol=lf
 schemas/overlay-spec-contract.json text eol=lf
 schemas/overlay-asset-contract.json text eol=lf
+
+# Real contrast-audit captures (PNG already uses the test/fixtures exemption above).
+test/fixtures/accessibility-contrast/*.json text eol=lf

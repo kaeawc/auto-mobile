@@ -273,6 +273,40 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
     expect(computeSafeBarrierResumeStep(p, 2)).toBe(0);
   });
 
+  test("ignores opposite lock orders when every arrival has deviceCount one", () => {
+    const p: Plan = {
+      name: "count-one-cross-lock",
+      mcpVersion: "1.0",
+      devices: ["A", "B"],
+      steps: [
+        actionStep("A"),
+        barrierStep("A", "X", 1),
+        barrierStep("A", "Y", 1),
+        barrierStep("B", "Y", 1),
+        barrierStep("B", "X", 1),
+      ],
+    };
+    expect(computeSafeBarrierResumeStep(p, 1)).toBe(1);
+  });
+
+  test("keeps multi-device and mixed-count opposing lock orders unsafe", () => {
+    const multiDevice = plan([
+      barrierStep("A", "X", 2),
+      barrierStep("A", "Y", 2),
+      barrierStep("B", "Y", 2),
+      barrierStep("B", "X", 2),
+    ]);
+    expect(computeSafeBarrierResumeStep(multiDevice, 1)).toBe(0);
+
+    const mixedCounts = plan([
+      barrierStep("A", "X", 2),
+      barrierStep("A", "Y", 1),
+      barrierStep("B", "Y", 1),
+      barrierStep("B", "X", 2),
+    ]);
+    expect(computeSafeBarrierResumeStep(mixedCounts, 1)).toBe(0);
+  });
+
   test("does not flag a single device revisiting two locks in both orders as a cross-lock cycle", () => {
     // Only device A ever alternates between X and Y; nothing else depends on
     // A while it does so, so there is no partner to deadlock against.

@@ -5,7 +5,7 @@ import {
 } from "../../src/daemon/cli/runDaemonCommand";
 import { getCurrentBuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
-import type { DaemonStatus } from "../../src/daemon/types";
+import { DAEMON_LIVENESS_OWNER_IS_PROXY_CODE, type DaemonStatus } from "../../src/daemon/types";
 import * as debugTools from "../../src/daemon/debugTools";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -50,7 +50,10 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  available-devices     Query device pool status"],
           ["stdout", "  session-info <id>     Get information about a session"],
           ["stdout", "  release-session <id>  Release a session and free its device"],
-          ["stdout", "  heartbeat <id>        Record a heartbeat for a session"],
+          [
+            "stdout",
+            "  heartbeat <id>        Heartbeat a one-shot CLI session (proxy-owned: refused)",
+          ],
           ["exit", 1],
           ["stderr", "Unexpected error: fake exit"],
           ["exit", 1],
@@ -531,4 +534,74 @@ describe("daemon command characterization with fake I/O", () => {
       }
     },
   );
+});
+
+describe("heartbeat command against a proxy-owned session (#10054)", () => {
+  const sessionId = "proxy-owned-session";
+
+  class RefusingClient extends FakeDaemonClient {
+    readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    override async connect() {}
+    override async callDaemonMethod(method: string, params: Record<string, unknown>) {
+      this.calls.push({ method, params });
+      throw Object.assign(new Error(`Session ${sessionId} is owned by an MCP proxy.`), {
+        code: DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
+      });
+    }
+    override async close() {}
+  }
+
+  test("exits non-zero printing the daemon's actionable message and the structured code", async () => {
+    const client = new RefusingClient();
+    class Manager extends SafeDaemonManager {
+      override getDaemonState() {
+        return remoteState;
+      }
+      override createClient() {
+        return client;
+      }
+    }
+    const output: unknown[] = [];
+    const log = spyOn(console, "log").mockImplementation((text) => {
+      output.push(["stdout", text]);
+    });
+    const error = spyOn(console, "error").mockImplementation((text) => {
+      output.push(["stderr", text]);
+    });
+    const exit = spyOn(process, "exit").mockImplementation((code) => {
+      output.push(["exit", code]);
+      return undefined as never;
+    });
+    try {
+      await runDaemonCommand(
+        "heartbeat",
+        [sessionId, "--liveness-owner-token", "keeper", "--claim-liveness-ownership"],
+        {},
+        Manager,
+      );
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+      exit.mockRestore();
+    }
+
+    expect(client.calls).toEqual([
+      {
+        method: "daemon/heartbeat",
+        params: expect.objectContaining({
+          sessionId,
+          livenessOwnerKind: "cli-keeper",
+          livenessOwnerToken: "keeper",
+          claimLivenessOwnership: true,
+        }),
+      },
+    ]);
+    expect(output).toEqual([
+      [
+        "stderr",
+        `Error: Session ${sessionId} is owned by an MCP proxy. [liveness_owner_is_proxy] Stop this keeper; heartbeat only works for one-shot CLI sessions.`,
+      ],
+      ["exit", 1],
+    ]);
+  });
 });

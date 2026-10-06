@@ -936,6 +936,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
         );
         device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+          sessionId: sessionUuid,
           skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
           readiness:
             typeof options.deviceReadiness === "function"

@@ -297,10 +297,10 @@ The `systemTray` tool handles this automatically. See
 
 ## CtrlProxy visibility bypass
 
-`ViewHierarchyExtractor.kt` must bypass the `isVisibleToUser` filter for
-`com.android.systemui` nodes. Collapsed groups mark child text nodes as
-not visible even though they are present in the shade. Without this bypass,
-notification text cannot be matched at all.
+The extractor does not filter on `isVisibleToUser` for any package (see
+`android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/ViewHierarchyExtractor.kt`).
+Collapsed groups mark child text nodes as not visible even though they are
+present in the shade; ignoring this flag keeps those children matchable.
 
 # CI failure triage
 

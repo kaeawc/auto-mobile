@@ -355,6 +355,44 @@ export class VideoRecordingRepository {
     return rows.map(toRecord);
   }
 
+  /**
+   * `recording` rows that no live peer daemon provably owns (issue #10043): the
+   * only rows a starting daemon may mark `interrupted`. The table is shared by
+   * every daemon on the database file, and the only ownership a row carries is
+   * `owner_session_uuid` -> `device_sessions.daemon_session_id`, so:
+   *
+   * - a row whose owner device session belongs to a daemon in
+   *   `livePeerDaemonSessionIds` is excluded (that peer is still capturing it);
+   * - a row whose owner session is unknown or owned by a daemon that is not live
+   *   is orphaned and included;
+   * - a legacy row with no owner cannot be attributed to any daemon, so it is
+   *   included only when no live peer exists to have written it.
+   */
+  async listRecordingsWithoutLivePeerOwner(
+    livePeerDaemonSessionIds: ReadonlySet<string>,
+  ): Promise<VideoRecordingRecord[]> {
+    const db = await this.getDb();
+    let builder = db.selectFrom("video_recordings").selectAll().where("status", "=", "recording");
+    const livePeers = Array.from(livePeerDaemonSessionIds);
+    if (livePeers.length > 0) {
+      builder = builder.where((eb) =>
+        eb.and([
+          eb("owner_session_uuid", "is not", null),
+          eb(
+            "owner_session_uuid",
+            "not in",
+            eb
+              .selectFrom("device_sessions")
+              .select("session_uuid")
+              .where("daemon_session_id", "in", livePeers),
+          ),
+        ]),
+      );
+    }
+    const rows = await builder.execute();
+    return rows.map(toRecord);
+  }
+
   async getLatestRecording(): Promise<VideoRecordingRecord | null> {
     const rows = await this.listRecordings({
       status: ["completed", "interrupted"],

@@ -40,27 +40,53 @@ export class AndroidDeviceResourceReader {
   private get timer() {
     return this.options.timer ?? defaultTimer;
   }
-  createRun(request: DeviceResourceObservationRequest): AndroidResourceReadRun {
+  createRun(
+    request: DeviceResourceObservationRequest,
+    observationOnly = false,
+  ): AndroidResourceReadRun {
+    const reads = new Map<string, Promise<string>>();
     const adb = this.adbFactory.create(request.device);
     const run: AndroidResourceReadRun = {
       request,
       user: "",
-      command: async (args) => {
-        request.signal?.throwIfAborted();
-        const timeoutMs = request.deadlineMs - this.timer.now();
-        if (timeoutMs <= 0) {
-          throw new Error("Android resource configuration deadline expired");
+      command: (args) => {
+        if (request.signal?.aborted) {
+          return Promise.reject(request.signal.reason);
         }
-        const options: AdbExecuteOptions = {
-          timeoutMs,
-          signal: request.signal,
-          noRetry: true,
-          waitForProcessSettlementAfterAbort: true,
-        };
-        const output = await adb.execute(["shell", args.map(shellQuote).join(" ")], options);
-        request.signal?.throwIfAborted();
-        return output.stdout.trim();
+        if (request.deadlineMs <= this.timer.now()) {
+          return Promise.reject(new Error("Android resource configuration deadline expired"));
+        }
+        const cacheable =
+          observationOnly &&
+          ((args[0] === "pm" && args[1] === "list") ||
+            (args[0] === "dumpsys" && args[1] === "package"));
+        const key = JSON.stringify(args);
+        if (cacheable && reads.has(key)) {
+          return reads.get(key)!;
+        }
+        const read = execute(args);
+        if (cacheable) {
+          reads.set(key, read);
+          void read.then(undefined, () => reads.delete(key));
+        }
+        return read;
       },
+    };
+    const execute = async (args: string[]): Promise<string> => {
+      request.signal?.throwIfAborted();
+      const timeoutMs = request.deadlineMs - this.timer.now();
+      if (timeoutMs <= 0) {
+        throw new Error("Android resource configuration deadline expired");
+      }
+      const options: AdbExecuteOptions = {
+        timeoutMs,
+        signal: request.signal,
+        noRetry: true,
+        waitForProcessSettlementAfterAbort: true,
+      };
+      const output = await adb.execute(["shell", args.map(shellQuote).join(" ")], options);
+      request.signal?.throwIfAborted();
+      return output.stdout.trim();
     };
     return run;
   }

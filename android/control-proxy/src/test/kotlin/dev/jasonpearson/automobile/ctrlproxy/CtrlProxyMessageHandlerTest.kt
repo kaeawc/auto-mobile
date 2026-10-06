@@ -966,14 +966,14 @@ class CtrlProxyMessageHandlerTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  fun `dispatches start_recording`() = runTest {
-    dispatch("""{"type":"start_recording"}""")
+  fun `accepts start_recording without a response`() = runTest {
+    assertNull(dispatchForResponse("""{"type":"start_recording"}"""))
     assertEquals("startRecording" to emptyList<Any?>(), lastCall)
   }
 
   @Test
-  fun `dispatches stop_recording`() = runTest {
-    dispatch("""{"type":"stop_recording"}""")
+  fun `accepts stop_recording without a response`() = runTest {
+    assertNull(dispatchForResponse("""{"type":"stop_recording"}"""))
     assertEquals("stopRecording" to emptyList<Any?>(), lastCall)
   }
 

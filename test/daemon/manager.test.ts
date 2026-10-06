@@ -64,6 +64,7 @@ import {
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
@@ -6761,6 +6762,7 @@ describe("Daemon manager heartbeat", () => {
         params: {
           sessionId: "session-1",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
         },
       },
@@ -6854,6 +6856,7 @@ describe("Daemon manager heartbeat", () => {
         params: {
           sessionId: "session-1",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
           livenessOwnerToken: "ios-video-keeper",
           claimLivenessOwnership: true,

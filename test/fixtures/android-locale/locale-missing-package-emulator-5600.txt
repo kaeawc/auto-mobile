@@ -1,0 +1,9 @@
+$ adb -s emulator-5600 shell cmd locale get-app-locales com.example.missing.pkg; echo exit=$?
+Unknown package com.example.missing.pkg for userId 0
+exit=0
+$ adb -s emulator-5600 shell cmd locale set-app-locales com.example.missing.pkg --user 0 --locales fr-FR; echo exit=$?
+Unknown package com.example.missing.pkg for userId 0
+exit=0
+$ adb -s emulator-5600 shell cmd locale get-app-locales com.example.missing.pkg --user 0; echo exit=$?
+Unknown package com.example.missing.pkg for userId 0
+exit=0

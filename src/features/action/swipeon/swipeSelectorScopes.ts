@@ -1,3 +1,4 @@
+import { isStrictlyScoped } from "../../utility/ScopedSelection";
 import { ActionableError } from "../../../models/ActionableError";
 import {
   isMissingContainerError,
@@ -64,16 +65,11 @@ export function bindSwipeScope(nodes: readonly SearchableEntry[], element: Eleme
 }
 
 export function usesScopedSwipeContainer(container: SwipeOnOptions["container"]): boolean {
-  return (
-    !!container &&
-    (container.container !== undefined ||
-      container.selectionStrategy !== undefined ||
-      container.index !== undefined)
-  );
+  return isStrictlyScoped(container, "swipe-container-options");
 }
 
 export function usesScopedSwipeLookFor(lookFor: SwipeOnOptions["lookFor"]): boolean {
-  return !!lookFor && (lookFor.container !== undefined || lookFor.selectionStrategy !== undefined);
+  return isStrictlyScoped(lookFor, "swipe-look-for-options");
 }
 
 export function resolveSwipeLookFor({

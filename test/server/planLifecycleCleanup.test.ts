@@ -18,6 +18,8 @@ import {
 } from "../../src/server/toolRegistry";
 import { logger } from "../../src/utils/logger";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
+import { ClearAppData } from "../../src/features/action/ClearAppData";
+import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -508,4 +510,49 @@ describe("executePlan cleans every acquired device before release", () => {
       }
     },
   );
+
+  describe("iOS simulator clear-app-data through the real ClearAppData", () => {
+    const iosCleanup = (simctl: FakeSimCtlClient) =>
+      new DefaultAppCleanupService({
+        createClearAppData: (device) =>
+          new ClearAppData(device, undefined, {
+            simctl,
+            isSimulatorFn: () => true,
+            cacheInvalidator: { invalidate: () => {} },
+          }),
+        logger: log,
+      });
+
+    test("an uninstalled bundle is cleaned and does not mark the simulator", async () => {
+      await acquire([devices[3]]);
+      const simctl = new FakeSimCtlClient();
+      simctl.setInstalledApps([{ bundleId: "com.example.other" }]);
+      await lifecycle.afterExecution(
+        input({ device: devices[3], cleanupService: iosCleanup(simctl) }),
+      );
+      expect(marker("device-ios")).toBeUndefined();
+      expect(log.at("warn").some((entry) => entry.message.includes("was incomplete"))).toBe(false);
+    });
+
+    test("a transient container failure on an installed bundle still marks the simulator", async () => {
+      await acquire([devices[3]]);
+      const simctl = new FakeSimCtlClient();
+      simctl.setInstalledApps([{ bundleId: "com.example.chat" }]);
+      simctl.setContainerError("com.example.chat", new Error("simctl get_app_container failed"));
+      await lifecycle.afterExecution(
+        input({ device: devices[3], cleanupService: iosCleanup(simctl) }),
+      );
+      expect(marker("device-ios")).toBe("app-cleanup");
+    });
+
+    test("an unreadable listing is not mistaken for an uninstalled bundle", async () => {
+      await acquire([devices[3]]);
+      const simctl = new FakeSimCtlClient();
+      simctl.setListAppsError(new Error("simctl listapps timed out"));
+      await lifecycle.afterExecution(
+        input({ device: devices[3], cleanupService: iosCleanup(simctl) }),
+      );
+      expect(marker("device-ios")).toBe("app-cleanup");
+    });
+  });
 });

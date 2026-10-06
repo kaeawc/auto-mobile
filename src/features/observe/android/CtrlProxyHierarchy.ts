@@ -64,6 +64,17 @@ class HierarchyRunnerError extends Error {
   }
 }
 
+/**
+ * Whether the reply to a sync request answers its caller only and must not replace the
+ * client's shared default-display state (cached hierarchy, screen geometry, device
+ * stream). Observer reads always do; an owner read does when it targets a non-default
+ * logical display. A request with no `displayId`, or `displayId: 0`, keeps owning the
+ * shared cache (#10106).
+ */
+function isolatedHierarchyRequest(request: { observerMode: boolean; displayId?: number }): boolean {
+  return request.observerMode || (request.displayId !== undefined && request.displayId !== 0);
+}
+
 type HierarchyLookupResult = AccessibilityHierarchyResponse & {
   /** Internal cache-serving policy; never exposed as verification freshness. */
   withinCacheServeWindow?: boolean;
@@ -212,8 +223,19 @@ export class CtrlProxyHierarchy {
     );
   }
 
-  private unmarkObserverRequest(observerMode: boolean, requestId?: string): void {
-    if (observerMode && requestId) {
+  private markIsolatedRequest(
+    requestId: string,
+    request: { observerMode: boolean; preserveDisplayState: boolean; displayId?: number },
+  ): void {
+    this.context.markObserverHierarchyRequest?.(requestId, {
+      // An owner read of a non-default display always answers its caller only (#10106).
+      isolateResponse:
+        !request.observerMode || request.preserveDisplayState || request.displayId !== undefined,
+    });
+  }
+
+  private unmarkObserverRequest(isolated: boolean, requestId?: string): void {
+    if (isolated && requestId) {
       this.context.unmarkObserverHierarchyRequest?.(requestId);
     }
   }
@@ -1122,7 +1144,10 @@ export class CtrlProxyHierarchy {
           ),
         );
       } finally {
-        this.unmarkObserverRequest(observerMode, correlationRequestId);
+        this.unmarkObserverRequest(
+          isolatedHierarchyRequest({ observerMode, displayId }),
+          correlationRequestId,
+        );
       }
 
       if (freshData) {
@@ -1615,12 +1640,11 @@ export class CtrlProxyHierarchy {
     }
 
     const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
+    const isolated = isolatedHierarchyRequest({ observerMode, displayId });
     try {
       onRequestId?.(requestId);
-      if (observerMode) {
-        this.context.markObserverHierarchyRequest?.(requestId, {
-          isolateResponse: preserveDisplayState || displayId !== undefined,
-        });
+      if (isolated) {
+        this.markIsolatedRequest(requestId, { observerMode, preserveDisplayState, displayId });
       }
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering, displayId }),
@@ -1631,7 +1655,7 @@ export class CtrlProxyHierarchy {
       );
       return requestId;
     } catch (error) {
-      if (observerMode) {
+      if (isolated) {
         // A failed send cannot produce a correlated frame.
         this.context.unmarkObserverHierarchyRequest?.(requestId);
       }

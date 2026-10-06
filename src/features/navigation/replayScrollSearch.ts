@@ -3,7 +3,7 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { Timer } from "../../utils/SystemTimer";
-import type { ScrollPosition } from "../../utils/interfaces/NavigationGraph";
+import type { NavigationEdge, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { SwipeOn } from "../action/swipeon";
 
 /** The element a replayed `tapOn` targets, as `swipeOn lookFor` can describe it. */
@@ -52,12 +52,70 @@ export interface ReplayScrollSearcher {
 }
 
 /**
- * A replayed `tapOn` whose target is not on screen and was not found by the bounded
- * scroll search either. Unlike a tap that found its element and still missed, this
- * says nothing about whether the edge works when the list is positioned differently,
- * so navigateTo does not remember it as a failed edge.
+ * A replay step that failed because the screen is not positioned the way the edge
+ * needs, not because the edge is broken. navigateTo ranks the edge last for the rest of
+ * the call so a fallback runs first, and settles it when the call ends
+ * (`settleTransientEdgeFailure`) instead of demoting it outright. `searched` is whether
+ * a scroll search ran and came up empty: only those misses count towards a lasting
+ * demotion, because a refused replay says nothing about whether the target exists.
  */
-export class ReplayTargetNotFoundError extends ActionableError {}
+export class ReplayTransientError extends ActionableError {
+  constructor(
+    message: string,
+    readonly searched: boolean,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * A replayed `tapOn` whose target is not on screen and was not found by the bounded
+ * scroll search either. Unlike a tap that found its element and still missed, a single
+ * one says nothing about whether the edge works when the list is positioned
+ * differently; repeated ones do (see `settleTransientEdgeFailure`).
+ */
+export class ReplayTargetNotFoundError extends ReplayTransientError {
+  constructor(message: string) {
+    super(message, true);
+  }
+}
+
+/**
+ * A replay refused because an earlier failed search in the same call left the list
+ * scrolled to an unknown position: an edge addressed by recorded coordinates would tap
+ * whatever is there now.
+ */
+export class ReplayScrollDisturbedError extends ReplayTransientError {
+  constructor(message: string) {
+    super(message, false);
+  }
+}
+
+/** One edge a navigateTo call remembered as failed only because its target was missing. */
+export interface TransientEdgeFailure {
+  edge: NavigationEdge;
+  searched: boolean;
+}
+
+/**
+ * What the replay scroll searches of ONE navigateTo call have done so far: the time
+ * they spent (capped across steps), the direction the last failed search scrolled
+ * (the list is left wherever that search ended), and the edges that call must settle.
+ */
+export class ReplayRunState {
+  searchMs = 0;
+  disturbedDirection: SwipeDirection | undefined;
+  readonly transientFailures: TransientEdgeFailure[] = [];
+}
+
+/**
+ * Whether the edge replays recorded screen coordinates rather than resolving a
+ * selector on a fresh observation, so it is only valid on the screen position it was
+ * recorded in.
+ */
+export function isCoordinateAddressed(toolName: string, args: Record<string, unknown>): boolean {
+  return toolName === "tapAt" || (typeof args.x === "number" && typeof args.y === "number");
+}
 
 /** tapOn reports a missing target as `Element not found with provided …` (a missing container differs). */
 const ELEMENT_NOT_FOUND = /\bElement not found\b/;

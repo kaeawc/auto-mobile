@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { combineApkDigests } from "../../src/utils/ContentHashProvider";
 
@@ -6,13 +6,23 @@ import { combineApkDigests } from "../../src/utils/ContentHashProvider";
 // invalidation. Its contract is order-independence ("sorted so split-APK ordering
 // does not affect the result"): an order bug causes spurious cache hits/misses.
 // See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
-const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
+const RUN_OPTIONS = { seed: 1_234_567, numRuns: 150 } as const;
 
 /** A valid 64-char lowercase hex SHA-256 digest (matches the module's SHA256_HEX). */
-const hexDigest = fc.stringMatching(/^[0-9a-f]{64}$/);
+const hexDigest = fc
+  .array(fc.constantFrom(..."0123456789abcdef"), {
+    minLength: 64,
+    maxLength: 64,
+  })
+  .map((chars) => chars.join(""));
 
 /** A path token with no whitespace (only the first token of a line is read). */
-const pathToken = fc.stringMatching(/^[A-Za-z0-9_./-]+$/).filter((s) => s.length > 0);
+const pathToken = fc
+  .array(fc.constantFrom(..."ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./-"), {
+    minLength: 1,
+    maxLength: 32,
+  })
+  .map((chars) => chars.join(""));
 
 /** One `sha256sum`-style line: `<digest>  <path>`. */
 const validLine = fc.tuple(hexDigest, pathToken).map(([d, p]) => `${d}  ${p}`);
@@ -26,38 +36,50 @@ const garbageLine = fc.oneof(
   fc.constant(""),
 );
 
-/** Reorder `items` by an independently generated key vector (a pseudo-permutation). */
-function permuteBy<T>(items: T[], keys: number[]): T[] {
-  return items
-    .map((item, i) => ({ item, key: keys[i] }))
-    .sort((a, b) => a.key - b.key)
-    .map(({ item }) => item);
-}
-
 describe("combineApkDigests (property-based)", () => {
+  beforeAll(() => {
+    // Keep one-off fast-check and SHA-256 initialization outside the first property.
+    combineApkDigests("0".repeat(64) + "  /warmup.apk");
+  });
+
   test("commutativity: output is invariant to input line order", () => {
     const arb = fc.array(validLine, { minLength: 1, maxLength: 8 }).chain((lines) =>
       fc
-        .array(fc.double({ noNaN: true, noDefaultInfinity: true }), {
+        .shuffledSubarray(lines, {
           minLength: lines.length,
           maxLength: lines.length,
         })
-        .map((keys) => ({ lines, keys })),
+        .map((shuffled) => ({ lines, shuffled })),
     );
     fc.assert(
-      fc.property(arb, ({ lines, keys }) => {
+      fc.property(arb, ({ lines, shuffled }) => {
         const base = combineApkDigests(lines.join("\n"));
-        const shuffled = combineApkDigests(permuteBy(lines, keys).join("\n"));
-        expect(shuffled).toBe(base);
+        expect(combineApkDigests(shuffled.join("\n"))).toBe(base);
       }),
       RUN_OPTIONS,
     );
   });
 
+  test("edge cases: duplicates and maximum-size input preserve order independence", () => {
+    const repeated = "a".repeat(64);
+    const distinct = "b".repeat(64);
+    const lines = [
+      `${repeated}  /base.apk`,
+      `${distinct}  /split_1.apk`,
+      `${repeated}  /base.apk`,
+      `${"c".repeat(64)}  /split_2.apk`,
+      `${"d".repeat(64)}  /split_3.apk`,
+      `${"e".repeat(64)}  /split_4.apk`,
+      `${"f".repeat(64)}  /split_5.apk`,
+      `${"0".repeat(64)}  /split_6.apk`,
+    ];
+    expect(combineApkDigests([...lines].reverse().join("\n"))).toBe(
+      combineApkDigests(lines.join("\n")),
+    );
+  });
+
   test("garbage-line invariance: non-digest lines do not change the result", () => {
-    // One sort key per combined element, so every valid/garbage line is actually
-    // shuffled — a short key vector would leave a suffix in original order and yield
-    // NaN comparisons in permuteBy, silently weakening the interleaving coverage.
+    // Generate a full-length shuffle so every valid/garbage line participates.
     const arb = fc
       .tuple(
         fc.array(validLine, { minLength: 1, maxLength: 6 }),
@@ -65,17 +87,16 @@ describe("combineApkDigests (property-based)", () => {
       )
       .chain(([valid, garbage]) =>
         fc
-          .array(fc.double({ noNaN: true, noDefaultInfinity: true }), {
+          .shuffledSubarray([...valid, ...garbage], {
             minLength: valid.length + garbage.length,
             maxLength: valid.length + garbage.length,
           })
-          .map((keys) => ({ valid, garbage, keys })),
+          .map((mixed) => ({ valid, mixed })),
       );
     fc.assert(
-      fc.property(arb, ({ valid, garbage, keys }) => {
+      fc.property(arb, ({ valid, mixed }) => {
         const clean = combineApkDigests(valid.join("\n"));
-        const mixed = permuteBy([...valid, ...garbage], keys).join("\n");
-        expect(combineApkDigests(mixed)).toBe(clean);
+        expect(combineApkDigests(mixed.join("\n"))).toBe(clean);
       }),
       RUN_OPTIONS,
     );

@@ -38,6 +38,30 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  test("recording notifications preserve fire-and-forget wire messages", async () => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const send = spyOn(socket, "send").mockImplementation(() => {});
+    try {
+      client.notifyRecordingStarted();
+      client.notifyRecordingStopped();
+      expect(send.mock.calls).toEqual([
+        ['{"type":"start_recording"}'],
+        ['{"type":"stop_recording"}'],
+      ]);
+      expect(client["requestManager"].getPendingCount()).toBe(0);
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
+  });
+
   test("requestAction reports no dispatch when connection is unavailable", async () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       testDevice,

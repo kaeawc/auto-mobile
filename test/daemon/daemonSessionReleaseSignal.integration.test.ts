@@ -104,6 +104,16 @@ describe("Daemon session-release signal wiring", () => {
 
       await timer.advanceTimeAsync(10_000);
 
+      // The 1s lease has expired, but the 10s suspect grace still reserves the device (#10051).
+      expect(await repository.getSession("heartbeat-expired")).toMatchObject({
+        status: "active",
+        release_reason: null,
+      });
+      expect(emitted).toEqual([]);
+
+      // Drive the next scheduled scan separately so this is not a daemon timer stall.
+      await timer.advanceTimeAsync(10_000);
+
       const persisted = await repository.getSession("heartbeat-expired");
       expect(persisted).toMatchObject({
         status: "expired",

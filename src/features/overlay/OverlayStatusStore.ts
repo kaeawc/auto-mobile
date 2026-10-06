@@ -1,6 +1,6 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import type { OverlayResult } from "../observe/android/ctrlProxyProtocol";
+import type { OverlayEvent, OverlayResult } from "../observe/android/ctrlProxyProtocol";
 
 export type OverlayMutation = "show" | "update" | "dismiss";
 export interface OverlayLastResult {
@@ -14,8 +14,13 @@ export interface OverlayLastResult {
   totalTimeMs?: number;
   timestamp: number;
 }
+export interface OverlayEventState {
+  pages: OverlayEvent["pages"];
+  state: OverlayEvent["state"];
+  lastKnown: true;
+}
 export interface OverlayStatus {
-  overlays: OverlayLastResult[];
+  overlays: (OverlayLastResult & Partial<OverlayEventState>)[];
   lastResult?: OverlayLastResult;
 }
 export interface OverlayScope {
@@ -24,6 +29,8 @@ export interface OverlayScope {
 }
 export interface OverlayStatusStore {
   status(scope: OverlayScope): OverlayStatus;
+  startShow(scope: OverlayScope): void;
+  recordEvent(scope: OverlayScope, event: OverlayEvent): void;
   /** The device reported a terminal dismissal for this overlay; its presence is gone. */
   dismissed(scope: OverlayScope, id: string): void;
   clearDevice(deviceId: string): void;
@@ -39,7 +46,9 @@ export interface OverlayStatusStore {
 }
 interface StoredOverlayStatus extends OverlayScope {
   shown: Map<string, OverlayLastResult>;
-  lastResult: OverlayLastResult;
+  lastResult?: OverlayLastResult;
+  snapshot?: OverlayEventState & { id: string };
+  pendingSnapshot?: OverlayEventState & { id: string };
 }
 
 /**
@@ -59,10 +68,47 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
 
   status(scope: OverlayScope): OverlayStatus {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
+    const snapshot = stored?.snapshot;
     return {
-      overlays: Array.from(stored?.shown.values() ?? [], (entry) => ({ ...entry })),
-      ...(stored ? { lastResult: { ...stored.lastResult } } : {}),
+      overlays: Array.from(stored?.shown.values() ?? [], (entry) => ({
+        ...entry,
+        ...(snapshot && snapshot.id === entry.id
+          ? {
+              pages: { ...snapshot.pages },
+              state: { ...snapshot.state },
+              lastKnown: true as const,
+            }
+          : {}),
+      })),
+      ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
     };
+  }
+
+  /** Only events after this show attempt can establish its successful snapshot. */
+  startShow(scope: OverlayScope): void {
+    const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
+    if (stored) {
+      stored.pendingSnapshot = undefined;
+    }
+  }
+
+  /** Accepted pushes may precede the successful show acknowledgement. */
+  recordEvent(scope: OverlayScope, event: OverlayEvent): void {
+    const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
+    const stored = this.scopes.get(key) ?? {
+      ...scope,
+      shown: new Map<string, OverlayLastResult>(),
+    };
+    stored.pendingSnapshot = {
+      id: event.id,
+      pages: { ...event.pages },
+      state: { ...event.state },
+      lastKnown: true,
+    };
+    if (stored.shown.has(event.id)) {
+      stored.snapshot = stored.pendingSnapshot;
+    }
+    this.remember(key, stored);
   }
 
   record(
@@ -109,7 +155,9 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
   private updatePresence(stored: StoredOverlayStatus, entry: OverlayLastResult): void {
     if (entry.lastAction === "show" && entry.success && entry.id) {
       // The device has one active overlay; replacement invalidates every session's presence.
+      const snapshot = stored.pendingSnapshot;
       this.clearShown(stored.deviceId);
+      stored.snapshot = snapshot?.id === entry.id ? snapshot : undefined;
       stored.shown.set(entry.id, entry);
     } else if (entry.lastAction === "dismiss" && entry.success) {
       if (entry.all) {
@@ -133,11 +181,16 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
   clearSession(sessionUuid: string): readonly string[] {
     const devices = new Set(
       Array.from(this.scopes.values())
-        .filter((stored) => stored.sessionUuid === sessionUuid)
+        .filter((stored) => stored.sessionUuid === sessionUuid && stored.lastResult !== undefined)
         .map((stored) => stored.deviceId),
     );
     for (const deviceId of devices) {
       this.clearDevice(deviceId);
+    }
+    for (const [key, stored] of this.scopes) {
+      if (stored.sessionUuid === sessionUuid) {
+        this.scopes.delete(key);
+      }
     }
     return Array.from(devices);
   }
@@ -167,6 +220,12 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     for (const known of this.scopes.values()) {
       if (known.deviceId !== deviceId) {
         continue;
+      }
+      if (id === undefined || known.pendingSnapshot?.id === id) {
+        known.pendingSnapshot = undefined;
+      }
+      if (id === undefined || known.snapshot?.id === id) {
+        known.snapshot = undefined;
       }
       if (id === undefined) {
         known.shown.clear();

@@ -1,3 +1,4 @@
+import type { SessionReleaseOptions } from "./sessionManager";
 import type { DeviceInfo } from "../models";
 import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -776,6 +777,7 @@ export class DeviceRecoveryCoordinator {
     sessionId: string,
     releaseReason: string,
     attempt: () => Promise<string | null>,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> | undefined {
     const record = this.recoveringSessionLosses.get(sessionId);
     if (!record?.reservations.has("failed-release")) {
@@ -788,7 +790,7 @@ export class DeviceRecoveryCoordinator {
     // sweeps cannot enter a second retry flight. The continuation avoids recursion
     // through SessionManager's expiry hook and preserves its commit/cancel fences.
     const release = Promise.resolve().then(() =>
-      this.retryFailedRecoveryRelease(record, releaseReason, attempt),
+      this.retryFailedRecoveryRelease(record, releaseReason, attempt, options),
     );
     const entry: SessionPreservingRecovery = {
       promise: release.then(() => (record.state === "released" ? "released" : "deferred")),
@@ -808,6 +810,7 @@ export class DeviceRecoveryCoordinator {
     record: AndroidRecoveryRecord,
     releaseReason: string,
     attempt: () => Promise<string | null>,
+    options: SessionReleaseOptions,
   ): Promise<string | null> {
     let deviceId: string | null = null;
     try {
@@ -817,13 +820,9 @@ export class DeviceRecoveryCoordinator {
         releaseReason,
         async () => {
           deviceId = await attempt();
-          // A prior terminal reason overrides cleanup-expired/lazy-expiry in
-          // the release notification. Consume that captured device here because
-          // idle expiry has no daemon caller to return it after session release.
-          if (
-            (releaseReason === "cleanup-expired" || releaseReason === "lazy-expiry") &&
-            this.pool.hasReleasedDeviceCapture(record.sessionId)
-          ) {
+          // Idle expiry has no daemon caller. This recovery flight owns its
+          // capture even when a prior terminal diagnostic overrides the expiry reason.
+          if (options.expiryOrigin && this.pool.hasReleasedDeviceCapture(record.sessionId)) {
             await this.pool.releaseDevice(record.deviceId, record.sessionId);
           }
         },

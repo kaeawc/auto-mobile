@@ -546,23 +546,38 @@ function networkIdentityKey(event: TelemetryEvent, data: Record<string, unknown>
   );
 }
 
+function defaultIdentityKey(event: TelemetryEvent, data: Record<string, unknown>): string | null {
+  const id = asKeyId(data.id ?? data.occurrenceId ?? data.sequenceNumber ?? data.requestId);
+  if (id === null) {
+    return null;
+  }
+  if (event.category === "overlay" && typeof data.sequence === "number") {
+    return JSON.stringify([event.category, event.deviceId, event.sessionId, id, data.sequence]);
+  }
+  return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
+}
+
 /**
  * Identity under which a live event and the backfilled copy of the same event
  * collide, or null when the two paths share no stable identity (then the event
  * is never deduplicated, so an unrelated event is never dropped).
  *
- * Each id source has its own namespace so a DB row id can never equal an SDK
- * sequence number: crash/anr/nonfatal use the failure `occurrenceId` both paths
- * carry; network uses {@link networkIdentityKey}. log/os/navigation/storage/
- * layout rows and live inputs carry no id, so they have no key; a bare row `id`
- * (only ever present on backfilled rows) is namespaced `row` so it dedupes
- * repeats within a backfill without matching any live event.
+ * Network and failure id sources have their own namespaces so a DB row id can
+ * never equal an SDK sequence number: crash/anr/nonfatal use the failure
+ * `occurrenceId` both paths carry; network uses {@link networkIdentityKey}.
+ * Their bare row `id` is namespaced `row` for repeated backfill rows. Other
+ * categories retain their existing id fallbacks and serialization; overlay
+ * sequences distinguish interactions with the same overlay id. log/os/
+ * navigation/storage/layout rows and live inputs carry no id, so have no key.
  */
 export function telemetryEventIdentityKey(event: TelemetryEvent): string | null {
   if (event.data === null || typeof event.data !== "object") {
     return null;
   }
   const data = event.data as Record<string, unknown>;
+  if (!["network", "crash", "anr", "nonfatal"].includes(event.category)) {
+    return defaultIdentityKey(event, data);
+  }
   const occurrenceId = asKeyId(data.occurrenceId);
   if (occurrenceId !== null) {
     return keyOf(event, "occ", occurrenceId);

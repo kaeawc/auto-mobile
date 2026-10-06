@@ -150,6 +150,7 @@ export function parseArgs(
     daemonPort: scalarOptions.daemonPort,
     daemonHost: scalarOptions.daemonHost,
     initialSessionUuid: scalarOptions.initialSessionUuid,
+    livenessOwnerToken: scalarOptions.livenessOwnerToken,
     debugPerf,
     debug,
     strictPort,
@@ -322,6 +323,7 @@ interface ScalarOptions {
   daemonPort?: number;
   daemonHost?: string;
   initialSessionUuid?: string;
+  livenessOwnerToken?: string;
   a11yLevel?: string;
   a11yFailureMode?: string;
   a11yMinSeverity?: string;
@@ -392,18 +394,39 @@ function parseConnectionOption(
     } else {
       log.warn(`Invalid host: ${host}`);
     }
-  } else if (arg === "--initial-session-uuid") {
-    const sessionUuid = args[i + 1];
-    if (sessionUuid && !sessionUuid.startsWith("--")) {
-      options.initialSessionUuid = sessionUuid;
-      i++;
-    } else {
-      log.warn(`Invalid initial session UUID: ${sessionUuid}`);
-    }
   } else {
-    return undefined;
+    return parseSessionBindingOption(args, i, log, options);
   }
   return i;
+}
+
+/** The proxy's device-session binding flags: which session, and under which owner token. */
+function parseSessionBindingOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  const value = args[i + 1]?.trim();
+  const hasValue = value !== undefined && value.length > 0 && !value.startsWith("--");
+  if (arg === "--initial-session-uuid") {
+    if (!hasValue) {
+      log.warn(`Invalid initial session UUID: ${args[i + 1]}`);
+      return i;
+    }
+    options.initialSessionUuid = args[i + 1];
+    return i + 1;
+  }
+  if (arg === "--liveness-owner-token") {
+    if (!hasValue) {
+      log.warn("--liveness-owner-token requires a non-empty value");
+      return i;
+    }
+    options.livenessOwnerToken = value;
+    return i + 1;
+  }
+  return undefined;
 }
 
 function parseAccessibilityOption(

@@ -28,7 +28,8 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
-  elementSelectionStrategySchema,
+  nestedElementContainerSchema,
+  resolverSelectionStrategySchema,
   validateElementIdTextSelector,
 } from "./elementSelectorSchemas";
 import { logger } from "../utils/logger";
@@ -51,9 +52,14 @@ const highlightBaseSchema = z
     shape: highlightShapeSchema.optional().describe("Optional bounds for a red hand-drawn circle"),
     elementId: elementIdTextFieldsSchema.shape.elementId,
     text: elementIdTextFieldsSchema.shape.text,
-    container: elementContainerSchema.optional().describe("Scope search to a container"),
+    container: nestedElementContainerSchema
+      .or(elementContainerSchema)
+      .optional()
+      .describe(
+        "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
+      ),
     containerOf: z.boolean().optional().describe("Highlight selected element's container"),
-    selectionStrategy: elementSelectionStrategySchema
+    selectionStrategy: resolverSelectionStrategySchema
       .optional()
       .describe("Selection strategy when multiple match (default: first)"),
   })

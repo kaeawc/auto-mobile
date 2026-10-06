@@ -101,8 +101,8 @@ describe("text under the soft keyboard (#10220)", () => {
     const { result, failing } = await runAudit(capture(), grey());
 
     const covered = failing.filter((element) => element.bounds.top >= KEYBOARD_TOP);
-    // Only the keyboard's own key labels (window 550) sit below the keyboard top and are measured.
-    expect(textsOf(covered).every((text) => /^\d$/.test(text ?? ""))).toBe(true);
+    // IME labels belong to the keyboard, while the app labels here are covered by it.
+    expect(covered).toEqual([]);
     const failingTexts = textsOf(failing);
     for (const hidden of [...appTextUnderKeyboard, ...bottomNavLabels]) {
       expect(failingTexts).not.toContain(hidden);

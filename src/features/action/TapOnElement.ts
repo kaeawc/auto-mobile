@@ -1,3 +1,4 @@
+import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -1765,9 +1766,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
-        (options.selectionStrategy !== "unique" &&
-          options.index === undefined &&
-          !options.container?.container) ||
+        (!isStrictlyScoped(options) && options.index === undefined) ||
         !this.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
@@ -1830,7 +1829,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           : "tap";
     const lookupAction = options.subtext
       ? "inspect"
-      : options.selectionStrategy === "unique" || options.container?.container
+      : isStrictlyScoped(options)
         ? intentAction
         : options.action === "focus"
           ? "focus-input"
@@ -3269,8 +3268,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const scopedOptions = {
       container: container.container,
       index: container.index,
-      strategy:
-        options.selectionStrategy === "unique" ? ("unique" as const) : container.selectionStrategy,
+      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
     };
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
@@ -4711,7 +4709,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return undefined;
     }
 
-    if (options?.container?.container || options?.selectionStrategy === "unique") {
+    if (isStrictlyScoped(options)) {
       await this.executeScopedAndroidTap({
         action,
         x,

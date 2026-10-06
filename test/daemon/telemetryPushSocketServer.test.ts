@@ -33,6 +33,12 @@ class AuthTelemetryServer extends TelemetryPushSocketServer {
     return this.subscribed;
   }
 }
+
+class EventKeyTelemetryServer extends TelemetryPushSocketServer {
+  key(event: TelemetryEvent): string | null {
+    return this.pushEventKey(event);
+  }
+}
 streamSubscribeAuthCases(
   "telemetry-push",
   (timer, authenticator) => new AuthTelemetryServer(timer, authenticator),
@@ -213,6 +219,73 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(queryOrder).toEqual([]);
     expect(messages()).toEqual([]);
     expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("queues distinct overlay sequences during backfill and deduplicates repeated sequence", async () => {
+    const filter = server.filter("overlay");
+    server.subscribe(socket, filter);
+    const overlayEvent = (sequence: number): TelemetryEvent => ({
+      category: "overlay",
+      timestamp: sequence,
+      deviceId: "device",
+      sessionId: "session",
+      data: { id: "panel", sequence, kind: "page_changed" },
+    });
+    server.pushTelemetryEvent(overlayEvent(1));
+    server.pushTelemetryEvent(overlayEvent(2));
+    server.pushTelemetryEvent(overlayEvent(3));
+    server.pushTelemetryEvent(overlayEvent(3));
+    await server.backfill(socket, filter);
+    // Explicitly finish because the harness's manual backfill bypasses onSubscribed.
+    await server["finishBackfill"]("backfill");
+    expect(messages().map(({ data }) => (data.data as { sequence: number }).sequence)).toEqual([
+      1, 2, 3,
+    ]);
+  });
+
+  test("preserves non-overlay event key serialization", () => {
+    const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
+    const base = { timestamp: 1, deviceId: "device", sessionId: "session" } as const;
+    expect(keys.key({ ...base, category: "navigation", data: { id: "event" } })).toBe(
+      '["navigation","device","session","event"]',
+    );
+    expect(keys.key({ ...base, category: "toolcall", data: { occurrenceId: 12 } })).toBe(
+      '["toolcall","device","session",12]',
+    );
+  });
+
+  test.each([
+    [{ id: "panel", occurrenceId: "ignored", sequenceNumber: 9, requestId: "ignored" }, "panel"],
+    [{ id: null, occurrenceId: "panel", sequenceNumber: 9, requestId: "ignored" }, "panel"],
+    [{ id: null, occurrenceId: null, sequenceNumber: 0, requestId: "ignored" }, 0],
+    [{ requestId: "panel" }, "panel"],
+  ] as const)("overlay identity retains id fallback precedence (%j)", (data, id) => {
+    const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
+    const base = { timestamp: 1, deviceId: "device", sessionId: "session" } as const;
+    expect(keys.key({ ...base, category: "overlay", data: { ...data, sequence: 2 } })).toBe(
+      JSON.stringify(["overlay", "device", "session", id, 2]),
+    );
+    expect(keys.key({ ...base, category: "overlay", data })).toBe(
+      JSON.stringify(["overlay", "device", "session", id]),
+    );
+    expect(keys.key({ ...base, category: "toolcall", data })).toBe(
+      JSON.stringify(["toolcall", "device", "session", id]),
+    );
+  });
+
+  test("overlay identity requires a valid id and a numeric sequence", () => {
+    const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
+    const base = {
+      category: "overlay",
+      timestamp: 1,
+      deviceId: "device",
+      sessionId: "session",
+    } as const;
+    expect(keys.key({ ...base, data: { sequence: 2 } })).toBeNull();
+    expect(keys.key({ ...base, data: { id: {}, occurrenceId: "panel", sequence: 2 } })).toBeNull();
+    expect(keys.key({ ...base, data: { id: "panel", sequence: "2" } })).toBe(
+      '["overlay","device","session","panel"]',
+    );
   });
 
   test("keeps query phases in order and skips screenshot lookup for no navigation rows", async () => {

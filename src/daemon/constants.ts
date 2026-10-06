@@ -480,6 +480,16 @@ export const CLI_SESSION_LIVENESS_POLICY = "cli";
 export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
 
 /**
+ * Optional `daemon/heartbeat` parameter naming the kind of liveness owner behind the request.
+ *
+ * The external `--daemon heartbeat` keeper sends {@link CLI_KEEPER_LIVENESS_OWNER_KIND} so the
+ * daemon can tell it apart from a one-shot `--cli` proxy, whose declaration carries the same
+ * `cli` policy, token and claim (#10054). A keeper is for one-shot CLI sessions only and is
+ * refused a session a stdio/HTTP proxy owns. Absent for every proxy.
+ */
+export const CLI_KEEPER_LIVENESS_OWNER_KIND = "cli-keeper";
+
+/**
  * Default wall-clock idle timeout for a CLI-owned session (issue #6870).
  *
  * Ten minutes, deliberately measured in minutes rather than the 10 s heartbeat

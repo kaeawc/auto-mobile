@@ -4,6 +4,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   createSingleClaimSessionOwnershipRenewal,
   createReclaimingSessionOwnershipRenewal,
+  isLivenessOwnerConflict,
   isLivenessOwnerSuperseded,
   startSessionOwnershipHeartbeat,
 } from "./sessionOwnershipHeartbeat";
@@ -114,6 +115,49 @@ describe("startSessionOwnershipHeartbeat", () => {
     expect(idGenerator.pendingCount()).toBe(1);
     expect(() => heartbeat.assertHealthy()).toThrow("session ownership heartbeat failed");
     expect(await heartbeat.stop()).toBe(error);
+  });
+
+  test("skips a tick whose re-claim hits a live CLI owner and re-claims on the next tick", async () => {
+    const timer = new FakeTimer();
+    const idGenerator = new FakeIdGenerator(["keeper-first", "keeper-second", "keeper-third"]);
+    const calls: Array<{ token: string; claim: boolean }> = [];
+    let cliHoldsLiveLease = false;
+    let owner = "";
+    const heartbeat = await startSessionOwnershipHeartbeat({
+      intervalMs: 2_000,
+      timer,
+      renew: createReclaimingSessionOwnershipRenewal(async (token, claim) => {
+        calls.push({ token, claim });
+        if (claim && cliHoldsLiveLease && owner !== token) {
+          throw Object.assign(new Error("owner holds a live lease"), {
+            code: "liveness_owner_conflict",
+          });
+        }
+        if (claim) {
+          owner = token;
+        } else if (owner !== token) {
+          throw Object.assign(new Error("displaced"), { code: "liveness_owner_superseded" });
+        }
+      }, idGenerator),
+    });
+
+    owner = "one-shot-cli";
+    cliHoldsLiveLease = true;
+    await timer.advanceTimeAsync(2_000);
+    expect(() => heartbeat.assertHealthy()).not.toThrow();
+    expect(owner).toBe("one-shot-cli");
+
+    cliHoldsLiveLease = false;
+    await timer.advanceTimeAsync(2_000);
+    expect(() => heartbeat.assertHealthy()).not.toThrow();
+    expect(owner).toBe("keeper-third");
+    expect(await heartbeat.stop()).toBeNull();
+  });
+
+  test("recognizes conflict only by its structured code", () => {
+    expect(isLivenessOwnerConflict(new Error("liveness_owner_conflict"))).toBe(false);
+    expect(isLivenessOwnerConflict({ code: "liveness_owner_superseded" })).toBe(false);
+    expect(isLivenessOwnerConflict({ code: "liveness_owner_conflict" })).toBe(true);
   });
 
   test("recognizes supersession only by its structured code", () => {

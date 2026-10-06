@@ -231,6 +231,7 @@ async function main() {
       daemonPort,
       daemonHost,
       initialSessionUuid,
+      livenessOwnerToken,
       debugPerf,
       debug,
       strictPort,
@@ -692,6 +693,7 @@ async function main() {
               autoStartDaemon: !noDaemon,
               daemonOptions: daemonStartupOptions,
               initialSessionUuid,
+              livenessOwnerToken,
               heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
             },
           });

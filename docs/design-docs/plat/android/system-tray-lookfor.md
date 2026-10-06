@@ -178,9 +178,10 @@ swiping the group and clearing every notification in it.
 
 Collapsed notification groups mark child text nodes as
 `isVisibleToUser=false` in the accessibility tree, even though they are
-present in the shade. `ViewHierarchyExtractor.kt` bypasses this filter for
-all `com.android.systemui` nodes (not scoped to the notification shade
-specifically). The broader scope is safe because notification candidate
+present in the shade. The extractor does not filter on `isVisibleToUser`
+for any package (see
+`android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/ViewHierarchyExtractor.kt`),
+so collapsed notification-group children remain matchable. Notification candidate
 collection already filters nodes through resource ID hints and excludes —
 extra system UI nodes (status bar, quick settings) are not collected as
 notification candidates.

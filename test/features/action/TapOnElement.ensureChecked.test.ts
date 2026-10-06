@@ -190,11 +190,11 @@ describe("tapOn ensureChecked", () => {
       },
       observedInteraction: async (
         block: (result: ObserveResult) => Promise<unknown>,
-        options: { observationTimestampProvider?: () => number | undefined },
+        options: { observationHostTimestampProvider?: () => number | undefined },
       ) => {
         const actionStartTime = timer.now();
         const result = await block(observation);
-        observationFloor = options.observationTimestampProvider?.() ?? actionStartTime;
+        observationFloor = options.observationHostTimestampProvider?.() ?? actionStartTime;
         const staleCacheAccepted = preTapCaptureTimestamp >= observationFloor;
         setNextElement(staleCacheAccepted ? toggle("false") : toggle("true"));
         return {

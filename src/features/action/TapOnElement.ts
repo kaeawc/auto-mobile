@@ -3768,7 +3768,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           previousObservation: target.observation,
           signal,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => tapTimestamp }
+            ? { observationHostTimestampProvider: () => tapTimestamp }
             : {}),
         },
       );
@@ -4439,7 +4439,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => ensureCheckedTapTimestamp }
+            ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),
           predictionContext: {
             toolName: "tapOn",

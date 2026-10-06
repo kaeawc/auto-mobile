@@ -2700,12 +2700,16 @@ export class Daemon {
   }
 
   private createPlanDeviceLossCheck(
-    deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
+    deviceManager: Pick<
+      MultiPlatformDeviceManager,
+      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds"
+    >,
   ): (
     result: ReturnType<typeof evaluateDeviceDisconnects>,
     bootedDeviceIds: ReadonlySet<string>,
   ) => Promise<void> {
     const monitor = new PlanDeviceLossMonitor({
+      timer: this.timer,
       getDevice: (id) => this.devicePool.getDevice(id),
       getPlanSessionUuid: (id) =>
         resolveToolSelectionBaseSessionUuid(id, this.sessionManager) ?? id,
@@ -2718,6 +2722,7 @@ export class Daemon {
       isShutdownReserved: (id) => this.devicePool.isShutdownReservationHeld(id),
       discover: () =>
         deviceManager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+      getOfflineDeviceIds: (ids) => deviceManager.getAndroidOfflineDeviceIds(ids),
       isAdbReset: (ids, discovery) =>
         isProcessWideAdbServerReset(
           ids,

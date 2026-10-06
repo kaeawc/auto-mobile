@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscoveryOptions } from "../../src/devices/deviceUtils";
 import {
@@ -50,6 +51,9 @@ function harness() {
   class Manager extends FakeDeviceManager {
     calls: BootedDeviceDiscoveryOptions[] = [];
     onDiscovery = () => {};
+    offlineDeviceIds = new Set<string>();
+    onOfflineProbe = () => {};
+    offlineProbeError: Error | undefined;
     override async getBootedDevicesDetailed(
       platform: Parameters<FakeDeviceManager["getBootedDevicesDetailed"]>[0],
       options: BootedDeviceDiscoveryOptions = {},
@@ -59,7 +63,11 @@ function harness() {
       return super.getBootedDevicesDetailed(platform);
     }
     async getAndroidOfflineDeviceIds() {
-      return new Set<string>();
+      this.onOfflineProbe();
+      if (this.offlineProbeError) {
+        throw this.offlineProbeError;
+      }
+      return this.offlineDeviceIds;
     }
     async recoverAndroidOfflineDevices() {
       throw new Error("Plan path must not recover devices");
@@ -158,12 +166,86 @@ function harness() {
 }
 
 describe("confirmed plan device loss", () => {
+  test("repeated checks cannot confirm before the named window elapses", async () => {
+    const h = harness();
+    const plan = h.start("executePlan");
+    const check = h.daemon["createPlanDeviceLossCheck"](h.manager);
+    const missing = {
+      disconnected: [],
+      missed: [{ deviceId: h.device.id, misses: 1 }],
+      skippedAllDiscoveryFailed: false,
+    };
+    const present = new Set([h.peer.id]);
+    await check(missing, present);
+    await check(missing, present);
+    h.timer.setCurrentTime(PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS - 1);
+    await check(missing, present);
+    expect(plan.abortController.signal.aborted).toBe(false);
+    expect(await h.incidents.list()).toEqual([]);
+    h.timer.setCurrentTime(PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS);
+    await check(missing, present);
+    expect(plan.abortController.signal.aborted).toBe(true);
+    await check(missing, present);
+    expect(await h.incidents.list()).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("persistent offline rows are inconclusive and break the absence window", async () => {
+    const h = harness();
+    const plan = h.start("executePlan");
+    await h.tick();
+    h.manager.offlineDeviceIds.add(h.device.id);
+    await h.tick();
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(false);
+    expect(await h.incidents.list()).toEqual([]);
+    h.manager.offlineDeviceIds.clear();
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(false);
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(true);
+    expect(await h.incidents.list()).toHaveLength(1);
+  });
+
+  test("a failed offline probe breaks the absence window", async () => {
+    const h = harness();
+    const plan = h.start("executePlan");
+    await h.tick();
+    h.manager.offlineProbeError = new Error("offline probe unavailable");
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(false);
+    h.manager.offlineProbeError = undefined;
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(false);
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(true);
+  });
+
+  test.each(["leased", "reserved"])(
+    "restart %s grace breaks a previously pending loss",
+    async (state) => {
+      const h = harness();
+      const plan = h.start("executePlan");
+      await h.tick();
+      h[state] = true;
+      await h.tick();
+      h[state] = false;
+      await h.tick();
+      expect(plan.abortController.signal.aborted).toBe(false);
+      await h.tick();
+      expect(plan.abortController.signal.aborted).toBe(true);
+    },
+  );
+
   test("cancels only the owning plan once per loss and reports the existing incident outcome", async () => {
     const h = harness();
     const plan = h.start("executePlan");
     executionTracker.bindDeviceExecution(plan.id, h.peer.id);
     const cancel = spyOn(executionTracker, "cancelDeviceExecutions");
     try {
+      await h.tick();
+      expect(plan.abortController.signal.aborted).toBe(false);
+      expect(await h.incidents.list()).toEqual([]);
       await h.tick();
       expect(plan.abortController.signal.aborted).toBe(true);
       const outcome = deviceLossOutcomeFromError(plan.cancelReason, "plan");
@@ -191,6 +273,8 @@ describe("confirmed plan device loss", () => {
       const nextPlan = h.start("executePlan");
       h.manager.bootedDevices = [{ deviceId: h.peer.id, name: "Pixel_2", platform: "android" }];
       await h.tick();
+      expect(nextPlan.abortController.signal.aborted).toBe(false);
+      await h.tick();
       expect(nextPlan.abortController.signal.aborted).toBe(true);
       expect(cancel).toHaveBeenCalledTimes(2);
     } finally {
@@ -198,16 +282,19 @@ describe("confirmed plan device loss", () => {
     }
   });
 
-  test("fresh discovery finds the device: the raw event does not cancel the plan", async () => {
+  test("adbd restart blip: absent at the first tick, present at the later re-probe", async () => {
     const h = harness();
     const plan = h.start("executePlan");
+    await h.tick();
+    expect(plan.abortController.signal.aborted).toBe(false);
     h.manager.onDiscovery = () => {
-      if (h.manager.calls.length === 2) {
+      if (h.manager.calls.length === 4) {
         h.manager.bootedDevices.push({ deviceId: h.device.id, name: "Pixel", platform: "android" });
       }
     };
     await h.tick();
-    expect(h.manager.calls).toHaveLength(2);
+    expect(h.manager.calls).toHaveLength(4);
+    expect(h.timer.now()).toBe(2 * PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS);
     expect(plan.abortController.signal.aborted).toBe(false);
     expect(await h.incidents.list()).toEqual([]);
   });
@@ -222,7 +309,8 @@ describe("confirmed plan device loss", () => {
         h.daemon["forceDisconnectedDeviceIds"].clear();
       }
       await h.tick();
-      expect(h.manager.calls).toHaveLength(2);
+      await h.tick();
+      expect(h.manager.calls).toHaveLength(4);
       expect(plan.abortController.signal.aborted).toBe(false);
       expect(await h.incidents.list()).toEqual([]);
     },
@@ -238,6 +326,7 @@ describe("confirmed plan device loss", () => {
       h.start("executePlan", h.peer.id),
     ];
     await h.tick();
+    await h.tick();
     expect(plan.abortController.signal.aborted).toBe(true);
     for (const execution of untouched) {
       expect(execution.abortController.signal.aborted).toBe(false);
@@ -251,10 +340,13 @@ describe("confirmed plan device loss", () => {
     "confirmation-reservation",
     "cancellation-reservation",
     "discovery",
+    "offline-probe",
     "incident",
   ])("incarnation changes across %s await: no stale cancellation", async (boundary) => {
     const h = harness();
     const plan = h.start("executePlan");
+    await h.tick();
+    h.manager.calls = [];
     const replace = () => h.devices.set(h.device.id, { ...h.device, incarnation: 2 });
     if (boundary === "reservation") {
       h.onReservation = replace;
@@ -275,6 +367,9 @@ describe("confirmed plan device loss", () => {
         }
       };
     }
+    if (boundary === "offline-probe") {
+      h.manager.onOfflineProbe = replace;
+    }
     if (boundary === "incident") {
       h.onIncident = replace;
     }
@@ -286,6 +381,8 @@ describe("confirmed plan device loss", () => {
   test("failed fresh discovery is inconclusive", async () => {
     const h = harness();
     const plan = h.start("executePlan");
+    await h.tick();
+    h.manager.calls = [];
     h.manager.onDiscovery = () => {
       if (h.manager.calls.length === 2) {
         h.manager.failedPlatforms.add("android");
@@ -302,6 +399,8 @@ describe("confirmed plan device loss", () => {
     async (boundary) => {
       const h = harness();
       const plan = h.start("executePlan");
+      await h.tick();
+      h.manager.calls = [];
       if (boundary === "discovery") {
         h.manager.onDiscovery = () => {
           if (h.manager.calls.length === 2) {
@@ -324,6 +423,8 @@ describe("confirmed plan device loss", () => {
     async (field) => {
       const h = harness();
       const plan = h.start("executePlan");
+      await h.tick();
+      h.manager.calls = [];
       h.manager.onDiscovery = () => {
         if (h.manager.calls.length === 2) {
           h.device[field]++;
@@ -335,13 +436,13 @@ describe("confirmed plan device loss", () => {
     },
   );
 
-  test.each(["booting", "leased", "reserved"])(
+  test.each(["idle", "error", "leased", "reserved"])(
     "keeps plan-driven restart grace when %s",
     async (state) => {
       const h = harness();
       const plan = h.start("executePlan");
-      if (state === "booting") {
-        h.device.status = "booting";
+      if (state === "idle" || state === "error") {
+        h.device.status = state;
       }
       if (state === "leased") {
         h.leased = true;
@@ -350,8 +451,9 @@ describe("confirmed plan device loss", () => {
         h.reserved = true;
       }
       await h.tick();
+      await h.tick();
       expect(plan.abortController.signal.aborted).toBe(false);
-      expect(h.manager.calls).toHaveLength(1);
+      expect(h.manager.calls).toHaveLength(2);
       expect(await h.incidents.list()).toEqual([]);
     },
   );

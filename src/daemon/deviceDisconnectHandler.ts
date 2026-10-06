@@ -10,6 +10,10 @@ import type { EmulatorLossDetectionPath } from "./emulatorLossIncident";
 import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
+import type { Timer } from "../utils/SystemTimer";
+
+/** Confirm on a later plan tick, beyond the 1–3s adb root/unroot restart window. */
+export const PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS = 5_000;
 
 interface PlanLossTarget {
   device: PooledDevice;
@@ -20,12 +24,14 @@ interface PlanLossTarget {
 }
 
 export interface PlanDeviceLossPort {
+  timer: Pick<Timer, "now">;
   getDevice(deviceId: string): PooledDevice | null;
   getPlanSessionUuid(sessionId: string): string;
   hasPlanExecution(deviceId: string, planSessionUuid: string): boolean;
   isStartupLeased(deviceId: string): boolean;
   isShutdownReserved(deviceId: string): Promise<boolean>;
   discover(): Promise<BootedDeviceDiscovery>;
+  getOfflineDeviceIds(deviceIds: Iterable<string>): Promise<Set<string>>;
   isAdbReset(bootedDeviceIds: ReadonlySet<string>, discovery: BootedDeviceDiscovery): boolean;
   recordLoss(deviceId: string): Promise<string | undefined>;
   finishLoss(incidentId: string | undefined): Promise<void>;
@@ -35,6 +41,7 @@ export interface PlanDeviceLossPort {
 /** Confirm plan losses without consuming debounce grace or mutating pool/session ownership. */
 export class PlanDeviceLossMonitor {
   private readonly reported = new Map<string, PlanLossTarget>();
+  private readonly pending = new Map<string, { target: PlanLossTarget; absentSince: number }>();
 
   constructor(private readonly port: PlanDeviceLossPort) {}
 
@@ -42,6 +49,12 @@ export class PlanDeviceLossMonitor {
     missingDeviceIds: readonly string[],
     bootedDeviceIds: ReadonlySet<string>,
   ): Promise<void> {
+    const missing = new Set(missingDeviceIds);
+    for (const [deviceId, { target }] of this.pending) {
+      if (!missing.has(deviceId) || bootedDeviceIds.has(deviceId) || !this.isCurrent(target)) {
+        this.pending.delete(deviceId);
+      }
+    }
     for (const [deviceId, target] of this.reported) {
       if (bootedDeviceIds.has(deviceId) || !this.isCurrent(target)) {
         this.reported.delete(deviceId);
@@ -51,20 +64,34 @@ export class PlanDeviceLossMonitor {
     if (targets.length === 0) {
       return;
     }
-    // One cache-bypassing discovery for this sweep, independent of the miss counter.
-    const discovery = await this.port.discover();
+    // Booted discovery omits ADB-offline rows. They cannot establish loss,
+    // even when they persist beyond the confirmation window. One cache-bypassing
+    // discovery and an independent offline probe supply this sweep's evidence.
+    // Rejected probes break the evidence before the daemon's tick catch logs them.
+    let discovery: BootedDeviceDiscovery;
+    let offlineDeviceIds: Set<string>;
+    try {
+      [discovery, offlineDeviceIds] = await Promise.all([
+        this.port.discover(),
+        this.port.getOfflineDeviceIds(targets.map(({ device }) => device.id)),
+      ]);
+    } catch (error) {
+      this.pending.clear();
+      throw error;
+    }
     const confirmedBootedIds = new Set(discovery.devices.map((device) => device.deviceId));
     if (this.port.isAdbReset(confirmedBootedIds, discovery)) {
+      this.pending.clear();
       return;
     }
     for (const target of targets) {
-      await this.confirmTarget(target, confirmedBootedIds, discovery);
+      await this.confirmTarget(target, confirmedBootedIds, discovery, offlineDeviceIds);
     }
   }
 
   private captureTarget(deviceId: string): PlanLossTarget | undefined {
     const device = this.port.getDevice(deviceId);
-    // Allocation/restart owns booting and shutdown-reserved devices. The global
+    // Allocation/restart owns startup-leased and shutdown-reserved devices. The global
     // plan lease alone is not evidence that a plan has begun using this device.
     if (!device || device.platform !== "android" || device.status !== "busy" || !device.sessionId) {
       return undefined;
@@ -84,11 +111,14 @@ export class PlanDeviceLossMonitor {
     for (const deviceId of missingDeviceIds) {
       const target = this.captureTarget(deviceId);
       if (!target) {
+        this.pending.delete(deviceId);
         continue;
       }
       const reserved = await this.port.isShutdownReserved(deviceId);
       if (!reserved && this.isCurrent(target) && this.hasPlanWork(target)) {
         targets.push(target);
+      } else {
+        this.pending.delete(deviceId);
       }
     }
     return targets;
@@ -98,19 +128,36 @@ export class PlanDeviceLossMonitor {
     target: PlanLossTarget,
     bootedDeviceIds: ReadonlySet<string>,
     discovery: BootedDeviceDiscovery,
+    offlineDeviceIds: ReadonlySet<string>,
   ): Promise<void> {
     if (!this.isCurrent(target) || !this.hasPlanWork(target)) {
+      this.pending.delete(target.device.id);
       return;
     }
-    if (bootedDeviceIds.has(target.device.id)) {
-      this.reported.delete(target.device.id);
+    // Use the same missing-device observation classifier as non-plan liveness.
+    // This base has no transport-alias presence contract yet (#10364).
+    const observation = classifyMissingDeviceObservation(
+      didSourceSucceedForDevice(discovery, target.device.platform, target.device.id),
+      bootedDeviceIds.has(target.device.id),
+    );
+    if (observation !== "missing" || offlineDeviceIds.has(target.device.id)) {
+      this.pending.delete(target.device.id);
+      if (observation === "present") {
+        this.reported.delete(target.device.id);
+      }
       return;
     }
-    if (!didSourceSucceedForDevice(discovery, "android", target.device.id)) {
+    const pending = this.pending.get(target.device.id);
+    if (!pending || !this.isCurrent(pending.target)) {
+      this.pending.set(target.device.id, { target, absentSince: this.port.timer.now() });
+      return;
+    }
+    if (this.port.timer.now() - pending.absentSince < PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS) {
       return;
     }
     const reserved = await this.port.isShutdownReserved(target.device.id);
     if (reserved || !this.isCurrent(target) || !this.hasPlanWork(target)) {
+      this.pending.delete(target.device.id);
       return;
     }
     await this.reportLoss(target);
@@ -148,6 +195,7 @@ export class PlanDeviceLossMonitor {
     }
     // Mark before abort dispatch: listeners may synchronously end the plan.
     this.reported.set(target.device.id, target);
+    this.pending.delete(target.device.id);
     await this.port.cancelPlan(
       target.device.id,
       target.planSessionUuid,

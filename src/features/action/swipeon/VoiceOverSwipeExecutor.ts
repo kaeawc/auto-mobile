@@ -1,5 +1,6 @@
 import { getReturnDuration, validateSwipeTimingOptions } from "./swipeTiming";
 import { ActionableError } from "../../../models/ActionableError";
+import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
 import type { FencedGestureOptions } from "../ExecuteGesture";
 import { BootedDevice, Element, SwipeDirection } from "../../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -174,25 +175,18 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       perf,
       signal,
     );
-    throwIfAborted(signal);
     if (!forwardResult.success) {
+      throwIfAborted(signal);
       return forwardResult;
     }
 
-    if (boomerang.apexPauseMs > 0) {
-      await this.timer.sleep(boomerang.apexPauseMs);
-    }
-
-    throwIfAborted(signal);
-    const returnResult = await this.executeGesture.swipe(
-      x2,
-      y2,
-      x1,
-      y1,
-      returnOptions,
-      perf,
+    // The forward swipe landed: a pause cancel, a throw or a failed return must say so (#9973).
+    const returnResult = await runBoomerangReturnLeg({
+      timer: this.timer,
+      apexPauseMs: boomerang.apexPauseMs,
       signal,
-    );
+      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, perf, signal),
+    });
     if (!returnResult.success) {
       return {
         ...returnResult,

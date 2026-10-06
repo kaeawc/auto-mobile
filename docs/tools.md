@@ -2002,6 +2002,15 @@ users have it, the call fails and asks for `userId`. If the device's users canno
 user 0 is used (with a warning). The result always reports the `userId` that was read or
 written. `userId` is rejected for other scopes.
 
+`setKeyValue`, `removeKeyValue` and `clearKeyValueFile` accept the same optional `userId` on
+Android. It applies to their direct-file fallback (the `run-as` XML edit used when the SDK route
+is disabled by inspection or mutation policy) and resolve the default identically: an explicit
+`userId` wins, otherwise user 0 when the package is installed for it, else the one other running
+user that has it (several such users: the call fails and asks for `userId`). The SDK route itself is not user-scoped.
+The mutation queue is keyed per user, so the same file in two users never serializes together.
+`userId` is rejected on iOS devices. The `automobile:devices/{deviceId}/storage/...` entries
+resource has no input, so its `run-as` fallback reads the same default user.
+
 ### iOS UserDefaults preferences
 
 `getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),

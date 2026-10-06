@@ -325,7 +325,7 @@ describe("Android changeLocalization time zone (#10190)", () => {
   });
 
   it("lets the read-back refuse a host-unknown id the device did not keep", async () => {
-    adb.setCommandResultSequence(GET, ["America/New_York", "UTC", "America/New_York"]);
+    adb.setCommandResultSequence(GET, ["America/New_York", "UTC", "UTC", "America/New_York"]);
 
     const result = await manager.setTimeZone("Antarctica/Futurezone");
 
@@ -346,7 +346,7 @@ describe("Android changeLocalization time zone (#10190)", () => {
   });
 
   it("restores the previous zone when the new one does not read back", async () => {
-    adb.setCommandResultSequence(GET, ["America/New_York", "UTC", "America/New_York"]);
+    adb.setCommandResultSequence(GET, ["America/New_York", "UTC", "UTC", "America/New_York"]);
 
     const result = await manager.setTimeZone("Asia/Tokyo");
 
@@ -362,7 +362,12 @@ describe("Android changeLocalization time zone (#10190)", () => {
   });
 
   it("treats a case-variant read-back as not applied", async () => {
-    adb.setCommandResultSequence(GET, ["America/New_York", "asia/tokyo", "America/New_York"]);
+    adb.setCommandResultSequence(GET, [
+      "America/New_York",
+      "asia/tokyo",
+      "asia/tokyo",
+      "America/New_York",
+    ]);
 
     const result = await manager.setTimeZone("Asia/Tokyo");
 
@@ -371,7 +376,7 @@ describe("Android changeLocalization time zone (#10190)", () => {
   });
 
   it("clears the prop when no zone was set before", async () => {
-    adb.setCommandResultSequence(GET, ["", "UTC", ""]);
+    adb.setCommandResultSequence(GET, ["", "UTC", "UTC", ""]);
 
     const result = await manager.setTimeZone("Asia/Tokyo");
 
@@ -380,15 +385,28 @@ describe("Android changeLocalization time zone (#10190)", () => {
   });
 
   it("names the value the device is left with when the restore fails", async () => {
-    adb.setCommandResultSequence(GET, ["America/New_York", "UTC"]);
+    adb.setCommandResultSequence(GET, ["America/New_York", "UTC", "UTC", "UTC", "UTC"]);
     adb.setCommandError("shell setprop persist.sys.timezone 'America/New_York'", new Error("busy"));
+    adb.setCommandError("shell cmd alarm set-timezone 'America/New_York'", new Error("alarm busy"));
 
     const result = await manager.setTimeZone("Asia/Tokyo");
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(
-      'Restoring the previous time zone ("America/New_York") failed (busy); persist.sys.timezone is left as "UTC".',
+      'Restoring the previous time zone ("America/New_York") failed (setprop: busy; cmd alarm set-timezone: alarm busy); persist.sys.timezone is left as "UTC".',
     );
+  });
+
+  it("keeps the setprop-only restore failure wording when the previous zone was unset", async () => {
+    adb.setCommandResultSequence(GET, ["", "UTC", "UTC", "UTC"]);
+    adb.setCommandError("shell setprop persist.sys.timezone ''", new Error("busy"));
+
+    const result = await manager.setTimeZone("Asia/Tokyo");
+
+    expect(result.error).toContain(
+      'Restoring the previous time zone (unset) failed (busy); persist.sys.timezone is left as "UTC".',
+    );
+    expect(adb.wasCommandExecuted("cmd alarm set-timezone ''")).toBe(false);
   });
 
   it("does not restore when the device still holds the previous zone", async () => {
@@ -421,7 +439,9 @@ describe("Android changeLocalization time zone (#10190)", () => {
 
     const result = await manager.setTimeZone("Asia/Tokyo");
 
-    expect(result.error).toBe("Failed to set time zone: denied");
+    expect(result.error).toBe(
+      'Read-back verification failed: expected "Asia/Tokyo" but got "America/New_York"',
+    );
     expect(setprops()).toHaveLength(1);
   });
 });

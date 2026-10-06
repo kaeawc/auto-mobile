@@ -738,15 +738,21 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("returns error when adb command fails", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.timezone", "America/Chicago");
       fakeAdbClient.setCommandError(
         "shell setprop persist.sys.timezone 'Asia/Tokyo'",
         new Error("setprop failed"),
+      );
+      fakeAdbClient.setCommandError(
+        "shell cmd alarm set-timezone 'Asia/Tokyo'",
+        new Error("alarm failed"),
       );
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Failed to set time zone");
+      expect(result.error).toContain("Failed to set time zone: setprop failed");
+      expect(result.error).toContain("fallback also failed: alarm failed");
     });
   });
 

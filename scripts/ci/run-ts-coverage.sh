@@ -18,8 +18,13 @@ mkdir -p "$(dirname "${log_file}")"
 rm -rf coverage
 
 # A chunk log is clean only when it reports zero failures and no non-zero count.
+# Store the result instead of returning it so callers stay outside conditionals
+# and set -e keeps its normal behavior for the helper invocation.
 log_is_clean() {
-  grep -Eq '(^|[^0-9])0 fail' "$1" && ! grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "$1"
+  log_clean=0
+  if grep -Eq '(^|[^0-9])0 fail' "$1" && ! grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "$1"; then
+    log_clean=1
+  fi
 }
 
 set +e
@@ -58,7 +63,8 @@ if [[ -f "${unit_logs[0]:-}" ]]; then
     if grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${unit_log}"; then
       saw_write_failed=1
     fi
-    if ! log_is_clean "${unit_log}"; then
+    log_is_clean "${unit_log}"
+    if [[ "${log_clean}" -eq 0 ]]; then
       tolerated=0
       break
     fi
@@ -101,7 +107,8 @@ tail -n 200 "${log_file}"
 # one. Print the tail of each chunk (or shard) that did not finish clean.
 if [[ -f "${unit_logs[0]:-}" ]]; then
   for unit_log in "${unit_logs[@]}"; do
-    if ! log_is_clean "${unit_log}"; then
+    log_is_clean "${unit_log}"
+    if [[ "${log_clean}" -eq 0 ]]; then
       echo "::group::Unclean coverage log: ${unit_log}"
       tail -n 60 "${unit_log}"
       echo "::endgroup::"

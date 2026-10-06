@@ -50,7 +50,7 @@ fi
 
 current_label=""
 current_log=""
-# shellcheck disable=SC2329 # Invoked through the TERM trap below.
+# shellcheck disable=SC2317,SC2329 # Invoked through the TERM trap below.
 interrupted() {
   # The shard watchdog sends TERM to this group: surface the chunk it cut short.
   printf 'INTERRUPTED: coverage shard %s chunk %s was running when the shard budget expired; log tail:\n' \

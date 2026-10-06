@@ -39,6 +39,7 @@ class OverlayMissingAssetsTest {
       host,
       sink,
       lifecycle = OverlayLifecycle(FakeOverlayTimer()),
+      displays = OverlayDisplayProvider { it == 2 },
       clearAssets = { store.clear() },
       hasAsset = { store.lookup(it) != null },
     )
@@ -108,5 +109,41 @@ class OverlayMissingAssetsTest {
     controller.dismiss("r2", "panel", null)
     assertEquals(Reply(true, null, emptyList()), replies.last())
     assertEquals(0, store.count)
+  }
+
+  @Test
+  fun `a show on another display still reports its missing assets and targets that display`() =
+    runTest {
+      upload("hero")
+      controller.show("r1", spec("hero", "gone"), displayId = 2)
+      assertEquals(Reply(true, null, listOf("gone")), replies.last())
+      assertEquals(2, host.requests.single().displayId)
+    }
+
+  @Test
+  fun `a resend after the late upload keeps the display and clears the warning`() = runTest {
+    controller.show("r1", spec("late"), displayId = 2)
+    assertEquals(Reply(true, null, listOf("late")), replies.last())
+    upload("late")
+    controller.show("r2", spec("late"), displayId = 2)
+    assertEquals(Reply(true, null, emptyList()), replies.last())
+    assertEquals(listOf(2, 2), host.requests.map { it.displayId })
+  }
+
+  @Test
+  fun `a spec update on a shown display reports missing assets and stays on that display`() =
+    runTest {
+      controller.show("r1", spec(), displayId = 2)
+      controller.update("r2", "panel", spec("late"), null)
+      assertEquals(Reply(true, null, listOf("late")), replies.last())
+      assertEquals(2, host.requests.last().displayId)
+    }
+
+  @Test
+  fun `an unavailable display fails the show with no missing list`() = runTest {
+    controller.show("r1", spec("gone"), displayId = 9)
+    assertFalse(replies.last().success)
+    assertEquals(emptyList<String>(), replies.last().missing)
+    assertTrue(host.requests.isEmpty())
   }
 }

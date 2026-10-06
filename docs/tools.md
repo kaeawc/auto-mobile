@@ -596,6 +596,11 @@ panel disappears while the overlay is up (fold), the device dismisses it with
 reason `teardown`; it is never moved to another display. `update` and `dismiss`
 act on the overlay where it is shown and do not take `display`.
 
+`display` and `assets` combine on `show`: the display is resolved and checked first, so a
+refused display uploads nothing; assets are then uploaded and the overlay is shown on that
+display. The one missing-asset re-send goes to the same resolved display without re-reading the
+display inventory. `update` with `assets` stays on the display the overlay is already on.
+
 `show`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
 or `{ id, observation }` that uploads images before the overlay is sent, so no
 separate upload step is needed. `path` is an absolute path the daemon can read

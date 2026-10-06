@@ -207,9 +207,9 @@ describe("a publish that fails after packet boundaries were delivered (#10149, #
 
     failPublish[0](new Error("WHIP request timed out"));
     await settle();
-    // The teardown is parked on the source's stop, before the publisher has been stopped.
+    // The source's stop is parked, yet the publisher is stopped concurrently (#10160 review).
     expect(source.stopCalls).toBe(1);
-    expect(publishers[0].stopCalls).toBe(0);
+    expect(publishers[0].stopCalls).toBe(1);
 
     options.onData(idr);
     options.onEncodedAccessUnit?.();

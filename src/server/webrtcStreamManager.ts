@@ -241,11 +241,23 @@ interface WebRtcSubscriptionLookup {
   existingLeaseOnly?: boolean;
 }
 
+/**
+ * Records that count as active for an unaddressed lookup. A record whose initial
+ * start failed is retired: it stays in `streams` only so its lease holders can
+ * read the failure by `streamId`, and never competes with a live stream.
+ */
+function unaddressedStreamCandidates(): WebRtcStreamRecord[] {
+  const all = [...streams.values()];
+  const active = all.filter((record) => !record.initialStartFailed);
+  return active.length > 0 ? active : all;
+}
+
 function addressedStreamRecord(streamId?: string): WebRtcStreamRecord | undefined {
   if (streamId !== undefined) {
     return streams.get(streamId);
   }
-  return streams.size === 1 ? streams.values().next().value : undefined;
+  const candidates = unaddressedStreamCandidates();
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function leaseStreamRecord(input: WebRtcSubscriptionLookup): WebRtcStreamRecord | undefined {
@@ -934,9 +946,15 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
 }
 
 function assertNewStreamIdAvailable(streamId: string): void {
-  if (streams.has(streamId)) {
+  const existing = streams.get(streamId);
+  if (!existing) {
+    return;
+  }
+  if (!existing.initialStartFailed) {
     throw new ActionableError(`WebRTC stream ${streamId} already active. Stop it first.`);
   }
+  // A retired record is already torn down; an explicit retry of the same id replaces it.
+  discardDeadRecord(existing);
 }
 
 /**
@@ -957,7 +975,11 @@ function discardDeadRecord(record: WebRtcStreamRecord): void {
 /** Stop live media components while retaining best-effort cleanup semantics. */
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
   setLifecycleState(record, "stopping");
-  // A stuck capture must not prevent the publisher from closing its transport.
+  await stopSourceAndPublisher(record);
+}
+
+/** A stuck capture must not prevent the publisher from closing its transport. */
+async function stopSourceAndPublisher(record: WebRtcStreamRecord): Promise<void> {
   await Promise.all([
     stopSource(record),
     record.publisher.stop().catch((error) => {
@@ -986,10 +1008,7 @@ async function retireFailedInitialStart(
 ): Promise<void> {
   record.initialStartFailed = true;
   try {
-    await stopSource(record);
-    await record.publisher.stop().catch((stopError) => {
-      logger.warn(`[WebRtcStream] publisher cleanup failed: ${errorMessage(stopError)}`, stopError);
-    });
+    await stopSourceAndPublisher(record);
   } catch (error) {
     logger.warn(
       `[WebRtcStream] cleanup of failed initial start ${record.streamId} failed: ${errorMessage(error)}`,
@@ -1368,11 +1387,12 @@ function resolveStreamRecord(streamId?: string): WebRtcStreamRecord {
     return record;
   }
 
-  if (streams.size === 0) {
+  const candidates = unaddressedStreamCandidates();
+  if (candidates.length === 0) {
     throw new ActionableError("No active WebRTC streams. Provide a streamId.");
   }
-  if (streams.size > 1) {
+  if (candidates.length > 1) {
     throw new ActionableError("Multiple active WebRTC streams. Provide a streamId.");
   }
-  return streams.values().next().value as WebRtcStreamRecord;
+  return candidates[0];
 }

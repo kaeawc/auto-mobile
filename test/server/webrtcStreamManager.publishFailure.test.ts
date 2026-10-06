@@ -89,11 +89,15 @@ class CountingSource {
   startCalls = 0;
   stopCalls = 0;
   stopError: Error | null = null;
+  stopNeverSettles = false;
   async start(): Promise<void> {
     this.startCalls++;
   }
   async stop(): Promise<void> {
     this.stopCalls++;
+    if (this.stopNeverSettles) {
+      await new Promise<void>(() => {});
+    }
     if (this.stopError) {
       throw this.stopError;
     }
@@ -279,6 +283,89 @@ describe("webrtcStreamManager initial publish failure (#10149)", () => {
     expect(second.streamId).not.toBe(first.streamId);
     expect(second.failure).toBeNull();
     expect(sources).toHaveLength(2);
+  });
+
+  test("a capture stop that never settles does not block the publisher teardown", async () => {
+    const { publishers, sources } = installFakes("gated");
+
+    const first = await startWebRtcStream(startRequest);
+    sources[0].stopNeverSettles = true;
+    publishers[0].failStart();
+    await settle();
+
+    expect(sources[0].stopCalls).toBe(1);
+    expect(publishers[0].stopCalls).toBe(1);
+    expect(getWebRtcStreamDescriptor(first.streamId, first.lease?.id)?.failure?.code).toBe(
+      "whip_publish_failed",
+    );
+  });
+
+  test("a publisher stop rejection is logged and the capture is still stopped", async () => {
+    const { publishers, sources } = installFakes("gated");
+
+    await startWebRtcStream(startRequest);
+    publishers[0].stopError = new Error("whip delete failed");
+    publishers[0].failStart();
+    await settle();
+
+    expect(publishers[0].stopCalls).toBe(1);
+    expect(sources[0].stopCalls).toBe(1);
+    const warnings = (logger.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(warnings.some((call) => String(call[0]).includes("whip delete failed"))).toBe(true);
+  });
+
+  test("a stop without a streamId addresses the live retry, not the failed record", async () => {
+    const { publishers, sources } = installFakes("gated");
+
+    const first = await startWebRtcStream(startRequest);
+    publishers[0].failStart();
+    await settle();
+
+    const retry = await startWebRtcStream(startRequest);
+    expect(retry.streamId).not.toBe(first.streamId);
+
+    // The failed record is still queryable by its own lease holder.
+    expect(getWebRtcStreamDescriptor(first.streamId, first.lease?.id)?.failure?.code).toBe(
+      "whip_publish_failed",
+    );
+    const stopped = await stopWebRtcStream();
+    expect(stopped.streamId).toBe(retry.streamId);
+    expect(sources[1].stopCalls).toBe(1);
+    expect(publishers[1].stopCalls).toBe(1);
+  });
+
+  test("a lone failed record is still addressable without a streamId", async () => {
+    const { publishers } = installFakes("gated");
+
+    const first = await startWebRtcStream(startRequest);
+    publishers[0].failStart();
+    await settle();
+
+    const stopped = await stopWebRtcStream();
+    expect(stopped.streamId).toBe(first.streamId);
+    expect(listWebRtcStreams()).toHaveLength(0);
+  });
+
+  test("a retry may reuse the failed stream's explicit streamId immediately", async () => {
+    const { publishers, sources, timer } = installFakes("gated");
+
+    await startWebRtcStream({ ...startRequest, streamId: "stream-a" });
+    publishers[0].failStart();
+    await settle();
+
+    const retry = await startWebRtcStream({ ...startRequest, streamId: "stream-a" });
+    expect(retry.streamId).toBe("stream-a");
+    expect(retry.failure).toBeNull();
+    expect(retry.lifecycleState).toBe("capture_ready");
+    expect(sources).toHaveLength(2);
+    expect(publishers).toHaveLength(2);
+    expect(listWebRtcStreams()).toHaveLength(1);
+
+    // The replaced record's lease timer must not stop the live retry's capture.
+    await timer.advanceTimeAsync(WEBRTC_STREAM_LEASE_TTL_MS / 2);
+    await settle();
+    expect(sources[1].stopCalls).toBe(0);
+    expect(publishers[1].stopCalls).toBe(0);
   });
 
   test("a healthy publish keeps its record and capture running", async () => {

@@ -758,9 +758,11 @@ The device subscription ends when no nonterminal overlays remain.
 
 `highlight` takes either `shape` (a `circle` with `bounds`) or an `elementId`/`text`
 selector, never both. `elementId` is a resource ID; `text` matches text,
-content description, or placeholder. `selectionStrategy` is `first` (default)
-or `random`. `description` labels the highlight, and `timeoutMs` bounds the
-highlight request (default 5000 ms).
+content description, or placeholder. `selectionStrategy` is `first` (default),
+`random`, or `unique` (ambiguity returns the resolver failure). `container` accepts
+a nested chain with per-level `index` and `selectionStrategy`, resolved outermost
+first through the same resolver as `tapOn`. `description` labels the highlight,
+and `timeoutMs` bounds the highlight request (default 5000 ms).
 
 `explore` accepts positive integer `maxInteractions` (default 200), a positive
 `timeoutMs` (default 300000 ms), `resetToHome` to return home
@@ -876,7 +878,7 @@ settled screenshot is eligible.
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
@@ -1025,8 +1027,13 @@ belong inside `container` or `lookFor`; a strategy without a selector and
 malformed recursive selectors are rejected. Existing screen and simple selector
 calls retain their defaults.
 
-This nested-scoping contract is not yet available for `observe` subtree queries
-or `waitFor`.
+`waitFor` accepts nested container scopes. This nested-scoping contract is not yet
+available for `observe` subtree queries.
+
+`pinchOn.container` accepts nested containers with per-level `index` and
+`selectionStrategy` (`first`, `random`, or `unique`; default `first`). Strategy
+selection is supported only inside each container level; `pinchOn` has no
+top-level `selectionStrategy`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands. Each `key` command accepts at most 4 raw modifier entries
@@ -2007,6 +2014,9 @@ carry neither `index` nor `ambiguous`; selectors with an index omit `ambiguous`.
 `observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
 `textEquals`, `countStable`, and legacy element predicates) accept a nested
 `container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.
+The `timeout` / `timeoutMs` wait budget is capped at 1,770,000 ms so the wait
+and its 30-second dispatch/report allowance fit within the caller's 30-minute
+request limit.
 Each container names exactly one `elementId` or `text` and may carry its own
 zero-based `index`, `selectionStrategy`, and enclosing `container`. The outermost
 container resolves first; later levels and the leaf search only strict descendants

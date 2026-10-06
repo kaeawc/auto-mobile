@@ -8,7 +8,6 @@ import com.networknt.schema.SpecificationVersion
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.format.DateTimeParseException
-import org.yaml.snakeyaml.Yaml
 
 /**
  * Validates AutoMobile test plan YAML files against JSON schema. Supports schema versioning based
@@ -16,7 +15,6 @@ import org.yaml.snakeyaml.Yaml
  */
 object TestPlanValidator {
   private var schema: Schema? = null
-  private val yaml = Yaml()
   // Same inclusive UTC instants as DeviceClock.ts; compare Instants, never local years.
   private val MIN_DEVICE_CLOCK_INSTANT = Instant.parse("2000-01-01T00:00:00Z")
   private val MAX_DEVICE_CLOCK_INSTANT = Instant.parse("2100-01-01T00:00:00Z")
@@ -65,7 +63,7 @@ object TestPlanValidator {
     // Parse YAML to object
     val parsedObject: Any?
     try {
-      parsedObject = yaml.load(yamlContent)
+      parsedObject = PlanYaml.newLoader().load(yamlContent)
     } catch (e: Exception) {
       return ValidationResult(
         valid = false,
@@ -175,8 +173,19 @@ object TestPlanValidator {
     errors.addAll(deviceLabelErrors)
     errors.addAll(barrierCoordinationErrors)
 
-    return ValidationResult(valid = false, errors = errors)
+    return resultFor(errors)
   }
+
+  /**
+   * Validity follows the reported errors, so a result can never be invalid with an empty error list
+   * (#10131): only ERROR-severity entries invalidate a plan, and a plan with warnings alone is
+   * valid.
+   */
+  internal fun resultFor(errors: List<ValidationError>): ValidationResult =
+    ValidationResult(
+      valid = errors.none { it.severity == ValidationSeverity.ERROR },
+      errors = errors,
+    )
 
   /** networknt draft-07 ignores formatMinimum/Maximum; match the TS semantic check. */
   private fun validateClockInstantWindows(parsedObject: Any?): List<ValidationError> {
@@ -1034,9 +1043,11 @@ object TestPlanValidator {
     val rawMessage = msg.message ?: "Validation error"
     val messageType = msg.messageKey ?: msg.keyword ?: ""
 
-    // Determine severity based on whether this is a deprecated field
+    // Only the "deprecated field is present" notice is a warning; a type, format, enum or required
+    // violation is an ERROR whatever the field is called (#10131).
+    val property = Regex("property '([^']+)'").find(rawMessage)?.groupValues?.getOrNull(1)
     val severity =
-      if (isDeprecatedFieldError(field, rawMessage, messageType)) {
+      if (isDeprecatedFieldNotice(field, msg.keyword ?: messageType, msg.property ?: property)) {
         ValidationSeverity.WARNING
       } else {
         ValidationSeverity.ERROR
@@ -1087,24 +1098,28 @@ object TestPlanValidator {
     )
   }
 
-  /** Determine if an error is related to a deprecated field */
-  private fun isDeprecatedFieldError(field: String, message: String, messageType: String): Boolean {
-    // Check if the field itself is deprecated
-    val fieldName = field.substringAfterLast('.').substringAfterLast(']')
-    if (fieldName in ValidTools.DEPRECATED_FIELDS) {
-      return true
-    }
+  private val STEP_FIELD = Regex("^steps\\[\\d+]$")
 
-    // Check if the message mentions a deprecated field
-    if (messageType.contains("additionalProperties") || message.contains("additional")) {
-      val propertyMatch = Regex("property '([^']+)'").find(message)
-      val property = propertyMatch?.groupValues?.getOrNull(1)
-      if (property in ValidTools.DEPRECATED_FIELDS) {
-        return true
-      }
+  /**
+   * Whether a schema error is the "legacy field is present" notice rather than a real violation: an
+   * `additionalProperties` report naming a deprecated field in the place it is deprecated
+   * (top-level `generated`/`appId`/`parameters`, step-level `description`). [parentField] is the
+   * object the property sits on ("root" for the plan itself). Step-level `appId` and top-level
+   * `description` are current fields, so they are never notices.
+   */
+  internal fun isDeprecatedFieldNotice(
+    parentField: String,
+    keyword: String,
+    property: String?,
+  ): Boolean {
+    if (property == null || !keyword.contains("additionalProperties")) {
+      return false
     }
-
-    return false
+    return when {
+      parentField == "root" -> property in ValidTools.TOP_LEVEL_DEPRECATED_FIELDS
+      STEP_FIELD.matches(parentField) -> property in ValidTools.STEP_DEPRECATED_FIELDS
+      else -> false
+    }
   }
 
   /**

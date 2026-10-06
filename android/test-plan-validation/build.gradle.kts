@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -27,6 +28,31 @@ dependencies {
   testImplementation(libs.kotlin.test)
   testImplementation(libs.bundles.unit.test)
 }
+
+// Plan `tool:` names come from the tool registry's own schema, not a hand-kept list (#10126): this
+// writes every tool name in schemas/tool-definitions.json to a resource that ValidTools reads, so the
+// published artifact needs no repository checkout at runtime and the allowlist cannot drift.
+val toolDefinitionsFile = layout.projectDirectory.file("../../schemas/tool-definitions.json")
+val planToolNamesDir = layout.buildDirectory.dir("generated/planToolNames")
+
+val generatePlanToolNames by
+  tasks.registering {
+    val definitions = toolDefinitionsFile
+    val outputDir = planToolNamesDir
+    inputs.file(definitions)
+    outputs.dir(outputDir)
+    doLast {
+      val tools = JsonSlurper().parse(definitions.asFile) as List<*>
+      val names = tools.map { (it as Map<*, *>)["name"] as String }.sorted()
+      require(names.isNotEmpty()) { "No tools found in ${definitions.asFile}" }
+      val target =
+        outputDir.get().file("dev/jasonpearson/automobile/validation/plan-tool-names.txt").asFile
+      target.parentFile.mkdirs()
+      target.writeText(names.joinToString("\n", postfix = "\n"))
+    }
+  }
+
+sourceSets.named("main") { resources.srcDir(generatePlanToolNames) }
 
 // Version comes from root project's gradle.properties (VERSION_NAME)
 

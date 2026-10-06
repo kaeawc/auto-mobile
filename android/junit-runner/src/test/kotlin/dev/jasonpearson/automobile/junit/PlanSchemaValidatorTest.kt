@@ -467,4 +467,71 @@ class PlanSchemaValidatorTest {
     val error = result.errors.find { it.field.contains("steps") }
     assertNotNull(error, "Should have error about steps")
   }
+
+  @Test
+  fun `an empty description fails with an error naming the field (#10131)`() {
+    val yaml =
+      """
+      name: login
+      description:
+      steps:
+        - tool: launchApp
+          appId: com.example.app
+      """
+        .trimIndent()
+
+    val result = PlanSchemaValidator.validateYaml(yaml)
+    assertFalse(result.valid)
+    assertEquals(listOf("description"), result.errors.map { it.field })
+  }
+
+  @Test
+  fun `an invalid plan always reports at least one error (#10131)`() {
+    val prefix = "name: p\nsteps:\n  - tool: observe\n"
+    for (head in listOf("parameters: [user, pass]\n", "generated: yesterday\n", "appId: 5\n")) {
+      val result = PlanSchemaValidator.validateYaml(head + prefix)
+      assertFalse(result.valid, head)
+      assertTrue(result.errors.isNotEmpty(), "invalid result must list its errors for: $head")
+    }
+  }
+
+  @Test
+  fun `accepts current tools missing from the old allowlist (#10126)`() {
+    val yaml =
+      """
+      name: unlock-and-tap
+      steps:
+        - tool: wakeAndUnlock
+        - tool: tapAt
+          x: 540
+          y: 1200
+      """
+        .trimIndent()
+
+    val result = PlanSchemaValidator.validateYaml(yaml)
+    assertEquals(emptyList(), result.errors)
+    assertTrue(result.valid)
+  }
+
+  @Test
+  fun `unquoted timestamps and yes are accepted like the daemon (#10129)`() {
+    val yaml =
+      """
+      name: clock-plan
+      metadata:
+        createdAt: 2026-01-08T00:00:00Z
+      steps:
+        - tool: setDeviceState
+          clock:
+            mode: set
+            instant: 2026-03-01T09:00:00Z
+        - tool: observe
+          label: yes
+      """
+        .trimIndent()
+
+    val result = PlanSchemaValidator.validateYaml(yaml)
+    assertEquals(emptyList(), result.errors)
+    assertTrue(result.valid)
+  }
 }

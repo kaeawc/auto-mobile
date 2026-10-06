@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { waitForTimeoutDiagnostics, waitForTimeoutError } from "../utils/plan/waitForTimeout";
+import { stepNotPerformedError } from "../utils/plan/stepNotPerformed";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -126,7 +127,7 @@ function throwIfSubStepFailed(
   const failure =
     toolResult?.success === false
       ? formatCriticalSectionError(toolResult, tool)
-      : waitForTimeoutError(payload, tool);
+      : (waitForTimeoutError(payload, tool) ?? stepNotPerformedError(payload, tool));
   if (failure === null) {
     return;
   }

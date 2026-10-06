@@ -172,6 +172,26 @@ describe("criticalSection sub-steps in a mixed-platform plan", () => {
       ]);
     });
 
+    test("a sub-step that reports status unsupported fails the section with the tool's message (#10175)", async () => {
+      ToolRegistry.register("refusesChange", "refuses", z.object({}), async () =>
+        createStructuredToolResponse({
+          message: "This iOS simulator is not a foldable device.",
+          status: "unsupported",
+        }),
+      );
+
+      const result = await new DefaultPlanExecutor(new FakeTimer()).executePlan(
+        singlePlan({ tool: "refusesChange" }),
+        0,
+        "android",
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.failedStep?.error).toContain(
+        "Failed at step 1/1 (refusesChange): This iOS simulator is not a foldable device.",
+      );
+    });
+
     test("a sub-step failed by a waitFor timeout keeps the timeout's diagnostics as plan warnings", async () => {
       ToolRegistry.register("timesOut", "times out", z.object({}), async () =>
         createStructuredToolResponse({

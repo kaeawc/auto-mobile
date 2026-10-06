@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
 import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout";
+import { stepNotPerformedError } from "./stepNotPerformed";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -756,7 +757,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
 
       const timeoutPayload = getStructuredPayload(toolResult) ?? toolResult;
-      const error = waitForTimeoutError(timeoutPayload, step.tool);
+      // A tool that answered "not performed" (setPosture `unsupported`) did not make the change the
+      // step asked for, so the step fails with the tool's own message (#10175).
+      const error =
+        waitForTimeoutError(timeoutPayload, step.tool) ??
+        stepNotPerformedError(timeoutPayload, step.tool);
       if (error) {
         if (step.optional) {
           return skippedOptionalResult(step, error);

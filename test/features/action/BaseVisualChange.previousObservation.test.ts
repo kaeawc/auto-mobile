@@ -379,7 +379,6 @@ describe("BaseVisualChange previous observation with real ObserveScreen", () => 
       const h = harness();
       expect((await h.observe()).freshness?.isFresh).toBe(true);
       await h.run("swipeOn", false, swipeOptions);
-      console.log(`${_name}: captures=${JSON.stringify(h.captures)}`);
       expect(h.captures).toEqual(["terminal"]);
     },
   );
@@ -392,7 +391,6 @@ describe("BaseVisualChange previous observation with real ObserveScreen", () => 
       lookFor: { text: "Revealed Item" },
       maxScrolls: 2,
     });
-    console.log(`lookFor swipe: captures=${JSON.stringify(h.captures)}`);
     expect(h.captures).toEqual(["terminal"]);
     expect(result?.screenshotPath).toBe("/fake/settled.png");
   });

@@ -1302,17 +1302,20 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$
 Compiled from "NetworkMockRuleStore.kt"
 public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig {
   public static final int $stable;
-  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig(java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long);
+  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig(java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long, java.lang.Long);
+  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig(java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long, java.lang.Long, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final java.lang.String getErrorType();
   public final java.lang.Integer getLimit();
   public final java.util.concurrent.atomic.AtomicInteger getRemaining();
   public final long getExpiresAtEpochMs();
+  public final java.lang.Long getDeadlineMonotonicMs();
   public final java.lang.String component1();
   public final java.lang.Integer component2();
   public final java.util.concurrent.atomic.AtomicInteger component3();
   public final long component4();
-  public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig copy(java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long);
-  public static dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig copy$default(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig, java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long, int, java.lang.Object);
+  public final java.lang.Long component5();
+  public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig copy(java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long, java.lang.Long);
+  public static dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig copy$default(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig, java.lang.String, java.lang.Integer, java.util.concurrent.atomic.AtomicInteger, long, java.lang.Long, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
@@ -1353,18 +1356,22 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore 
   public static final java.lang.String EXTRA_ERROR_SIM_TYPE = "error_type";
   public static final java.lang.String EXTRA_ERROR_SIM_LIMIT = "limit";
   public static final java.lang.String EXTRA_ERROR_SIM_EXPIRES_AT = "expires_at";
-  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore(kotlin.jvm.functions.Function0<java.lang.Long>);
-  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore(kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public static final java.lang.String EXTRA_ERROR_SIM_REMAINING_MS = "remaining_ms";
+  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore(kotlin.jvm.functions.Function0<java.lang.Long>, kotlin.jvm.functions.Function0<java.lang.Long>);
+  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore(kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$RuleMatcher getRuleMatcher();
   public final void setRules(java.util.List<dev.jasonpearson.automobile.protocol.NetworkMockRuleDto>);
-  public final void setErrorSimulation(boolean, java.lang.String, java.lang.Integer, java.lang.Long);
+  public final void setErrorSimulation(boolean, java.lang.String, java.lang.Integer, java.lang.Long, java.lang.Long);
+  public static void setErrorSimulation$default(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore, boolean, java.lang.String, java.lang.Integer, java.lang.Long, java.lang.Long, int, java.lang.Object);
   public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$MatchedMockRule findMatchingRule(java.lang.String, java.lang.String, java.lang.String);
   public final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore$ErrorSimulationConfig getActiveErrorSimulation();
   public final void clear();
   public final int getRuleCount();
   public final synchronized void registerReceiver(android.content.Context);
   public final synchronized void unregisterReceiver(android.content.Context);
+  public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore(kotlin.jvm.functions.Function0<java.lang.Long>);
   public dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore();
+  public final void setErrorSimulation(boolean, java.lang.String, java.lang.Integer, java.lang.Long);
   public static final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore access$getInstance$cp();
   public static final void access$setInstance$cp(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
 }

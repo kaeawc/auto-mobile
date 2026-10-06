@@ -465,6 +465,7 @@ class CtrlProxyMessageHandler(
           request.errorType,
           request.limit,
           request.expiresAtEpochMs,
+          request.remainingMs,
         )
       is GetCurrentFocus -> actions.getCurrentFocus(request.requestId)
       is GetTraversalOrder -> actions.getTraversalOrder(request.requestId)

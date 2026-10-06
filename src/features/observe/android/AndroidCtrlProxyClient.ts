@@ -120,7 +120,7 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
-import { NetworkState } from "../../../server/NetworkState";
+import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
@@ -2494,6 +2494,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             errorType: sim?.errorType,
             limit: sim?.limit,
             expiresAtEpochMs: sim?.expiresAt,
+            // What is left now, not the original duration: the device times it on its own
+            // monotonic clock, so a skewed device clock cannot stretch or kill it (#10062).
+            remainingMs: sim ? simulationRemainingMs(sim, state.timer.now()) : undefined,
           }),
         ),
       );

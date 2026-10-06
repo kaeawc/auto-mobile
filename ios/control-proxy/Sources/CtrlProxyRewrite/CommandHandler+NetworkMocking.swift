@@ -31,7 +31,8 @@ extension CommandHandler {
             enabled: request.enabled,
             errorType: request.errorType,
             limit: request.limit,
-            expiresAtEpochMs: request.expiresAtEpochMs
+            expiresAtEpochMs: request.expiresAtEpochMs,
+            remainingMs: request.remainingMs
         )
         let succeeded = if await sdkServerInfoForTrackedForegroundApp() != nil {
             await sdkHierarchyClient?.setNetworkErrorSimulation(config) ?? false

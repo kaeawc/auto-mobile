@@ -928,6 +928,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "tlsFailure",
           limit: 4,
           expiresAtEpochMs: expect.any(Number),
+          remainingMs: expect.any(Number),
         });
         expect(sync).toContainEqual({
           type: "set_network_mock_rules",
@@ -1188,6 +1189,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: 1_720_000_000_000,
+          remainingMs: 30_000,
         });
         for (let attempt = 0; attempt < 10; attempt += 1) {
           if (
@@ -1215,6 +1217,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: 1_720_000_000_000,
+          remainingMs: 30_000,
         });
 
         socket!.simulateMessage(
@@ -1375,6 +1378,7 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: expect.any(Number),
+          remainingMs: expect.any(Number),
         });
       } finally {
         await testClient.close();

@@ -16,7 +16,16 @@ import kotlinx.serialization.json.Json
  * Updated via BroadcastReceiver from control-proxy process. Queried by
  * [AutoMobileNetworkInterceptor] on every HTTP request.
  */
-class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeMillis() }) {
+class NetworkMockRuleStore
+@JvmOverloads
+constructor(
+  private val clock: () -> Long = { System.currentTimeMillis() },
+  /**
+   * Monotonic clock in milliseconds, immune to wall-clock steps and to the host/device skew that
+   * made an absolute host expiry unusable (issue #10062). Only elapsed time is meaningful.
+   */
+  private val monotonicClock: () -> Long = { System.nanoTime() / 1_000_000L },
+) {
 
   companion object {
     private const val TAG = "NetworkMockRuleStore"
@@ -28,6 +37,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     const val EXTRA_ERROR_SIM_TYPE = "error_type"
     const val EXTRA_ERROR_SIM_LIMIT = "limit"
     const val EXTRA_ERROR_SIM_EXPIRES_AT = "expires_at"
+    const val EXTRA_ERROR_SIM_REMAINING_MS = "remaining_ms"
     @Volatile private var instance: NetworkMockRuleStore? = null
 
     fun getInstance(): NetworkMockRuleStore {
@@ -80,6 +90,11 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     val limit: Int?,
     val remaining: AtomicInteger?,
     val expiresAtEpochMs: Long,
+    /**
+     * Deadline on the store's monotonic clock when the host sent a remaining duration. When
+     * non-null it decides expiry and [expiresAtEpochMs] is informational only.
+     */
+    val deadlineMonotonicMs: Long? = null,
   )
 
   @Volatile private var rules: List<CompiledMockRule> = emptyList()
@@ -151,19 +166,26 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       hostRegex.pattern == dto.host &&
       pathRegex.pattern == dto.path
 
+  @JvmOverloads
   fun setErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long? = null,
   ) {
+    // A remaining duration is measured on this device's monotonic clock; the absolute host epoch
+    // is only the fallback for older hosts that send nothing else.
+    val boundedRemainingMs = remainingMs?.coerceAtLeast(0L)
+    val epochMs = expiresAtEpochMs ?: boundedRemainingMs?.let { clock() + it }
     errorSimulation =
-      if (enabled && errorType != null && expiresAtEpochMs != null) {
+      if (enabled && errorType != null && epochMs != null) {
         ErrorSimulationConfig(
           errorType = errorType,
           limit = limit,
           remaining = limit?.let { AtomicInteger(it) },
-          expiresAtEpochMs = expiresAtEpochMs,
+          expiresAtEpochMs = epochMs,
+          deadlineMonotonicMs = boundedRemainingMs?.let { monotonicClock() + it },
         )
       } else {
         null
@@ -198,7 +220,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
 
   fun getActiveErrorSimulation(): ErrorSimulationConfig? {
     val sim = errorSimulation ?: return null
-    if (clock() >= sim.expiresAtEpochMs) {
+    if (isExpired(sim)) {
       errorSimulation = null
       return null
     }
@@ -211,6 +233,11 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
       }
     }
     return sim
+  }
+
+  private fun isExpired(sim: ErrorSimulationConfig): Boolean {
+    val deadline = sim.deadlineMonotonicMs
+    return if (deadline != null) monotonicClock() >= deadline else clock() >= sim.expiresAtEpochMs
   }
 
   fun clear() {
@@ -262,7 +289,9 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
           intent.getLongExtra(EXTRA_ERROR_SIM_EXPIRES_AT, -1).let {
             if (it == -1L) null else it
           }
-        setErrorSimulation(enabled, errorType, limit, expiresAt)
+        val remainingMs =
+          intent.getLongExtra(EXTRA_ERROR_SIM_REMAINING_MS, -1L).let { if (it < 0L) null else it }
+        setErrorSimulation(enabled, errorType, limit, expiresAt, remainingMs)
       }
     }
   }

@@ -61,7 +61,7 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { serverConfig } from "../../../utils/ServerConfig";
-import { NetworkState } from "../../../server/NetworkState";
+import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import {
   HierarchyNavigationDetector,
@@ -640,6 +640,8 @@ export interface IosNetworkErrorSimulationConfig {
   errorType?: SimulatedErrorType | null;
   limit?: number | null;
   expiresAtEpochMs?: number | null;
+  /** Time left, timed by the device's own monotonic clock; preferred over the epoch (#10062). */
+  remainingMs?: number | null;
 }
 
 type SdkEventPollResult = {
@@ -2060,6 +2062,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         );
         return;
       }
+      const state = NetworkState.getInstance();
       this.sendMessage(
         JSON.stringify({
           type: "set_network_error_simulation",
@@ -2067,6 +2070,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           errorType: sim.errorType,
           limit: sim.limit,
           expiresAtEpochMs: sim.expiresAt,
+          // What is left now, so a reconnect cannot restart the original duration (#10062).
+          remainingMs: simulationRemainingMs(sim, state.timer.now()),
         }),
       );
     } catch (e) {
@@ -3673,6 +3678,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         errorType: config.errorType ?? null,
         limit: config.limit ?? null,
         expiresAtEpochMs: config.expiresAtEpochMs ?? null,
+        remainingMs: config.remainingMs ?? null,
       },
       timeoutMs,
       perf,

@@ -3,6 +3,7 @@ import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient, type IosMockRuleSyncOutcome } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
 import { NetworkState } from "../../src/server/NetworkState";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   isIosNetworkErrorSimulationAvailable,
   registerNetworkTools,
@@ -194,6 +195,7 @@ describe("network tool schema", () => {
         errorType: "timeout",
         limit: 2,
         expiresAtEpochMs: expect.any(Number),
+        remainingMs: 30_000,
       },
     ]);
   });
@@ -223,6 +225,7 @@ describe("network tool schema", () => {
           errorType: "timeout",
           limit: null,
           expiresAtEpochMs: 2_235,
+          remainingMs: 1_235,
         },
       ]);
       expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(2_235);
@@ -256,6 +259,7 @@ describe("network tool schema", () => {
 
       const sent = iosErrorSimulations[0] as { expiresAtEpochMs: number };
       expect(sent.expiresAtEpochMs).toBe(31_000);
+      expect((sent as { remainingMs: number }).remainingMs).toBe(30_000);
       expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(sent.expiresAtEpochMs);
       expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors?.remainingSeconds).toBe(25);
     } finally {
@@ -288,6 +292,7 @@ describe("network tool schema", () => {
       errorType: null,
       limit: null,
       expiresAtEpochMs: null,
+      remainingMs: null,
     });
   });
 
@@ -376,6 +381,7 @@ describe("network tool schema", () => {
         errorType: "timeout",
         limit: null,
         expiresAtEpochMs: expect.any(Number),
+        remainingMs: 30_000,
       },
     ]);
   });
@@ -399,6 +405,7 @@ describe("network tool schema", () => {
         errorType: null,
         limit: null,
         expiresAtEpochMs: null,
+        remainingMs: null,
       },
     ]);
     expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors).toBeUndefined();
@@ -427,6 +434,7 @@ describe("network tool schema", () => {
         errorType: "timeout",
         limit: null,
         expiresAtEpochMs: expect.any(Number),
+        remainingMs: 30_000,
       },
     ]);
   });
@@ -498,6 +506,31 @@ describe("network tool schema", () => {
       errorType: "dnsFailure",
       limit: null,
     });
+  });
+
+  test("network simulateErrors sends Android the remaining duration, not only a host epoch (#10062)", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_700_000_000_000);
+    const getInstanceSpy = spyOn(NetworkState, "getInstance").mockReturnValue(
+      new NetworkState({ timer }),
+    );
+    ToolRegistry.clearTools();
+    registerNetworkTools();
+    try {
+      const tool = ToolRegistry.getTool("network");
+      await tool!.deviceAwareHandler!(androidDevice, {
+        simulateErrors: { errorType: "http500", durationSeconds: 30 },
+      });
+
+      expect(JSON.parse(androidMessages[0])).toMatchObject({
+        type: "set_network_error_simulation",
+        enabled: true,
+        remainingMs: 30_000,
+        expiresAtEpochMs: 1_700_000_030_000,
+      });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 
   test("mockNetwork creates an iOS rule and syncs through IOSCtrlProxyClient", async () => {

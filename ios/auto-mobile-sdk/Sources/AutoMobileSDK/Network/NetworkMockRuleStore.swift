@@ -20,6 +20,9 @@
         let errorType: String?
         let limit: Int?
         let expiresAtEpochMs: Int64?
+        /// Time left on the simulation, measured on this device's monotonic clock. When present it decides
+        /// expiry and `expiresAtEpochMs` (a host-clock value, wrong on a skewed device) is ignored (#10062).
+        var remainingMs: Int64? = nil
     }
 
     public enum NetworkFaultTransport: String, Codable, Equatable, Sendable {
@@ -174,13 +177,24 @@
 
         private let state = OSAllocatedUnfairLock<State>(initialState: State())
         private let dateProvider: DateProvider
+        private let uptimeMs: @Sendable () -> Int64
 
         public init() {
             dateProvider = SystemDateProvider()
+            uptimeMs = NetworkMockRuleStore.systemUptimeMs
         }
 
-        init(dateProvider: DateProvider) {
+        init(
+            dateProvider: DateProvider,
+            uptimeMs: @escaping @Sendable () -> Int64 = NetworkMockRuleStore.systemUptimeMs
+        ) {
             self.dateProvider = dateProvider
+            self.uptimeMs = uptimeMs
+        }
+
+        /// Monotonic milliseconds, unaffected by wall-clock changes and host/device clock skew.
+        static let systemUptimeMs: @Sendable () -> Int64 = {
+            Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
         }
 
         /// Replace the rule list. The host re-sends its whole list on every change and reconnect, so a rule
@@ -294,7 +308,8 @@
                 state.errorSimulation = CompiledErrorSimulation(
                     errorType: errorType,
                     remaining: dto.limit,
-                    expiresAtEpochMs: dto.expiresAtEpochMs
+                    expiresAtEpochMs: dto.expiresAtEpochMs,
+                    deadlineUptimeMs: dto.remainingMs.map { uptimeMs() + max(0, $0) }
                 )
             }
         }
@@ -305,9 +320,7 @@
                     return nil
                 }
 
-                if let expiresAtEpochMs = simulation.expiresAtEpochMs,
-                   currentEpochMs() >= expiresAtEpochMs
-                {
+                if isSimulationExpired(simulation) {
                     state.errorSimulation = nil
                     return nil
                 }
@@ -358,6 +371,15 @@
             let errorType: String
             var remaining: Int?
             let expiresAtEpochMs: Int64?
+            /// Deadline on the monotonic clock when the host sent a remaining duration (#10062).
+            let deadlineUptimeMs: Int64?
+        }
+
+        private func isSimulationExpired(_ simulation: CompiledErrorSimulation) -> Bool {
+            if let deadline = simulation.deadlineUptimeMs {
+                return uptimeMs() >= deadline
+            }
+            return isExpired(simulation.expiresAtEpochMs)
         }
 
         private struct CompiledFaultRule: Sendable {

@@ -323,6 +323,7 @@ interface CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   )
 
   fun getCurrentFocus(requestId: String?)

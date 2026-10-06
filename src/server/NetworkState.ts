@@ -19,6 +19,17 @@ export interface SimulationConfig {
   expiresAt: number;
 }
 
+/**
+ * Milliseconds left on a simulation, measured on the host clock at call time.
+ * Devices turn this into a deadline on their own monotonic clock, so the length
+ * of a simulation never depends on the skew between host and device clocks
+ * (issue #10062). Computed at send time so a re-push after a reconnect carries
+ * what is left rather than the original duration.
+ */
+export function simulationRemainingMs(sim: SimulationConfig, nowMs: number): number {
+  return Math.max(0, Math.ceil(sim.expiresAt - nowMs));
+}
+
 export interface MockRule {
   mockId: string;
   host: string;

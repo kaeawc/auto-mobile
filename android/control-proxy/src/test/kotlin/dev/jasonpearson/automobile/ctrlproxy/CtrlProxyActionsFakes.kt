@@ -143,6 +143,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   ) {}
 
   override fun getCurrentFocus(requestId: String?) {}
@@ -487,7 +488,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
-  ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs)
+    remainingMs: Long?,
+  ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override fun getCurrentFocus(requestId: String?) = record("getCurrentFocus", requestId)
 

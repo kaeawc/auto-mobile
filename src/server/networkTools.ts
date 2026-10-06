@@ -3,7 +3,12 @@ import { validateHeaderName } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { NetworkState, type SimulatedErrorType, type SimulationConfig } from "./NetworkState";
+import {
+  NetworkState,
+  simulationRemainingMs,
+  type SimulatedErrorType,
+  type SimulationConfig,
+} from "./NetworkState";
 import { buildNetworkMockRules } from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
@@ -269,12 +274,15 @@ async function syncIosMockRules(device: BootedDevice): Promise<DeviceSyncResult>
   }
 }
 
-function errorSimulationMessageFields(sim: SimulationConfig | null) {
+function errorSimulationMessageFields(sim: SimulationConfig | null, nowMs: number) {
   return {
     enabled: sim !== null,
     errorType: sim?.errorType ?? null,
     limit: sim?.limit ?? null,
+    // Host-clock epoch, kept for SDKs that predate remainingMs.
     expiresAtEpochMs: sim?.expiresAt ?? null,
+    // New SDKs time the simulation from this on the device's own monotonic clock (#10062).
+    remainingMs: sim ? simulationRemainingMs(sim, nowMs) : null,
   };
 }
 
@@ -288,7 +296,7 @@ async function syncErrorSimulationToDevice(
   const sim = state.getSimulation(device.deviceId);
   if (device.platform === "ios") {
     const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation(
-      errorSimulationMessageFields(sim),
+      errorSimulationMessageFields(sim, state.timer.now()),
     );
     if (!result.success) {
       throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
@@ -298,7 +306,7 @@ async function syncErrorSimulationToDevice(
 
   return syncAndroidNetworkMessage(device, {
     type: "set_network_error_simulation",
-    ...errorSimulationMessageFields(sim),
+    ...errorSimulationMessageFields(sim, state.timer.now()),
   });
 }
 
@@ -311,14 +319,14 @@ async function setIosErrorSimulation(
     state.cancelSimulation(device.deviceId);
   }
 
-  const expiresAtEpochMs = config
-    ? Math.ceil(state.timer.now() + config.durationSeconds * 1000)
-    : null;
+  const remainingMs = config ? Math.ceil(config.durationSeconds * 1000) : null;
+  const expiresAtEpochMs = remainingMs === null ? null : Math.ceil(state.timer.now() + remainingMs);
   const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
     enabled: config !== null,
     errorType: config?.errorType ?? null,
     limit: config?.limit ?? null,
     expiresAtEpochMs,
+    remainingMs,
   });
   if (!result.success) {
     throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");

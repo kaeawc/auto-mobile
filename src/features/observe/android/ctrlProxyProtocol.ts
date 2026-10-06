@@ -673,7 +673,10 @@ export interface SetNetworkErrorSimulationMessage {
   enabled: boolean;
   errorType: string | null;
   limit: number | null;
+  /** Host-clock epoch; kept for SDKs that predate `remainingMs`. */
   expiresAtEpochMs: number | null;
+  /** Time left, timed by the device's own monotonic clock; preferred when present (#10062). */
+  remainingMs: number | null;
 }
 
 // =============================================================================
@@ -1498,6 +1501,7 @@ export const ctrlProxyRequests = {
     errorType?: string | null;
     limit?: number | null;
     expiresAtEpochMs?: number | null;
+    remainingMs?: number | null;
   }): SetNetworkErrorSimulationMessage {
     return {
       type: "set_network_error_simulation",
@@ -1505,6 +1509,7 @@ export const ctrlProxyRequests = {
       errorType: args.errorType ?? null,
       limit: args.limit ?? null,
       expiresAtEpochMs: args.expiresAtEpochMs ?? null,
+      remainingMs: args.remainingMs ?? null,
     };
   },
 

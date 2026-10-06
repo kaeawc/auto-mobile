@@ -714,7 +714,18 @@ class CtrlProxyMessageHandlerTest {
       """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":5,"expiresAtEpochMs":99999}"""
     )
     assertEquals(
-      "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", 5, 99999L),
+      "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", 5, 99999L, null),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches set_network_error_simulation remainingMs`() = runTest {
+    dispatch(
+      """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","expiresAtEpochMs":99999,"remainingMs":30000}"""
+    )
+    assertEquals(
+      "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", null, 99999L, 30000L),
       lastCall,
     )
   }

@@ -5,6 +5,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -335,6 +336,79 @@ class NetworkMockRuleStoreTest {
     val store = createStore()
     store.setErrorSimulation(false, null, null, null)
 
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  // --- Skew-immune expiry (issue #10062) ---
+
+  @Test
+  fun `remainingMs simulation runs its duration on a device clock far ahead of the host`() {
+    // Device wall clock is two minutes ahead of the host epoch the old code compared against.
+    val wall = AtomicLong(1_000_000L + 120_000L)
+    val mono = AtomicLong(5_000L)
+    val store = NetworkMockRuleStore(clock = { wall.get() }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "http500", null, 1_030_000L, remainingMs = 30_000L)
+
+    assertNotNull(store.getActiveErrorSimulation())
+    mono.addAndGet(29_999L)
+    assertNotNull(store.getActiveErrorSimulation())
+    mono.addAndGet(1L)
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `remainingMs simulation still expires on a device clock far behind the host`() {
+    val wall = AtomicLong(1_000_000L - 120_000L)
+    val mono = AtomicLong(5_000L)
+    val store = NetworkMockRuleStore(clock = { wall.get() }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "http500", null, 1_030_000L, remainingMs = 30_000L)
+
+    mono.addAndGet(30_000L)
+
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `wall clock steps do not change a remainingMs simulation`() {
+    val wall = AtomicLong(1_000L)
+    val mono = AtomicLong(0L)
+    val store = NetworkMockRuleStore(clock = { wall.get() }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 10_000L)
+
+    wall.set(Long.MAX_VALUE / 2)
+
+    assertNotNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `remainingMs of zero is already expired`() {
+    val store = NetworkMockRuleStore(clock = { 1_000L }, monotonicClock = { 0L })
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 0L)
+
+    assertNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `remainingMs wins over a conflicting absolute expiry`() {
+    val mono = AtomicLong(0L)
+    val store = NetworkMockRuleStore(clock = { 1_000L }, monotonicClock = { mono.get() })
+    // The absolute value is already in the past on the device clock; the duration governs.
+    store.setErrorSimulation(true, "timeout", null, 500L, remainingMs = 10_000L)
+
+    assertNotNull(store.getActiveErrorSimulation())
+  }
+
+  @Test
+  fun `a re-pushed remainingMs replaces the deadline rather than extending the original`() {
+    val mono = AtomicLong(0L)
+    val store = NetworkMockRuleStore(clock = { 1_000L }, monotonicClock = { mono.get() })
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 30_000L)
+    mono.addAndGet(10_000L)
+    store.setErrorSimulation(true, "timeout", null, null, remainingMs = 20_000L)
+
+    mono.addAndGet(19_999L)
+    assertNotNull(store.getActiveErrorSimulation())
+    mono.addAndGet(1L)
     assertNull(store.getActiveErrorSimulation())
   }
 

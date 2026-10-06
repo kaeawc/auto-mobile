@@ -2958,7 +2958,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
-  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs)
+    remainingMs: Long?,
+  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
 
@@ -3184,10 +3185,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   ) {
     try {
       val intent =
         Intent(NetworkMockRuleStore.ACTION_NETWORK_ERROR_SIMULATION).apply {
+          remainingMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_REMAINING_MS, it) }
           putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_ENABLED, enabled)
           errorType?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_TYPE, it) }
           limit?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_LIMIT, it) }

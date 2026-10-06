@@ -133,7 +133,13 @@ tasks.withType<Test> {
   environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", apkPath)
   systemProperty("automobile.ctrl.proxy.apk.path", apkPath)
   systemProperty("automobile.daemon.package.version", npmPackageVersion.get())
-  systemProperty("automobile.daemon.force.restart", "true")
+  // No hard-coded force restart: with maxParallelForks > 1 every fork would stop the shared daemon
+  // under the others' running plans (#10170). Under CI the runner restarts only a daemon that is
+  // absent, unhealthy or of a different build; opt in to an unconditional restart explicitly with
+  // -Pautomobile.daemon.force.restart=true.
+  providers.gradleProperty("automobile.daemon.force.restart").orNull?.let {
+    systemProperty("automobile.daemon.force.restart", it)
+  }
   systemProperty("automobile.daemon.local.project.path", repoRootPath)
 
   testLogging {

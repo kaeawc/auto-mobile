@@ -90,128 +90,14 @@ internal object DaemonSocketClientManager {
   }
 
   private fun ensureDaemonRunning() {
-    val socketPath = DaemonSocketPaths.socketPath()
-    val forceRestart = DaemonSocketPaths.resolveForceRestart()
-    val daemonAvailable = DaemonSocketClient.isAvailable(socketPath)
-    val daemonAssetVersion =
-      DaemonSocketPaths.readDaemonAssetVersionFromPidFile(DaemonSocketPaths.pidFilePath())
-    val callerAssetVersion = DaemonSocketPaths.resolveCallerAssetVersionPin()
-    val assetVersionSkew =
-      daemonAvailable &&
-        DaemonSocketPaths.requiresAssetVersionPinFailure(
-          daemonAssetVersion,
-          callerAssetVersion,
-        )
-
-    // A daemon of a different build already owning the shared per-uid socket would
-    // silently serve the wrong tool set (#2744). Before reusing it, compare the version
-    // (and, for local overrides, the entry-script build identity) it recorded in its PID
-    // file against this runner's and restart on skew, mirroring the MCP proxy's
-    // ensureVersionMatches/ensureBuildMatches.
-    val pidFilePath = DaemonSocketPaths.pidFilePath()
-    val versionSkew =
-      daemonAvailable &&
-        DaemonSocketPaths.requiresVersionSkewRestart(
-          DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
-          DaemonSocketPaths.resolveClientVersion(),
-        )
-    // Two checkouts at the same release version (e.g. a stale `0.0.40+gold` daemon vs this
-    // local `0.0.40`) are indistinguishable by release alone; the entry-script hash catches them.
-    val buildSkew =
-      daemonAvailable &&
-        DaemonSocketPaths.requiresBuildSkewRestart(
-          DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
-          DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
-          DaemonSocketPaths.resolveClientBuildId(),
-          DaemonSocketPaths.resolveLocalDaemonEntryScript(),
-        )
-    if (
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
-        assetVersionSkew,
-        versionSkew,
-        buildSkew,
-        forceRestart,
+    val lockTimeoutMs =
+      DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = true) +
+        DaemonSocketPaths.daemonStartTimeoutMs()
+    DaemonLauncher(
+        DefaultDaemonLaunchEnvironment,
+        FileCrossProcessLock(File(DaemonSocketPaths.restartLockPath()).toPath(), lockTimeoutMs),
       )
-    ) {
-      throw DaemonUnavailableException(
-        "AutoMobile daemon AUTOMOBILE_VERSION mismatch: the shared daemon was started with " +
-          "${daemonAssetVersion ?: "unknown"}, but this runner requested $callerAssetVersion. " +
-          "Restart the daemon from this runner's environment before reusing it."
-      )
-    }
-    val skew = versionSkew || buildSkew || assetVersionSkew
-
-    if (!forceRestart && daemonAvailable && !skew) {
-      return
-    }
-
-    val restartRequired = forceRestart || skew
-    val startCommand =
-      if (restartRequired) {
-        DaemonSocketPaths.buildDaemonRestartCommand()
-      } else {
-        DaemonSocketPaths.buildDaemonStartCommand()
-      }
-    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
-    if (skew && debugMode) {
-      println("Restarting AutoMobile daemon due to version/build skew with runner")
-    }
-    if (debugMode) {
-      println("Starting AutoMobile daemon with: ${startCommand.joinToString(" ")}")
-    }
-
-    val environmentOverrides = resolveDaemonEnvironmentOverrides()
-    AutoMobileSharedUtils.executeCommand(
-      startCommand,
-      DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = restartRequired),
-      environmentOverrides,
-    )
-
-    val started =
-      DaemonSocketClient.waitForAvailability(
-        socketPath,
-        DaemonSocketPaths.daemonStartTimeoutMs(),
-      )
-    if (!started) {
-      throw DaemonUnavailableException(
-        "Daemon failed to start within ${DaemonSocketPaths.daemonStartTimeoutMs()}ms"
-      )
-    }
-
-    // executeCommand returns a CommandResult rather than throwing, and waitForAvailability only
-    // confirms socket liveness — a failed versioned bunx/npx restart that leaves the stale socket
-    // up, or a PATH `auto-mobile` fallback of a different version, would look "ready" while the
-    // daemon's handshake gate (#2744) rejects every request carrying clientVersion/clientBuildId.
-    // Confirm the running daemon's version AND build identity match this runner before marking it
-    // ensured; a daemon that records no version/build id is accepted (a skew cannot be proven).
-    val stillVersionSkewed =
-      DaemonSocketPaths.requiresVersionSkewRestart(
-        DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
-        DaemonSocketPaths.resolveClientVersion(),
-      )
-    val stillBuildSkewed =
-      DaemonSocketPaths.requiresBuildSkewRestart(
-        DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
-        DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
-        DaemonSocketPaths.resolveClientBuildId(),
-        DaemonSocketPaths.resolveLocalDaemonEntryScript(),
-      )
-    val stillAssetVersionSkewed =
-      DaemonSocketPaths.requiresAssetVersionPinFailure(
-        DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFilePath),
-        DaemonSocketPaths.resolveCallerAssetVersionPin(),
-      )
-    if (stillVersionSkewed || stillBuildSkewed || stillAssetVersionSkewed) {
-      throw DaemonUnavailableException(
-        "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
-          "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
-          "daemon and runs the tests (e.g. set automobile.daemon.package.version)."
-      )
-    }
-
-    // NOTE: Device pool initialization check removed to allow parallel test execution.
-    // The daemon initializes its device pool at startup, and tests will wait for
-    // devices as needed when they call executePlan.
+      .ensureRunning()
   }
 
   /**
@@ -313,7 +199,7 @@ internal object DaemonSocketClientManager {
     )
   }
 
-  private fun resolveDaemonEnvironmentOverrides(): Map<String, String> {
+  internal fun resolveDaemonEnvironmentOverrides(): Map<String, String> {
     val resolvedOverrides = mutableMapOf<String, String>()
     val ctrlProxyApkProperty = SystemPropertyCache.get("automobile.ctrl.proxy.apk.path", "").trim()
     val ctrlProxyApkEnv = System.getenv("AUTOMOBILE_CTRL_PROXY_APK_PATH")?.trim().orEmpty()
@@ -338,6 +224,64 @@ internal object DaemonSocketClientManager {
       )
     return candidates.firstOrNull { it.exists() }?.absolutePath
   }
+}
+
+/** The real daemon launch environment: PID file, shared socket and the launcher command. */
+internal object DefaultDaemonLaunchEnvironment : DaemonLaunchEnvironment {
+  override val restartMode: DaemonRestartMode
+    get() = DaemonSocketPaths.resolveRestartMode()
+
+  override val startTimeoutMs: Long
+    get() = DaemonSocketPaths.daemonStartTimeoutMs()
+
+  override fun isDaemonAvailable(): Boolean =
+    DaemonSocketClient.isAvailable(DaemonSocketPaths.socketPath())
+
+  override fun daemonIdentity(): DaemonIdentity {
+    val pidFilePath = DaemonSocketPaths.pidFilePath()
+    return DaemonIdentity(
+      version = DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
+      buildId = DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
+      entryScript = DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
+      assetVersion = DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFilePath),
+    )
+  }
+
+  override fun runnerIdentity(): DaemonIdentity =
+    DaemonIdentity(
+      version = DaemonSocketPaths.resolveClientVersion(),
+      buildId = DaemonSocketPaths.resolveClientBuildId(),
+      entryScript = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
+      assetVersion = DaemonSocketPaths.resolveCallerAssetVersionPin(),
+    )
+
+  override fun runLaunchCommand(restart: Boolean, skewDetected: Boolean) {
+    val startCommand =
+      if (restart) {
+        DaemonSocketPaths.buildDaemonRestartCommand()
+      } else {
+        DaemonSocketPaths.buildDaemonStartCommand()
+      }
+    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
+    if (skewDetected && debugMode) {
+      println("Restarting AutoMobile daemon due to version/build skew with runner")
+    }
+    if (debugMode) {
+      println("Starting AutoMobile daemon with: ${startCommand.joinToString(" ")}")
+    }
+
+    AutoMobileSharedUtils.executeCommand(
+      startCommand,
+      DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = restart),
+      DaemonSocketClientManager.resolveDaemonEnvironmentOverrides(),
+    )
+  }
+
+  override fun awaitAvailability(): Boolean =
+    DaemonSocketClient.waitForAvailability(
+      DaemonSocketPaths.socketPath(),
+      DaemonSocketPaths.daemonStartTimeoutMs(),
+    )
 }
 
 internal object DaemonSocketPaths {
@@ -530,36 +474,46 @@ internal object DaemonSocketPaths {
   }
 
   /**
-   * Resolve whether to force a daemon restart before reuse. Explicit configuration wins (JVM
-   * property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`); otherwise
-   * CI runs default to true so a stale daemon left by a previous job is replaced rather than
-   * silently reused (#2744 interim). See [shouldForceRestart] for the decision.
+   * Resolve how this runner treats a daemon it did not start. Explicit configuration wins (JVM
+   * property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`): `true` is
+   * the unconditional-restart opt-in. Otherwise CI runs default to [DaemonRestartMode.IF_NEEDED] so
+   * a stale daemon left by a previous job is replaced, but a healthy matching daemon started by
+   * another fork of the same run is not (#2744 interim, #10170). See [resolveRestartMode] for the
+   * decision.
    */
-  fun resolveForceRestart(): Boolean {
+  fun resolveRestartMode(): DaemonRestartMode {
     val property = SystemPropertyCache.get("automobile.daemon.force.restart", "").ifBlank { null }
     val env = System.getenv("AUTOMOBILE_DAEMON_FORCE_RESTART")
     val ci = System.getenv("CI")
-    return shouldForceRestart(property, env, ci)
+    return resolveRestartMode(property, env, ci)
   }
 
   /**
-   * Pure force-restart decision. Explicit property/env values (parsed as booleans) win in order;
-   * when neither is set, a truthy `CI` marker defaults to true. Unset/blank/unparseable values fall
-   * through, defaulting to false outside CI.
+   * Pure restart-mode decision. Explicit property/env values (parsed as booleans) win in order:
+   * true is [DaemonRestartMode.ALWAYS], false is [DaemonRestartMode.NEVER]. When neither is set, a
+   * truthy `CI` marker defaults to [DaemonRestartMode.IF_NEEDED]. Unset/blank/unparseable values
+   * fall through, defaulting to [DaemonRestartMode.NEVER] outside CI.
    */
+  internal fun resolveRestartMode(
+    propertyValue: String?,
+    envValue: String?,
+    ciValue: String?,
+  ): DaemonRestartMode {
+    val explicit = parseBooleanFlag(propertyValue) ?: parseBooleanFlag(envValue)
+    return when {
+      explicit == true -> DaemonRestartMode.ALWAYS
+      explicit == false -> DaemonRestartMode.NEVER
+      parseBooleanFlag(ciValue) == true -> DaemonRestartMode.IF_NEEDED
+      else -> DaemonRestartMode.NEVER
+    }
+  }
+
+  /** Whether any form of forced restart is configured (explicit opt-in or the CI default). */
   internal fun shouldForceRestart(
     propertyValue: String?,
     envValue: String?,
     ciValue: String?,
-  ): Boolean {
-    parseBooleanFlag(propertyValue)?.let {
-      return it
-    }
-    parseBooleanFlag(envValue)?.let {
-      return it
-    }
-    return parseBooleanFlag(ciValue) ?: false
-  }
+  ): Boolean = resolveRestartMode(propertyValue, envValue, ciValue) != DaemonRestartMode.NEVER
 
   private fun parseBooleanFlag(value: String?): Boolean? {
     val normalized = value?.trim()?.lowercase() ?: return null
@@ -580,6 +534,15 @@ internal object DaemonSocketPaths {
   fun pidFilePath(): String {
     val userId = getUserId()
     return "/tmp/auto-mobile-daemon-$userId.pid"
+  }
+
+  /**
+   * Cross-process lock file serializing runner JVMs that check-and-(re)start the shared daemon.
+   * Lives beside the PID file and socket in the per-uid state directory (/tmp).
+   */
+  fun restartLockPath(): String {
+    val userId = getUserId()
+    return "/tmp/auto-mobile-daemon-$userId.runner-restart.lock"
   }
 
   /**

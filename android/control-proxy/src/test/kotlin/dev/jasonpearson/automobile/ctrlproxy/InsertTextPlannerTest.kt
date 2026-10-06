@@ -5,6 +5,215 @@ import org.junit.Test
 
 // These inputs model reported accessibility node states; they are unverified against a device.
 class InsertTextPlannerTest {
+  private class FakeTimer {
+    var nowMs = 0L
+    val pauses = mutableListOf<Long>()
+
+    fun pause(ms: Long) {
+      pauses.add(ms)
+      nowMs += ms
+    }
+  }
+
+  private class FakeNode(val states: List<InsertTextSnapshot>) {
+    var reads = 0
+    var current = states.first()
+    val selectionTexts = mutableListOf<String?>()
+    val selectionListed: Boolean
+      get() = !current.text.isNullOrEmpty()
+
+    fun refresh(): InsertTextSnapshot {
+      current = states[minOf(reads++, states.lastIndex)]
+      return current
+    }
+
+    fun setSelection(caret: Int): Boolean {
+      selectionTexts.add(current.text)
+      if (caret !in 0..current.text.orEmpty().length) return false
+      current = current.copy(selectionStart = caret, selectionEnd = caret)
+      return true
+    }
+  }
+
+  private fun placeSelection(
+    plan: InsertTextPlan,
+    node: FakeNode,
+    timer: FakeTimer,
+    acceptsCaretNotPlaced: Boolean = true,
+  ): InsertTextOutcome {
+    val observed = awaitInsertTextMutation(plan, node::refresh, { timer.nowMs }, timer::pause)
+    val attempted = observed != null && node.selectionListed
+    val returned = attempted && node.setSelection(plan.caret)
+    val placed = insertTextSelectionSucceeded(true, attempted, returned, plan, node.current)
+    return insertTextOutcome(true, attempted, placed, null, acceptsCaretNotPlaced)
+  }
+
+  @Test
+  fun `stale text converges before selection is attempted`() {
+    val plan = planInsertText("abc", false, 3, 3, "def")
+    val stale = InsertTextSnapshot("abc", false, 3, 3)
+    val node = FakeNode(listOf(stale, stale, stale.copy(text = "abcdef")))
+    val timer = FakeTimer()
+    assertEquals(
+      InsertTextOutcome(true, null, null, null, false),
+      placeSelection(plan, node, timer),
+    )
+    assertEquals(listOf("abcdef"), node.selectionTexts)
+    assertEquals(listOf(25L, 25L), timer.pauses)
+    assertEquals(3, node.reads)
+  }
+
+  @Test
+  fun `never converged text preserves warning and legacy failure within bound`() {
+    val plan = planInsertText("abc", false, 3, 3, "def")
+    for (acceptsCaretNotPlaced in listOf(false, true)) {
+      val node = FakeNode(listOf(InsertTextSnapshot("abc", false, 3, 3)))
+      val timer = FakeTimer()
+      assertEquals(
+        insertTextOutcome(true, true, false, null, acceptsCaretNotPlaced),
+        placeSelection(plan, node, timer, acceptsCaretNotPlaced),
+      )
+      assertEquals(200L, timer.nowMs)
+      assertEquals(9, node.reads)
+      assertEquals(listOf("abc"), node.selectionTexts)
+    }
+  }
+
+  @Test
+  fun `empty Compose field exposes selection action only after convergence`() {
+    val plan = planInsertText("", false, -1, -1, "abc")
+    val node =
+      FakeNode(
+        listOf(InsertTextSnapshot("", false, -1, -1), InsertTextSnapshot("abc", false, -1, -1))
+      )
+    val timer = FakeTimer()
+    assertEquals(false, node.selectionListed)
+    assertEquals(
+      InsertTextOutcome(true, null, null, null, false),
+      placeSelection(plan, node, timer),
+    )
+    assertEquals(listOf("abc"), node.selectionTexts)
+    assertEquals(listOf(25L), timer.pauses)
+  }
+
+  @Test
+  fun `empty node never converges and preserves unattempted selection warning`() {
+    val plan = planInsertText("", false, -1, -1, "abc")
+    val node = FakeNode(listOf(InsertTextSnapshot("", false, -1, -1)))
+    val timer = FakeTimer()
+    assertEquals(
+      insertTextOutcome(true, false, false, null, true),
+      placeSelection(plan, node, timer),
+    )
+    assertEquals(200L, timer.nowMs)
+    assertEquals(emptyList<String?>(), node.selectionTexts)
+  }
+
+  @Test
+  fun `immediately converged node does not pause or refresh again`() {
+    val plan = InsertTextPlan("abc", 3, true)
+    val node = FakeNode(listOf(InsertTextSnapshot("abc", false, 3, 3)))
+    val timer = FakeTimer()
+    assertEquals(
+      InsertTextOutcome(true, null, null, null, false),
+      placeSelection(plan, node, timer),
+    )
+    assertEquals(1, node.reads)
+    assertEquals(emptyList<Long>(), timer.pauses)
+  }
+
+  @Test
+  fun `converged already correct caret accepts rejected selection`() {
+    val plan = InsertTextPlan("abcdef", 6, false)
+    val timer = FakeTimer()
+    var reads = 0
+    val observed =
+      awaitInsertTextMutation(
+        plan,
+        {
+          if (++reads == 1) InsertTextSnapshot("abc", false, 3, 3)
+          else InsertTextSnapshot("abcdef", false, 6, 6)
+        },
+        { timer.nowMs },
+        timer::pause,
+      )
+    assertEquals(true, insertTextSelectionSucceeded(true, true, false, plan, observed))
+    assertEquals(2, reads)
+    assertEquals(listOf(25L), timer.pauses)
+  }
+
+  @Test
+  fun `node lost during mutation polling stops without moving selection`() {
+    val timer = FakeTimer()
+    var reads = 0
+    assertEquals(
+      null,
+      awaitInsertTextMutation(
+        InsertTextPlan("abc", 3, true),
+        { if (++reads == 1) InsertTextSnapshot("", false, -1, -1) else null },
+        { timer.nowMs },
+        timer::pause,
+      ),
+    )
+    assertEquals(2, reads)
+    assertEquals(listOf(25L), timer.pauses)
+  }
+
+  @Test
+  fun `convergence decision requires actual matching text and stops at deadline`() {
+    val plan = InsertTextPlan("abc", 3, true)
+    val converged = InsertTextSnapshot("abc", false, -1, -1)
+    assertEquals(false, shouldPollInsertTextMutation(plan, converged, 0L))
+    assertEquals(false, shouldPollInsertTextMutation(plan, converged, 200L))
+    assertEquals(true, shouldPollInsertTextMutation(plan, converged.copy(text = "ab"), 199L))
+    assertEquals(false, shouldPollInsertTextMutation(plan, converged.copy(text = "ab"), 200L))
+    assertEquals(
+      true,
+      shouldPollInsertTextMutation(plan, converged.copy(isShowingHintText = true), 0L),
+    )
+    assertEquals(true, shouldPollInsertTextMutation(plan, converged.copy(text = null), 0L))
+    assertEquals(false, shouldPollInsertTextMutation(plan, null, 0L))
+  }
+
+  @Test
+  fun `refresh time counts toward deadline and final pause is clamped`() {
+    val plan = InsertTextPlan("abc", 3, true)
+    val stale = InsertTextSnapshot("", false, -1, -1)
+    val timer = FakeTimer()
+    var reads = 0
+    assertEquals(
+      stale,
+      awaitInsertTextMutation(
+        plan,
+        {
+          if (++reads == 1) timer.nowMs += 190L
+          stale
+        },
+        { timer.nowMs },
+        timer::pause,
+      ),
+    )
+    assertEquals(listOf(10L), timer.pauses)
+    assertEquals(200L, timer.nowMs)
+    assertEquals(2, reads)
+  }
+
+  @Test
+  fun `text converging on final deadline refresh is accepted`() {
+    val plan = InsertTextPlan("abc", 3, true)
+    val node =
+      FakeNode(
+        List(8) { InsertTextSnapshot("", false, -1, -1) } + InsertTextSnapshot("abc", false, -1, -1)
+      )
+    val timer = FakeTimer()
+    assertEquals(
+      InsertTextOutcome(true, null, null, null, false),
+      placeSelection(plan, node, timer),
+    )
+    assertEquals(200L, timer.nowMs)
+    assertEquals(listOf("abc"), node.selectionTexts)
+  }
+
   @Test
   fun `false selection return with observed planned caret succeeds in both modes`() {
     val plan = InsertTextPlan("hello world", 11, false)

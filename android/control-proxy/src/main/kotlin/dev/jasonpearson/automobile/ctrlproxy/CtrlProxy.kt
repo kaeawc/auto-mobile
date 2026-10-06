@@ -5551,8 +5551,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           setTextArguments,
         )
       textMutated = setTextSucceeded
-      // Refresh after SET_TEXT to capture the field's actual reported selection, even when the
-      // replacement text has not reached the accessibility cache yet.
+      // Compose may acknowledge SET_TEXT before its semantics reflect the replacement. Wait
+      // briefly on the same node before reading selection support and placing the caret (#10414).
       val mutationNodeKey = nodeKey()
       fun readMutationSnapshot(): InsertTextSnapshot? {
         // After writing, never re-find and move a caret in a different focused field.
@@ -5571,7 +5571,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           targetNode.textSelectionEnd,
         )
       }
-      val afterSetText = if (setTextSucceeded) readMutationSnapshot() else null
+      val afterSetText =
+        if (setTextSucceeded) {
+          awaitInsertTextMutation(
+            plan,
+            readSnapshot = ::readMutationSnapshot,
+            nowMs = { android.os.SystemClock.uptimeMillis() },
+            pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },
+          )
+        } else null
       AutoMobileLog.d(
         TAG,
         "insertText selectionAfterSetTextStart=${afterSetText?.selectionStart ?: -1} selectionAfterSetTextEnd=${afterSetText?.selectionEnd ?: -1}",

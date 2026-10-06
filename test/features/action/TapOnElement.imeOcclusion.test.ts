@@ -52,11 +52,29 @@ test.each(["Demos", "Slides", "Settings", "Password"])(
       fixture: capturedImeHierarchy(),
       screenSize: { width: 1080, height: 2400 },
       realSelector: true,
-      index: label === "Settings" ? 1 : undefined,
     });
     expect(result.success).toBe(false);
     expect(result.error).toBe(
       `Failed to perform tap on element: Target "${label}" is covered by the soft keyboard; dismiss the keyboard first.`,
+    );
+    expect(points).toEqual([]);
+  },
+);
+
+test.each(["Delete", "Space"])(
+  "captured keyboard: `%s` matches only a Gboard key, so tapOn names the keyboard and dispatches no tap",
+  async (selectorText) => {
+    const { result, points } = await executeAt("Settings", {
+      fixture: capturedImeHierarchy(),
+      screenSize: { width: 1080, height: 2400 },
+      realSelector: true,
+      selectorText,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      `Failed to perform tap on element: Element not found with provided text '${selectorText}'. ` +
+        "The only match is a soft-keyboard key, which observe does not list; " +
+        "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
     );
     expect(points).toEqual([]);
   },
@@ -170,6 +188,7 @@ async function executeAt(
     realSelector = false,
     selectionStrategy,
     index,
+    selectorText,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -188,6 +207,8 @@ async function executeAt(
     realSelector?: boolean;
     selectionStrategy?: "unique";
     index?: number;
+    /** The text tapOn is given, when it differs from the `label` that locates the fixture node. */
+    selectorText?: string;
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -290,7 +311,7 @@ async function executeAt(
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute(
     {
-      ...(elementId ? { elementId } : { text: label }),
+      ...(elementId ? { elementId } : { text: selectorText ?? label }),
       action,
       display,
       selectionStrategy,

@@ -4341,8 +4341,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.seq.options[0]).not.toHaveProperty("display");
     });
 
-    test("a field that keeps the pre-clear text fails the clear and stops the batch", async () => {
-      const h = harness(["old z"]);
+    test("a field already at its cleared mask or prefix succeeds with a warning and runs the next command (#9943)", async () => {
+      const h = harness(["+1 "]);
       const sendKeys = new SendKeys(androidDevice, createAdbFactory(h.adb), {
         executor: h.executor,
         observer: h.seq.observer,
@@ -4351,15 +4351,15 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       });
       const result = await sendKeys.execute([
         { action: "clear" },
-        { action: "type", text: "Na1 k", mode: "a11y" },
+        { action: "type", text: "5551234", mode: "a11y" },
       ]);
-      expect(result).toMatchObject({
-        success: false,
-        failedIndex: 0,
-        error: "Field was not fully cleared: 5 UTF-16 units remain",
-      });
-      expect(h.calls.filter((call) => call.startsWith("insert:"))).toEqual([]);
+      expect(result.success).toBe(true);
+      expect(result.failedIndex).toBeUndefined();
+      expect(h.calls.filter((call) => call.startsWith("insert:"))).toEqual(["insert:5551234"]);
+      // The full settle poll still runs before the insert, so the #9884 race stays closed.
       expect(h.timer.getSleepHistory().slice(0, 2)).toEqual([150, 150]);
+      expect(h.order.indexOf("insert")).toBeGreaterThan(h.order.lastIndexOf("clear") + 3);
+      expect(JSON.stringify(result)).toContain("still shows its pre-clear text");
     });
 
     test("a masked field that re-inserts its skeleton still counts as cleared", async () => {
@@ -4376,12 +4376,11 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.timer.getSleepHistory()).toEqual([150]);
     });
 
-    test("an unreadable first read keeps polling and still catches the old text", async () => {
+    test("an unreadable first read keeps polling and still notices the unchanged text", async () => {
       const h = harness(["old z", undefined, "old z", "old z"]);
-      expect(await h.executor.clear()).toEqual({
-        success: false,
-        error: "Field was not fully cleared: 5 UTF-16 units remain",
-      });
+      const result = await h.executor.clear();
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("still shows its pre-clear text");
       expect(h.seq.reads()).toBe(4);
     });
 
@@ -4424,6 +4423,61 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const hinted = focusedAndroidObservation("Type here", { "hint-text": "Type here" }, 0);
       h.seq.observer.execute = async () => hinted;
       expect(await h.executor.clear()).toEqual({ success: true });
+    });
+  });
+
+  describe("#9940 a replace's clear is verified before the first insert", () => {
+    test("eventAll replace starting with a non-key-event character waits for the clear", async () => {
+      // Reads: focus check, pre-clear, then the settled polls.
+      const h = harness(["old z", "old z", "old z", ""]);
+      const result = await h.executor.type({
+        action: "type",
+        text: "Émile",
+        operation: "replace",
+        mode: "eventAll",
+      });
+      expect(result).toMatchObject({ success: true });
+      const clearAt = h.order.indexOf("clear");
+      const insertAt = h.order.indexOf("insert");
+      expect(clearAt).toBeGreaterThanOrEqual(0);
+      expect(insertAt).toBeGreaterThan(clearAt);
+      // At least one read that showed the clear applied sits between them.
+      expect(h.order.slice(clearAt + 1, insertAt).filter((e) => e === "read").length).toBe(2);
+      expect(h.timer.getSleepHistory().slice(0, 1)).toEqual([150]);
+      expect(h.calls.filter((call) => call.startsWith("insert:"))[0]).toBe("insert:É");
+    });
+
+    test("eventAll replace over an already-cleared mask is not failed or warned", async () => {
+      const h = harness(["+1 "]);
+      const result = await h.executor.type({
+        action: "type",
+        text: "Émile",
+        operation: "replace",
+        mode: "eventAll",
+      });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning ?? "").not.toContain("pre-clear text");
+    });
+
+    test("eventAll append does not clear or read before the insert", async () => {
+      const h = harness(["old z"]);
+      await h.executor.type({ action: "type", text: "Émile", mode: "eventAll" });
+      expect(h.order).not.toContain("clear");
+    });
+
+    test("eventLast replace with only a tail key event waits for the clear before the key event", async () => {
+      // Reads: focus check, pre-clear, then the settled polls.
+      const h = harness(["old z", "old z", "old z", ""]);
+      const result = await h.executor.type({
+        action: "type",
+        text: "0",
+        operation: "replace",
+        mode: "eventLast",
+      });
+      expect(result).toMatchObject({ success: true });
+      expect(h.order.slice(0, 5)).toEqual(["read", "read", "clear", "read", "read"]);
+      expect(h.timer.getSleepHistory().slice(0, 1)).toEqual([150]);
+      expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
     });
   });
 

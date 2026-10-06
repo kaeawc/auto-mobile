@@ -1,3 +1,4 @@
+import { DaemonState } from "../daemon/daemonState";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
@@ -27,42 +28,52 @@ import { serverConfig } from "../utils/ServerConfig";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 
-/**
- * Storage for accessibility service setup timing.
- * Keyed by deviceId, consumed once when observe reads it.
- */
-const pendingSetupTimings = new Map<string, TimingData>();
+/** Legacy fallback only for callers that have no session. */
+const sessionlessSetupTimingsByDevice = new Map<string, TimingData>();
 
 const MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS = 5;
 const DEVICE_ACQUISITION_SETUP_DEADLINE_MS = 300_000;
 
-/**
- * Store setup timing for a device.
- * Called after accessibility service setup completes.
- */
-export function storeSetupTiming(deviceId: string, timing: TimingData): void {
-  pendingSetupTimings.set(deviceId, timing);
-  logger.info(`[ToolExecutionContext] Stored setup timing for deviceId=${deviceId}`);
+function setupTimingSessionManager(): SessionManager | undefined {
+  const state = DaemonState.getInstance();
+  return state.isInitialized() ? state.getSessionManager() : undefined;
 }
 
-/**
- * Get and consume the setup timing for a device.
- * Returns the timing data if present and clears it from storage.
- */
-export function consumeSetupTiming(deviceId: string): TimingData | null {
-  const timing = pendingSetupTimings.get(deviceId);
-  const availableKeys = Array.from(pendingSetupTimings.keys());
-  if (timing) {
-    pendingSetupTimings.delete(deviceId);
-    logger.info(`[ToolExecutionContext] Consumed setup timing for deviceId=${deviceId}`);
-    return timing;
+/** Session-owned timing never falls back to another session's device timing. */
+export function storeSetupTiming(
+  deviceId: string,
+  timing: TimingData,
+  sessionId?: string,
+  sessionManager = setupTimingSessionManager(),
+): void {
+  if (sessionId) {
+    const session = sessionManager?.getSession(sessionId);
+    if (session?.assignedDevice === deviceId) {
+      session.cacheData.pendingSetupTiming = timing;
+    }
+    return;
   }
-  if (availableKeys.length > 0) {
-    logger.warn(
-      `[ToolExecutionContext] No setup timing for deviceId=${deviceId}, available keys: ${availableKeys.join(", ")}`,
-    );
+  sessionlessSetupTimingsByDevice.set(deviceId, timing);
+}
+
+/** Consume once from the owning session, or the explicit session-less fallback. */
+export function consumeSetupTiming(
+  deviceId: string,
+  sessionId?: string,
+  sessionManager = setupTimingSessionManager(),
+): TimingData | null {
+  if (sessionId) {
+    const session = sessionManager?.getSession(sessionId);
+    if (session?.assignedDevice !== deviceId) {
+      return null;
+    }
+    const timing = session.cacheData.pendingSetupTiming;
+    delete session.cacheData.pendingSetupTiming;
+    return timing ?? null;
   }
-  return null;
+  const timing = sessionlessSetupTimingsByDevice.get(deviceId);
+  sessionlessSetupTimingsByDevice.delete(deviceId);
+  return timing ?? null;
 }
 
 /**
@@ -514,6 +525,7 @@ async function runDeviceReadinessSetup(
             session.platform,
             sessionManager.getTimer(),
             signal,
+            sessionManager,
           ),
         );
       },
@@ -696,6 +708,7 @@ async function ensureAccessibilityServiceReady(
   platform: Platform,
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
+  sessionManager?: SessionManager,
 ): Promise<void> {
   const device: BootedDevice = {
     name: deviceId,
@@ -769,7 +782,7 @@ async function ensureAccessibilityServiceReady(
     perf.end();
     const timings = perf.getTimings();
     if (timings) {
-      storeSetupTiming(deviceId, timings);
+      storeSetupTiming(deviceId, timings, sessionId, sessionManager);
       logger.info(`[ToolExecutionContext] Accessibility service ready for session ${sessionId}`, {
         connected,
       });

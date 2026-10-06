@@ -2102,7 +2102,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       // Include setup timing if this is the first observe after accessibility service setup
-      consumeObserveSetupTiming(deviceRead, device, result);
+      consumeObserveSetupTiming(deviceRead, device, result, args.sessionUuid);
 
       // Record back stack information in navigation graph if available
       if (!deviceRead) {
@@ -2644,8 +2644,9 @@ function consumeObserveSetupTiming(
   deviceRead: boolean,
   device: BootedDevice,
   result: ObserveResult,
+  sessionId?: string,
 ): void {
-  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId);
+  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId, sessionId);
   attachObserveSetupTiming(result, setupTiming);
 }
 

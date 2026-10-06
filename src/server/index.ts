@@ -906,7 +906,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let routingSessionUuid: string | undefined;
+    try {
+      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    } catch (error) {
+      // Match the existing tool-error boundary below: the SDK handler alias
+      // is narrower than the protocol's text-only tool error result.
+      return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
+    }
     let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const requestedToolResultsNoStructuredContent = daemonMode

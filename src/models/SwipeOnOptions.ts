@@ -37,6 +37,7 @@ export interface SwipeOnOptions {
     container?: ElementContainerSelector;
     selectionStrategy?: ElementSelectionStrategy;
     maxTime?: number; // Max time to search (default 15000ms) - internal only
+    maxSwipes?: number; // Max search swipes before giving up (default: unbounded) - internal only
   };
 
   /**

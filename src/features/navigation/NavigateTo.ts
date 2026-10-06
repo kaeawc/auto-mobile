@@ -33,6 +33,15 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { PressButton } from "../action/PressButton";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import {
+  isElementNotFoundFailure,
+  ReplayTargetNotFoundError,
+  replayLookForFor,
+  replayScrollContainer,
+  SwipeOnReplayScrollSearcher,
+  type ReplayScrollSearchRequest,
+  type ReplayScrollSearcher,
+} from "./replayScrollSearch";
+import {
   describeForegroundOverlay,
   type ForegroundObservation,
   type ForegroundObserver,
@@ -57,6 +66,12 @@ interface PathRunContext {
   startTime: number;
   options: NavigateToOptions;
   uiStateSetup: UIStateSetup;
+  /**
+   * Edges whose replay only failed to find its target after a bounded scroll search
+   * (#10154). Remembered as failed for the rest of the call, so the fallback ranks
+   * first, and forgotten when it ends.
+   */
+  transientFailures?: NavigationEdge[];
 }
 
 /** A path run's result; `retryFrom` is set when a step failed with the device still at its source. */
@@ -91,8 +106,13 @@ export class NavigateTo {
   private pathOptimizer: PathOptimizer | undefined;
   private sessionUuid?: string;
   private foregroundObserverProvider: () => ForegroundObserver;
+  private scrollSearcher: ReplayScrollSearcher;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
+  /** Swipes a replayed tapOn may spend looking for an off-screen target (#10154). */
+  private static readonly REPLAY_SEARCH_MAX_SWIPES = 8;
+  /** Longest a single replay scroll search may run, within the remaining navigateTo budget. */
+  private static readonly REPLAY_SEARCH_MAX_MS = 10000;
   private static readonly STEP_TIMEOUT_MS = 5000; // 5 seconds per step
   private static readonly POLL_INTERVAL_MS = 500; // Check screen every 500ms
 
@@ -106,6 +126,7 @@ export class NavigateTo {
     pathOptimizer?: PathOptimizer,
     sessionUuid?: string,
     foregroundObserverProvider?: () => ForegroundObserver,
+    scrollSearcher?: ReplayScrollSearcher,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -113,6 +134,7 @@ export class NavigateTo {
     this.timer = timer;
     this.pathOptimizer = pathOptimizer;
     this.sessionUuid = sessionUuid;
+    this.scrollSearcher = scrollSearcher ?? new SwipeOnReplayScrollSearcher(device, this.timer);
     this.foregroundObserverProvider =
       foregroundObserverProvider ??
       (() => new RealObserveScreen(this.device, { create: () => this.adb }));
@@ -245,6 +267,29 @@ export class NavigateTo {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<NavigateToResult> {
+    const transientFailures: NavigationEdge[] = [];
+    try {
+      return await this.followPathWithFallbacks(
+        initialPath,
+        { ...context, transientFailures },
+        progress,
+        signal,
+      );
+    } finally {
+      // A target the bounded search could not find does not show the edge is broken, so
+      // it is not demoted for later navigateTo calls (it is at most last for this one).
+      for (const edge of transientFailures) {
+        this.navigationManager.recordEdgeReplayOutcome(edge, true);
+      }
+    }
+  }
+
+  private async followPathWithFallbacks(
+    initialPath: PathResult,
+    context: PathRunContext,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<NavigateToResult> {
     const executedPath: string[] = [];
     const attempted = new Set<string>();
     let path = initialPath.path;
@@ -307,7 +352,7 @@ export class NavigateTo {
 
       // Execute navigation step
       try {
-        await this.replayStep(edge, options, uiStateSetup, executedPath, signal);
+        await this.replayStep(edge, options, uiStateSetup, executedPath, startTime, signal);
       } catch (error) {
         throwIfAborted(signal);
         logger.warn(`[NAVIGATE_TO] Error executing step: ${errorMessage(error)}`, error);
@@ -315,6 +360,7 @@ export class NavigateTo {
           edge,
           this.stepExecutionFailureResult(error, i, resultContext),
           signal,
+          error instanceof ReplayTargetNotFoundError ? context.transientFailures : undefined,
         );
       }
 
@@ -374,12 +420,19 @@ export class NavigateTo {
    * current screen is not proof of that: a replay can open a system dialog or sheet
    * the graph never reports, so a fresh observation must agree before a fallback
    * edge (possibly a Back press) is dispatched (#10133).
+   *
+   * `transientFailures` is given when the replay never found its target even after a
+   * bounded scroll search (#10154): the failure is remembered for the rest of this
+   * call so the fallback edge ranks first, but forgotten by followPath when the call
+   * ends, since the list not being where the edge needs it does not make the edge bad.
    */
   private async failedStepOutcome(
     edge: NavigationEdge,
     result: NavigateToResult,
     signal?: AbortSignal,
+    transientFailures?: NavigationEdge[],
   ): Promise<PathStepsOutcome> {
+    transientFailures?.push(edge);
     this.navigationManager.recordEdgeReplayOutcome(edge, false);
     // The failure result already carries the screen the graph reported after the replay.
     if (result.currentScreen !== edge.from) {
@@ -657,11 +710,78 @@ export class NavigateTo {
     logger.debug(`[NAVIGATE_TO] Pressed back via ${this.device.platform} interaction tool`);
   }
 
+  /**
+   * Replay the edge's tool call. A `tapOn` whose target is not on screen is retried
+   * once after looking for it the way an interactive caller would, with the shared
+   * `swipeOn lookFor` scroll machinery (#10154): an edge recorded after the user
+   * scrolled is replayed from the screen's initial scroll position, where its target
+   * can be off screen. The search is capped in swipes and by the remaining navigateTo
+   * budget; when it does not find the target the step fails with
+   * `ReplayTargetNotFoundError`.
+   */
+  private async replayToolCall(
+    edge: NavigationEdge,
+    interaction: ToolCallInteraction,
+    options: NavigateToOptions,
+    progress: { startTime: number; executedPath: string[] },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.executeToolCall(interaction, options, signal);
+      return;
+    } catch (error) {
+      throwIfAborted(signal);
+      const request = this.replaySearchRequest(edge, interaction, progress.startTime, error);
+      if (!request) {
+        throw error;
+      }
+      const outcome = await this.scrollSearcher.search(request, signal);
+      throwIfAborted(signal);
+      if (!outcome.found) {
+        throw new ReplayTargetNotFoundError(
+          `${errorMessage(error)}; scrolled ${request.direction} looking for it (at most ` +
+            `${request.maxSwipes} swipes) and it did not come into view` +
+            (outcome.detail ? `: ${outcome.detail}` : ""),
+        );
+      }
+      progress.executedPath.push(`swipeOn(lookFor: ${JSON.stringify(request.lookFor)})`);
+    }
+    await this.executeToolCall(interaction, options, signal);
+  }
+
+  /** The bounded search to run after `error`, or undefined when scrolling cannot help. */
+  private replaySearchRequest(
+    edge: NavigationEdge,
+    interaction: ToolCallInteraction,
+    startTime: number,
+    error: unknown,
+  ): ReplayScrollSearchRequest | undefined {
+    if (interaction.toolName !== "tapOn" || !isElementNotFoundFailure(error)) {
+      return undefined;
+    }
+    const lookFor = replayLookForFor(interaction.args);
+    const remainingMs = NavigateTo.MAX_TIMEOUT_MS - (this.timer.now() - startTime);
+    if (!lookFor || remainingMs <= 0) {
+      return undefined;
+    }
+    const scrollPosition = edge.uiState?.scrollPosition;
+    const container = replayScrollContainer(scrollPosition);
+    return {
+      lookFor,
+      // Lists are entered at the top, so content most often needs to move up (finger up).
+      direction: scrollPosition?.direction ?? "up",
+      ...(container ? { container } : {}),
+      maxSwipes: NavigateTo.REPLAY_SEARCH_MAX_SWIPES,
+      maxTimeMs: Math.min(remainingMs, NavigateTo.REPLAY_SEARCH_MAX_MS),
+    };
+  }
+
   private async replayStep(
     edge: NavigationEdge,
     options: NavigateToOptions,
     uiStateSetup: UIStateSetup,
     executedPath: string[],
+    startTime: number,
     signal?: AbortSignal,
   ): Promise<void> {
     throwIfAborted(signal);
@@ -691,7 +811,7 @@ export class NavigateTo {
         ...edge.interaction,
         args: stripNavigationToolParams(edge.interaction.args),
       };
-      await this.executeToolCall(interaction, options, signal);
+      await this.replayToolCall(edge, interaction, options, { startTime, executedPath }, signal);
       executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
     } else {
       // No known interaction - try back button

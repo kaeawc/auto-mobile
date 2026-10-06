@@ -25,7 +25,7 @@ import { PressButton } from "../action/PressButton";
 import { LaunchApp } from "../action/LaunchApp";
 import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
@@ -79,6 +79,7 @@ import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlocke
 
 // Import validate mode functions
 import {
+  countNewTransitions,
   initializeGraphTraversal,
   markNodeVisited,
   markEdgeTraversed,
@@ -353,10 +354,10 @@ export class Explore extends BaseVisualChange {
     context: ExplorationLoopContext,
     observation: ObserveResult,
   ): Promise<boolean> {
-    const { progress } = context;
+    const { progress, signal } = context;
     if (!this.recordedBackEdge) {
       logger.info("[Explore] No suitable element found, checking dead-end recovery");
-      await this.handleDeadEnd(progress, observation);
+      await this.handleDeadEnd(progress, observation, signal);
       return true;
     }
     if (!(await this.validateRecordedBack(this.recordedBackEdge, observation, progress))) {
@@ -456,7 +457,7 @@ export class Explore extends BaseVisualChange {
       this.device,
       this.adb,
       this.elementParser,
-      (p) => this.handleDeadEnd(p),
+      (p) => this.handleDeadEnd(p, undefined, signal),
       progress,
       this.blockerHandlerDeps(),
     );
@@ -1218,25 +1219,40 @@ export class Explore extends BaseVisualChange {
     }
   }
 
+  /** Record a cancelled run as the stop reason; true when the caller must stop. */
+  private stopIfCancelled(signal?: AbortSignal): boolean {
+    if (!signal?.aborted) {
+      return false;
+    }
+    this.stopReason = OPERATION_CANCELLED_MESSAGE;
+    return true;
+  }
+
   /**
    * Press Back on the device, recorded as `pressButton { button: "back" }` so the
    * edge the resulting navigation creates replays (and validates) as a recorded
-   * Back instead of an unknown interaction.
+   * Back instead of an unknown interaction. The request signal reaches the
+   * Android press so a cancelled run does not keep dispatching Back.
    */
-  private async dispatchBack(observation?: ObserveResult): Promise<void> {
+  private async dispatchBack(observation?: ObserveResult, signal?: AbortSignal): Promise<void> {
     // Recovery dispatches below bypass BaseVisualChange's action boundary.
     await beginPostActionCaptureAction();
     await this.runRecorded("pressButton", { button: "back" }, observation, async () => {
-      await this.pressBackOnPlatform();
+      await this.pressBackOnPlatform(signal);
       return { success: true };
     });
   }
 
-  private async pressBackOnPlatform(): Promise<void> {
+  private async pressBackOnPlatform(signal?: AbortSignal): Promise<void> {
     if (this.device.platform === "android") {
       // Preserve the Explore instance's injected transport and timer. Calling
       // press() avoids nested observed-interaction progress on this operation.
-      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      const result = await new PressButton(this.device, this.adb, this.timer).press(
+        "back",
+        undefined,
+        undefined,
+        signal,
+      );
       if (!result.success) {
         throw new Error(result.error ?? "Android back navigation failed");
       }
@@ -1260,10 +1276,15 @@ export class Explore extends BaseVisualChange {
   private async handleDeadEnd(
     progress?: ProgressCallback,
     observation?: ObserveResult,
+    signal?: AbortSignal,
   ): Promise<void> {
     // The previous action caused no navigation (that is why this is a dead end): withdraw
     // its record before the Back press is recorded in its place.
     this.discardPendingToolCall();
+    // The loop-top check can be a whole observe and selection behind; do not press Back now.
+    if (this.stopIfCancelled(signal)) {
+      return;
+    }
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
@@ -1279,13 +1300,17 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      await this.dispatchBack(observation);
+      await this.dispatchBack(observation, signal);
       this.pendingBackScreen = currentScreen === "unknown" ? null : currentScreen;
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
-      await this.timer.sleep(1000);
+      await awaitWhileRequestIsLive(this.timer.sleep(1000), signal);
     } catch (error) {
+      // A cancelled recovery is not a failed one: report the cancelled partial run.
+      if (this.stopIfCancelled(signal)) {
+        return;
+      }
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
       this.stopReason = `Back-navigation recovery failed: ${errorMessage(error)}`;
     }
@@ -1333,7 +1358,7 @@ export class Explore extends BaseVisualChange {
       }
 
       // Wait for home screen
-      await this.timer.sleep(2000);
+      await awaitWhileRequestIsLive(this.timer.sleep(2000), signal);
 
       // Home alone leaves the launcher in the foreground, which the next
       // observation would treat as having left the target app (issue #6126).
@@ -1344,6 +1369,9 @@ export class Explore extends BaseVisualChange {
       // Reset consecutive back count
       this.consecutiveBackCount = 0;
     } catch (error) {
+      if (this.stopIfCancelled(signal)) {
+        return;
+      }
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
       this.stopReason = `Home-screen recovery failed: ${errorMessage(error)}`;
     }
@@ -1444,7 +1472,7 @@ export class Explore extends BaseVisualChange {
       ? await this.navigationManager.exportGraphForApp(initialGraph.appId)
       : await this.navigationManager.exportGraph();
     const screensDiscovered = Math.max(0, finalGraph.nodes.length - initialGraph.nodes.length);
-    const edgesAdded = Math.max(0, finalGraph.edges.length - initialGraph.edges.length);
+    const edgesAdded = countNewTransitions(initialGraph.edges, finalGraph.edges);
 
     // Calculate coverage
     const totalScreens = finalGraph.nodes.length;

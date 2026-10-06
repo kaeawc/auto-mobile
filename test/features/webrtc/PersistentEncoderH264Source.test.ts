@@ -22,6 +22,7 @@ import {
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { capturedH264AsDevicePackets } from "../../helpers/capturedH264Stream";
 import { logger } from "../../../src/utils/logger";
 
 const DEVICE: BootedDevice = {
@@ -468,6 +469,51 @@ describe("PersistentEncoderH264Source", () => {
     expect(rotations).toEqual([3]);
     // The config payload still flows to onData unchanged.
     expect(ctx.chunks[0]).toEqual(Buffer.from([0, 0, 0, 1, 0x67]));
+
+    await ctx.source.stop();
+  });
+
+  test("signals every H.264 packet end right after its bytes, once per packet (issue #10150)", async () => {
+    const events: string[] = [];
+    const ctx = makeSource({
+      onData: (chunk: Buffer) => events.push(`data:${chunk.length}`),
+      onEncodedAccessUnit: () => events.push("end"),
+    });
+    await startReady(ctx);
+
+    const FLAG_CONFIG = 1n << 63n;
+    const FLAG_KEY_FRAME = 1n << 62n;
+    // Real captured packets: SPS+PPS config, then SEI+IDR, then a P frame.
+    const [config, idr, pFrame] = capturedH264AsDevicePackets();
+    ctx.sockets[0].feed(streamHeader(480, 1040));
+    ctx.sockets[0].feed(framedPacket(config, FLAG_CONFIG));
+    // The IDR packet arrives split across two transport chunks: no end until it is complete.
+    const idrFrame = framedPacket(idr, FLAG_KEY_FRAME | 5n);
+    const cut = Math.floor(idrFrame.length / 2);
+    ctx.sockets[0].feed(idrFrame.subarray(0, cut));
+    expect(events).toEqual([`data:${config.length}`, "end"]);
+    ctx.sockets[0].feed(idrFrame.subarray(cut));
+    ctx.sockets[0].feed(framedPacket(pFrame, 6n));
+
+    expect(events).toEqual([
+      `data:${config.length}`,
+      "end",
+      `data:${idr.length}`,
+      "end",
+      `data:${pFrame.length}`,
+      "end",
+    ]);
+
+    await ctx.source.stop();
+  });
+
+  test("does not signal a packet end for muxed audio packets", async () => {
+    const ends: number[] = [];
+    const ctx = makeSource({ audioEnabled: true, onEncodedAccessUnit: () => ends.push(1) });
+    await startReady(ctx);
+
+    ctx.sockets[0].feed(muxPacket(VIDEO_SERVER_TRACK_ID_AUDIO, Buffer.from([1, 2, 3, 4])));
+    expect(ends).toEqual([]);
 
     await ctx.source.stop();
   });

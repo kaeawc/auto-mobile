@@ -1455,6 +1455,14 @@ export const rotateSchema = addDeviceTargetingToSchema(
         .describe(
           "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
         ),
+      display: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
+        ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.
@@ -2546,7 +2554,13 @@ export async function rotateHandler(
       sessionRotation: (mutation) =>
         runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
     });
-    const result = await rotate.execute(args.orientation, progress, args.lockOrientation, signal);
+    const result = await rotate.execute(
+      args.orientation,
+      progress,
+      args.lockOrientation,
+      signal,
+      args.display,
+    );
     const response = createStructuredToolResponse({
       observation: result.observation,
       ...result,

@@ -22117,6 +22117,12 @@
           "description": "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
           "type": "boolean"
         },
+        "display": {
+          "description": "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]

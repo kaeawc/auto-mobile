@@ -1,8 +1,7 @@
-import { ActionableError, type BootedDevice } from "../models";
+import { type BootedDevice } from "../models";
 import type { AdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { logger } from "./logger";
 import { errorMessage } from "./describeUnknownError";
-import { consolePortFromSerial } from "./android-cmdline-tools/EmulatorConsoleClient";
 
 /**
  * adb reserves the `emulator-<port>` serial shape for locally-running Android
@@ -50,9 +49,8 @@ function loopbackConsoleSerial(serial: string): string | undefined {
   return port >= 5554 && port % 2 === 0 && port <= 65534 ? `emulator-${port}` : undefined;
 }
 
-/** Identity cache and aliases belong to one pool, and retire with its entry. */
+/** Alias groups belong to one pool; transport identity is reverified per observation. */
 export class AndroidTransportAliases implements AndroidTransportRouting {
-  private readonly identities = new Map<string, Promise<TransportIdentity | undefined>>();
   private readonly groups = new Map<string, TransportGroup>();
   private readonly routes = new Map<string, string>();
 
@@ -69,22 +67,33 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
   }
 
   private async readIdentity(device: BootedDevice): Promise<TransportIdentity | undefined> {
-    const adb = this.adbFactory.create(device);
-    const property = async (name: string) =>
-      (
-        await adb.execute(["shell", "getprop", name], { noRetry: true, timeoutMs: 2000 })
-      ).stdout.trim();
     try {
+      const adb = this.adbFactory.create(device);
+      const property = async (name: string) =>
+        (
+          await adb.execute(["shell", "getprop", name], { noRetry: true, timeoutMs: 2000 })
+        ).stdout.trim();
       const serial = await property("ro.serialno");
       const qemu = await property("ro.kernel.qemu");
       if (qemu === "1") {
         const avdName = await property("ro.boot.qemu.avd_name");
-        const consoleSerial =
-          consolePortFromSerial(serial) !== null ? serial : loopbackConsoleSerial(device.deviceId);
+        const consoleSerial = isAndroidEmulatorSerial(device.deviceId)
+          ? device.deviceId
+          : loopbackConsoleSerial(device.deviceId);
         // Never merge two emulator instances merely because they share an AVD name.
         return avdName && consoleSerial ? { key: consoleSerial, avdName } : undefined;
       }
-      return serial && serial !== "unknown" ? { key: serial } : undefined;
+      // Generic factory serials cannot prove that two endpoints reach one handset.
+      if (!serial || ["unknown", "0123456789abcdef"].includes(serial.toLowerCase())) {
+        return undefined;
+      }
+      const bootId = (
+        await adb.execute(["shell", "cat", "/proc/sys/kernel/random/boot_id"], {
+          noRetry: true,
+          timeoutMs: 2000,
+        })
+      ).stdout.trim();
+      return bootId ? { key: `physical:${JSON.stringify([serial, bootId])}` } : undefined;
     } catch (error) {
       logger.warn(
         `Android transport identity unavailable for ${device.deviceId}: ${errorMessage(error)}`,
@@ -94,12 +103,15 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     }
   }
 
-  /** Cold transport probes run outside the pool lock; durable serials need no probes. */
+  /** Probes run outside the pool lock. Physical peers need the same serial AND boot id. */
   async prepare(devices: readonly BootedDevice[]): Promise<ReadonlyMap<string, TransportIdentity>> {
     const evidence = new Map<string, TransportIdentity>();
+    if (!this.needsNormalization(devices)) {
+      return evidence;
+    }
     await Promise.all(
       devices.map(async (device) => {
-        if (device.platform !== "android" || !isAndroidTransportAddressSerial(device.deviceId)) {
+        if (device.platform !== "android" || isAndroidEmulatorSerial(device.deviceId)) {
           return;
         }
         const identity = await this.prepareIdentity(device, devices);
@@ -133,25 +145,14 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     device: BootedDevice,
     devices: readonly BootedDevice[],
   ): Promise<TransportIdentity | undefined> {
-    let pending = this.identities.get(device.deviceId);
-    if (!pending) {
-      pending = this.readIdentity(device);
-      this.identities.set(device.deviceId, pending);
-    }
-    let identity = await pending;
-    if (this.contradictsEmulatorPeer(identity, devices)) {
-      // A different resolved AVD on this console slot proves the cached incarnation ended.
-      pending = this.readIdentity(device);
-      this.identities.set(device.deviceId, pending);
-      identity = await pending;
-    }
+    // Endpoint strings can be reused without an intervening discovery (DHCP,
+    // adb reconnect, or reboot). Never reuse identity evidence across snapshots.
+    const identity = await this.readIdentity(device);
     if (!identity || this.contradictsEmulatorPeer(identity, devices)) {
-      if (this.identities.get(device.deviceId) === pending) {
-        this.identities.delete(device.deviceId);
-      }
-      throw new ActionableError(
-        `Could not identify Android transport '${device.deviceId}'. Check its adb connection and retry discovery.`,
+      logger.warn(
+        `Android transport '${device.deviceId}' could not be identified; leaving it unaliased.`,
       );
+      return undefined;
     }
     return identity;
   }
@@ -161,6 +162,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     devices: readonly BootedDevice[],
     evidence: ReadonlyMap<string, TransportIdentity>,
     pooledIds: ReadonlySet<string>,
+    completeSnapshot = true,
   ): BootedDevice[] {
     const byIdentity = new Map<string, BootedDevice[]>();
     for (const device of devices) {
@@ -172,11 +174,29 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       rows.push(device);
       byIdentity.set(key, rows);
     }
+    if (completeSnapshot) {
+      this.pruneDisconnectedTransports(byIdentity, pooledIds);
+    }
     const result = devices.filter((device) => device.platform !== "android");
     for (const [key, rows] of byIdentity) {
-      result.push(this.foldGroup(key, rows, evidence, pooledIds));
+      result.push(this.foldGroup(key, rows, evidence, pooledIds, completeSnapshot));
     }
     return result;
+  }
+
+  private pruneDisconnectedTransports(
+    byIdentity: ReadonlyMap<string, readonly BootedDevice[]>,
+    pooledIds: ReadonlySet<string>,
+  ): void {
+    for (const [key, group] of this.groups) {
+      group.serials = new Set((byIdentity.get(key) ?? []).map((row) => row.deviceId));
+      if (group.serials.size === 0) {
+        this.routes.delete(group.canonical);
+        if (!pooledIds.has(group.canonical)) {
+          this.groups.delete(key);
+        }
+      }
+    }
   }
 
   private canonicalSerial(
@@ -199,13 +219,14 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     rows: BootedDevice[],
     evidence: ReadonlyMap<string, TransportIdentity>,
     pooledIds: ReadonlySet<string>,
+    completeSnapshot: boolean,
   ): BootedDevice {
     const previous = this.groups.get(key);
     const canonical = this.canonicalSerial(rows, previous, pooledIds);
     const representative = rows.find((row) => row.deviceId === canonical) ?? rows[0];
     const avdName = rows.map((row) => evidence.get(row.deviceId)?.avdName).find(Boolean);
     const live = rows.map((row) => row.deviceId);
-    const serials = new Set([...(previous?.serials ?? []), ...live]);
+    const serials = new Set([...(completeSnapshot ? [] : (previous?.serials ?? [])), ...live]);
     const name =
       avdName ??
       (representative.deviceId === canonical ? representative.name : previous?.name) ??
@@ -225,22 +246,25 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
   }
 
   aliases(deviceId: string): string[] {
-    const group = [...this.groups.values()].find((entry) => entry.canonical === deviceId);
-    return group ? [...group.serials].filter((serial) => serial !== deviceId) : [];
+    return [...this.groups.values()]
+      .filter((entry) => entry.canonical === deviceId)
+      .flatMap((group) => [...group.serials].filter((serial) => serial !== deviceId));
   }
 
   avdName(deviceId: string): string | undefined {
     return [...this.groups.values()].find((entry) => entry.canonical === deviceId)?.avdName;
   }
 
-  retire(deviceId: string): void {
+  retire(deviceId: string): boolean {
+    let retired = false;
     for (const [key, group] of this.groups) {
       if (group.canonical !== deviceId) {
         continue;
       }
-      group.serials.forEach((serial) => this.identities.delete(serial));
       this.groups.delete(key);
+      retired = true;
     }
     this.routes.delete(deviceId);
+    return retired;
   }
 }

@@ -1,3 +1,4 @@
+import type { AndroidTransportRouting } from "../androidSerial";
 import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
@@ -27,6 +28,8 @@ export interface AdbClientFactory {
  * Default factory that creates real AdbClient instances.
  */
 class DefaultAdbClientFactory implements AdbClientFactory {
+  constructor(private readonly transportRouting?: AndroidTransportRouting) {}
+
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
     return new AdbClient(
       device ?? null,
@@ -39,7 +42,7 @@ class DefaultAdbClientFactory implements AdbClientFactory {
       defaultEmulatorConsoleBusyRegistry,
       undefined,
       undefined,
-      daemonDeviceAdmissionGate.getAndroidTransportRouting?.(),
+      this.transportRouting ?? daemonDeviceAdmissionGate.getAndroidTransportRouting?.(),
     );
   }
 }
@@ -90,6 +93,11 @@ export class AdmittingAdbClientFactory implements AdbClientFactory {
     return this.delegate.create(device, retryExecutor);
   }
 }
+
+/** Identity probes must address the observed endpoint, never a previous alias route. */
+export const androidTransportIdentityAdbFactory: AdbClientFactory = new DefaultAdbClientFactory({
+  resolveTransport: (deviceId) => deviceId,
+});
 
 /**
  * The identity, lifecycle and teardown machinery's factory: it is BELOW the

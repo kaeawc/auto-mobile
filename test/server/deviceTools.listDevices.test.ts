@@ -219,6 +219,7 @@ describe("listDevices tool (#5870)", () => {
   ])("listDevices reports %s once with its alias %s", async (canonical, alias, avd) => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("getprop ro.serialno", createExecResult(canonical, ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
     adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult(avd ? "1" : "0", ""));
     if (avd) {
       adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(avd, ""));
@@ -234,12 +235,43 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.devices[0].transportAliases).toEqual([alias]);
   });
 
+  test.each(["empty serial", "read failure", "remote emulator"])(
+    "listDevices preserves both platforms for %s",
+    async (failure) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("ro.serialno", createExecResult("", ""));
+      if (failure === "read failure") {
+        adb.setCommandError("ro.serialno", new Error("identity unavailable"));
+      }
+      if (failure === "remote emulator") {
+        adb.setCommandResponse("ro.kernel.qemu", createExecResult("1", ""));
+        adb.setCommandResponse("ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
+      }
+      setDeviceToolsDependencies({ androidAdbFactory: new FakeAdbClientFactory(adb) });
+      fakeDeviceUtils.setBootedDevices("android", [
+        { platform: "android", name: "Remote", deviceId: "192.168.1.30:5555" },
+        { platform: "android", name: "Phone", deviceId: "USB" },
+      ]);
+      fakeDeviceUtils.setBootedDevices("ios", [
+        { platform: "ios", name: "iPhone", deviceId: "ios-device" },
+      ]);
+      const payload = await callListDevices({ platform: "either" });
+      expect(payload.count).toBe(3);
+      expect(
+        payload.devices
+          .map((entry: { runtime: { deviceId: string } }) => entry.runtime.deviceId)
+          .sort(),
+      ).toEqual(["USB", "192.168.1.30:5555", "ios-device"].sort());
+    },
+  );
+
   test("listDevices keeps a held wireless canonical through USB arrival and wireless-only failover", async () => {
     const canonical = "adb-R5CT1234ABC-AbCdEf._adb-tls-connect._tcp";
     const usb = "R5CT1234ABC";
     const device: BootedDevice = { platform: "android", name: "Phone", deviceId: canonical };
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
     adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
     const factory = new FakeAdbClientFactory(adb);
     const timer = new FakeTimer();
@@ -263,7 +295,9 @@ describe("listDevices tool (#5870)", () => {
         const payload = await callListDevices({ platform: "android" });
         expect(payload.count).toBe(1);
         expect(payload.devices[0].runtime.deviceId).toBe(canonical);
-        expect(payload.devices[0].transportAliases).toEqual([usb]);
+        expect(payload.devices[0].transportAliases).toEqual(
+          devices.length === 2 ? [usb] : undefined,
+        );
         expect(pool.getDevice(canonical)?.sessionId).toBe("owner");
       }
     } finally {

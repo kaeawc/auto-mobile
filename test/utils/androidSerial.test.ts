@@ -68,10 +68,10 @@ describe("Android transport identity", () => {
     adb.setCommandResponse("ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
     const aliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
     const rows = [device("emulator-5554"), device("192.168.1.30:5555")];
-    await expect(aliases.prepare(rows)).rejects.toThrow("Could not identify Android transport");
+    expect(aliases.fold(rows, await aliases.prepare(rows), new Set())).toEqual(rows);
   });
 
-  test("a changed console-slot incarnation invalidates the cached AVD evidence", async () => {
+  test("a changed console-slot incarnation is reverified for every observation", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("ro.serialno", createExecResult("EMULATOR-SERIAL", ""));
     adb.setCommandResponse("ro.kernel.qemu", createExecResult("1", ""));
@@ -95,13 +95,91 @@ describe("Android transport identity", () => {
     const first = new FakeAdbExecutor();
     first.setCommandResponse("ro.serialno", createExecResult("PHONE-A", ""));
     first.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    first.setCommandResponse("boot_id", createExecResult("boot-a", ""));
     const second = new FakeAdbExecutor();
     second.setCommandResponse("ro.serialno", createExecResult("PHONE-B", ""));
     second.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    second.setCommandResponse("boot_id", createExecResult("boot-b", ""));
     const aliases = new AndroidTransportAliases({
       create: (target) => (target?.deviceId === "host-a:5555" ? first : second),
     });
     const rows = [device("host-a:5555"), device("host-b:5555")];
     expect(aliases.fold(rows, await aliases.prepare(rows), new Set())).toHaveLength(2);
+  });
+});
+
+describe("Android physical transport evidence", () => {
+  const device = (deviceId: string): BootedDevice => ({
+    deviceId,
+    name: deviceId,
+    platform: "android",
+  });
+  const executor = (serial: string, bootId: string) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult(serial, ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    adb.setCommandResponse("boot_id", createExecResult(bootId, ""));
+    return adb;
+  };
+
+  test.each([true, false])(
+    "a DHCP-reused endpoint is reidentified and never routes the old phone to its replacement (observed absence=%s)",
+    async (observedAbsence) => {
+      const usb = executor("PHONE-A", "boot-a");
+      const wifi = executor("PHONE-A", "boot-a");
+      const aliases = new AndroidTransportAliases({
+        create: (target) => (target?.deviceId === "PHONE-A" ? usb : wifi),
+      });
+      const initial = [device("PHONE-A"), device("192.168.1.20:5555")];
+      const pooled = new Set(["PHONE-A"]);
+      expect(aliases.fold(initial, await aliases.prepare(initial), pooled)).toHaveLength(1);
+      const disconnected = [device("PHONE-A")];
+      if (observedAbsence) {
+        aliases.fold(disconnected, await aliases.prepare(disconnected), pooled);
+      }
+      wifi.setCommandResponse("ro.serialno", createExecResult("PHONE-B", ""));
+      wifi.setCommandResponse("boot_id", createExecResult("boot-b", ""));
+      expect(aliases.fold(initial, await aliases.prepare(initial), pooled)).toHaveLength(2);
+      const onlyReplacement = [device("192.168.1.20:5555")];
+      expect(
+        aliases
+          .fold(onlyReplacement, await aliases.prepare(onlyReplacement), pooled)
+          .map((row) => row.deviceId),
+      ).toEqual(["192.168.1.20:5555"]);
+      expect(aliases.resolveTransport("PHONE-A")).toBe("PHONE-A");
+      expect(aliases.aliases("PHONE-A")).toEqual([]);
+    },
+  );
+
+  test.each(["0123456789ABCDEF", "unknown", ""])(
+    "does not fold generic or absent serial %s even with a shared boot id",
+    async (serial) => {
+      const adb = executor(serial, "boot-a");
+      const aliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
+      const rows = [device("host-a:5555"), device("host-b:5555")];
+      expect(aliases.fold(rows, await aliases.prepare(rows), new Set())).toEqual(rows);
+    },
+  );
+
+  test.each(["boot-b", ""])(
+    "a physical serial requires matching nonempty boot evidence on both transports: %s",
+    async (bootId) => {
+      const usb = executor("PHONE-A", "boot-a");
+      const wifi = executor("PHONE-A", bootId);
+      const aliases = new AndroidTransportAliases({
+        create: (target) => (target?.deviceId === "PHONE-A" ? usb : wifi),
+      });
+      const rows = [device("PHONE-A"), device("host-a:5555")];
+      expect(aliases.fold(rows, await aliases.prepare(rows), new Set())).toEqual(rows);
+    },
+  );
+
+  test("identity read failure leaves the row unaliased and preserves iOS", async () => {
+    const adb = executor("PHONE-A", "boot-a");
+    adb.setCommandError("ro.serialno", new Error("identity unavailable"));
+    const aliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
+    const ios: BootedDevice = { deviceId: "ios", name: "iPhone", platform: "ios" };
+    const rows = [ios, device("host-a:5555")];
+    expect(aliases.fold(rows, await aliases.prepare(rows), new Set())).toEqual(rows);
   });
 });

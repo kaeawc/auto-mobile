@@ -1,7 +1,7 @@
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { AndroidTransportAliases, type AndroidTransportRouting } from "../utils/androidSerial";
 import {
-  unadmittedAdbClientFactory,
+  androidTransportIdentityAdbFactory,
   type AdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { isSessionReleasing } from "./sessionReleaseState";
@@ -669,7 +669,7 @@ function createMissingDeviceLiveness(
 }
 
 function createAndroidTransportAliases(factory?: AdbClientFactory): AndroidTransportAliases {
-  return new AndroidTransportAliases(factory ?? unadmittedAdbClientFactory);
+  return new AndroidTransportAliases(factory ?? androidTransportIdentityAdbFactory);
 }
 
 function resolveMissingDeviceMisses(shared?: Map<string, number>): Map<string, number> {
@@ -1209,6 +1209,7 @@ export class DevicePool {
         this.shouldRebootDisconnectedAndroidDevice(device),
       normalizeAndroidDiscovery: (devices) => this.normalizeAndroidDiscovery(devices),
       needsAndroidTransportNormalization: (devices) =>
+        devices.some((device) => device.platform === "android") &&
         this.needsAndroidTransportNormalization(devices),
       isTransportEmulator: (deviceId) =>
         this.androidTransportAliases.avdName(deviceId) !== undefined,
@@ -1915,8 +1916,9 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
-    this.androidAliasRetirement++;
-    this.androidTransportAliases.retire(deviceId);
+    if (device.platform === "android" && this.androidTransportAliases.retire(deviceId)) {
+      this.androidAliasRetirement++;
+    }
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
@@ -6528,7 +6530,7 @@ export class DevicePool {
   }
 
   private async normalizeSingleAndroidDevice(device: BootedDevice): Promise<BootedDevice> {
-    const normalized = (await this.normalizeAndroidDiscovery([device], true))[0];
+    const normalized = (await this.normalizeAndroidDiscovery([device], true, () => true, false))[0];
     if (!normalized) {
       throw new ActionableError(
         `Android transport discovery changed while adding '${device.deviceId}'. Retry device discovery.`,
@@ -6552,7 +6554,14 @@ export class DevicePool {
     devices: readonly BootedDevice[],
     assignmentLockHeld = false,
     isCurrent: () => boolean = () => true,
+    completeAndroidSnapshot = true,
   ): Promise<BootedDevice[]> {
+    if (
+      !this.needsAndroidTransportNormalization(devices) ||
+      (devices.length > 0 && devices.every((device) => device.platform !== "android"))
+    ) {
+      return [...devices];
+    }
     const observation = ++this.androidAliasObservation;
     const retirement = this.androidAliasRetirement;
     const evidence = await this.androidTransportAliases.prepare(devices);
@@ -6569,7 +6578,12 @@ export class DevicePool {
         );
       }
       this.androidAliasAppliedObservation = observation;
-      return this.androidTransportAliases.fold(devices, evidence, new Set(this.devices.keys()));
+      return this.androidTransportAliases.fold(
+        devices,
+        evidence,
+        new Set(this.devices.keys()),
+        completeAndroidSnapshot,
+      );
     };
     return assignmentLockHeld ? fold() : this.assignmentMutex.runExclusive(fold);
   }

@@ -1,3 +1,6 @@
+import { DaemonState } from "../daemon/daemonState";
+import { AndroidTransportAliases } from "../utils/androidSerial";
+import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
@@ -72,7 +75,15 @@ export async function listBootedDevicesForResource(
   options?: { signal?: AbortSignal; requireFresh?: boolean },
 ): Promise<BootedDevice[]> {
   try {
-    const devices = await discoverForResource(platform, options);
+    const rawDevices = await discoverForResource(platform, options);
+    const state = DaemonState.getInstance();
+    const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+    const devices =
+      platform === "ios"
+        ? rawDevices
+        : state.isInitialized()
+          ? await state.getDevicePool().normalizeAndroidDiscovery(rawDevices)
+          : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
     // FUNNEL 1. In daemon mode this can await the identity quarantine, which
     // cancels and drains the owning session's executions — so a cancellation
     // that lands here is rechecked AFTER the wait, or a cancelled read would go

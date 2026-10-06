@@ -3,6 +3,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   defaultAdbClientFactory,
+  androidTransportIdentityAdbFactory,
   unadmittedAdbClientFactory,
 } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -243,6 +244,7 @@ describe("device-client admission seam", () => {
     utils.setBootedDevices("android", [device, alias]);
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("ro.serialno", createExecResult(device.deviceId, ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
     adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
     const pool = new DevicePool(
       createDevicePoolDependencies(sessions, "alias-daemon", {
@@ -256,8 +258,10 @@ describe("device-client admission seam", () => {
     DaemonState.getInstance().initialize(sessions, pool);
     const previousTestMode = process.env.AUTOMOBILE_TEST_MODE;
     process.env.AUTOMOBILE_TEST_MODE = "true";
+    let identityClient: ReturnType<typeof androidTransportIdentityAdbFactory.create> | undefined;
     const client = (() => {
       try {
+        identityClient = androidTransportIdentityAdbFactory.create(device);
         return defaultAdbClientFactory.create(device);
       } finally {
         if (previousTestMode === undefined) {
@@ -267,7 +271,7 @@ describe("device-client admission seam", () => {
         }
       }
     })();
-    if (!(client instanceof AdbClient)) {
+    if (!(client instanceof AdbClient) || !(identityClient instanceof AdbClient)) {
       throw new Error("Expected the default AdbClient");
     }
     const calls: string[][] = [];
@@ -280,6 +284,10 @@ describe("device-client admission seam", () => {
       utils.setBootedDevices("android", [alias]);
       await pool.refreshDevices();
       await client.execute(["forward", "tcp:1234", "tcp:7001"], { noRetry: true });
+      expect((await identityClient.getBaseCommandParts()).baseArgs).toEqual([
+        "-s",
+        device.deviceId,
+      ]);
       DaemonState.getInstance().reset();
       await client.execute(["shell", "echo", "direct"], { noRetry: true });
       expect(calls).toEqual([

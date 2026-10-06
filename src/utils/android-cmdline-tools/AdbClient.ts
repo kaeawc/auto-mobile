@@ -694,7 +694,7 @@ export class AdbClient implements AdbExecutor {
     };
     const onExit = () => cleanup();
     const onError = (error: Error) => {
-      this.notifyMissingDeviceIfNeeded(error, busyAtDispatch);
+      this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]);
       cleanup();
     };
     const onAbort = () => {
@@ -856,7 +856,7 @@ export class AdbClient implements AdbExecutor {
    * Determine if an error is non-retryable (auth, syntax, or device errors).
    * Returns true if the error should NOT be retried.
    */
-  private isNonRetryableError(error: Error): boolean {
+  private isNonRetryableError(error: Error, transportId?: string): boolean {
     const underlying = error.cause instanceof Error ? error.cause : error;
     const stderr = (underlying as Error & { stderr?: string | Buffer }).stderr;
     const message = (
@@ -868,7 +868,7 @@ export class AdbClient implements AdbExecutor {
           ? ""
           : underlying.message
     ).toLowerCase();
-    if (isAdbMissingDeviceError(underlying, this.device?.deviceId)) {
+    if (isAdbMissingDeviceError(underlying, this.device?.deviceId, transportId)) {
       return true;
     }
     const nonRetryablePatterns = [
@@ -893,9 +893,10 @@ export class AdbClient implements AdbExecutor {
   private notifyMissingDeviceIfNeeded(
     error: unknown,
     busyAtDispatch: { busy: boolean; generation: number },
+    transportId?: string,
   ): void {
     const deviceId = this.device?.deviceId;
-    if (!deviceId || !isAdbMissingDeviceError(error, deviceId)) {
+    if (!deviceId || !isAdbMissingDeviceError(error, deviceId, transportId)) {
       return;
     }
     if (
@@ -1115,7 +1116,7 @@ export class AdbClient implements AdbExecutor {
         if (resolvedSignal?.aborted) {
           throw this.getAbortError(resolvedSignal);
         }
-        this.notifyMissingDeviceIfNeeded(error, busyAtDispatch);
+        this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]);
         const duration = this.timer.now() - startTime;
         const message = (error as Error).message;
         if (this.isMissingExecutableError(error)) {
@@ -1169,8 +1170,8 @@ export class AdbClient implements AdbExecutor {
             // original "Command timed out after ..." error instead.
             return false;
           }
-          if (this.isNonRetryableError(error)) {
-            this.notifyMissingDeviceIfNeeded(error, busyAtDispatch);
+          if (this.isNonRetryableError(error, baseArgs[1])) {
+            this.notifyMissingDeviceIfNeeded(error, busyAtDispatch, baseArgs[1]);
             return false;
           }
           return (

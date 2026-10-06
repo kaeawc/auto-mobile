@@ -1,3 +1,5 @@
+import { AndroidTransportAliases } from "../utils/androidSerial";
+import { androidTransportIdentityAdbFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { errorMessage } from "../utils/describeUnknownError";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
@@ -446,7 +448,15 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
     try {
       const discovery =
         await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(platform);
-      devices.push(...discovery.devices);
+      const pool = readDaemonDeviceContext().devicePool;
+      const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+      const normalized =
+        platform === "android"
+          ? pool
+            ? await pool.normalizeAndroidDiscovery(discovery.devices)
+            : aliases.fold(discovery.devices, await aliases.prepare(discovery.devices), new Set())
+          : discovery.devices;
+      devices.push(...normalized);
       const complete = sourcesForPlatform(platform).every(
         (source) =>
           discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform),
@@ -805,11 +815,25 @@ async function discoverBootedDevicesForPlatform(
   const { resolveDeviceSessionUuid, timer } = options;
   try {
     const deviceManager = PlatformDeviceManagerFactory.getInstance();
-    const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+    const rawDiscovery = await deviceManager.getBootedDevicesDetailed(platform, {
       coalesceInventoryEnrichment: true,
       signal: getAbortSignal(),
     });
     getAbortSignal()?.throwIfAborted();
+    const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+    const discovery = {
+      ...rawDiscovery,
+      devices:
+        platform === "android"
+          ? devicePool
+            ? await devicePool.normalizeAndroidDiscovery(rawDiscovery.devices)
+            : aliases.fold(
+                rawDiscovery.devices,
+                await aliases.prepare(rawDiscovery.devices),
+                new Set(),
+              )
+          : rawDiscovery.devices,
+    };
     // FUNNEL 1: fold this observation into the pool BEFORE any of it is joined to
     // pooled identity below. This read can be the first discovery to see the
     // `Unknown (<serial>)` placeholder, and withholding only its own output would

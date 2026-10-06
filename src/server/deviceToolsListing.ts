@@ -150,13 +150,16 @@ export function createListingHandlers() {
       });
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
-      booted = pool
-        ? await pool.normalizeAndroidDiscovery(discovery.devices)
-        : directAliases.fold(
-            discovery.devices,
-            await directAliases.prepare(discovery.devices),
-            new Set(),
-          );
+      booted =
+        platform === "ios"
+          ? discovery.devices
+          : pool
+            ? await pool.normalizeAndroidDiscovery(discovery.devices)
+            : directAliases.fold(
+                discovery.devices,
+                await directAliases.prepare(discovery.devices),
+                new Set(),
+              );
       await reconcileDiscoveryObservation(booted, "listDevices");
       succeededPlatforms = discovery.succeededPlatforms;
       succeededSources = discovery.succeededSources;

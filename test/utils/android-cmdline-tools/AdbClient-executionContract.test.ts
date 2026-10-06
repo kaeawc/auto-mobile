@@ -1138,3 +1138,46 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
     expect(argvs).toEqual([["devices"]]);
   });
 });
+
+describe("AdbClient alias missing-device attribution", () => {
+  test.each([false, true])(
+    "alias error is non-retryable and notifies its canonical device (noRetry=%s)",
+    async (noRetry) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const notifications: AdbMissingDeviceEvent[] = [];
+      const stop = onAdbMissingDevice((event) => notifications.push(event));
+      let attempts = 0;
+      const client = new AdbClient(
+        DEVICE,
+        async (_file: string, args: string[], _maxBuffer?: number) => {
+          attempts++;
+          expect(args.slice(0, 2)).toEqual(["-s", "localhost:5555"]);
+          throw new Error("adb: device 'localhost:5555' not found");
+        },
+        null,
+        new DefaultRetryExecutor(timer),
+        timer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { resolveTransport: () => "localhost:5555" },
+      );
+      try {
+        await expect(
+          client.execute(["shell", "getprop", "sys.boot_completed"], { noRetry }),
+        ).rejects.toThrow("localhost:5555");
+        expect(attempts).toBe(1);
+        expect(notifications).toEqual([
+          { deviceId: DEVICE.deviceId, message: expect.stringContaining("localhost:5555") },
+        ]);
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        stop();
+        timer.reset();
+      }
+    },
+  );
+});

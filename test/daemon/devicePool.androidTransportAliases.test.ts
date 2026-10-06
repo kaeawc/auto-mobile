@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -31,20 +32,26 @@ function harness(devices: BootedDevice[], serial = usb, avd?: string) {
   manager.setBootedDevices("android", devices);
   const adb = new FakeAdbExecutor();
   adb.setCommandResponse("getprop ro.serialno", createExecResult(serial, ""));
+  adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
   adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult(avd ? "1" : "0", ""));
   if (avd) {
     adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(avd, ""));
   }
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  let liveness: MissingDeviceLiveness | undefined;
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "alias-daemon", {
       timer,
       deviceManager: manager,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       androidAdbFactory: new FakeAdbClientFactory(adb),
+      missingDeviceLivenessFactory: (port) => {
+        liveness = new MissingDeviceLiveness(port);
+        return liveness;
+      },
     }),
   );
-  return { pool, timer, manager, adb };
+  return { pool, timer, manager, adb, liveness };
 }
 
 describe("Android transport aliases (#10201)", () => {
@@ -115,11 +122,10 @@ describe("Android transport aliases (#10201)", () => {
       ["-s", canonical, "shell", "input", "tap", "1", "2"],
       ["-s", alias, "forward", "tcp:1234", "tcp:7001"],
     ]);
-    expect(h.adb.getExecutedCommands()).toEqual([
-      "shell getprop ro.serialno",
-      "shell getprop ro.kernel.qemu",
-      ...(avd ? ["shell getprop ro.boot.qemu.avd_name"] : []),
-    ]);
+    expect(h.adb.getExecutedCommands()).toContain("shell getprop ro.serialno");
+    expect(h.adb.getExecutedCommands()).toContain(
+      avd ? "shell getprop ro.boot.qemu.avd_name" : "shell cat /proc/sys/kernel/random/boot_id",
+    );
     expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
@@ -153,7 +159,7 @@ describe("Android transport aliases (#10201)", () => {
     expect(h.pool.getAndroidTransportAvdName("localhost:5555")).toBe("Pixel");
   });
 
-  test("retiring a pool incarnation retires its transport identity cache", async () => {
+  test("retiring a pool incarnation drops its canonical alias group", async () => {
     const h = harness([booted(usb), booted(wireless)]);
     await h.pool.refreshDevices();
     await h.pool.removeDevice(usb);
@@ -163,7 +169,7 @@ describe("Android transport aliases (#10201)", () => {
     expect(h.pool.getAllDevices().map((device) => device.id)).toEqual(["OTHER-USB"]);
     expect(
       h.adb.getExecutedCommands().filter((command) => command.includes("ro.serialno")),
-    ).toHaveLength(2);
+    ).toHaveLength(4);
   });
 
   test("distinct durable serials remain distinct without extra getprop reads", async () => {
@@ -173,13 +179,68 @@ describe("Android transport aliases (#10201)", () => {
     expect(h.adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("an unreadable transport identity is inconclusive rather than an independently assignable device", async () => {
-    const h = harness([booted(usb), booted(wireless)], "");
-    const result = await h.pool.refreshDevicesWithOutcome();
-    expect(result.failure).toContain("Could not identify Android transport");
-    expect(h.pool.getAllDevices()).toHaveLength(0);
-    h.adb.setCommandResponse("getprop ro.serialno", createExecResult(usb, ""));
+  test.each(["empty serial", "read failure", "remote emulator"])(
+    "%s leaves its transport unaliased without failing other platforms",
+    async (failure) => {
+      const ios: BootedDevice = { deviceId: "ios-device", name: "iPhone", platform: "ios" };
+      const h = harness([booted(usb), booted(wireless)], "");
+      h.manager.setBootedDevices("ios", [ios]);
+      if (failure === "read failure") {
+        h.adb.setCommandError("ro.serialno", new Error("identity unavailable"));
+      }
+      if (failure === "remote emulator") {
+        h.adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
+        h.adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
+      }
+      const result = await h.pool.refreshDevicesWithOutcome();
+      expect(result.failure).toBeUndefined();
+      expect(
+        h.pool
+          .getAllDevices()
+          .map((device) => device.id)
+          .sort(),
+      ).toEqual([usb, wireless, ios.deviceId].sort());
+      expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
+      expect(
+        (await h.liveness!.takeFreshPresenceDiscovery("android")).devices
+          .map((device) => device.deviceId)
+          .sort(),
+      ).toEqual([usb, wireless].sort());
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
+  test("iOS presence discovery preserves Android routing, and a full empty snapshot prunes aliases", async () => {
+    const h = harness([booted(usb), booted(wireless)]);
     await h.pool.refreshDevices();
-    expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
+    await h.pool.normalizeAndroidDiscovery([booted(wireless)]);
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
+    await h.liveness!.takeFreshPresenceDiscovery("ios");
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
+    await h.pool.normalizeAndroidDiscovery([]);
+    expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(usb);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("removing iOS does not supersede Android identity preparation", async () => {
+    const h = harness([]);
+    const ios: BootedDevice = { deviceId: "ios-device", name: "iPhone", platform: "ios" };
+    await h.pool.initializeWithDevices([ios]);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+    const execute = h.adb.execute.bind(h.adb);
+    const probe = spyOn(h.adb, "execute").mockImplementationOnce(async () => {
+      entered.resolve();
+      return release.promise;
+    });
+    const normalization = h.pool.normalizeAndroidDiscovery([booted(wireless)]);
+    await entered.promise;
+    await h.pool.removeDevice(ios.deviceId);
+    release.resolve(createExecResult(usb, ""));
+    probe.mockImplementation(execute);
+    await expect(normalization).resolves.toEqual([booted(wireless)]);
+    probe.mockRestore();
+    expect(h.timer.getSleepHistory()).toEqual([]);
   });
 });

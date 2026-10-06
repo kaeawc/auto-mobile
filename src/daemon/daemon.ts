@@ -2539,6 +2539,7 @@ export class Daemon {
       const discovery = await deviceManager.getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache,
       });
+      discovery.devices = await this.devicePool.normalizeAndroidDiscovery(discovery.devices);
       // Reconciliation can quarantine identity and cancel in-flight work. During
       // allocation, discovery supplies only presence evidence for miss counting.
       if (!planActive) {
@@ -2560,9 +2561,8 @@ export class Daemon {
           this.startDeferredSessionRecoverySweep(planActive);
 
           let discovery = await discoverAndReconcile({ planActive });
-          const bootedDevices = discovery.devices;
           let succeededPlatforms = discovery.succeededPlatforms;
-          let bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
+          let bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
           const activeRecordings = planActive ? [] : await listRecordings();
 
           const missingByDevice = new Map<string, string[]>();

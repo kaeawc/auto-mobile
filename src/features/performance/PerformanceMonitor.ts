@@ -822,11 +822,19 @@ export class PerformanceMonitor {
       device.cachedMemory = memory;
     }
 
-    // iOS doesn't provide FPS/frame time metrics without in-app SDK
-    // We report null to indicate "not available" rather than assuming values
-    const fps: number | null = null;
-    const frameTimeMs: number | null = null;
-    const jankFrames: number | null = null;
+    // Only the in-app SDK describes app frames; runner CADisplayLink metrics
+    // remain excluded. A quiet/non-SDK app has no frame readings.
+    const sdkFrame = this.frameMetricsStore.getFresh(
+      device.deviceId,
+      samplingPackage,
+      this.timer.now(),
+      PerformanceMonitor.SDK_FRAME_TTL_MS,
+    );
+    const { fps, frameTimeMs, jankFrames } = sdkFrame ?? {
+      fps: null,
+      frameTimeMs: null,
+      jankFrames: null,
+    };
     const touchLatencyMs: number | null = null;
 
     // Get TTI from the global store if available
@@ -843,12 +851,12 @@ export class PerformanceMonitor {
       memoryUsageMb: memory,
     };
 
-    // iOS has no on-device frame/touch source here, so raw readings are null.
+    // iOS has no app touch source here; SDK frame readings are already raw.
     // Host `ps` yields only RSS, not a meminfo-style component breakdown.
     this.pushMetrics(device, now, metrics, jankFrames, server, {
       fps,
       frameTimeMs,
-      jankFrames: null,
+      jankFrames,
       touchLatencyMs: null,
       cpuUsagePercent: shouldCollectCpu ? cpu : null,
       memoryUsageMb: shouldCollectMemory ? memory : null,

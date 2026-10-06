@@ -27,6 +27,11 @@ import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor"
 import type { CtrlProxyScreenshotResult } from "./types";
 import { decodeSdkNetworkVersion, IOS_SDK_NETWORK_DIAGNOSTIC_TAG } from "./IosSdkNetworkWire";
 
+import {
+  getSdkFrameMetricsStore,
+  type SdkFrameMetricsStore,
+} from "../../performance/SdkFrameMetricsStore";
+
 export const IOS_SDK_NETWORK_DIAGNOSTIC_WINDOW_MS = 10 * 60 * 1000;
 const MAX_NETWORK_DIAGNOSTIC_KEYS = 64;
 const MAX_RECEIVED_VERSION_LENGTH = 32;
@@ -74,6 +79,7 @@ export interface IosSdkEventIngestorDeps {
   /** The iOS device/simulator UDID that owns these events. */
   deviceId: string;
   timer?: Timer;
+  frameMetricsStore?: SdkFrameMetricsStore;
   /** Returns the navigation graph for the current session (session-bound). */
   getNavigationGraphManager: () => NavigationEventSink;
   /** Capture a screenshot for navigation-node association. */
@@ -89,6 +95,7 @@ export interface IosSdkEventIngestorDeps {
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly deviceId: string;
   private readonly timer: Timer;
+  private readonly frameMetricsStore: SdkFrameMetricsStore;
   private readonly networkDiagnostics = new Map<
     string,
     { emittedAt: number; suppressedCount: number }
@@ -102,6 +109,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
     this.timer = deps.timer ?? defaultTimer;
+    this.frameMetricsStore = deps.frameMetricsStore ?? getSdkFrameMetricsStore();
     this.getNavigationGraphManager = deps.getNavigationGraphManager;
     this.captureScreenshot = deps.captureScreenshot;
     this.telemetryRecorderOverride = deps.telemetryRecorder;
@@ -125,6 +133,10 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
 
   async recordSdkEvent(event: SdkEvent, applicationId: string | null): Promise<void> {
     try {
+      if (event.type === "frame_metrics_event") {
+        this.ingestFrameMetrics(event.payload, applicationId);
+        return;
+      }
       const recorder = this.telemetryRecorder;
       // Save and restore context to avoid race with Android device context
       const prevContext = recorder.getContext();
@@ -150,6 +162,30 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     } catch (error) {
       logger.warn("[IosSdkEventIngestor] Failed to record SDK event", error);
     }
+  }
+
+  private ingestFrameMetrics(p: Record<string, unknown>, applicationId: string | null): void {
+    const { fps, frameTimeMs, jankFrames } = p;
+    if (
+      !applicationId ||
+      typeof fps !== "number" ||
+      !Number.isFinite(fps) ||
+      fps < 0 ||
+      typeof frameTimeMs !== "number" ||
+      !Number.isFinite(frameTimeMs) ||
+      frameTimeMs <= 0 ||
+      typeof jankFrames !== "number" ||
+      !Number.isSafeInteger(jankFrames) ||
+      jankFrames < 0
+    ) {
+      return;
+    }
+    this.frameMetricsStore.ingest(this.deviceId, applicationId, {
+      fps,
+      frameTimeMs,
+      jankFrames,
+      receivedAt: this.timer.now(),
+    });
   }
 
   private recordAcceptedSdkEvent(

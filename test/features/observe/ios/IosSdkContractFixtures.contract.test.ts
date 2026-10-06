@@ -10,6 +10,8 @@ import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 
+import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
+
 interface FixtureBatch {
   bundleId: string;
   timestamp: number;
@@ -197,4 +199,36 @@ test("SDK storage batch preserves every encoded field and maps change metadata",
       changeType: "modify",
     },
   ]);
+});
+
+test("SDK frame batch survives runner/client decode and reaches the shared frame store", async () => {
+  const event = decodeFixture("frame-metrics");
+  expect(event.payload).toEqual({
+    eventType: "frame_metrics_event",
+    timestamp: 1_700_000_000_004,
+    fps: 55,
+    frameTimeMs: 18,
+    jankFrames: 2,
+  });
+  const timer = new FakeTimer();
+  const store = new SdkFrameMetricsStore();
+  const ingestor = new DefaultIosSdkEventIngestor({
+    deviceId: "fixture-device",
+    timer,
+    frameMetricsStore: store,
+    getNavigationGraphManager: () => {
+      throw new Error("Frames must not resolve navigation");
+    },
+    captureScreenshot: async () => ({ success: false }),
+  });
+  await ingestor.recordSdkEvent(
+    { type: event.eventType, timestamp: event.timestamp, payload: event.payload },
+    event.applicationId ?? null,
+  );
+  expect(store.getFresh("fixture-device", "fixture.app", timer.now(), 2500)).toEqual({
+    fps: 55,
+    frameTimeMs: 18,
+    jankFrames: 2,
+    receivedAt: timer.now(),
+  });
 });

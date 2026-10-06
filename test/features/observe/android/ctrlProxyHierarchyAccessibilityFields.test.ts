@@ -143,7 +143,7 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
     },
   );
 
-  test("existing skeleton keeps filled text and uses the converted hint only for an unlabeled input", () => {
+  test("existing skeleton keeps filled text as the label and carries the converted hint as sublabel (#9346)", () => {
     const collector = new DefaultObserveElementCollector();
     const skeleton = (text: string) =>
       projectSkeleton(collector.collect(convert({ ...filledField, text }), "android")).skeleton;
@@ -151,6 +151,7 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
       {
         elementId: "first-name",
         label: "Ada",
+        sublabel: "First name",
         bounds: [0, 0, 200, 40],
         affordances: ["tap", "input"],
       },

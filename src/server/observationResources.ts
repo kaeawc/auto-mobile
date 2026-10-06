@@ -7,6 +7,7 @@ import {
 } from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
+import { safeDecodeSegment } from "./resourceUriSegments";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
@@ -274,16 +275,6 @@ function observationScreenshotMalformedUriError(uri: string): ResourceContent {
       2,
     ),
   };
-}
-
-function safeDecodeSegment(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch (error) {
-    // A malformed client URI is expected input validation, so preserve the typed envelope.
-    logger.debug(`[ObservationResources] Malformed URI segment '${value}': ${error}`);
-    return null;
-  }
 }
 
 function matchesObservationId(deviceId: string, observationId: string): boolean {

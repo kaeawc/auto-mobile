@@ -5,7 +5,7 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice } from "../../models";
+import type { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { SetAndroidNotificationPolicyAccess } from "../action/SetAndroidNotificationPolicyAccess";
 import {
   defaultBulletinBoardReader,
@@ -211,18 +211,63 @@ export class NotificationPolicy {
       allowed: input.policyAccess,
     });
 
+    // Never echo the request: read the policy-access state back (one extra
+    // `shell dumpsys notification`) and report what the device now says.
+    const observed = await this.getPolicy(appId);
+    return this.buildSetResult(appId, input, result, observed);
+  }
+
+  private buildSetResult(
+    appId: string,
+    input: SetNotificationPolicyInput,
+    command: AndroidDeviceShellToolResult,
+    observed: NotificationPolicyResult,
+  ): NotificationPolicyResult {
+    const base = { appId, deviceId: this.device.deviceId, platform: this.device.platform };
+    const readBack = observed.policyAccess;
+    const allowed = observed.success ? (readBack.allowed ?? null) : null;
+    const policyAccess: NotificationPolicyAccessState = {
+      supported: true,
+      allowed,
+      method: observed.success ? "android_dumpsys_notification" : "android_cmd_notification",
+      ...(readBack.rawValue ? { rawValue: readBack.rawValue } : {}),
+    };
+
+    const verdict = classifySetOutcome(appId, input, command, allowed, readBack);
+    if (verdict.error) {
+      const { error } = verdict;
+      return { ...base, success: false, policyAccess: { ...policyAccess, error }, error };
+    }
     return {
-      success: result.success,
-      appId,
-      deviceId: this.device.deviceId,
-      platform: this.device.platform,
-      policyAccess: {
-        supported: true,
-        allowed: input.policyAccess,
-        method: "android_cmd_notification",
-        ...(result.error ? { error: result.error } : {}),
-      },
-      ...(result.error ? { error: result.error } : {}),
+      ...base,
+      success: true,
+      policyAccess: verdict.warning ? { ...policyAccess, warning: verdict.warning } : policyAccess,
     };
   }
+}
+
+/** Compare the command outcome and the read-back with the request; error means failure. */
+function classifySetOutcome(
+  appId: string,
+  input: SetNotificationPolicyInput,
+  command: AndroidDeviceShellToolResult,
+  allowed: boolean | null,
+  readBack: NotificationPolicyAccessState,
+): { error?: string; warning?: string } {
+  if (!command.success) {
+    return { error: command.error ?? "cmd notification failed" };
+  }
+  if (allowed === null) {
+    const reason = readBack.error ?? readBack.warning ?? "state could not be determined";
+    return {
+      warning: `Command succeeded but the resulting policy access was not verified: ${reason}`,
+    };
+  }
+  if (allowed !== input.policyAccess) {
+    const sub = input.policyAccess ? "allow_dnd" : "disallow_dnd";
+    return {
+      error: `cmd notification ${sub} reported success but dumpsys notification shows policy access ${allowed ? "still granted" : "not granted"} for ${appId}`,
+    };
+  }
+  return {};
 }

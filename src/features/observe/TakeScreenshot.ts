@@ -58,6 +58,7 @@ import {
 import { shellQuote } from "../../utils/shellQuote";
 import {
   AndroidPhysicalDisplayIdResolver,
+  type PhysicalDisplayIdResolver,
   assertValidPng,
   decodePngBase64Output,
   withAndroidScreenshotCaptureLock,
@@ -262,7 +263,7 @@ export class TakeScreenshot implements ScreenshotService {
   private fileSystem: FileSystem;
   private cacheDirResolver: () => string;
   private readonly pathProtection: ScreenshotPathProtection;
-  private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
+  private readonly physicalDisplayIdResolver: PhysicalDisplayIdResolver;
   private static cacheDir: string | null = null;
 
   /**
@@ -289,11 +290,9 @@ export class TakeScreenshot implements ScreenshotService {
     fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
     fileSystem: FileSystem = new DefaultFileSystem(),
     cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
-    physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(
-      {
-        timer,
-      },
-    ),
+    physicalDisplayIdResolver: PhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({
+      timer,
+    }),
     cleanupOnCreate = true,
     options: { pathProtection?: ScreenshotPathProtection } = {},
   ) {

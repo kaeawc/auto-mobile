@@ -67,12 +67,23 @@ export function decodePngBase64Output(output: string): Buffer {
   return stripLeadingPngNoise(Buffer.from(cleanedOutput.slice(signatureOffset), "base64"));
 }
 
+/** What a screenshot capture needs from display resolution (fakes implement this). */
+export interface PhysicalDisplayIdResolver {
+  resolve(adb: AdbExecutor, deviceId: string, signal?: AbortSignal): Promise<string | null>;
+  resolveLogical(
+    adb: AdbExecutor,
+    deviceId: string,
+    logicalId: number,
+    signal?: AbortSignal,
+  ): Promise<string | null>;
+}
+
 /**
  * Per-device display resolution cache. Single-display and unambiguous
  * multi-display results are cached for the host display revision; unavailable
  * or ambiguous results are retried.
  */
-export class AndroidPhysicalDisplayIdResolver {
+export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolver {
   private readonly cache = new Map<
     string,
     { displayId: string | null; expiresAt: number; revision: number }

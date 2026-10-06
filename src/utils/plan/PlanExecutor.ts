@@ -25,7 +25,12 @@ import {
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
-import { computeSafeBarrierResumeStep } from "./BarrierResumeGuard";
+import { computeSafeBarrierResumeStep, isCoordinationTool } from "./BarrierResumeGuard";
+import {
+  isParticipantFailureAbort,
+  ParticipantFailureTracker,
+  type ParticipantFailedError,
+} from "./ParticipantFailureTracker";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
@@ -721,7 +726,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
         throw error;
       }
       const errorMsg = formatStepError(step.tool, error, step.params, tool.schema);
-      if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
+      // A wait cut short because a participant track failed (#10025) skips an optional step
+      // exactly like the barrier timeout it replaces; any other abort still fails it.
+      const abortedForOtherReason =
+        context.signal?.aborted && !isParticipantFailureAbort(context.signal);
+      if (step.optional && !abortedForOtherReason && !(error instanceof ZodError)) {
         this.logger.warn(
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
           error,
@@ -1091,6 +1100,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // Track per-device results
     const perDeviceResults = new Map<string, DeviceExecutionResult>();
     const failures: ParallelTrackFailure[] = [];
+    // Tells survivors that a barrier/criticalSection can no longer be satisfied (#10025).
+    const participants = new ParticipantFailureTracker(plan);
 
     // Execute each device track in parallel
     const devicePromises = partitionedPlan.devices.map(async (device, deviceOrder) => {
@@ -1109,11 +1120,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           sessionUuid,
           combinedSignal,
           executionOptions,
+          participants,
         );
         // An ordinary failing callback aborts synchronously below. Failures
         // observed after that abort may be cancelled siblings, even at a lower
         // real plan index. Keep them in perDeviceResults but prefer the cause.
-        const abortConsequence = internalAbortController.signal.aborted;
+        // A coordination step that failed only because a participant track had
+        // already failed is the same kind of symptom (#10025).
+        const abortConsequence =
+          internalAbortController.signal.aborted || result.failedStep?.participantFailed === true;
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -1161,7 +1176,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
             );
             internalAbortController.abort();
           }
-          // For "finish-current-step", we just let other devices finish naturally
+          // For "finish-current-step", other devices finish naturally, except that a
+          // barrier/criticalSection the failed track will never reach fails promptly.
+          if (abortStrategy === "finish-current-step" && result.failedStep) {
+            participants.trackFailed(device, result.failedStep);
+          }
         }
 
         return result;
@@ -1316,6 +1335,44 @@ export class DefaultPlanExecutor implements PlanExecutor {
   }
 
   /**
+   * Run one step of a device track. A coordination step that a failed participant track can no
+   * longer satisfy (#10025) is not run at all: it resolves immediately with that participant's
+   * failure, as does a barrier wait that becomes unsatisfiable while the step is parked in it.
+   */
+  private async executeTrackStep(
+    device: string,
+    step: PlanStep,
+    planIndex: number,
+    context: StepExecutionContext,
+    allParticipants: ParticipantFailureTracker | undefined,
+  ): Promise<{ result: StepExecutionResult; participantFailure?: ParticipantFailedError }> {
+    // Only coordination steps can wait on another track, so every other step keeps the plan's
+    // own signal untouched.
+    const participants = isCoordinationTool(step.tool) ? allParticipants : undefined;
+    const begun = participants?.beginStep(device, planIndex, context.signal);
+    if (begun && "failure" in begun) {
+      const error = begun.failure.message;
+      return {
+        participantFailure: begun.failure,
+        result: {
+          status: step.optional ? "skipped" : "failed",
+          error,
+          details: { params: step.params, error, ...(step.optional ? { optional: true } : {}) },
+        },
+      };
+    }
+    const result = await this.executeStep(step, {
+      ...context,
+      signal: begun ? begun.signal : context.signal,
+    });
+    participants?.endStep(device);
+    return {
+      result,
+      participantFailure: participants?.interruptionAt(device, planIndex),
+    };
+  }
+
+  /**
    * Execute a single device track.
    */
   private async executeDeviceTrack(
@@ -1327,6 +1384,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     sessionUuid?: string,
     signal?: AbortSignal,
     executionOptions?: PlanExecutionOptions,
+    participants?: ParticipantFailureTracker,
   ): Promise<{
     success: boolean;
     executedSteps: number;
@@ -1337,6 +1395,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
       tool: string;
       error: string;
       failureObservation?: FailureObservationSummary;
+      /** The step failed only because a participant track had already failed (#10025). */
+      participantFailed?: boolean;
     };
     skippedSteps: DeviceSkippedStepResult[];
     warnings: PlanStepWarnings[];
@@ -1366,14 +1426,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
         );
 
         const stepStartTime = this.timer.now();
-        const stepResult = await this.executeStep(step, {
-          platform,
-          deviceId: this.resolveTrackDeviceId(device, sessionUuid),
-          sessionUuid,
-          signal,
-          logPrefix: `[PARALLEL_EXEC][${device}]`,
-          debugLog: true,
-        });
+        const { result: stepResult, participantFailure } = await this.executeTrackStep(
+          device,
+          step,
+          planIndex,
+          {
+            platform,
+            deviceId: this.resolveTrackDeviceId(device, sessionUuid),
+            sessionUuid,
+            signal,
+            logPrefix: `[PARALLEL_EXEC][${device}]`,
+            debugLog: true,
+          },
+          participants,
+        );
 
         if (stepResult.warnings) {
           warnings.push({
@@ -1409,10 +1475,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
               stepIndex: planIndex,
               trackIndex,
               tool: step.tool,
-              error: stepResult.error ?? "Unknown error",
+              error: participantFailure?.message ?? stepResult.error ?? "Unknown error",
               ...(stepResult.failureObservation
                 ? { failureObservation: stepResult.failureObservation }
                 : {}),
+              ...(participantFailure ? { participantFailed: true } : {}),
             },
             skippedSteps,
             warnings,

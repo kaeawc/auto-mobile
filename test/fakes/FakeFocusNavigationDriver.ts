@@ -1,20 +1,42 @@
 import type { FocusNavigationDriver } from "../../src/features/talkback/FocusNavigationExecutor";
-import type { A11ySwipeResult } from "../../src/features/observe/android";
-import type { CurrentFocusResult, ScreenSize, TraversalOrderResult } from "../../src/models";
+import type {
+  AccessibilityNodeSelector,
+  A11yActionResult,
+} from "../../src/features/observe/android/types";
+import type {
+  CurrentFocusResult,
+  TraversalOrderResult,
+  ViewHierarchyResult,
+} from "../../src/models";
 import type { Element } from "../../src/models/Element";
 
-type SwipeDirection = "forward" | "backward";
+export interface FocusRequest {
+  action: string;
+  resourceId?: string;
+  selector?: AccessibilityNodeSelector;
+}
 
+/**
+ * Fake focus-navigation driver. The cursor only moves through accessibility actions, as on a
+ * device: `focus` on a node whose stable identity matches moves focus to it. Nothing here models
+ * a swipe, because a gesture an accessibility service dispatches never moves TalkBack's cursor.
+ */
 export class FakeFocusNavigationDriver implements FocusNavigationDriver {
-  screenSize: ScreenSize = { width: 1000, height: 2000 };
   elements: Element[] = [];
   focusedIndex: number | null = null;
-  swipeResult: A11ySwipeResult = { success: true, totalTimeMs: 1 };
-  swipeHistory: Array<{ x1: number; y1: number; x2: number; y2: number; duration: number }> = [];
-  /** The signal each swipe request was given, in order. */
-  swipeSignals: Array<AbortSignal | undefined> = [];
-  autoAdvanceOnSwipe = true;
-  onSwipe: ((direction: SwipeDirection) => void) | null = null;
+  /** Result every `focus` request returns. */
+  focusResult: A11yActionResult = { success: true, action: "focus", totalTimeMs: 1 };
+  /** Every `focus` request, in order. */
+  focusHistory: FocusRequest[] = [];
+  /** The signal each `focus` request was given, in order. */
+  focusSignals: Array<AbortSignal | undefined> = [];
+  /** When true a successful `focus` request moves the cursor onto the addressed node. */
+  autoFocusOnAction = true;
+  /** Called after every `focus` request, before it returns. */
+  onFocusAction: ((request: FocusRequest) => void) | null = null;
+  nodeActionSelectorsSupported = true;
+  /** Expose the elements as the full accessibility tree (needed by resource-id uniqueness checks). */
+  exposeHierarchy = false;
   private traversalOverrides: TraversalOrderResult[] = [];
   private currentFocusOverrides: CurrentFocusResult[] = [];
 
@@ -23,6 +45,7 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     this.focusedIndex = focusedIndex;
   }
 
+  /** Replace what the screen shows, keeping the cursor on the same node when it still exists. */
   replaceElements(elements: Element[], preserveFocus: boolean = true): void {
     const focusedElement = preserveFocus ? this.getFocusedElement() : null;
     this.elements = elements;
@@ -35,14 +58,6 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     }
   }
 
-  setScreenSize(size: ScreenSize): void {
-    this.screenSize = size;
-  }
-
-  setSwipeResult(result: A11ySwipeResult): void {
-    this.swipeResult = result;
-  }
-
   queueTraversalResult(result: TraversalOrderResult): void {
     this.traversalOverrides.push(result);
   }
@@ -51,8 +66,8 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     this.currentFocusOverrides.push(result);
   }
 
-  getSwipeCount(): number {
-    return this.swipeHistory.length;
+  getFocusRequestCount(): number {
+    return this.focusHistory.length;
   }
 
   getFocusedElement(): Element | null {
@@ -60,6 +75,13 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
       return null;
     }
     return this.elements[this.focusedIndex] ?? null;
+  }
+
+  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
+    if (!this.exposeHierarchy) {
+      return null;
+    }
+    return { hierarchy: { node: this.elements.map((element) => ({ $: element })) } };
   }
 
   async requestTraversalOrder(): Promise<TraversalOrderResult> {
@@ -84,50 +106,55 @@ export class FakeFocusNavigationDriver implements FocusNavigationDriver {
     };
   }
 
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    durationMs: number,
+  async requestAction(
+    action: string,
+    resourceId?: string,
     signal?: AbortSignal,
-  ): Promise<A11ySwipeResult> {
-    this.swipeHistory.push({ x1, y1, x2, y2, duration: durationMs });
-    this.swipeSignals.push(signal);
-    const direction = this.getDirection(x1, x2);
-
-    if (this.autoAdvanceOnSwipe) {
-      this.advanceFocus(direction);
-    }
-
-    if (this.onSwipe) {
-      this.onSwipe(direction);
-    }
-
-    return this.swipeResult;
+  ): Promise<A11yActionResult> {
+    return this.handleAction({ action, resourceId }, signal);
   }
 
-  async getScreenSize(): Promise<ScreenSize> {
-    return this.screenSize;
+  async requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.handleAction({ action, selector }, signal);
   }
 
-  private getDirection(startX: number, endX: number): SwipeDirection {
-    return endX > startX ? "forward" : "backward";
+  async supportsNodeActionSelectors(): Promise<boolean> {
+    return this.nodeActionSelectorsSupported;
   }
 
-  private advanceFocus(direction: SwipeDirection): void {
-    if (this.elements.length === 0) {
-      return;
+  /** Overridable by drivers that also record other actions; `focus` is handled here. */
+  protected handleAction(request: FocusRequest, signal?: AbortSignal): A11yActionResult {
+    if (request.action !== "focus") {
+      return { success: true, action: request.action, totalTimeMs: 1 };
     }
-    if (this.focusedIndex === null || this.focusedIndex === undefined) {
-      this.focusedIndex = 0;
-      return;
+    this.focusHistory.push(request);
+    this.focusSignals.push(signal);
+    if (this.focusResult.success && this.autoFocusOnAction) {
+      const index = this.elements.findIndex((element) => this.addresses(request, element));
+      if (index !== -1) {
+        this.focusedIndex = index;
+      }
     }
-    const nextIndex =
-      direction === "forward"
-        ? Math.min(this.elements.length - 1, this.focusedIndex + 1)
-        : Math.max(0, this.focusedIndex - 1);
-    this.focusedIndex = nextIndex;
+    this.onFocusAction?.(request);
+    return this.focusResult;
+  }
+
+  private addresses(request: FocusRequest, element: Element): boolean {
+    // Like the device's node lookup, every field the request names must match the node.
+    const resourceId = request.selector?.resourceId ?? request.resourceId;
+    const testTag = request.selector?.testTag;
+    if (!resourceId && !testTag) {
+      return false;
+    }
+    const nodeId = element["resource-id"];
+    const idMatches =
+      !resourceId ||
+      Boolean(nodeId && (nodeId === resourceId || nodeId.endsWith(`:id/${resourceId}`)));
+    return idMatches && (!testTag || element["test-tag"] === testTag);
   }
 
   private getElementKey(element: Element): string | null {

@@ -32660,7 +32660,7 @@
           "type": "object",
           "properties": {
             "reachable": {
-              "description": "Whether swipe cursor navigation reached the target",
+              "description": "Whether the accessibility cursor was moved onto the target",
               "type": "boolean"
             },
             "traversalOrder": {
@@ -32914,7 +32914,7 @@
               }
             },
             "focusTrapDetected": {
-              "description": "Whether cursor navigation got stuck or failed to converge",
+              "description": "Always false: a cursor that cannot be moved onto the target fails the call instead",
               "type": "boolean"
             }
           },

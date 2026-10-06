@@ -71,6 +71,10 @@ function fixture(
   let openCount = 0;
   let afterTapDispatch: (() => void) | undefined;
   let keyboardGate: Promise<void> | undefined;
+  let keyboardOutcome:
+    | ((signal: AbortSignal | undefined) => Promise<{ success: boolean; error?: string }>)
+    | undefined;
+  const keyboardSignals: Array<AbortSignal | undefined> = [];
   const deviceId = `native-session-device-${++fixtureNumber}`;
   let subtype: number | null = 7;
   let subtypeRestoreError: string | undefined;
@@ -124,11 +128,12 @@ function fixture(
       }),
     },
     keyboard: {
-      execute: async () => {
+      execute: async (_action, signal) => {
         openCount++;
+        keyboardSignals.push(signal);
         afterSelection?.();
         await keyboardGate;
-        return { success: true };
+        return keyboardOutcome ? keyboardOutcome(signal) : { success: true };
       },
     },
     hierarchy: {
@@ -159,6 +164,11 @@ function fixture(
     events,
     setKeyboardGate: (gate: Promise<void>) => {
       keyboardGate = gate;
+    },
+    keyboardSignals,
+    getReadCount: () => readCount,
+    setKeyboardOutcome: (outcome: NonNullable<typeof keyboardOutcome>) => {
+      keyboardOutcome = outcome;
     },
     setTapError: (error: string) => {
       tapError = error;
@@ -694,6 +704,62 @@ test("does not open the keyboard when selection completes with cancellation", as
     `restoreSubtype:${original}:7`,
   ]);
   expect(getActive()).toBe(original);
+});
+
+test("hands its abort signal to the keyboard open", async () => {
+  const { session, keyboardSignals } = fixture();
+  const controller = new AbortController();
+
+  await session.tapKey(target, "a", controller.signal);
+
+  expect(keyboardSignals).toEqual([controller.signal]);
+});
+
+test("a cancel during the keyboard open stops before reading or tapping and restores the IME", async () => {
+  const { session, events, keyboardSignals, setKeyboardOutcome, getReadCount, getActive } =
+    fixture();
+  const controller = new AbortController();
+  setKeyboardOutcome(async (signal) => {
+    expect(signal).toBe(controller.signal);
+    controller.abort();
+    // A cancelled open reports a failure result; it must not surface as "did not open".
+    return { success: false, error: "Keyboard did not open" };
+  });
+
+  await expect(session.tapKey(target, "a", controller.signal)).rejects.toThrow(
+    "The operation was aborted",
+  );
+  expect(keyboardSignals.length).toBe(1);
+  // Only the starting-state read happened: no visible-key poll once aborted.
+  expect(getReadCount()).toBe(1);
+  expect(events).toEqual([
+    `select:${target}:signaled`,
+    `select:${original}:cleanup`,
+    `restoreSubtype:${original}:7`,
+  ]);
+  expect(getActive()).toBe(original);
+});
+
+test("a cancel that rejects the keyboard open is rethrown unchanged", async () => {
+  const { session, setKeyboardOutcome, getReadCount } = fixture();
+  const controller = new AbortController();
+  const reason = new Error("caller cancelled");
+  setKeyboardOutcome(async () => {
+    controller.abort(reason);
+    throw reason;
+  });
+
+  await expect(session.tapKey(target, "a", controller.signal)).rejects.toBe(reason);
+  expect(getReadCount()).toBe(1);
+});
+
+test("a keyboard open that fails without a cancel still reports the open failure", async () => {
+  const { session, setKeyboardOutcome } = fixture();
+  setKeyboardOutcome(async () => ({ success: false, error: "No focused text input" }));
+
+  await expect(session.tapKey(target, "a", new AbortController().signal)).rejects.toThrow(
+    "No focused text input",
+  );
 });
 
 test("reports an applied key when cancellation arrives after physical dispatch", async () => {

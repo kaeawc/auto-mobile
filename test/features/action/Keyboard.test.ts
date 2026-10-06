@@ -376,6 +376,127 @@ describe("Keyboard", () => {
       expect(result.message).toBe("Keyboard opened");
     });
 
+    describe("cancellation", () => {
+      const live = () => new AbortController();
+
+      test("hands the signal to the selector probe and the node click", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([
+          selectorField({ "resource-id": "", "test-tag": "notes-field" }),
+          keyboardWindowHierarchy(),
+        ]);
+
+        await newKeyboard().execute("open", controller.signal);
+
+        expect(fakeClient.selectorSupportSignals).toEqual([controller.signal]);
+        expect(fakeClient.nodeActionSignals).toEqual([controller.signal]);
+      });
+
+      test("an abort before the click sends nothing and keeps the abort", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeClient.onNodeAction = undefined;
+        const keyboard = newKeyboard();
+        const open = keyboard.execute("open", controller.signal);
+        controller.abort();
+
+        await expect(open).rejects.toThrow("Operation cancelled");
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an acknowledged click followed by an abort stops without a tap or a poll", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeHierarchy.setDefaultResult(baseHierarchy());
+        fakeClient.onNodeAction = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Operation cancelled",
+        );
+
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+        expect(fakeTimer.getSleepCallCount()).toBe(0);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an abort that lands on a sent but unacknowledged click is indeterminate", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeHierarchy.setDefaultResult(baseHierarchy());
+        fakeClient.actionResult = {
+          success: false,
+          action: "click",
+          totalTimeMs: 1,
+          error: "Error: Operation cancelled",
+          dispatched: true,
+          acknowledged: false,
+        };
+        fakeClient.onNodeAction = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Keyboard open outcome is indeterminate",
+        );
+
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+        expect(fakeTimer.getSleepCallCount()).toBe(0);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an abort that lands before the click was sent stays a plain abort", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeClient.actionResult = {
+          success: false,
+          action: "click",
+          totalTimeMs: 1,
+          error: "Error: Operation cancelled",
+          dispatched: false,
+          acknowledged: false,
+        };
+        fakeClient.onNodeAction = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Operation cancelled",
+        );
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an abort during the caret read sends no tap", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([focusedInputHierarchy()]);
+        fakeClient.onCaretRead = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Operation cancelled",
+        );
+        expect(fakeClient.caretReadCount).toBe(1);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+      });
+
+      test("an abort that lands on a started tap fallback is indeterminate", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([focusedInputHierarchy()]);
+        fakeHierarchy.setDefaultResult(baseHierarchy());
+        fakeAdb.abortAfterCommand("shell input tap", controller);
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Keyboard open outcome is indeterminate: the tap was dispatched",
+        );
+
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+        expect(fakeTimer.getSleepCallCount()).toBe(0);
+      });
+
+      test("a tap fallback failure without an abort still propagates unchanged", async () => {
+        fakeHierarchy.setResults([focusedInputHierarchy()]);
+        fakeAdb.setCommandError("shell input tap", new Error("adb offline"));
+
+        await expect(newKeyboard().execute("open", live().signal)).rejects.toThrow("adb offline");
+      });
+    });
+
     test("does not touch the node-action client when the keyboard is already open", async () => {
       fakeHierarchy.setResults([keyboardWindowHierarchy()]);
 

@@ -201,8 +201,10 @@ export class InstalledImeKeySession {
     signal?.throwIfAborted();
     await catalog.selectWithinLock(imeId, signal);
     signal?.throwIfAborted();
-    // Once focus activation starts, wait for it to settle before any restoration.
-    const opened = await keyboard.execute("open");
+    // Cancellation reaches the open poll; restoration still runs afterwards under the held lock.
+    const opened = await keyboard.execute("open", signal);
+    // A cancelled open can report a failed result; surface the cancellation instead.
+    signal?.throwIfAborted();
     if (!opened.success) {
       throw new Error(opened.error ?? "Could not open the selected IME.");
     }

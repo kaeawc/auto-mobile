@@ -30,6 +30,7 @@ import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/Skelet
 import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/android/types";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { ActionableError } from "../../models/ActionableError";
 import {
   nodeActionTargetError,
   stableNodeSelectorForElement,
@@ -119,7 +120,7 @@ type KeyboardDetection = {
  * to report a moved caret when the tap fallback has to run.
  */
 export interface KeyboardOpenClient {
-  supportsNodeActionSelectors(): Promise<boolean>;
+  supportsNodeActionSelectors(perf?: undefined, signal?: AbortSignal): Promise<boolean>;
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
@@ -128,6 +129,13 @@ export interface KeyboardOpenClient {
     signal?: AbortSignal,
   ): Promise<A11yActionResult>;
   requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
+}
+
+/** A cancelled open whose click/tap was already sent: the device may have applied it. */
+function keyboardOpenIndeterminateError(dispatched: string, reason?: string): ActionableError {
+  return new ActionableError(
+    `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`,
+  );
 }
 
 export class Keyboard {
@@ -463,14 +471,16 @@ export class Keyboard {
     if (!selector) {
       return false;
     }
+    let client: KeyboardOpenClient;
     try {
-      const client = this.getOpenClient();
+      client = this.getOpenClient();
       // A bare resource-id resolves globally on the device, so it must be unique in
       // this hierarchy or the click could land on a different field.
       const targetError = await nodeActionTargetError(
         selector,
         {
-          supportsNodeActionSelectors: () => client.supportsNodeActionSelectors(),
+          supportsNodeActionSelectors: () =>
+            awaitWhileRequestIsLive(client.supportsNodeActionSelectors(undefined, signal), signal),
           getAccessibilityHierarchy: async () => hierarchy,
         },
         element,
@@ -479,30 +489,46 @@ export class Keyboard {
         logger.warn(`Keyboard open: node click unavailable (${targetError})`);
         return false;
       }
-      throwIfAborted(signal);
-      const result = await client.requestNodeAction(
-        "click",
-        selector,
-        undefined,
-        undefined,
-        signal,
-      );
-      throwIfAborted(signal);
-      if (!result.success) {
-        logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
-      }
-      return result.success;
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
       return false;
     }
+    return this.dispatchNodeClick(client, selector, signal);
+  }
+
+  private async dispatchNodeClick(
+    client: KeyboardOpenClient,
+    selector: AccessibilityNodeSelector,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    let result: A11yActionResult;
+    try {
+      result = await client.requestNodeAction("click", selector, undefined, undefined, signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
+      return false;
+    }
+    // The runner reports an aborted-after-send click as dispatched but unacknowledged.
+    if (signal?.aborted && result.dispatched === true && result.acknowledged !== true) {
+      throw keyboardOpenIndeterminateError("node click", result.error);
+    }
+    throwIfAborted(signal);
+    if (!result.success) {
+      logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
+    }
+    return result.success;
   }
 
   /** Best-effort caret read; undefined when the runner cannot report it. */
   private async readCaret(signal?: AbortSignal): Promise<InsertTextState | undefined> {
     try {
-      const result = await this.getOpenClient().requestInsertTextState();
+      const result = await awaitWhileRequestIsLive(
+        this.getOpenClient().requestInsertTextState(),
+        signal,
+      );
       throwIfAborted(signal);
       return result.success ? result.state : undefined;
     } catch (error) {
@@ -776,9 +802,23 @@ export class Keyboard {
     const x = Math.round(center.x);
     const y = Math.round(center.y);
     throwIfAborted(signal);
-    await awaitWhileRequestIsLive(
-      this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal),
-      signal,
-    );
+    try {
+      await awaitWhileRequestIsLive(
+        this.adb.executeCommand(
+          `shell input tap ${x} ${y}`,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        ),
+        signal,
+      );
+    } catch (error) {
+      // The tap command had started, so it may have reached the device.
+      if (signal?.aborted) {
+        throw keyboardOpenIndeterminateError("tap", errorMessage(error));
+      }
+      throw error;
+    }
   }
 }

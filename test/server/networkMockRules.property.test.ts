@@ -13,8 +13,6 @@ const mockRule: fc.Arbitrary<MockRule> = fc.record({
   path: fc.string({ maxLength: 12 }),
   method: fc.constantFrom("GET", "POST", "PUT", "DELETE", "PATCH"),
   limit: nullableCount,
-  // `remaining` is intentionally independent of `limit`, to prove it is IGNORED.
-  remaining: nullableCount,
   statusCode: fc.integer({ min: 100, max: 599 }),
   responseHeaders: fc.dictionary(fc.string({ maxLength: 6 }), fc.string({ maxLength: 6 }), {
     maxKeys: 4,
@@ -33,17 +31,17 @@ describe("buildNetworkMockRules (property-based)", () => {
   test("preserves count and insertion order by mockId", () => {
     fc.assert(
       fc.property(fc.array(mockRule, { maxLength: 12 }), (rules) => {
-        const out = buildNetworkMockRules(stateFrom(rules));
+        const out = buildNetworkMockRules(stateFrom(rules), "device-1");
         return out.length === rules.length && out.every((o, i) => o.mockId === rules[i].mockId);
       }),
       RUN_OPTIONS,
     );
   });
 
-  test("reinitializes remaining from limit, never copying the store's remaining", () => {
+  test("sends the install-time remaining (the limit) for every rule", () => {
     fc.assert(
       fc.property(fc.array(mockRule, { maxLength: 12 }), (rules) => {
-        const out = buildNetworkMockRules(stateFrom(rules));
+        const out = buildNetworkMockRules(stateFrom(rules), "device-1");
         return out.every((o, i) => o.remaining === rules[i].limit);
       }),
       RUN_OPTIONS,
@@ -53,7 +51,7 @@ describe("buildNetworkMockRules (property-based)", () => {
   test("passes every other field through unchanged", () => {
     fc.assert(
       fc.property(fc.array(mockRule, { minLength: 1, maxLength: 12 }), (rules) => {
-        const out = buildNetworkMockRules(stateFrom(rules));
+        const out = buildNetworkMockRules(stateFrom(rules), "device-1");
         return out.every((o, i) => {
           const r = rules[i];
           return (
@@ -74,7 +72,10 @@ describe("buildNetworkMockRules (property-based)", () => {
 
   test("an empty store yields an empty payload", () => {
     fc.assert(
-      fc.property(fc.constant(null), () => buildNetworkMockRules(stateFrom([])).length === 0),
+      fc.property(
+        fc.constant(null),
+        () => buildNetworkMockRules(stateFrom([]), "device-1").length === 0,
+      ),
       RUN_OPTIONS,
     );
   });

@@ -4,7 +4,7 @@ import { ElementBounds } from "../../models/ElementBounds";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { NavigationEdge, SelectedElement } from "../../utils/interfaces/NavigationGraph";
+import { NavigationEdge } from "../../utils/interfaces/NavigationGraph";
 
 import { isEditableElementProperties } from "../utility/elementProperties";
 
@@ -618,38 +618,33 @@ export class IdentifyInteractions {
     identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
     edge: NavigationEdge,
   ): number {
+    if (edge.interaction?.toolName !== "tapOn") {
+      return 0;
+    }
+    // The edge's `uiState.selectedElements` describe what was already selected on the source
+    // screen before the tool ran, not what it acted on, so they never attribute the edge.
     const { edgeText, edgeId } = this.getEdgeTapIdentifiers(edge);
-
-    let score = 0;
-
-    if (edge.interaction?.toolName === "tapOn") {
-      score = this.scoreTapMatch(identifiers, edgeId, edgeText);
-    }
-
-    const selectedElements = edge.interaction?.uiState?.selectedElements || [];
-    if (selectedElements.length > 0) {
-      for (const selected of selectedElements) {
-        score = this.scoreSelectedElementMatch(identifiers, selected, score);
-      }
-    }
-
-    return score;
+    return this.scoreTapMatch(identifiers, edgeId, edgeText);
   }
 
+  /**
+   * A recorded `tapOn` keeps its target under `args.selector` (the tool's own input shape);
+   * the top-level keys are read as a fallback for edges stored before that shape.
+   */
   private getEdgeTapIdentifiers(edge: NavigationEdge): {
     edgeText: string | undefined;
     edgeId: string | undefined;
   } {
     const args = edge.interaction?.args || {};
-    const edgeText = typeof args.text === "string" ? args.text : undefined;
-    const edgeId =
-      typeof args.elementId === "string"
-        ? args.elementId
-        : typeof args.id === "string"
-          ? args.id
-          : undefined;
+    const selector =
+      typeof args.selector === "object" && args.selector !== null ? args.selector : {};
+    const firstString = (...values: unknown[]): string | undefined =>
+      values.find((value): value is string => typeof value === "string");
 
-    return { edgeText, edgeId };
+    return {
+      edgeText: firstString(selector.text, args.text),
+      edgeId: firstString(selector.elementId, args.elementId, args.id),
+    };
   }
 
   private scoreTapMatch(
@@ -664,33 +659,6 @@ export class IdentifyInteractions {
 
     if (edgeText && this.textMatches(edgeText, identifiers.text, identifiers.contentDescription)) {
       score = Math.max(score, 0.85);
-    }
-    return score;
-  }
-
-  private scoreSelectedElementMatch(
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
-    selected: SelectedElement,
-    score: number,
-  ): number {
-    if (
-      selected.resourceId &&
-      identifiers.resourceId &&
-      selected.resourceId === identifiers.resourceId
-    ) {
-      score = Math.max(score, 0.8);
-    }
-    if (
-      selected.text &&
-      this.textMatches(selected.text, identifiers.text, identifiers.contentDescription)
-    ) {
-      score = Math.max(score, 0.75);
-    }
-    if (
-      selected.contentDesc &&
-      this.textMatches(selected.contentDesc, identifiers.text, identifiers.contentDescription)
-    ) {
-      score = Math.max(score, 0.7);
     }
     return score;
   }

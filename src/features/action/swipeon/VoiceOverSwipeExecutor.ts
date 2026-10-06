@@ -6,7 +6,11 @@ import { BootedDevice, Element, SwipeDirection } from "../../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types";
-import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
+import {
+  VOICEOVER_STATE_UNKNOWN_WARNING,
+  type IosVoiceOverDetector,
+} from "../../accessibility/interfaces/IosVoiceOverDetector";
+import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
 import type { IOSCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -86,27 +90,30 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
 
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
     // apply to swipe detection uniformly with the observe path (#3925).
-    const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverEnabled(
+    // Tri-state, like the Android TalkBack swipe: an unreadable probe takes the
+    // standard swipe but is reported as a warning, never as a confirmed "off".
+    const voiceOverState = await this.iosVoiceOverDetector.resolveState(
       this.device.deviceId,
       this.iosClient,
       this.featureFlags,
     );
     throwIfAborted(signal);
 
-    if (!isVoiceOverEnabled) {
-      if (boomerang) {
-        return this.executeBoomerangGesture(
-          x1,
-          y1,
-          x2,
-          y2,
-          gestureOptions,
-          boomerang,
-          perf,
-          signal,
-        );
-      }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+    if (voiceOverState !== true) {
+      const warning = voiceOverState === null ? VOICEOVER_STATE_UNKNOWN_WARNING : undefined;
+      const result = boomerang
+        ? await this.executeBoomerangGesture(
+            x1,
+            y1,
+            x2,
+            y2,
+            gestureOptions,
+            boomerang,
+            perf,
+            signal,
+          )
+        : await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+      return withEpilogueWarning(result, warning);
     }
 
     // VoiceOver is enabled

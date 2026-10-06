@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { SmartNavigationHelper } from "../../../src/features/navigation/SmartNavigationHelper";
+import type { ForegroundObserver } from "../../../src/features/navigation/foregroundOverlay";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { BootedDevice } from "../../../src/models";
@@ -31,6 +32,10 @@ const edge = (from: string, to: string): NavigationEdge => ({
   edgeType: "tool",
   interaction: { toolName: "tapOn", args: { text: `to${to}` }, timestamp: 0 },
 });
+
+// A failed replay re-observes the device before any fallback edge (#10133); a fake keeps
+// that off the real observe path (which would spawn device tools) and reports no overlay.
+const cleanForegroundObserver: ForegroundObserver = { execute: async () => ({}) };
 
 async function drainMicrotasks(): Promise<void> {
   for (let i = 0; i < 60; i++) {
@@ -78,7 +83,17 @@ describe("NavigateTo replay safety", () => {
     waiter: ScreenTransitionWaiter | null = { waitForScreen: async () => true },
     setup = noSetup,
   ): NavigateTo {
-    return new NavigateTo(device, new FakeAdbClientFactory(), setup, waiter, graph, timer);
+    return new NavigateTo(
+      device,
+      new FakeAdbClientFactory(),
+      setup,
+      waiter,
+      graph,
+      timer,
+      undefined,
+      undefined,
+      () => cleanForegroundObserver,
+    );
   }
 
   for (const failedStep of [1, 2]) {

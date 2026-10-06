@@ -1093,7 +1093,7 @@ Without an owner, iOS selects the first element carrying a matching semantic
 link in document order, then resolves `occurrence` within that element. This
 changes the previous tree-wide counting (#6631). It never skips to a later owner
 when the first lacks the occurrence or link geometry. With multiple candidate
-owners, a successful SDK activation includes a runner `warning` naming the
+owners, a successful SDK activation adds the runner's note to the result's `warnings`, naming the
 selected owner and candidate count; use `container`/`subtext` for a specific owner.
 
 When SDK resolution fails, the XCUITest fallback remains available. Its flat

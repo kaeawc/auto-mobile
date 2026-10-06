@@ -1623,17 +1623,53 @@ export async function getVideoRecordingMetadata(
   return metadata;
 }
 
+/**
+ * What "latest" resolves to (#10187): the newest recording whose file exists, or, when
+ * recordings exist but none has a file, the newest one and its status so the caller can
+ * say why nothing is playable.
+ */
+export interface LatestVideoRecordingLookup {
+  recording: VideoRecordingMetadata | null;
+  newestWithoutFile?: { recordingId: string; status: VideoRecordingRecord["status"] };
+}
+
+/**
+ * A row is playable when it was recorded as having a file (`sizeBytes` is 0 for an
+ * interrupted recording whose capture never reached the host) and that file is still
+ * there now. The size check comes first so a row known to have no file costs no disk read.
+ */
+async function hasPlayableFile(
+  record: VideoRecordingRecord,
+  { statFileSize }: VideoRecordingManagerDependencies,
+): Promise<boolean> {
+  return record.sizeBytes > 0 && (await statFileSize(record.filePath)) > 0;
+}
+
+export async function lookupLatestVideoRecording(
+  scope: { ownerSessionUuid?: string } = {},
+): Promise<LatestVideoRecordingLookup> {
+  const deps = await getVideoRecordingDependencies();
+  const recordings = await deps.recordingRepository.listRecordings({
+    status: ["completed", "interrupted"],
+    orderByStartedAt: "desc",
+    ownerSessionUuid: scope.ownerSessionUuid,
+  });
+  for (const record of recordings) {
+    if (await hasPlayableFile(record, deps)) {
+      return { recording: toMetadata(record) };
+    }
+  }
+  const newest = recordings[0];
+  return {
+    recording: null,
+    newestWithoutFile: newest && { recordingId: newest.recordingId, status: newest.status },
+  };
+}
+
 export async function getLatestVideoRecordingMetadata(
   scope: { ownerSessionUuid?: string } = {},
 ): Promise<VideoRecordingMetadata | null> {
-  const { recordingRepository } = await getVideoRecordingDependencies();
-  const recordings = await recordingRepository.listRecordings({
-    status: ["completed", "interrupted"],
-    orderByStartedAt: "desc",
-    limit: 1,
-    ownerSessionUuid: scope.ownerSessionUuid,
-  });
-  return recordings[0] ? toMetadata(recordings[0]) : null;
+  return (await lookupLatestVideoRecording(scope)).recording;
 }
 
 async function deleteVideoRecording(

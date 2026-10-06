@@ -35,7 +35,7 @@ function metadata(overrides: Partial<VideoRecordingMetadata> = {}): VideoRecordi
 
 function store(overrides: Partial<VideoRecordingResourceStore> = {}): VideoRecordingResourceStore {
   return {
-    getLatest: async () => null,
+    lookupLatest: async () => ({ recording: null }),
     getById: async () => null,
     list: async () => [],
     readFile: async () => Buffer.from("video-bytes"),
@@ -102,16 +102,46 @@ describe("default archive root", () => {
 
 describe("getLatestVideoRecording", () => {
   test("reports that no recordings are available when the store is empty", async () => {
-    const content = await getLatestVideoRecording(store({ getLatest: async () => null }));
+    const content = await getLatestVideoRecording(
+      store({ lookupLatest: async () => ({ recording: null }) }),
+    );
     expect(content.uri).toBe(VIDEO_RESOURCE_URIS.LATEST);
     expect(parse(content.text).error).toContain("No video recordings available");
   });
+
+  test.each([
+    ["interrupted", "was interrupted and has no file"],
+    ["completed", "has no file on disk any more"],
+  ] as const)(
+    "says why nothing is playable when the newest recording is %s without a file (#10187)",
+    async (status, why) => {
+      let readCalled = false;
+      const content = await getLatestVideoRecording(
+        store({
+          lookupLatest: async () => ({
+            recording: null,
+            newestWithoutFile: { recordingId: "rec-new", status },
+          }),
+          readFile: async () => {
+            readCalled = true;
+            return Buffer.from("never read");
+          },
+        }),
+      );
+      expect(readCalled).toBe(false);
+      expect(content.blob).toBeUndefined();
+      expect(parse(content.text)).toEqual({
+        error: `No playable video recording is available: the newest recording rec-new ${why}.`,
+        newestRecording: { recordingId: "rec-new", status },
+      });
+    },
+  );
 
   test("returns the metadata and base64 video for the latest recording", async () => {
     const latest = metadata({ recordingId: "latest-1" });
     const content = await getLatestVideoRecording(
       store({
-        getLatest: async () => latest,
+        lookupLatest: async () => ({ recording: latest }),
         getById: async () => latest,
         readFile: async () => Buffer.from("abc"),
       }),
@@ -234,6 +264,30 @@ describe("buildVideoResourceContent", () => {
     expect(readCalled).toBe(false);
     expect(content.blob).toBeUndefined();
   });
+
+  test.each([
+    [0, "it was interrupted before a file was saved"],
+    [1024, "the file was deleted or moved"],
+  ])(
+    "an explicit read of a recording with no file on disk (size %d) says so (#10187)",
+    async (sizeBytes, why) => {
+      const content = await buildVideoResourceContent(
+        metadata({ sizeBytes }),
+        buildVideoArchiveItemUri("rec-1"),
+        store({
+          readFile: async () => {
+            throw Object.assign(new Error("ENOENT: no such file or directory"), {
+              code: "ENOENT",
+            });
+          },
+        }),
+      );
+      expect(parse(content.text).error).toBe(
+        `Failed to read video data: Recording rec-1 has no video file on disk (${why})`,
+      );
+      expect(content.blob).toBeUndefined();
+    },
+  );
 
   test("reports a read error when the video file cannot be read", async () => {
     const content = await buildVideoResourceContent(

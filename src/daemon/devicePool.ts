@@ -495,8 +495,8 @@ export interface DeviceSessionExecutionCanceller {
   /** Same injected cancellation/drain seam, for work with no bound session. */
   cancelDeviceExecutions?(
     deviceId: string,
-    reason: string,
-    options?: { excludeExecutionId?: string },
+    reason: string | Error,
+    options?: { excludeExecutionId?: string; onlySessionUuid?: string },
   ): Promise<number>;
   (sessionId: string, reason: string, options?: { excludeExecutionId?: string }): Promise<number>;
 }
@@ -6193,11 +6193,19 @@ export class DevicePool {
     sessionId: string,
   ): Promise<void> {
     try {
+      // Scoped to this session: another session's or a sessionless read on the
+      // still-booted old device must keep running.
       const cancelled =
         (await this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(
           previousDeviceId,
-          `session-rebound:${sessionId}:${previousDeviceId}`,
-          { excludeExecutionId: this.ambientExecutionIdReader?.getExecutionId() },
+          new ActionableError(
+            `Session ${sessionId} was rebound from device '${previousDeviceId}' to another device ` +
+              "by setActiveDevice; this call was cancelled because it was still driving the old device.",
+          ),
+          {
+            excludeExecutionId: this.ambientExecutionIdReader?.getExecutionId(),
+            onlySessionUuid: sessionId,
+          },
         )) ?? 0;
       if (cancelled > 0) {
         logger.info(

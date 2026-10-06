@@ -49,7 +49,7 @@ import {
   parseStepParams,
 } from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
-import { StepToolResultCollector } from "./stepToolResults";
+import { PlanToolResultsBudget, StepToolResultCollector } from "./stepToolResults";
 import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
@@ -146,13 +146,14 @@ function completedStepPayload(
 }
 
 /** Every device track's `toolResults`, ordered by plan step index, or nothing when none ran. */
-function mergedToolResultsField(tracks: { toolResults: PlanStepToolResult[] }[]): {
-  toolResults?: PlanStepToolResult[];
-} {
+function mergedToolResultsField(
+  tracks: { toolResults: PlanStepToolResult[] }[],
+  budget: PlanToolResultsBudget,
+): ReturnType<StepToolResultCollector["asField"]> {
   const toolResults = tracks
     .flatMap((track) => track.toolResults)
     .sort((a, b) => a.stepIndex - b.stepIndex);
-  return toolResults.length > 0 ? { toolResults } : {};
+  return { ...(toolResults.length > 0 ? { toolResults } : {}), ...budget.asField() };
 }
 
 /** The optional-step skip record shared by every "tool answered but the step failed" branch. */
@@ -1160,6 +1161,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const failures: ParallelTrackFailure[] = [];
     // Tells survivors that a barrier/criticalSection can no longer be satisfied (#10025).
     const participants = new ParticipantFailureTracker(plan);
+    // One toolResults budget for the whole plan, not one per device track.
+    const toolResultsBudget = new PlanToolResultsBudget();
 
     // Execute each device track in parallel
     const devicePromises = partitionedPlan.devices.map(async (device, deviceOrder) => {
@@ -1181,6 +1184,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           combinedSignal,
           executionOptions,
           participants,
+          toolResultsBudget,
         );
         // An ordinary failing callback aborts synchronously below. Failures
         // observed after that abort may be cancelled siblings, even at a lower
@@ -1361,7 +1365,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
-      ...mergedToolResultsField(results),
+      ...mergedToolResultsField(results, toolResultsBudget),
     };
   }
 
@@ -1447,6 +1451,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     signal?: AbortSignal,
     executionOptions?: PlanExecutionOptions,
     participants?: ParticipantFailureTracker,
+    toolResultsBudget?: PlanToolResultsBudget,
   ): Promise<{
     success: boolean;
     executedSteps: number;
@@ -1467,7 +1472,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     let executedSteps = 0;
     const skippedSteps: DeviceSkippedStepResult[] = [];
     const warnings: PlanStepWarnings[] = [];
-    const toolResults = new StepToolResultCollector();
+    const toolResults = new StepToolResultCollector(toolResultsBudget);
 
     try {
       for (let trackIndex = 0; trackIndex < track.length; trackIndex++) {

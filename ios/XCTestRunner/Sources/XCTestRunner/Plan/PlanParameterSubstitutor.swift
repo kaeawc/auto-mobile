@@ -16,7 +16,8 @@ import Foundation
 ///   raw, so numeric and boolean tool arguments keep the YAML type they always had; any other value
 ///   (`shoes #1`, `size: large`, leading space, line break, ...) rewrites the whole scalar as
 ///   `"..."`, so it is a string;
-/// - a block scalar (`|`, `>`): the value is spliced raw, line breaks re-indented;
+/// - a block scalar (`|`, `>`): the value is spliced raw, line breaks re-indented; a folded (`>`)
+///   scalar would fold a line break to a space, so a multi-line value there throws `invalidPlan`;
 /// - a comment: left untouched.
 ///
 /// Every placeholder is replaced in ONE pass over the original text, so a value that itself
@@ -25,7 +26,10 @@ import Foundation
 /// Mirrors the Android runner's `PlanParameterSubstitution`, which does the same on a parsed YAML
 /// tree. Known limit (the scanner is not a full YAML parser): an unquoted scalar that continues on a
 /// following line cannot be rewritten as `"..."`, so a non-plain-safe value in one throws
-/// `invalidPlan` instead of guessing — write the placeholder in a double-quoted scalar.
+/// `invalidPlan` instead of guessing — write the placeholder in a double-quoted scalar. The same
+/// holds for anything else the scanner cannot classify with certainty (an unquoted flow key directly
+/// followed by `:"...`, a flow collection still open at a line that cannot continue it): it throws
+/// `invalidPlan` naming the line rather than guess.
 enum PlanParameterSubstitutor {
     /// Substitute into a plain string (secret key names, the redaction path's bare `${key}`): a
     /// single pass that never rescans substituted text.
@@ -149,7 +153,9 @@ private enum YAMLScalar {
 
     /// True when `value` can be written as an unquoted scalar and read back as that same text (or the
     /// number/boolean/null it spells), in a block context or — with `flow` — inside `[...]`/`{...}`.
-    static func isPlainSafe(_ value: String, flow: Bool) -> Bool {
+    /// `continuation`: the text is the first token of a continuation line of a multi-line plain
+    /// scalar, so it does not start a scalar and only a leading `#` (a comment line) is a hazard.
+    static func isPlainSafe(_ value: String, flow: Bool, continuation: Bool = false) -> Bool {
         let scalars = Array(value.unicodeScalars)
         guard let first = scalars.first, let last = scalars.last else {
             return false
@@ -157,10 +163,10 @@ private enum YAMLScalar {
         if isSpace(first) || isSpace(last) || scalars.contains(where: isLineBreakOrControl) {
             return false
         }
-        if ",[]{}#&*!|>'\"%@`".unicodeScalars.contains(first) {
+        if continuation ? first == "#" : ",[]{}#&*!|>'\"%@`".unicodeScalars.contains(first) {
             return false
         }
-        if "-?:".unicodeScalars.contains(first), scalars.count == 1 || isSpace(scalars[1]) {
+        if !continuation, "-?:".unicodeScalars.contains(first), scalars.count == 1 || isSpace(scalars[1]) {
             return false
         }
         if last == ":" {
@@ -198,6 +204,12 @@ private struct PlanScanner {
     private var blockParentIndent: Int?
     private var openQuote: QuoteKind?
     private var flowDepth = 0
+    /// Line number and indentation of the line that opened the outermost open flow collection.
+    private var flowOpen: (line: Int, indent: Int)?
+    /// A block-context unquoted scalar ended its line: parent indent of its node, whether it was
+    /// rewritten as `"..."`, and its line.
+    private var plainContinuation: (parent: Int, rewritten: Bool, line: Int)?
+    private var blockIsFolded = false
 
     init(placeholders: Placeholders) {
         self.placeholders = placeholders
@@ -214,6 +226,16 @@ private struct PlanScanner {
         var lastDashColumn: Int?
         var firstNodeColumn: Int?
         var sawValueIndicator = false
+        /// The last non-space token on this line was a closing quote, so a `:` here is the value
+        /// indicator of a JSON-like key even with no space after it (`{"k":"v"}`).
+        var afterQuote = false
+        /// The line's last token was an unquoted scalar running to the end of the line, in block
+        /// context: the next, more-indented line continues it.
+        var endsInPlain = false
+        /// That scalar was rewritten as `"..."`, so a continuation line could no longer be joined.
+        var rewroteAsQuoted = false
+        /// Set on a continuation line: the parent indent of the scalar it continues.
+        var continuationParent: Int?
 
         init(line: [Unicode.Scalar], number: Int) {
             self.line = line
@@ -232,25 +254,99 @@ private struct PlanScanner {
     mutating func process(line: [Unicode.Scalar], lineNumber: Int) throws -> String {
         if let parent = blockParentIndent {
             if isBlank(line) || indentation(of: line) > parent {
-                return expandBlockLine(line)
+                return try expandBlockLine(line, number: lineNumber)
             }
             blockParentIndent = nil
         }
         var cursor = Cursor(line: line, number: lineNumber)
         if let kind = openQuote {
             try continueQuote(kind, &cursor)
+        } else {
+            try checkFlowCanContinue(cursor)
+            try beginPlainContinuation(&cursor)
         }
         while cursor.index < line.count {
             try scanNext(&cursor)
         }
+        rememberPlainContinuation(cursor)
         return String(String.UnicodeScalarView(cursor.output))
+    }
+
+    // MARK: Structure bounds
+
+    /// A flow collection in block context continues only on lines indented deeper than the line that
+    /// opened it (a closing `]`/`}` may sit at the opener's own indent). A line that is not means the
+    /// collection was never closed, or this scanner mistook text for a bracket; either way flow mode
+    /// must not leak onto the rest of the file.
+    private func checkFlowCanContinue(_ cursor: Cursor) throws {
+        guard flowDepth > 0, let open = flowOpen, let first = firstNonSpace(cursor.line),
+              first != "#", indentation(of: cursor.line) < open.indent
+              || (indentation(of: cursor.line) == open.indent && !"]}".unicodeScalars.contains(first))
+        else {
+            return
+        }
+        throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+            "Plan line \(cursor.number): the flow collection opened on line \(open.line) is not closed "
+                + "here, so parameters cannot be substituted safely. Close the '[' or '{' (or quote the "
+                + "text) and keep the collection's lines indented under it."
+        )
+    }
+
+    /// A more-indented line right after a block-context unquoted scalar continues that scalar: its
+    /// text is plain, so a leading quote or bracket on it is NOT a quoted scalar or flow collection.
+    private mutating func beginPlainContinuation(_ cursor: inout Cursor) throws {
+        guard let pending = plainContinuation else { return }
+        plainContinuation = nil
+        if isBlank(cursor.line) {
+            plainContinuation = pending
+            return
+        }
+        guard indentation(of: cursor.line) > pending.parent, firstNonSpace(cursor.line) != "#" else {
+            return
+        }
+        if pending.rewritten {
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                "Plan line \(cursor.number): this continues the unquoted scalar from line "
+                    + "\(pending.line), whose parameter value had to be written as a double-quoted scalar, "
+                    + "which cannot span lines. Write the placeholder in a double-quoted scalar (\"${name}\")."
+            )
+        }
+        cursor.continuationParent = pending.parent
+        cursor.atNodeStart = false
+        while let scalar = cursor.peek(), YAMLScalar.isSpace(scalar) {
+            copy(&cursor)
+        }
+        try scanPlain(&cursor, continuation: true)
+    }
+
+    private mutating func rememberPlainContinuation(_ cursor: Cursor) {
+        guard cursor.endsInPlain, flowDepth == 0, let parent = plainParentIndent(cursor) else {
+            return
+        }
+        plainContinuation = (parent, cursor.rewroteAsQuoted, cursor.number)
+    }
+
+    /// Indent a continuation line must exceed, or nil when this line does not pin it down (a lone
+    /// value on its own line): then no continuation is assumed.
+    private func plainParentIndent(_ cursor: Cursor) -> Int? {
+        if let inherited = cursor.continuationParent { return inherited }
+        return cursor.sawValueIndicator ? cursor.firstNodeColumn : cursor.lastDashColumn
     }
 
     // MARK: Dispatch
 
     private mutating func scanNext(_ cursor: inout Cursor) throws {
         guard let scalar = cursor.peek() else { return }
+        let followsQuote = cursor.afterQuote
+        if !YAMLScalar.isSpace(scalar) {
+            cursor.afterQuote = false
+        }
         if YAMLScalar.isSpace(scalar) {
+            copy(&cursor)
+        } else if scalar == ":", flowDepth > 0, followsQuote {
+            // JSON-like key: `{"k":"v"}`, `{"k" :"v"}`. The colon is the value indicator whatever
+            // follows it, so the value is its own node and not part of a plain scalar `:"v"`.
+            noteIndicator(scalar, &cursor)
             copy(&cursor)
         } else if scalar == "#", cursor.index == 0 || YAMLScalar.isSpace(cursor.line[cursor.index - 1]) {
             cursor.output += cursor.line[cursor.index...]
@@ -264,11 +360,17 @@ private struct PlanScanner {
             try scanSingleQuoted(&cursor)
         } else if "[{".unicodeScalars.contains(scalar) {
             markNode(&cursor)
+            if flowDepth == 0 {
+                flowOpen = (cursor.number, indentation(of: cursor.line))
+            }
             flowDepth += 1
             copy(&cursor)
             cursor.atNodeStart = true
         } else if "]}".unicodeScalars.contains(scalar) {
             flowDepth = max(0, flowDepth - 1)
+            if flowDepth == 0 {
+                flowOpen = nil
+            }
             copy(&cursor)
             cursor.atNodeStart = false
         } else if scalar == ",", flowDepth > 0 {
@@ -309,6 +411,7 @@ private struct PlanScanner {
     }
 
     private mutating func openBlockScalar(_ cursor: inout Cursor) {
+        blockIsFolded = cursor.line[cursor.index] == ">"
         let indent = indentation(of: cursor.line)
         blockParentIndent =
             cursor.sawValueIndicator
@@ -320,7 +423,7 @@ private struct PlanScanner {
 
     // MARK: Plain scalars
 
-    private mutating func scanPlain(_ cursor: inout Cursor) throws {
+    private mutating func scanPlain(_ cursor: inout Cursor, continuation: Bool = false) throws {
         markNode(&cursor)
         let start = cursor.index
         let end = plainScalarEnd(cursor)
@@ -332,11 +435,19 @@ private struct PlanScanner {
         let endsAsKey = end < cursor.line.count && cursor.line[end] == ":"
 
         let expanded = placeholders.expand(token)
+        if expanded.replaced, flowDepth > 0, hasColonBeforeQuote(token) {
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                "Plan line \(cursor.number): an unquoted flow key directly followed by a quote after "
+                    + "':' is read differently by YAML parsers, so a parameter cannot be substituted "
+                    + "safely. Put a space after the ':' or quote the key."
+            )
+        }
         if !expanded.replaced {
             cursor.output += token
-        } else if YAMLScalar.isPlainSafe(expanded.text, flow: flowDepth > 0) {
+        } else if YAMLScalar.isPlainSafe(expanded.text, flow: flowDepth > 0, continuation: continuation) {
             cursor.output += expanded.text.unicodeScalars
         } else if cursor.atNodeStart || endsAsKey {
+            cursor.rewroteAsQuoted = !endsAsKey
             cursor.output += YAMLScalar.doubleQuoted(expanded.text).unicodeScalars
         } else {
             throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
@@ -348,6 +459,12 @@ private struct PlanScanner {
         cursor.output += cursor.line[trimmed ..< end]
         cursor.index = end
         cursor.atNodeStart = false
+        cursor.endsInPlain = end == cursor.line.count
+    }
+
+    /// True when the scalar holds a `:` immediately followed by a quote character.
+    private func hasColonBeforeQuote(_ token: ArraySlice<Unicode.Scalar>) -> Bool {
+        zip(token, token.dropFirst()).contains { $0 == ":" && ($1 == "\"" || $1 == "'") }
     }
 
     /// Index one past the plain scalar starting at the cursor (before trimming trailing space).
@@ -418,6 +535,7 @@ private struct PlanScanner {
     private mutating func closeQuote(_ cursor: inout Cursor) {
         openQuote = nil
         cursor.atNodeStart = false
+        cursor.afterQuote = true
     }
 
     private func appendQuotedValue(_ value: String, kind: QuoteKind, _ cursor: inout Cursor) throws {
@@ -459,6 +577,7 @@ private struct PlanScanner {
         }
         cursor.index = close + 1
         cursor.atNodeStart = false
+        cursor.afterQuote = true
     }
 
     /// Index of the closing `'` at or after `index`, honouring the `''` escape; nil if unterminated.
@@ -481,13 +600,23 @@ private struct PlanScanner {
 
     /// A block scalar's content is raw text: splice the value, re-indenting its line breaks so they
     /// stay inside the scalar. CRLF and lone CR become LF.
-    private func expandBlockLine(_ line: [Unicode.Scalar]) -> String {
+    private func expandBlockLine(_ line: [Unicode.Scalar], number: Int) throws -> String {
         let indent = String(String.UnicodeScalarView(line.prefix { $0 == " " }))
+        var foldedLineBreak = false
         let expanded = placeholders.expand(line[...]) { value in
-            value
+            foldedLineBreak = foldedLineBreak
+                || (blockIsFolded && value.unicodeScalars.contains { $0 == "\n" || $0 == "\r" })
+            return value
                 .replacingOccurrences(of: "\r\n", with: "\n")
                 .replacingOccurrences(of: "\r", with: "\n")
                 .replacingOccurrences(of: "\n", with: "\n" + indent)
+        }
+        if foldedLineBreak {
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                "Plan line \(number): a parameter value with a line break cannot be substituted into a "
+                    + "folded (>) block scalar, which would fold the break into a space. Use a literal (|) "
+                    + "block scalar or a double-quoted scalar (\"${name}\")."
+            )
         }
         return expanded.text
     }
@@ -500,5 +629,9 @@ private struct PlanScanner {
 
     private func indentation(of line: [Unicode.Scalar]) -> Int {
         line.prefix { $0 == " " }.count
+    }
+
+    private func firstNonSpace(_ line: [Unicode.Scalar]) -> Unicode.Scalar? {
+        line.first { !YAMLScalar.isSpace($0) }
     }
 }

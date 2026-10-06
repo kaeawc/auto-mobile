@@ -6,6 +6,7 @@ import type {
   PlanSkippedStep,
   PlanStepToolResult,
   PlanStepWarnings,
+  PlanToolResultsTruncation,
 } from "./ExecutePlanResult";
 
 export interface PlanStep {
@@ -81,6 +82,8 @@ export interface PlanExecutionResult {
   skippedSteps?: PlanSkippedStep[];
   /** Bounded tool payloads of completed steps, in plan step order (issue #10090). */
   toolResults?: PlanStepToolResult[];
+  /** Set when the plan-wide `toolResults` budget ran out (see {@link PlanToolResultsTruncation}). */
+  toolResultsTruncated?: PlanToolResultsTruncation;
 }
 
 export interface DeviceExecutionResult {

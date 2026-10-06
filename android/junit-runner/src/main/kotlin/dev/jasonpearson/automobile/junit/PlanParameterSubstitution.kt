@@ -183,7 +183,9 @@ internal object PlanParameterSubstitution {
     // did.
     private fun typedPlain(node: ScalarNode, value: String): Node {
       val tag = resolver.resolve(NodeId.scalar, value, true)
-      if (tag == Tag.STR) return quoted(node, value)
+      // An empty value would resolve to YAML null. The iOS runner writes `""`, so both runners
+      // treat an empty parameter as an empty string.
+      if (tag == Tag.STR || value.isEmpty()) return quoted(node, value)
       return ScalarNode(tag, value, node.startMark, node.endMark, ScalarStyle.PLAIN)
     }
 

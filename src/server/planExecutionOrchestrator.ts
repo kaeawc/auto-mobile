@@ -10,6 +10,7 @@ import {
   ExecutePlanStepDebugInfo,
   PlanExecutionOptions,
   type PlanStepToolResult,
+  type PlanToolResultsTruncation,
   type PlanStepWarnings,
   type PlanSkippedStep,
   type PlanDeviceFailure,
@@ -204,6 +205,13 @@ function planToolResultsField(toolResults: PlanStepToolResult[] | undefined): {
   toolResults?: PlanStepToolResult[];
 } {
   return toolResults?.length ? { toolResults } : {};
+}
+
+/** The toolResultsTruncated marker, present only when the plan's shared budget ran out. */
+function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | undefined): {
+  toolResultsTruncated?: PlanToolResultsTruncation;
+} {
+  return truncated ? { toolResultsTruncated: truncated } : {};
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */
@@ -429,6 +437,7 @@ export class PlanExecutionOrchestrator {
         ...planWarningsField(result.warnings),
         ...planSkippedStepsField(result.skippedSteps),
         ...planToolResultsField(result.toolResults),
+        ...planToolResultsTruncatedField(result.toolResultsTruncated),
         ...planDeviceFailuresField(result.deviceFailures),
         videoWarnings: finalizedVideo.videoWarnings,
         ...(finalizedVideo.videoFilePaths.length > 0

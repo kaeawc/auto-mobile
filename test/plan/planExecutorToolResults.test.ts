@@ -6,6 +6,7 @@ import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import {
   MAX_PLAN_TOOL_RESULTS_CHARS,
   MAX_STEP_TOOL_RESULT_CHARS,
+  PlanToolResultsBudget,
   StepToolResultCollector,
   boundStepToolResult,
 } from "../../src/utils/plan/stepToolResults";
@@ -175,23 +176,55 @@ describe("boundStepToolResult / StepToolResultCollector", () => {
     expect(truncated).toBe(true);
   });
 
-  test("once the plan budget is spent later steps carry only success", () => {
+  test("once the plan budget is spent later steps are omitted and counted, never widening the total", () => {
     const collector = new StepToolResultCollector();
     const perStep = Math.floor(MAX_STEP_TOOL_RESULT_CHARS * 0.9);
-    const steps = Math.ceil(MAX_PLAN_TOOL_RESULTS_CHARS / perStep) + 2;
+    const steps = Math.ceil(MAX_PLAN_TOOL_RESULTS_CHARS / perStep) + 40;
     for (let i = 0; i < steps; i++) {
       collector.add(i, "tapOn", { success: true, message: "m".repeat(perStep - 40) });
     }
-    const entries = collector.toArray() ?? [];
-    expect(entries).toHaveLength(steps);
-    expect(entries[0]?.truncated).toBeUndefined();
-    expect(entries[steps - 1]).toEqual({
-      stepIndex: steps - 1,
-      tool: "tapOn",
-      result: { success: true },
-      truncated: true,
+    const { toolResults = [], toolResultsTruncated } = collector.asField();
+    expect(toolResults.length).toBeLessThan(steps);
+    expect(toolResults[0]?.truncated).toBeUndefined();
+    expect(JSON.stringify(toolResults).length).toBeLessThanOrEqual(MAX_PLAN_TOOL_RESULTS_CHARS);
+    expect(toolResultsTruncated).toEqual({ omittedSteps: steps - toolResults.length });
+    // The retained entries are a prefix of what completed.
+    expect(toolResults.map((entry) => entry.stepIndex)).toEqual(
+      toolResults.map((_entry, index) => index),
+    );
+  });
+
+  test("a small entry after the budget ran out is still omitted", () => {
+    const budget = new PlanToolResultsBudget(200);
+    const collector = new StepToolResultCollector(budget);
+    collector.add(0, "tapOn", { success: true, message: "m".repeat(120) });
+    collector.add(1, "tapOn", { success: true, message: "m".repeat(120) });
+    collector.add(2, "tapOn", { success: true });
+    expect(collector.toArray()?.map((entry) => entry.stepIndex)).toEqual([0]);
+    expect(budget.asField()).toEqual({ toolResultsTruncated: { omittedSteps: 2 } });
+  });
+
+  test("collectors sharing a budget share one hard total, and no marker appears under it", () => {
+    const budget = new PlanToolResultsBudget(500);
+    const a = new StepToolResultCollector(budget);
+    const b = new StepToolResultCollector(budget);
+    a.add(0, "tapOn", { success: true }, "A");
+    b.add(1, "tapOn", { success: true }, "B");
+    expect(budget.asField()).toEqual({});
+    for (let i = 2; i < 40; i++) {
+      (i % 2 === 0 ? a : b).add(i, "tapOn", { success: true, message: "m".repeat(60) }, "X");
+    }
+    const kept = [...(a.toArray() ?? []), ...(b.toArray() ?? [])];
+    expect(JSON.stringify(kept).length).toBeLessThanOrEqual(500);
+    expect(budget.asField().toolResultsTruncated?.omittedSteps).toBe(40 - kept.length);
+  });
+
+  test("a plan under the budget carries no truncation marker", () => {
+    const collector = new StepToolResultCollector();
+    collector.add(0, "tapOn", { success: true });
+    expect(collector.asField()).toEqual({
+      toolResults: [{ stepIndex: 0, tool: "tapOn", result: { success: true } }],
     });
-    expect(JSON.stringify(entries).length).toBeLessThan(MAX_PLAN_TOOL_RESULTS_CHARS + 1024);
   });
 
   test("a device label is carried and entries are ordered by plan step index", () => {
@@ -243,6 +276,37 @@ describe("PlanExecutor toolResults edge shapes (#10090)", () => {
     });
   });
 
+  test("multi-device tracks share one hard plan budget and report the omitted steps", async () => {
+    const bigTool = "toolResultsBig";
+    ToolRegistry.register(
+      bigTool,
+      "Large payload",
+      z.object({ device: z.string(), index: z.number() }),
+      async () => createStructuredToolResponse({ success: true, message: "m".repeat(7_000) }),
+    );
+    try {
+      const perTrack = 8;
+      const steps = ["A", "B"].flatMap((device, d) =>
+        Array.from({ length: perTrack }, (_unused, i) => ({
+          tool: bigTool,
+          params: { device, index: d * perTrack + i },
+        })),
+      );
+      const result = await executor.executePlan(
+        { name: "big-parallel", devices: ["A", "B"], steps },
+        0,
+      );
+      expect(result.success).toBe(true);
+      const kept = result.toolResults ?? [];
+      expect(JSON.stringify(kept).length).toBeLessThanOrEqual(MAX_PLAN_TOOL_RESULTS_CHARS);
+      expect(kept.length).toBeLessThan(steps.length);
+      expect(new Set(kept.map((entry) => entry.device))).toEqual(new Set(["A", "B"]));
+      expect(result.toolResultsTruncated).toEqual({ omittedSteps: steps.length - kept.length });
+    } finally {
+      unregisterTemporaryTools(bigTool);
+    }
+  });
+
   test("multi-device tracks report plan step indexes with their device label", async () => {
     const result = await executor.executePlan(
       {
@@ -257,6 +321,7 @@ describe("PlanExecutor toolResults edge shapes (#10090)", () => {
       0,
     );
     expect(result.success).toBe(true);
+    expect(result).not.toHaveProperty("toolResultsTruncated");
     expect(
       result.toolResults?.map((entry) => [entry.stepIndex, entry.device, entry.result]),
     ).toEqual([

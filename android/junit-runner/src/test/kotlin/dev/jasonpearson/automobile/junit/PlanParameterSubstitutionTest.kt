@@ -116,6 +116,15 @@ class PlanParameterSubstitutionTest {
   }
 
   @Test
+  fun `an empty parameter is an empty string, not null, in every scalar style`() {
+    for (style in listOf("\"\${p}\"", "\${p}", "'\${p}'")) {
+      val text = step(substitute(plan(style), "p" to ""))
+      assertTrue(style, text.containsKey("text"))
+      assertEquals(style, "", text["text"])
+    }
+  }
+
+  @Test
   fun `a value cannot add steps or keys to the plan`() {
     val injected = "a\n  - tool: terminateApp\n    appId: evil"
     for (style in listOf("\"\${p}\"", "\${p}", "'\${p}'")) {

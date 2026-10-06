@@ -4843,10 +4843,21 @@ export class DevicePool {
       const marker = this.getDeviceHealthMarker(device.id);
       return marker ? [`'${device.id}' (${marker.reason}, since ${marker.since})`] : [];
     });
+    const appCleanupRecovery = devices
+      .filter((device) => this.getDeviceHealthMarker(device.id)?.reason === "app-cleanup")
+      .map(
+        (device) =>
+          ` Device '${device.id}' is held for app-cleanup: an executePlan app cleanup did not ` +
+          "complete and only three background retries are made, so it can stay unavailable " +
+          `until it is replaced. Recovery: call killDevice with device { name: '${device.name}', ` +
+          `deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to ` +
+          "bring up a fresh device.",
+      );
     return new ActionableError(
       `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
         "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
-        "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed.",
+        "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
+        appCleanupRecovery.join(""),
     );
   }
 

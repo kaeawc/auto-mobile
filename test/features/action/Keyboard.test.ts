@@ -257,9 +257,36 @@ describe("Keyboard", () => {
       const result = await newKeyboard().execute("open");
 
       expect(result).toMatchObject({ success: true, open: true, message: "Keyboard opened" });
+      expect(fakeClient.focusedInputClickCount).toBe(0);
       expect(fakeClient.nodeActions).toEqual([
         { action: "click", selector: { resourceId: "com.example:id/notes" } },
       ]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
+    test("clicks selectorless focused input without a tap or caret note", async () => {
+      fakeClient.focusedInputClickResult = { success: true, action: "click", totalTimeMs: 1 };
+      fakeHierarchy.setResults([selectorField({ "resource-id": "" }), keyboardWindowHierarchy()]);
+      const result = await newKeyboard().execute("open");
+      expect(result).toMatchObject({ success: true, message: "Keyboard opened" });
+      expect(fakeClient.focusedInputClickCount).toBe(1);
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
+    test("does not tap after an unacknowledged selectorless click", async () => {
+      fakeClient.focusedInputClickResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "Action timeout after 5000ms",
+        dispatched: true,
+        acknowledged: false,
+      };
+      fakeHierarchy.setResults([selectorField({ "resource-id": "" })]);
+      const result = await newKeyboard().execute("open");
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("indeterminate");
       expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
     });
 
@@ -461,7 +488,7 @@ describe("Keyboard", () => {
       });
     });
 
-    test("reports a moved caret when only the tap fallback can show the keyboard", async () => {
+    test("reports a moved caret when an older runner rejects the focused input request", async () => {
       fakeClient.queueInsertStates(
         { isShowingHintText: false, selectionStart: 30, selectionEnd: 30 },
         { isShowingHintText: false, selectionStart: 12, selectionEnd: 12 },
@@ -470,6 +497,9 @@ describe("Keyboard", () => {
 
       const result = await newKeyboard().execute("open");
 
+      expect(fakeClient.focusedInputClickCount).toBe(1);
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(true);
       expect(result.success).toBe(true);
       expect(result.message).toBe(
         "Keyboard opened (the tap used to show it moved the caret from 30-30 to 12-12)",

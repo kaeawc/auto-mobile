@@ -272,6 +272,8 @@ interface CtrlProxyActions {
 
   fun requestSelectAll(requestId: String?)
 
+  fun requestClickFocusedInput(requestId: String?)
+
   fun requestAction(
     requestId: String?,
     action: String,

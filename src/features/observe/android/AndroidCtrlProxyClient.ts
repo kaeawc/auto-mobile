@@ -1188,6 +1188,12 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<A11yActionResult>;
 
+  requestClickFocusedInput(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
+
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
@@ -3642,6 +3648,40 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     selector?: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
+    return this.dispatchActionRequest(
+      action,
+      (requestId) =>
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
+        ),
+      timeoutMs,
+      perf,
+      signal,
+    );
+  }
+
+  async requestClickFocusedInput(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.dispatchActionRequest(
+      "click",
+      (requestId) =>
+        serializeCtrlProxyRequest(ctrlProxyRequests.requestClickFocusedInput({ requestId })),
+      timeoutMs,
+      perf,
+      signal,
+    );
+  }
+
+  private async dispatchActionRequest(
+    action: string,
+    serializeRequest: (requestId: string) => string,
+    timeoutMs: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let pendingRequestId: string | undefined;
@@ -3670,8 +3710,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const requestId = this.requestManager.generateId("action");
       pendingRequestId = requestId;
       logger.debug(
-        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, ` +
-          `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
+        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action})`,
       );
 
       const actionPromise = this.requestManager.register<A11yActionResult>(
@@ -3705,14 +3744,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
-        );
+        const message = serializeRequest(requestId);
         this.ws.send(message);
         dispatched = true;
         logger.debug(
-          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
-            `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
+          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
         );
       });
 
@@ -5222,10 +5258,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.rejectedCommands.add(rejectedCommand);
       }
       const deviceError = message.error || "Runner reported an unstructured protocol error";
-      // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
+      // Preserve capability refusals used by fallback callers, including focused-input clicks.
       const errorText =
         rejectedCommand &&
         [
+          "request_click_focused_input",
           "show_overlay",
           "update_overlay",
           "dismiss_overlay",

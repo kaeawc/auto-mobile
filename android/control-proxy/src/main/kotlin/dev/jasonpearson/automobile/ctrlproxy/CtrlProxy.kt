@@ -2938,6 +2938,43 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
 
+  override fun requestClickFocusedInput(requestId: String?) {
+    rememberedInsert = null
+    val startTime = System.currentTimeMillis()
+    launchRequestScope(requestId) {
+      try {
+        val outcome =
+          clickFocusedInput(
+            findFocusedInput = {
+              findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
+            },
+            click = { node ->
+              nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
+                node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+            },
+            recycle = { node -> node.recycle() },
+          )
+        broadcastActionResult(
+          requestId,
+          "click",
+          outcome.success,
+          outcome.error,
+          System.currentTimeMillis() - startTime,
+        )
+      } catch (e: Exception) {
+        if (e is CancellationException) throw e
+        Log.e(TAG, "Focused input click failed", e)
+        broadcastActionResult(
+          requestId,
+          "click",
+          false,
+          e.message ?: "Focused input click failed",
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    }
+  }
+
   override fun requestAction(
     requestId: String?,
     action: String,

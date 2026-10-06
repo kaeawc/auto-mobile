@@ -132,6 +132,7 @@ import {
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+  createPooledObservationExecutor,
   runObservationRequestBatch,
 } from "./observationRequestBatch";
 import {
@@ -275,6 +276,38 @@ type DeviceSessionRoutingTargets = {
   failuresPush: ReturnType<typeof getFailuresPushServer>;
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
+
+function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
+  return {
+    deviceId: pooledDevice.id,
+    name: pooledDevice.name,
+    platform: pooledDevice.platform,
+    iosVersion: pooledDevice.iosVersion,
+  };
+}
+
+/**
+ * Per-device step of the pooled observation batch. An Android floor is read from the device's
+ * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
+ * floor (issue #9895).
+ */
+function createDaemonObservationExecutor(requestStart: number) {
+  return createPooledObservationExecutor({
+    hostRequestStartMs: requestStart,
+    readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
+      (
+        await defaultAdbClientFactory
+          .create(toBootedDevice(pooledDevice))
+          .getDeviceTimestampMsWithSource(undefined, signal)
+      ).timestampMs,
+    observe: (pooledDevice: PooledDevice, { minTimestamp, signal }) =>
+      new RealObserveScreen(toBootedDevice(pooledDevice)).execute({
+        skipWaitForFresh: false,
+        minTimestamp,
+        signal,
+      }),
+  });
+}
 
 export function getProcessWideAdbServerResetCohort(
   bootedDeviceIds: ReadonlySet<string>,
@@ -2003,20 +2036,7 @@ export class Daemon {
       const requestStart = this.timer.now();
       return runObservationRequestBatch(
         pooledDevices,
-        async (pooledDevice, observationSignal) => {
-          const bootedDevice: BootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: pooledDevice.platform,
-            iosVersion: pooledDevice.iosVersion,
-          };
-          const observeScreen = new RealObserveScreen(bootedDevice);
-          return observeScreen.execute({
-            skipWaitForFresh: false,
-            minTimestamp: requestStart,
-            signal: observationSignal,
-          });
-        },
+        createDaemonObservationExecutor(requestStart),
         {
           timer: this.timer,
           signal,

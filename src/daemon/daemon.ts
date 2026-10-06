@@ -83,6 +83,8 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { NetworkState } from "../server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -614,6 +616,7 @@ export class Daemon {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
         defaultMockLocationClearRegistry.retireDevice(deviceId);
+        NetworkState.getInstance().retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
@@ -648,6 +651,7 @@ export class Daemon {
 
   private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
+    registerNetworkStateSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {

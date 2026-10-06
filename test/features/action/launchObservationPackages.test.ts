@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
+import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   getLaunchObservationPackageNames,
   isLaunchPermissionDialogObservation,
@@ -25,6 +26,60 @@ describe("getLaunchObservationPackageNames", () => {
     } as ObserveResult;
 
     expect(getLaunchObservationPackageNames(observation)).toEqual(["com.fallback"]);
+  });
+
+  describe("while CtrlProxy's own overlay holds window focus (#10000)", () => {
+    const overlayWindows = [
+      { id: 1, type: 1, isFocused: false },
+      { id: 2, type: 4, isFocused: true },
+    ];
+
+    test("drops the overlay package in favour of the app behind it", () => {
+      const observation = {
+        activeWindow: { appId: "com.expected" },
+        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: overlayWindows },
+      } as ObserveResult;
+
+      expect(getLaunchObservationPackageNames(observation)).toEqual(["com.expected"]);
+    });
+
+    test("names the foreground task's package when only the overlay package is reported", () => {
+      const observation = {
+        activeWindow: { appId: CTRL_PROXY_PACKAGE },
+        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: overlayWindows },
+        backStack: {
+          currentTaskId: 441,
+          tasks: [
+            { id: 347, packageName: "com.launcher" },
+            { id: 441, packageName: "com.expected" },
+          ],
+        },
+      } as ObserveResult;
+
+      expect(getLaunchObservationPackageNames(observation)).toEqual(["com.expected"]);
+    });
+
+    test("keeps the overlay package when no app behind it can be named", () => {
+      const observation = {
+        activeWindow: { appId: CTRL_PROXY_PACKAGE },
+        viewHierarchy: { packageName: CTRL_PROXY_PACKAGE, windows: overlayWindows },
+      } as ObserveResult;
+
+      expect(getLaunchObservationPackageNames(observation)).toEqual([CTRL_PROXY_PACKAGE]);
+    });
+
+    test("a CtrlProxy-labelled capture without an overlay window is still reported as CtrlProxy", () => {
+      const observation = {
+        activeWindow: { appId: CTRL_PROXY_PACKAGE },
+        viewHierarchy: {
+          packageName: CTRL_PROXY_PACKAGE,
+          windows: [{ id: 1, type: 1, isFocused: true }],
+        },
+        backStack: { currentTaskId: 441, tasks: [{ id: 441, packageName: "com.expected" }] },
+      } as ObserveResult;
+
+      expect(getLaunchObservationPackageNames(observation)).toEqual([CTRL_PROXY_PACKAGE]);
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
+import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
 import { ObserveResult } from "../../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
@@ -126,6 +127,33 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       createSwipeOn().execute({ direction: "up" }, undefined, controller.signal),
     ).rejects.toThrow("Operation cancelled");
     expect(fakeGesture.getSwipeCalls()).toEqual([]);
+  });
+
+  test("a cancelled lookFor search keeps its swipe count through the top-level catch and scrolls no further (#10151)", async () => {
+    const controller = new AbortController();
+    const scrolls = () => fakeCtrlProxy.getActionHistory().length;
+    // Every scroll changes the page, so the search never ends by itself.
+    fakeObserveScreen.setObserveResult(() => {
+      if (scrolls() === 2) {
+        controller.abort();
+      }
+      return createObserveResult(`page-${scrolls()}`);
+    });
+
+    const error = await createSwipeOn()
+      .execute(
+        { direction: "up", lookFor: { text: "Never There", maxTime: 60_000 } },
+        undefined,
+        controller.signal,
+      )
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+
+    expect(error).toBeInstanceOf(SwipeSearchCancelledError);
+    expect((error as SwipeSearchCancelledError).swipesDispatched).toBe(2);
+    expect(scrolls()).toBe(2);
   });
 
   test("lookFor target below the viewport with finger-up issues scroll_forward and reaches it in one scroll", async () => {

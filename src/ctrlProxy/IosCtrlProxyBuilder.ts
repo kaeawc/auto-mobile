@@ -1,4 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { SingleFlight } from "../utils/cache/SingleFlight";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { logger } from "../utils/logger";
@@ -275,9 +277,19 @@ export class IosCtrlProxyBuilder {
    * `IOSCtrlProxyBundleDownloader.extractBundle`) would wipe out the tree the
    * first just populated. Mirrors the existing static `prefetchPromise` idiom
    * below, but scoped per-instance since `build()` is an instance method.
+   *
+   * The flight is owned by the builder, not by the first caller (#10200): it runs
+   * under a flight-scoped signal that aborts only when no waiter is left, and each
+   * waiter stops waiting on its own signal without cancelling the download for the
+   * others. `buildInFlight` is the flight's own promise, retained after it settles
+   * until every waiter has resolved its platform paths.
    */
   private buildInFlight: Promise<CtrlProxyIosBuildResult> | null = null;
   private buildWaiters = 0;
+  private readonly buildFlights = new SingleFlight<"build", CtrlProxyIosBuildResult>();
+  // Settles when the latest flight has wound down, so a flight started after every
+  // waiter abandoned its predecessor never overlaps that one's remaining work.
+  private buildSettled: Promise<void> = Promise.resolve();
 
   private constructor(
     config: Partial<CtrlProxyIosBuildConfig> = {},
@@ -718,7 +730,7 @@ export class IosCtrlProxyBuilder {
     // Local validation is platform-specific and does not extract shared artifacts.
     const build = this.isLocalBuildMode()
       ? this.doBuild(perf, platform)
-      : (this.buildInFlight ??= this.doBuild(perf, platform));
+      : this.joinBuildFlight(perf, platform);
     try {
       const shared = await build;
       if (!shared.success) {
@@ -746,6 +758,57 @@ export class IosCtrlProxyBuilder {
         this.buildInFlight = null;
       }
     }
+  }
+
+  /**
+   * Wait for the shared bundle flight under THIS caller's own signal, starting the
+   * flight when none is running. A flight that has settled but is still retained for
+   * the remaining waiters' path resolution is reused as-is.
+   */
+  private joinBuildFlight(
+    perf: PerformanceTracker,
+    platform?: IOSCtrlProxyPlatform,
+  ): Promise<CtrlProxyIosBuildResult> {
+    if (this.buildInFlight && !this.buildFlights.has("build")) {
+      return this.buildInFlight;
+    }
+    return this.buildFlights.run(
+      "build",
+      (flightSignal) => this.startBuildFlight(perf, platform, flightSignal),
+      getAbortSignal(),
+      { cancelWhenAllWaitersAbort: true },
+    );
+  }
+
+  private startBuildFlight(
+    perf: PerformanceTracker,
+    platform: IOSCtrlProxyPlatform | undefined,
+    flightSignal?: AbortSignal,
+  ): Promise<CtrlProxyIosBuildResult> {
+    const previous = this.buildSettled;
+    const flight = (async () => {
+      await previous;
+      // Created inside the first caller's async context; detach from that caller's
+      // signal so the download (which binds to the ambient signal) runs under the
+      // flight-scoped one.
+      return runWithAbortSignal(flightSignal, () => this.doBuild(perf, platform));
+    })();
+    this.buildInFlight = flight;
+    this.buildSettled = flight.then(
+      () => undefined,
+      () => undefined,
+    );
+    // An abandoned flight must not be handed to a later caller as the shared result.
+    flightSignal?.addEventListener(
+      "abort",
+      () => {
+        if (this.buildInFlight === flight) {
+          this.buildInFlight = null;
+        }
+      },
+      { once: true },
+    );
+    return flight;
   }
 
   private async doBuild(

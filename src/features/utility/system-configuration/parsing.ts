@@ -227,6 +227,20 @@ function isJavaCustomZoneId(zoneId: string): boolean {
  */
 const IANA_ZONE_SHAPE = /^[A-Z][A-Za-z0-9._+-]*(?:\/[A-Z][A-Za-z0-9._+-]*){1,2}$/;
 
+/**
+ * The tzdata rule zones: single-component names that Android and Foundation ship.
+ * Accepted by name because the host runtime does not agree on them: the Bun/ICU on
+ * the CI runners throws `RangeError` for these four while the macOS build resolves
+ * them (they are links to `America/*` zones in current tzdata), so asking `Intl`
+ * would make the verdict depend on the machine (issue #10190).
+ */
+const TZDATA_RULE_ZONES: ReadonlySet<string> = new Set([
+  "EST5EDT",
+  "CST6CDT",
+  "MST7MDT",
+  "PST8PDT",
+]);
+
 /** Which device the id is for; only Android resolves Java custom ids. */
 export type TimeZoneIdPlatform = "android" | "ios";
 
@@ -277,6 +291,9 @@ export function checkTimeZoneId(zoneId: string, platform?: TimeZoneIdPlatform): 
     return {
       error: `Invalid time zone "${zoneId}": a bare UTC offset is not a zone id and the device has no entry for it. Use an IANA id (${expected}) or a fixed-offset zone such as "Etc/GMT-5" (the sign is inverted: Etc/GMT-5 is UTC+5).`,
     };
+  }
+  if (TZDATA_RULE_ZONES.has(zoneId)) {
+    return { error: null };
   }
   const resolved = resolveTimeZone(zoneId);
   if (resolved === null) {

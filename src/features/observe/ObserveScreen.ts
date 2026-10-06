@@ -1896,7 +1896,7 @@ export class RealObserveScreen implements ObserveScreen {
       // Predictive UI (opt-in via config)
       if (!observerMode && serverConfig.isPredictiveUiEnabled()) {
         try {
-          const predictions = await this.predictiveUIState.generate(result);
+          const predictions = await this.predictiveUIState.generate(result, this.device);
           this.attachPredictions(result, predictions);
         } catch (error) {
           logger.warn(`[PredictiveUIState] Failed to generate predictions: ${error}`);

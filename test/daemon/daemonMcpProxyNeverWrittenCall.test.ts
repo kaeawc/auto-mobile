@@ -1,6 +1,10 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonClient,
+  DaemonRequestNotDeliveredError,
+  DaemonUnavailableError,
+} from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -64,5 +68,78 @@ describe("DaemonMcpProxy tool call that was never written (#9996)", () => {
       isAvailableSpy.mockRestore();
       await proxy.close();
     }
+  });
+});
+
+describe("DaemonMcpProxy retry of a never-written call (#9996 follow-up)", () => {
+  // Attempt 1 hits the window where the proxy has no client; the retry runs on
+  // `retryClient`, whose callTool fails with `retryFailure`.
+  async function failRetry(
+    toolName: string,
+    retryFailure: Error,
+  ): Promise<{ error: unknown; retryClient: FakeDaemonClient }> {
+    const lostClient = new HeldSubscribeClient();
+    const retryClient = new FakeDaemonClient({
+      onCallTool: () => {
+        throw retryFailure;
+      },
+    });
+    const clients = [lostClient, retryClient];
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer: new FakeTimer(),
+    });
+    try {
+      const call = proxy.callTool(toolName, {});
+      const settled = call.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      for (let turn = 0; turn < 100 && !proxy.isConnected(); turn += 1) {
+        await Promise.resolve();
+      }
+      lostClient.closeSocketThenReleaseSubscribe();
+      return { error: await settled, retryClient };
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  }
+
+  test("a retried non-idempotent tool whose frame was written then lost is outcome-unknown", async () => {
+    const { error, retryClient } = await failRetry(
+      "tapOn",
+      new DaemonUnavailableError("Socket connection closed"),
+    );
+
+    expect(error).toBeInstanceOf(DaemonToolOutcomeUnknownError);
+    expect((error as DaemonToolOutcomeUnknownError).toolName).toBe("tapOn");
+    // Retried exactly once; the ambiguous failure is not retried again.
+    expect(retryClient.callToolCalls).toHaveLength(1);
+  });
+
+  test("a retry that provably never reached the daemon stays a not-delivered failure", async () => {
+    const notDelivered = new DaemonRequestNotDeliveredError("Socket connection lost");
+    const { error, retryClient } = await failRetry("tapOn", notDelivered);
+
+    expect(error).toBe(notDelivered);
+    expect(retryClient.callToolCalls).toHaveLength(1);
+  });
+
+  test("a retried idempotent tool keeps surfacing the raw transport error", async () => {
+    const closed = new DaemonUnavailableError("Socket connection closed");
+    const { error } = await failRetry("listDevices", closed);
+
+    expect(error).toBe(closed);
+  });
+
+  test("a tool error returned by the daemon on the retry is not rewritten", async () => {
+    const toolFailure = new Error("Element not found");
+    const { error } = await failRetry("tapOn", toolFailure);
+
+    expect(error).toBe(toolFailure);
   });
 });

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
-import { appendBounded } from "./appendBounded";
+import { runAndroidCommand } from "./runAndroidCommand";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
@@ -307,7 +307,7 @@ export class SdkManagerClient {
     SdkManagerClient.homebrewWarningLoggers.add(this.dependencies.logger);
   }
 
-  private execute(
+  private async execute(
     path: string,
     args: string[],
     inputOptions: {
@@ -323,90 +323,30 @@ export class SdkManagerClient {
     const maxStderrChars = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS;
     const timeoutMs = options.timeoutMs ?? inputOptions.timeoutMs;
     const terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
-    return new Promise((resolvePromise, reject) => {
-      if (options.signal?.aborted) {
-        reject(new Error("sdkmanager command cancelled"));
-        return;
-      }
-      const invocation = this.windowsBatchInvocation(path, args, inputOptions.env);
-      const child = this.dependencies.spawn(invocation.command, invocation.args, {
-        env: inputOptions.env,
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: false,
-      });
-      let stdout = "";
-      let stderr = "";
-      let outputTruncated = false;
-      let settled = false;
-      let terminationError: Error | undefined;
-      let terminationTimeout: NodeJS.Timeout | undefined;
-      const settle = (callback: () => void) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.dependencies.timer.clearTimeout(timeout);
-        if (terminationTimeout) {
-          this.dependencies.timer.clearTimeout(terminationTimeout);
-        }
-        options.signal?.removeEventListener("abort", onAbort);
-        callback();
-      };
-      const terminate = (error: Error) => {
-        if (terminationError) {
-          return;
-        }
-        terminationError = error;
-        child.kill("SIGTERM");
-        terminationTimeout = this.dependencies.timer.setTimeout(
-          () =>
-            settle(() => {
-              child.kill("SIGKILL");
-              reject(error);
-            }),
-          terminationGraceMs,
-        );
-      };
-      const onAbort = () => terminate(new Error("sdkmanager command cancelled"));
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-      const timeout = this.dependencies.timer.setTimeout(() => {
-        terminate(new Error(`sdkmanager command timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      this.dependencies.logger.info(`Executing: ${path} ${args.join(" ")}`);
-      child.stdout?.on("data", (data) => {
-        const appended = appendBounded(stdout, data.toString(), maxStdoutChars);
-        stdout = appended.value;
-        outputTruncated ||= appended.truncated;
-      });
-      child.stderr?.on("data", (data) => {
-        const appended = appendBounded(stderr, data.toString(), maxStderrChars);
-        stderr = appended.value;
-        outputTruncated ||= appended.truncated;
-      });
-      child.on("close", (code) =>
-        settle(() => {
-          if (terminationError) {
-            reject(terminationError);
-            return;
-          }
-          const childHome = inputOptions.env.HOME ?? inputOptions.env.USERPROFILE;
-          resolvePromise({
-            stdout: redactAndroidCommandOutput(stdout, childHome),
-            stderr: redactAndroidCommandOutput(stderr, childHome),
-            exitCode: code,
-            outputTruncated,
-          });
-        }),
-      );
-      child.on("error", (error) =>
-        settle(() => reject(new Error(`Failed to spawn command: sdkmanager: ${error.message}`))),
-      );
-      if (inputOptions.input) {
-        child.stdin?.write(inputOptions.input);
-        child.stdin?.end();
-      }
+    if (options.signal?.aborted) {
+      throw new Error("sdkmanager command cancelled");
+    }
+    const invocation = this.windowsBatchInvocation(path, args, inputOptions.env);
+    const result = await runAndroidCommand(this.dependencies, {
+      ...invocation,
+      env: inputOptions.env,
+      input: inputOptions.input,
+      signal: options.signal,
+      timeoutMs,
+      maxStdoutChars,
+      maxStderrChars,
+      name: "sdkmanager",
+      spawnErrorPrefix: "Failed to spawn command: sdkmanager: ",
+      terminationGraceMs,
+      onStart: () => this.dependencies.logger.info(`Executing: ${path} ${args.join(" ")}`),
     });
+    const childHome = inputOptions.env.HOME ?? inputOptions.env.USERPROFILE;
+    return {
+      stdout: redactAndroidCommandOutput(result.stdout, childHome),
+      stderr: redactAndroidCommandOutput(result.stderr, childHome),
+      exitCode: result.exitCode,
+      outputTruncated: result.stdoutTruncated || result.stderrTruncated,
+    };
   }
 
   private windowsBatchInvocation(

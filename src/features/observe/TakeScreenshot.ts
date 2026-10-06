@@ -311,12 +311,12 @@ export class TakeScreenshot implements ScreenshotService {
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
     this.pathProtection.start(this.cacheDirResolver(), { fileSystem: this.fileSystem });
     if (cleanupOnCreate) {
-      void this.cleanupCache();
+      this.cleanupCacheOnce();
     }
   }
 
-  private async cleanupCache(): Promise<void> {
-    await this.pathProtection.sweep(this.cacheDirResolver(), this.fileSystem);
+  private cleanupCacheOnce(): void {
+    void this.pathProtection.sweepOnce(this.cacheDirResolver(), this.fileSystem);
   }
 
   private async writeScreenshot(filePath: string, bytes: Buffer): Promise<void> {

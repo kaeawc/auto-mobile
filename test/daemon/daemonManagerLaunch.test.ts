@@ -1,5 +1,5 @@
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +14,18 @@ import { EVENT_ALL_MARKERS_ENV, EVENT_ALL_MARKERS_FLAG } from "../../src/utils/e
 describe("DaemonManager launch", () => {
   const tempDirs: string[] = [];
   const originalCwd = process.cwd();
+  let previousDirs: NodeJS.ProcessEnv;
+  beforeEach(() => {
+    previousDirs = {
+      AUTOMOBILE_DATA_DIR: process.env.AUTOMOBILE_DATA_DIR,
+      AUTOMOBILE_LOG_DIR: process.env.AUTOMOBILE_LOG_DIR,
+      AUTO_MOBILE_LOG_DIR: process.env.AUTO_MOBILE_LOG_DIR,
+    };
+    // Exercise data-derived launch logs without discarding the caller's isolation.
+    process.env.AUTOMOBILE_DATA_DIR = createTempDir("daemon-launch-default-");
+    delete process.env.AUTOMOBILE_LOG_DIR;
+    delete process.env.AUTO_MOBILE_LOG_DIR;
+  });
 
   function createTempDir(prefix: string): string {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -24,8 +36,13 @@ describe("DaemonManager launch", () => {
   afterEach(() => {
     process.chdir(originalCwd);
     delete process.env[DAEMON_LAUNCH_CWD_ENV];
-    delete process.env.AUTOMOBILE_DATA_DIR;
-    delete process.env.AUTOMOBILE_LOG_DIR;
+    for (const [key, value] of Object.entries(previousDirs)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
     delete process.env.AUTOMOBILE_LOG_FORMAT;
     delete process.env.AUTOMOBILE_LOG_SINK;
     delete process.env.AUTOMOBILE_ENABLED_TOOLS;

@@ -101,6 +101,8 @@
     "dead-code:ts": "bash scripts/detect-dead-code-ts.sh",
     "dead-code:ts:prune": "bash -o pipefail -c 'bunx ts-prune --project tsconfig.dead-code.json -i src/db/migrations | (grep -v \"(used in module)\" || true) | bash scripts/filter-ts-prune-allowlist.sh'",
     "dead-code:ts:knip": "bunx knip",
+    "prepack": "bun scripts/release/trim-bundled-deps.ts prepack",
+    "postpack": "bun scripts/release/trim-bundled-deps.ts postpack",
     "prepublishOnly": "cp README.md README.md.backup && bun scripts/npm/transform-readme.js",
     "postpublish": "mv README.md.backup README.md || true",
     "turbo:validate": "turbo run lint build test check:android-emulator-boundary check:ffmpeg-boundary check:host-shell-boundary check:ios-ctrl-proxy-process-boundary",
@@ -248,9 +250,6 @@
     "parse-bmfont-xml"
   ],
   "overrides": {
-    "@ts-morph/common": {
-      "minimatch": "3.1.5"
-    },
     "hono": "^4.11.10",
     "lodash": "^4.17.23",
     "qs": "^6.14.2",

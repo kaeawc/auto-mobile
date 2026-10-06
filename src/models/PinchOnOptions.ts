@@ -1,8 +1,10 @@
+import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
+
 export interface ElementContainerSelector {
   elementId?: string;
   text?: string;
   index?: number;
-  selectionStrategy?: "first" | "random" | "unique";
+  selectionStrategy?: ElementSelectionStrategy;
   container?: ElementContainerSelector;
 }
 

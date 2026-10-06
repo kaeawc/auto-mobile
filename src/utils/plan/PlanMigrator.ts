@@ -495,6 +495,15 @@ const migrateToolParams = (
     return migrateTapParams(mergedParams, stepIndex, warnings);
   }
 
+  if (normalizedTool === "highlight" && typeof mergedParams.id === "string") {
+    if (mergedParams.elementId === undefined) {
+      mergedParams.elementId = mergedParams.id;
+    }
+    delete mergedParams.id;
+    recordWarning(warnings, "Renamed id to elementId for highlight.", stepIndex);
+    return true;
+  }
+
   if (normalizedTool === "openLink") {
     return migrateLinkParams(mergedParams, stepIndex, warnings);
   }
@@ -531,6 +540,11 @@ const migrateStepMetadata = (
     delete step.command;
     recordWarning(warnings, "Removed deprecated command field.", stepIndex);
     changed = true;
+  }
+
+  // highlight.description is a live tool parameter, not a deprecated step label.
+  if (step.tool === "highlight") {
+    return changed;
   }
 
   if (typeof step.description === "string" && !step.label) {

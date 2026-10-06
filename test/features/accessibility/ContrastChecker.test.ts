@@ -343,9 +343,9 @@ describe("ContrastChecker", function () {
   });
 
   describe("Color Sampling", function () {
-    it("should sample text color from center region", async function () {
+    it("should identify the dense text colour inside the surrounding background", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
-      // Use full image bounds - center will have text color (black from 5-95)
+      // The dense black block occupies most of the box, but its perimeter is white.
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Center",
@@ -354,7 +354,7 @@ describe("ContrastChecker", function () {
       const result = await checker.checkContrast(screenshotPath, element, "AA");
 
       expect(result).not.toBeNull();
-      // Should detect black text in center (center at 50,25 is in the text region 5-95)
+      // The block is foreground even though it occupies more pixels than the perimeter.
       expect(result!.textColor.r).toBeLessThan(50);
       expect(result!.textColor.g).toBeLessThan(50);
       expect(result!.textColor.b).toBeLessThan(50);

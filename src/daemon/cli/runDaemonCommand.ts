@@ -1,8 +1,13 @@
 import { isSessionReleasing } from "../sessionReleaseState";
+import { refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
-import { CLI_SESSION_LIVENESS_POLICY, getCliSessionIdleTimeoutMs } from "../constants";
+import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
+  CLI_SESSION_LIVENESS_POLICY,
+  getCliSessionIdleTimeoutMs,
+} from "../constants";
 import {
   getDaemonHealthReport,
   formatHealthReport,
@@ -20,7 +25,10 @@ import type { DaemonClientFactory } from "../client";
 import type { DaemonStateLike } from "../daemonState";
 import type { DaemonManager } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";
-import { DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE } from "../types";
+import {
+  DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
+  DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+} from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
 import { parseDaemonArgs } from "./daemonArgs";
 
@@ -262,6 +270,15 @@ function recordLocalDaemonHeartbeat(daemonState: DaemonStateLike, sessionId: str
     sessionManager.getSession(sessionId) ?? sessionManager.getReleasingSession(sessionId);
   if (!session || isSessionReleasing(sessionManager, sessionId, session)) {
     throw new ActionableError(`Session not found: ${sessionId}`);
+  }
+  const refusal = refuseCliKeeperOnProxySession(CLI_KEEPER_LIVENESS_OWNER_KIND, session);
+  if (refusal) {
+    throw new ActionableError(
+      heartbeatFailureMessage(
+        sessionId,
+        Object.assign(new Error(refusal.error), { code: refusal.code }),
+      ),
+    );
   }
   sessionManager.recordHeartbeat(sessionId);
 }
@@ -518,6 +535,19 @@ async function releaseDaemonSession(args: string[], manager: DaemonManager): Pro
   }
 }
 
+function heartbeatFailureMessage(sessionId: string, error: unknown): string {
+  const code =
+    error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
+  if (code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE) {
+    return `The token no longer owns session ${sessionId}'s liveness. Re-claim with a fresh --liveness-owner-token and --claim-liveness-ownership, or stop the keeper.`;
+  }
+  if (code === DAEMON_LIVENESS_OWNER_IS_PROXY_CODE) {
+    // The daemon's message names the proxy-owned session; keep the code visible for scripts.
+    return `${errorMessage(error)} [${DAEMON_LIVENESS_OWNER_IS_PROXY_CODE}] Stop this keeper; heartbeat only works for one-shot CLI sessions.`;
+  }
+  return `Failed to record session heartbeat: ${errorMessage(error)}`;
+}
+
 async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Promise<void> {
   try {
     const { sessionId, livenessOwnerToken, claimLivenessOwnership } =
@@ -535,21 +565,13 @@ async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Pr
         await client.callDaemonMethod("daemon/heartbeat", {
           sessionId,
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
           ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
           ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
         });
       } catch (error) {
-        const superseded =
-          error !== null &&
-          typeof error === "object" &&
-          "code" in error &&
-          error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE;
-        throw new ActionableError(
-          superseded
-            ? `The token no longer owns session ${sessionId}'s liveness. Re-claim with a fresh --liveness-owner-token and --claim-liveness-ownership, or stop the keeper.`
-            : `Failed to record session heartbeat: ${errorMessage(error)}`,
-        );
+        throw new ActionableError(heartbeatFailureMessage(sessionId, error));
       } finally {
         await client.close();
       }
@@ -579,7 +601,7 @@ function printUnknownDaemonCommand(command: string): void {
     console.log("  available-devices     Query device pool status");
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
-    console.log("  heartbeat <id>        Record a heartbeat for a session");
+    console.log("  heartbeat <id>        Heartbeat a one-shot CLI session (proxy-owned: refused)");
     process.exit(1);
   } catch (error) {
     if (error instanceof ActionableError) {

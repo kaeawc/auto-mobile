@@ -1,3 +1,4 @@
+import { isStrictlyScoped, propagateUniqueStrategy } from "./ScopedSelection";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { getHierarchySnapshot } from "../observe/HierarchyCapture";
@@ -167,8 +168,7 @@ export class ResolverElementSelector implements ElementSelector {
     const result = this.resolver.resolve(
       { id: "container", nodes: this.selectionNodes(capture, {}) },
       {
-        container:
-          strategy === "unique" ? { ...container, selectionStrategy: "unique" } : container,
+        container: propagateUniqueStrategy(container, strategy),
       },
       { action: "inspect" },
     );
@@ -240,7 +240,10 @@ export class ResolverElementSelector implements ElementSelector {
     if (!error) {
       return;
     }
-    const strictScope = options.strategy === "unique" || options.container?.container !== undefined;
+    const strictScope = isStrictlyScoped(
+      { container: options.container, selectionStrategy: options.strategy },
+      "nested-container-defined",
+    );
     if (strictScope || !isMissingContainerError(error)) {
       throw new ActionableError(error);
     }

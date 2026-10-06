@@ -48,6 +48,16 @@ wiring_requires_yq() {
   [[ "$attempt_run" != *"Starting emulator retry attempt 2."* ]]
 }
 
+@test "both emulator attempts use the boot entrypoint that verifies keyguard state" {
+  wiring_requires_yq
+  local first_attempt retry_attempt
+  first_attempt="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-1") | .run' "$ACTION")"
+  retry_attempt="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-2") | .run' "$ACTION")"
+  [[ "$first_attempt" == *"scripts/android/boot-emulator.sh"* ]]
+  [[ "$retry_attempt" == *"scripts/android/boot-emulator.sh"* ]]
+  [[ "$(<scripts/android/boot-emulator.sh)" == *"unlock_keyguard"* ]]
+}
+
 @test "daemon reset runs only after a failed first attempt and before retry" {
   wiring_requires_yq
   local reset_index retry_index reset_condition reset_run attempt_condition reset_working_directory

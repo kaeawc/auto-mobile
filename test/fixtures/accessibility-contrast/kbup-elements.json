@@ -1,0 +1,48 @@
+[
+ {
+  "actions": [
+   "select",
+   "clear_selection",
+   "accessibility_focus",
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "set_selection"
+  ],
+  "text": "1",
+  "resource-id": "com.google.android.inputmethod.latin:id/0_resource_name_obfuscated",
+  "visible-to-user": true,
+  "view-id": "com.google.android.inputmethod.latin:id/0_resource_name_obfuscated",
+  "bounds": [
+   89,
+   1654,
+   105,
+   1699
+  ]
+ },
+ {
+  "actions": [
+   "focus",
+   "select",
+   "clear_selection",
+   "click",
+   "long_click",
+   "accessibility_focus",
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "set_selection"
+  ],
+  "content-desc": "q",
+  "resource-id": "com.google.android.inputmethod.latin:id/key_pos_0_0",
+  "visible-to-user": true,
+  "view-id": "com.google.android.inputmethod.latin:id/key_pos_0_0",
+  "clickable": "true",
+  "focusable": "true",
+  "long-clickable": "true",
+  "bounds": [
+   5,
+   1654,
+   112,
+   1808
+  ]
+ }
+]

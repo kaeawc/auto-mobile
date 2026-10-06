@@ -1,3 +1,4 @@
+import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
@@ -456,7 +457,20 @@ const selectionOutputSchema = z.object({
 export const overlayOutputSchema = z.object({
   success: z.boolean(),
   error: z.string().optional(),
-  overlays: z.array(lastResultSchema.extend(eventCountsSchema.shape)).optional(),
+  overlays: z
+    .array(
+      lastResultSchema.extend(eventCountsSchema.shape).extend({
+        pages: z.record(z.string(), z.number().int().nonnegative()).optional(),
+        state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+        lastKnown: z
+          .literal(true)
+          .optional()
+          .describe(
+            "Pages and state are the last accepted overlay_event snapshot, not a live device query",
+          ),
+      }),
+    )
+    .optional(),
   lastResult: lastResultSchema.optional(),
   event: overlayEventOutputSchema.optional(),
   selection: selectionOutputSchema
@@ -964,7 +978,11 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   const clientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
-  const events = new OverlayEventCoordinator(dependencies.timer ?? defaultTimer, store);
+  const events = new OverlayEventCoordinator(
+    dependencies.timer ?? defaultTimer,
+    store,
+    TelemetryRecorder.getInstance(),
+  );
   const assetReaders: AssetReaders = {
     assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
     observationScreenshotReader:

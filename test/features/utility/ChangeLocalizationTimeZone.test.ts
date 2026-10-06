@@ -440,9 +440,12 @@ describe("Android changeLocalization time zone (#10190)", () => {
     const result = await manager.setTimeZone("Asia/Tokyo");
 
     expect(result.error).toBe(
-      'Read-back verification failed: expected "Asia/Tokyo" but got "America/New_York"',
+      'Read-back verification failed: expected "Asia/Tokyo" but got "America/New_York" Failed to set time zone: denied.',
     );
     expect(setprops()).toHaveLength(1);
+    expect(
+      adb.getAllCommands().filter((command) => command.includes("cmd alarm set-timezone")),
+    ).toEqual(["shell cmd alarm set-timezone 'Asia/Tokyo'"]);
   });
 });
 

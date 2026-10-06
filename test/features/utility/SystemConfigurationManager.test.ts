@@ -751,8 +751,9 @@ describe("SystemConfigurationManager", () => {
       const result = await mgr.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Failed to set time zone: setprop failed");
-      expect(result.error).toContain("fallback also failed: alarm failed");
+      expect(result.error).toBe(
+        'Read-back verification failed: expected "Asia/Tokyo" but got "America/Chicago" Failed to set time zone: setprop failed; cmd alarm set-timezone: alarm failed.',
+      );
     });
   });
 

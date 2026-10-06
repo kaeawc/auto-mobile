@@ -545,10 +545,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         success: false,
         zoneId,
         previousZoneId,
-        error:
-          fallbackError.success === false && setpropError.success === false
-            ? `Failed to set time zone: ${errorMessage(setpropError.error)}. The cmd alarm set-timezone fallback also failed: ${errorMessage(fallbackError.error)}. Read-back verification failed: expected "${zoneId}" but got "${persistedZoneId}"${restoreNote}`
-            : `Read-back verification failed: expected "${zoneId}" but got "${persistedZoneId}"${restoreNote}`,
+        error: `Read-back verification failed: expected "${zoneId}" but got "${persistedZoneId}"${restoreNote}${this.timeZoneWriteFailure(setpropError, fallbackError)}`,
       };
     }
     return {

@@ -4706,12 +4706,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
   }
 
-  /** Tell the Kotlin service that recording has started (enables interaction event emission). */
+  /** Send start_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStarted(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
   }
 
-  /** Tell the Kotlin service that recording has stopped (disables interaction event emission). */
+  /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
   }

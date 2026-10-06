@@ -1,5 +1,12 @@
+import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver";
+import { DefaultDeviceResourceObserver } from "../../src/utils/deviceResourceObserver";
+import { DefaultDeviceResourceController } from "../../src/utils/deviceResourceController";
+import { FakeWallpaperSimctl, FakeWallpaperPlist } from "../fakes/FakeIosResourceRuntime";
+import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatalog";
+import { androidDeviceResourceCatalog } from "../../src/utils/androidDeviceResourceCatalog";
+import { logger } from "../../src/utils/logger";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   deviceResourceConfigurationSchema,
   setDeviceResourcesSchema,
@@ -23,6 +30,7 @@ isolateToolRegistry();
 describe("setDeviceResources", () => {
   let controller: FakeDeviceResourceController;
   let timer: FakeTimer;
+  let observer: FakeDeviceResourceObserver;
   const device = {
     platform: "ios" as const,
     name: "iPhone",
@@ -31,11 +39,191 @@ describe("setDeviceResources", () => {
   beforeEach(() => {
     controller = new FakeDeviceResourceController();
     timer = new FakeTimer();
-    setDeviceToolsDependencies({ deviceResourceControllerFactory: () => controller, timer });
+    observer = new FakeDeviceResourceObserver();
+    observer.result.resources.wallpaperRendering = { state: "disabled" };
+    setDeviceToolsDependencies({
+      deviceResourceControllerFactory: () => controller,
+      deviceResourceObserverFactory: () => observer,
+      timer,
+    });
     registerDeviceTools();
   });
   afterEach(() => resetDeviceToolsDependencies());
 
+  test.each(["android", "ios"] as const)(
+    "returns the independent full %s snapshot without changing mutation fields",
+    async (platform) => {
+      const target = { ...device, platform };
+      const common = observer.result.resources;
+      observer.result =
+        platform === "android"
+          ? {
+              deviceId: target.deviceId,
+              platform,
+              resources: {
+                ...common,
+                googlePlayServices: { state: "unsupported", reason: "No read path" },
+              },
+            }
+          : {
+              ...observer.result,
+              deviceId: target.deviceId,
+              platform: "ios",
+              resources: {
+                ...common,
+                icloudSync: { state: "unsupported" },
+                photoAnalysis: { state: "unknown" },
+              },
+            };
+      const catalog = platform === "ios" ? iosDeviceResourceCatalog : androidDeviceResourceCatalog;
+      Object.assign(
+        observer.result.resources,
+        Object.fromEntries(
+          Object.keys(catalog).map((key) => [
+            key,
+            { state: "unknown", reason: "Not verified in fake" },
+          ]),
+        ),
+      );
+      controller.result.services = { wallpaperRendering: { native: { state: "disabled" } } };
+      controller.result.restore = {
+        deviceId: target.deviceId,
+        bootId: "boot",
+        userId: 0,
+        entries: [],
+      };
+      const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(
+        target,
+        { resources: controller.result.requested, timeoutMs: 10_000 },
+      );
+      const payload = JSON.parse(response.content[0].text);
+      expect(payload).toEqual({ device: target, ...controller.result, observed: observer.result });
+      expect(Object.keys(payload.observed.resources)).toEqual(
+        expect.arrayContaining(Object.keys(catalog)),
+      );
+      expect(observer.requests[0]).toEqual({
+        device: target,
+        deadlineMs: timer.now() + (controller.requests[0]!.deadlineMs - timer.now()) / 2,
+        signal: controller.requests[0]!.signal,
+      });
+      expect(response.isError).toBeUndefined();
+    },
+  );
+
+  test.each(["enabled", "disabled"] as const)(
+    "explicit opposite observation contradicts requested %s",
+    async (requested) => {
+      observer.result.resources.wallpaperRendering = {
+        state: requested === "enabled" ? "disabled" : "enabled",
+      };
+      const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(
+        device,
+        { resources: { wallpaperRendering: requested } },
+      );
+      expect(response.isError).toBe(true);
+      expect(JSON.parse(response.content[0].text)).toEqual({
+        device,
+        ...controller.result,
+        requested: { wallpaperRendering: requested },
+        success: false,
+        observed: observer.result,
+        observationContradictions: ["wallpaperRendering"],
+      });
+      expect(controller.result.success).toBe(true);
+    },
+  );
+
+  test.each(["unknown", "unsupported"] as const)(
+    "%s observation preserves successful mutation",
+    async (state) => {
+      observer.result.resources.wallpaperRendering = { state, reason: "Not observed" };
+      const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(
+        device,
+        { resources: controller.result.requested },
+      );
+      expect(response.isError).toBeUndefined();
+      expect(JSON.parse(response.content[0].text)).toEqual({
+        device,
+        ...controller.result,
+        observed: observer.result,
+      });
+    },
+  );
+
+  test("an undefined requested entry is omitted, never a contradiction", async () => {
+    observer.result.resources.wallpaperRendering = { state: "enabled" };
+    const requested = { widgets: "enabled" as const, wallpaperRendering: undefined };
+    const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
+      resources: requested,
+    });
+    expect(response.isError).toBeUndefined();
+    expect(JSON.parse(response.content[0].text).observationContradictions).toBeUndefined();
+  });
+
+  test("logs observation failure and keeps successful mutation evidence", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    observer.onRequest = async () => {
+      throw new Error("observation timed out");
+    };
+    try {
+      const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(
+        device,
+        { resources: controller.result.requested },
+      );
+      expect(JSON.parse(response.content[0].text)).toEqual({ device, ...controller.result });
+      expect(response.isError).toBeUndefined();
+      expect(warning).toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("propagates cancellation during observation and releases the lease", async () => {
+    const abort = new AbortController();
+    const reason = new Error("observation cancelled");
+    observer.onRequest = async () => {
+      abort.abort(reason);
+    };
+    const handler = ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!;
+    await expect(
+      handler(device, { resources: controller.result.requested }, undefined, abort.signal),
+    ).rejects.toBe(reason);
+    observer.onRequest = undefined;
+    await handler(device, { resources: controller.result.requested });
+    expect(observer.requests).toHaveLength(2);
+  });
+
+  test("propagates observer AbortError even without an aborted caller signal", async () => {
+    observer.onRequest = async () => {
+      throw new DOMException("cancelled", "AbortError");
+    };
+    await expect(
+      ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
+        resources: controller.result.requested,
+      }),
+    ).rejects.toThrow("cancelled");
+  });
+
+  test("observes the native fake runtime after the real controller writes", async () => {
+    const simctl = new FakeWallpaperSimctl();
+    const plist = new FakeWallpaperPlist();
+    const readDirectory = (path: string) => plist.readDirectory(path);
+    setDeviceToolsDependencies({
+      deviceResourceControllerFactory: () =>
+        new DefaultDeviceResourceController(simctl, plist, timer, readDirectory),
+      deviceResourceObserverFactory: () =>
+        new DefaultDeviceResourceObserver({ simctl, plist, timer, readDirectory }),
+    });
+    const response = await ToolRegistry.getTool("setDeviceResources")!.deviceAwareHandler!(device, {
+      resources: { wallpaperRendering: "disabled" },
+    });
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload.success).toBe(true);
+    expect(payload.observed.resources.wallpaperRendering.state).toBe("disabled");
+    expect(Object.keys(payload.observed.resources)).toEqual(
+      expect.arrayContaining(Object.keys(iosDeviceResourceCatalog)),
+    );
+  });
   test("registers a device-aware opt-in tool", () => {
     expect(ToolRegistry.getTool("setDeviceResources")).toMatchObject({
       defaultEnabled: false,

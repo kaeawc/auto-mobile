@@ -1,4 +1,8 @@
 import { z } from "zod/v4";
+import {
+  ELEMENT_SELECTION_STRATEGIES,
+  type ElementSelectionStrategy,
+} from "../models/ElementSelectionStrategy";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 
 type ElementIdTextDescriptions = {
@@ -25,7 +29,7 @@ export const elementContainerSchema = createElementIdTextSelectorSchema({
   text: "Container text",
 });
 
-export const resolverSelectionStrategySchema = z.enum(["first", "random", "unique"]);
+export const resolverSelectionStrategySchema = z.enum(ELEMENT_SELECTION_STRATEGIES);
 
 export const nestedElementContainerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>
   z.union([
@@ -55,8 +59,6 @@ export const elementIdTextFieldsSchema = z
   })
   .strict();
 
-export const elementSelectionStrategySchema = z.enum(["first", "random"]);
-
 export const validateElementIdTextSelector = (
   value: { elementId?: string; text?: string },
   ctx: z.RefinementCtx,
@@ -81,7 +83,7 @@ export interface ResolverSelector {
   contentDescription?: string;
   className?: string;
   index?: number;
-  selectionStrategy?: "first" | "random" | "unique";
+  selectionStrategy?: ElementSelectionStrategy;
   match?: "exact" | "contains" | "regex";
   caseSensitive?: boolean;
   container?: ResolverSelector;
@@ -97,7 +99,7 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
       className: z.string().min(1).optional(),
       testTag: z.string().min(1).optional(),
       index: z.number().int().nonnegative().optional(),
-      selectionStrategy: elementSelectionStrategySchema.optional(),
+      selectionStrategy: resolverSelectionStrategySchema.exclude(["unique"]).optional(),
       match: z.enum(["exact", "contains", "regex"]).optional(),
       caseSensitive: z.boolean().optional(),
       container: resolverSelectorSchema.optional(),

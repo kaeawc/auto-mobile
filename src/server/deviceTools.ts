@@ -1,4 +1,8 @@
 import {
+  DefaultDeviceResourceObserver,
+  type DeviceResourceObserver,
+} from "../utils/deviceResourceObserver";
+import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
 } from "../daemon/devicePoolRefresh";
@@ -1251,6 +1255,7 @@ export function detailedDiscoveryOptions(
 
 export interface DeviceToolsDependencies {
   deviceResourceControllerFactory: () => DeviceResourceController;
+  deviceResourceObserverFactory: () => DeviceResourceObserver;
   deviceManagerFactory: () => PlatformDeviceManager;
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
@@ -3465,6 +3470,8 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
       deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
+      deviceResourceObserverFactory: () =>
+        new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
@@ -3541,6 +3548,8 @@ function resolveDeviceToolsLifecycleCoordinator(
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
+    deviceResourceObserverFactory:
+      deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
     deviceResourceControllerFactory:
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,

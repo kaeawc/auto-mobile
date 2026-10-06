@@ -155,6 +155,43 @@ describe("storageResources", () => {
     expect(adb.getExecutedCommands()).toHaveLength(1);
   });
 
+  test("storage-entries run-as fallback reads the work profile's copy when the app lives there (#9964)", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x4c13, running: true },
+      { userId: 10, name: "Work profile", flags: 0x1030, running: true },
+    ]);
+    adb.setCommandResponse("shell pm list packages --user 0", createExecResult("", ""));
+    adb.setCommandResponse(
+      "shell pm list packages --user 10",
+      createExecResult("package:com.example.app", ""),
+    );
+    adb.setCommandResponse(
+      "cat shared_prefs/settings.xml",
+      createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+    );
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => {
+        throw new ProviderUnavailableError(
+          "Unknown authority com.example.app.automobile.sharedprefs",
+        );
+      },
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+    );
+
+    expect(JSON.parse(content.text ?? "{}").source).toBe("run-as");
+    expect(adb.getExecutedCommands().filter((command) => command.includes("run-as"))).toEqual([
+      "shell run-as com.example.app --user 10 cat shared_prefs/settings.xml",
+    ]);
+  });
+
   test("run-as entries match the CtrlProxy encoding for every SharedPreferences type", async () => {
     PlatformDeviceManagerFactory.setInstance(
       new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),

@@ -56,24 +56,24 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
         const operationSignal = callerSignal
           ? AbortSignal.any([callerSignal, lease.signal])
           : lease.signal;
-        const result = await trackDeviceAcquisitionReadiness(
+        const configured = await trackDeviceAcquisitionReadiness(
           deviceReadinessLockKey(device.platform, device.deviceId),
           async () => {
             operationSignal.throwIfAborted();
-            const configured = await deps.deviceResourceControllerFactory().setResources({
+            return deps.deviceResourceControllerFactory().setResources({
               device,
               resources: parsed.resources ?? {},
               restore: parsed.restore,
               deadlineMs,
               signal: operationSignal,
             });
-            return observeConfiguredDeviceResources(deps, configured, {
-              device,
-              deadlineMs,
-              signal: operationSignal,
-            });
           },
         );
+        const result = await observeConfiguredDeviceResources(deps, configured, {
+          device,
+          deadlineMs,
+          signal: operationSignal,
+        });
         return {
           ...createJSONToolResponse({ device, ...result }),
           ...(result.success ? {} : { isError: true }),
@@ -86,14 +86,25 @@ export function registerDeviceResourceTools(dependencies: () => DeviceToolsDepen
   );
 }
 
+// Preserve abort identity and cancellation routing while retaining completed mutation evidence.
+export type DeviceResourceObservationAbort = Error & {
+  deviceResourceResult: DeviceResourceConfigurationResult;
+};
+const OBSERVATION_REMAINING_BUDGET_FRACTION = 0.5;
+
 /** Observation is best-effort, but explicit contradictions invalidate configuration success. */
 export async function observeConfiguredDeviceResources(
-  deps: Pick<DeviceToolsDependencies, "deviceResourceObserverFactory">,
+  deps: Pick<DeviceToolsDependencies, "deviceResourceObserverFactory" | "timer">,
   result: DeviceResourceConfigurationResult,
   request: DeviceResourceObservationRequest,
 ): Promise<DeviceResourceConfigurationResult> {
-  request.signal?.throwIfAborted();
+  const now = deps.timer.now();
+  request = {
+    ...request,
+    deadlineMs: now + Math.max(0, request.deadlineMs - now) * OBSERVATION_REMAINING_BUDGET_FRACTION,
+  };
   try {
+    request.signal?.throwIfAborted();
     const observed = await deps.deviceResourceObserverFactory().observeResources(request);
     request.signal?.throwIfAborted();
     const states: Partial<Record<ConfigurableDeviceResource, DeviceResourceStatus>> =
@@ -117,9 +128,15 @@ export async function observeConfiguredDeviceResources(
         : {}),
     };
   } catch (error) {
-    request.signal?.throwIfAborted();
-    if (error instanceof Error && error.name === "AbortError") {
-      throw error;
+    if (request.signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      const reason: unknown = request.signal?.aborted ? request.signal.reason : error;
+      // Receipts exist only in returned JSON; cancellation cannot also return a tool response.
+      // Carry the result on the same error so direct callers can recover it without suppressing abort.
+      const abort =
+        reason instanceof Error ? reason : new DOMException(String(reason), "AbortError");
+      throw Object.assign(abort, {
+        deviceResourceResult: result,
+      }) satisfies DeviceResourceObservationAbort;
     }
     logger.warn(`Device resource observation failed: ${errorMessage(error)}`, error);
     // Keep mutation evidence usable when independent observation cannot complete.

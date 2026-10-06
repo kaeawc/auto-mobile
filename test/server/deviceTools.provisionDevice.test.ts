@@ -693,6 +693,7 @@ describe("provisionDevice handler", () => {
     "applies %s resources before automation readiness and includes verified results",
     async (platform) => {
       const resources = new FakeDeviceResourceController();
+      const timer = new FakeTimer();
       const order: string[] = [];
       resources.onRequest = async () => {
         order.push("resources");
@@ -706,6 +707,7 @@ describe("provisionDevice handler", () => {
         },
       ]);
       setDeviceToolsDependencies({
+        timer,
         deviceResourceControllerFactory: () => resources,
         ensureCtrlProxyReady: async () => {
           order.push("readiness");
@@ -719,7 +721,7 @@ describe("provisionDevice handler", () => {
       expect(order).toEqual(["resources", "readiness"]);
       expect(resourceObserver.requests[0]).toEqual({
         device: resources.requests[0]!.device,
-        deadlineMs: resources.requests[0]!.deadlineMs,
+        deadlineMs: timer.now() + (resources.requests[0]!.deadlineMs - timer.now()) / 2,
         signal: resources.requests[0]!.signal,
       });
       expect(operationStore.getStoredResult(args.operationId)?.resources?.observed).toEqual(
@@ -3410,7 +3412,7 @@ describe("provisionDevice handler", () => {
         );
         expect(resourceObserver.requests[1]).toEqual({
           device: resourceController.requests[1]!.device,
-          deadlineMs: resourceController.requests[1]!.deadlineMs,
+          deadlineMs: timer.now() + (resourceController.requests[1]!.deadlineMs - timer.now()) / 2,
           signal: resourceController.requests[1]!.signal,
         });
         resourceObserver.result.resources.wallpaperRendering = { state: "enabled" };

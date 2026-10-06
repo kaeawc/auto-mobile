@@ -1705,8 +1705,11 @@ failed reads yield `unknown`. Explicit opposite enabled/disabled states set
 `success: false` and name the resources in `observationContradictions`, using the
 existing MCP error response (provisioning retains the device/session). Unknown or
 unsupported observations do not add failures. Existing mutation fields retain
-their shape and meaning. Observation shares the resource deadline and abort
-signal, and provisioning replay refreshes it. Non-abort observation errors are
+their shape and meaning. Observation uses at most half the remaining resource deadline and shares the abort
+signal; exhausted reads report `unknown`, and provisioning replay refreshes it.
+Identical package and launchctl reads are reused only within one observation.
+Cancellation after mutation carries the completed result on the propagated error
+as `deviceResourceResult` (including any restore receipt). Non-abort observation errors are
 logged and omit `observed` while retaining the mutation result.
 
 `provisionDevice.operationId` is a caller-generated idempotency key.

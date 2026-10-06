@@ -103,7 +103,7 @@ describe("setDeviceResources", () => {
       );
       expect(observer.requests[0]).toEqual({
         device: target,
-        deadlineMs: controller.requests[0]!.deadlineMs,
+        deadlineMs: timer.now() + (controller.requests[0]!.deadlineMs - timer.now()) / 2,
         signal: controller.requests[0]!.signal,
       });
       expect(response.isError).toBeUndefined();

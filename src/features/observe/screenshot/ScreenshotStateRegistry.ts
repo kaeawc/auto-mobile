@@ -1,13 +1,9 @@
 import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
+import { OBSERVE_RESULT_CACHE_TTL_MS } from "../cache/FileSystemObserveCacheStore";
 
-/**
- * TTL for cached per-device screenshot state. Mirrors
- * `RealObserveScreen.OBSERVE_RESULT_CACHE_TTL_MS` so reads of the most-recent
- * screenshot state stay aligned with the observe result cache.
- */
-export const OBSERVE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
+export { OBSERVE_RESULT_CACHE_TTL_MS };
 export const MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE = 10;
 /**
  * Backstop on cleared-observation tombstones per device. Only observations

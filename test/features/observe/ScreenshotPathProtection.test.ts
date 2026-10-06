@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import {
   BoundedScreenshotPathProtection,
@@ -92,6 +92,21 @@ test("publication never drops a live lease under count pressure", async () => {
     await registry.protect(`path-${i}`);
   }
   expect(registry.isProtected("path-0")).toBe(true);
+});
+
+test("sweepOnce is scoped to normalized directory and protection instance", async () => {
+  const first = new BoundedScreenshotPathProtection(new FakeTimer(), path.posix);
+  const second = new BoundedScreenshotPathProtection(new FakeTimer(), path.posix);
+  const firstSweep = spyOn(first, "sweep").mockResolvedValue(undefined);
+  const secondSweep = spyOn(second, "sweep").mockResolvedValue(undefined);
+
+  await first.sweepOnce("/screenshots", undefined);
+  await first.sweepOnce("/screenshots/.", undefined);
+  await first.sweepOnce("/other-screenshots", undefined);
+  await second.sweepOnce("/screenshots", undefined);
+
+  expect(firstSweep).toHaveBeenCalledTimes(2);
+  expect(secondSweep).toHaveBeenCalledTimes(1);
 });
 
 test("protect reports exactly ten minutes from the last return", async () => {

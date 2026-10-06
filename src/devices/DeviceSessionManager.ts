@@ -346,6 +346,7 @@ export function deviceReadinessRank(level: DeviceReadinessLevel): number {
 export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "observedAt">;
 
 export interface DeviceReadyOptions {
+  sessionId?: string;
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -1135,7 +1136,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (state.didSetup) {
         const timings = perf.getTimings();
         if (timings) {
-          storeSetupTiming(deviceId, timings);
+          storeSetupTiming(deviceId, timings, options?.sessionId);
         }
       }
     }
@@ -1454,7 +1455,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (didSetup) {
         const timings = perf.getTimings();
         if (timings) {
-          storeSetupTiming(deviceId, timings);
+          storeSetupTiming(deviceId, timings, options?.sessionId);
         }
       }
     }

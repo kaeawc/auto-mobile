@@ -1,4 +1,4 @@
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, test, afterEach, beforeEach } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,6 +15,13 @@ function unavailableDaemonClient() {
 
 describe("DaemonManager file lock", () => {
   const tempDirs: string[] = [];
+  let previousDirs: NodeJS.ProcessEnv;
+  beforeEach(() => {
+    previousDirs = {
+      AUTOMOBILE_DATA_DIR: process.env.AUTOMOBILE_DATA_DIR,
+      AUTOMOBILE_LOG_DIR: process.env.AUTOMOBILE_LOG_DIR,
+    };
+  });
 
   function createTempLockPath(): string {
     const dir = mkdtempSync(join(tmpdir(), "daemon-lock-test-"));
@@ -22,6 +29,7 @@ describe("DaemonManager file lock", () => {
     // Keep any daemon launch log inside this test's temp tree, not the real
     // `~/.auto-mobile/logs` default (see tempDir.resolveAutoMobileBaseDir).
     process.env.AUTOMOBILE_DATA_DIR = dir;
+    process.env.AUTOMOBILE_LOG_DIR = join(dir, "logs");
     return join(dir, "daemon.lock");
   }
 
@@ -35,8 +43,13 @@ describe("DaemonManager file lock", () => {
       }
     }
     tempDirs.length = 0;
-    delete process.env.AUTOMOBILE_DATA_DIR;
-    delete process.env.AUTOMOBILE_LOG_DIR;
+    for (const [key, value] of Object.entries(previousDirs)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
   });
 
   describe("acquireLock", () => {

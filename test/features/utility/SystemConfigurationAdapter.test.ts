@@ -12,6 +12,12 @@ import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { SystemConfigurationAdapter } from "../../../src/utils/interfaces/SystemConfigurationAdapter";
 
 import { logger } from "../../../src/utils/logger";
+import {
+  LOCALE_CAPTURE_APP_ID,
+  LOCALE_CAPTURE_MISSING_APP_ID,
+  readLocaleCapture,
+  readMissingPackageCapture,
+} from "../../helpers/androidLocaleCapture";
 
 /**
  * Sanity-check the platform-agnostic SystemConfigurationAdapter contract.
@@ -167,15 +173,15 @@ describe("SystemConfigurationAdapter", () => {
     it("sets an app-scoped locale with cmd locale when appId is provided", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
+      // Device replies are the API 36 captures in test/fixtures/android-locale/.
       const appLocaleResponses = [
-        "Locales for com.example.app for user 0 are []\n",
-        "Locales for com.example.app for user 0 are [ja-JP]\n",
+        readLocaleCapture("0-initial").appLocalesUser0,
+        readLocaleCapture("7-fr-FR").appLocalesUser0,
       ];
       const original = adb.executeCommand.bind(adb);
       adb.executeCommand = (async (command: string, ...rest: any[]) => {
-        if (command === "shell cmd locale get-app-locales 'com.example.app' --user 0") {
-          const stdout =
-            appLocaleResponses.shift() ?? "Locales for com.example.app for user 0 are [ja-JP]\n";
+        if (command === `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`) {
+          const stdout = appLocaleResponses.shift() ?? readLocaleCapture("7-fr-FR").appLocalesUser0;
           return {
             stdout,
             stderr: "",
@@ -188,17 +194,17 @@ describe("SystemConfigurationAdapter", () => {
       }) as any;
 
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
-      const result = await adapter.setLocale("ja-JP", {
+      const result = await adapter.setLocale("fr-FR", {
         broadcast: false,
-        appId: "com.example.app",
+        appId: LOCALE_CAPTURE_APP_ID,
       });
 
       expect(result.success).toBe(true);
-      expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 0");
+      expect(result.method).toBe(`cmd locale set-app-locales ${LOCALE_CAPTURE_APP_ID} --user 0`);
       expect(result.previousLanguageTag).toBeNull();
       expect(
         adb.wasCommandExecuted(
-          "cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'",
+          `cmd locale set-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0 --locales 'fr-FR'`,
         ),
       ).toBe(true);
       expect(adb.wasCommandExecuted("setprop persist.sys.locale")).toBe(false);
@@ -551,37 +557,53 @@ describe("SystemConfigurationAdapter", () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
       adb.setCommandResult(
-        "shell cmd locale get-app-locales 'com.example.app' --user 0",
-        "Locales for com.example.app for user 0 are [en-US]\n",
+        `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`,
+        readLocaleCapture("6-he-IL").appLocalesUser0,
       );
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
-      const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
+      const result = await adapter.setLocale("fr-FR", { appId: LOCALE_CAPTURE_APP_ID });
 
       expect(result.success).toBe(false);
       expect(result.error).toBe(
-        'Read-back verification failed for com.example.app: expected "ja-JP" but got "en-US"',
+        `Read-back verification failed for ${LOCALE_CAPTURE_APP_ID}: expected "fr-FR" but got "he-IL"`,
       );
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     });
 
     it("returns false when app-scoped locale read-back has no locale list", async () => {
-      const adb = new FakeAdbClient();
-      adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
-      adb.setCommandResult(
-        "shell cmd locale get-app-locales 'com.example.app' --user 0",
-        "Unknown package com.example.app for userId 0\n",
-      );
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(36);
+      adb.setCommandResponse("cmd locale get-app-locales", execResult(""));
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb, new FakeTimer());
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
-      // The read-back could not be read, so the outcome is indeterminate and
-      // nothing is restored (#10155).
       expect(result.error).toContain("Locale change outcome is indeterminate");
       expect(result.error).toContain("could not be read back for com.example.app");
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     });
 
+    it("returns a definite not-installed failure, not an indeterminate one, for an unknown package (#10211)", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
+      adb.setCommandResult(
+        `shell cmd locale get-app-locales '${LOCALE_CAPTURE_MISSING_APP_ID}' --user 0`,
+        readMissingPackageCapture().getAppLocalesUser0.output,
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("fr-FR", { appId: LOCALE_CAPTURE_MISSING_APP_ID });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        `app ${LOCALE_CAPTURE_MISSING_APP_ID} is not installed for user 0; nothing was changed`,
+      );
+      expect(result.error).not.toContain("indeterminate");
+      expect(adb.wasCommandExecuted("set-app-locales")).toBe(false);
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    // Not captured: a two-locale app override. The comma-joined list is Android's LocaleList form
+    // but no capture holds one, so this reply is hand-built.
     it("uses the first locale when app-scoped read-back returns multiple locales", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
@@ -635,14 +657,17 @@ describe("SystemConfigurationAdapter", () => {
     it("reports app scope on the Android 13+ app-scoped path (issue #6346)", async () => {
       const adb = new FakeAdbClient();
       adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
-      adb.setCommandResultSequence("shell cmd locale get-app-locales 'com.example.app' --user 0", [
-        { stdout: "Locales for com.example.app for user 0 are []\n", stderr: "" },
-        { stdout: "Locales for com.example.app for user 0 are [ja-JP]\n", stderr: "" },
-      ]);
+      adb.setCommandResultSequence(
+        `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`,
+        [
+          { stdout: readLocaleCapture("0-initial").appLocalesUser0, stderr: "" },
+          { stdout: readLocaleCapture("7-fr-FR").appLocalesUser0, stderr: "" },
+        ],
+      );
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
-      const result = await adapter.setLocale("ja-JP", {
+      const result = await adapter.setLocale("fr-FR", {
         broadcast: false,
-        appId: "com.example.app",
+        appId: LOCALE_CAPTURE_APP_ID,
       });
 
       expect(result.success).toBe(true);

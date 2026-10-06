@@ -735,6 +735,9 @@ export class DevicePool {
     requests: DeviceAllocationRequest[];
   }> = [];
   private readonly multiDeviceAllocationWaiters = new Set<() => void>();
+  // Sessions a multi-device allocation created, i.e. a plan's label sessions.
+  // Their devices free when that plan ends, so waiters keep waiting for them.
+  private readonly planAllocatedSessions = new Map<string, Session>();
 
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
@@ -2206,6 +2209,7 @@ export class DevicePool {
         );
       }
 
+      this.notePlanAllocatedSessions(assignmentsToRollback);
       const totalElapsed = this.timer.now() - startTime;
       logger.info(
         `[DevicePool] Successfully allocated ${requiredCount} devices ` +
@@ -2371,6 +2375,7 @@ export class DevicePool {
         }
       }
 
+      this.notePlanAllocatedSessions(assignmentsToRollback);
       const totalElapsed = this.timer.now() - startTime;
       logger.info(
         `[DevicePool] Successfully allocated ${requiredCount} devices by criteria ` +
@@ -2463,6 +2468,7 @@ export class DevicePool {
       }
       waited = true;
       if (!this.canClaimMultiDeviceAllocation(ticket)) {
+        this.assertNotBlockedByOtherSessionHolds(ticket);
         if (this.timer.now() >= deadlineMs) {
           return { success: false, attempts };
         }
@@ -2477,6 +2483,103 @@ export class DevicePool {
         }
         // Contention is expected; allocate released this round's new claims.
         logger.debug("Multi-device allocation will retry after contention", error);
+      }
+    }
+  }
+
+  /**
+   * Fail fast when a request can only be met by a device another live session
+   * holds. Such a hold lasts until that session is released, not until some
+   * running call ends, so waiting out the allocation timeout cannot help; the
+   * two-session case in #9950 otherwise blocks the first plan for its whole
+   * timeout. Holds stay exclusive. Devices that are merely busy, booting,
+   * reserved, in cleanup, or held by a plan's own label sessions are still waited
+   * for, and every queue round re-evaluates.
+   */
+  private assertNotBlockedByOtherSessionHolds(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): void {
+    const ownIds = new Set(ticket.requests.map((request) => request.sessionId));
+    const held = this.getDevicesMatchingAnyRequest(ticket.requests).filter((device) =>
+      this.isHeldByOtherLiveSession(device, ownIds),
+    );
+    if (held.length === 0) {
+      return;
+    }
+    const heldIds = new Set(held.map((device) => device.id));
+    const taken = new Set<string>();
+    const blockers = new Map<string, PooledDevice>();
+    let unmet = 0;
+    for (const request of this.criteriaMatcher.sortBySpecificity(ticket.requests)) {
+      // An existing session already has its device and needs no new claim.
+      if (this.sessionManager.getSession(request.sessionId)) {
+        continue;
+      }
+      const obtainable = this.getDevicesMatchingCriteria(request.criteria).find(
+        (device) =>
+          !heldIds.has(device.id) &&
+          !taken.has(device.id) &&
+          !(device.sessionId && ownIds.has(device.sessionId)),
+      );
+      if (obtainable) {
+        taken.add(obtainable.id);
+        continue;
+      }
+      const blocking = this.criteriaMatcher.filterDevices(held, request.criteria);
+      // Growth (a recovering image) or plain absence is not a session hold.
+      if (blocking.length > 0 && !this.hasPendingAndroidRecoveryMatching(request.criteria)) {
+        unmet++;
+        for (const device of blocking) {
+          blockers.set(device.id, device);
+        }
+      }
+    }
+    if (unmet === 0) {
+      return;
+    }
+    const holders = [...blockers.values()].map(
+      (device) => `${device.sessionId} (holding ${device.id})`,
+    );
+    throw new ActionableError(
+      `Cannot allocate ${ticket.requests.length} devices: ${ticket.requests.length - unmet} available, ` +
+        `the rest are held by other live sessions: ${holders.join(", ")}.\n` +
+        `Suggestions:\n` +
+        `  - Release that session, or use a device label it owns\n` +
+        `  - Reduce the number of devices required in the test plan`,
+    );
+  }
+
+  private isHeldByOtherLiveSession(device: PooledDevice, ownIds: ReadonlySet<string>): boolean {
+    const holderId = device.sessionId;
+    if (!holderId || device.status !== "busy" || ownIds.has(holderId)) {
+      return false;
+    }
+    const session = this.sessionManager.getSession(holderId);
+    return (
+      session !== null &&
+      !isSessionReleasing(this.sessionManager, holderId, session) &&
+      !device.autolockSessionId &&
+      !this.isReservedForAssignment(device) &&
+      !this.sessionManager.hasDeviceCleanupInProgress(device.id) &&
+      !this.isPlanLabelSession(holderId, session)
+    );
+  }
+
+  /** A session a multi-device allocation created; its device frees when its plan ends. */
+  private isPlanLabelSession(sessionId: string, session: Session): boolean {
+    return this.planAllocatedSessions.get(sessionId) === session;
+  }
+
+  private notePlanAllocatedSessions(created: ReadonlyMap<string, RollbackAssignment>): void {
+    for (const [sessionId, { session }] of created) {
+      this.planAllocatedSessions.set(sessionId, session);
+    }
+  }
+
+  private forgetEndedPlanAllocatedSessions(): void {
+    for (const [sessionId, session] of this.planAllocatedSessions) {
+      if (this.sessionManager.getSession(sessionId) !== session) {
+        this.planAllocatedSessions.delete(sessionId);
       }
     }
   }
@@ -2566,6 +2669,7 @@ export class DevicePool {
   ): void {
     const index = this.multiDeviceAllocationQueue.indexOf(ticket);
     if (index >= 0) {
+      this.forgetEndedPlanAllocatedSessions();
       this.multiDeviceAllocationQueue.splice(index, 1);
       this.notifyMultiDeviceAllocationWaiters();
     }

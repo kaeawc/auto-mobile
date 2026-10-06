@@ -11,6 +11,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import type { Platform } from "../../src/models";
+import { holdAsPlanSession } from "../helpers/planSessionHold";
 
 for (const criteria of [false, true]) {
   describe(`${criteria ? "criteria" : "platform"} multi-device scheduling`, () => {
@@ -92,7 +93,7 @@ for (const criteria of [false, true]) {
         const device = { deviceId, name: deviceId, platform: "ios" as const };
         discovery.bootedDevices.push(device);
         await pool.addDevice(device);
-        await pool.bindOrReuseDeviceSession(`owner:${deviceId}`, deviceId, "ios");
+        await holdAsPlanSession(pool, `owner:${deviceId}`, deviceId, "ios");
       }
       const head = allocate(["h:a", "h:b"], "ios");
       await drainUntilQuiescent(timer);
@@ -102,7 +103,7 @@ for (const criteria of [false, true]) {
       expect(follower.outcome()).toBeInstanceOf(Map);
     });
     test("overlapping follower retains its deadline budget while waiting for a turn", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "b", "android");
+      await holdAsPlanSession(pool, "owner", "b");
       const head = allocate(["h:a", "h:b"]);
       await drainUntilQuiescent(timer);
       const follower = allocate(["f:a", "f:b"], "android", 2_000);
@@ -147,7 +148,7 @@ for (const criteria of [false, true]) {
       }
     });
     test("last device release wakes head before the next poll without session churn", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "b", "android");
+      await holdAsPlanSession(pool, "owner", "b");
       const creates = spyOn(persistence, "upsertActiveSession");
       try {
         const head = allocate(["h:a", "h:b"]);
@@ -297,7 +298,7 @@ for (const criteria of [false, true]) {
     });
 
     test("round-2: timeout reports required capacity without a rolled-back allocation count", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "b", "android");
+      await holdAsPlanSession(pool, "owner", "b");
       const head = allocate(["h:a", "h:b"], "android", 2_000);
       await drainUntilQuiescent(timer);
       for (let poll = 0; poll < 2; poll++) {

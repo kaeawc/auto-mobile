@@ -9,6 +9,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
+import { holdAsPlanSession } from "../helpers/planSessionHold";
 
 for (const criteria of [false, true]) {
   describe(`${criteria ? "criteria" : "platform"} multi-device contention`, () => {
@@ -115,7 +116,7 @@ for (const criteria of [false, true]) {
     });
 
     test("partial availability keeps the idle device free until the other is released", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await holdAsPlanSession(pool, "owner", "d2");
       const waiter = observe(["a", "b"]);
       await drainUntilQuiescent(timer);
       const idle = pool.getDevice("d1")?.status;
@@ -125,7 +126,7 @@ for (const criteria of [false, true]) {
     });
 
     test("aborted head releases no other owner's device and lets a follower acquire", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await holdAsPlanSession(pool, "owner", "d2");
       const head = observe(["a", "b"]);
       await drainUntilQuiescent(timer);
       const follower = observe(["later"]);
@@ -142,7 +143,7 @@ for (const criteria of [false, true]) {
     });
 
     test("aborted queued waiter is removed without blocking the next request", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await holdAsPlanSession(pool, "owner", "d2");
       const head = observe(["a", "b"]);
       await drainUntilQuiescent(timer);
       const cancelled = observe(["cancelled"]);
@@ -160,7 +161,7 @@ for (const criteria of [false, true]) {
     });
 
     test("earlier pair precedes a later singleton across both multi-device APIs", async () => {
-      await pool.bindOrReuseDeviceSession("owner", "d2", "android");
+      await holdAsPlanSession(pool, "owner", "d2");
       const head = observe(["a", "b"]);
       await drainUntilQuiescent(timer);
       const follower = observe(["later"], 8_000, new AbortController(), !criteria);
@@ -181,8 +182,8 @@ for (const criteria of [false, true]) {
       const third = { deviceId: "d3", name: "d3", platform: "android" as const };
       manager.bootedDevices.push(third);
       await pool.addDevice(third);
-      await pool.bindOrReuseDeviceSession("owner:2", "d2", "android");
-      await pool.bindOrReuseDeviceSession("owner:3", "d3", "android");
+      await holdAsPlanSession(pool, "owner:2", "d2");
+      await holdAsPlanSession(pool, "owner:3", "d3");
       const controller = new AbortController();
       const head = criteria
         ? runWithAbortSignal(controller.signal, () =>
@@ -262,7 +263,7 @@ for (const criteria of [false, true]) {
       const third = { deviceId: "d3", name: "d3", platform: "android" as const };
       manager.bootedDevices.push(third);
       await pool.addDevice(third);
-      await pool.bindOrReuseDeviceSession("other-owner", "d3", "android");
+      await holdAsPlanSession(pool, "other-owner", "d3");
       const waiter = observe(["base", "extra:a", "extra:b"]);
       await drainUntilQuiescent(timer);
       const idleWhileWaiting = pool.getDevice("d2")?.status;

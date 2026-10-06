@@ -12,6 +12,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
+import { holdAsPlanSession } from "../helpers/planSessionHold";
 
 // Pure allocation unit tests: in-memory persistence and fake discovery/time only.
 describe("criteria allocation rollback on thrown errors", () => {
@@ -70,7 +71,7 @@ describe("criteria allocation rollback on thrown errors", () => {
   };
 
   test("third label abort releases partial allocations before rejection", async () => {
-    await pool.bindOrReuseDeviceSession("other-owner", "device-c", "android");
+    await holdAsPlanSession(pool, "other-owner", "device-c");
     const controller = new AbortController();
     const originalError = new Error("client cancelled criteria allocation");
     const allocation = runWithAbortSignal(controller.signal, () =>

@@ -1,4 +1,5 @@
 import { createConnection, Socket } from "node:net";
+import { errorMessage } from "../utils/describeUnknownError";
 import type { Duplex } from "node:stream";
 import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
@@ -1170,6 +1171,10 @@ export class DaemonClient {
     // prepared to wait for (the client's default is 120s). The daemon applies
     // the same clamp and floors, so both sides resolve the same deadline.
     request.timeoutMs = requestTimeoutMs;
+    // Serialize before registering the request: an unserializable argument
+    // rejects here with nothing scheduled, instead of throwing inside the
+    // Promise executor after the timeout and pending entry already exist.
+    const frame = this.serializeRequestFrame(request);
     const toolName = method === "tools/call" ? (params?.name ?? method) : method;
     const disconnectCause = new DaemonDisconnectError({
       toolName,
@@ -1215,7 +1220,19 @@ export class DaemonClient {
         return;
       }
 
-      this.socket.write(this.serializeRequestFrame(request));
+      try {
+        this.socket.write(frame);
+      } catch (error) {
+        // A synchronous write failure means the frame never left this process.
+        this.timer.clearTimeout(timeout);
+        this.pendingRequests.delete(requestId);
+        reject(
+          new DaemonRequestNotDeliveredError(`Daemon socket write failed: ${errorMessage(error)}`, {
+            cause: error,
+          }),
+        );
+        return;
+      }
       if (signal) {
         const onAbort = () => {
           const pending = this.pendingRequests.get(requestId);

@@ -9,6 +9,8 @@ import { executeAndroidSearchDrag } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
+import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
+import { isDeviceLostError } from "../../../models/DeviceLostError";
 import {
   withStaleDisplay,
   StaleDisplayError,
@@ -444,26 +446,43 @@ export class SwipeOn extends BaseVisualChange {
     await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
     let totalDuration = duration;
     if (boomerang) {
-      if (boomerang.apexPauseMs > 0) {
-        await this.timer.sleep(boomerang.apexPauseMs);
-      }
-      target.assertCurrent();
-      throwIfAborted(signal);
       const returnDuration = getReturnDuration({
         forwardDuration: duration,
         returnSpeed: boomerang.returnSpeed,
       });
-      await this.dispatchDisplaySwipeLeg({
-        x1: x2,
-        y1: y2,
-        x2: x1,
-        y2: y1,
-        duration: returnDuration,
-        target,
-        useCtrlProxy,
-        signal,
-      });
       totalDuration += boomerang.apexPauseMs + returnDuration;
+      // The forward leg landed: a pause cancel, a failed return leg or a throw must say so (#9973).
+      const returnResult = await runBoomerangReturnLeg({
+        timer: this.timer,
+        apexPauseMs: boomerang.apexPauseMs,
+        signal,
+        returnSwipe: () =>
+          this.dispatchDisplayReturnLeg({
+            x1: x2,
+            y1: y2,
+            x2: x1,
+            y2: y1,
+            duration: returnDuration,
+            target,
+            useCtrlProxy,
+            signal,
+          }),
+      });
+      if (!returnResult.success) {
+        return this.withAutoTargetDecision({
+          result: {
+            ...returnResult,
+            targetType,
+            x1,
+            y1,
+            x2,
+            y2,
+            duration: totalDuration,
+            warning,
+          },
+          decision,
+        });
+      }
     }
     return this.withAutoTargetDecision({
       result: {
@@ -870,6 +889,31 @@ export class SwipeOn extends BaseVisualChange {
       target.assertCurrent();
     }
     return withUnknownTalkBackWarning(result, talkBack.unknownWarning);
+  }
+
+  /**
+   * Return leg of a display-addressed boomerang as a SwipeResult, so a plain dispatch failure
+   * reaches `runBoomerangReturnLeg` as a result it can mark partially applied. Cancellation, device
+   * loss and stale-display errors stay thrown: the callers branch on those types.
+   */
+  private async dispatchDisplayReturnLeg(
+    options: Parameters<SwipeOn["dispatchDisplaySwipeLeg"]>[0],
+  ): Promise<SwipeResult> {
+    const { x1, y1, x2, y2, duration, signal } = options;
+    try {
+      await this.dispatchDisplaySwipeLeg(options);
+      return { success: true, x1, y1, x2, y2, duration };
+    } catch (error) {
+      throwIfAborted(signal);
+      if (isDeviceLostError(error) || error instanceof StaleDisplayError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      logger.warn(`swipeOn display return leg failed: ${errorMessage(error)}`, error);
+      return { success: false, error: errorMessage(error), x1, y1, x2, y2, duration };
+    }
   }
 
   private async dispatchDisplaySwipeLeg(options: {

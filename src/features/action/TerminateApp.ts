@@ -1,13 +1,13 @@
 import { toActionableError } from "../../models/ActionableError";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, TerminateAppResult } from "../../models";
+import { ActionableError, BootedDevice, ObserveResult, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -24,6 +24,7 @@ import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
@@ -52,6 +53,48 @@ registerDeviceIncarnationListener({
       platform: "android",
     }),
 });
+
+/**
+ * Whether `bundleId` was the foreground iOS app in the pre-terminate
+ * observation. `undefined` means it could not be determined (no observation,
+ * a stale/unverified capture, or no identifiable foreground window); callers
+ * omit `wasForeground` rather than assert `false`.
+ */
+function iosWasForeground(
+  bundleId: string,
+  observation: ObserveResult | undefined,
+): boolean | undefined {
+  const foregroundAppId = observation && usableForegroundAppId(observation);
+  return foregroundAppId ? foregroundAppId === bundleId : undefined;
+}
+
+/** The foreground app id of a fresh, verified observation, else `undefined`. */
+function usableForegroundAppId(observation: ObserveResult): string | undefined {
+  const { freshness } = observation;
+  if (
+    freshness?.isFresh === false ||
+    freshness?.verified === false ||
+    // The runner reports com.apple.springboard when it cannot identify the
+    // foreground app, so that identity is a guess, not an observation.
+    observation.viewHierarchy?.fallbackToSpringboard === true ||
+    resolveMissingForegroundWindow(observation)
+  ) {
+    return undefined;
+  }
+  return observedAppId(observation);
+}
+
+function observedAppId(observation: ObserveResult): string | undefined {
+  return (
+    observation.activeWindow?.appId ||
+    observation.viewHierarchy?.packageName ||
+    observation.viewHierarchy?.foregroundActivity?.split("/")[0] ||
+    undefined
+  );
+}
+
+const wasForegroundField = (value: boolean | undefined): { wasForeground?: boolean } =>
+  value === undefined ? {} : { wasForeground: value };
 
 export interface TerminateAppOptions {
   simctl?: SimCtlClient;
@@ -184,13 +227,14 @@ export class TerminateApp extends BaseVisualChange {
         // `force-stop` is destructive, so determine the selected user's process
         // state before changing it. A package running in another profile must not
         // make this operation report that the selected profile was running.
-        const isRunning = await perf.track("checkRunning", async () => {
+        const runningPids = await perf.track("checkRunning", async () => {
           try {
             const result = await readAndroidPackageProcesses(this.adb, packageName, {
               userId: targetUserId,
               timer: this.timer,
             });
-            return result.isRunning;
+            const processes = result.processes.filter((p) => p.userId === targetUserId);
+            return new Set(processes.map((p) => p.pid));
           } catch (error) {
             logger.warn(
               `[TerminateApp] Running-state check failed for user ${targetUserId}`,
@@ -202,7 +246,7 @@ export class TerminateApp extends BaseVisualChange {
           }
         });
 
-        if (!isRunning) {
+        if (runningPids.size === 0) {
           // The process is already gone — the exact dead-process state that
           // terminate-then-observe is meant to recover from (issue #5867). Any
           // cached window/hierarchy record for it is stale, so invalidate here too,
@@ -236,7 +280,7 @@ export class TerminateApp extends BaseVisualChange {
 
         if (!options?.skipObservation) {
           await perf.track("awaitTerminated", () =>
-            this.awaitTerminated(packageName, targetUserId, isForeground, signal),
+            this.awaitTerminated(packageName, targetUserId, isForeground, signal, runningPids),
           );
         }
 
@@ -273,26 +317,30 @@ export class TerminateApp extends BaseVisualChange {
     userId: number,
     wasForeground: boolean,
     signal?: AbortSignal,
+    baselinePids: ReadonlySet<number> = new Set(),
   ): Promise<void> {
     const startedAt = this.timer.now();
     const deadline = startedAt + TERMINATE_VERIFY_BUDGET_MS;
     const backoff = sequenceBackoff(TERMINATE_VERIFY_BACKOFF_MS);
     let attempts = 0;
-    let gone = false;
+    let state: boolean | "restarted" = false;
 
     while (this.timer.now() < deadline) {
       throwIfAborted(signal);
       attempts++;
-      gone = await this.isAndroidAppGone(packageName, userId, wasForeground, signal);
+      state = await this.isAndroidAppGone(packageName, userId, wasForeground, signal, baselinePids);
       throwIfAborted(signal);
-      if (gone) {
+      if (state) {
         break;
       }
       const remainingMs = deadline - this.timer.now();
       if (remainingMs <= 0) {
         break;
       }
-      await this.timer.sleep(Math.min(backoff.delayForAttempt(attempts), remainingMs));
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(backoff.delayForAttempt(attempts), remainingMs)),
+        signal,
+      );
     }
     throwIfAborted(signal);
 
@@ -301,7 +349,7 @@ export class TerminateApp extends BaseVisualChange {
         `[TerminateApp] Termination verification for ${packageName} took ${attempts} attempts and ${this.timer.now() - startedAt}ms`,
       );
     }
-    if (!gone) {
+    if (!state) {
       // Force-stop succeeded; a missing post-condition must not change its result.
       logger.warn(
         `[TerminateApp] ${packageName} for user ${userId} still reported running/foreground or could not be verified after force-stop (${TERMINATE_VERIFY_BUDGET_MS}ms budget)`,
@@ -314,7 +362,8 @@ export class TerminateApp extends BaseVisualChange {
     userId: number,
     wasForeground: boolean,
     signal?: AbortSignal,
-  ): Promise<boolean> {
+    baselinePids: ReadonlySet<number> = new Set(),
+  ): Promise<boolean | "restarted"> {
     try {
       const [processes, foreground] = await Promise.all([
         readAndroidPackageProcesses(this.adb, packageName, {
@@ -324,6 +373,16 @@ export class TerminateApp extends BaseVisualChange {
         }),
         wasForeground ? this.adb.getForegroundApp(signal) : Promise.resolve(null),
       ]);
+      const userProcesses = processes.processes.filter((process) => process.userId === userId);
+      if (
+        userProcesses.length > 0 &&
+        userProcesses.every((process) => baselinePids.size > 0 && !baselinePids.has(process.pid))
+      ) {
+        logger.warn(
+          `[TerminateApp] ${packageName} for user ${userId} was killed and restarted with a new pid (old pids: ${[...baselinePids].join(", ")}; new pids: ${userProcesses.map((process) => process.pid).join(", ")})`,
+        );
+        return "restarted";
+      }
       return (
         !processes.isRunning &&
         !(foreground?.packageName === packageName && foreground.userId === userId)
@@ -359,10 +418,17 @@ export class TerminateApp extends BaseVisualChange {
         deviceAppTerminator: this.deviceTerminator,
       });
       const terminateTransport = backend.requiresInstalledAppCheck
-        ? () => this.terminateSimulator(bundleId, perf, backend)
-        : () => this.terminatePhysicalDevice(bundleId, perf, backend);
-      const terminateLogic = async (): Promise<TerminateAppResult> => {
-        const result = await terminateTransport();
+        ? (foreground: boolean | undefined) =>
+            this.terminateSimulator(bundleId, perf, backend, foreground)
+        : (foreground: boolean | undefined) =>
+            this.terminatePhysicalDevice(bundleId, perf, backend, foreground);
+      const terminateLogic = async (
+        previousObservation?: ObserveResult,
+      ): Promise<TerminateAppResult> => {
+        // Read before terminating: afterwards the app is no longer foreground.
+        // The skipObservation path has no pre-action observation, so the state
+        // is unknown there and `wasForeground` is omitted.
+        const result = await terminateTransport(iosWasForeground(bundleId, previousObservation));
         if (result.success) {
           if (result.wasInstalled !== false) {
             this.cacheInvalidator.invalidate(this.device);
@@ -410,6 +476,7 @@ export class TerminateApp extends BaseVisualChange {
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     backend: IosTerminateBackend,
+    foreground: boolean | undefined,
   ): Promise<TerminateAppResult> {
     const listApps = new ListInstalledApps(this.device, { create: () => this.adb }, this.simctl, {
       cacheEnabled: false,
@@ -417,12 +484,11 @@ export class TerminateApp extends BaseVisualChange {
     const listing = await perf.track("checkInstalled", () => listApps.executeIosDetailedResult());
 
     if (!listing.successful) {
-      // Omit wasInstalled/wasRunning: install state was never established, so
-      // reporting them as `false` would assert a fact we do not have.
+      // Omit wasInstalled/wasRunning/wasForeground: install state was never
+      // established, so reporting them as `false` would assert a fact we do not have.
       return {
         success: false,
         packageName: bundleId,
-        wasForeground: false,
         error:
           `Could not determine whether ${bundleId} is installed on iOS device ` +
           `${this.device.deviceId}: the installed-app listing failed. Confirm the device ` +
@@ -467,7 +533,10 @@ export class TerminateApp extends BaseVisualChange {
       packageName: bundleId,
       wasInstalled: true,
       wasRunning,
-      wasForeground: false,
+      // A process that was already gone cannot have been foreground; a failed
+      // terminate leaves the pre-terminate state unverified, so only report the
+      // observed value on success.
+      ...wasForegroundField(errorMsg ? undefined : wasRunning ? foreground : false),
       ...(errorMsg ? { error: errorMsg } : {}),
     };
   }
@@ -484,6 +553,7 @@ export class TerminateApp extends BaseVisualChange {
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     backend: IosTerminateBackend,
+    foreground: boolean | undefined,
   ): Promise<TerminateAppResult> {
     try {
       const { wasInstalled, wasRunning } = await perf.track("terminateApp", () =>
@@ -494,7 +564,7 @@ export class TerminateApp extends BaseVisualChange {
         packageName: bundleId,
         wasInstalled,
         wasRunning,
-        wasForeground: false,
+        ...wasForegroundField(wasRunning ? foreground : false),
       };
     } catch (error) {
       const message = errorMessage(error);
@@ -511,7 +581,6 @@ export class TerminateApp extends BaseVisualChange {
       return {
         success: false,
         packageName: bundleId,
-        wasForeground: false,
         error: message,
       };
     }

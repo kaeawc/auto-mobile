@@ -8,9 +8,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import {
   deriveIosSharedEmitFiles,
   extractImportSpecifiers,
@@ -27,9 +27,59 @@ function typesOf(source: string): string[] {
 }
 
 describe("ctrlProxyWireScan.scanFile — discriminator resolution", () => {
+  test("finds both hierarchy request types in the production source with no unresolved sites", () => {
+    const file = resolve(
+      import.meta.dir,
+      "../../../../src/features/observe/ios/CtrlProxyHierarchy.ts",
+    );
+    const result = scanFile(file, readFileSync(file, "utf8"));
+    expect(result.emitted.map((emit) => emit.type).sort()).toEqual([
+      "request_hierarchy",
+      "request_hierarchy_if_stale",
+    ]);
+    expect(result.unresolved).toEqual([]);
+  });
+
   test("resolves a direct string-literal messageType in a sendCommand object", () => {
     const src = `sendCommand(ctx, { messageType: "request_tap_coordinates", params });`;
     expect(typesOf(src)).toEqual(["request_tap_coordinates"]);
+  });
+
+  test("resolves a messageType in a sendIOSPressCommand object", () => {
+    const src = `sendIOSPressCommand(this.context, { messageType: "request_press_home", params });`;
+    expect(typesOf(src)).toEqual(["request_press_home"]);
+  });
+
+  test("resolves a messageType in an options builder whose result is passed as a call expression", () => {
+    const src = `
+      class Delegate {
+        tapCommandOptions(tap) {
+          return { idPrefix: "tap", messageType: "request_tap_coordinates", params: {} };
+        }
+        send(tap) {
+          return sendIOSPressCommand(this.context, this.tapCommandOptions(tap));
+        }
+      }
+    `;
+    expect(typesOf(src)).toEqual(["request_tap_coordinates"]);
+  });
+
+  test("a returned object without a messageType is not an emit site", () => {
+    const src = `function result() { return { type: "mutation", rows: [] }; }`;
+    expect(typesOf(src)).toEqual([]);
+  });
+
+  test("finds the tap and pinch wire commands emitted by the shared gesture delegate", () => {
+    const file = resolve(
+      import.meta.dir,
+      "../../../../src/features/observe/shared/SharedGestureDelegate.ts",
+    );
+    const result = scanFile(file, readFileSync(file, "utf8"));
+    const emitted = result.emitted.map((emit) => emit.type);
+    expect(emitted).toContain("request_tap_coordinates");
+    expect(emitted).toContain("request_pinch");
+    expect(emitted).toContain("request_swipe");
+    expect(result.unresolved).toEqual([]);
   });
 
   test("resolves both branches of a ternary type in a JSON.stringify object", () => {

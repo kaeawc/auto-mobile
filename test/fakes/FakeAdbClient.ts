@@ -27,6 +27,8 @@ interface SpawnBehavior {
   match: string;
   outcome:
     | { kind: "exit"; code: number; stderr?: string }
+    | { kind: "running" }
+    | { kind: "signal"; signal: NodeJS.Signals }
     | { kind: "error"; error: Error }
     | { kind: "reject"; error: Error };
 }
@@ -67,6 +69,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
   private spawnedProcesses: FakeAdbProcess[] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
+  private spawnStdouts: Array<{ match: string; stdout: string }> = [];
   // A single merged log of executeCommand()/spawn() calls in the order they
   // actually happened. `commandCalls`/`spawnCalls` are separate arrays, so a
   // count- or membership-only assertion against them can't tell a caller that
@@ -176,8 +179,16 @@ export class FakeAdbClient implements FakeAdbClientContract {
     }
     const proc = new FakeAdbProcess();
     this.spawnedProcesses.push(proc);
+    const stdout = this.spawnStdouts.find((s) => joined.includes(s.match));
+    if (stdout) {
+      proc.stdout.push(stdout.stdout);
+    }
     if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
+    } else if (behavior?.outcome.kind === "signal") {
+      proc.scheduleExit(null, behavior.outcome.signal);
+    } else if (behavior?.outcome.kind === "running") {
+      // A long-lived process (a recorder): the test ends it via getSpawnedProcesses().
     } else {
       proc.scheduleExit(
         behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0,
@@ -194,6 +205,21 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   setSpawnExit(match: string, code: number, stderr?: string): void {
     this.spawnBehaviors.push({ match, outcome: { kind: "exit", code, stderr } });
+  }
+
+  /** End a spawned command whose argv contains `match` by `signal` (no exit code). */
+  setSpawnKilled(match: string, signal: NodeJS.Signals): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "signal", signal } });
+  }
+
+  /** Keep a spawned command whose argv contains `match` running until the test ends it. */
+  setSpawnRunning(match: string): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "running" } });
+  }
+
+  /** Make a spawned command whose argv contains `match` print `stdout` (buffered until read). */
+  setSpawnStdout(match: string, stdout: string): void {
+    this.spawnStdouts.push({ match, stdout });
   }
 
   setSpawnError(match: string, error: Error): void {

@@ -110,3 +110,17 @@ teardown() {
   [[ "$output" == *"bun-version-coherence-fixture/action.yml"* ]]
   [[ "$output" == *"0.1.0"* ]]
 }
+
+@test "fast validation registers the tool definitions drift check" {
+  run "$ABS_SCRIPT" --list-checks
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'tool-definitions\tscripts/generate-tool-definitions.ts'* ]]
+}
+
+@test "pull_request Fast Validation runs the tool definitions drift check" {
+  # CI runs an explicit --only list; a registered check missing from it never runs.
+  run grep -E -- '--only .*(^|,)tool-definitions(,|[[:space:]])' .github/workflows/pull_request.yml
+
+  [ "$status" -eq 0 ]
+}

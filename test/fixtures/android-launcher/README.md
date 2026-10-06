@@ -13,3 +13,27 @@ Captured output, not hand-written. Verbatim copies of manual-test batch 11 captu
 - `dumpsys-package-egg-no-launcher.txt`: `com.android.egg`, installed system app. Six activities
   register `android.intent.action.MAIN`, but none has the LAUNCHER category, so the package has no
   launcher activity. Its first MAIN activity is `.landroid.MainActivity` (DEFAULT + PLATLOGO).
+
+## Launcher surface observations
+
+Seven verbatim `observe` captures (including the raw hierarchy), captured 2026-10-05 in
+manual-test batch 32 on emulator-5600 (phone) and emulator-5602 (foldable), API 36,
+`com.google.android.apps.nexuslauncher`, tested main SHA `0cd001971`. These are copied
+observations, not hand-written fixtures.
+
+- `launcher-home-emulator-5600.json` and `launcher-home-emulator-5602.json`: home workspace.
+- `launcher-recents-emulator-5600.json` and `launcher-recents-emulator-5602.json`: Recents overview.
+- `launcher-allapps-emulator-5600.json` and `launcher-allapps-emulator-5602.json`: all-apps drawer.
+- `launcher-widgets-emulator-5600.json`: widgets picker (phone only).
+
+`launcher-folder-emulator-5600.json` (phone) and `launcher-folder-emulator-5602.json`
+(foldable) are verbatim, untrimmed `observe` copies from manual-test batch 34,
+emulator-5600 / emulator-5602, API 36, `com.google.android.apps.nexuslauncher`, tested
+main SHA `f5c7eca2ae23f33067311e1c67a91dc5d6a9db69`. Both open folders expose
+`folder_content`, `folder_footer`, and `folder_name`, omit `workspace`, and are
+distinguished from both home captures by `folder_content` (none of the three folder
+ids appears in either home capture).
+
+Both home captures expose a visible `workspace` with
+`occlusionState: "partial"`; the five overlay captures omit it. The foldable all-apps
+capture retains a visible `hotseat`, so hotseat presence cannot establish home.

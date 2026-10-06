@@ -11,7 +11,10 @@ import {
   type CoordinateTapClient,
 } from "../../../src/features/action/coordinateTapDispatch";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { LONG_PRESS_MIN_MS } from "../../../src/features/action/tapAtGesture";
+import { DOUBLE_TAP_GAP_MS, LONG_PRESS_MIN_MS } from "../../../src/features/action/tapAtGesture";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { TALKBACK_ACTIVATION_WARNING } from "../../../src/features/talkback/TalkBackTapStrategy";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { observation } from "../../helpers/tapAtCoordinate";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
@@ -211,34 +214,215 @@ describe("androidDisplayTapDispatch", () => {
     assertCurrent: () => {},
   };
 
-  test.each(["Not connected", undefined])(
-    "preserves a plain failure before dispatch (%s)",
-    async (error) => {
+  test.each(["tap", "longPress"] as const)(
+    "falls back on the same display after a pre-dispatch %s failure",
+    async (action) => {
       const adb = new FakeAdbExecutor();
       const onDispatched = mock(() => {});
       const client: Parameters<typeof androidDisplayTapDispatch>[0] = {
         supportsCommand: async (name) => name === "gesture_display_id_v1",
-        requestTapCoordinates: async () => ({ success: false, error }),
+        requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
       };
       const dispatch = await androidDisplayTapDispatch(
         client,
         adb,
-        { action: "tap" },
+        { action },
         {
           target,
           onDispatched,
         },
       );
 
-      const request = dispatch({ x: 10, y: 20 });
+      await dispatch({ x: 10, y: 20 });
+      expect(onDispatched).toHaveBeenCalledTimes(1);
+      expect(adb.getExecutedCommands()).toEqual([
+        `shell input touchscreen -d 2 ${action === "longPress" ? "swipe 10 20 10 20 800" : "tap 10 20"}`,
+      ]);
+      expect(adb.getCommandCalls()[0].timeoutMs).toBe(
+        action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(800) : undefined,
+      );
+    },
+  );
 
-      await expect(request).rejects.toBeInstanceOf(ActionableError);
-      await expect(request).rejects.toThrow(error ?? "Android tap failed");
-      await expect(request).rejects.not.toThrow(/indeterminate/i);
+  test.each(["abort", "beforeSend fence", "fallback fence", "stale frame"] as const)(
+    "does not fall back after %s failure before dispatch",
+    async (failure) => {
+      const adb = new FakeAdbExecutor();
+      const controller = new AbortController();
+      const onDispatched = mock(() => {});
+      let current = true;
+      const assertCurrent = () => {
+        if (!current) {
+          throw new ActionableError("Display changed");
+        }
+      };
+      const dispatch = await androidDisplayTapDispatch(
+        {
+          supportsCommand: async () => true,
+          requestTapCoordinates: async (
+            _x,
+            _y,
+            _duration,
+            _timeout,
+            _perf,
+            _frame,
+            _onDispatch,
+            _signal,
+            _display,
+            beforeSend,
+          ) => {
+            if (failure === "abort") {
+              controller.abort();
+            } else if (failure !== "stale frame") {
+              current = false;
+              if (failure === "beforeSend fence") {
+                beforeSend?.();
+              }
+            }
+            return {
+              success: false,
+              error: failure === "stale frame" ? "Stale frame context" : "Not connected",
+            };
+          },
+        },
+        adb,
+        { action: "tap" },
+        { target: { ...target, assertCurrent }, signal: controller.signal, onDispatched },
+      );
+      await expect(dispatch({ x: 10, y: 20 })).rejects.toThrow(
+        failure === "abort"
+          ? OPERATION_CANCELLED_MESSAGE
+          : failure === "stale frame"
+            ? "Stale frame context"
+            : "Display changed",
+      );
+      expect(adb.getExecutedCommands()).toEqual([]);
       expect(onDispatched).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([true, false])("spaces double taps by 200 ms (CtrlProxy %s)", async (ctrlProxy) => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const onDispatched = mock(() => {});
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const dispatch = await androidDisplayTapDispatch(
+      { supportsCommand: async () => ctrlProxy, requestTapCoordinates },
+      adb,
+      { action: "doubleTap" },
+      { target, onDispatched, timer },
+    );
+    const pending = dispatch({ x: 10, y: 20 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingSleeps()).toEqual([DOUBLE_TAP_GAP_MS]);
+    timer.advanceTime(DOUBLE_TAP_GAP_MS - 1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    timer.advanceTime(1);
+    await pending;
+    expect(onDispatched).toHaveBeenCalledTimes(2);
+    expect(requestTapCoordinates).toHaveBeenCalledTimes(ctrlProxy ? 2 : 0);
+    expect(adb.getExecutedCommands()).toHaveLength(ctrlProxy ? 0 : 2);
+  });
+
+  test.each(["abort", "display change"] as const)(
+    "prevents the second double tap after %s in the gap",
+    async (failure) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      let current = true;
+      const onDispatched = mock(() => {});
+      const requestTapCoordinates = mock(async () => ({ success: true }));
+      const dispatch = await androidDisplayTapDispatch(
+        { supportsCommand: async () => true, requestTapCoordinates },
+        adb,
+        { action: "doubleTap" },
+        {
+          target: {
+            ...target,
+            assertCurrent: () => {
+              if (!current) {
+                throw new ActionableError("Display changed");
+              }
+            },
+          },
+          signal: controller.signal,
+          onDispatched,
+          timer,
+        },
+      );
+      const pending = dispatch({ x: 10, y: 20 });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(timer.getPendingSleeps()).toEqual([DOUBLE_TAP_GAP_MS]);
+      if (failure === "abort") {
+        controller.abort();
+      } else {
+        current = false;
+      }
+      if (failure === "display change") {
+        timer.advanceTime(DOUBLE_TAP_GAP_MS);
+      }
+      await expect(pending).rejects.toThrow(
+        failure === "abort" ? OPERATION_CANCELLED_MESSAGE : "Display changed",
+      );
+      await expect(pending).rejects.toBeInstanceOf(ActionableError);
+      await expect(pending).rejects.toThrow(
+        /indeterminate.*Double tap partially applied: one tap was delivered; the second tap was not confirmed/i,
+      );
+      expect(onDispatched).toHaveBeenCalledTimes(1);
+      timer.advanceTime(DOUBLE_TAP_GAP_MS);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(requestTapCoordinates).toHaveBeenCalledTimes(1);
       expect(adb.getExecutedCommands()).toEqual([]);
     },
   );
+
+  test("falls back only for an undispatched second tap", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const onDispatched = mock(() => {});
+    const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
+      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+        if (requestTapCoordinates.mock.calls.length === 1) {
+          onDispatch?.();
+          return { success: true };
+        }
+        return { success: false, error: "Not connected" };
+      },
+    );
+    const dispatch = await androidDisplayTapDispatch(
+      { supportsCommand: async () => true, requestTapCoordinates },
+      adb,
+      { action: "doubleTap" },
+      { target, onDispatched, timer },
+    );
+    await dispatch({ x: 10, y: 20 });
+    expect(requestTapCoordinates).toHaveBeenCalledTimes(2);
+    expect(onDispatched).toHaveBeenCalledTimes(2);
+    expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen -d 2 tap 10 20"]);
+  });
+
+  test("reports fallback delivery before propagating cancellation", async () => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    const onDispatched = mock(() => {});
+    adb.abortAfterCommand("input touchscreen -d 2 tap 10 20", controller);
+    const dispatch = await androidDisplayTapDispatch(
+      {
+        supportsCommand: async () => true,
+        requestTapCoordinates: async () => ({ success: false, error: "Not connected" }),
+      },
+      adb,
+      { action: "tap" },
+      { target, signal: controller.signal, onDispatched },
+    );
+    await expect(dispatch({ x: 10, y: 20 })).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toEqual(["shell input touchscreen -d 2 tap 10 20"]);
+  });
 
   test.each(["Tap timed out after 5000ms", "runner rejected", "Stale frame context", undefined])(
     "does not replay a dispatched tap after failure (%s)",
@@ -319,6 +503,34 @@ describe("androidDisplayTapDispatch", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
+  test("counts a confirmed first double tap before propagating a racing abort", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const onDispatched = mock(() => {});
+    const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
+      async (_x, _y, _duration, _timeout, _perf, _frame, onDispatch) => {
+        onDispatch?.();
+        controller.abort();
+        return { success: true };
+      },
+    );
+    const dispatch = await androidDisplayTapDispatch(
+      { supportsCommand: async () => true, requestTapCoordinates },
+      adb,
+      { action: "doubleTap" },
+      { target, signal: controller.signal, onDispatched, timer },
+    );
+
+    await expect(dispatch({ x: 10, y: 20 })).rejects.toThrow(
+      /Operation cancelled.*Double tap partially applied: one tap was delivered/i,
+    );
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(requestTapCoordinates).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
   test("does not attempt the second double tap after an indeterminate first tap", async () => {
     const adb = new FakeAdbExecutor();
     const onDispatched = mock(() => {});
@@ -351,6 +563,8 @@ describe("androidDisplayTapDispatch", () => {
     "preserves successful %s routing to display %s",
     async (action, displayId, count, duration) => {
       const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
       const onDispatched = mock(() => {});
       const controller = new AbortController();
       const requestTapCoordinates = mock<CoordinateTapClient<() => void>["requestTapCoordinates"]>(
@@ -364,7 +578,7 @@ describe("androidDisplayTapDispatch", () => {
         { supportsCommand: async () => true, requestTapCoordinates },
         adb,
         { action },
-        { target: { ...target, displayId }, signal: controller.signal, onDispatched },
+        { target: { ...target, displayId }, signal: controller.signal, onDispatched, timer },
       );
 
       await dispatch({ x: 10, y: 20 });
@@ -386,6 +600,7 @@ describe("androidDisplayTapDispatch", () => {
       }
       expect(onDispatched).toHaveBeenCalledTimes(count);
       expect(adb.getExecutedCommands()).toEqual([]);
+      expect(timer.getSleepHistory()).toEqual(action === "doubleTap" ? [DOUBLE_TAP_GAP_MS] : []);
     },
   );
 
@@ -398,13 +613,15 @@ describe("androidDisplayTapDispatch", () => {
     "preserves ADB %s routing without display capability",
     async (action, supportsCommand, input, count, duration) => {
       const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
       const onDispatched = mock(() => {});
       const requestTapCoordinates = mock(async () => ({ success: true }));
       const dispatch = await androidDisplayTapDispatch(
         { supportsCommand, requestTapCoordinates },
         adb,
         { action, duration },
-        { target, onDispatched },
+        { target, onDispatched, timer },
       );
 
       await dispatch({ x: 10, y: 20 });
@@ -414,6 +631,7 @@ describe("androidDisplayTapDispatch", () => {
         Array.from({ length: count }, () => `shell input touchscreen -d 2 ${input}`),
       );
       expect(onDispatched).toHaveBeenCalledTimes(count);
+      expect(timer.getSleepHistory()).toEqual(action === "doubleTap" ? [DOUBLE_TAP_GAP_MS] : []);
       if (action === "longPress" && duration === 20000) {
         expect(adb.getCommandCalls()[0].timeoutMs).toBeGreaterThanOrEqual(22000);
       } else if (action !== "longPress") {
@@ -480,3 +698,213 @@ test.each([500, 4000, MAX_SETTIMEOUT_DELAY_MS])(
     }
   },
 );
+
+describe("androidDisplayTapDispatch with TalkBack on (#9905)", () => {
+  const talkBackTarget = (displayId: number | undefined) => ({
+    observation: {
+      ...observation(100, 200),
+      display: { key: "inner", role: "inner", posture: "opened", generation: 7 } as const,
+    },
+    displayId,
+    assertCurrent: () => {},
+  });
+  const rawClient = () => {
+    const requestTapCoordinates = mock(async () => ({ success: true }));
+    const supportsCommand = mock(async () => true);
+    const client: Parameters<typeof androidDisplayTapDispatch>[0] = {
+      supportsCommand,
+      requestTapCoordinates,
+    };
+    return { client, requestTapCoordinates, supportsCommand };
+  };
+  const strategyFake = () => ({
+    executePreciseTap: mock(async () => ({
+      success: true,
+      method: "coordinate-fallback" as const,
+      focusCompleted: true,
+    })),
+    executeCoordinateFallback: mock(async () => ({
+      success: true,
+      method: "coordinate-fallback" as const,
+    })),
+  });
+  const driver = new FakeTalkBackNavigationDriver();
+
+  test.each(["tap", "doubleTap", "longPress"] as const)(
+    "refuses %s on a non-default display before any dispatch or capability probe",
+    async (action) => {
+      const adb = new FakeAdbExecutor();
+      const { client, requestTapCoordinates, supportsCommand } = rawClient();
+      const strategy = strategyFake();
+      await expect(
+        androidDisplayTapDispatch(
+          client,
+          adb,
+          { action },
+          {
+            target: talkBackTarget(2),
+            onDispatched: () => {},
+            talkBack: { strategy, driver },
+          },
+        ),
+      ).rejects.toThrow(
+        "TalkBack coordinate activation cannot target display 2; no gesture was dispatched.",
+      );
+      expect(supportsCommand).not.toHaveBeenCalled();
+      expect(requestTapCoordinates).not.toHaveBeenCalled();
+      expect(adb.getExecutedCommands()).toEqual([]);
+      expect(strategy.executePreciseTap).not.toHaveBeenCalled();
+      expect(strategy.executeCoordinateFallback).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each([0, undefined])(
+    "uses the TalkBack tap strategy on default display %p instead of a raw gesture",
+    async (displayId) => {
+      const adb = new FakeAdbExecutor();
+      const { client, requestTapCoordinates } = rawClient();
+      const strategy = strategyFake();
+      const onDispatched = mock(() => {});
+      const point = { x: 10, y: 20 };
+      const run = (action: "tap" | "doubleTap" | "longPress") =>
+        androidDisplayTapDispatch(
+          client,
+          adb,
+          { action },
+          { target: talkBackTarget(displayId), onDispatched, talkBack: { strategy, driver } },
+        ).then((dispatch) => dispatch(point));
+
+      await run("tap");
+      expect(strategy.executePreciseTap).toHaveBeenCalledTimes(1);
+      await run("doubleTap");
+      await run("longPress");
+      expect(strategy.executeCoordinateFallback.mock.calls.map((call) => call[2])).toEqual([
+        "doubleTap",
+        "longPress",
+      ]);
+      // tap + doubleTap (two activation touches) + longPress
+      expect(onDispatched).toHaveBeenCalledTimes(4);
+      expect(requestTapCoordinates).not.toHaveBeenCalled();
+      expect(adb.getExecutedCommands()).toEqual([]);
+    },
+  );
+
+  test("forwards the unconfirmed-activation warnings the strategy reports on success", async () => {
+    const strategy = strategyFake();
+    strategy.executePreciseTap.mockResolvedValue({
+      success: true,
+      method: "coordinate-fallback",
+      focusCompleted: true,
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    } as never);
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "tap" },
+      {
+        target: talkBackTarget(0),
+        onDispatched: () => {},
+        onWarning,
+        talkBack: { strategy, driver },
+      },
+    );
+    await dispatch({ x: 1, y: 2 });
+    expect(onWarning.mock.calls).toEqual([[TALKBACK_ACTIVATION_WARNING]]);
+  });
+
+  test("a successful TalkBack double tap reports both delivered touches", async () => {
+    const strategy = strategyFake();
+    strategy.executeCoordinateFallback.mockResolvedValue({
+      success: true,
+      method: "coordinate-fallback",
+      completedTaps: 2,
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    } as never);
+    const onDispatched = mock(() => {});
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "doubleTap" },
+      { target: talkBackTarget(0), onDispatched, onWarning, talkBack: { strategy, driver } },
+    );
+    await dispatch({ x: 1, y: 2 });
+    expect(onDispatched).toHaveBeenCalledTimes(2);
+    expect(onWarning.mock.calls).toEqual([[TALKBACK_ACTIVATION_WARNING]]);
+  });
+
+  test("a long press carries no activation warning and one delivery", async () => {
+    const strategy = strategyFake();
+    const onDispatched = mock(() => {});
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "longPress" },
+      { target: talkBackTarget(0), onDispatched, onWarning, talkBack: { strategy, driver } },
+    );
+    await dispatch({ x: 1, y: 2 });
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test("a failed TalkBack activation does not forward a success warning", async () => {
+    const strategy = strategyFake();
+    strategy.executePreciseTap.mockResolvedValue({
+      success: false,
+      method: "coordinate-fallback",
+      error: "nope",
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    } as never);
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "tap" },
+      {
+        target: talkBackTarget(0),
+        onDispatched: () => {},
+        onWarning,
+        talkBack: { strategy, driver },
+      },
+    );
+    await expect(dispatch({ x: 1, y: 2 })).rejects.toThrow("TalkBack coordinate tap failed");
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test("a failed TalkBack activation throws and reports the delivered focus touch", async () => {
+    const strategy = strategyFake();
+    strategy.executePreciseTap.mockResolvedValue({
+      success: false,
+      method: "coordinate-fallback",
+      focusCompleted: true,
+      error: "Double tap failed: nope",
+    } as never);
+    const onDispatched = mock(() => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "tap" },
+      { target: talkBackTarget(0), onDispatched, talkBack: { strategy, driver } },
+    );
+    await expect(dispatch({ x: 1, y: 2 })).rejects.toThrow(
+      "TalkBack coordinate tap failed: Double tap failed: nope Focus touch was delivered",
+    );
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+  });
+
+  test("without a TalkBack context the raw display dispatch is unchanged", async () => {
+    const adb = new FakeAdbExecutor();
+    const { client, requestTapCoordinates } = rawClient();
+    const dispatch = await androidDisplayTapDispatch(
+      client,
+      adb,
+      { action: "tap" },
+      { target: talkBackTarget(2), onDispatched: () => {} },
+    );
+    await dispatch({ x: 10, y: 20 });
+    expect(requestTapCoordinates).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+});

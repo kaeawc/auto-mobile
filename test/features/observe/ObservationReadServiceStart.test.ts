@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import iosFixture from "../../fixtures/observe/ios-fractional-bounds.json";
 import type { ViewHierarchyResult } from "../../../src/models";
 import type { RunnerReadinessRequest } from "../../../src/ctrlProxy/RunnerReadinessService";
@@ -159,6 +159,21 @@ async function harness(platform: "android" | "ios" = "android") {
       capture.capture({ freshness: "fresh", observerMode: true, ...options }),
   };
 }
+
+beforeAll(async () => {
+  // Pay the one-time cold-start cost of the first read (lazy zod schema build, first-use pool and
+  // session wiring; ~15 ms) outside the per-test budget with a throwaway read nothing asserts on.
+  const h = await harness("android");
+  const result = await h.screen.executeDeviceRead(undefined, "none");
+  observeToolResultSchema.safeParse(result);
+  projectSanitizedObserveSkeleton(
+    sanitizeObserveResult(result, { dropElements: false, project: "full" }),
+    result,
+  );
+  for (const close of cleanups.splice(0)) {
+    close();
+  }
+});
 
 test.each(["android", "ios"] as const)(
   "unowned %s read starts once, returns fresh elements and leaves real pool/session state idle",

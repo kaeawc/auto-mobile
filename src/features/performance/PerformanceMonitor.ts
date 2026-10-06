@@ -1108,51 +1108,7 @@ export class PerformanceMonitor {
         true,
       );
 
-      // Check if any frames were actually rendered in this interval
-      const totalFramesMatch = stdout.match(/Total frames rendered:\s+(\d+)/);
-      const totalFrames = totalFramesMatch ? parseInt(totalFramesMatch[1], 10) : 0;
-
-      // Only parse frame-time percentiles if frames were rendered (otherwise
-      // gfxinfo prints garbage default values). gfxinfo already computes this
-      // native histogram for the same interval we reset each tick, so surfacing
-      // it costs no extra device work.
-      let frameTimeMs: number | null = null;
-      let frameTimePercentilesMs: FrameTimePercentiles | null = null;
-      if (totalFrames > 0) {
-        frameTimeMs = parsePercentileMs(stdout, 50);
-        frameTimePercentilesMs = parseFrameTimePercentiles(stdout);
-      }
-
-      // Parse jank counters (now reflects only jank since last reset)
-      const missedVsync = parseInt(stdout.match(/Missed Vsync:\s+(\d+)/)?.[1] || "0", 10);
-      const slowUi = parseInt(stdout.match(/Slow UI thread:\s+(\d+)/)?.[1] || "0", 10);
-      const deadlineMissed = parseInt(
-        stdout.match(/Frame deadline missed:\s+(\d+)/)?.[1] || "0",
-        10,
-      );
-      // Aggregate janky-frame count (deduplicated across causes) when present.
-      const jankyMatch = stdout.match(/Janky frames:\s+(\d+)/);
-      const jankyFrames = jankyMatch ? parseInt(jankyMatch[1], 10) : null;
-
-      // Parse high input latency frame count
-      const highInputLatencyMatch = stdout.match(/Number High input latency:\s+(\d+)/);
-      const highInputLatencyFrames = highInputLatencyMatch
-        ? parseInt(highInputLatencyMatch[1], 10)
-        : null;
-
-      // Calculate FPS from frame time
-      const fps = frameTimeMs && frameTimeMs > 0 ? Math.min(1000 / frameTimeMs, 60) : null;
-
-      return {
-        fps,
-        frameTimeMs,
-        jankFrames: null, // Computed as delta in sampleDevice
-        highInputLatencyFrames,
-        totalFrames,
-        frameTimePercentilesMs,
-        rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
-        resetSucceeded: true,
-      };
+      return this.parseGfxMetrics(stdout);
     } catch (error) {
       signal.throwIfAborted();
       logger.debug(`[PerformanceMonitor] gfxinfo failed for ${device.deviceId}: ${error}`);
@@ -1167,6 +1123,57 @@ export class PerformanceMonitor {
         resetSucceeded: false,
       };
     }
+  }
+
+  private fpsFromFrameTime(frameTimeMs: number | null): number | null {
+    return frameTimeMs && frameTimeMs > 0 ? Math.min(1000 / frameTimeMs, 60) : null;
+  }
+
+  private parseGfxMetrics(
+    stdout: string,
+  ): GfxMetrics & { rawJankCounters: RawJankCounters | null; resetSucceeded: boolean } {
+    // Check if any frames were actually rendered in this interval
+    const totalFramesMatch = stdout.match(/Total frames rendered:\s+(\d+)/);
+    const totalFrames = totalFramesMatch ? parseInt(totalFramesMatch[1], 10) : 0;
+
+    // Only parse frame-time percentiles if frames were rendered (otherwise
+    // gfxinfo prints garbage default values). gfxinfo already computes this
+    // native histogram for the same interval we reset each tick, so surfacing
+    // it costs no extra device work.
+    let frameTimeMs: number | null = null;
+    let frameTimePercentilesMs: FrameTimePercentiles | null = null;
+    if (totalFrames > 0) {
+      frameTimeMs = parsePercentileMs(stdout, 50);
+      frameTimePercentilesMs = parseFrameTimePercentiles(stdout);
+    }
+
+    // Parse jank counters (now reflects only jank since last reset)
+    const missedVsync = parseInt(stdout.match(/Missed Vsync:\s+(\d+)/)?.[1] || "0", 10);
+    const slowUi = parseInt(stdout.match(/Slow UI thread:\s+(\d+)/)?.[1] || "0", 10);
+    const deadlineMissed = parseInt(stdout.match(/Frame deadline missed:\s+(\d+)/)?.[1] || "0", 10);
+    // Aggregate janky-frame count (deduplicated across causes) when present.
+    const jankyMatch = stdout.match(/Janky frames:\s+(\d+)/);
+    const jankyFrames = jankyMatch ? parseInt(jankyMatch[1], 10) : null;
+
+    // Parse high input latency frame count
+    const highInputLatencyMatch = stdout.match(/Number High input latency:\s+(\d+)/);
+    const highInputLatencyFrames = highInputLatencyMatch
+      ? parseInt(highInputLatencyMatch[1], 10)
+      : null;
+
+    // Calculate FPS from frame time
+    const fps = this.fpsFromFrameTime(frameTimeMs);
+
+    return {
+      fps,
+      frameTimeMs,
+      jankFrames: null, // Computed as delta in sampleDevice
+      highInputLatencyFrames,
+      totalFrames,
+      frameTimePercentilesMs,
+      rawJankCounters: { missedVsync, slowUi, deadlineMissed, jankyFrames },
+      resetSucceeded: true,
+    };
   }
 
   /**

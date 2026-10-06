@@ -1,7 +1,10 @@
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
-import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
+import {
+  cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
+  releaseSessionAndDevice,
+} from "./releaseSessionAndDevice";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
@@ -80,6 +83,8 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { NetworkState } from "../server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -129,6 +134,7 @@ import {
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+  createPooledObservationExecutor,
   runObservationRequestBatch,
 } from "./observationRequestBatch";
 import {
@@ -192,7 +198,7 @@ import {
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
-  stopVideoRecording,
+  stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -249,6 +255,12 @@ const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
 const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+// How long device-disconnect cleanup waits for a recording's stop before releasing the device.
+// An iOS recording started with `resolution` is re-encoded by ffmpeg on stop, which an
+// unattended stop bounds by up to 10 minutes; the device and its session must not wait that
+// long. This is the stream-copy post-process budget (and the former fixed bound). The stop
+// keeps running in the background under its own unattended ceiling.
+const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
@@ -272,6 +284,38 @@ type DeviceSessionRoutingTargets = {
   failuresPush: ReturnType<typeof getFailuresPushServer>;
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
+
+function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
+  return {
+    deviceId: pooledDevice.id,
+    name: pooledDevice.name,
+    platform: pooledDevice.platform,
+    iosVersion: pooledDevice.iosVersion,
+  };
+}
+
+/**
+ * Per-device step of the pooled observation batch. An Android floor is read from the device's
+ * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
+ * floor (issue #9895).
+ */
+function createDaemonObservationExecutor(requestStart: number) {
+  return createPooledObservationExecutor({
+    hostRequestStartMs: requestStart,
+    readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
+      (
+        await defaultAdbClientFactory
+          .create(toBootedDevice(pooledDevice))
+          .getDeviceTimestampMsWithSource(undefined, signal)
+      ).timestampMs,
+    observe: (pooledDevice: PooledDevice, { minTimestamp, signal }) =>
+      new RealObserveScreen(toBootedDevice(pooledDevice)).execute({
+        skipWaitForFresh: false,
+        minTimestamp,
+        signal,
+      }),
+  });
+}
 
 export function getProcessWideAdbServerResetCohort(
   bootedDeviceIds: ReadonlySet<string>,
@@ -520,7 +564,100 @@ export class Daemon {
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     this.observerSessionRegistry = new ObserverSessionRegistry(this.timer);
+    this.configureSessionLifecycleCallbacks();
+    this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
+    const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
+    for (const warning of recoveryConfiguration.warnings) {
+      logger.warn(`[Daemon] ${warning}`);
+    }
+    logger.info(
+      `[Daemon] Device recovery policy: onLoss=${recoveryConfiguration.policy.onLoss}, ` +
+        `maxAttempts=${recoveryConfiguration.policy.maxAttempts}`,
+    );
+    this.deviceSessionRegistry = new DeviceSessionRegistry(this.timer, this.idGenerator);
+    this.devicePool = this.createDevicePool(
+      recoveryConfiguration.policy,
+      recoveryPolicyEnvironment,
+    );
+    executionTracker.setAutolockSessionResolver({
+      autolockSessionForMcpSession: (mcpSessionId) =>
+        this.devicePool.captureAutolockSessionForMcpSession(mcpSessionId),
+    });
+    // Initialize singleton for daemon state access
+    DaemonState.getInstance().initialize(
+      this.sessionManager,
+      this.devicePool,
+      this.deviceSessionRegistry,
+      this.observerSessionRegistry,
+    );
+
+    this.applyRuntimeOptions(options);
+    this.applyAccessibilityOptions(options);
+    this.applyToolOutputOptions(options);
+  }
+
+  private createDevicePool(
+    recoveryPolicy: ReturnType<typeof parseDeviceRecoveryPolicy>["policy"],
+    recoveryPolicyEnvironment: NodeJS.ProcessEnv,
+  ): DevicePool {
+    return DevicePool.create({
+      sessionManager: this.sessionManager,
+      daemonSessionId: this.daemonSessionId,
+      timer: this.timer,
+      missingDeviceMisses: this.deviceDisconnectMisses,
+      installedAppsRepository: this.installedAppsRepository,
+      deviceSessionRepository: this.deviceSessionRepository,
+      releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
+        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
+          deferFailureFallback: true,
+        }),
+      onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
+      recoveryPolicy: recoveryPolicy,
+      onDeviceFramesInvalidated: (deviceId) => {
+        // Full: pool callbacks signal new incarnations or untrusted runtime identity.
+        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
+        getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
+      },
+      onDeviceRemoved: (deviceId, platform) => {
+        getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
+        stopLocationRouteForRemovedDevice(deviceId);
+        defaultMockLocationClearRegistry.retireDevice(deviceId);
+        NetworkState.getInstance().retireDevice(deviceId);
+        defaultDisplayInventoryProvider.invalidate(deviceId);
+        DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
+        this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
+        // Full removal: prune AFTER epoch retirement, which also invalidates frames.
+        this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
+        if (platform === "ios") {
+          const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
+          void manager?.suspendForDeviceRemoval().catch((error) => {
+            logger.warn(
+              `[Daemon] Failed to stop iOS CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
+            );
+          });
+        }
+      },
+      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
+      ambientExecutionIdReader,
+      cancelDeviceSessionExecutions: Object.assign(
+        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
+          this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
+        {
+          cancelDeviceExecutions: (
+            deviceId: string,
+            reason: string | Error,
+            options?: { excludeExecutionId?: string; onlySessionUuid?: string },
+          ) => this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
+        },
+      ),
+      idGenerator: this.idGenerator,
+      deviceSessionContinuityEnabled: isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
+    });
+  }
+
+  private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
+    registerNetworkStateSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {
@@ -596,80 +733,9 @@ export class Daemon {
       }
       SessionReleaseBroadcaster.emit(sessionId, releaseReason, snapshot);
     });
-    this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
-    const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
-    for (const warning of recoveryConfiguration.warnings) {
-      logger.warn(`[Daemon] ${warning}`);
-    }
-    logger.info(
-      `[Daemon] Device recovery policy: onLoss=${recoveryConfiguration.policy.onLoss}, ` +
-        `maxAttempts=${recoveryConfiguration.policy.maxAttempts}`,
-    );
-    this.deviceSessionRegistry = new DeviceSessionRegistry(this.timer, this.idGenerator);
-    this.devicePool = DevicePool.create({
-      sessionManager: this.sessionManager,
-      daemonSessionId: this.daemonSessionId,
-      timer: this.timer,
-      missingDeviceMisses: this.deviceDisconnectMisses,
-      installedAppsRepository: this.installedAppsRepository,
-      deviceSessionRepository: this.deviceSessionRepository,
-      releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
-          deferFailureFallback: true,
-        }),
-      onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
-      recoveryPolicy: recoveryConfiguration.policy,
-      onDeviceFramesInvalidated: (deviceId) => {
-        // Full: pool callbacks signal new incarnations or untrusted runtime identity.
-        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
-        getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
-      },
-      onDeviceRemoved: (deviceId, platform) => {
-        getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
-        stopLocationRouteForRemovedDevice(deviceId);
-        defaultMockLocationClearRegistry.retireDevice(deviceId);
-        defaultDisplayInventoryProvider.invalidate(deviceId);
-        DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
-        this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
-        // Full removal: prune AFTER epoch retirement, which also invalidates frames.
-        this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
-        if (platform === "ios") {
-          const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);
-          void manager?.suspendForDeviceRemoval().catch((error) => {
-            logger.warn(
-              `[Daemon] Failed to stop iOS CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
-            );
-          });
-        }
-      },
-      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      ambientExecutionIdReader,
-      cancelDeviceSessionExecutions: Object.assign(
-        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
-          this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
-        {
-          cancelDeviceExecutions: (
-            deviceId: string,
-            reason: string,
-            options?: { excludeExecutionId?: string },
-          ) => this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
-        },
-      ),
-      idGenerator: this.idGenerator,
-      deviceSessionContinuityEnabled: isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
-    });
-    executionTracker.setAutolockSessionResolver({
-      autolockSessionForMcpSession: (mcpSessionId) =>
-        this.devicePool.captureAutolockSessionForMcpSession(mcpSessionId),
-    });
-    // Initialize singleton for daemon state access
-    DaemonState.getInstance().initialize(
-      this.sessionManager,
-      this.devicePool,
-      this.deviceSessionRegistry,
-      this.observerSessionRegistry,
-    );
+  }
 
+  private applyRuntimeOptions(options: DaemonOptions): void {
     // Apply CLI flags to serverConfig so daemon tools respect them
     if (options.networkMockable) {
       serverConfig.setNetworkMockableEnabled(true);
@@ -698,6 +764,9 @@ export class Daemon {
     if (options.predictiveUi) {
       serverConfig.setPredictiveUiEnabled(true);
     }
+  }
+
+  private applyAccessibilityOptions(options: DaemonOptions): void {
     if (options.rawElementSearch) {
       serverConfig.setRawElementSearchEnabled(true);
     }
@@ -719,6 +788,9 @@ export class Daemon {
     if (options.noOcclusion) {
       serverConfig.setOcclusionEnabled(false);
     }
+  }
+
+  private applyToolOutputOptions(options: DaemonOptions): void {
     if (options.observeResultIncludeElements) {
       serverConfig.setObserveResultIncludeElementsEnabled(true);
     }
@@ -727,6 +799,9 @@ export class Daemon {
     }
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
+    }
+    if (options.actionsCompactMetadata) {
+      serverConfig.setActionsCompactMetadataEnabled(true);
     }
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
@@ -1070,259 +1145,8 @@ export class Daemon {
     this.httpServer.headersTimeout = 0;
     this.httpServer.timeout = 0;
 
-    const handleRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-      // Check every path before parsing the URL or handling preflight requests.
-      if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
-        res.writeHead(403, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Forbidden" }));
-        return;
-      }
-
-      if (req.method === "OPTIONS") {
-        res.writeHead(200);
-        res.end();
-        return;
-      }
-
-      const url = new URL(req.url!, `http://${req.headers.host}`);
-
-      if (url.pathname === "/heartbeat") {
-        if (req.method !== "POST") {
-          res.writeHead(405, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Method not allowed" }));
-          return;
-        }
-
-        const bodyResult = await this.readHttpBody(req);
-        if (!bodyResult.ok) {
-          this.respondToBodyReadFailure(res, bodyResult);
-          return;
-        }
-
-        let payload: { sessionId?: string } | null = null;
-        try {
-          payload = JSON.parse(bodyResult.body);
-        } catch (error) {
-          // Invalid client JSON is expected; the 400 response fully describes the failure.
-          logger.debug(`Invalid heartbeat JSON: ${error}`);
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Invalid JSON" }));
-          return;
-        }
-
-        const sessionId = payload?.sessionId;
-        if (!sessionId) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Missing sessionId" }));
-          return;
-        }
-
-        const session =
-          this.sessionManager.getSession(sessionId) ??
-          this.sessionManager.getReleasingSession(sessionId);
-        if (session && isSessionReleasing(this.sessionManager, sessionId, session)) {
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
-          return;
-        }
-        this.sessionManager.recordHeartbeat(sessionId);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok" }));
-        return;
-      }
-
-      if (url.pathname === MCP_STREAMABLE_PATH) {
-        if (!this.acceptingHttpSessions) {
-          res.writeHead(503, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-          return;
-        }
-
-        // Get session ID from header
-        const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
-        let streamableTransport: StreamableHTTPServerTransport;
-        let parsedBody: unknown;
-
-        // Parse body for POST requests
-        if (req.method === "POST") {
-          const bodyResult = await this.readHttpBody(req);
-          if (!bodyResult.ok) {
-            this.respondToBodyReadFailure(res, bodyResult);
-            return;
-          }
-
-          try {
-            parsedBody = JSON.parse(bodyResult.body);
-          } catch (error) {
-            // Invalid client JSON is expected; the 400 response fully describes the failure.
-            logger.debug(`Invalid MCP JSON: ${error}`);
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Invalid JSON" }));
-            return;
-          }
-        }
-
-        // Check if this is an initialization request
-        const isInitializeRequest =
-          parsedBody &&
-          typeof parsedBody === "object" &&
-          true &&
-          "method" in parsedBody &&
-          parsedBody.method === "initialize";
-        const sendJsonRpcError = (message: string, error?: unknown) => {
-          if (res.headersSent) {
-            return;
-          }
-          const id =
-            parsedBody && typeof parsedBody === "object" && "id" in parsedBody
-              ? parsedBody.id
-              : null;
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id,
-              error: {
-                code: -32603,
-                message,
-                data: error instanceof Error ? error.message : undefined,
-              },
-            }),
-          );
-        };
-
-        // A request may have begun reading its body just before shutdown
-        // quiesced the listener. Recheck admission before it can create or use
-        // a transport after the shutdown session snapshot is taken.
-        if (!this.acceptingHttpSessions) {
-          res.writeHead(503, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-          return;
-        }
-
-        if (sessionId && this.transports.has(sessionId)) {
-          // Use existing transport
-          streamableTransport = this.transports.get(sessionId)!;
-        } else if (isInitializeRequest || !sessionId) {
-          // Create new transport for initialization or when no session ID
-          const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
-          const boundToolSelectionProfileUuid = req.headers[DAEMON_TOOL_SELECTION_PROFILE_HEADER];
-          const sessionContext: {
-            sessionId?: string;
-            initialSessionToolBinding?: string;
-            initialReleasedSession?: string;
-            initialToolSelectionProfile?: string;
-          } = {
-            ...(typeof boundSessionUuid === "string" &&
-            boundSessionUuid.trim().length > 0 &&
-            !(
-              typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
-              req.headers[DAEMON_RELEASED_SESSION_HEADER].trim() === boundSessionUuid.trim()
-            )
-              ? { initialSessionToolBinding: boundSessionUuid }
-              : {}),
-            ...(typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
-            req.headers[DAEMON_RELEASED_SESSION_HEADER].trim().length > 0
-              ? { initialReleasedSession: req.headers[DAEMON_RELEASED_SESSION_HEADER] }
-              : {}),
-            ...(typeof boundToolSelectionProfileUuid === "string" &&
-            boundToolSelectionProfileUuid.trim().length > 0
-              ? { initialToolSelectionProfile: boundToolSelectionProfileUuid }
-              : {}),
-          };
-          streamableTransport = new StreamableHTTPServerTransport({
-            enableDnsRebindingProtection: true,
-            allowedHosts,
-            sessionIdGenerator: () => this.idGenerator.next(),
-            onsessioninitialized: (newSessionId) => {
-              if (!this.registerHttpTransport(newSessionId, streamableTransport)) {
-                return;
-              }
-              sessionContext.sessionId = newSessionId;
-              logger.info(`Streamable HTTP session initialized: ${newSessionId}`);
-            },
-          });
-
-          // Create and connect MCP server
-          let mcpServer;
-          try {
-            mcpServer = createMcpServer({
-              iosDependencies: this.iosDoctorDependencies,
-              debug: this.debug,
-              sessionContext,
-              daemonMode: true,
-              acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
-            });
-          } catch (error) {
-            logger.error("Failed to create MCP server:", error);
-            sendJsonRpcError("Server error", error);
-            return;
-          }
-
-          // Setup cleanup handlers
-          this.configureHttpTransportCallbacks(streamableTransport);
-
-          try {
-            logger.info("Connecting MCP server to Streamable HTTP transport");
-            await mcpServer.connect(streamableTransport);
-            logger.info("MCP server connected to Streamable HTTP transport");
-          } catch (error) {
-            logger.error("MCP server connect failed:", error);
-            sendJsonRpcError("Server error", error);
-            return;
-          }
-        } else {
-          // Invalid session
-          res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Session not found" }));
-          return;
-        }
-
-        // SSE keepalive: prevent the fetch() response stream from going idle
-        // during long-running tool calls (e.g. executePlan at ~6-10 min).
-        // Without traffic the client-side stream silently dies; the server
-        // writes the result to a dead pipe and the client eventually times out.
-        // SSE comment lines (`:`) are ignored by EventSourceParserStream.
-        const keepaliveTimer =
-          req.method === "POST"
-            ? this.timer.setInterval(() => {
-                if (res.headersSent && !res.writableEnded && !res.destroyed) {
-                  res.write(":keepalive\n\n");
-                }
-              }, SSE_KEEPALIVE_INTERVAL_MS)
-            : undefined;
-
-        const clearKeepalive = () => {
-          if (keepaliveTimer) {
-            this.timer.clearInterval(keepaliveTimer);
-          }
-        };
-        res.on("close", clearKeepalive);
-        res.on("finish", clearKeepalive);
-
-        // Let the transport handle the request
-        const activeSessionId = streamableTransport.sessionId;
-        if (activeSessionId) {
-          this.beginHttpRequest(activeSessionId);
-        }
-        try {
-          await streamableTransport.handleRequest(req, res, parsedBody);
-        } catch (error) {
-          logger.error("Streamable HTTP request handling failed:", error);
-          sendJsonRpcError("Server error", error);
-        } finally {
-          clearKeepalive();
-          if (activeSessionId) {
-            this.endHttpRequest(activeSessionId);
-          }
-        }
-      } else {
-        // 404 for unknown paths
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Not found" }));
-      }
-    };
+    const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
+      this.handleHttpRequest(req, res, allowedHosts);
     this.httpServer.on("request", (req, res) => {
       handleRequest(req, res).catch((error) => {
         logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
@@ -1361,6 +1185,310 @@ export class Daemon {
         reject(error);
       });
     });
+  }
+
+  private async handleHttpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    allowedHosts: string[],
+  ): Promise<void> {
+    // Check every path before parsing the URL or handling preflight requests.
+    if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Forbidden" }));
+      return;
+    }
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+
+    if (url.pathname === "/heartbeat") {
+      return this.handleHeartbeatHttpRequest(req, res);
+    }
+
+    if (url.pathname === MCP_STREAMABLE_PATH) {
+      return this.handleMcpHttpRequest(req, res, allowedHosts);
+    } else {
+      // 404 for unknown paths
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+    }
+  }
+
+  private async handleHeartbeatHttpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Method not allowed" }));
+      return;
+    }
+
+    const bodyResult = await this.readHttpBody(req);
+    if (!bodyResult.ok) {
+      this.respondToBodyReadFailure(res, bodyResult);
+      return;
+    }
+
+    let payload: { sessionId?: string } | null = null;
+    try {
+      payload = JSON.parse(bodyResult.body);
+    } catch (error) {
+      // Invalid client JSON is expected; the 400 response fully describes the failure.
+      logger.debug(`Invalid heartbeat JSON: ${error}`);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON" }));
+      return;
+    }
+
+    const sessionId = payload?.sessionId;
+    if (!sessionId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing sessionId" }));
+      return;
+    }
+
+    const session =
+      this.sessionManager.getSession(sessionId) ??
+      this.sessionManager.getReleasingSession(sessionId);
+    if (session && isSessionReleasing(this.sessionManager, sessionId, session)) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
+      return;
+    }
+    this.sessionManager.recordHeartbeat(sessionId);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  private createHttpSessionContext(req: IncomingMessage): {
+    sessionId?: string;
+    initialSessionToolBinding?: string;
+    initialReleasedSession?: string;
+    initialToolSelectionProfile?: string;
+  } {
+    const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
+    const boundToolSelectionProfileUuid = req.headers[DAEMON_TOOL_SELECTION_PROFILE_HEADER];
+    const sessionContext: {
+      sessionId?: string;
+      initialSessionToolBinding?: string;
+      initialReleasedSession?: string;
+      initialToolSelectionProfile?: string;
+    } = {
+      ...(typeof boundSessionUuid === "string" &&
+      boundSessionUuid.trim().length > 0 &&
+      !(
+        typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
+        req.headers[DAEMON_RELEASED_SESSION_HEADER].trim() === boundSessionUuid.trim()
+      )
+        ? { initialSessionToolBinding: boundSessionUuid }
+        : {}),
+      ...(typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
+      req.headers[DAEMON_RELEASED_SESSION_HEADER].trim().length > 0
+        ? { initialReleasedSession: req.headers[DAEMON_RELEASED_SESSION_HEADER] }
+        : {}),
+      ...(typeof boundToolSelectionProfileUuid === "string" &&
+      boundToolSelectionProfileUuid.trim().length > 0
+        ? { initialToolSelectionProfile: boundToolSelectionProfileUuid }
+        : {}),
+    };
+    return sessionContext;
+  }
+
+  private async handleMcpHttpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    allowedHosts: string[],
+  ): Promise<void> {
+    if (!this.acceptingHttpSessions) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+      return;
+    }
+
+    // Get session ID from header
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+    let streamableTransport: StreamableHTTPServerTransport;
+    let parsedBody: unknown;
+
+    // Parse body for POST requests
+    if (req.method === "POST") {
+      const bodyResult = await this.readHttpBody(req);
+      if (!bodyResult.ok) {
+        this.respondToBodyReadFailure(res, bodyResult);
+        return;
+      }
+
+      try {
+        parsedBody = JSON.parse(bodyResult.body);
+      } catch (error) {
+        // Invalid client JSON is expected; the 400 response fully describes the failure.
+        logger.debug(`Invalid MCP JSON: ${error}`);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+        return;
+      }
+    }
+
+    // Check if this is an initialization request
+    const isInitializeRequest = this.isHttpInitializeRequest(parsedBody);
+    const sendJsonRpcError = (message: string, error?: unknown) =>
+      this.sendHttpJsonRpcError(res, parsedBody, message, error);
+
+    // A request may have begun reading its body just before shutdown
+    // quiesced the listener. Recheck admission before it can create or use
+    // a transport after the shutdown session snapshot is taken.
+    if (!this.acceptingHttpSessions) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
+      return;
+    }
+
+    if (sessionId && this.transports.has(sessionId)) {
+      // Use existing transport
+      streamableTransport = this.transports.get(sessionId)!;
+    } else if (isInitializeRequest || !sessionId) {
+      // Create new transport for initialization or when no session ID
+      const sessionContext = this.createHttpSessionContext(req);
+      streamableTransport = new StreamableHTTPServerTransport({
+        enableDnsRebindingProtection: true,
+        allowedHosts,
+        sessionIdGenerator: () => this.idGenerator.next(),
+        onsessioninitialized: (newSessionId) => {
+          if (!this.registerHttpTransport(newSessionId, streamableTransport)) {
+            return;
+          }
+          sessionContext.sessionId = newSessionId;
+          logger.info(`Streamable HTTP session initialized: ${newSessionId}`);
+        },
+      });
+
+      // Create and connect MCP server
+      let mcpServer;
+      try {
+        mcpServer = createMcpServer({
+          iosDependencies: this.iosDoctorDependencies,
+          debug: this.debug,
+          sessionContext,
+          daemonMode: true,
+          acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+        });
+      } catch (error) {
+        logger.error("Failed to create MCP server:", error);
+        sendJsonRpcError("Server error", error);
+        return;
+      }
+
+      // Setup cleanup handlers
+      this.configureHttpTransportCallbacks(streamableTransport);
+
+      try {
+        logger.info("Connecting MCP server to Streamable HTTP transport");
+        await mcpServer.connect(streamableTransport);
+        logger.info("MCP server connected to Streamable HTTP transport");
+      } catch (error) {
+        logger.error("MCP server connect failed:", error);
+        sendJsonRpcError("Server error", error);
+        return;
+      }
+    } else {
+      // Invalid session
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Session not found" }));
+      return;
+    }
+
+    return this.dispatchMcpHttpRequest(req, res, streamableTransport, parsedBody, sendJsonRpcError);
+  }
+
+  private isHttpInitializeRequest(parsedBody: unknown): unknown {
+    return (
+      parsedBody &&
+      typeof parsedBody === "object" &&
+      true &&
+      "method" in parsedBody &&
+      parsedBody.method === "initialize"
+    );
+  }
+
+  private sendHttpJsonRpcError(
+    res: ServerResponse,
+    parsedBody: unknown,
+    message: string,
+    error?: unknown,
+  ): void {
+    if (res.headersSent) {
+      return;
+    }
+    const id =
+      parsedBody && typeof parsedBody === "object" && "id" in parsedBody ? parsedBody.id : null;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: -32603,
+          message,
+          data: error instanceof Error ? error.message : undefined,
+        },
+      }),
+    );
+  }
+
+  private async dispatchMcpHttpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    streamableTransport: StreamableHTTPServerTransport,
+    parsedBody: unknown,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    // SSE keepalive: prevent the fetch() response stream from going idle
+    // during long-running tool calls (e.g. executePlan at ~6-10 min).
+    // Without traffic the client-side stream silently dies; the server
+    // writes the result to a dead pipe and the client eventually times out.
+    // SSE comment lines (`:`) are ignored by EventSourceParserStream.
+    const keepaliveTimer =
+      req.method === "POST"
+        ? this.timer.setInterval(() => {
+            if (res.headersSent && !res.writableEnded && !res.destroyed) {
+              res.write(":keepalive\n\n");
+            }
+          }, SSE_KEEPALIVE_INTERVAL_MS)
+        : undefined;
+
+    const clearKeepalive = () => {
+      if (keepaliveTimer) {
+        this.timer.clearInterval(keepaliveTimer);
+      }
+    };
+    res.on("close", clearKeepalive);
+    res.on("finish", clearKeepalive);
+
+    // Let the transport handle the request
+    const activeSessionId = streamableTransport.sessionId;
+    if (activeSessionId) {
+      this.beginHttpRequest(activeSessionId);
+    }
+    try {
+      await streamableTransport.handleRequest(req, res, parsedBody);
+    } catch (error) {
+      logger.error("Streamable HTTP request handling failed:", error);
+      sendJsonRpcError("Server error", error);
+    } finally {
+      clearKeepalive();
+      if (activeSessionId) {
+        this.endHttpRequest(activeSessionId);
+      }
+    }
   }
 
   private configureHttpTransportCallbacks(
@@ -1918,20 +2046,7 @@ export class Daemon {
       const requestStart = this.timer.now();
       return runObservationRequestBatch(
         pooledDevices,
-        async (pooledDevice, observationSignal) => {
-          const bootedDevice: BootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: pooledDevice.platform,
-            iosVersion: pooledDevice.iosVersion,
-          };
-          const observeScreen = new RealObserveScreen(bootedDevice);
-          return observeScreen.execute({
-            skipWaitForFresh: false,
-            minTimestamp: requestStart,
-            signal: observationSignal,
-          });
-        },
+        createDaemonObservationExecutor(requestStart),
         {
           timer: this.timer,
           signal,
@@ -2167,6 +2282,35 @@ export class Daemon {
     });
   }
 
+  private checkHealthListeners(
+    recordHealthCheckFailure: (kind: HealthFailureKind) => void,
+  ): boolean {
+    // Check if HTTP server is responsive
+    if (!this.httpServer) {
+      logger.warn("Health check failed: HTTP server not initialized");
+      recordHealthCheckFailure("http");
+      return false;
+    }
+    if (!this.httpServer.listening) {
+      logger.warn("Health check failed: HTTP server not listening");
+      recordHealthCheckFailure("http");
+      return false;
+    }
+    // Check socket servers before probing shared dependencies; clients
+    // can only subscribe to advertised streams while their socket paths exist.
+    if (!this.socketServer || !this.socketServer.isListening()) {
+      logger.warn("Health check failed: Socket server not listening");
+      recordHealthCheckFailure("socket");
+      return false;
+    }
+    if (!this.observationStreamHealth.isHealthy()) {
+      logger.warn("Health check failed: Observation stream socket unavailable");
+      recordHealthCheckFailure("socket");
+      return false;
+    }
+    return true;
+  }
+
   /**
    * Start periodic health checks
    */
@@ -2191,32 +2335,15 @@ export class Daemon {
 
     const checkHealth = async (): Promise<void> => {
       try {
-        // Check if HTTP server is responsive
-        if (!this.httpServer) {
-          logger.warn("Health check failed: HTTP server not initialized");
-          recordHealthCheckFailure("http");
-        } else if (!this.httpServer.listening) {
-          logger.warn("Health check failed: HTTP server not listening");
-          recordHealthCheckFailure("http");
-        } else {
-          // Check socket servers before probing shared dependencies; clients
-          // can only subscribe to advertised streams while their socket paths exist.
-          if (!this.socketServer || !this.socketServer.isListening()) {
-            logger.warn("Health check failed: Socket server not listening");
-            recordHealthCheckFailure("socket");
-          } else if (!this.observationStreamHealth.isHealthy()) {
-            logger.warn("Health check failed: Observation stream socket unavailable");
-            recordHealthCheckFailure("socket");
-          } else {
-            try {
-              await this.databaseHealthProbe.check();
-              // Health check passed
-              resetHealthCheckFailures();
-              logger.debug("Health check passed");
-            } catch (error) {
-              logger.warn(`Health check failed: Database probe failed: ${error}`);
-              recordHealthCheckFailure("database");
-            }
+        if (this.checkHealthListeners(recordHealthCheckFailure)) {
+          try {
+            await this.databaseHealthProbe.check();
+            // Health check passed
+            resetHealthCheckFailures();
+            logger.debug("Health check passed");
+          } catch (error) {
+            logger.warn(`Health check failed: Database probe failed: ${error}`);
+            recordHealthCheckFailure("database");
           }
         }
 
@@ -2430,16 +2557,7 @@ export class Daemon {
         const planActive = serverConfig.isPlanExecutionActive();
         let adbServerResetCohort: readonly PooledDevice[] = [];
         try {
-          if (!planActive) {
-            this.trackDeferredSessionRecoverySweep(
-              this.devicePool.retryDueDeferredSessionRecoveries().catch((error) => {
-                logger.warn(
-                  `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
-                  error,
-                );
-              }),
-            );
-          }
+          this.startDeferredSessionRecoverySweep(planActive);
 
           let discovery = await discoverAndReconcile({ planActive });
           const bootedDevices = discovery.devices;
@@ -2448,25 +2566,8 @@ export class Daemon {
           const activeRecordings = planActive ? [] : await listRecordings();
 
           const missingByDevice = new Map<string, string[]>();
-          const candidateDeviceIds = new Set<string>();
-          const candidatePlatforms = new Map<string, "android" | "ios">();
-          const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
-          for (const recording of activeRecordings) {
-            candidateDeviceIds.add(recording.deviceId);
-            candidatePlatforms.set(recording.deviceId, recording.platform);
-          }
-          for (const device of this.devicePool.getAllDevices()) {
-            candidateDeviceIds.add(device.id);
-            candidatePlatforms.set(device.id, device.platform);
-            candidateIncarnations.set(device.id, device.incarnation);
-          }
-          for (const session of this.sessionManager.getAllSessions()) {
-            candidateDeviceIds.add(session.assignedDevice);
-            if (!candidatePlatforms.has(session.assignedDevice)) {
-              candidatePlatforms.set(session.assignedDevice, session.platform);
-            }
-          }
-
+          const { candidateDeviceIds, candidatePlatforms, candidateIncarnations } =
+            this.collectDisconnectCandidates(activeRecordings);
           // Online-ness is otherwise binary: an in-session Android emulator
           // that dropped to ADB `offline` looks identical to one that is
           // fully gone, since bootedDeviceIds only ever contains `device`
@@ -2476,12 +2577,10 @@ export class Daemon {
           let offlineDeviceIds: Set<string> | undefined;
           try {
             if (!planActive) {
-              const missingAndroidCandidateIds = new Set(
-                [...candidateDeviceIds].filter(
-                  (deviceId) =>
-                    !bootedDeviceIds.has(deviceId) &&
-                    candidatePlatforms.get(deviceId) === "android",
-                ),
+              const missingAndroidCandidateIds = this.findMissingAndroidCandidates(
+                candidateDeviceIds,
+                bootedDeviceIds,
+                candidatePlatforms,
               );
               offlineDeviceIds =
                 missingAndroidCandidateIds.size > 0
@@ -2498,42 +2597,10 @@ export class Daemon {
             );
           }
           if (!planActive) {
-            this.offlineRecoveryAttemptedDeviceIds = pruneStaleOfflineRecoveryAttempts(
-              this.offlineRecoveryAttemptedDeviceIds,
+            const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
               offlineDeviceIds,
-              this.offlineRecoveryAttemptedIncarnations,
               candidateIncarnations,
-            );
-            // A serial that is mid-provisionDevice/startDevice already has its
-            // own bounded offline recovery: AndroidEmulatorClient's
-            // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
-            // #7078) owns that serial's `adb reconnect offline` on its own 15s
-            // threshold. Deferring to it here mirrors how the ADB-reset cohort
-            // path (below) defers on the same in-flight-startup lease, so the
-            // monitor never races a second reconnect against the readiness
-            // wait's own dispatch.
-            const inFlightStartupOfflineDeviceIds = new Set(
-              [...(offlineDeviceIds ?? [])].filter((deviceId) =>
-                this.devicePool.isDeviceLeasedForAndroidStartup(deviceId),
-              ),
-            );
-            const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
-              offlineDeviceIds ?? new Set(),
-              candidateDeviceIds,
-              this.offlineRecoveryAttemptedDeviceIds,
-              inFlightStartupOfflineDeviceIds,
-            );
-            const dispatchTargets =
-              inFlightStartupOfflineDeviceIds.size > 0 ? [] : offlineRecoveryTargets;
-            this.offlineRecoveryAttemptedDeviceIds = new Set([
-              ...this.offlineRecoveryAttemptedDeviceIds,
-              ...dispatchTargets,
-            ]);
-            this.offlineRecoveryAttemptedIncarnations = new Map(
-              [...candidateIncarnations].filter(([deviceId]) =>
-                this.offlineRecoveryAttemptedDeviceIds.has(deviceId),
-              ),
             );
             if (dispatchTargets.length > 0) {
               logger.warn(
@@ -2575,22 +2642,7 @@ export class Daemon {
             return;
           }
 
-          for (const { deviceId, misses: evaluatedMisses } of disconnectResult.missed) {
-            const misses = planActive
-              ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
-              : evaluatedMisses;
-            if (planActive) {
-              // Also lower pre-plan misses so a plan-driven restart gets the same grace.
-              this.deviceDisconnectMisses.set(deviceId, misses);
-            }
-            const missState = offlineDeviceIds?.has(deviceId) ? "offline" : "absent";
-            const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
-            if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
-              logger.debug(message);
-            } else {
-              logger.info(message);
-            }
-          }
+          this.logDisconnectMisses(disconnectResult, planActive, offlineDeviceIds, bootedDeviceIds);
 
           // Keep absence evidence current, but leave allocation's pool/session
           // state untouched. Two inactive ticks can confirm continued absence;
@@ -2620,164 +2672,18 @@ export class Daemon {
             return;
           }
           adbServerResetCohort = adbServerResetDetachment.devices;
-          const processWideAdbServerReset = adbServerResetCohort.length > 0;
-          const adbServerResetCohortByDeviceId = new Map(
-            adbServerResetCohort.map((device) => [device.id, device]),
+          const adbServerResetCohortByDeviceId = this.collectDisconnectedRecordings(
+            adbServerResetCohort,
+            missingByDevice,
+            activeRecordings,
           );
-          if (processWideAdbServerReset) {
-            logger.warn(
-              "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
-                "treating this as an ADB server reset and recovering by AVD name",
-            );
-            for (const device of adbServerResetCohort) {
-              missingByDevice.set(device.id, []);
-            }
-          }
-
-          for (const recording of activeRecordings) {
-            if (missingByDevice.has(recording.deviceId)) {
-              missingByDevice.get(recording.deviceId)!.push(recording.recordingId);
-            }
-          }
 
           for (const [deviceId, recordingIds] of missingByDevice.entries()) {
-            const pooledDeviceAtDisconnect = this.devicePool.getDevice(deviceId);
-            const assignmentCountAtDisconnect = pooledDeviceAtDisconnect?.assignmentCount;
-            const sessionIdAtDisconnect =
-              pooledDeviceAtDisconnect?.sessionId ??
-              this.sessionManager.getSessionForDevice(deviceId);
-            const sessionAtDisconnect = sessionIdAtDisconnect
-              ? this.sessionManager.getSession(sessionIdAtDisconnect)
-              : null;
-            const forceGenerationAtDisconnect =
-              this.forceDisconnectedDeviceGenerations.get(deviceId);
-            const adbServerResetTarget = adbServerResetCohortByDeviceId.get(deviceId);
-            if (
-              !adbServerResetTarget &&
-              (await this.shouldSkipStaleDisconnectCleanup(
-                pooledDeviceAtDisconnect,
-                deviceId,
-                forceGenerationAtDisconnect,
-              ))
-            ) {
-              continue;
-            }
-            let deviceCleanupSucceeded = true;
-
-            // Stop performance monitoring for this device
-            getPerformanceMonitor().stopMonitoring(deviceId);
-
-            for (const recordingId of recordingIds) {
-              if (!(await this.stopRecordingAfterDeviceDisconnect(recordingId, deviceId))) {
-                deviceCleanupSucceeded = false;
-              }
-            }
-
-            if (
-              !adbServerResetTarget &&
-              (await this.shouldSkipStaleDisconnectCleanup(
-                pooledDeviceAtDisconnect,
-                deviceId,
-                forceGenerationAtDisconnect,
-              ))
-            ) {
-              continue;
-            }
-
-            if (adbServerResetTarget) {
-              if (
-                await this.tryRecoverProcessWideAdbServerResetDevice(
-                  deviceId,
-                  adbServerResetTarget,
-                  forceGenerationAtDisconnect,
-                )
-              ) {
-                continue;
-              }
-            }
-
-            // Cancel active executions and release the session so the test fails
-            // fast instead of waiting for the full MCP request timeout.
-            const { incidentId, handled } = await this.recordAndTryRecoverCapturedDisconnect(
+            await this.cleanupDisconnectedDevice(
               deviceId,
-              pooledDeviceAtDisconnect,
-              assignmentCountAtDisconnect ?? 0,
-              sessionIdAtDisconnect,
-              sessionAtDisconnect,
-              forceGenerationAtDisconnect,
+              recordingIds,
+              adbServerResetCohortByDeviceId,
             );
-            if (handled) {
-              continue;
-            }
-            if (
-              !this.isCapturedDisconnectTargetCurrent(
-                deviceId,
-                pooledDeviceAtDisconnect,
-                assignmentCountAtDisconnect,
-                sessionIdAtDisconnect,
-                sessionAtDisconnect,
-              )
-            ) {
-              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
-              continue;
-            }
-            if (sessionIdAtDisconnect && sessionAtDisconnect) {
-              logger.warn(
-                `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionIdAtDisconnect}`,
-              );
-              await this.cancelAndReleaseSession(
-                sessionIdAtDisconnect,
-                deviceLossCancellationReason(deviceId, incidentId),
-                false,
-                sessionAtDisconnect,
-              );
-            }
-
-            if (
-              !this.isCapturedDisconnectTargetCurrent(
-                deviceId,
-                pooledDeviceAtDisconnect,
-                assignmentCountAtDisconnect,
-              )
-            ) {
-              await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
-              continue;
-            }
-            await this.devicePool.removeDisconnectedDevice(
-              deviceId,
-              true,
-              incidentId,
-              pooledDeviceAtDisconnect ?? undefined,
-            );
-            // Drop any per-device input caches so a device replaced under the same
-            // serial does not inherit the previous one's cached API-level capability
-            // (issue #3351): an API 31+/pre-31 mismatch mis-handles SHIFT/uppercase.
-            // This fires only on a CONFIRMED disappearance; a fast same-serial restart
-            // that never confirms is handled by the device-ready callback; the 5-min
-            // idle close remains a fallback.
-            if (this.devicePool.getDevice(deviceId)) {
-              // removeDisconnectedDevice can synchronously recover a same-serial
-              // Android emulator (reboot → re-add), which mints a fresh epoch. The
-              // device is live again, so retiring here would delete that just-minted
-              // epoch; skip the retire and let cleanup fail so the monitor retries.
-              deviceCleanupSucceeded = false;
-            } else {
-              this.socketServer?.evictDeviceInputCache(deviceId);
-            }
-            if (deviceCleanupSucceeded) {
-              this.confirmedDisconnectedDeviceIds.add(deviceId);
-              this.deviceDisconnectMisses.delete(deviceId);
-              this.deviceDisconnectMissIncarnations.delete(deviceId);
-              this.offlineRecoveryAttemptedDeviceIds.delete(deviceId);
-              this.offlineRecoveryAttemptedIncarnations.delete(deviceId);
-              if (
-                this.forceDisconnectedDeviceGenerations.get(deviceId) ===
-                forceGenerationAtDisconnect
-              ) {
-                this.forceDisconnectedDeviceIds.delete(deviceId);
-                this.forceDisconnectedDeviceGenerations.delete(deviceId);
-              }
-            }
           }
         } catch (error) {
           logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);
@@ -2789,6 +2695,329 @@ export class Daemon {
       },
     );
     this.deviceDisconnectMonitor.start();
+  }
+
+  private findMissingAndroidCandidates(
+    candidateDeviceIds: Set<string>,
+    bootedDeviceIds: Set<string>,
+    candidatePlatforms: Map<string, "android" | "ios">,
+  ): Set<string> {
+    return new Set(
+      [...candidateDeviceIds].filter(
+        (deviceId) =>
+          !bootedDeviceIds.has(deviceId) && candidatePlatforms.get(deviceId) === "android",
+      ),
+    );
+  }
+
+  private startDeferredSessionRecoverySweep(planActive: boolean): void {
+    if (!planActive) {
+      this.trackDeferredSessionRecoverySweep(
+        this.devicePool.retryDueDeferredSessionRecoveries().catch((error) => {
+          logger.warn(
+            `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
+            error,
+          );
+        }),
+      );
+    }
+  }
+
+  private collectDisconnectedRecordings(
+    adbServerResetCohort: readonly PooledDevice[],
+    missingByDevice: Map<string, string[]>,
+    activeRecordings: Awaited<ReturnType<typeof listActiveVideoRecordings>>,
+  ): Map<string, PooledDevice> {
+    const processWideAdbServerReset = adbServerResetCohort.length > 0;
+    const adbServerResetCohortByDeviceId = new Map(
+      adbServerResetCohort.map((device) => [device.id, device]),
+    );
+    if (processWideAdbServerReset) {
+      logger.warn(
+        "[DisconnectMonitor] All AutoMobile-owned Android emulators disappeared together; " +
+          "treating this as an ADB server reset and recovering by AVD name",
+      );
+      for (const device of adbServerResetCohort) {
+        missingByDevice.set(device.id, []);
+      }
+    }
+
+    for (const recording of activeRecordings) {
+      if (missingByDevice.has(recording.deviceId)) {
+        missingByDevice.get(recording.deviceId)!.push(recording.recordingId);
+      }
+    }
+    return adbServerResetCohortByDeviceId;
+  }
+
+  private collectDisconnectCandidates(
+    activeRecordings: Awaited<ReturnType<typeof listActiveVideoRecordings>>,
+  ) {
+    const candidateDeviceIds = new Set<string>();
+    const candidatePlatforms = new Map<string, "android" | "ios">();
+    const candidateIncarnations = recordingCandidateIncarnations(activeRecordings);
+    for (const recording of activeRecordings) {
+      candidateDeviceIds.add(recording.deviceId);
+      candidatePlatforms.set(recording.deviceId, recording.platform);
+    }
+    for (const device of this.devicePool.getAllDevices()) {
+      candidateDeviceIds.add(device.id);
+      candidatePlatforms.set(device.id, device.platform);
+      candidateIncarnations.set(device.id, device.incarnation);
+    }
+    for (const session of this.sessionManager.getAllSessions()) {
+      candidateDeviceIds.add(session.assignedDevice);
+      if (!candidatePlatforms.has(session.assignedDevice)) {
+        candidatePlatforms.set(session.assignedDevice, session.platform);
+      }
+    }
+    return { candidateDeviceIds, candidatePlatforms, candidateIncarnations };
+  }
+
+  private prepareOfflineRecovery(
+    candidateDeviceIds: Set<string>,
+    offlineDeviceIds: Set<string> | undefined,
+    candidateIncarnations: ReturnType<typeof recordingCandidateIncarnations>,
+  ) {
+    this.offlineRecoveryAttemptedDeviceIds = pruneStaleOfflineRecoveryAttempts(
+      this.offlineRecoveryAttemptedDeviceIds,
+      candidateDeviceIds,
+      offlineDeviceIds,
+      this.offlineRecoveryAttemptedIncarnations,
+      candidateIncarnations,
+    );
+    // A serial that is mid-provisionDevice/startDevice already has its
+    // own bounded offline recovery: AndroidEmulatorClient's
+    // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
+    // #7078) owns that serial's `adb reconnect offline` on its own 15s
+    // threshold. Deferring to it here mirrors how the ADB-reset cohort
+    // path (below) defers on the same in-flight-startup lease, so the
+    // monitor never races a second reconnect against the readiness
+    // wait's own dispatch.
+    const inFlightStartupOfflineDeviceIds = new Set(
+      [...(offlineDeviceIds ?? [])].filter((deviceId) =>
+        this.devicePool.isDeviceLeasedForAndroidStartup(deviceId),
+      ),
+    );
+    const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
+      offlineDeviceIds ?? new Set(),
+      candidateDeviceIds,
+      this.offlineRecoveryAttemptedDeviceIds,
+      inFlightStartupOfflineDeviceIds,
+    );
+    const dispatchTargets = inFlightStartupOfflineDeviceIds.size > 0 ? [] : offlineRecoveryTargets;
+    this.offlineRecoveryAttemptedDeviceIds = new Set([
+      ...this.offlineRecoveryAttemptedDeviceIds,
+      ...dispatchTargets,
+    ]);
+    this.offlineRecoveryAttemptedIncarnations = new Map(
+      [...candidateIncarnations].filter(([deviceId]) =>
+        this.offlineRecoveryAttemptedDeviceIds.has(deviceId),
+      ),
+    );
+    return { dispatchTargets, offlineRecoveryTargets };
+  }
+
+  private logDisconnectMisses(
+    disconnectResult: ReturnType<typeof evaluateDeviceDisconnects>,
+    planActive: boolean,
+    offlineDeviceIds: Set<string> | undefined,
+    bootedDeviceIds: Set<string>,
+  ): void {
+    for (const { deviceId, misses: evaluatedMisses } of disconnectResult.missed) {
+      const misses = planActive
+        ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
+        : evaluatedMisses;
+      if (planActive) {
+        // Also lower pre-plan misses so a plan-driven restart gets the same grace.
+        this.deviceDisconnectMisses.set(deviceId, misses);
+      }
+      const missState = offlineDeviceIds?.has(deviceId) ? "offline" : "absent";
+      const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
+      if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
+        logger.debug(message);
+      } else {
+        logger.info(message);
+      }
+    }
+  }
+
+  private captureDisconnectCleanup(
+    deviceId: string,
+    adbServerResetCohortByDeviceId: Map<string, PooledDevice>,
+  ) {
+    const pooledDeviceAtDisconnect = this.devicePool.getDevice(deviceId);
+    const assignmentCountAtDisconnect = pooledDeviceAtDisconnect?.assignmentCount;
+    const sessionIdAtDisconnect =
+      pooledDeviceAtDisconnect?.sessionId ?? this.sessionManager.getSessionForDevice(deviceId);
+    const sessionAtDisconnect = sessionIdAtDisconnect
+      ? this.sessionManager.getSession(sessionIdAtDisconnect)
+      : null;
+    const forceGenerationAtDisconnect = this.forceDisconnectedDeviceGenerations.get(deviceId);
+    const adbServerResetTarget = adbServerResetCohortByDeviceId.get(deviceId);
+    return {
+      pooledDeviceAtDisconnect,
+      assignmentCountAtDisconnect,
+      sessionIdAtDisconnect,
+      sessionAtDisconnect,
+      forceGenerationAtDisconnect,
+      adbServerResetTarget,
+    };
+  }
+
+  private confirmDisconnectedDeviceCleanup(
+    deviceId: string,
+    forceGenerationAtDisconnect: number | undefined,
+  ): void {
+    this.confirmedDisconnectedDeviceIds.add(deviceId);
+    this.deviceDisconnectMisses.delete(deviceId);
+    this.deviceDisconnectMissIncarnations.delete(deviceId);
+    this.offlineRecoveryAttemptedDeviceIds.delete(deviceId);
+    this.offlineRecoveryAttemptedIncarnations.delete(deviceId);
+    if (this.forceDisconnectedDeviceGenerations.get(deviceId) === forceGenerationAtDisconnect) {
+      this.forceDisconnectedDeviceIds.delete(deviceId);
+      this.forceDisconnectedDeviceGenerations.delete(deviceId);
+    }
+  }
+
+  private async cleanupDisconnectedDevice(
+    deviceId: string,
+    recordingIds: string[],
+    adbServerResetCohortByDeviceId: Map<string, PooledDevice>,
+  ): Promise<void> {
+    const captured = this.captureDisconnectCleanup(deviceId, adbServerResetCohortByDeviceId);
+    const { pooledDeviceAtDisconnect, forceGenerationAtDisconnect, adbServerResetTarget } =
+      captured;
+    if (
+      !adbServerResetTarget &&
+      (await this.shouldSkipStaleDisconnectCleanup(
+        pooledDeviceAtDisconnect,
+        deviceId,
+        forceGenerationAtDisconnect,
+      ))
+    ) {
+      return;
+    }
+    let deviceCleanupSucceeded = true;
+
+    // Stop performance monitoring for this device
+    getPerformanceMonitor().stopMonitoring(deviceId);
+
+    for (const recordingId of recordingIds) {
+      if (!(await this.stopRecordingAfterDeviceDisconnect(recordingId, deviceId))) {
+        deviceCleanupSucceeded = false;
+      }
+    }
+
+    if (
+      !adbServerResetTarget &&
+      (await this.shouldSkipStaleDisconnectCleanup(
+        pooledDeviceAtDisconnect,
+        deviceId,
+        forceGenerationAtDisconnect,
+      ))
+    ) {
+      return;
+    }
+
+    if (adbServerResetTarget) {
+      if (
+        await this.tryRecoverProcessWideAdbServerResetDevice(
+          deviceId,
+          adbServerResetTarget,
+          forceGenerationAtDisconnect,
+        )
+      ) {
+        return;
+      }
+    }
+
+    return this.finishDisconnectedDeviceCleanup(deviceId, captured, deviceCleanupSucceeded);
+  }
+
+  private async finishDisconnectedDeviceCleanup(
+    deviceId: string,
+    captured: ReturnType<Daemon["captureDisconnectCleanup"]>,
+    deviceCleanupSucceeded: boolean,
+  ): Promise<void> {
+    const {
+      pooledDeviceAtDisconnect,
+      assignmentCountAtDisconnect,
+      sessionIdAtDisconnect,
+      sessionAtDisconnect,
+      forceGenerationAtDisconnect,
+    } = captured;
+    // Cancel active executions and release the session so the test fails
+    // fast instead of waiting for the full MCP request timeout.
+    const { incidentId, handled } = await this.recordAndTryRecoverCapturedDisconnect(
+      deviceId,
+      pooledDeviceAtDisconnect,
+      assignmentCountAtDisconnect ?? 0,
+      sessionIdAtDisconnect,
+      sessionAtDisconnect,
+      forceGenerationAtDisconnect,
+    );
+    if (handled) {
+      return;
+    }
+    if (
+      !this.isCapturedDisconnectTargetCurrent(
+        deviceId,
+        pooledDeviceAtDisconnect,
+        assignmentCountAtDisconnect,
+        sessionIdAtDisconnect,
+        sessionAtDisconnect,
+      )
+    ) {
+      await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+      return;
+    }
+    if (sessionIdAtDisconnect && sessionAtDisconnect) {
+      logger.warn(
+        `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionIdAtDisconnect}`,
+      );
+      await this.cancelAndReleaseSession(
+        sessionIdAtDisconnect,
+        deviceLossCancellationReason(deviceId, incidentId),
+        false,
+        sessionAtDisconnect,
+      );
+    }
+
+    if (
+      !this.isCapturedDisconnectTargetCurrent(
+        deviceId,
+        pooledDeviceAtDisconnect,
+        assignmentCountAtDisconnect,
+      )
+    ) {
+      await this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted");
+      return;
+    }
+    await this.devicePool.removeDisconnectedDevice(
+      deviceId,
+      true,
+      incidentId,
+      pooledDeviceAtDisconnect ?? undefined,
+    );
+    // Drop any per-device input caches so a device replaced under the same
+    // serial does not inherit the previous one's cached API-level capability
+    // (issue #3351): an API 31+/pre-31 mismatch mis-handles SHIFT/uppercase.
+    // This fires only on a CONFIRMED disappearance; a fast same-serial restart
+    // that never confirms is handled by the device-ready callback; the 5-min
+    // idle close remains a fallback.
+    if (this.devicePool.getDevice(deviceId)) {
+      // removeDisconnectedDevice can synchronously recover a same-serial
+      // Android emulator (reboot → re-add), which mints a fresh epoch. The
+      // device is live again, so retiring here would delete that just-minted
+      // epoch; skip the retire and let cleanup fail so the monitor retries.
+      deviceCleanupSucceeded = false;
+    } else {
+      this.socketServer?.evictDeviceInputCache(deviceId);
+    }
+    if (deviceCleanupSucceeded) {
+      this.confirmDisconnectedDeviceCleanup(deviceId, forceGenerationAtDisconnect);
+    }
   }
 
   private trackDeferredSessionRecoverySweep(sweep: Promise<void>): void {
@@ -2858,8 +3087,38 @@ export class Daemon {
       return false;
     }
     this.stoppingRecordings.add(recordingId);
+    const stopped = this.stopOrInterruptRecordingAfterDeviceDisconnect(
+      recordingId,
+      deviceId,
+    ).finally(() => this.stoppingRecordings.delete(recordingId));
+    const stillStopping = new Error("recording stop still running");
     try {
-      await stopVideoRecording(recordingId);
+      return await raceWithDeadline(stopped, {
+        timer: this.timer,
+        timeoutMs: DISCONNECT_RECORDING_STOP_WAIT_MS,
+        label: "Stop recording after device disconnect",
+        timeoutError: () => stillStopping,
+      });
+    } catch (error) {
+      if (error !== stillStopping) {
+        throw error;
+      }
+      // The capture itself ended with the device; what is left is post-processing, bounded by
+      // the unattended stop's own ceiling. The recording stays in `stoppingRecordings` until
+      // it finishes, so releasing the device neither waits for it nor starts a second stop.
+      logger.warn(
+        `[Daemon] Recording ${recordingId} is still finishing after device ${deviceId} disconnected; releasing the device without waiting`,
+      );
+      return true;
+    }
+  }
+
+  private async stopOrInterruptRecordingAfterDeviceDisconnect(
+    recordingId: string,
+    deviceId: string,
+  ): Promise<boolean> {
+    try {
+      await stopVideoRecordingUnattended(recordingId);
       logger.warn(
         `[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`,
       );
@@ -2869,8 +3128,6 @@ export class Daemon {
         `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`,
       );
       return await this.interruptRecordingAfterDeviceDisconnect(recordingId, deviceId);
-    } finally {
-      this.stoppingRecordings.delete(recordingId);
     }
   }
 
@@ -2997,83 +3254,84 @@ export class Daemon {
     shouldCommit?: () => boolean,
     options?: { deferFailureFallback?: boolean },
   ): Promise<boolean> {
-    const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    // Early identity fence: discovery can replace a same-serial runtime while
-    // execution cancellation is in flight. It is not the final one — the
-    // session manager re-evaluates `shouldCommit` immediately before it
-    // removes the session, after its own setup/restoration awaits (#7031).
-    if (shouldCommit?.() === false) {
-      return false;
-    }
-    // Capture the owner before release can remove it or hide it behind a
-    // terminal fence. Pool lookup also covers expired sessions during shutdown.
-    const assignedDeviceId =
-      expectedSession?.assignedDevice ??
-      this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
-      null;
-    let deviceId: string | null = null;
-    let superseded = false;
-    await releaseSessionAndDevice(
-      this.sessionManager,
-      this.devicePool,
-      assignedDeviceId,
-      sessionId,
-      releaseReason,
-      {
-        ...options,
-        release: async () => {
-          if (expectedSession) {
-            deviceId = await this.sessionManager.releaseSessionIfOwned(
-              sessionId,
-              expectedSession,
-              expectedSession.assignedDevice,
-              releaseReason,
-            );
-          } else if (shouldCommit) {
-            const release = await this.sessionManager.releaseSessionUnlessSuperseded(
-              sessionId,
-              releaseReason,
-              shouldCommit,
-              allowExpired,
-            );
-            if (release.superseded) {
-              logger.info(
-                `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+    return cancelExecutionsAndReleaseSession(sessionId, releaseReason, async (cancelled) => {
+      // Early identity fence: discovery can replace a same-serial runtime while
+      // execution cancellation is in flight. It is not the final one — the
+      // session manager re-evaluates `shouldCommit` immediately before it
+      // removes the session, after its own setup/restoration awaits (#7031).
+      if (shouldCommit?.() === false) {
+        return false;
+      }
+      // Capture the owner before release can remove it or hide it behind a
+      // terminal fence. Pool lookup also covers expired sessions during shutdown.
+      const assignedDeviceId =
+        expectedSession?.assignedDevice ??
+        this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
+        null;
+      let deviceId: string | null = null;
+      let superseded = false;
+      await releaseSessionAndDevice(
+        this.sessionManager,
+        this.devicePool,
+        assignedDeviceId,
+        sessionId,
+        releaseReason,
+        {
+          ...options,
+          release: async () => {
+            if (expectedSession) {
+              deviceId = await this.sessionManager.releaseSessionIfOwned(
+                sessionId,
+                expectedSession,
+                expectedSession.assignedDevice,
+                releaseReason,
               );
-              superseded = true;
-              return null;
+            } else if (shouldCommit) {
+              const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+                sessionId,
+                releaseReason,
+                shouldCommit,
+                allowExpired,
+              );
+              if (release.superseded) {
+                logger.info(
+                  `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+                );
+                superseded = true;
+                return null;
+              }
+              deviceId = release.deviceId;
+            } else {
+              deviceId = await this.sessionManager.releaseSession(
+                sessionId,
+                releaseReason,
+                allowExpired,
+              );
             }
-            deviceId = release.deviceId;
-          } else {
-            deviceId = await this.sessionManager.releaseSession(
-              sessionId,
-              releaseReason,
-              allowExpired,
-            );
-          }
-          // A completed persistence retry may return a device already idle or
-          // reassigned. Do not issue a stale pool release or report it as freed.
-          if (!this.isSessionDeviceAssigned(deviceId, sessionId)) {
-            deviceId = null;
-          }
-          return deviceId;
+            // A completed persistence retry may return a device already idle or
+            // reassigned. Do not issue a stale pool release or report it as freed.
+            if (!this.isSessionDeviceAssigned(deviceId, sessionId)) {
+              deviceId = null;
+            }
+            return deviceId;
+          },
         },
-      },
-    );
-    if (superseded) {
-      return false;
-    }
-    if (!deviceId || this.isSessionDeviceAssigned(deviceId, sessionId)) {
-      logger.info(
-        `Cancelled session ${sessionId} (${cancelled} executions); no device freed (reason=${releaseReason})`,
       );
-      return false;
-    }
-    logger.info(
-      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId} ` +
-        `(reason=${releaseReason})`,
-    );
-    return true;
+      if (superseded) {
+        return false;
+      }
+      if (!deviceId || this.isSessionDeviceAssigned(deviceId, sessionId)) {
+        logger.info(
+          `Cancelled session ${sessionId} (${cancelled} executions); no device freed (reason=${releaseReason})`,
+        );
+        return false;
+      }
+      logger.info(
+        `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId} ` +
+          `(reason=${releaseReason})`,
+      );
+      return true;
+    });
   }
 
   private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {
@@ -3082,8 +3340,8 @@ export class Daemon {
 
   private async cancelAndDrainDeviceExecutions(
     deviceId: string,
-    reason: string,
-    options?: { excludeExecutionId?: string },
+    reason: string | Error,
+    options?: { excludeExecutionId?: string; onlySessionUuid?: string },
   ): Promise<number> {
     const cancelled = await executionTracker.cancelDeviceExecutions(deviceId, reason, options);
     if (cancelled === 0) {
@@ -3444,41 +3702,12 @@ export class Daemon {
         },
         {
           name: "shutdown monitors",
-          run: async () => {
-            // The navigation retention monitor's in-flight pass drains via the DB
-            // write-barrier stage below; here we only cancel its next scheduled tick.
-            navigationRetentionMonitor?.stop();
-            const [heartbeatSettled, disconnectSettled] = await Promise.all([
-              heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
-              deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,
-            ]);
-            if (!heartbeatSettled) {
-              logger.warn("Session heartbeat monitor did not settle before daemon shutdown");
-            }
-            if (!disconnectSettled) {
-              logger.warn("Device disconnect monitor did not settle before daemon shutdown");
-            }
-            const timedOut = Symbol("recovery sweep drain timeout");
-            let sweepsSettled = true;
-            try {
-              await raceWithDeadline(Promise.allSettled(this.deferredSessionRecoverySweeps), {
-                timer: this.timer,
-                timeoutMs: DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
-                label: "Recovery sweep drain",
-                timeoutError: () => timedOut,
-              });
-            } catch (error) {
-              if (error !== timedOut) {
-                throw error;
-              }
-              sweepsSettled = false;
-            }
-            if (!sweepsSettled) {
-              logger.warn(
-                `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
-              );
-            }
-          },
+          run: () =>
+            this.drainShutdownMonitors(
+              navigationRetentionMonitor,
+              heartbeatMonitor,
+              deviceDisconnectMonitor,
+            ),
         },
         {
           name: "ADB missing-device subscription",
@@ -3533,13 +3762,7 @@ export class Daemon {
         },
         {
           name: "active HTTP session registry",
-          run: () => {
-            for (const sessionId of this.httpSessionIdleTimers.keys()) {
-              this.clearHttpSessionIdleTimer(sessionId);
-            }
-            this.activeHttpRequests.clear();
-            this.transports.clear();
-          },
+          run: () => this.clearHttpSessionRegistry(),
         },
         {
           name: "HTTP server",
@@ -3570,35 +3793,11 @@ export class Daemon {
         { name: "managed ADB server", run: this.stopManagedAdbServer },
         {
           name: "database write drain",
-          run: async () => {
-            // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
-            // background retention cleanup) BEFORE closing the connection, so a query
-            // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
-            // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
-            const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
-            if (!drained) {
-              logger.warn(
-                `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`,
-              );
-            }
-          },
+          run: () => this.drainShutdownDatabaseWrites(),
         },
         {
           name: "in-flight migrations",
-          run: async () => {
-            // If a SIGTERM arrived mid cold-start migration, the detached migration
-            // connection is still open and writing on its own connection (its writes are
-            // NOT tracked by the write barrier drained above). Let it settle before
-            // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
-            // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
-            // Bounded so a wedged migration cannot itself hang shutdown.
-            const migrationsSettled = await awaitInFlightMigrations(MIGRATION_SETTLE_TIMEOUT_MS);
-            if (!migrationsSettled) {
-              logger.warn(
-                `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`,
-              );
-            }
-          },
+          run: () => this.settleShutdownMigrations(),
         },
         {
           name: "database",
@@ -3631,6 +3830,82 @@ export class Daemon {
       ],
       (message, error) => logger.warn(message, error),
     );
+  }
+
+  private clearHttpSessionRegistry(): void {
+    for (const sessionId of this.httpSessionIdleTimers.keys()) {
+      this.clearHttpSessionIdleTimer(sessionId);
+    }
+    this.activeHttpRequests.clear();
+    this.transports.clear();
+  }
+
+  private async drainShutdownDatabaseWrites(): Promise<void> {
+    // Quiesce in-flight best-effort DB writes (fire-and-forget telemetry ingest,
+    // background retention cleanup) BEFORE closing the connection, so a query
+    // queued in Kysely's ConnectionMutex can't strand shutdown on an unsettled
+    // promise (issue #2792). Bounded: a wedged write cannot itself hang shutdown.
+    const drained = await getDbWriteBarrier().drain(DB_WRITE_DRAIN_TIMEOUT_MS);
+    if (!drained) {
+      logger.warn(
+        `Timed out after ${DB_WRITE_DRAIN_TIMEOUT_MS}ms draining in-flight DB writes; closing database anyway`,
+      );
+    }
+  }
+
+  private async settleShutdownMigrations(): Promise<void> {
+    // If a SIGTERM arrived mid cold-start migration, the detached migration
+    // connection is still open and writing on its own connection (its writes are
+    // NOT tracked by the write barrier drained above). Let it settle before
+    // closeDatabase() destroys the app connection, so their WAL writes/checkpoint
+    // can't contend and stall shutdown on busy_timeout (Windows; issue #3044).
+    // Bounded so a wedged migration cannot itself hang shutdown.
+    const migrationsSettled = await awaitInFlightMigrations(MIGRATION_SETTLE_TIMEOUT_MS);
+    if (!migrationsSettled) {
+      logger.warn(
+        `Timed out after ${MIGRATION_SETTLE_TIMEOUT_MS}ms awaiting in-flight startup migration; closing database anyway`,
+      );
+    }
+  }
+
+  private async drainShutdownMonitors(
+    navigationRetentionMonitor: typeof this.navigationRetentionMonitor,
+    heartbeatMonitor: typeof this.heartbeatMonitor,
+    deviceDisconnectMonitor: typeof this.deviceDisconnectMonitor,
+  ): Promise<void> {
+    // The navigation retention monitor's in-flight pass drains via the DB
+    // write-barrier stage below; here we only cancel its next scheduled tick.
+    navigationRetentionMonitor?.stop();
+    const [heartbeatSettled, disconnectSettled] = await Promise.all([
+      heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
+      deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,
+    ]);
+    if (!heartbeatSettled) {
+      logger.warn("Session heartbeat monitor did not settle before daemon shutdown");
+    }
+    if (!disconnectSettled) {
+      logger.warn("Device disconnect monitor did not settle before daemon shutdown");
+    }
+    const timedOut = Symbol("recovery sweep drain timeout");
+    let sweepsSettled = true;
+    try {
+      await raceWithDeadline(Promise.allSettled(this.deferredSessionRecoverySweeps), {
+        timer: this.timer,
+        timeoutMs: DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+        label: "Recovery sweep drain",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      sweepsSettled = false;
+    }
+    if (!sweepsSettled) {
+      logger.warn(
+        `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
+      );
+    }
   }
 
   /**

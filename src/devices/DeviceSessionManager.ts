@@ -5,9 +5,11 @@ import {
   type DeviceExecutionBinding,
 } from "../server/deviceExecutionBinding";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import {
   ActionableError,
   BootedDevice,
+  DeviceInfo,
   Platform,
   SomePlatform,
   toActionableError,
@@ -63,6 +65,8 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
+import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
 import {
   compareIdentityEvidence,
   deriveEvidenceFromBootedDevice,
@@ -342,6 +346,7 @@ export function deviceReadinessRank(level: DeviceReadinessLevel): number {
 export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "observedAt">;
 
 export interface DeviceReadyOptions {
+  sessionId?: string;
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -376,6 +381,13 @@ export interface DeviceSessionManagerOptions {
   runnerProvisionTimeoutMs?: number;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   idGenerator?: IdGenerator;
+}
+
+/** What a lifecycle-start operation may do to keep its AVD lease past its own return. */
+interface LifecycleStartHold {
+  lease: VirtualDeviceLifecycleLease;
+  /** Keeps the lease held until `settlement` settles, though the operation has already returned. */
+  holdLeaseUntil: (settlement: Promise<unknown>) => void;
 }
 
 export class DeviceSessionManager implements DeviceSessionManager {
@@ -578,80 +590,21 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Detect all connected devices
-    const result = options?.getConnectedPlatforms
-      ? await options.getConnectedPlatforms()
-      : await this.detectConnectedPlatformsWithStatus(options?.signal);
-    const { devices: connectedPlatforms, scanned } = Array.isArray(result)
-      ? { devices: result, scanned: { android: true, ios: true } }
-      : result;
-    const pinnedDevice = this.explicitDevicePin;
-    if (
-      pinnedDevice &&
-      scanned[pinnedDevice.platform] &&
-      !connectedPlatforms.some(
-        (device) =>
-          device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
-      )
-    ) {
-      this.clearExplicitDevicePin(pinnedDevice.deviceId);
-    }
+    const result = await this.getReadinessScan(options);
+    const { devices: connectedPlatforms, scanned } = this.normalizeReadinessScan(result);
+    this.reconcileReadinessPin(connectedPlatforms, scanned);
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);
     const iosDevices = connectedPlatforms.filter((device) => device.platform === "ios");
     logger.info(`Found ${iosDevices.length} ios devices`);
 
-    // Get devices for the requested platform
-    let platformDevices: BootedDevice[] = [];
-    let resolvedPlatform: Platform;
-    switch (platform) {
-      case "android":
-        platformDevices = androidDevices;
-        resolvedPlatform = "android";
-        break;
-      case "ios":
-        platformDevices = iosDevices;
-        resolvedPlatform = "ios";
-        break;
-      default:
-        // Only check for mixed platforms when auto-detecting (not explicitly specified)
-        if (androidDevices.length > 0 && iosDevices.length > 0) {
-          // An explicit deviceId names the target unambiguously, so it resolves
-          // the platform ahead of the ambient one — otherwise switching to a
-          // device on the other platform by id would be pinned to whatever
-          // setActiveDevice last selected and fail (issue #5870).
-          if (providedDeviceId) {
-            const allDevices = [...androidDevices, ...iosDevices];
-            const match = allDevices.find((d) => d.deviceId === providedDeviceId);
-            if (match) {
-              platformDevices = match.platform === "android" ? androidDevices : iosDevices;
-              resolvedPlatform = match.platform;
-              break;
-            }
-          }
-          // With no matching deviceId, fall back to the platform setActiveDevice selected.
-          const selectedPlatform = this.explicitDevicePin?.platform ?? this.currentPlatform;
-          if (selectedPlatform && (this.explicitDevicePin || this.currentDevice)) {
-            platformDevices = selectedPlatform === "android" ? androidDevices : iosDevices;
-            resolvedPlatform = selectedPlatform;
-            break;
-          }
-          throw new ActionableError(
-            "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
-          );
-        }
-
-        if (androidDevices.length > 0) {
-          platformDevices = androidDevices;
-          resolvedPlatform = "android";
-        } else if (iosDevices.length > 0) {
-          platformDevices = iosDevices;
-          resolvedPlatform = "ios";
-        } else {
-          platformDevices = [];
-          resolvedPlatform = "android";
-        }
-    }
+    const { platformDevices, resolvedPlatform } = this.resolveReadinessPlatform(
+      platform,
+      androidDevices,
+      iosDevices,
+      providedDeviceId,
+    );
 
     let selectedDevice: BootedDevice | undefined;
     let deviceVerified = false;
@@ -659,71 +612,32 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     // If a specific device is provided, verify it exists on the correct platform
     if (providedDeviceId) {
-      const providedDevice = platformDevices.find((device) => device.deviceId === providedDeviceId);
-      if (!providedDevice) {
-        throw new ActionableError(
-          `Device ${providedDeviceId} not found on ${platform} platform. ` +
-            `Available ${platform} devices: ${describeDevices(platformDevices)}`,
-        );
-      }
+      const providedDevice = this.requireProvidedReadinessDevice(
+        platform,
+        platformDevices,
+        providedDeviceId,
+      );
       selectedDevice = await this.resolveAndroidReadinessIdentity(providedDevice, options?.signal);
       deviceSource = "provided";
     }
 
     // Explicit selection takes precedence over ambient resolution by another call.
-    const selectedPin = platformDevices.find(
-      (device) => device.deviceId === this.explicitDevicePin?.deviceId,
-    );
-    if (!selectedDevice && !providedDeviceId && selectedPin) {
+    const selectedPin = this.findPinnedReadinessDevice(platformDevices);
+    if (this.shouldResolveReadinessPin(selectedDevice, providedDeviceId, selectedPin)) {
       selectedDevice = await this.resolveAndroidReadinessIdentity(selectedPin, options?.signal);
       deviceSource = "provided";
     }
 
     // If we have a current device for the requested platform, verify it's still ready
-    if (
-      !selectedDevice &&
-      this.currentDevice &&
-      (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)
-    ) {
-      logger.info(
-        `[DeviceSessionManager] Found current device: ${this.currentDevice.deviceId}, verifying readiness`,
+    if (!selectedDevice && this.hasCurrentReadinessDevice(platform, resolvedPlatform)) {
+      selectedDevice = await this.verifyCurrentReadinessDevice(
+        platformDevices,
+        resolvedPlatform,
+        options,
       );
-      try {
-        // Prefer the current discovery over the cached selection, resolved to
-        // its stable AVD name so an Android emulator is keyed by the runtime on
-        // the serial rather than by the serial itself.
-        const currentDevice = await this.resolveAndroidReadinessIdentity(
-          platformDevices.find((device) => device.deviceId === this.currentDevice?.deviceId) ??
-            this.currentDevice,
-          options?.signal,
-        );
-        // Use resolvedPlatform (always "android" | "ios") instead of platform (which may be "either")
-        // to ensure verifyDevice dispatches to the correct platform-specific verification
-        await this.withLifecycleStart(
-          lifecycleIdentityForDevice(currentDevice),
-          options,
-          async (signal) =>
-            await this.verifyDevice(
-              currentDevice.deviceId,
-              resolvedPlatform,
-              { ...options, signal },
-              currentDevice,
-            ),
-        );
-        selectedDevice = currentDevice;
+      if (selectedDevice) {
         deviceVerified = true;
         deviceSource = "current";
-      } catch (error) {
-        // Request cancellation does not make the selected device stale. Preserve
-        // the user's explicit selection so a later platform-implicit call does
-        // not become ambiguous merely because this caller disconnected.
-        options?.signal?.throwIfAborted();
-        if (error instanceof RunnerReadinessError || isDeviceIdentityQuarantinedError(error)) {
-          throw error;
-        }
-        logger.warn(`Current device ${this.currentDevice} is no longer ready: ${error}`);
-        this.currentDevice = undefined;
-        this.currentPlatform = undefined;
       }
     }
 
@@ -755,6 +669,30 @@ export class DeviceSessionManager implements DeviceSessionManager {
       );
     }
 
+    return await this.finishReadinessSelection(
+      selectedDevice,
+      resolvedPlatform,
+      deviceSource,
+      options,
+    );
+  }
+
+  private assertUsableIosOverride(
+    iosOverride: Awaited<ReturnType<typeof checkIosCtrlProxyOverride>>,
+  ): void {
+    if (iosOverride.present && !iosOverride.usable) {
+      throw new ActionableError(
+        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`,
+      );
+    }
+  }
+
+  private async finishReadinessSelection(
+    selectedDevice: BootedDevice,
+    resolvedPlatform: Platform,
+    deviceSource: "provided" | "current" | "auto",
+    options?: DeviceReadyOptions,
+  ): Promise<BootedDevice> {
     // Safety check: ensure the selected device's platform matches the resolved platform.
     // This guards against cross-platform contamination where an iOS device could be
     // returned when Android was explicitly requested (or vice versa).
@@ -774,6 +712,186 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
     return selectedDevice;
+  }
+
+  private assertCreatedIosReservation(
+    lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+    provisioned: { name: string; deviceId?: string },
+  ): asserts lifecycleLease is VirtualDeviceLifecycleLease {
+    if (!lifecycleLease || !provisioned.deviceId) {
+      throw new ActionableError(
+        `Created iOS simulator '${provisioned.name}' has no lifecycle reservation.`,
+      );
+    }
+  }
+
+  private shouldResolveReadinessPin(
+    selectedDevice: BootedDevice | undefined,
+    providedDeviceId: string | undefined,
+    selectedPin: BootedDevice | undefined,
+  ): selectedPin is BootedDevice {
+    return !selectedDevice && !providedDeviceId && !!selectedPin;
+  }
+
+  private requireProvidedReadinessDevice(
+    platform: SomePlatform,
+    platformDevices: BootedDevice[],
+    providedDeviceId: string,
+  ): BootedDevice {
+    const providedDevice = platformDevices.find((device) => device.deviceId === providedDeviceId);
+    if (!providedDevice) {
+      throw new ActionableError(
+        `Device ${providedDeviceId} not found on ${platform} platform. ` +
+          `Available ${platform} devices: ${describeDevices(platformDevices)}`,
+      );
+    }
+    return providedDevice;
+  }
+
+  private findPinnedReadinessDevice(platformDevices: BootedDevice[]): BootedDevice | undefined {
+    return platformDevices.find((device) => device.deviceId === this.explicitDevicePin?.deviceId);
+  }
+
+  private getReadinessScan(
+    options?: DeviceReadyOptions,
+  ): Promise<BootedDevice[] | ConnectedPlatformScan> {
+    return options?.getConnectedPlatforms
+      ? options.getConnectedPlatforms()
+      : this.detectConnectedPlatformsWithStatus(options?.signal);
+  }
+
+  private reconcileReadinessPin(
+    connectedPlatforms: BootedDevice[],
+    scanned: ConnectedPlatformScan["scanned"],
+  ): void {
+    const pinnedDevice = this.explicitDevicePin;
+    if (
+      pinnedDevice &&
+      scanned[pinnedDevice.platform] &&
+      !connectedPlatforms.some(
+        (device) =>
+          device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
+      )
+    ) {
+      this.clearExplicitDevicePin(pinnedDevice.deviceId);
+    }
+  }
+
+  private resolveReadinessPlatform(
+    platform: SomePlatform,
+    androidDevices: BootedDevice[],
+    iosDevices: BootedDevice[],
+    providedDeviceId?: string,
+  ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
+    // Get devices for the requested platform
+    let platformDevices: BootedDevice[] = [];
+    let resolvedPlatform: Platform;
+    switch (platform) {
+      case "android":
+        platformDevices = androidDevices;
+        resolvedPlatform = "android";
+        break;
+      case "ios":
+        platformDevices = iosDevices;
+        resolvedPlatform = "ios";
+        break;
+      default:
+        // Only check for mixed platforms when auto-detecting (not explicitly specified)
+        if (androidDevices.length > 0 && iosDevices.length > 0) {
+          return this.resolveMixedReadinessPlatform(androidDevices, iosDevices, providedDeviceId);
+        }
+
+        if (androidDevices.length > 0) {
+          platformDevices = androidDevices;
+          resolvedPlatform = "android";
+        } else if (iosDevices.length > 0) {
+          platformDevices = iosDevices;
+          resolvedPlatform = "ios";
+        } else {
+          platformDevices = [];
+          resolvedPlatform = "android";
+        }
+    }
+
+    return { platformDevices, resolvedPlatform };
+  }
+
+  private resolveMixedReadinessPlatform(
+    androidDevices: BootedDevice[],
+    iosDevices: BootedDevice[],
+    providedDeviceId?: string,
+  ): { platformDevices: BootedDevice[]; resolvedPlatform: Platform } {
+    // An explicit deviceId names the target unambiguously, so it resolves
+    // the platform ahead of the ambient one — otherwise switching to a
+    // device on the other platform by id would be pinned to whatever
+    // setActiveDevice last selected and fail (issue #5870).
+    if (providedDeviceId) {
+      const allDevices = [...androidDevices, ...iosDevices];
+      const match = allDevices.find((d) => d.deviceId === providedDeviceId);
+      if (match) {
+        return {
+          platformDevices: match.platform === "android" ? androidDevices : iosDevices,
+          resolvedPlatform: match.platform,
+        };
+      }
+    }
+    // With no matching deviceId, fall back to the platform setActiveDevice selected.
+    const selectedPlatform = this.explicitDevicePin?.platform ?? this.currentPlatform;
+    if (selectedPlatform && (this.explicitDevicePin || this.currentDevice)) {
+      return {
+        platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
+        resolvedPlatform: selectedPlatform,
+      };
+    }
+    throw new ActionableError(
+      "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
+    );
+  }
+
+  private async verifyCurrentReadinessDevice(
+    platformDevices: BootedDevice[],
+    resolvedPlatform: Platform,
+    options?: DeviceReadyOptions,
+  ): Promise<BootedDevice | undefined> {
+    logger.info(
+      `[DeviceSessionManager] Found current device: ${this.currentDevice!.deviceId}, verifying readiness`,
+    );
+    try {
+      // Prefer the current discovery over the cached selection, resolved to
+      // its stable AVD name so an Android emulator is keyed by the runtime on
+      // the serial rather than by the serial itself.
+      const currentDevice = await this.resolveAndroidReadinessIdentity(
+        platformDevices.find((device) => device.deviceId === this.currentDevice?.deviceId) ??
+          this.currentDevice!,
+        options?.signal,
+      );
+      // Use resolvedPlatform (always "android" | "ios") instead of platform (which may be "either")
+      // to ensure verifyDevice dispatches to the correct platform-specific verification
+      await this.withLifecycleStart(
+        lifecycleIdentityForDevice(currentDevice),
+        options,
+        async (signal) =>
+          await this.verifyDevice(
+            currentDevice.deviceId,
+            resolvedPlatform,
+            { ...options, signal },
+            currentDevice,
+          ),
+      );
+      return currentDevice;
+    } catch (error) {
+      // Request cancellation does not make the selected device stale. Preserve
+      // the user's explicit selection so a later platform-implicit call does
+      // not become ambiguous merely because this caller disconnected.
+      options?.signal?.throwIfAborted();
+      if (error instanceof RunnerReadinessError || isDeviceIdentityQuarantinedError(error)) {
+        throw error;
+      }
+      logger.warn(`Current device ${this.currentDevice} is no longer ready: ${error}`);
+      this.currentDevice = undefined;
+      this.currentPlatform = undefined;
+    }
+    return undefined;
   }
 
   /**
@@ -850,32 +968,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       logger.info(`[DeviceSessionManager] Verifying Android device ${deviceId} readiness`);
 
-      const deviceForWindow =
-        resolvedIdentity?.deviceId === device.deviceId
-          ? {
-              ...device,
-              name: resolvedIdentity.name,
-              ...(resolvedIdentity.observedAt === undefined
-                ? {}
-                : { observedAt: resolvedIdentity.observedAt }),
-            }
-          : device;
+      const deviceForWindow = this.androidReadinessWindowDevice(device, resolvedIdentity);
       const window = this.provider.getWindow(deviceForWindow);
 
       const activeWindow = await window.getActive(true);
-      if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-        logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
-        if (activeWindow) {
-          logger.warn(
-            `[DeviceSessionManager] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
-          );
-        } else {
-          logger.warn(`[DeviceSessionManager] activeWindow: ${activeWindow}`);
-        }
-        throw new ActionableError(
-          `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
-        );
-      }
+      this.assertAndroidActiveWindow(deviceId, activeWindow);
     } catch (error) {
       const errorMsg = errorMessage(error);
       throw new ActionableError(
@@ -895,6 +992,40 @@ export class DeviceSessionManager implements DeviceSessionManager {
     );
   }
 
+  private androidReadinessWindowDevice(
+    device: BootedDevice,
+    resolvedIdentity?: ResolvedDeviceIdentity,
+  ): BootedDevice {
+    return resolvedIdentity?.deviceId === device.deviceId
+      ? {
+          ...device,
+          name: resolvedIdentity.name,
+          ...(resolvedIdentity.observedAt === undefined
+            ? {}
+            : { observedAt: resolvedIdentity.observedAt }),
+        }
+      : device;
+  }
+
+  private assertAndroidActiveWindow(
+    deviceId: string,
+    activeWindow: Awaited<ReturnType<Window["getActive"]>>,
+  ): void {
+    if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
+      logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
+      if (activeWindow) {
+        logger.warn(
+          `[DeviceSessionManager] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
+        );
+      } else {
+        logger.warn(`[DeviceSessionManager] activeWindow: ${activeWindow}`);
+      }
+      throw new ActionableError(
+        `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
+      );
+    }
+  }
+
   // Existing CtrlProxy state machine moved intact so the readiness lock covers it.
   // oxlint-disable-next-line eslint/complexity
   private async ensureAndroidCtrlProxyReady(
@@ -905,55 +1036,17 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // Always track setup timing (one-time per session, valuable for debugging)
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityService");
-    let didSetup = false;
+    const state = { didSetup: false, needsSetup: false };
 
     try {
-      const skipCtrlProxyDownload =
-        options?.skipCtrlProxyDownload ??
-        options?.skipAccessibilityDownload ??
-        options?.skipAccessibilitySetup;
-      if (options?.skipAccessibilitySetup !== undefined) {
-        if (options?.skipAccessibilityDownload !== undefined) {
-          logger.warn(
-            "[DeviceSessionManager] skipAccessibilityDownload is deprecated; use skipCtrlProxyDownload instead.",
-          );
-        } else {
-          logger.warn(
-            "[DeviceSessionManager] skipAccessibilitySetup is deprecated; use skipCtrlProxyDownload instead.",
-          );
-        }
-      }
+      const skipCtrlProxyDownload = this.skipCtrlProxyDownload(options);
+      this.warnDeprecatedAccessibilityOptions(options);
 
       const accessibilityClient = this.provider.getAndroidCtrlProxyClient(device);
       if (accessibilityClient.isConnected()) {
-        // WebSocket appears connected, but verify service is actually responsive
-        // This catches cases where service crashed but socket wasn't properly closed
-        logger.info(
-          `[DeviceSessionManager] WebSocket connected for ${deviceId}, verifying service is responsive`,
-        );
-        const isReady = await perf.track("verifyConnectedService", () =>
-          accessibilityClient.verifyServiceReady(2, 200, 2000),
-        );
-        if (isReady) {
-          logger.info(
-            `[DeviceSessionManager] Accessibility service verified responsive for ${deviceId}`,
-          );
-          perf.end();
+        if (await this.verifyConnectedAndroidService(deviceId, accessibilityClient, perf)) {
           return;
         }
-        // Service not responsive despite a connected socket: the socket itself
-        // is suspect (issue #7554 — readyState stays OPEN across a half-open
-        // connection to a wedged or unreachable peer). Terminate it so the
-        // normal flow below reconnects with a fresh socket, rather than
-        // falling through to a waitForConnection() that would just reuse the
-        // same half-open one and report success immediately. Unlike close(),
-        // terminateStaleConnection() does not disable auto-reconnect for the
-        // rest of this client's lifetime — it drives the same was-open close
-        // path a real network failure would.
-        logger.warn(
-          `[DeviceSessionManager] WebSocket connected but service not responsive for ${deviceId}, terminating stale connection and checking status`,
-        );
-        accessibilityClient.terminateStaleConnection();
       }
 
       const manager = this.provider.getAndroidCtrlProxyManager(device);
@@ -975,31 +1068,23 @@ export class DeviceSessionManager implements DeviceSessionManager {
         Promise.all([manager.isInstalled(), manager.isEnabled()]),
       );
 
-      let needsSetup = false;
+      state.needsSetup = false;
 
       if (isInstalled && isEnabled) {
-        logger.info(
-          `[DeviceSessionManager] Accessibility service already enabled for ${deviceId}, verifying WebSocket connection`,
-        );
-        // Verify the service is actually working by checking WebSocket connection
-        const connected = await perf.track("verifyConnection", () =>
-          accessibilityClient.waitForConnection(3, 200),
-        );
-        if (connected) {
-          if (skipCtrlProxyDownload) {
-            await verifyCompatibilityWhenSkipping();
-            return;
-          }
-          logger.info(
-            `[DeviceSessionManager] Accessibility service enabled and connected for ${deviceId}, verifying version compatibility`,
-          );
-        } else {
-          // Service claims to be installed but WebSocket won't connect - cache is stale
-          logger.warn(
-            `[DeviceSessionManager] Accessibility service cache stale for ${deviceId} - marked as installed/enabled but WebSocket failed. Resetting setup state and forcing reinstall.`,
-          );
-          manager.resetSetupState();
-          needsSetup = true;
+        if (
+          await this.verifyEnabledAndroidService(
+            deviceId,
+            manager,
+            accessibilityClient,
+            perf,
+            state,
+            {
+              skipCtrlProxyDownload,
+              verifyCompatibilityWhenSkipping,
+            },
+          )
+        ) {
+          return;
         }
       }
 
@@ -1010,87 +1095,33 @@ export class DeviceSessionManager implements DeviceSessionManager {
         return;
       }
 
-      if (isInstalled && !isEnabled && !needsSetup) {
-        logger.info(
-          `[DeviceSessionManager] Accessibility service installed but not enabled for ${deviceId}, enabling now`,
-        );
-        try {
-          await perf.track("enableService", () => manager.enable());
-          didSetup = true;
-          // enable() just changed the endpoint's state; failures recorded
-          // before this point must not cool down the connect that follows
-          // (issue #7538).
-          accessibilityClient.resetConnectionBudget();
-          // Wait for WebSocket to be ready after enabling
-          logger.info(
-            `[DeviceSessionManager] Waiting for accessibility WebSocket connection for ${deviceId}`,
-          );
-          const enableConnected = await perf.track("waitForConnection", () =>
-            accessibilityClient.waitForConnection(),
-          );
-          if (!enableConnected) {
-            logger.warn(
-              `[DeviceSessionManager] WebSocket connection failed after enabling for ${deviceId}, will attempt full setup`,
-            );
-            manager.resetSetupState();
-            needsSetup = true;
-          } else {
-            if (skipCtrlProxyDownload) {
-              await verifyCompatibilityWhenSkipping();
-              return;
-            }
-            logger.info(
-              `[DeviceSessionManager] Accessibility service enabled for ${deviceId}, verifying version compatibility`,
-            );
-          }
-        } catch (error) {
-          const errorMsg = errorMessage(error);
-          logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMsg}`);
-          if (skipCtrlProxyDownload) {
-            return;
-          }
-          needsSetup = true;
+      if (isInstalled && !isEnabled && !state.needsSetup) {
+        if (
+          await this.enableInstalledAndroidService(
+            deviceId,
+            manager,
+            accessibilityClient,
+            perf,
+            state,
+            {
+              skipCtrlProxyDownload,
+              verifyCompatibilityWhenSkipping,
+            },
+          )
+        ) {
+          return;
         }
       }
 
-      if (skipCtrlProxyDownload && !needsSetup) {
+      if (skipCtrlProxyDownload && !state.needsSetup) {
         logger.info(
           `[DeviceSessionManager] Skipping accessibility service download/install for ${deviceId}`,
         );
         return;
       }
 
-      if (needsSetup || !isInstalled) {
-        const setup = await manager.setup(false, perf);
-        if (!setup.success) {
-          throw new ActionableError(setup.error ?? setup.message);
-        }
-        didSetup = true;
-        // setup() just changed the endpoint's state (fresh install/enable);
-        // failures recorded before this point must not cool down the connect
-        // that follows (issue #7538).
-        accessibilityClient.resetConnectionBudget();
-        // Wait for WebSocket to be ready after setup (install + enable)
-        logger.info(
-          `[DeviceSessionManager] Waiting for accessibility WebSocket connection after setup for ${deviceId}`,
-        );
-        const connected = await perf.track("waitForConnection", () =>
-          accessibilityClient.waitForConnection(),
-        );
-        if (connected) {
-          // Verify service is actually ready to respond (not just WebSocket connected)
-          logger.info(
-            `[DeviceSessionManager] Verifying accessibility service is responsive for ${deviceId}`,
-          );
-          const ready = await perf.track("verifyServiceReady", () =>
-            accessibilityClient.verifyServiceReady(5, 500, 3000),
-          );
-          if (!ready) {
-            logger.warn(
-              `[DeviceSessionManager] Accessibility service not responsive after setup for ${deviceId}, observe may fall back to UIAutomator`,
-            );
-          }
-        }
+      if (state.needsSetup || !isInstalled) {
+        await this.setupAndroidService(deviceId, manager, accessibilityClient, perf, state);
       }
     } catch (error) {
       const errorMsg = errorMessage(error);
@@ -1102,13 +1133,218 @@ export class DeviceSessionManager implements DeviceSessionManager {
     } finally {
       perf.end();
       // Store timing if we actually did setup work
-      if (didSetup) {
+      if (state.didSetup) {
         const timings = perf.getTimings();
         if (timings) {
-          storeSetupTiming(deviceId, timings);
+          storeSetupTiming(deviceId, timings, options?.sessionId);
         }
       }
     }
+  }
+
+  private skipCtrlProxyDownload(options?: DeviceReadyOptions): boolean | undefined {
+    return (
+      options?.skipCtrlProxyDownload ??
+      options?.skipAccessibilityDownload ??
+      options?.skipAccessibilitySetup
+    );
+  }
+
+  private warnDeprecatedAccessibilityOptions(options?: DeviceReadyOptions): void {
+    if (options?.skipAccessibilitySetup !== undefined) {
+      if (options?.skipAccessibilityDownload !== undefined) {
+        logger.warn(
+          "[DeviceSessionManager] skipAccessibilityDownload is deprecated; use skipCtrlProxyDownload instead.",
+        );
+      } else {
+        logger.warn(
+          "[DeviceSessionManager] skipAccessibilitySetup is deprecated; use skipCtrlProxyDownload instead.",
+        );
+      }
+    }
+  }
+
+  private async verifyConnectedAndroidService(
+    deviceId: string,
+    accessibilityClient: AndroidCtrlProxy,
+    perf: ReturnType<typeof createPerformanceTracker>,
+  ): Promise<boolean> {
+    // WebSocket appears connected, but verify service is actually responsive
+    // This catches cases where service crashed but socket wasn't properly closed
+    logger.info(
+      `[DeviceSessionManager] WebSocket connected for ${deviceId}, verifying service is responsive`,
+    );
+    const isReady = await perf.track("verifyConnectedService", () =>
+      accessibilityClient.verifyServiceReady(2, 200, 2000),
+    );
+    if (isReady) {
+      logger.info(
+        `[DeviceSessionManager] Accessibility service verified responsive for ${deviceId}`,
+      );
+      perf.end();
+      return true;
+    }
+    // Service not responsive despite a connected socket: the socket itself
+    // is suspect (issue #7554 — readyState stays OPEN across a half-open
+    // connection to a wedged or unreachable peer). Terminate it so the
+    // normal flow below reconnects with a fresh socket, rather than
+    // falling through to a waitForConnection() that would just reuse the
+    // same half-open one and report success immediately. Unlike close(),
+    // terminateStaleConnection() does not disable auto-reconnect for the
+    // rest of this client's lifetime — it drives the same was-open close
+    // path a real network failure would.
+    logger.warn(
+      `[DeviceSessionManager] WebSocket connected but service not responsive for ${deviceId}, terminating stale connection and checking status`,
+    );
+    accessibilityClient.terminateStaleConnection();
+    return false;
+  }
+
+  private async verifyEnabledAndroidService(
+    deviceId: string,
+    manager: CtrlProxyManager,
+    accessibilityClient: AndroidCtrlProxy,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    setupState: { didSetup: boolean; needsSetup: boolean },
+    compatibility: {
+      skipCtrlProxyDownload: boolean | undefined;
+      verifyCompatibilityWhenSkipping: () => Promise<void>;
+    },
+  ): Promise<boolean> {
+    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping } = compatibility;
+    logger.info(
+      `[DeviceSessionManager] Accessibility service already enabled for ${deviceId}, verifying WebSocket connection`,
+    );
+    // Verify the service is actually working by checking WebSocket connection
+    const connected = await perf.track("verifyConnection", () =>
+      accessibilityClient.waitForConnection(3, 200),
+    );
+    if (connected) {
+      if (skipCtrlProxyDownload) {
+        await verifyCompatibilityWhenSkipping();
+        return true;
+      }
+      logger.info(
+        `[DeviceSessionManager] Accessibility service enabled and connected for ${deviceId}, verifying version compatibility`,
+      );
+    } else {
+      // Service claims to be installed but WebSocket won't connect - cache is stale
+      logger.warn(
+        `[DeviceSessionManager] Accessibility service cache stale for ${deviceId} - marked as installed/enabled but WebSocket failed. Resetting setup state and forcing reinstall.`,
+      );
+      manager.resetSetupState();
+      setupState.needsSetup = true;
+    }
+    return false;
+  }
+
+  private async enableInstalledAndroidService(
+    deviceId: string,
+    manager: CtrlProxyManager,
+    accessibilityClient: AndroidCtrlProxy,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    setupState: { didSetup: boolean; needsSetup: boolean },
+    compatibility: {
+      skipCtrlProxyDownload: boolean | undefined;
+      verifyCompatibilityWhenSkipping: () => Promise<void>;
+    },
+  ): Promise<boolean> {
+    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping } = compatibility;
+    logger.info(
+      `[DeviceSessionManager] Accessibility service installed but not enabled for ${deviceId}, enabling now`,
+    );
+    try {
+      await perf.track("enableService", () => manager.enable());
+      setupState.didSetup = true;
+      // enable() just changed the endpoint's state; failures recorded
+      // before this point must not cool down the connect that follows
+      // (issue #7538).
+      accessibilityClient.resetConnectionBudget();
+      // Wait for WebSocket to be ready after enabling
+      logger.info(
+        `[DeviceSessionManager] Waiting for accessibility WebSocket connection for ${deviceId}`,
+      );
+      const enableConnected = await perf.track("waitForConnection", () =>
+        accessibilityClient.waitForConnection(),
+      );
+      if (!enableConnected) {
+        logger.warn(
+          `[DeviceSessionManager] WebSocket connection failed after enabling for ${deviceId}, will attempt full setup`,
+        );
+        manager.resetSetupState();
+        setupState.needsSetup = true;
+      } else {
+        if (skipCtrlProxyDownload) {
+          await verifyCompatibilityWhenSkipping();
+          return true;
+        }
+        logger.info(
+          `[DeviceSessionManager] Accessibility service enabled for ${deviceId}, verifying version compatibility`,
+        );
+      }
+    } catch (error) {
+      const errorMsg = errorMessage(error);
+      logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMsg}`);
+      if (skipCtrlProxyDownload) {
+        return true;
+      }
+      setupState.needsSetup = true;
+    }
+    return false;
+  }
+
+  private async setupAndroidService(
+    deviceId: string,
+    manager: CtrlProxyManager,
+    accessibilityClient: AndroidCtrlProxy,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    state: { didSetup: boolean },
+  ): Promise<void> {
+    const setup = await manager.setup(false, perf);
+    if (!setup.success) {
+      throw new ActionableError(setup.error ?? setup.message);
+    }
+    state.didSetup = true;
+    // setup() just changed the endpoint's state (fresh install/enable);
+    // failures recorded before this point must not cool down the connect
+    // that follows (issue #7538).
+    accessibilityClient.resetConnectionBudget();
+    // Wait for WebSocket to be ready after setup (install + enable)
+    logger.info(
+      `[DeviceSessionManager] Waiting for accessibility WebSocket connection after setup for ${deviceId}`,
+    );
+    const connected = await perf.track("waitForConnection", () =>
+      accessibilityClient.waitForConnection(),
+    );
+    if (connected) {
+      // Verify service is actually ready to respond (not just WebSocket connected)
+      logger.info(
+        `[DeviceSessionManager] Verifying accessibility service is responsive for ${deviceId}`,
+      );
+      const ready = await perf.track("verifyServiceReady", () =>
+        accessibilityClient.verifyServiceReady(5, 500, 3000),
+      );
+      if (!ready) {
+        logger.warn(
+          `[DeviceSessionManager] Accessibility service not responsive after setup for ${deviceId}, observe may fall back to UIAutomator`,
+        );
+      }
+    }
+  }
+
+  private hasCurrentReadinessDevice(platform: SomePlatform, resolvedPlatform: Platform): boolean {
+    return !!(
+      this.currentDevice &&
+      (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)
+    );
+  }
+
+  private normalizeReadinessScan(
+    result: BootedDevice[] | ConnectedPlatformScan,
+  ): ConnectedPlatformScan {
+    return Array.isArray(result)
+      ? { devices: result, scanned: { android: true, ios: true } }
+      : result;
   }
 
   /**
@@ -1126,11 +1362,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // loaded (#4221).
     if (readiness === "automationReady") {
       const iosOverride = await checkIosCtrlProxyOverride();
-      if (iosOverride.present && !iosOverride.usable) {
-        throw new ActionableError(
-          `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`,
-        );
-      }
+      this.assertUsableIosOverride(iosOverride);
     }
 
     if (!this.simctl) {
@@ -1139,17 +1371,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const deviceInfo = await this.simctl.getDeviceInfo(deviceId);
     options?.signal?.throwIfAborted();
 
-    if (!deviceInfo) {
-      throw new ActionableError(
-        `iOS simulator ${deviceId} is not available. Please check if it exists and is available.`,
-      );
-    }
-
-    if (!deviceInfo.isAvailable) {
-      throw new ActionableError(
-        `iOS simulator ${deviceId} is not available (state: ${deviceInfo.state}). Please check simulator availability.`,
-      );
-    }
+    this.assertIosDeviceAvailable(deviceId, deviceInfo);
 
     // If simulator is not booted, we could boot it, but for now we'll just check
     if (deviceInfo.state !== "Booted") {
@@ -1169,6 +1391,31 @@ export class DeviceSessionManager implements DeviceSessionManager {
       platform: "ios",
     };
 
+    await this.ensureIosRunnerReady(deviceId, device, options);
+  }
+
+  private assertIosDeviceAvailable(
+    deviceId: string,
+    deviceInfo: Awaited<ReturnType<SimCtlClient["getDeviceInfo"]>>,
+  ): asserts deviceInfo is NonNullable<Awaited<ReturnType<SimCtlClient["getDeviceInfo"]>>> {
+    if (!deviceInfo) {
+      throw new ActionableError(
+        `iOS simulator ${deviceId} is not available. Please check if it exists and is available.`,
+      );
+    }
+
+    if (!deviceInfo.isAvailable) {
+      throw new ActionableError(
+        `iOS simulator ${deviceId} is not available (state: ${deviceInfo.state}). Please check simulator availability.`,
+      );
+    }
+  }
+
+  private async ensureIosRunnerReady(
+    deviceId: string,
+    device: BootedDevice,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
     // Pass the tracker through to CtrlProxy setup while keeping the legacy
     // session path subject to the same strict readiness contract as startDevice.
     const perf = createPerformanceTracker(true);
@@ -1195,10 +1442,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         operationName: "legacy iOS session auto-start",
         totalDeadlineMs,
         readinessTimeoutMs: runnerReadinessTimeoutMs,
-        skipCtrlProxyDownload:
-          options?.skipCtrlProxyDownload ??
-          options?.skipAccessibilityDownload ??
-          options?.skipAccessibilitySetup,
+        skipCtrlProxyDownload: this.skipCtrlProxyDownload(options),
         perf,
         signal: options?.signal,
         onRunnerSetup: () => {
@@ -1211,7 +1455,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (didSetup) {
         const timings = perf.getTimings();
         if (timings) {
-          storeSetupTiming(deviceId, timings);
+          storeSetupTiming(deviceId, timings, options?.sessionId);
         }
       }
     }
@@ -1276,11 +1520,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return await this.withLifecycleStart(
       { platform: "android", stableId: deviceImage.name },
       options,
-      async (signal) => {
+      async (signal, hold) => {
         perf.startOperation("startDevice");
         const childProcess = await runWithAbortSignal(
           signal,
-          async () => await this.deviceUtils.startDevice(deviceImage),
+          async () => await this.startDeviceOwningCancelledLaunch(deviceImage, hold),
         );
         const processTracker = childProcess ? trackProcess(childProcess) : undefined;
         perf.endOperation("startDevice");
@@ -1315,6 +1559,21 @@ export class DeviceSessionManager implements DeviceSessionManager {
         perf.endOperation("verifyDevice");
         return newDevice;
       },
+    );
+  }
+
+  private async bindCreatedIosReadinessIdentity(
+    lifecycleLease: VirtualDeviceLifecycleLease | undefined,
+    device: { name: string; deviceId?: string },
+  ): Promise<void> {
+    if (!lifecycleLease || !device.deviceId) {
+      throw new ActionableError(
+        `Created iOS simulator '${device.name}' has no lifecycle identity.`,
+      );
+    }
+    const stableId = device.deviceId;
+    await lifecycleLease.bindCanonicalIdentity({ platform: "ios", stableId }, async () =>
+      this.revalidateCreatedIosDevice(stableId),
     );
   }
 
@@ -1354,23 +1613,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
               return lifecycleLease.signal;
             },
             bindAfterCreate: async (device) => {
-              if (!lifecycleLease || !device.deviceId) {
-                throw new ActionableError(
-                  `Created iOS simulator '${device.name}' has no lifecycle identity.`,
-                );
-              }
-              const stableId = device.deviceId;
-              await lifecycleLease.bindCanonicalIdentity({ platform: "ios", stableId }, async () =>
-                this.revalidateCreatedIosDevice(stableId),
-              );
+              await this.bindCreatedIosReadinessIdentity(lifecycleLease, device);
             },
           });
           const provisioned = await provisioner.provision({ platform: "ios" }, options?.signal);
-          if (!lifecycleLease || !provisioned.deviceId) {
-            throw new ActionableError(
-              `Created iOS simulator '${provisioned.name}' has no lifecycle reservation.`,
-            );
-          }
+          this.assertCreatedIosReservation(lifecycleLease, provisioned);
           return await this.runWithLifecycleLease(lifecycleLease, options, async (signal) => {
             perf.startOperation("bootSimulator");
             const createdDevice = await runWithAbortSignal(
@@ -1498,7 +1745,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private async withLifecycleStart<T>(
     identity: StableVirtualDeviceIdentity | VirtualDeviceLifecycleIdentity,
     options: DeviceReadyOptions | undefined,
-    operation: (signal: AbortSignal) => Promise<T>,
+    operation: (signal: AbortSignal, hold: LifecycleStartHold) => Promise<T>,
   ): Promise<T> {
     const lifecycleLease = await this.lifecycleCoordinator.reserve(
       "kind" in identity ? identity : { kind: "stable", ...identity },
@@ -1508,10 +1755,50 @@ export class DeviceSessionManager implements DeviceSessionManager {
         signal: options?.signal,
       },
     );
+    const held: Promise<unknown>[] = [];
     try {
-      return await this.runWithLifecycleLease(lifecycleLease, options, operation);
+      return await this.runWithLifecycleLease(lifecycleLease, options, (signal) =>
+        operation(signal, {
+          lease: lifecycleLease,
+          holdLeaseUntil: (settlement) => {
+            held.push(settlement);
+          },
+        }),
+      );
     } finally {
-      lifecycleLease.release();
+      if (held.length === 0) {
+        lifecycleLease.release();
+      } else {
+        // An emulator this start spawned is still shutting down and holds its AVD
+        // lock files: the stable key is not free until it is confirmed gone (#10075).
+        void Promise.allSettled(held).then(() => lifecycleLease.release());
+      }
+    }
+  }
+
+  /**
+   * Starts the device, and when the launch is cancelled after the emulator was
+   * spawned, takes the child from the cancellation error and terminates it with the
+   * shared SIGTERM -> bounded wait -> SIGKILL escalation, holding the AVD lease until
+   * its exit is confirmed. The launch rejects the moment the request aborts, so
+   * without this the lease would be released while the child is still shutting down
+   * and a following start of the same AVD could spawn a second emulator (#10075).
+   */
+  private async startDeviceOwningCancelledLaunch(
+    image: DeviceInfo,
+    hold: LifecycleStartHold,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await this.deviceUtils.startDevice(image);
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        hold.holdLeaseUntil(
+          terminateOwnedEmulatorProcess(error.process, image.name, this.runnerReadinessTimer, {
+            markHeldByUnkillableProcess: (pid) => hold.lease.markHeldByUnkillableProcess?.(pid),
+          }).then((outcome) => (outcome.state === "survived" ? outcome.gone : undefined)),
+        );
+      }
+      throw error;
     }
   }
 

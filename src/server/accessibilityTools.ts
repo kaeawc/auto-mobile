@@ -14,6 +14,10 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";
+import { DaemonState } from "../daemon/daemonState";
+import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
+import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
+import { runSessionScreenReaderMutation } from "./sessionScreenReader";
 
 export const accessibilitySchema = addDeviceTargetingToSchema(
   z
@@ -32,15 +36,92 @@ export const accessibilitySchema = addDeviceTargetingToSchema(
     .strict(),
 );
 
+/**
+ * Which feature flag, if any, overrides what the action tools (tapOn, swipeOn, observe) assume
+ * about the screen reader. The explicit state query never applies it to `enabled` (#10222):
+ * `enabled` is what the device reports, this says what the tools will treat it as. Force wins
+ * over auto-detect-off, matching `resolveState`/`resolveVoiceOverState`.
+ */
+function detectionOverride(featureFlags: FeatureFlagService): {
+  detectionOverride?: { mode: "forced-on" | "auto-detect-off"; effectiveEnabled: boolean };
+} {
+  if (featureFlags.isEnabled("force-accessibility-mode")) {
+    return { detectionOverride: { mode: "forced-on", effectiveEnabled: true } };
+  }
+  if (!featureFlags.isEnabled("accessibility-auto-detect")) {
+    return { detectionOverride: { mode: "auto-detect-off", effectiveEnabled: false } };
+  }
+  return {};
+}
+
 interface AccessibilityArgs {
   talkback?: boolean;
   voiceover?: boolean;
+  sessionUuid?: string;
 }
 
-async function toggleTalkBackAccessibility(device: BootedDevice, requestedEnabled: boolean) {
+/**
+ * Run a screen-reader toggle so the state the session found is recorded before it
+ * is changed and restored when the session releases its device (#10146). The slot is
+ * write-once, so a later toggle in the same session never overwrites it, and it is cleared
+ * again once a toggle returns the screen reader to the recorded state (#10159).
+ */
+async function toggleRecordingPreviousState<
+  R extends { supported: boolean; currentState?: boolean },
+>(
+  device: BootedDevice,
+  args: AccessibilityArgs,
+  run: (options: ScreenReaderToggleOptions) => Promise<R>,
+): Promise<R> {
+  const manager =
+    args.sessionUuid && DaemonState.getInstance().isInitialized()
+      ? DaemonState.getInstance().getSessionManager()
+      : undefined;
+  const platform = device.platform === "ios" ? "ios" : "android";
+  return runSessionScreenReaderMutation(
+    manager,
+    args.sessionUuid,
+    device.deviceId,
+    async (slot?: ScreenReaderRestoreSlot) => {
+      const priorState = slot?.get();
+      let recordedPrevious: boolean | undefined;
+      const result = await run({
+        beforeChange: (previousEnabled) => {
+          if (slot && !priorState) {
+            slot.record({ platform, previousEnabled });
+            recordedPrevious = previousEnabled;
+          }
+        },
+      });
+      // Nothing changed (unsupported, or the write never landed) on the toggle that recorded
+      // the slot: there is nothing to restore.
+      const recordedButUnchanged =
+        recordedPrevious !== undefined &&
+        (!result.supported || result.currentState === recordedPrevious);
+      // The tool itself put the screen reader back to what the session found: the device
+      // matches again, so release must not later undo a change the user makes by hand.
+      const backToOriginal =
+        priorState !== undefined &&
+        result.supported &&
+        result.currentState === priorState.previousEnabled;
+      if (recordedButUnchanged || backToOriginal) {
+        slot?.clear();
+      }
+      return result;
+    },
+  );
+}
+
+async function toggleTalkBackAccessibility(
+  device: BootedDevice,
+  args: AccessibilityArgs,
+  requestedEnabled: boolean,
+) {
   try {
     const toggle = new TalkBackToggle(device);
-    const talkback = await toggle.toggle(requestedEnabled);
+    const talkback = await toggleRecordingPreviousState(device, args, (options) =>
+      toggle.toggle(requestedEnabled, options),
+    );
     if (!talkback.supported) {
       throw new ActionableError(
         talkback.reason ?? "TalkBack toggle is not supported on this device",
@@ -72,21 +153,27 @@ async function handleAndroidAccessibility(device: BootedDevice, args: Accessibil
     throw new ActionableError("VoiceOver is not supported on Android devices");
   }
   if (args.talkback !== undefined) {
-    return await toggleTalkBackAccessibility(device, args.talkback);
+    return await toggleTalkBackAccessibility(device, args, args.talkback);
   }
 
-  // Detect current TalkBack state on Android
+  // Read the device's TalkBack state fresh. No feature flags are passed: they steer how the
+  // action tools adapt, not what the device reports (#10222) — the toggle path reads the same way.
   accessibilityDetector.invalidateCache(device.deviceId);
   const adb = defaultAdbClientFactory.create(device);
-  const featureFlags = FeatureFlagService.getInstance();
-  const state = await accessibilityDetector.resolveState(device.deviceId, adb, featureFlags);
+  const override = detectionOverride(FeatureFlagService.getInstance());
+  const state = await accessibilityDetector.resolveState(device.deviceId, adb);
   if (state === null) {
     return createStructuredToolResponse({
       service: "unknown",
       reason: "could not determine TalkBack state: device accessibility settings read unavailable",
+      ...override,
     });
   }
-  return createStructuredToolResponse({ enabled: state.enabled, service: state.service });
+  return createStructuredToolResponse({
+    enabled: state.enabled,
+    service: state.service,
+    ...override,
+  });
 }
 
 async function handleIosAccessibility(device: BootedDevice, args: AccessibilityArgs) {
@@ -95,7 +182,10 @@ async function handleIosAccessibility(device: BootedDevice, args: AccessibilityA
   }
   if (args.voiceover !== undefined) {
     const toggle = new VoiceOverToggle(device);
-    const voiceover = await toggle.toggle(args.voiceover);
+    const requestedEnabled = args.voiceover;
+    const voiceover = await toggleRecordingPreviousState(device, args, (options) =>
+      toggle.toggle(requestedEnabled, options),
+    );
     if (!voiceover.supported) {
       throw new ActionableError(
         voiceover.reason ?? "VoiceOver toggle is not supported on this device",
@@ -113,18 +203,22 @@ async function handleIosAccessibility(device: BootedDevice, args: AccessibilityA
     return createStructuredToolResponse({ enabled, service });
   }
 
-  // Detect current VoiceOver state on iOS
+  // Probe the device's VoiceOver state fresh, without feature flags (see the Android branch, #10222).
   iosVoiceOverDetector.invalidateCache(device.deviceId);
   const client = IOSCtrlProxyClient.getInstance(device);
-  const featureFlags = FeatureFlagService.getInstance();
-  const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
-    device.deviceId,
-    client,
-    featureFlags,
-  );
-  const service = enabled ? ("voiceover" as const) : ("unknown" as const);
-  logger.debug(`[accessibility tool] VoiceOver state: enabled=${enabled}`);
-  return createStructuredToolResponse({ enabled, service });
+  const override = detectionOverride(FeatureFlagService.getInstance());
+  const state = await iosVoiceOverDetector.resolveState(device.deviceId, client);
+  if (state === null) {
+    // An unreadable probe is not evidence of "off": omit `enabled`, like the Android branch (#9682).
+    return createStructuredToolResponse({
+      service: "unknown",
+      reason: "could not determine VoiceOver state: CtrlProxy VoiceOver probe unavailable",
+      ...override,
+    });
+  }
+  const service = state ? ("voiceover" as const) : ("unknown" as const);
+  logger.debug(`[accessibility tool] VoiceOver state: enabled=${state}`);
+  return createStructuredToolResponse({ enabled: state, service, ...override });
 }
 
 export function registerAccessibilityTools() {
@@ -144,7 +238,7 @@ export function registerAccessibilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "accessibility",
-    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device.",
+    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     accessibilitySchema,
     accessibilityHandler,
     { defaultEnabled: false, outputSchema: accessibilityStateSchema },

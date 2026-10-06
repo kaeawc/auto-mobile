@@ -18,6 +18,12 @@ no host MediaScanner indexing equivalent. Neither platform exposes media-library
 list/read. Capability support describes the registered contract, not proof that
 a device workflow has been verified.
 
+Physical-Android `app_containers` resolves the debuggable app build prerequisite
+per `appId` from the package's `pkgFlags`: list/read/write are supported when
+`DEBUGGABLE` is present and unavailable when it is absent. Missing app scope or
+an unverified package probe leaves the prerequisite partial. Provider coverage
+still applies. Emulators and iOS do not use this probe.
+
 iOS `user_files` writes and `namespace_reset` are Simulator-only and require the
 managed Files fixture app (`dev.jasonpearson.automobile.FilesFixture`), not yet
 shipped in this repo. `iosFilesFixtureInstalled: true` means its container was

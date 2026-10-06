@@ -1,0 +1,2180 @@
+{
+ "observationId": "e520e024-5de1-4841-9941-d08ea997df3d",
+ "deviceId": "emulator-5600",
+ "display": {
+  "key": "0",
+  "role": "unknown",
+  "posture": "unknown",
+  "generation": 0
+ },
+ "updatedAt": 1791227108814,
+ "screenSize": {
+  "width": 1080,
+  "height": 2400,
+  "units": "physical-pixels"
+ },
+ "systemInsets": {
+  "top": 168,
+  "bottom": 84,
+  "left": 78,
+  "right": 78
+ },
+ "insets": {
+  "available": true,
+  "source": "android-window-metrics",
+  "units": "physical-pixels",
+  "systemBars": {
+   "visible": {
+    "top": 136,
+    "bottom": 63,
+    "left": 0,
+    "right": 0
+   },
+   "stable": {
+    "top": 136,
+    "bottom": 63,
+    "left": 0,
+    "right": 0
+   }
+  },
+  "displayCutout": {
+   "top": 136,
+   "bottom": 0,
+   "left": 0,
+   "right": 0
+  },
+  "displayCutoutInfo": {
+   "classification": "unknown",
+   "bounds": [
+    [
+     480,
+     0,
+     625,
+     136
+    ]
+   ]
+  },
+  "systemGestures": {
+   "top": 168,
+   "bottom": 84,
+   "left": 78,
+   "right": 78
+  },
+  "mandatorySystemGestures": {
+   "top": 168,
+   "bottom": 84,
+   "left": 0,
+   "right": 0
+  },
+  "tappableElement": {
+   "top": 136,
+   "bottom": 0,
+   "left": 0,
+   "right": 0
+  },
+  "systemChrome": {
+   "visibility": "visible",
+   "statusBar": "visible",
+   "navigationBar": "visible",
+   "homeIndicatorAutoHideRequested": null,
+   "source": "android-window-insets"
+  }
+ },
+ "viewHierarchy": {
+  "displayId": 0,
+  "hierarchy": {
+   "node": [
+    {
+     "windowId": 870,
+     "actions": [
+      "select",
+      "clear_selection",
+      "accessibility_focus"
+     ],
+     "visible-to-user": true,
+     "view-id": "s2-30da329ea888afc9",
+     "occlusionState": "partial",
+     "occludedBy": "unlabeled view",
+     "occludedByViewId": "s2-178a27a83e9cbea9",
+     "bounds": [
+      0,
+      0,
+      1080,
+      2400
+     ],
+     "node": {
+      "actions": [
+       "select",
+       "clear_selection",
+       "accessibility_focus"
+      ],
+      "visible-to-user": true,
+      "view-id": "s2-6f71f2c25f8e725f",
+      "class": "android.widget.LinearLayout",
+      "className": "android.widget.LinearLayout",
+      "occlusionState": "partial",
+      "occludedBy": "unlabeled view",
+      "occludedByViewId": "s2-178a27a83e9cbea9",
+      "bounds": [
+       0,
+       0,
+       1080,
+       2400
+      ],
+      "node": {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "android:id/content",
+       "visible-to-user": true,
+       "occlusionState": "partial",
+       "occludedBy": "unlabeled view",
+       "occludedByViewId": "s2-178a27a83e9cbea9",
+       "bounds": [
+        0,
+        0,
+        1080,
+        2400
+       ],
+       "node": {
+        "actions": [
+         "select",
+         "clear_selection",
+         "accessibility_focus"
+        ],
+        "resource-id": "com.google.android.apps.nexuslauncher:id/launcher",
+        "visible-to-user": true,
+        "occlusionState": "partial",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-178a27a83e9cbea9",
+        "bounds": [
+         0,
+         0,
+         1080,
+         2400
+        ],
+        "node": {
+         "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+         ],
+         "resource-id": "com.google.android.apps.nexuslauncher:id/drag_layer",
+         "visible-to-user": true,
+         "occlusionState": "partial",
+         "occludedBy": "unlabeled view",
+         "occludedByViewId": "s2-178a27a83e9cbea9",
+         "bounds": [
+          0,
+          0,
+          1080,
+          2400
+         ],
+         "node": {
+          "actions": [
+           "clear_focus",
+           "select",
+           "clear_selection",
+           "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-1e51fab2f1296a3e",
+          "class": "android.widget.LinearLayout",
+          "className": "android.widget.LinearLayout",
+          "focusable": "true",
+          "focused": "true",
+          "bounds": [
+           148,
+           1084,
+           684,
+           1541
+          ],
+          "node": [
+           {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.google.android.apps.nexuslauncher:id/folder_content",
+            "visible-to-user": true,
+            "scrollable": "true",
+            "bounds": [
+             148,
+             1084,
+             684,
+             1394
+            ],
+            "node": {
+             "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+             ],
+             "visible-to-user": true,
+             "view-id": "s2-47f6d66d04423e88",
+             "class": "android.view.ViewGroup",
+             "className": "android.view.ViewGroup",
+             "bounds": [
+              190,
+              1147,
+              642,
+              1394
+             ],
+             "node": {
+              "actions": [
+               "select",
+               "clear_selection",
+               "accessibility_focus"
+              ],
+              "visible-to-user": true,
+              "view-id": "s2-3160f71126c5c88d",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": [
+               190,
+               1147,
+               642,
+               1394
+              ],
+              "node": [
+               {
+                "actions": [
+                 "focus",
+                 "select",
+                 "clear_selection",
+                 "click",
+                 "long_click",
+                 "accessibility_focus",
+                 "next_at_movement_granularity",
+                 "previous_at_movement_granularity",
+                 "set_selection"
+                ],
+                "text": "Gmail",
+                "visible-to-user": true,
+                "view-id": "s2-011b9424a640191f",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": [
+                 190,
+                 1147,
+                 395,
+                 1394
+                ]
+               },
+               {
+                "actions": [
+                 "focus",
+                 "select",
+                 "clear_selection",
+                 "click",
+                 "long_click",
+                 "accessibility_focus",
+                 "next_at_movement_granularity",
+                 "previous_at_movement_granularity",
+                 "set_selection"
+                ],
+                "text": "Photos",
+                "visible-to-user": true,
+                "view-id": "s2-4e1e654a6a6b64d0",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": [
+                 437,
+                 1147,
+                 642,
+                 1394
+                ]
+               }
+              ]
+             }
+            }
+           },
+           {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.google.android.apps.nexuslauncher:id/folder_footer",
+            "visible-to-user": true,
+            "class": "android.widget.LinearLayout",
+            "className": "android.widget.LinearLayout",
+            "bounds": [
+             148,
+             1394,
+             684,
+             1541
+            ],
+            "node": {
+             "actions": [
+              "focus",
+              "select",
+              "clear_selection",
+              "click",
+              "long_click",
+              "accessibility_focus",
+              "next_at_movement_granularity",
+              "previous_at_movement_granularity",
+              "set_selection",
+              "set_text"
+             ],
+             "text": "Google",
+             "resource-id": "com.google.android.apps.nexuslauncher:id/folder_name",
+             "visible-to-user": true,
+             "hint-text": "Edit Name",
+             "class": "android.widget.EditText",
+             "className": "android.widget.EditText",
+             "clickable": "true",
+             "focusable": "true",
+             "long-clickable": "true",
+             "bounds": [
+              201,
+              1394,
+              631,
+              1541
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "windowId": 863,
+     "actions": [
+      "select",
+      "clear_selection",
+      "accessibility_focus"
+     ],
+     "visible-to-user": true,
+     "view-id": "s2-178a27a83e9cbea9",
+     "bounds": [
+      0,
+      0,
+      1080,
+      136
+     ],
+     "node": [
+      {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "com.android.systemui:id/status_bar_launch_animation_container",
+       "visible-to-user": true,
+       "bounds": [
+        0,
+        0,
+        1080,
+        136
+       ]
+      },
+      {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "com.android.systemui:id/container",
+       "visible-to-user": true,
+       "bounds": [
+        0,
+        0,
+        1080,
+        136
+       ]
+      },
+      {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "com.android.systemui:id/status_bar_container",
+       "visible-to-user": true,
+       "bounds": [
+        0,
+        0,
+        1080,
+        136
+       ],
+       "node": {
+        "actions": [
+         "select",
+         "clear_selection",
+         "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/status_bar",
+        "visible-to-user": true,
+        "pane-title": "Status bar",
+        "bounds": [
+         0,
+         0,
+         1080,
+         136
+        ],
+        "node": {
+         "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+         ],
+         "resource-id": "com.android.systemui:id/status_bar_contents",
+         "visible-to-user": true,
+         "class": "android.widget.LinearLayout",
+         "className": "android.widget.LinearLayout",
+         "bounds": [
+          47,
+          0,
+          1027,
+          136
+         ],
+         "node": [
+          {
+           "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+           ],
+           "resource-id": "com.android.systemui:id/status_bar_start_side_container",
+           "visible-to-user": true,
+           "bounds": [
+            47,
+            1,
+            459,
+            136
+           ],
+           "node": {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/status_bar_start_side_content",
+            "visible-to-user": true,
+            "bounds": [
+             47,
+             1,
+             267,
+             136
+            ],
+            "node": {
+             "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+             ],
+             "resource-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+             "visible-to-user": true,
+             "class": "android.widget.LinearLayout",
+             "className": "android.widget.LinearLayout",
+             "bounds": [
+              47,
+              1,
+              267,
+              136
+             ],
+             "node": [
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+               ],
+               "text": "2:05",
+               "content-desc": "2:05\u202fPM",
+               "resource-id": "com.android.systemui:id/clock",
+               "visible-to-user": true,
+               "bounds": [
+                47,
+                47,
+                151,
+                90
+               ]
+              },
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+               ],
+               "resource-id": "com.android.systemui:id/notification_icon_area",
+               "visible-to-user": true,
+               "bounds": [
+                151,
+                1,
+                267,
+                136
+               ],
+               "node": {
+                "actions": [
+                 "select",
+                 "clear_selection",
+                 "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/notificationIcons",
+                "visible-to-user": true,
+                "class": "android.view.ViewGroup",
+                "className": "android.view.ViewGroup",
+                "bounds": [
+                 151,
+                 1,
+                 267,
+                 136
+                ],
+                "node": [
+                 {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus",
+                   "next_at_movement_granularity",
+                   "previous_at_movement_granularity",
+                   "set_selection"
+                  ],
+                  "content-desc": "Security & privacy notification: ",
+                  "visible-to-user": true,
+                  "view-id": "s2-425d6fb4840881ab",
+                  "class": "android.widget.ImageView",
+                  "className": "android.widget.ImageView",
+                  "bounds": [
+                   151,
+                   1,
+                   209,
+                   136
+                  ]
+                 },
+                 {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus",
+                   "next_at_movement_granularity",
+                   "previous_at_movement_granularity",
+                   "set_selection"
+                  ],
+                  "content-desc": "Android System notification: ",
+                  "visible-to-user": true,
+                  "view-id": "s2-59c2c43e07860ca2",
+                  "class": "android.widget.ImageView",
+                  "className": "android.widget.ImageView",
+                  "bounds": [
+                   209,
+                   1,
+                   267,
+                   136
+                  ]
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          },
+          {
+           "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+           ],
+           "resource-id": "com.android.systemui:id/cutout_space_view",
+           "visible-to-user": true,
+           "bounds": [
+            459,
+            1,
+            604,
+            136
+           ]
+          },
+          {
+           "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+           ],
+           "resource-id": "com.android.systemui:id/status_bar_end_side_container",
+           "visible-to-user": true,
+           "bounds": [
+            604,
+            1,
+            1016,
+            136
+           ],
+           "node": {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/status_bar_end_side_content",
+            "visible-to-user": true,
+            "class": "android.widget.LinearLayout",
+            "className": "android.widget.LinearLayout",
+            "bounds": [
+             876,
+             1,
+             1016,
+             136
+            ],
+            "node": {
+             "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+             ],
+             "resource-id": "com.android.systemui:id/system_icons",
+             "visible-to-user": true,
+             "class": "android.widget.LinearLayout",
+             "className": "android.widget.LinearLayout",
+             "bounds": [
+              876,
+              39,
+              1016,
+              97
+             ],
+             "node": [
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+               ],
+               "resource-id": "com.android.systemui:id/statusIcons",
+               "visible-to-user": true,
+               "class": "android.widget.LinearLayout",
+               "className": "android.widget.LinearLayout",
+               "bounds": [
+                884,
+                39,
+                985,
+                97
+               ],
+               "node": [
+                {
+                 "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                 ],
+                 "resource-id": "com.android.systemui:id/wifi_combo",
+                 "visible-to-user": true,
+                 "bounds": [
+                  884,
+                  39,
+                  930,
+                  97
+                 ],
+                 "node": {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.systemui:id/wifi_group",
+                  "visible-to-user": true,
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                   891,
+                   39,
+                   930,
+                   97
+                  ],
+                  "node": {
+                   "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                   ],
+                   "resource-id": "com.android.systemui:id/wifi_combo",
+                   "visible-to-user": true,
+                   "bounds": [
+                    891,
+                    48,
+                    930,
+                    87
+                   ],
+                   "node": {
+                    "actions": [
+                     "select",
+                     "clear_selection",
+                     "accessibility_focus",
+                     "next_at_movement_granularity",
+                     "previous_at_movement_granularity",
+                     "set_selection"
+                    ],
+                    "content-desc": "Wifi signal full.",
+                    "resource-id": "com.android.systemui:id/wifi_signal",
+                    "visible-to-user": true,
+                    "class": "android.widget.ImageView",
+                    "className": "android.widget.ImageView",
+                    "bounds": [
+                     891,
+                     48,
+                     930,
+                     87
+                    ]
+                   }
+                  }
+                 }
+                },
+                {
+                 "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                 ],
+                 "content-desc": "T-Mobile, signal full.",
+                 "resource-id": "com.android.systemui:id/mobile_combo",
+                 "visible-to-user": true,
+                 "bounds": [
+                  930,
+                  39,
+                  969,
+                  97
+                 ],
+                 "node": {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.systemui:id/mobile_group",
+                  "visible-to-user": true,
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                   930,
+                   39,
+                   969,
+                   97
+                  ],
+                  "node": {
+                   "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                   ],
+                   "visible-to-user": true,
+                   "view-id": "s2-d7f4ecf2ac0deda7",
+                   "bounds": [
+                    930,
+                    48,
+                    969,
+                    87
+                   ],
+                   "node": {
+                    "actions": [
+                     "select",
+                     "clear_selection",
+                     "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.systemui:id/mobile_signal",
+                    "visible-to-user": true,
+                    "class": "android.widget.ImageView",
+                    "className": "android.widget.ImageView",
+                    "bounds": [
+                     930,
+                     48,
+                     969,
+                     87
+                    ]
+                   }
+                  }
+                 }
+                }
+               ]
+              },
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+               ],
+               "content-desc": "Battery charging, 100 percent.",
+               "resource-id": "com.android.systemui:id/battery",
+               "visible-to-user": true,
+               "class": "android.widget.LinearLayout",
+               "className": "android.widget.LinearLayout",
+               "bounds": [
+                985,
+                51,
+                1005,
+                85
+               ],
+               "node": {
+                "actions": [
+                 "select",
+                 "clear_selection",
+                 "accessibility_focus"
+                ],
+                "visible-to-user": true,
+                "view-id": "s2-fd6a03b7d39498d6",
+                "class": "android.widget.ImageView",
+                "className": "android.widget.ImageView",
+                "bounds": [
+                 985,
+                 51,
+                 1005,
+                 85
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "packageName": "com.google.android.apps.nexuslauncher",
+  "windows": [
+   {
+    "id": 863,
+    "displayId": 0,
+    "type": 3,
+    "windowLayer": 1,
+    "isActive": false,
+    "isFocused": false,
+    "bounds": [
+     0,
+     0,
+     1080,
+     136
+    ],
+    "hierarchy": {
+     "windowId": 863,
+     "actions": [
+      "select",
+      "clear_selection",
+      "accessibility_focus"
+     ],
+     "visible-to-user": true,
+     "view-id": "s2-178a27a83e9cbea9",
+     "bounds": [
+      0,
+      0,
+      1080,
+      136
+     ],
+     "node": [
+      {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "com.android.systemui:id/status_bar_launch_animation_container",
+       "visible-to-user": true,
+       "view-id": "com.android.systemui:id/status_bar_launch_animation_container",
+       "bounds": [
+        0,
+        0,
+        1080,
+        136
+       ]
+      },
+      {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "com.android.systemui:id/container",
+       "visible-to-user": true,
+       "view-id": "com.android.systemui:id/container",
+       "bounds": [
+        0,
+        0,
+        1080,
+        136
+       ]
+      },
+      {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "com.android.systemui:id/status_bar_container",
+       "visible-to-user": true,
+       "view-id": "com.android.systemui:id/status_bar_container",
+       "bounds": [
+        0,
+        0,
+        1080,
+        136
+       ],
+       "node": {
+        "actions": [
+         "select",
+         "clear_selection",
+         "accessibility_focus"
+        ],
+        "resource-id": "com.android.systemui:id/status_bar",
+        "visible-to-user": true,
+        "pane-title": "Status bar",
+        "view-id": "com.android.systemui:id/status_bar",
+        "bounds": [
+         0,
+         0,
+         1080,
+         136
+        ],
+        "node": {
+         "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+         ],
+         "resource-id": "com.android.systemui:id/status_bar_contents",
+         "visible-to-user": true,
+         "view-id": "com.android.systemui:id/status_bar_contents",
+         "class": "android.widget.LinearLayout",
+         "className": "android.widget.LinearLayout",
+         "bounds": [
+          47,
+          0,
+          1027,
+          136
+         ],
+         "node": [
+          {
+           "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+           ],
+           "resource-id": "com.android.systemui:id/status_bar_start_side_container",
+           "visible-to-user": true,
+           "view-id": "com.android.systemui:id/status_bar_start_side_container",
+           "bounds": [
+            47,
+            1,
+            459,
+            136
+           ],
+           "node": {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/status_bar_start_side_content",
+            "visible-to-user": true,
+            "view-id": "com.android.systemui:id/status_bar_start_side_content",
+            "bounds": [
+             47,
+             1,
+             267,
+             136
+            ],
+            "node": {
+             "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+             ],
+             "resource-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+             "visible-to-user": true,
+             "view-id": "com.android.systemui:id/status_bar_start_side_except_heads_up",
+             "class": "android.widget.LinearLayout",
+             "className": "android.widget.LinearLayout",
+             "bounds": [
+              47,
+              1,
+              267,
+              136
+             ],
+             "node": [
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+               ],
+               "text": "2:05",
+               "content-desc": "2:05\u202fPM",
+               "resource-id": "com.android.systemui:id/clock",
+               "visible-to-user": true,
+               "view-id": "com.android.systemui:id/clock",
+               "bounds": [
+                47,
+                47,
+                151,
+                90
+               ]
+              },
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+               ],
+               "resource-id": "com.android.systemui:id/notification_icon_area",
+               "visible-to-user": true,
+               "view-id": "com.android.systemui:id/notification_icon_area",
+               "bounds": [
+                151,
+                1,
+                267,
+                136
+               ],
+               "node": {
+                "actions": [
+                 "select",
+                 "clear_selection",
+                 "accessibility_focus"
+                ],
+                "resource-id": "com.android.systemui:id/notificationIcons",
+                "visible-to-user": true,
+                "view-id": "com.android.systemui:id/notificationIcons",
+                "class": "android.view.ViewGroup",
+                "className": "android.view.ViewGroup",
+                "bounds": [
+                 151,
+                 1,
+                 267,
+                 136
+                ],
+                "node": [
+                 {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus",
+                   "next_at_movement_granularity",
+                   "previous_at_movement_granularity",
+                   "set_selection"
+                  ],
+                  "content-desc": "Security & privacy notification: ",
+                  "visible-to-user": true,
+                  "view-id": "s2-425d6fb4840881ab",
+                  "class": "android.widget.ImageView",
+                  "className": "android.widget.ImageView",
+                  "bounds": [
+                   151,
+                   1,
+                   209,
+                   136
+                  ]
+                 },
+                 {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus",
+                   "next_at_movement_granularity",
+                   "previous_at_movement_granularity",
+                   "set_selection"
+                  ],
+                  "content-desc": "Android System notification: ",
+                  "visible-to-user": true,
+                  "view-id": "s2-59c2c43e07860ca2",
+                  "class": "android.widget.ImageView",
+                  "className": "android.widget.ImageView",
+                  "bounds": [
+                   209,
+                   1,
+                   267,
+                   136
+                  ]
+                 }
+                ]
+               }
+              }
+             ]
+            }
+           }
+          },
+          {
+           "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+           ],
+           "resource-id": "com.android.systemui:id/cutout_space_view",
+           "visible-to-user": true,
+           "view-id": "com.android.systemui:id/cutout_space_view",
+           "bounds": [
+            459,
+            1,
+            604,
+            136
+           ]
+          },
+          {
+           "actions": [
+            "select",
+            "clear_selection",
+            "accessibility_focus"
+           ],
+           "resource-id": "com.android.systemui:id/status_bar_end_side_container",
+           "visible-to-user": true,
+           "view-id": "com.android.systemui:id/status_bar_end_side_container",
+           "bounds": [
+            604,
+            1,
+            1016,
+            136
+           ],
+           "node": {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.android.systemui:id/status_bar_end_side_content",
+            "visible-to-user": true,
+            "view-id": "com.android.systemui:id/status_bar_end_side_content",
+            "class": "android.widget.LinearLayout",
+            "className": "android.widget.LinearLayout",
+            "bounds": [
+             876,
+             1,
+             1016,
+             136
+            ],
+            "node": {
+             "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+             ],
+             "resource-id": "com.android.systemui:id/system_icons",
+             "visible-to-user": true,
+             "view-id": "com.android.systemui:id/system_icons",
+             "class": "android.widget.LinearLayout",
+             "className": "android.widget.LinearLayout",
+             "bounds": [
+              876,
+              39,
+              1016,
+              97
+             ],
+             "node": [
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus"
+               ],
+               "resource-id": "com.android.systemui:id/statusIcons",
+               "visible-to-user": true,
+               "view-id": "com.android.systemui:id/statusIcons",
+               "class": "android.widget.LinearLayout",
+               "className": "android.widget.LinearLayout",
+               "bounds": [
+                884,
+                39,
+                985,
+                97
+               ],
+               "node": [
+                {
+                 "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus"
+                 ],
+                 "resource-id": "com.android.systemui:id/wifi_combo",
+                 "visible-to-user": true,
+                 "view-id": "com.android.systemui:id/wifi_combo",
+                 "bounds": [
+                  884,
+                  39,
+                  930,
+                  97
+                 ],
+                 "node": {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.systemui:id/wifi_group",
+                  "visible-to-user": true,
+                  "view-id": "com.android.systemui:id/wifi_group",
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                   891,
+                   39,
+                   930,
+                   97
+                  ],
+                  "node": {
+                   "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                   ],
+                   "resource-id": "com.android.systemui:id/wifi_combo",
+                   "visible-to-user": true,
+                   "view-id": "com.android.systemui:id/wifi_combo",
+                   "bounds": [
+                    891,
+                    48,
+                    930,
+                    87
+                   ],
+                   "node": {
+                    "actions": [
+                     "select",
+                     "clear_selection",
+                     "accessibility_focus",
+                     "next_at_movement_granularity",
+                     "previous_at_movement_granularity",
+                     "set_selection"
+                    ],
+                    "content-desc": "Wifi signal full.",
+                    "resource-id": "com.android.systemui:id/wifi_signal",
+                    "visible-to-user": true,
+                    "view-id": "com.android.systemui:id/wifi_signal",
+                    "class": "android.widget.ImageView",
+                    "className": "android.widget.ImageView",
+                    "bounds": [
+                     891,
+                     48,
+                     930,
+                     87
+                    ]
+                   }
+                  }
+                 }
+                },
+                {
+                 "actions": [
+                  "select",
+                  "clear_selection",
+                  "accessibility_focus",
+                  "next_at_movement_granularity",
+                  "previous_at_movement_granularity",
+                  "set_selection"
+                 ],
+                 "content-desc": "T-Mobile, signal full.",
+                 "resource-id": "com.android.systemui:id/mobile_combo",
+                 "visible-to-user": true,
+                 "view-id": "com.android.systemui:id/mobile_combo",
+                 "bounds": [
+                  930,
+                  39,
+                  969,
+                  97
+                 ],
+                 "node": {
+                  "actions": [
+                   "select",
+                   "clear_selection",
+                   "accessibility_focus"
+                  ],
+                  "resource-id": "com.android.systemui:id/mobile_group",
+                  "visible-to-user": true,
+                  "view-id": "com.android.systemui:id/mobile_group",
+                  "class": "android.widget.LinearLayout",
+                  "className": "android.widget.LinearLayout",
+                  "bounds": [
+                   930,
+                   39,
+                   969,
+                   97
+                  ],
+                  "node": {
+                   "actions": [
+                    "select",
+                    "clear_selection",
+                    "accessibility_focus"
+                   ],
+                   "visible-to-user": true,
+                   "view-id": "s2-d7f4ecf2ac0deda7",
+                   "bounds": [
+                    930,
+                    48,
+                    969,
+                    87
+                   ],
+                   "node": {
+                    "actions": [
+                     "select",
+                     "clear_selection",
+                     "accessibility_focus"
+                    ],
+                    "resource-id": "com.android.systemui:id/mobile_signal",
+                    "visible-to-user": true,
+                    "view-id": "com.android.systemui:id/mobile_signal",
+                    "class": "android.widget.ImageView",
+                    "className": "android.widget.ImageView",
+                    "bounds": [
+                     930,
+                     48,
+                     969,
+                     87
+                    ]
+                   }
+                  }
+                 }
+                }
+               ]
+              },
+              {
+               "actions": [
+                "select",
+                "clear_selection",
+                "accessibility_focus",
+                "next_at_movement_granularity",
+                "previous_at_movement_granularity",
+                "set_selection"
+               ],
+               "content-desc": "Battery charging, 100 percent.",
+               "resource-id": "com.android.systemui:id/battery",
+               "visible-to-user": true,
+               "view-id": "com.android.systemui:id/battery",
+               "class": "android.widget.LinearLayout",
+               "className": "android.widget.LinearLayout",
+               "bounds": [
+                985,
+                51,
+                1005,
+                85
+               ],
+               "node": {
+                "actions": [
+                 "select",
+                 "clear_selection",
+                 "accessibility_focus"
+                ],
+                "visible-to-user": true,
+                "view-id": "s2-fd6a03b7d39498d6",
+                "class": "android.widget.ImageView",
+                "className": "android.widget.ImageView",
+                "bounds": [
+                 985,
+                 51,
+                 1005,
+                 85
+                ]
+               }
+              }
+             ]
+            }
+           }
+          }
+         ]
+        }
+       }
+      }
+     ]
+    }
+   },
+   {
+    "id": 870,
+    "displayId": 0,
+    "type": 1,
+    "windowLayer": 0,
+    "isActive": true,
+    "isFocused": true,
+    "bounds": [
+     0,
+     0,
+     1080,
+     2400
+    ],
+    "hierarchy": {
+     "windowId": 870,
+     "actions": [
+      "select",
+      "clear_selection",
+      "accessibility_focus"
+     ],
+     "visible-to-user": true,
+     "view-id": "s2-30da329ea888afc9",
+     "occlusionState": "partial",
+     "occludedBy": "unlabeled view",
+     "occludedByViewId": "s2-178a27a83e9cbea9",
+     "bounds": [
+      0,
+      0,
+      1080,
+      2400
+     ],
+     "node": {
+      "actions": [
+       "select",
+       "clear_selection",
+       "accessibility_focus"
+      ],
+      "visible-to-user": true,
+      "view-id": "s2-6f71f2c25f8e725f",
+      "class": "android.widget.LinearLayout",
+      "className": "android.widget.LinearLayout",
+      "occlusionState": "partial",
+      "occludedBy": "unlabeled view",
+      "occludedByViewId": "s2-178a27a83e9cbea9",
+      "bounds": [
+       0,
+       0,
+       1080,
+       2400
+      ],
+      "node": {
+       "actions": [
+        "select",
+        "clear_selection",
+        "accessibility_focus"
+       ],
+       "resource-id": "android:id/content",
+       "visible-to-user": true,
+       "view-id": "android:id/content",
+       "occlusionState": "partial",
+       "occludedBy": "unlabeled view",
+       "occludedByViewId": "s2-178a27a83e9cbea9",
+       "bounds": [
+        0,
+        0,
+        1080,
+        2400
+       ],
+       "node": {
+        "actions": [
+         "select",
+         "clear_selection",
+         "accessibility_focus"
+        ],
+        "resource-id": "com.google.android.apps.nexuslauncher:id/launcher",
+        "visible-to-user": true,
+        "view-id": "com.google.android.apps.nexuslauncher:id/launcher",
+        "occlusionState": "partial",
+        "occludedBy": "unlabeled view",
+        "occludedByViewId": "s2-178a27a83e9cbea9",
+        "bounds": [
+         0,
+         0,
+         1080,
+         2400
+        ],
+        "node": {
+         "actions": [
+          "select",
+          "clear_selection",
+          "accessibility_focus"
+         ],
+         "resource-id": "com.google.android.apps.nexuslauncher:id/drag_layer",
+         "visible-to-user": true,
+         "view-id": "com.google.android.apps.nexuslauncher:id/drag_layer",
+         "occlusionState": "partial",
+         "occludedBy": "unlabeled view",
+         "occludedByViewId": "s2-178a27a83e9cbea9",
+         "bounds": [
+          0,
+          0,
+          1080,
+          2400
+         ],
+         "node": {
+          "actions": [
+           "clear_focus",
+           "select",
+           "clear_selection",
+           "accessibility_focus"
+          ],
+          "visible-to-user": true,
+          "view-id": "s2-1e51fab2f1296a3e",
+          "class": "android.widget.LinearLayout",
+          "className": "android.widget.LinearLayout",
+          "focusable": "true",
+          "focused": "true",
+          "bounds": [
+           148,
+           1084,
+           684,
+           1541
+          ],
+          "node": [
+           {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.google.android.apps.nexuslauncher:id/folder_content",
+            "visible-to-user": true,
+            "view-id": "com.google.android.apps.nexuslauncher:id/folder_content",
+            "scrollable": "true",
+            "bounds": [
+             148,
+             1084,
+             684,
+             1394
+            ],
+            "node": {
+             "actions": [
+              "select",
+              "clear_selection",
+              "accessibility_focus"
+             ],
+             "visible-to-user": true,
+             "view-id": "s2-47f6d66d04423e88",
+             "class": "android.view.ViewGroup",
+             "className": "android.view.ViewGroup",
+             "bounds": [
+              190,
+              1147,
+              642,
+              1394
+             ],
+             "node": {
+              "actions": [
+               "select",
+               "clear_selection",
+               "accessibility_focus"
+              ],
+              "visible-to-user": true,
+              "view-id": "s2-3160f71126c5c88d",
+              "class": "android.view.ViewGroup",
+              "className": "android.view.ViewGroup",
+              "bounds": [
+               190,
+               1147,
+               642,
+               1394
+              ],
+              "node": [
+               {
+                "actions": [
+                 "focus",
+                 "select",
+                 "clear_selection",
+                 "click",
+                 "long_click",
+                 "accessibility_focus",
+                 "next_at_movement_granularity",
+                 "previous_at_movement_granularity",
+                 "set_selection"
+                ],
+                "text": "Gmail",
+                "visible-to-user": true,
+                "view-id": "s2-011b9424a640191f",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": [
+                 190,
+                 1147,
+                 395,
+                 1394
+                ]
+               },
+               {
+                "actions": [
+                 "focus",
+                 "select",
+                 "clear_selection",
+                 "click",
+                 "long_click",
+                 "accessibility_focus",
+                 "next_at_movement_granularity",
+                 "previous_at_movement_granularity",
+                 "set_selection"
+                ],
+                "text": "Photos",
+                "visible-to-user": true,
+                "view-id": "s2-4e1e654a6a6b64d0",
+                "clickable": "true",
+                "focusable": "true",
+                "long-clickable": "true",
+                "bounds": [
+                 437,
+                 1147,
+                 642,
+                 1394
+                ]
+               }
+              ]
+             }
+            }
+           },
+           {
+            "actions": [
+             "select",
+             "clear_selection",
+             "accessibility_focus"
+            ],
+            "resource-id": "com.google.android.apps.nexuslauncher:id/folder_footer",
+            "visible-to-user": true,
+            "view-id": "com.google.android.apps.nexuslauncher:id/folder_footer",
+            "class": "android.widget.LinearLayout",
+            "className": "android.widget.LinearLayout",
+            "bounds": [
+             148,
+             1394,
+             684,
+             1541
+            ],
+            "node": {
+             "actions": [
+              "focus",
+              "select",
+              "clear_selection",
+              "click",
+              "long_click",
+              "accessibility_focus",
+              "next_at_movement_granularity",
+              "previous_at_movement_granularity",
+              "set_selection",
+              "set_text"
+             ],
+             "text": "Google",
+             "resource-id": "com.google.android.apps.nexuslauncher:id/folder_name",
+             "visible-to-user": true,
+             "hint-text": "Edit Name",
+             "view-id": "com.google.android.apps.nexuslauncher:id/folder_name",
+             "class": "android.widget.EditText",
+             "className": "android.widget.EditText",
+             "clickable": "true",
+             "focusable": "true",
+             "long-clickable": "true",
+             "bounds": [
+              201,
+              1394,
+              631,
+              1541
+             ]
+            }
+           }
+          ]
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  ],
+  "contentHiddenRegions": null,
+  "intentChooserDetected": false,
+  "notificationPermissionDetected": false,
+  "ctrlProxyIncomplete": null,
+  "sources": [
+   "control-proxy"
+  ],
+  "screenWidth": 1080,
+  "screenHeight": 2400,
+  "rotation": 0,
+  "systemInsets": {
+   "top": 168,
+   "bottom": 84,
+   "left": 78,
+   "right": 78
+  },
+  "insets": {
+   "available": true,
+   "source": "android-window-metrics",
+   "units": "physical-pixels",
+   "systemBars": {
+    "visible": {
+     "top": 136,
+     "bottom": 63,
+     "left": 0,
+     "right": 0
+    },
+    "stable": {
+     "top": 136,
+     "bottom": 63,
+     "left": 0,
+     "right": 0
+    }
+   },
+   "displayCutout": {
+    "top": 136,
+    "bottom": 0,
+    "left": 0,
+    "right": 0
+   },
+   "displayCutoutInfo": {
+    "classification": "unknown",
+    "bounds": [
+     [
+      480,
+      0,
+      625,
+      136
+     ]
+    ]
+   },
+   "systemGestures": {
+    "top": 168,
+    "bottom": 84,
+    "left": 78,
+    "right": 78
+   },
+   "mandatorySystemGestures": {
+    "top": 168,
+    "bottom": 84,
+    "left": 0,
+    "right": 0
+   },
+   "tappableElement": {
+    "top": 136,
+    "bottom": 0,
+    "left": 0,
+    "right": 0
+   },
+   "systemChrome": {
+    "visibility": "visible",
+    "statusBar": "visible",
+    "navigationBar": "visible",
+    "homeIndicatorAutoHideRequested": null,
+    "source": "android-window-insets"
+   }
+  },
+  "wakefulness": "Awake",
+  "foregroundActivity": null,
+  "density": 420,
+  "sdkInt": 36,
+  "deviceModel": "sdk_gphone64_arm64",
+  "isEmulator": true,
+  "truncationReasons": null,
+  "nativeScale": 1,
+  "pixelWidth": 1080,
+  "pixelHeight": 2400,
+  "updatedAt": 1791227108814,
+  "receivedAt": 1791227108758,
+  "frameContext": "493ebfd5-b63b-4d27-8893-590160def257:274",
+  "fresh": true
+ },
+ "focusedElement": {
+  "actions": [
+   "clear_focus",
+   "select",
+   "clear_selection",
+   "accessibility_focus"
+  ],
+  "visible-to-user": true,
+  "view-id": "s2-1e51fab2f1296a3e",
+  "class": "android.widget.LinearLayout",
+  "className": "android.widget.LinearLayout",
+  "focusable": "true",
+  "focused": true,
+  "bounds": [
+   148,
+   1084,
+   684,
+   1541
+  ]
+ },
+ "intentChooserDetected": false,
+ "notificationPermissionDetected": false,
+ "rotation": 0,
+ "wakefulness": "Awake",
+ "wakefulnessSource": "hierarchy",
+ "backStack": {
+  "depth": 1,
+  "activities": [
+   {
+    "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+    "taskId": 2,
+    "userId": 0,
+    "isTaskRoot": false
+   },
+   {
+    "name": "com.google.android.apps.search.googleapp.launcher.minusone.activity.MinusOneActivity",
+    "taskId": 2,
+    "userId": 0,
+    "isTaskRoot": true
+   },
+   {
+    "name": "dev.jasonpearson.automobile.playground.MainActivity",
+    "taskId": 334,
+    "userId": 0,
+    "taskAffinity": "10216:dev.jasonpearson.automobile.playground",
+    "isTaskRoot": true
+   }
+  ],
+  "tasks": [
+   {
+    "id": 2,
+    "userId": 0,
+    "rootActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+    "packageName": "com.google.android.apps.nexuslauncher",
+    "numActivities": 2
+   },
+   {
+    "id": 334,
+    "userId": 0,
+    "affinity": "10216:dev.jasonpearson.automobile.playground",
+    "numActivities": 1,
+    "launchedFromPackage": "com.android.shell",
+    "rootActivity": "dev.jasonpearson.automobile.playground/.MainActivity",
+    "packageName": "dev.jasonpearson.automobile.playground"
+   }
+  ],
+  "currentActivity": {
+   "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+   "taskId": 2,
+   "userId": 0
+  },
+  "displayCount": 1,
+  "currentTaskId": 2,
+  "capturedAt": 1791227108784,
+  "source": "adb"
+ },
+ "activeWindow": {
+  "appId": "com.google.android.apps.nexuslauncher",
+  "activityName": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+  "layoutSeqSum": 101775
+ },
+ "deviceLock": {
+  "locked": false,
+  "keyguardShowing": false,
+  "secure": false
+ },
+ "layoutWarnings": {
+  "scope": "full",
+  "warnings": [
+   {
+    "type": "interaction-in-system-gesture-region",
+    "severity": "info",
+    "element": {
+     "viewId": "s2-178a27a83e9cbea9",
+     "bounds": [
+      0,
+      0,
+      1080,
+      136
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemGestures",
+     "mandatorySystemGestures"
+    ],
+    "sides": [
+     "top",
+     "right",
+     "left"
+    ],
+    "overflowPx": {
+     "top": 168,
+     "right": 78,
+     "left": 78
+    },
+    "insetPx": {
+     "top": 168,
+     "right": 78,
+     "left": 78
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "important-content-under-inset",
+    "severity": "warning",
+    "element": {
+     "viewId": "s2-425d6fb4840881ab",
+     "contentDesc": "Security & privacy notification: ",
+     "bounds": [
+      151,
+      1,
+      209,
+      136
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemBars",
+     "displayCutout"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 135
+    },
+    "insetPx": {
+     "top": 136
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "interaction-in-system-gesture-region",
+    "severity": "info",
+    "element": {
+     "viewId": "s2-425d6fb4840881ab",
+     "contentDesc": "Security & privacy notification: ",
+     "bounds": [
+      151,
+      1,
+      209,
+      136
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemGestures",
+     "mandatorySystemGestures"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 167
+    },
+    "insetPx": {
+     "top": 168
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "important-content-under-inset",
+    "severity": "warning",
+    "element": {
+     "viewId": "s2-59c2c43e07860ca2",
+     "contentDesc": "Android System notification: ",
+     "bounds": [
+      209,
+      1,
+      267,
+      136
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemBars",
+     "displayCutout"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 135
+    },
+    "insetPx": {
+     "top": 136
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "interaction-in-system-gesture-region",
+    "severity": "info",
+    "element": {
+     "viewId": "s2-59c2c43e07860ca2",
+     "contentDesc": "Android System notification: ",
+     "bounds": [
+      209,
+      1,
+      267,
+      136
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemGestures",
+     "mandatorySystemGestures"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 167
+    },
+    "insetPx": {
+     "top": 168
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "important-content-under-inset",
+    "severity": "warning",
+    "element": {
+     "viewId": "s2-d7f4ecf2ac0deda7",
+     "bounds": [
+      930,
+      48,
+      969,
+      87
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemBars",
+     "displayCutout"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 88
+    },
+    "insetPx": {
+     "top": 136
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "interaction-in-system-gesture-region",
+    "severity": "info",
+    "element": {
+     "viewId": "s2-d7f4ecf2ac0deda7",
+     "bounds": [
+      930,
+      48,
+      969,
+      87
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemGestures",
+     "mandatorySystemGestures"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 120
+    },
+    "insetPx": {
+     "top": 168
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "important-content-under-inset",
+    "severity": "warning",
+    "element": {
+     "viewId": "s2-fd6a03b7d39498d6",
+     "bounds": [
+      985,
+      51,
+      1005,
+      85
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemBars",
+     "displayCutout"
+    ],
+    "sides": [
+     "top"
+    ],
+    "overflowPx": {
+     "top": 85
+    },
+    "insetPx": {
+     "top": 136
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   },
+   {
+    "type": "interaction-in-system-gesture-region",
+    "severity": "info",
+    "element": {
+     "viewId": "s2-fd6a03b7d39498d6",
+     "bounds": [
+      985,
+      51,
+      1005,
+      85
+     ]
+    },
+    "categories": [
+     "interaction"
+    ],
+    "insetTypes": [
+     "systemGestures",
+     "mandatorySystemGestures"
+    ],
+    "sides": [
+     "top",
+     "right"
+    ],
+    "overflowPx": {
+     "top": 117,
+     "right": 3
+    },
+    "insetPx": {
+     "top": 168,
+     "right": 78
+    },
+    "overlapPercent": 100,
+    "confidence": "medium"
+   }
+  ]
+ },
+ "accessibilityState": {
+  "enabled": false,
+  "service": "unknown",
+  "detectionSkipped": false
+ },
+ "freshness": {
+  "actualTimestamp": 1791227108814,
+  "ageMs": 101,
+  "verified": true,
+  "isFresh": true
+ },
+ "snapshotReference": {
+  "snapshotId": "10514009-31bc-4117-8059-08374561e711",
+  "expiresAt": 1791227408862
+ },
+ "rawViewHierarchy": {
+  "json": "{\n  \"updatedAt\": 1791227108934,\n  \"packageName\": \"com.google.android.apps.nexuslauncher\",\n  \"userId\": 0,\n  \"displayId\": 0,\n  \"hierarchy\": {\n    \"text\": null,\n    \"textSize\": null,\n    \"text-color\": null,\n    \"content-desc\": null,\n    \"resource-id\": null,\n    \"view-id\": null,\n    \"className\": null,\n    \"bounds\": null,\n    \"clickable\": null,\n    \"enabled\": null,\n    \"focusable\": null,\n    \"focused\": null,\n    \"accessibility-focused\": null,\n    \"scrollable\": null,\n    \"password\": null,\n    \"checkable\": null,\n    \"checked\": null,\n    \"selected\": null,\n    \"long-clickable\": null,\n    \"fragment\": null,\n    \"test-tag\": null,\n    \"unique-id\": null,\n    \"visible-to-user\": null,\n    \"container-title\": null,\n    \"role\": null,\n    \"state-description\": null,\n    \"error-message\": null,\n    \"hint-text\": null,\n    \"tooltip-text\": null,\n    \"pane-title\": null,\n    \"live-region\": null,\n    \"collection-info\": null,\n    \"collection-item-info\": null,\n    \"collection-row-index\": null,\n    \"collection-column-index\": null,\n    \"range-info\": null,\n    \"input-type\": null,\n    \"actions\": null,\n    \"extras\": null,\n    \"occlusionState\": null,\n    \"occludedBy\": null,\n    \"occludedByViewId\": null,\n    \"recomposition\": null,\n    \"node\": [\n      {\n        \"windowId\": 870,\n        \"displayId\": 0,\n        \"view-id\": \"fcf3bd8d-c369-6abe-66ae-de6b90ebd227\",\n        \"bounds\": {\n          \"left\": 0,\n          \"top\": 0,\n          \"right\": 1080,\n          \"bottom\": 2400\n        },\n        \"visible-to-user\": true,\n        \"actions\": [\n          \"select\",\n          \"clear_selection\",\n          \"accessibility_focus\"\n        ],\n        \"node\": {\n          \"view-id\": \"7753c520-fa59-f1a6-39bf-ba6ded5df947\",\n          \"className\": \"android.widget.LinearLayout\",\n          \"bounds\": {\n            \"left\": 0,\n            \"top\": 0,\n            \"right\": 1080,\n            \"bottom\": 2400\n          },\n          \"visible-to-user\": true,\n          \"actions\": [\n            \"select\",\n            \"clear_selection\",\n            \"accessibility_focus\"\n          ],\n          \"node\": {\n            \"resource-id\": \"android:id/content\",\n            \"view-id\": \"android:id/content\",\n            \"bounds\": {\n              \"left\": 0,\n              \"top\": 0,\n              \"right\": 1080,\n              \"bottom\": 2400\n            },\n            \"visible-to-user\": true,\n            \"actions\": [\n              \"select\",\n              \"clear_selection\",\n              \"accessibility_focus\"\n            ],\n            \"node\": {\n              \"resource-id\": \"com.google.android.apps.nexuslauncher:id/launcher\",\n              \"view-id\": \"com.google.android.apps.nexuslauncher:id/launcher\",\n              \"bounds\": {\n                \"left\": 0,\n                \"top\": 0,\n                \"right\": 1080,\n                \"bottom\": 2400\n              },\n              \"visible-to-user\": true,\n              \"actions\": [\n                \"select\",\n                \"clear_selection\",\n                \"accessibility_focus\"\n              ],\n              \"node\": {\n                \"resource-id\": \"com.google.android.apps.nexuslauncher:id/drag_layer\",\n                \"view-id\": \"com.google.android.apps.nexuslauncher:id/drag_layer\",\n                \"bounds\": {\n                  \"left\": 0,\n                  \"top\": 0,\n                  \"right\": 1080,\n                  \"bottom\": 2400\n                },\n                \"visible-to-user\": true,\n                \"actions\": [\n                  \"select\",\n                  \"clear_selection\",\n                  \"accessibility_focus\"\n                ],\n                \"node\": {\n                  \"view-id\": \"1a832d9d-39cd-6ba3-718d-eafd0d562732\",\n                  \"className\": \"android.widget.LinearLayout\",\n                  \"bounds\": {\n                    \"left\": 148,\n                    \"top\": 1084,\n                    \"right\": 684,\n                    \"bottom\": 1541\n                  },\n                  \"focusable\": \"true\",\n                  \"focused\": \"true\",\n                  \"visible-to-user\": true,\n                  \"actions\": [\n                    \"clear_focus\",\n                    \"select\",\n                    \"clear_selection\",\n                    \"accessibility_focus\"\n                  ],\n                  \"node\": [\n                    {\n                      \"resource-id\": \"com.google.android.apps.nexuslauncher:id/folder_content\",\n                      \"view-id\": \"com.google.android.apps.nexuslauncher:id/folder_content\",\n                      \"bounds\": {\n                        \"left\": 148,\n                        \"top\": 1084,\n                        \"right\": 684,\n                        \"bottom\": 1394\n                      },\n                      \"scrollable\": \"true\",\n                      \"visible-to-user\": true,\n                      \"actions\": [\n                        \"select\",\n                        \"clear_selection\",\n                        \"accessibility_focus\"\n                      ],\n                      \"node\": {\n                        \"view-id\": \"8b07b0a6-35d3-0511-7e12-ed8df94deba7\",\n                        \"className\": \"android.view.ViewGroup\",\n                        \"bounds\": {\n                          \"left\": 190,\n                          \"top\": 1147,\n                          \"right\": 642,\n                          \"bottom\": 1394\n                        },\n                        \"visible-to-user\": true,\n                        \"actions\": [\n                          \"select\",\n                          \"clear_selection\",\n                          \"accessibility_focus\"\n                        ],\n                        \"node\": {\n                          \"view-id\": \"667eaba8-07e7-4edf-c26c-e6e400da2afc\",\n                          \"className\": \"android.view.ViewGroup\",\n                          \"bounds\": {\n                            \"left\": 190,\n                            \"top\": 1147,\n                            \"right\": 642,\n                            \"bottom\": 1394\n                          },\n                          \"visible-to-user\": true,\n                          \"actions\": [\n                            \"select\",\n                            \"clear_selection\",\n                            \"accessibility_focus\"\n                          ],\n                          \"node\": [\n                            {\n                              \"text\": \"Gmail\",\n                              \"view-id\": \"d17307c6-fc2c-d1f7-ff12-8ea44b87e8b4\",\n                              \"bounds\": {\n                                \"left\": 190,\n                                \"top\": 1147,\n                                \"right\": 395,\n                                \"bottom\": 1394\n                              },\n                              \"clickable\": \"true\",\n                              \"focusable\": \"true\",\n                              \"long-clickable\": \"true\",\n                              \"visible-to-user\": true,\n                              \"actions\": [\n                                \"focus\",\n                                \"select\",\n                                \"clear_selection\",\n                                \"click\",\n                                \"long_click\",\n                                \"accessibility_focus\",\n                                \"next_at_movement_granularity\",\n                                \"previous_at_movement_granularity\",\n                                \"set_selection\"\n                              ]\n                            },\n                            {\n                              \"text\": \"Photos\",\n                              \"view-id\": \"8deb4929-7bf4-024d-920e-bf1150cc64d6\",\n                              \"bounds\": {\n                                \"left\": 437,\n                                \"top\": 1147,\n                                \"right\": 642,\n                                \"bottom\": 1394\n                              },\n                              \"clickable\": \"true\",\n                              \"focusable\": \"true\",\n                              \"long-clickable\": \"true\",\n                              \"visible-to-user\": true,\n                              \"actions\": [\n                                \"focus\",\n                                \"select\",\n                                \"clear_selection\",\n                                \"click\",\n                                \"long_click\",\n                                \"accessibility_focus\",\n                                \"next_at_movement_granularity\",\n                                \"previous_at_movement_granularity\",\n                                \"set_selection\"\n                              ]\n                            }\n                          ]\n                        }\n                      }\n                    },\n                    {\n                      \"resource-id\": \"com.google.android.apps.nexuslauncher:id/folder_footer\",\n                      \"view-id\": \"com.google.android.apps.nexuslauncher:id/folder_footer\",\n                      \"className\": \"android.widget.LinearLayout\",\n                      \"bounds\": {\n                        \"left\": 148,\n                        \"top\": 1394,\n                        \"right\": 684,\n                        \"bottom\": 1541\n                      },\n                      \"visible-to-user\": true,\n                      \"actions\": [\n                        \"select\",\n                        \"clear_selection\",\n                        \"accessibility_focus\"\n                      ],\n                      \"node\": {\n                        \"text\": \"Google\",\n                        \"resource-id\": \"com.google.android.apps.nexuslauncher:id/folder_name\",\n                        \"view-id\": \"com.google.android.apps.nexuslauncher:id/folder_name\",\n                        \"className\": \"android.widget.EditText\",\n                        \"bounds\": {\n                          \"left\": 201,\n                          \"top\": 1394,\n                          \"right\": 631,\n                          \"bottom\": 1541\n                        },\n                        \"clickable\": \"true\",\n                        \"focusable\": \"true\",\n                        \"long-clickable\": \"true\",\n                        \"visible-to-user\": true,\n                        \"hint-text\": \"Edit Name\",\n                        \"actions\": [\n                          \"focus\",\n                          \"select\",\n                          \"clear_selection\",\n                          \"click\",\n                          \"long_click\",\n                          \"accessibility_focus\",\n                          \"next_at_movement_granularity\",\n                          \"previous_at_movement_granularity\",\n                          \"set_selection\",\n                          \"set_text\"\n                        ]\n                      }\n                    }\n                  ]\n                }\n              }\n            }\n          }\n        }\n      },\n      {\n        \"windowId\": 863,\n        \"displayId\": 0,\n        \"view-id\": \"dfb0de88-fe44-d078-5c5f-171fa00e86f1\",\n        \"bounds\": {\n          \"left\": 0,\n          \"top\": 0,\n          \"right\": 1080,\n          \"bottom\": 136\n        },\n        \"visible-to-user\": true,\n        \"actions\": [\n          \"select\",\n          \"clear_selection\",\n          \"accessibility_focus\"\n        ],\n        \"node\": [\n          {\n            \"resource-id\": \"com.android.systemui:id/status_bar_launch_animation_container\",\n            \"view-id\": \"com.android.systemui:id/status_bar_launch_animation_container\",\n            \"bounds\": {\n              \"left\": 0,\n              \"top\": 0,\n              \"right\": 1080,\n              \"bottom\": 136\n            },\n            \"visible-to-user\": true,\n            \"actions\": [\n              \"select\",\n              \"clear_selection\",\n              \"accessibility_focus\"\n            ]\n          },\n          {\n            \"resource-id\": \"com.android.systemui:id/container\",\n            \"view-id\": \"com.android.systemui:id/container\",\n            \"bounds\": {\n              \"left\": 0,\n              \"top\": 0,\n              \"right\": 1080,\n              \"bottom\": 136\n            },\n            \"visible-to-user\": true,\n            \"actions\": [\n              \"select\",\n              \"clear_selection\",\n              \"accessibility_focus\"\n            ]\n          },\n          {\n            \"resource-id\": \"com.android.systemui:id/status_bar_container\",\n            \"view-id\": \"com.android.systemui:id/status_bar_container\",\n            \"bounds\": {\n              \"left\": 0,\n              \"top\": 0,\n              \"right\": 1080,\n              \"bottom\": 136\n            },\n            \"visible-to-user\": true,\n            \"actions\": [\n              \"select\",\n              \"clear_selection\",\n              \"accessibility_focus\"\n            ],\n            \"node\": {\n              \"resource-id\": \"com.android.systemui:id/status_bar\",\n              \"view-id\": \"com.android.systemui:id/status_bar\",\n              \"bounds\": {\n                \"left\": 0,\n                \"top\": 0,\n                \"right\": 1080,\n                \"bottom\": 136\n              },\n              \"visible-to-user\": true,\n              \"pane-title\": \"Status bar\",\n              \"actions\": [\n                \"select\",\n                \"clear_selection\",\n                \"accessibility_focus\"\n              ],\n              \"node\": {\n                \"resource-id\": \"com.android.systemui:id/status_bar_contents\",\n                \"view-id\": \"com.android.systemui:id/status_bar_contents\",\n                \"className\": \"android.widget.LinearLayout\",\n                \"bounds\": {\n                  \"left\": 47,\n                  \"top\": 0,\n                  \"right\": 1027,\n                  \"bottom\": 136\n                },\n                \"visible-to-user\": true,\n                \"actions\": [\n                  \"select\",\n                  \"clear_selection\",\n                  \"accessibility_focus\"\n                ],\n                \"node\": [\n                  {\n                    \"resource-id\": \"com.android.systemui:id/status_bar_start_side_container\",\n                    \"view-id\": \"com.android.systemui:id/status_bar_start_side_container\",\n                    \"bounds\": {\n                      \"left\": 47,\n                      \"top\": 1,\n                      \"right\": 459,\n                      \"bottom\": 136\n                    },\n                    \"visible-to-user\": true,\n                    \"actions\": [\n                      \"select\",\n                      \"clear_selection\",\n                      \"accessibility_focus\"\n                    ],\n                    \"node\": {\n                      \"resource-id\": \"com.android.systemui:id/status_bar_start_side_content\",\n                      \"view-id\": \"com.android.systemui:id/status_bar_start_side_content\",\n                      \"bounds\": {\n                        \"left\": 47,\n                        \"top\": 1,\n                        \"right\": 267,\n                        \"bottom\": 136\n                      },\n                      \"visible-to-user\": true,\n                      \"actions\": [\n                        \"select\",\n                        \"clear_selection\",\n                        \"accessibility_focus\"\n                      ],\n                      \"node\": {\n                        \"resource-id\": \"com.android.systemui:id/status_bar_start_side_except_heads_up\",\n                        \"view-id\": \"com.android.systemui:id/status_bar_start_side_except_heads_up\",\n                        \"className\": \"android.widget.LinearLayout\",\n                        \"bounds\": {\n                          \"left\": 47,\n                          \"top\": 1,\n                          \"right\": 267,\n                          \"bottom\": 136\n                        },\n                        \"visible-to-user\": true,\n                        \"actions\": [\n                          \"select\",\n                          \"clear_selection\",\n                          \"accessibility_focus\"\n                        ],\n                        \"node\": [\n                          {\n                            \"text\": \"2:05\",\n                            \"content-desc\": \"2:05\u202fPM\",\n                            \"resource-id\": \"com.android.systemui:id/clock\",\n                            \"view-id\": \"com.android.systemui:id/clock\",\n                            \"bounds\": {\n                              \"left\": 47,\n                              \"top\": 47,\n                              \"right\": 151,\n                              \"bottom\": 90\n                            },\n                            \"visible-to-user\": true,\n                            \"actions\": [\n                              \"select\",\n                              \"clear_selection\",\n                              \"accessibility_focus\",\n                              \"next_at_movement_granularity\",\n                              \"previous_at_movement_granularity\",\n                              \"set_selection\"\n                            ]\n                          },\n                          {\n                            \"resource-id\": \"com.android.systemui:id/notification_icon_area\",\n                            \"view-id\": \"com.android.systemui:id/notification_icon_area\",\n                            \"bounds\": {\n                              \"left\": 151,\n                              \"top\": 1,\n                              \"right\": 267,\n                              \"bottom\": 136\n                            },\n                            \"visible-to-user\": true,\n                            \"actions\": [\n                              \"select\",\n                              \"clear_selection\",\n                              \"accessibility_focus\"\n                            ],\n                            \"node\": {\n                              \"resource-id\": \"com.android.systemui:id/notificationIcons\",\n                              \"view-id\": \"com.android.systemui:id/notificationIcons\",\n                              \"className\": \"android.view.ViewGroup\",\n                              \"bounds\": {\n                                \"left\": 151,\n                                \"top\": 1,\n                                \"right\": 267,\n                                \"bottom\": 136\n                              },\n                              \"visible-to-user\": true,\n                              \"actions\": [\n                                \"select\",\n                                \"clear_selection\",\n                                \"accessibility_focus\"\n                              ],\n                              \"node\": [\n                                {\n                                  \"content-desc\": \"Security & privacy notification: \",\n                                  \"view-id\": \"9ecc8931-e7a3-b2f0-1fc3-4bdb1b58332f\",\n                                  \"className\": \"android.widget.ImageView\",\n                                  \"bounds\": {\n                                    \"left\": 151,\n                                    \"top\": 1,\n                                    \"right\": 209,\n                                    \"bottom\": 136\n                                  },\n                                  \"visible-to-user\": true,\n                                  \"actions\": [\n                                    \"select\",\n                                    \"clear_selection\",\n                                    \"accessibility_focus\",\n                                    \"next_at_movement_granularity\",\n                                    \"previous_at_movement_granularity\",\n                                    \"set_selection\"\n                                  ]\n                                },\n                                {\n                                  \"content-desc\": \"Android System notification: \",\n                                  \"view-id\": \"45b17f22-e1ae-09e8-3c05-9ccf9d8b038a\",\n                                  \"className\": \"android.widget.ImageView\",\n                                  \"bounds\": {\n                                    \"left\": 209,\n                                    \"top\": 1,\n                                    \"right\": 267,\n                                    \"bottom\": 136\n                                  },\n                                  \"visible-to-user\": true,\n                                  \"actions\": [\n                                    \"select\",\n                                    \"clear_selection\",\n                                    \"accessibility_focus\",\n                                    \"next_at_movement_granularity\",\n                                    \"previous_at_movement_granularity\",\n                                    \"set_selection\"\n                                  ]\n                                }\n                              ]\n                            }\n                          }\n                        ]\n                      }\n                    }\n                  },\n                  {\n                    \"resource-id\": \"com.android.systemui:id/cutout_space_view\",\n                    \"view-id\": \"com.android.systemui:id/cutout_space_view\",\n                    \"bounds\": {\n                      \"left\": 459,\n                      \"top\": 1,\n                      \"right\": 604,\n                      \"bottom\": 136\n                    },\n                    \"visible-to-user\": true,\n                    \"actions\": [\n                      \"select\",\n                      \"clear_selection\",\n                      \"accessibility_focus\"\n                    ]\n                  },\n                  {\n                    \"resource-id\": \"com.android.systemui:id/status_bar_end_side_container\",\n                    \"view-id\": \"com.android.systemui:id/status_bar_end_side_container\",\n                    \"bounds\": {\n                      \"left\": 604,\n                      \"top\": 1,\n                      \"right\": 1016,\n                      \"bottom\": 136\n                    },\n                    \"visible-to-user\": true,\n                    \"actions\": [\n                      \"select\",\n                      \"clear_selection\",\n                      \"accessibility_focus\"\n                    ],\n                    \"node\": {\n                      \"resource-id\": \"com.android.systemui:id/status_bar_end_side_content\",\n                      \"view-id\": \"com.android.systemui:id/status_bar_end_side_content\",\n                      \"className\": \"android.widget.LinearLayout\",\n                      \"bounds\": {\n                        \"left\": 876,\n                        \"top\": 1,\n                        \"right\": 1016,\n                        \"bottom\": 136\n                      },\n                      \"visible-to-user\": true,\n                      \"actions\": [\n                        \"select\",\n                        \"clear_selection\",\n                        \"accessibility_focus\"\n                      ],\n                      \"node\": {\n                        \"resource-id\": \"com.android.systemui:id/system_icons\",\n                        \"view-id\": \"com.android.systemui:id/system_icons\",\n                        \"className\": \"android.widget.LinearLayout\",\n                        \"bounds\": {\n                          \"left\": 876,\n                          \"top\": 39,\n                          \"right\": 1016,\n                          \"bottom\": 97\n                        },\n                        \"visible-to-user\": true,\n                        \"actions\": [\n                          \"select\",\n                          \"clear_selection\",\n                          \"accessibility_focus\"\n                        ],\n                        \"node\": [\n                          {\n                            \"resource-id\": \"com.android.systemui:id/statusIcons\",\n                            \"view-id\": \"com.android.systemui:id/statusIcons\",\n                            \"className\": \"android.widget.LinearLayout\",\n                            \"bounds\": {\n                              \"left\": 884,\n                              \"top\": 39,\n                              \"right\": 985,\n                              \"bottom\": 97\n                            },\n                            \"visible-to-user\": true,\n                            \"actions\": [\n                              \"select\",\n                              \"clear_selection\",\n                              \"accessibility_focus\"\n                            ],\n                            \"node\": [\n                              {\n                                \"resource-id\": \"com.android.systemui:id/wifi_combo\",\n                                \"view-id\": \"com.android.systemui:id/wifi_combo\",\n                                \"bounds\": {\n                                  \"left\": 884,\n                                  \"top\": 39,\n                                  \"right\": 930,\n                                  \"bottom\": 97\n                                },\n                                \"visible-to-user\": true,\n                                \"actions\": [\n                                  \"select\",\n                                  \"clear_selection\",\n                                  \"accessibility_focus\"\n                                ],\n                                \"node\": {\n                                  \"resource-id\": \"com.android.systemui:id/wifi_group\",\n                                  \"view-id\": \"com.android.systemui:id/wifi_group\",\n                                  \"className\": \"android.widget.LinearLayout\",\n                                  \"bounds\": {\n                                    \"left\": 891,\n                                    \"top\": 39,\n                                    \"right\": 930,\n                                    \"bottom\": 97\n                                  },\n                                  \"visible-to-user\": true,\n                                  \"actions\": [\n                                    \"select\",\n                                    \"clear_selection\",\n                                    \"accessibility_focus\"\n                                  ],\n                                  \"node\": {\n                                    \"resource-id\": \"com.android.systemui:id/wifi_combo\",\n                                    \"view-id\": \"com.android.systemui:id/wifi_combo\",\n                                    \"bounds\": {\n                                      \"left\": 891,\n                                      \"top\": 48,\n                                      \"right\": 930,\n                                      \"bottom\": 87\n                                    },\n                                    \"visible-to-user\": true,\n                                    \"actions\": [\n                                      \"select\",\n                                      \"clear_selection\",\n                                      \"accessibility_focus\"\n                                    ],\n                                    \"node\": {\n                                      \"content-desc\": \"Wifi signal full.\",\n                                      \"resource-id\": \"com.android.systemui:id/wifi_signal\",\n                                      \"view-id\": \"com.android.systemui:id/wifi_signal\",\n                                      \"className\": \"android.widget.ImageView\",\n                                      \"bounds\": {\n                                        \"left\": 891,\n                                        \"top\": 48,\n                                        \"right\": 930,\n                                        \"bottom\": 87\n                                      },\n                                      \"visible-to-user\": true,\n                                      \"actions\": [\n                                        \"select\",\n                                        \"clear_selection\",\n                                        \"accessibility_focus\",\n                                        \"next_at_movement_granularity\",\n                                        \"previous_at_movement_granularity\",\n                                        \"set_selection\"\n                                      ]\n                                    }\n                                  }\n                                }\n                              },\n                              {\n                                \"content-desc\": \"T-Mobile, signal full.\",\n                                \"resource-id\": \"com.android.systemui:id/mobile_combo\",\n                                \"view-id\": \"com.android.systemui:id/mobile_combo\",\n                                \"bounds\": {\n                                  \"left\": 930,\n                                  \"top\": 39,\n                                  \"right\": 969,\n                                  \"bottom\": 97\n                                },\n                                \"visible-to-user\": true,\n                                \"actions\": [\n                                  \"select\",\n                                  \"clear_selection\",\n                                  \"accessibility_focus\",\n                                  \"next_at_movement_granularity\",\n                                  \"previous_at_movement_granularity\",\n                                  \"set_selection\"\n                                ],\n                                \"node\": {\n                                  \"resource-id\": \"com.android.systemui:id/mobile_group\",\n                                  \"view-id\": \"com.android.systemui:id/mobile_group\",\n                                  \"className\": \"android.widget.LinearLayout\",\n                                  \"bounds\": {\n                                    \"left\": 930,\n                                    \"top\": 39,\n                                    \"right\": 969,\n                                    \"bottom\": 97\n                                  },\n                                  \"visible-to-user\": true,\n                                  \"actions\": [\n                                    \"select\",\n                                    \"clear_selection\",\n                                    \"accessibility_focus\"\n                                  ],\n                                  \"node\": {\n                                    \"view-id\": \"d7539c61-4540-87b1-75cd-96c04b150401\",\n                                    \"bounds\": {\n                                      \"left\": 930,\n                                      \"top\": 48,\n                                      \"right\": 969,\n                                      \"bottom\": 87\n                                    },\n                                    \"visible-to-user\": true,\n                                    \"actions\": [\n                                      \"select\",\n                                      \"clear_selection\",\n                                      \"accessibility_focus\"\n                                    ],\n                                    \"node\": {\n                                      \"resource-id\": \"com.android.systemui:id/mobile_signal\",\n                                      \"view-id\": \"com.android.systemui:id/mobile_signal\",\n                                      \"className\": \"android.widget.ImageView\",\n                                      \"bounds\": {\n                                        \"left\": 930,\n                                        \"top\": 48,\n                                        \"right\": 969,\n                                        \"bottom\": 87\n                                      },\n                                      \"visible-to-user\": true,\n                                      \"actions\": [\n                                        \"select\",\n                                        \"clear_selection\",\n                                        \"accessibility_focus\"\n                                      ]\n                                    }\n                                  }\n                                }\n                              }\n                            ]\n                          },\n                          {\n                            \"content-desc\": \"Battery charging, 100 percent.\",\n                            \"resource-id\": \"com.android.systemui:id/battery\",\n                            \"view-id\": \"com.android.systemui:id/battery\",\n                            \"className\": \"android.widget.LinearLayout\",\n                            \"bounds\": {\n                              \"left\": 985,\n                              \"top\": 51,\n                              \"right\": 1005,\n                              \"bottom\": 85\n                            },\n                            \"visible-to-user\": true,\n                            \"actions\": [\n                              \"select\",\n                              \"clear_selection\",\n                              \"accessibility_focus\",\n                              \"next_at_movement_granularity\",\n                              \"previous_at_movement_granularity\",\n                              \"set_selection\"\n                            ],\n                            \"node\": {\n                              \"view-id\": \"49a431fa-da27-42d3-0d32-4524fa81c923\",\n                              \"className\": \"android.widget.ImageView\",\n                              \"bounds\": {\n                                \"left\": 985,\n                                \"top\": 51,\n                                \"right\": 1005,\n                                \"bottom\": 85\n                              },\n                              \"visible-to-user\": true,\n                              \"actions\": [\n                                \"select\",\n                                \"clear_selection\",\n                                \"accessibility_focus\"\n                              ]\n                            }\n                          }\n                        ]\n                      }\n                    }\n                  }\n                ]\n              }\n            }\n          }\n        ]\n      }\n    ]\n  },\n  \"windowInfo\": null,\n  \"windows\": [\n    {\n      \"id\": 863,\n      \"displayId\": 0,\n      \"type\": 3,\n      \"windowLayer\": 1,\n      \"isActive\": false,\n      \"isFocused\": false,\n      \"bounds\": {\n        \"left\": 0,\n        \"top\": 0,\n        \"right\": 1080,\n        \"bottom\": 136\n      }\n    },\n    {\n      \"id\": 870,\n      \"displayId\": 0,\n      \"type\": 1,\n      \"windowLayer\": 0,\n      \"isActive\": true,\n      \"isFocused\": true,\n      \"bounds\": {\n        \"left\": 0,\n        \"top\": 0,\n        \"right\": 1080,\n        \"bottom\": 2400\n      }\n    }\n  ],\n  \"contentHiddenRegions\": null,\n  \"intentChooserDetected\": false,\n  \"notificationPermissionDetected\": false,\n  \"accessibility-focused-element\": null,\n  \"ctrlProxyIncomplete\": null,\n  \"error\": null,\n  \"screenWidth\": 1080,\n  \"screenHeight\": 2400,\n  \"rotation\": 0,\n  \"systemInsets\": {\n    \"top\": 168,\n    \"bottom\": 84,\n    \"left\": 78,\n    \"right\": 78\n  },\n  \"insets\": {\n    \"available\": true,\n    \"source\": \"android-window-metrics\",\n    \"units\": \"physical-pixels\",\n    \"systemBars\": {\n      \"visible\": {\n        \"top\": 136,\n        \"bottom\": 63,\n        \"left\": 0,\n        \"right\": 0\n      },\n      \"stable\": {\n        \"top\": 136,\n        \"bottom\": 63,\n        \"left\": 0,\n        \"right\": 0\n      }\n    },\n    \"displayCutout\": {\n      \"top\": 136,\n      \"bottom\": 0,\n      \"left\": 0,\n      \"right\": 0\n    },\n    \"displayCutoutInfo\": {\n      \"classification\": \"unknown\",\n      \"bounds\": [\n        {\n          \"left\": 480,\n          \"top\": 0,\n          \"right\": 625,\n          \"bottom\": 136\n        }\n      ]\n    },\n    \"systemGestures\": {\n      \"top\": 168,\n      \"bottom\": 84,\n      \"left\": 78,\n      \"right\": 78\n    },\n    \"mandatorySystemGestures\": {\n      \"top\": 168,\n      \"bottom\": 84,\n      \"left\": 0,\n      \"right\": 0\n    },\n    \"tappableElement\": {\n      \"top\": 136,\n      \"bottom\": 0,\n      \"left\": 0,\n      \"right\": 0\n    },\n    \"systemChrome\": {\n      \"visibility\": \"visible\",\n      \"statusBar\": \"visible\",\n      \"navigationBar\": \"visible\",\n      \"homeIndicatorAutoHideRequested\": null,\n      \"source\": \"android-window-insets\"\n    }\n  },\n  \"wakefulness\": \"Awake\",\n  \"foregroundActivity\": null,\n  \"density\": 420,\n  \"sdkInt\": 36,\n  \"deviceModel\": \"sdk_gphone64_arm64\",\n  \"isEmulator\": true,\n  \"nativeScale\": 1,\n  \"pixelWidth\": 1080,\n  \"pixelHeight\": 2400,\n  \"truncationReasons\": null\n}",
+  "source": "accessibility-service",
+  "timestamp": 1791227108875,
+  "device": {
+   "deviceId": "emulator-5600",
+   "platform": "android"
+  }
+ },
+ "observationScreenshotResourceUri": "automobile:observation/emulator-5600/e520e024-5de1-4841-9941-d08ea997df3d/screenshot"
+}

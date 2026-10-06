@@ -131,6 +131,9 @@ internal constructor(
     private const val OCCLUSION_BUCKET_WIDTH = 128
     private const val MAX_OCCLUSION_BUCKET_SPAN = 64
     private const val DEFAULT_WINDOW_KEY = -1
+    private const val INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT = "active_window_null_root"
+    private const val INCOMPLETE_APP_WINDOW_NULL_ROOT = "app_window_null_root"
+    private const val INCOMPLETE_NO_APP_WINDOW_ROOT = "no_app_window_root"
     private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP = "compose-interop-no-hide-descendants"
     private const val MIN_HIDDEN_REGION_SCREEN_AREA = 0.25
     private const val MAX_VISIBLE_CHILD_COVERAGE = 0.25
@@ -391,7 +394,15 @@ internal constructor(
 
           val windowBounds = Rect()
           window.getBoundsInScreen(windowBounds)
-          windowInfos.add(windowInfo(window, windowBounds, displayId, panelUniqueId))
+          windowInfos.add(
+            windowInfo(
+              window,
+              windowBounds,
+              displayId,
+              panelUniqueId,
+              rootNode.packageName?.toString(),
+            )
+          )
           val element =
             extractNodeInfo(
               rootNode,
@@ -633,10 +644,16 @@ internal constructor(
       // 2. The selected application window has a null root
       // 3. Only system UI windows were successfully extracted (no app windows accessible)
       val isSystemUiForeground = mainPackageName == "com.android.systemui"
-      val ctrlProxyIncomplete =
-        activeWindowHasNullRoot ||
-          primaryAppWindowHasNullRoot ||
-          (!hasApplicationWindow && !isSystemUiForeground)
+      // When causes overlap, prefer the active null root, then the selected app null root,
+      // then the absence of any accessible app window. Keep the flag and reason in sync.
+      val ctrlProxyIncompleteReason =
+        when {
+          activeWindowHasNullRoot -> INCOMPLETE_ACTIVE_WINDOW_NULL_ROOT
+          primaryAppWindowHasNullRoot -> INCOMPLETE_APP_WINDOW_NULL_ROOT
+          !hasApplicationWindow && !isSystemUiForeground -> INCOMPLETE_NO_APP_WINDOW_ROOT
+          else -> null
+        }
+      val ctrlProxyIncomplete = ctrlProxyIncompleteReason != null
       if (ctrlProxyIncomplete) {
         Log.w(
           TAG,
@@ -654,6 +671,7 @@ internal constructor(
         accessibilityFocusedElement =
           accessibilityFocusedElement?.let { WireNodeCodec.materialize(it) },
         ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
+        ctrlProxyIncompleteReason = ctrlProxyIncompleteReason,
         contentHiddenRegions =
           detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
         truncationReasons = budget.truncationReasons().ifEmpty { null },
@@ -692,6 +710,7 @@ internal constructor(
     bounds: Rect,
     displayId: Int?,
     panelUniqueId: String?,
+    packageName: String?,
   ): WindowInfo =
     WindowInfo(
       id = window.id,
@@ -705,6 +724,7 @@ internal constructor(
       isActive = window.isActive,
       isFocused = window.isFocused,
       bounds = ElementBounds(bounds),
+      packageName = packageName,
     )
 
   private fun detectContentHiddenRegions(

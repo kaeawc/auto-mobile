@@ -17,6 +17,7 @@ describe("parseDaemonArgs output-reduction flags", () => {
     expect(options.toolResultsNoStructuredContent).toBeUndefined();
     expect(options.actionsDiffObserve).toBeUndefined();
     expect(options.actionsNoObserve).toBeUndefined();
+    expect(options.actionsCompactMetadata).toBeUndefined();
   });
 
   test("--observe-result-include-elements sets observeResultIncludeElements", () => {
@@ -45,11 +46,13 @@ describe("parseDaemonArgs output-reduction flags", () => {
       "--tool-results-no-structured-content",
       "--actions-diff-observe",
       "--actions-no-observe",
+      "--actions-compact-metadata",
     ]);
     expect(options.observeResultIncludeElements).toBe(true);
     expect(options.toolResultsNoStructuredContent).toBe(true);
     expect(options.actionsDiffObserve).toBe(true);
     expect(options.actionsNoObserve).toBe(true);
+    expect(options.actionsCompactMetadata).toBe(true);
   });
 
   test("retired output-reduction flags are silently ignored (no throw, no option set)", () => {
@@ -175,4 +178,8 @@ describe("tool outputs directory daemon arg relay", () => {
     expect(parseDaemonArgs(["--tool-outputs-dir"]).toolOutputsDir).toBeUndefined();
     expect(parseDaemonArgs(["--tool-outputs-dir", "--debug"]).toolOutputsDir).toBeUndefined();
   });
+});
+
+test("compact metadata daemon arg parses", () => {
+  expect(parseDaemonArgs(["--actions-compact-metadata"]).actionsCompactMetadata).toBe(true);
 });

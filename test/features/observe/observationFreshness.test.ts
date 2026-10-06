@@ -369,6 +369,21 @@ describe("computeFreshness", () => {
   // NOT be attached to a discarded-windows or extraction-throw capture. ---
   describe("incomplete-capture cause diagnosis (issue #6184)", () => {
     describe("on the unavailable path (rootless payload)", () => {
+      test.each(["active_window_null_root", "app_window_null_root", "no_app_window_root"] as const)(
+        "%s retains the legacy null-root guidance",
+        (reason) => {
+          const input = {
+            actualTimestamp: NOW,
+            now: NOW,
+            unavailable: true,
+            incompleteCapture: { sdkInt: 34, reason },
+          };
+          expect(computeFreshness(input)).toEqual(
+            computeFreshness({ ...input, incompleteCapture: { sdkInt: 34, reason: "null_root" } }),
+          );
+        },
+      );
+
       test("genuine null root on API 34+ keeps the 'no root' + isAccessibilityTool diagnosis", () => {
         const v = computeFreshness({
           actualTimestamp: NOW,

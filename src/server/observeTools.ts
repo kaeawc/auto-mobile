@@ -1,3 +1,8 @@
+import {
+  DEFAULT_WAIT_FOR_TIMEOUT_MS,
+  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+  MAX_WAIT_FOR_TIMEOUT_MS,
+} from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
@@ -15,6 +20,7 @@ import type { DisplayPanel } from "../models/DisplayPanel";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
+import { stripInternalToolParams } from "./internalToolParams";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
@@ -91,6 +97,7 @@ import {
   ElementResolver,
   isMissingContainerError,
   type MatchMode,
+  type ContainerFailure,
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
 import {
@@ -201,8 +208,20 @@ const waitForCommonShape = {
   absent: absentPredicateSchema
     .optional()
     .describe("Wait until an element matching these fields is absent"),
-  timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-  timeoutMs: z.number().optional().describe("Alias for timeout"),
+  timeout: z
+    .number()
+    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+    })
+    .optional()
+    .describe("Wait timeout ms (default: 5000)"),
+  timeoutMs: z
+    .number()
+    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+    })
+    .optional()
+    .describe("Alias for timeout"),
   container: waitForContainerField,
   selectionStrategy: resolverSelectionStrategySchema.optional(),
 };
@@ -349,8 +368,20 @@ const waitForConditionDslSchema = z
       .number()
       .optional()
       .describe("Consecutive stable reads for countStable/stable (default 2)"),
-    timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
-    timeoutMs: z.number().optional().describe("Alias for timeout"),
+    timeout: z
+      .number()
+      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+      })
+      .optional()
+      .describe("Wait timeout ms (default 5000; stable default 2500)"),
+    timeoutMs: z
+      .number()
+      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+      })
+      .optional()
+      .describe("Alias for timeout"),
     container: waitForContainerField,
     selectionStrategy: resolverSelectionStrategySchema.optional(),
     textAny: z.never().optional(),
@@ -487,8 +518,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: { $ref: "#waitForContainer" },
     selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
-    timeout: { type: "number" },
-    timeoutMs: { type: "number" },
+    timeout: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
+    timeoutMs: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
   },
   // Enforce the same shape the runtime does: either the `for` DSL, or at least one
   // legacy predicate with textAny mutually exclusive from the element predicates /
@@ -530,15 +561,47 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 // (not env). Every dimension is always honored when requested — the focus /
 // region / overview scoping is on by default and applies only when a call sets
 // the matching `scope` field.
+const legacyObserveFocusObjectSchema = z.object({
+  resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+  text: z.string().optional().describe("Anchor by substring text match"),
+});
+const routedLegacyObserveFocusSchema = withJsonSchemaOverride(
+  legacyObserveFocusObjectSchema
+    .extend({ elementId: z.never().optional(), container: z.never().optional() })
+    .refine((value) => !("elementId" in value || "container" in value)),
+  (schema) => {
+    const properties = schema.properties as Record<string, unknown>;
+    delete properties.elementId;
+    delete properties.container;
+    schema.not = { anyOf: [{ required: ["elementId"] }, { required: ["container"] }] };
+    schema.additionalProperties = true;
+  },
+);
 const observeScopeFocusSchema = z
-  .union([
-    z.boolean(),
-    z.object({
-      resourceId: z.string().optional().describe("Anchor by exact resource-id"),
-      text: z.string().optional().describe("Anchor by substring text match"),
-    }),
-  ])
-  .describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor.");
+  .preprocess(
+    (value, ctx) => {
+      const cleanValue = stripInternalToolParams(value);
+      const nested =
+        cleanValue !== null &&
+        typeof cleanValue === "object" &&
+        ("elementId" in cleanValue || "container" in cleanValue);
+      const parsed = (
+        nested
+          ? nestedElementContainerSchema
+          : z.union([z.boolean(), legacyObserveFocusObjectSchema])
+      ).safeParse(cleanValue);
+      if (!parsed.success) {
+        // Abort before the permissive legacy arm can consume an invalid nested selector.
+        ctx.issues.push(...parsed.error.issues.map((issue) => ({ ...issue, continue: false })));
+        return z.NEVER;
+      }
+      return parsed.data;
+    },
+    z.union([z.boolean(), routedLegacyObserveFocusSchema, nestedElementContainerSchema]),
+  )
+  .describe(
+    "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
+  );
 
 const observeScopeRegionBoxSchema = z
   .object({
@@ -784,6 +847,45 @@ export interface WaitForObservationOutcome {
   waitMs: number;
   matchedElement?: Element;
   candidates?: Element[];
+  containerFailure?: ContainerFailure;
+}
+
+interface ObserveConditionEvaluation extends ConditionEvaluation {
+  containerFailure?: ContainerFailure;
+}
+
+function containerFailureMetadata(failed: boolean, failure: ContainerFailure | undefined) {
+  return failed && failure ? { containerFailure: failure } : {};
+}
+
+/** Record resolver diagnostics without changing predicate matching or other tools. */
+function trackContainerFailure(
+  finder: ConditionResolver,
+  container: ObserveWaitForOptions["container"],
+) {
+  // Resolution may propagate unique; diagnostics keep each client-sent level.
+  const levels: NonNullable<ObserveWaitForOptions["container"]>[] = [];
+  for (let level = container; level; level = level.container) {
+    levels.unshift(level);
+  }
+  let failure: ContainerFailure | undefined;
+  return {
+    finder: {
+      resolve: (...args: Parameters<ConditionResolver["resolve"]>) => {
+        const result = finder.resolve(...args);
+        const resolved = result.containerFailure;
+        failure ??= resolved && {
+          ...resolved,
+          selector: levels[resolved.level - 1] ?? resolved.selector,
+        };
+        return result;
+      },
+    } satisfies ConditionResolver,
+    failure: () => failure,
+    reset: () => {
+      failure = undefined;
+    },
+  };
 }
 
 /** True when the waitFor options are the #4398 declarative `for` DSL form. */
@@ -841,10 +943,13 @@ const runWaitForConditionDsl = async (
   signal: AbortSignal | undefined,
   timer: Timer,
   skipBackStack: boolean = false,
+  platform?: BootedDevice["platform"],
 ): Promise<WaitForObservationOutcome> => {
   const startTime = timer.now();
   const timeoutMs =
-    waitFor.timeout ?? waitFor.timeoutMs ?? (waitFor.for === "stable" ? 2500 : 5000);
+    waitFor.timeout ??
+    waitFor.timeoutMs ??
+    (waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS);
   // Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.
   const pollingScreen: ObserveScreen = skipBackStack
     ? {
@@ -888,91 +993,16 @@ const runWaitForConditionDsl = async (
     : observeScreen;
   const settled = (waitFor as WaitForWithSettled).settled;
   const pollMs = waitFor.pollMs;
-  const applySettledGate = async (
-    outcome: WaitForObservationOutcome,
-    matched: boolean,
-    recheck: ConditionPredicate = () => ({ matched: true }),
-  ): Promise<WaitForObservationOutcome> => {
-    if (!settled || !matched) {
-      return outcome;
-    }
-    let observation = outcome.observation;
-    let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
-    let quietStart = timer.now();
-    let polls = outcome.polls;
-    let matchedElement = outcome.matchedElement;
-    let awaitedElement = outcome.awaitedElement;
-    let conditionMatched = true;
-    while (timer.now() - startTime < timeoutMs) {
-      if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
-        return {
-          ...outcome,
-          observation,
-          matchedElement,
-          awaitedElement,
-          matched: true,
-          settled: true,
-          timedOut: false,
-          awaitTimeout: false,
-          waitMs: timer.now() - startTime,
-          awaitDuration: timer.now() - startTime,
-          polls,
-        };
-      }
-      await awaitWhileRequestIsLive(timer.sleep(WAIT_FOR_POLL_INTERVAL_MS), signal);
-      throwIfAborted(signal);
-      observation = await pollingScreen.execute({
-        timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
-        skipWaitForFresh: false,
-        minTimestamp: startTime,
-        signal,
-        skipBackStack: skipBackStack || undefined,
-        skipScreenshot: true,
-        skipAccessibilityAudit: true,
-        skipStaleWindowRecovery: true,
-      });
-      throwIfAborted(signal);
-      polls++;
-      const unavailableReason = waitCaptureUnavailableReason(observation);
-      const evaluation: ConditionEvaluation = unavailableReason
-        ? { matched: false, diagnostic: unavailableReason }
-        : recheck(observation);
-      if (!evaluation.matched) {
-        conditionMatched = false;
-        matchedHash = null;
-        quietStart = timer.now();
-        matchedElement = undefined;
-        awaitedElement = undefined;
-        continue;
-      }
-      conditionMatched = true;
-      matchedElement = evaluation.matchedElement;
-      awaitedElement = evaluation.matchedElement;
-      const hash = hashHierarchyForSettle(observation.viewHierarchy);
-      if (hash === null || hash !== matchedHash) {
-        matchedHash = hash;
-        quietStart = timer.now();
-      }
-    }
-    const unavailableReason = waitCaptureUnavailableReason(observation);
-    return {
-      ...outcome,
-      observation,
-      matchedElement,
-      awaitedElement,
-      settled: false,
-      timedOut: true,
-      matched: conditionMatched,
-      ...scopedWaitTimeoutMetadata(
-        { matched: conditionMatched, diagnostic: unavailableReason },
-        timer.now() - startTime,
-      ),
-      awaitTimeout: true,
-      waitMs: timer.now() - startTime,
-      awaitDuration: timer.now() - startTime,
-      polls,
-    };
-  };
+  const applySettledGate = createSettledGate({
+    settled,
+    timer,
+    startTime,
+    timeoutMs,
+    signal,
+    pollingScreen,
+    skipBackStack,
+    platform,
+  });
   if (waitFor.for === "stable") {
     const settle = await new RealSettleObserve(pollingScreen, timer).execute({
       timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
@@ -996,9 +1026,9 @@ const runWaitForConditionDsl = async (
     return applySettledGate(outcome, settle.settled);
   }
 
-  const finder = new ElementResolver();
-  const predicate = buildConditionPredicate(
-    finder,
+  const tracked = trackContainerFailure(new ElementResolver(), waitFor.container);
+  const evaluate = buildConditionPredicate(
+    tracked.finder,
     waitFor.for,
     {
       elementId: waitFor.elementId,
@@ -1008,6 +1038,11 @@ const runWaitForConditionDsl = async (
     },
     { stableReads: waitFor.stableReads },
   );
+  const predicate: ConditionPredicate = (observation) => {
+    tracked.reset();
+    const evaluation = evaluate(observation);
+    return { ...evaluation, ...containerFailureMetadata(!evaluation.matched, tracked.failure()) };
+  };
   const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
     timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
@@ -1024,6 +1059,7 @@ const runWaitForConditionDsl = async (
     waitMs: result.waitMs,
     matchedElement: result.matchedElement,
     candidates: result.candidates,
+    ...containerFailureMetadata(result.timedOut, tracked.failure()),
     ...(result.diagnostic
       ? {
           timeoutReason: `Timed out after ${result.waitMs} ms waiting for ${waitFor.for}; ${result.diagnostic}`,
@@ -1435,14 +1471,16 @@ const evaluateWaitForObservation = (
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
-): ConditionEvaluation & { awaitedElement?: Element } => {
+): ObserveConditionEvaluation & { awaitedElement?: Element } => {
   const sizeOptions = {
     platform,
     iosMultiPanel,
     observationScreenSize: observation.screenSize,
     display: observation.viewHierarchy,
   };
-  const evaluation: ConditionEvaluation = { matched: false };
+  const evaluation: ObserveConditionEvaluation = { matched: false };
+  const tracked = trackContainerFailure(finder, waitFor.container);
+  finder = tracked.finder;
   const needsHierarchy =
     hasElementPredicate(waitFor) || waitFor.absent !== undefined || waitFor.settled !== undefined;
   const diagnostic = needsHierarchy ? waitCaptureUnavailableReason(observation) : undefined;
@@ -1475,14 +1513,16 @@ const evaluateWaitForObservation = (
           )
         : false;
 
+  const matched = [
+    activeWindowMatched,
+    displayMatched,
+    absentSatisfied,
+    !needsElementMatch || awaitedElement !== null,
+  ].every(Boolean);
   return {
     ...evaluation,
-    matched: [
-      activeWindowMatched,
-      displayMatched,
-      absentSatisfied,
-      !needsElementMatch || awaitedElement !== null,
-    ].every(Boolean),
+    ...containerFailureMetadata(!matched, tracked.failure()),
+    matched,
     awaitedElement: awaitedElement ?? undefined,
   };
 };
@@ -1630,13 +1670,16 @@ function recordDisplayWaitEvidence(
   activeDisplayEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
 }
 
-function scopedWaitTimeoutMetadata(evaluation: ConditionEvaluation, waitMs: number) {
-  return evaluation.diagnostic
-    ? {
-        candidates: evaluation.candidates,
-        timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
-      }
-    : {};
+function scopedWaitTimeoutMetadata(evaluation: ObserveConditionEvaluation, waitMs: number) {
+  return {
+    ...containerFailureMetadata(!evaluation.matched, evaluation.containerFailure),
+    ...(evaluation.diagnostic
+      ? {
+          candidates: evaluation.candidates,
+          timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
+        }
+      : {}),
+  };
 }
 
 export const waitForObservation = async (
@@ -1651,7 +1694,7 @@ export const waitForObservation = async (
   displayInventory: DisplayInventoryClassification = "unavailable",
   displayPanels: readonly Pick<DisplayPanel, "key" | "role">[] = [],
 ): Promise<WaitForObservationOutcome> => {
-  const iosMultiPanel = platform === "ios" && displayPanels.length > 1;
+  const iosMultiPanel = hasIosWaitPanels(platform, displayPanels);
   const postureEvidence: DisplayWaitTimeoutEvidence = {
     lastObservedReason: 'last observed posture "unknown"',
     knownValueObserved: false,
@@ -1662,102 +1705,48 @@ export const waitForObservation = async (
     knownValueObserved: false,
     hierarchyCaptured: false,
   };
-  const complete = async (
-    outcome: WaitForObservationOutcome,
-  ): Promise<WaitForObservationOutcome> => {
-    if (outcome.timedOut && waitFor.posture !== undefined) {
-      outcome.timeoutReason = displayWaitTimeoutReason(
-        "posture",
-        waitFor.posture,
-        outcome.awaitDuration,
-        displayInventory,
-        postureEvidence,
-      );
-    } else if (outcome.timedOut && waitFor.activeDisplay !== undefined) {
-      outcome.timeoutReason = displayWaitTimeoutReason(
-        "activeDisplay",
-        waitFor.activeDisplay,
-        outcome.awaitDuration,
-        displayInventory,
-        activeDisplayEvidence,
-      );
-    }
-    const mode = resolveScreenshotMode(screenshot);
-    if (
-      mode === "settled" ||
-      (mode === "async" &&
-        (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()))
-    ) {
-      await observeScreen.captureScreenshot?.(
-        createGlobalPerformanceTracker(),
-        signal,
-        outcome.observation,
-        screenshot,
-        screenshotOptions,
-      );
-    } else {
-      await observeScreen.runAccessibilityAudit?.(
-        outcome.observation,
-        createGlobalPerformanceTracker(),
-      );
-    }
-    return outcome;
-  };
+  const complete = createWaitCompletion({
+    waitFor,
+    displayInventory,
+    postureEvidence,
+    activeDisplayEvidence,
+    screenshot,
+    observeScreen,
+    signal,
+    screenshotOptions,
+  });
 
   // Declarative `for` DSL (issue #4398) routes to the #4389 primitives; the
   // legacy element/textAny/activeWindow path below is unchanged (back-compat).
   if (isConditionDsl(waitFor)) {
     return complete(
-      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack),
+      await runWaitForConditionDsl(observeScreen, waitFor, signal, timer, skipBackStack, platform),
     );
   }
 
   const startTime = timer.now();
-  const timeoutMs = waitFor.timeout ?? waitFor.timeoutMs ?? 5000;
+  const timeoutMs = legacyWaitTimeout(waitFor);
   const settled = waitFor.settled;
   const finder = new ElementResolver();
-  const queryOptions = {
-    text: waitFor.text ?? waitFor.textAny?.[0] ?? waitFor.contentDescription,
-    elementId: waitFor.elementId,
-  };
+  const queryOptions = waitObservationQuery(waitFor);
 
   // Back-stack collection may stay disabled during waitFor polling to preserve its
   // timeout budget. Screenshots always stay suppressed during polls; when opted
   // in, `complete` captures exactly one screenshot from the terminal state.
   const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
-  const observeOnce = async (minTimestamp: number) => {
-    const observation = await observeScreen.execute({
-      queryOptions,
-      timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
-      perf: createGlobalPerformanceTracker(),
-      skipWaitForFresh: false,
-      minTimestamp,
-      signal,
-      skipBackStack: skipPollingOverhead || skipBackStack,
-      skipScreenshot: true,
-      skipAccessibilityAudit: true,
-      skipStaleWindowRecovery: true,
-    });
-    recordDisplayWaitEvidence(observation, postureEvidence, activeDisplayEvidence);
-    return observation;
-  };
-
-  const checkDisplaySupport = (): void => {
-    if (
-      waitFor.activeDisplay !== undefined &&
-      !canDisplayExist(displayInventory, displayPanels, waitFor.activeDisplay)
-    ) {
-      throw new ActionableError(
-        "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and posture and retry.",
-      );
-    }
-    if (waitFor.posture !== undefined && displayInventory === "single") {
-      throw new ActionableError(
-        "Cannot wait for posture: this device has no display inventory. Select a device that reports display panels and posture and retry.",
-      );
-    }
-  };
+  const observeOnce = createWaitObserver({
+    observeScreen,
+    queryOptions,
+    timeoutMs,
+    timer,
+    startTime,
+    signal,
+    skipPollingOverhead,
+    skipBackStack,
+    postureEvidence,
+    activeDisplayEvidence,
+  });
 
   // Settle gate (issue #3490 §3): once the predicate matches, hold until the
   // hierarchy hash is unchanged for settled.quietPeriodMs. `matchedHash === null`
@@ -1779,27 +1768,21 @@ export const waitForObservation = async (
     return timer.now() - quietStart >= settled.quietPeriodMs;
   };
 
+  const resetMatchedHash = () => {
+    matchedHash = null;
+  };
+
   throwIfAborted(signal);
   // Evaluate the current cache on the first poll, then use its device-clock
   // timestamp to request a strictly newer hierarchy on later polls.
   let observation = await observeOnce(0);
   throwIfAborted(signal);
-  checkDisplaySupport();
-  const baselineTimestamp = waitCaptureUnavailableReason(observation)
-    ? undefined
-    : hierarchyUpdatedAtToMillis(observation.viewHierarchy);
+  checkWaitDisplaySupport(waitFor, displayInventory, displayPanels);
+  const baselineTimestamp = waitBaselineTimestamp(observation);
   // A posture-only stamp is read independently of hierarchy capture, including
   // while folding locks the device. UI predicates/settling still need a fresh tree.
-  const needsHierarchyFreshness =
-    waitFor.posture === undefined ||
-    hasElementPredicate(waitFor) ||
-    waitFor.absent !== undefined ||
-    waitFor.activeWindow !== undefined ||
-    settled !== undefined;
-  const minTimestamp =
-    needsHierarchyFreshness && baselineTimestamp !== undefined && baselineTimestamp > 0
-      ? baselineTimestamp + 1
-      : 0;
+  const needsHierarchyFreshness = needsWaitHierarchyFreshness(waitFor, settled);
+  const minTimestamp = waitTimestampFloor(needsHierarchyFreshness, baselineTimestamp);
   let polls = 1;
   const modes = new Map<string, MatchMode>();
   let waitEvaluation = evaluateWaitForObservation(
@@ -1811,40 +1794,13 @@ export const waitForObservation = async (
     { modes, iosMultiPanel },
   );
 
-  if (waitEvaluation.matched && settleReady(observation)) {
+  if (waitMatchReady(waitEvaluation, observation, settleReady, resetMatchedHash)) {
     const waitMs = timer.now() - startTime;
-    return complete({
-      observation,
-      awaitedElement: waitEvaluation.awaitedElement,
-      awaitDuration: waitMs,
-      awaitTimeout: false,
-      matched: true,
-      settled: settled ? true : undefined,
-      timedOut: false,
-      polls,
-      waitMs,
-      matchedElement: waitEvaluation.awaitedElement,
-    });
+    return complete(matchedWaitOutcome({ observation, waitEvaluation, waitMs, settled, polls }));
   }
-  if (!waitEvaluation.matched) {
-    matchedHash = null;
-  }
-
   if (timer.now() - startTime >= timeoutMs) {
     const waitMs = timer.now() - startTime;
-    return complete({
-      observation,
-      awaitedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
-      awaitDuration: waitMs,
-      awaitTimeout: true,
-      matched: waitEvaluation.matched,
-      settled: settled ? false : undefined,
-      timedOut: true,
-      polls,
-      waitMs,
-      matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
-      ...scopedWaitTimeoutMetadata(waitEvaluation, waitMs),
-    });
+    return complete(timedOutWaitOutcome({ observation, waitEvaluation, waitMs, settled, polls }));
   }
 
   while (timer.now() - startTime < timeoutMs) {
@@ -1856,12 +1812,7 @@ export const waitForObservation = async (
       observation = await observeOnce(minTimestamp);
     } catch (error) {
       throwDeviceLostFromAbortSignal(signal);
-      if (
-        isDeviceLostError(error) ||
-        waitFor.posture === undefined ||
-        signal?.aborted ||
-        (error instanceof Error && error.name === "AbortError")
-      ) {
+      if (shouldRethrowWaitObservationError(error, waitFor, signal)) {
         logger.debug("[observe] Wait observation failed", error);
         throw error;
       }
@@ -1872,57 +1823,30 @@ export const waitForObservation = async (
       continue;
     }
     throwIfAborted(signal);
-    checkDisplaySupport();
+    checkWaitDisplaySupport(waitFor, displayInventory, displayPanels);
     const observedTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
     // A timed-out delegate may return its old cache despite the requested
     // floor. It must not satisfy waitFor as post-invocation evidence.
-    waitEvaluation =
-      minTimestamp > 0 && (observedTimestamp === undefined || observedTimestamp < minTimestamp)
-        ? {
-            matched: false,
-            awaitedElement: undefined,
-            diagnostic: waitCaptureUnavailableReason(observation),
-          }
-        : evaluateWaitForObservation(finder, waitFor, observation, platform, displayInventory, {
-            modes,
-            iosMultiPanel,
-          });
+    waitEvaluation = evaluateFreshWaitObservation({
+      minTimestamp,
+      observedTimestamp,
+      finder,
+      waitFor,
+      observation,
+      platform,
+      displayInventory,
+      modes,
+      iosMultiPanel,
+    });
 
-    if (waitEvaluation.matched) {
-      if (settleReady(observation)) {
-        const waitMs = timer.now() - startTime;
-        return complete({
-          observation,
-          awaitedElement: waitEvaluation.awaitedElement,
-          awaitDuration: waitMs,
-          awaitTimeout: false,
-          matched: true,
-          settled: settled ? true : undefined,
-          timedOut: false,
-          polls,
-          waitMs,
-          matchedElement: waitEvaluation.awaitedElement,
-        });
-      }
-    } else {
-      matchedHash = null;
+    if (waitMatchReady(waitEvaluation, observation, settleReady, resetMatchedHash)) {
+      const waitMs = timer.now() - startTime;
+      return complete(matchedWaitOutcome({ observation, waitEvaluation, waitMs, settled, polls }));
     }
   }
 
   const waitMs = timer.now() - startTime;
-  return complete({
-    observation,
-    awaitedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
-    awaitDuration: waitMs,
-    awaitTimeout: true,
-    matched: waitEvaluation.matched,
-    settled: settled ? false : undefined,
-    timedOut: true,
-    polls,
-    waitMs,
-    matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
-    ...scopedWaitTimeoutMetadata(waitEvaluation, waitMs),
-  });
+  return complete(timedOutWaitOutcome({ observation, waitEvaluation, waitMs, settled, polls }));
 };
 
 interface AccessibilityReadinessActions {
@@ -2143,6 +2067,7 @@ function createObserveWaitResponse(
     waitMs: waitOutcome.waitMs,
     matchedElement: waitOutcome.matchedElement,
     candidates: waitOutcome.candidates,
+    ...(waitOutcome.containerFailure ? { containerFailure: waitOutcome.containerFailure } : {}),
   };
   return createObserveResponse(
     { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
@@ -2214,26 +2139,21 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
-      const waitOutcome =
-        !deviceRead && args.waitFor
-          ? await waitForObservation(
+      const waitOutcome = observeWaitRequested(deviceRead, args)
+        ? await waitForObservation(
+            ...observeWaitParameters(
               observeScreen,
-              { ...args.waitFor, settled: args.settled },
+              args,
               signal,
-              args.skipBackStack ?? false,
-              dependencies.timer ?? defaultTimer,
-              device.platform,
+              dependencies,
+              device,
               screenshotMode,
-              args.screenshotOptions,
-              ...displayWaitInventory(device),
-            )
-          : null;
+            ),
+          )
+        : null;
       const result = deviceRead
         ? await observeScreen.executeDeviceRead(signal, screenshotMode, encoding, {
-            requireFreshScreenshot:
-              args.crop !== undefined ||
-              args.screenshot === "settled" ||
-              args.includeScreenshotImage === true,
+            requireFreshScreenshot: requiresFreshObserveScreenshot(args),
             timeoutMs,
           })
         : waitOutcome
@@ -2241,6 +2161,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
           : await observeScreen.execute({
               perf: createGlobalPerformanceTracker(),
               skipWaitForFresh: true,
+              verifyCachedHierarchy: true,
               signal,
               screenshot: screenshotMode,
               screenshotOptions: args.screenshotOptions,
@@ -2251,16 +2172,16 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         await attachObserveCrop(args, result, device, dependencies.crop);
       }
 
-      if (!deviceRead && !aggregate) {
+      if (shouldPublishObservation(deviceRead, aggregate)) {
         attachSnapshotReference(device.deviceId, result);
       }
 
-      if (args.raw && !deviceRead) {
+      if (shouldAppendRawObserveHierarchy(args, deviceRead)) {
         await observeScreen.appendRawViewHierarchy(result, signal);
       }
 
       // The settled capture has resolved before either resource is announced.
-      if (!deviceRead && !aggregate) {
+      if (shouldPublishObservation(deviceRead, aggregate)) {
         await ResourceRegistry.notifyResourcesUpdated([
           RESOURCE_URIS.LATEST_OBSERVATION,
           RESOURCE_URIS.LATEST_SCREENSHOT,
@@ -2268,16 +2189,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       // Include setup timing if this is the first observe after accessibility service setup
-      const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId);
-      if (setupTiming) {
-        const setupEntries = Array.isArray(setupTiming) ? setupTiming : Object.values(setupTiming);
-        const observeEntries = result.perfTiming
-          ? Array.isArray(result.perfTiming)
-            ? result.perfTiming
-            : Object.values(result.perfTiming)
-          : [];
-        result.perfTiming = [...setupEntries, ...observeEntries];
-      }
+      consumeObserveSetupTiming(deviceRead, device, result, args.sessionUuid);
 
       // Record back stack information in navigation graph if available
       if (!deviceRead) {
@@ -2371,4 +2283,476 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     identifyInteractionsHandler,
     { defaultEnabled: true, debugOnly: true },
   );
+}
+
+function createSettledGate({
+  settled,
+  timer,
+  startTime,
+  timeoutMs,
+  signal,
+  pollingScreen,
+  skipBackStack,
+  platform,
+}: {
+  settled: SettledOptions | undefined;
+  timer: Timer;
+  startTime: number;
+  timeoutMs: number;
+  signal: AbortSignal | undefined;
+  pollingScreen: ObserveScreen;
+  skipBackStack: boolean;
+  platform: BootedDevice["platform"] | undefined;
+}) {
+  return async (
+    outcome: WaitForObservationOutcome,
+    matched: boolean,
+    recheck: ConditionPredicate = () => ({ matched: true }),
+  ): Promise<WaitForObservationOutcome> => {
+    if (!settled || !matched) {
+      return outcome;
+    }
+    let observation = outcome.observation;
+    // The floor must be in the device clock domain, like the `updatedAt` it is
+    // compared with (#9878, same class as #6430). The matched capture's own
+    // device stamp is inclusive, so it admits that capture (as the host
+    // `startTime` floor did with no skew) without rejecting every read of a
+    // still screen on a device whose clock trails the host. No device stamp
+    // (unavailable capture) means unfloored, as the #6430 loop does. iOS keeps
+    // the host `startTime` floor: the runner stamps `updatedAt` with its own
+    // `Date()`, which is the host clock for simulators but not clearly
+    // comparable for a physical device, so that path is unchanged.
+    const minTimestamp = settledGateFloor(observation, platform, startTime);
+    let matchedHash = hashHierarchyForSettle(observation.viewHierarchy);
+    let quietStart = timer.now();
+    let polls = outcome.polls;
+    let matchedElement = outcome.matchedElement;
+    let awaitedElement = outcome.awaitedElement;
+    let conditionMatched = true;
+    let lastEvaluation: ObserveConditionEvaluation = { matched: true };
+    while (timer.now() - startTime < timeoutMs) {
+      if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
+        return {
+          ...outcome,
+          observation,
+          matchedElement,
+          awaitedElement,
+          matched: true,
+          settled: true,
+          timedOut: false,
+          awaitTimeout: false,
+          waitMs: timer.now() - startTime,
+          awaitDuration: timer.now() - startTime,
+          polls,
+        };
+      }
+      await awaitWhileRequestIsLive(timer.sleep(WAIT_FOR_POLL_INTERVAL_MS), signal);
+      throwIfAborted(signal);
+      observation = await pollingScreen.execute({
+        timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
+        skipWaitForFresh: false,
+        minTimestamp,
+        signal,
+        skipBackStack: skipBackStack || undefined,
+        skipScreenshot: true,
+        skipAccessibilityAudit: true,
+        skipStaleWindowRecovery: true,
+      });
+      throwIfAborted(signal);
+      polls++;
+      const unavailableReason = waitCaptureUnavailableReason(observation);
+      const evaluation: ObserveConditionEvaluation = unavailableReason
+        ? { matched: false, diagnostic: unavailableReason }
+        : recheck(observation);
+      lastEvaluation = evaluation;
+      if (!evaluation.matched) {
+        conditionMatched = false;
+        matchedHash = null;
+        quietStart = timer.now();
+        matchedElement = undefined;
+        awaitedElement = undefined;
+        continue;
+      }
+      conditionMatched = true;
+      matchedElement = evaluation.matchedElement;
+      awaitedElement = evaluation.matchedElement;
+      const hash = hashHierarchyForSettle(observation.viewHierarchy);
+      if (hash === null || hash !== matchedHash) {
+        matchedHash = hash;
+        quietStart = timer.now();
+      }
+    }
+    const unavailableReason = waitCaptureUnavailableReason(observation);
+    return {
+      ...outcome,
+      observation,
+      matchedElement,
+      awaitedElement,
+      settled: false,
+      timedOut: true,
+      matched: conditionMatched,
+      ...containerFailureMetadata(!conditionMatched, lastEvaluation.containerFailure),
+      ...scopedWaitTimeoutMetadata(
+        { matched: conditionMatched, diagnostic: unavailableReason },
+        timer.now() - startTime,
+      ),
+      awaitTimeout: true,
+      waitMs: timer.now() - startTime,
+      awaitDuration: timer.now() - startTime,
+      polls,
+    };
+  };
+}
+
+function createWaitCompletion({
+  waitFor,
+  displayInventory,
+  postureEvidence,
+  activeDisplayEvidence,
+  screenshot,
+  observeScreen,
+  signal,
+  screenshotOptions,
+}: {
+  waitFor: WaitForWithSettled;
+  displayInventory: DisplayInventoryClassification;
+  postureEvidence: DisplayWaitTimeoutEvidence;
+  activeDisplayEvidence: DisplayWaitTimeoutEvidence;
+  screenshot: ScreenshotMode | undefined;
+  observeScreen: ObserveScreen;
+  signal: AbortSignal | undefined;
+  screenshotOptions: z.infer<typeof screenshotOptionsSchema> | undefined;
+}) {
+  return async (outcome: WaitForObservationOutcome): Promise<WaitForObservationOutcome> => {
+    if (outcome.timedOut && waitFor.posture !== undefined) {
+      outcome.timeoutReason = displayWaitTimeoutReason(
+        "posture",
+        waitFor.posture,
+        outcome.awaitDuration,
+        displayInventory,
+        postureEvidence,
+      );
+    } else if (outcome.timedOut && waitFor.activeDisplay !== undefined) {
+      outcome.timeoutReason = displayWaitTimeoutReason(
+        "activeDisplay",
+        waitFor.activeDisplay,
+        outcome.awaitDuration,
+        displayInventory,
+        activeDisplayEvidence,
+      );
+    }
+    const mode = resolveScreenshotMode(screenshot);
+    if (
+      mode === "settled" ||
+      (mode === "async" &&
+        (!shouldSkipObserveWaitForScreenshot() || serverConfig.isAccessibilityAuditEnabled()))
+    ) {
+      await observeScreen.captureScreenshot?.(
+        createGlobalPerformanceTracker(),
+        signal,
+        outcome.observation,
+        screenshot,
+        screenshotOptions,
+      );
+    } else {
+      await observeScreen.runAccessibilityAudit?.(
+        outcome.observation,
+        createGlobalPerformanceTracker(),
+      );
+    }
+    return outcome;
+  };
+}
+
+function createWaitObserver({
+  observeScreen,
+  queryOptions,
+  timeoutMs,
+  timer,
+  startTime,
+  signal,
+  skipPollingOverhead,
+  skipBackStack,
+  postureEvidence,
+  activeDisplayEvidence,
+}: {
+  observeScreen: ObserveScreen;
+  queryOptions: { text: string | undefined; elementId: string | undefined };
+  timeoutMs: number;
+  timer: Timer;
+  startTime: number;
+  signal: AbortSignal | undefined;
+  skipPollingOverhead: boolean;
+  skipBackStack: boolean;
+  postureEvidence: DisplayWaitTimeoutEvidence;
+  activeDisplayEvidence: DisplayWaitTimeoutEvidence;
+}) {
+  return async (minTimestamp: number) => {
+    const observation = await observeScreen.execute({
+      queryOptions,
+      timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
+      perf: createGlobalPerformanceTracker(),
+      skipWaitForFresh: false,
+      minTimestamp,
+      signal,
+      skipBackStack: skipPollingOverhead || skipBackStack,
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      skipStaleWindowRecovery: true,
+    });
+    recordDisplayWaitEvidence(observation, postureEvidence, activeDisplayEvidence);
+    return observation;
+  };
+}
+
+interface WaitOutcomeState {
+  observation: ObserveResult;
+  waitEvaluation: ReturnType<typeof evaluateWaitForObservation>;
+  waitMs: number;
+  settled: SettledOptions | undefined;
+  polls: number;
+}
+
+function matchedWaitOutcome({
+  observation,
+  waitEvaluation,
+  waitMs,
+  settled,
+  polls,
+}: WaitOutcomeState): WaitForObservationOutcome {
+  return {
+    observation,
+    awaitedElement: waitEvaluation.awaitedElement,
+    awaitDuration: waitMs,
+    awaitTimeout: false,
+    matched: true,
+    settled: settled ? true : undefined,
+    timedOut: false,
+    polls,
+    waitMs,
+    matchedElement: waitEvaluation.awaitedElement,
+  };
+}
+
+function timedOutWaitOutcome({
+  observation,
+  waitEvaluation,
+  waitMs,
+  settled,
+  polls,
+}: WaitOutcomeState): WaitForObservationOutcome {
+  return {
+    observation,
+    awaitedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
+    awaitDuration: waitMs,
+    awaitTimeout: true,
+    matched: waitEvaluation.matched,
+    settled: settled ? false : undefined,
+    timedOut: true,
+    polls,
+    waitMs,
+    matchedElement: waitEvaluation.matched ? waitEvaluation.awaitedElement : undefined,
+    ...scopedWaitTimeoutMetadata(waitEvaluation, waitMs),
+  };
+}
+
+function needsWaitHierarchyFreshness(
+  waitFor: WaitForWithSettled,
+  settled: SettledOptions | undefined,
+): boolean {
+  return (
+    waitFor.posture === undefined ||
+    hasElementPredicate(waitFor) ||
+    waitFor.absent !== undefined ||
+    waitFor.activeWindow !== undefined ||
+    settled !== undefined
+  );
+}
+
+function shouldRethrowWaitObservationError(
+  error: unknown,
+  waitFor: WaitForWithSettled,
+  signal: AbortSignal | undefined,
+): boolean | undefined {
+  return (
+    isDeviceLostError(error) ||
+    waitFor.posture === undefined ||
+    signal?.aborted ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function checkWaitDisplaySupport(
+  waitFor: WaitForWithSettled,
+  displayInventory: DisplayInventoryClassification,
+  displayPanels: readonly Pick<DisplayPanel, "key" | "role">[],
+): void {
+  if (
+    waitFor.activeDisplay !== undefined &&
+    !canDisplayExist(displayInventory, displayPanels, waitFor.activeDisplay)
+  ) {
+    throw new ActionableError(
+      "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and posture and retry.",
+    );
+  }
+  if (waitFor.posture !== undefined && displayInventory === "single") {
+    throw new ActionableError(
+      "Cannot wait for posture: this device has no display inventory. Select a device that reports display panels and posture and retry.",
+    );
+  }
+}
+
+function hasIosWaitPanels(
+  platform: BootedDevice["platform"] | undefined,
+  displayPanels: readonly Pick<DisplayPanel, "key" | "role">[],
+): boolean {
+  return platform === "ios" && displayPanels.length > 1;
+}
+
+function legacyWaitTimeout(waitFor: WaitForWithSettled): number {
+  return waitFor.timeout ?? waitFor.timeoutMs ?? DEFAULT_WAIT_FOR_TIMEOUT_MS;
+}
+
+function waitObservationQuery(waitFor: WaitForWithSettled) {
+  return {
+    text: waitFor.text ?? waitFor.textAny?.[0] ?? waitFor.contentDescription,
+    elementId: waitFor.elementId,
+  };
+}
+
+function waitTimestampFloor(
+  needsHierarchyFreshness: boolean,
+  baselineTimestamp: number | undefined,
+): number {
+  return needsHierarchyFreshness && baselineTimestamp !== undefined && baselineTimestamp > 0
+    ? baselineTimestamp + 1
+    : 0;
+}
+
+/** Settled-gate floor: iOS keeps the host `startTime`; otherwise the matched capture's own device stamp, else unfloored. */
+function settledGateFloor(
+  observation: ObserveResult,
+  platform: BootedDevice["platform"] | undefined,
+  startTime: number,
+): number {
+  return platform === "ios" ? startTime : (waitBaselineTimestamp(observation) ?? 0);
+}
+
+function waitBaselineTimestamp(observation: ObserveResult): number | undefined {
+  return waitCaptureUnavailableReason(observation)
+    ? undefined
+    : hierarchyUpdatedAtToMillis(observation.viewHierarchy);
+}
+
+function evaluateFreshWaitObservation({
+  minTimestamp,
+  observedTimestamp,
+  finder,
+  waitFor,
+  observation,
+  platform,
+  displayInventory,
+  modes,
+  iosMultiPanel,
+}: {
+  minTimestamp: number;
+  observedTimestamp: number | undefined;
+  finder: ElementResolver;
+  waitFor: WaitForWithSettled;
+  observation: ObserveResult;
+  platform: BootedDevice["platform"] | undefined;
+  displayInventory: DisplayInventoryClassification;
+  modes: Map<string, MatchMode>;
+  iosMultiPanel: boolean;
+}): ReturnType<typeof evaluateWaitForObservation> {
+  return minTimestamp > 0 && (observedTimestamp === undefined || observedTimestamp < minTimestamp)
+    ? {
+        matched: false,
+        awaitedElement: undefined,
+        diagnostic: waitCaptureUnavailableReason(observation),
+      }
+    : evaluateWaitForObservation(finder, waitFor, observation, platform, displayInventory, {
+        modes,
+        iosMultiPanel,
+      });
+}
+
+function attachObserveSetupTiming(
+  result: ObserveResult,
+  setupTiming: ReturnType<typeof consumeSetupTiming> | undefined,
+): void {
+  if (setupTiming) {
+    const setupEntries = Array.isArray(setupTiming) ? setupTiming : Object.values(setupTiming);
+    const observeEntries = result.perfTiming
+      ? Array.isArray(result.perfTiming)
+        ? result.perfTiming
+        : Object.values(result.perfTiming)
+      : [];
+    result.perfTiming = [...setupEntries, ...observeEntries];
+  }
+}
+
+function shouldPublishObservation(deviceRead: boolean, aggregate: boolean): boolean {
+  return !deviceRead && !aggregate;
+}
+
+function observeWaitRequested(
+  deviceRead: boolean,
+  args: ObserveArgs,
+): args is ObserveArgs & { waitFor: NonNullable<ObserveArgs["waitFor"]> } {
+  return Boolean(!deviceRead && args.waitFor);
+}
+
+function requiresFreshObserveScreenshot(args: ObserveArgs): boolean {
+  return (
+    args.crop !== undefined || args.screenshot === "settled" || args.includeScreenshotImage === true
+  );
+}
+
+function observeWaitParameters(
+  observeScreen: ObserveScreen,
+  args: ObserveArgs & { waitFor: NonNullable<ObserveArgs["waitFor"]> },
+  signal: AbortSignal | undefined,
+  dependencies: ObserveToolDependencies,
+  device: BootedDevice,
+  screenshotMode: ScreenshotMode | undefined,
+): Parameters<typeof waitForObservation> {
+  return [
+    observeScreen,
+    { ...args.waitFor, settled: args.settled },
+    signal,
+    args.skipBackStack ?? false,
+    dependencies.timer ?? defaultTimer,
+    device.platform,
+    screenshotMode,
+    args.screenshotOptions,
+    ...displayWaitInventory(device),
+  ];
+}
+
+function consumeObserveSetupTiming(
+  deviceRead: boolean,
+  device: BootedDevice,
+  result: ObserveResult,
+  sessionId?: string,
+): void {
+  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId, sessionId);
+  attachObserveSetupTiming(result, setupTiming);
+}
+
+function shouldAppendRawObserveHierarchy(args: ObserveArgs, deviceRead: boolean): boolean {
+  return Boolean(args.raw && !deviceRead);
+}
+
+function waitMatchReady(
+  waitEvaluation: ReturnType<typeof evaluateWaitForObservation>,
+  observation: ObserveResult,
+  settleReady: (observation: ObserveResult) => boolean,
+  resetMatchedHash: () => void,
+): boolean {
+  if (waitEvaluation.matched) {
+    return settleReady(observation);
+  }
+  resetMatchedHash();
+  return false;
 }

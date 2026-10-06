@@ -1,3 +1,4 @@
+import type { IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -127,6 +128,14 @@ const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
  * Function type that returns currently booted devices.
  * Injected for testability — avoids coupling to PlatformDeviceManagerFactory in tests.
  */
+/**
+ * Result of pushing the mock-rule set to the iOS SDK: `sent` means the message
+ * was written to the open connection; every other value means the rules were NOT
+ * delivered (no network_mocking capability, mocking disabled, send failed, or the
+ * capability probe was superseded by a newer foreground app).
+ */
+export type IosMockRuleSyncOutcome = "sent" | "noCapability" | "disabled" | "failed" | "superseded";
+
 export type BootedDeviceLister = () => Promise<BootedDevice[]>;
 
 export interface IosCtrlProxyClientOptions {
@@ -143,6 +152,18 @@ interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
   deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
   sdkEventIngestor?: IosSdkEventIngestor;
   retryExecutor?: RetryExecutor;
+}
+
+interface ScreenshotObservationStreamOptions {
+  screenshotBase64: string;
+  screenWidth: number;
+  screenHeight: number;
+  metadata?: ScreenshotMetadata;
+  captureSequence?: number;
+  coordinateSpace?: CoordinateSpace;
+  nativeScale?: number;
+  frameContext?: string;
+  rotation?: number;
 }
 
 /** Validate the platform version before it becomes a wire/cache key. */
@@ -299,6 +320,7 @@ import type {
   CtrlProxyNode,
   XCTestHierarchy,
   CtrlProxyHierarchyResponse,
+  CtrlProxySyncedHierarchy,
   CtrlProxyScreenshotResult,
   CtrlProxySwipeResult,
   CtrlProxyTapResult,
@@ -350,11 +372,14 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null>;
+  ): Promise<CtrlProxySyncedHierarchy | null>;
+  /** Force a real extraction only for cached tap resolution. */
+  requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -373,11 +398,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null>;
+  ): Promise<CtrlProxySyncedHierarchy | null>;
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult;
 
@@ -391,7 +412,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
-  ): Promise<CtrlProxySwipeResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   requestTapCoordinates(
     x: number,
@@ -401,7 +423,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyTapResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
 
   requestDrag(
     x1: number,
@@ -426,7 +449,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult>;
 
@@ -470,7 +495,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPressKeyResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
@@ -478,19 +505,24 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyClipboardResult>;
+    onDispatch?: () => void,
+  ): Promise<CtrlProxyClipboardResult & { acknowledged?: boolean }>;
 
   requestPressHome(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressHomeResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>>;
 
   requestPressBack(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressBackResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>>;
 
   requestShake(
     timeoutMs?: number,
@@ -503,14 +535,17 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressButtonResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>>;
 
   requestRecentApps(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyRecentAppsResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>>;
 
   requestRotate(
     orientation: string,
@@ -581,6 +616,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     ownerResourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyActionResult>;
 
   requestMultiFingerSwipe(
@@ -593,7 +630,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     fingerSpacing?: number,
-  ): Promise<CtrlProxySwipeResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   clearCache(): void;
 
@@ -1183,11 +1222,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs: number = 5000,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const deadline = this.timer.now() + Math.max(0, timeoutMs);
     return this.readForDiagnostics(
       (client) =>
@@ -1233,11 +1268,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /**
-   * Test-only accessor for the currently bound session (or null when unbound).
-   * Mirrors the Android client so isolation tests can pin the routing invariant.
+   * The session currently receiving this device's navigation events, or null when
+   * unbound. Mirrors the Android client.
    */
-  public getBoundSessionIdForTesting(): string | null {
+  public getBoundSessionId(): string | null {
     return this.boundSessionId;
+  }
+
+  /** Test-only alias kept for isolation tests that pin the routing invariant. */
+  public getBoundSessionIdForTesting(): string | null {
+    return this.getBoundSessionId();
   }
 
   /**
@@ -1744,12 +1784,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         logger.info(
           "[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change",
         );
-        const staleSocket = this.ws;
-        this.ws = null;
-        this.stopHealthCheck();
-        this.requestManager.cancelAll(new CtrlProxyServicePortChangedError());
-        staleSocket.removeAllListeners();
-        staleSocket.close();
+        // Same teardown a lost connection gets (pending requests rejected,
+        // per-connection caches/polling reset via onConnectionClosed, an error
+        // listener kept on the closing socket), minus auto-reconnect.
+        this.retireLiveSocket(new CtrlProxyServicePortChangedError());
       }
     }
   }
@@ -1982,24 +2020,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.startScreenshotBackoff();
   }
 
-  private syncNetworkMockRulesToDevice(): void {
+  private syncNetworkMockRulesToDevice(): IosMockRuleSyncOutcome {
     if (
       !this.hasSdkCapability("network_mocking") &&
       !this.isLegacySdkCommandSupported("network_mocking")
     ) {
-      return;
+      return "noCapability";
     }
     if (!serverConfig.isNetworkMockableEnabled()) {
-      return;
+      return "disabled";
     }
 
     try {
       // Always sync mock rules on reconnect. Sending an empty list clears
       // stale rules that may linger in the iOS SDK after a CtrlProxy restart.
-      const rules = buildNetworkMockRules(NetworkState.getInstance());
-      this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
+      const rules = buildNetworkMockRules(NetworkState.getInstance(), this.device.deviceId);
+      // sendMessage returns false (and logs) when the socket is not open.
+      return this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }))
+        ? "sent"
+        : "failed";
     } catch (e) {
       logger.warn(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
+      return "failed";
     }
   }
 
@@ -2017,7 +2059,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
     try {
-      const sim = NetworkState.getInstance().simulation;
+      const sim = NetworkState.getInstance().getSimulation(this.device.deviceId);
       if (sim === null) {
         this.sendMessage(
           JSON.stringify({
@@ -2250,11 +2292,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
-  public async syncNetworkMockRulesIfAvailable(): Promise<void> {
+  /**
+   * Push the current mock rules to the app, reporting whether they were actually
+   * delivered so `mockNetwork`/`clearMockNetwork` can warn like the Android path
+   * (#9918) instead of claiming a sync that never happened.
+   */
+  public async syncNetworkMockRulesIfAvailable(): Promise<IosMockRuleSyncOutcome> {
     try {
       if (await this.ensureSdkCapability("network_mocking")) {
-        this.syncNetworkMockRulesToDevice();
+        return this.syncNetworkMockRulesToDevice();
       }
+      return "noCapability";
     } catch (error) {
       if (!(error instanceof SdkCapabilityProbeSupersededError)) {
         throw error;
@@ -2262,7 +2310,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // Safe to swallow: the generation that superseded this probe runs its own
       // refreshSdkCapabilitiesAndSync, which re-syncs the mock rules to the device.
       logger.debug(`[IOSCtrlProxyClient] mock-rule sync skipped: ${error.message}`);
+      return "superseded";
     }
+  }
+
+  /**
+   * Push THIS device's mock rules and error simulation from the host store.
+   * Used after a session release clears the store (issue #10061); the
+   * reconnect path runs the same two syncs.
+   */
+  public async syncNetworkStateFromHost(): Promise<void> {
+    await this.syncNetworkMockRulesIfAvailable();
+    this.syncNetworkErrorSimulationToDevice();
   }
 
   private syncHierarchyCadenceToDevice(): void {
@@ -3505,8 +3564,26 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+  }
+
+  async requestHierarchySyncForTapRevalidation(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+    return this.hierarchy.requestHierarchySync(
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      false,
+      {
+        forceCapture: true,
+      },
+    );
   }
 
   async requestHierarchySyncWithoutObservationStreamPush(
@@ -3514,11 +3591,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
   }
 
@@ -3527,7 +3600,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering = false,
     signal?: AbortSignal,
     timeoutMs = 10000,
-  ): Promise<{ hierarchy: XCTestHierarchy; frameContext?: string } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const deadline = this.timer.now() + timeoutMs;
     await this.waitForPendingRequests(timeoutMs, signal);
     const remaining = deadline - this.timer.now();
@@ -3621,6 +3694,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegated Public Methods - Gestures
   // ===========================================================================
 
+  // oxlint-disable-next-line max-params -- Positional tap signature shared with the delegate.
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -3629,7 +3703,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyTapResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
     return this.gestures.requestTapCoordinates(
       x,
       y,
@@ -3638,6 +3713,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       perf,
       frameContext,
       signal,
+      onDispatch,
     );
   }
 
@@ -3651,7 +3727,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
-  ): Promise<CtrlProxySwipeResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
     return this.gestures.requestSwipe(
       x1,
       y1,
@@ -3661,7 +3738,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeoutMs,
       perf,
       contextOptions,
-      undefined,
+      onDispatch,
       signal,
     );
   }
@@ -3705,16 +3782,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    return this.gestures.requestPinchWithDispatch(
+      {
+        centerX,
+        centerY,
+        distanceStart,
+        distanceEnd,
+        rotationDegrees,
+        duration,
+        timeoutMs,
+        perf,
+        signal,
+      },
+      onDispatch,
     );
   }
 
@@ -3776,8 +3859,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     modifiers: InputKeyModifier[],
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPressKeyResult> {
-    return this.keyboard.requestPressKey(key, modifiers, timeoutMs, perf);
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressKeyResult>> {
+    return this.keyboard.requestPressKey(key, modifiers, timeoutMs, perf, signal, onDispatch);
   }
 
   // ===========================================================================
@@ -3788,17 +3873,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressHomeResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressHomeResult>> {
     this.invalidateSdkCapabilities();
-    return this.navigation.requestPressHome(timeoutMs, perf, frameContext);
+    return this.navigation.requestPressHome(timeoutMs, perf, frameContext, signal, onDispatch);
   }
 
   async requestPressBack(
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressBackResult> {
-    return this.navigation.requestPressBack(timeoutMs, perf, frameContext);
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressBackResult>> {
+    return this.navigation.requestPressBack(timeoutMs, perf, frameContext, signal, onDispatch);
   }
 
   async requestShake(
@@ -3814,11 +3903,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
-  ): Promise<CtrlProxyPressButtonResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPressButtonResult>> {
     if (button.toLowerCase() === "home" || button.toLowerCase() === "recent") {
       this.invalidateSdkCapabilities();
     }
-    return this.navigation.requestPressButton(button, timeoutMs, perf, frameContext);
+    return this.navigation.requestPressButton(
+      button,
+      timeoutMs,
+      perf,
+      frameContext,
+      signal,
+      onDispatch,
+    );
   }
 
   async requestRecentApps(
@@ -3826,9 +3924,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyRecentAppsResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyRecentAppsResult>> {
     this.invalidateSdkCapabilities();
-    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext, signal);
+    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext, signal, onDispatch);
   }
 
   async requestRotate(
@@ -3893,8 +3992,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyClipboardResult> {
-    return this.clipboard.requestClipboard(action, text, timeoutMs, perf, signal);
+    onDispatch?: () => void,
+  ): Promise<CtrlProxyClipboardResult & { acknowledged?: boolean }> {
+    return this.clipboard.requestClipboard(action, text, timeoutMs, perf, signal, onDispatch);
   }
 
   // ===========================================================================
@@ -3996,12 +4096,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
+  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
+  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
     text: string,
     occurrence: number,
     ownerResourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestActivateAccessibilityLink(
       text,
@@ -4009,6 +4113,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       ownerResourceId,
       timeoutMs,
       perf,
+      signal,
+      onDispatch,
     );
   }
 
@@ -4022,7 +4128,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     fingerSpacing?: number,
-  ): Promise<CtrlProxySwipeResult> {
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
     return this.gestures.requestMultiFingerSwipe(
       x1,
       y1,
@@ -4033,6 +4141,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeoutMs,
       perf,
       fingerSpacing,
+      signal,
+      onDispatch,
     );
   }
 
@@ -4336,17 +4446,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   /**
    * Push screenshot update to the device data stream for IDE plugins.
    */
-  private pushScreenshotToObservationStream(
-    screenshotBase64: string,
-    screenWidth: number,
-    screenHeight: number,
-    metadata: ScreenshotMetadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
-    captureSequence?: number,
-    coordinateSpace?: CoordinateSpace,
-    nativeScale?: number,
-    frameContext?: string,
-    rotation?: number,
-  ): void {
+  private pushScreenshotToObservationStream({
+    screenshotBase64,
+    screenWidth,
+    screenHeight,
+    metadata = IOS_CTRLPROXY_SCREENSHOT_METADATA,
+    captureSequence,
+    coordinateSpace,
+    nativeScale,
+    frameContext,
+    rotation,
+  }: ScreenshotObservationStreamOptions): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
@@ -4413,17 +4523,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           const binding = result.captureBinding;
           const screenWidth = binding?.width ?? this.screenGeometry.width ?? 1170;
           const screenHeight = binding?.height ?? this.screenGeometry.height ?? 2532;
-          this.pushScreenshotToObservationStream(
-            result.data,
+          this.pushScreenshotToObservationStream({
+            screenshotBase64: result.data,
             screenWidth,
             screenHeight,
-            result,
-            binding?.captureSequence,
-            binding?.coordinateSpace,
-            binding?.nativeScale,
-            result.frameContext,
-            result.rotation,
-          );
+            metadata: result,
+            captureSequence: binding?.captureSequence,
+            coordinateSpace: binding?.coordinateSpace,
+            nativeScale: binding?.nativeScale,
+            frameContext: result.frameContext,
+            rotation: result.rotation,
+          });
         },
         {
           getKeepAliveIntervalMs: () => {

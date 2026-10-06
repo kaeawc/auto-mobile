@@ -2,6 +2,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -113,6 +114,15 @@ describe("SessionHeartbeatMonitor", () => {
       await monitor.tick();
       expect(reaped).toEqual([]);
 
+      // Past the lease the session is suspect (#10051): held, not reaped.
+      timer.advanceTime(1);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(SUSPECT_GRACE_MS - 1);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
       timer.advanceTime(1);
       await monitor.tick();
       expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
@@ -143,7 +153,12 @@ describe("SessionHeartbeatMonitor", () => {
       await monitor.tick();
       expect(reaped).toEqual([]);
 
+      // The lease ends at `timeoutMs`; the grace window then runs to +SUSPECT_GRACE_MS.
       timer.advanceTime(1);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(SUSPECT_GRACE_MS);
       await monitor.tick();
       expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
     });
@@ -265,7 +280,7 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      timer.advanceTime(1_001);
+      timer.advanceTime(1_001 + SUSPECT_GRACE_MS);
       await monitor.tick();
 
       expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
@@ -447,7 +462,7 @@ describe("SessionHeartbeatMonitor", () => {
       timer.advanceTime(50);
       await sessionManager.createSession("newly-stale", "emulator-5556", "android", 60_000, 100);
       sessionManager.recordHeartbeat("newly-stale");
-      timer.advanceTime(51);
+      timer.advanceTime(51 + SUSPECT_GRACE_MS);
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
         sessionManager,

@@ -21,6 +21,7 @@ const CASES: Array<{ key: FeatureFlagKey; read: () => boolean }> = [
     read: () => serverConfig.isToolResultsNoStructuredContentEnabled(),
   },
   { key: "actions-diff-observe", read: () => serverConfig.isActionsDiffObserveEnabled() },
+  { key: "actions-compact-metadata", read: () => serverConfig.isActionsCompactMetadataEnabled() },
   { key: "actions-no-observe", read: () => serverConfig.isActionsNoObserveEnabled() },
 ];
 

@@ -15,10 +15,18 @@ import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
 import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
+import {
+  ActionableError,
+  type BootedDevice,
+  type DeviceInfo,
+  type Platform,
+} from "../../src/models";
+import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
+import type { DiscoverySource } from "../../src/utils/discoverySource";
+import { stableStringify } from "../../src/utils/stableStringify";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
@@ -2470,6 +2478,461 @@ describe("DeviceBootService", () => {
 
       expect(result.source).toBe("booted");
       expect(starts).toBe(2);
+    });
+  });
+
+  describe("iOS adoption after the shared lifecycle lease settles (#9902)", () => {
+    const udid = "UDID-X";
+    const iosImage: DeviceInfo = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: udid,
+      isRunning: false,
+      osVersion: "18.0",
+    };
+    const ownerHandle = { kill: () => true, pid: 42 } as ChildProcess;
+    const stableX = { kind: "stable", platform: "ios", stableId: udid } as const;
+
+    /**
+     * The cached simulator list (`getBootedDevices`) never shows a boot, which
+     * is what leaves the image looking stopped; the cache-bypassing detailed
+     * discovery sees the truth, and `startDevice` refuses a booted UDID exactly
+     * like `DeviceUtils.startDevice` does.
+     */
+    function setup() {
+      const devices = new FakeDeviceUtils();
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      const matcher = new FakeDeviceMatcher();
+      matcher.setImageResult(iosImage);
+      devices.setDeviceImages("ios", [iosImage]);
+      devices.setMockChildProcess(iosImage.name, ownerHandle);
+      const truthfulBooted = devices.getBootedDevices.bind(devices);
+      devices.getBootedDevices = async () => [];
+      let freshChecks = 0;
+      devices.getBootedDevicesDetailed = async (_platform, options) => {
+        if (options.bypassIosDeviceListCache === true) {
+          freshChecks++;
+        }
+        return {
+          devices: await truthfulBooted("ios"),
+          succeededPlatforms: new Set<Platform>(["ios"]),
+          succeededSources: new Set<DiscoverySource>(["ios-simulator"]),
+          discoveryErrors: {},
+        };
+      };
+      let starts = 0;
+      const originalStartDevice = devices.startDevice.bind(devices);
+      devices.startDevice = async (device, timeoutMs) => {
+        starts++;
+        if ((await truthfulBooted("ios")).some((booted) => booted.deviceId === device.deviceId)) {
+          throw new DeviceAlreadyRunningError(
+            `ios device '${device.name}' is already running`,
+            "ios",
+            device.deviceId,
+          );
+        }
+        return await originalStartDevice(device, timeoutMs);
+      };
+      // The first boot parks in readiness until the test releases it.
+      const ownerReadiness = Promise.withResolvers<void>();
+      const ownerReadinessStarted = Promise.withResolvers<void>();
+      let failOwnerBoot = false;
+      let gated = false;
+      const originalWaitForDeviceReady = devices.waitForDeviceReady.bind(devices);
+      devices.waitForDeviceReady = async (device, timeoutMs, handle, signal, options) => {
+        if (handle === ownerHandle && !gated) {
+          gated = true;
+          ownerReadinessStarted.resolve();
+          await ownerReadiness.promise;
+          if (failOwnerBoot) {
+            devices.setBootedDevices("ios", []);
+            throw new Error("owner boot failed");
+          }
+        }
+        return await originalWaitForDeviceReady(device, timeoutMs, handle, signal, options);
+      };
+      const newService = (lifecycleOptions?: Parameters<typeof service>[5]) =>
+        service(devices, matcher, undefined, timer, lifecycleCoordinator, lifecycleOptions);
+      return {
+        devices,
+        timer,
+        matcher,
+        lifecycleCoordinator,
+        newService,
+        starts: () => starts,
+        freshChecks: () => freshChecks,
+        ownerReadiness,
+        ownerReadinessStarted: ownerReadinessStarted.promise,
+        failOwner: () => {
+          failOwnerBoot = true;
+        },
+      };
+    }
+
+    async function flushMicrotasks(): Promise<void> {
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await Promise.resolve();
+      }
+    }
+
+    function expectNoLeasesHeld(lifecycleCoordinator: VirtualDeviceLifecycleCoordinator): void {
+      expect(lifecycleCoordinator.isReserved(stableX)).toBe(false);
+      expect(
+        lifecycleCoordinator.isReserved({
+          kind: "selector",
+          platform: "ios",
+          selector: stableStringify({}),
+        }),
+      ).toBe(false);
+    }
+
+    it("adopts the simulator a UDID acquisition is booting when a criteria-only acquisition resolves to it", async () => {
+      const test = setup();
+      // getApple({udid}) holds the stable lease through its boot and handoff.
+      const ownerLease = await test.lifecycleCoordinator.reserve(stableX, {
+        operation: "start",
+        deadlineMs: 600_000,
+      });
+      const owner = test
+        .newService({ lifecycleLease: ownerLease, allowExternalLeaseAdoptionRecheck: true })
+        .boot({ platform: "ios", deviceId: udid });
+      await test.ownerReadinessStarted;
+      let adopterSettled = false;
+      const adopter = test
+        .newService()
+        .boot({ platform: "ios" })
+        .finally(() => {
+          adopterSettled = true;
+        });
+
+      await flushMicrotasks();
+      expect(adopterSettled).toBe(false);
+      expect(test.starts()).toBe(1);
+
+      test.ownerReadiness.resolve();
+      const ownerResult = await owner;
+      ownerLease.release();
+      const adopted = await adopter;
+
+      expect(ownerResult.source).toBe("cold-boot");
+      expect(adopted.source).toBe("booted");
+      expect(adopted.device.deviceId).toBe(ownerResult.device.deviceId);
+      expect(test.starts()).toBe(1);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("adopts when two criteria-only acquisitions with different selectors resolve to one simulator", async () => {
+      const test = setup();
+      const owner = test.newService().boot({ platform: "ios", minOsVersion: "17.0" });
+      await test.ownerReadinessStarted;
+      let adopterSettled = false;
+      const adopter = test
+        .newService()
+        .boot({ platform: "ios" })
+        .finally(() => {
+          adopterSettled = true;
+        });
+
+      await flushMicrotasks();
+      expect(adopterSettled).toBe(false);
+
+      test.ownerReadiness.resolve();
+      const ownerResult = await owner;
+      const adopted = await adopter;
+
+      expect(ownerResult.source).toBe("cold-boot");
+      expect(adopted.source).toBe("booted");
+      expect(adopted.device.deviceId).toBe(udid);
+      expect(adopted.sourceImage).toEqual(iosImage);
+      expect(test.starts()).toBe(1);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("adopts a simulator whose boot finished before the later acquisition reached its lease", async () => {
+      const test = setup();
+      test.ownerReadiness.resolve();
+      const first = await test.newService().boot({ platform: "ios", minOsVersion: "17.0" });
+
+      const second = await test.newService().boot({ platform: "ios" });
+
+      expect(first.source).toBe("cold-boot");
+      expect(second.source).toBe("booted");
+      expect(second.device.deviceId).toBe(udid);
+      expect(test.starts()).toBe(1);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("adopts a simulator booted outside the daemon that the cached list still shows stopped", async () => {
+      const test = setup();
+      test.devices.setBootedDevices("ios", [
+        { name: iosImage.name, platform: "ios", deviceId: udid },
+      ]);
+
+      const result = await test.newService().boot({ platform: "ios" });
+
+      expect(result.source).toBe("booted");
+      expect(result.device.deviceId).toBe(udid);
+      expect(test.starts()).toBe(0);
+    });
+
+    it("cold-boots itself when the first boot fails and releases every lease", async () => {
+      const test = setup();
+      test.failOwner();
+      const owner = test
+        .newService()
+        .boot({ platform: "ios", minOsVersion: "17.0" })
+        .catch((error: unknown) => error);
+      await test.ownerReadinessStarted;
+      const adopter = test.newService().boot({ platform: "ios" });
+      await flushMicrotasks();
+
+      test.ownerReadiness.resolve();
+      expect(await owner).toBeInstanceOf(Error);
+      const result = await adopter;
+
+      expect(result.source).toBe("cold-boot");
+      expect(result.device.deviceId).toBe(udid);
+      expect(test.starts()).toBe(2);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("cancels promptly while queued behind the first boot and leaks no lease", async () => {
+      const test = setup();
+      const owner = test.newService().boot({ platform: "ios", minOsVersion: "17.0" });
+      await test.ownerReadinessStarted;
+      const controller = new AbortController();
+      const adopter = test
+        .newService()
+        .boot({ platform: "ios", signal: controller.signal })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      controller.abort();
+      const failure = await adopter;
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect(test.starts()).toBe(1);
+      test.ownerReadiness.resolve();
+      expect((await owner).source).toBe("cold-boot");
+      expect(test.starts()).toBe(1);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("still refuses an explicit cold boot of a simulator that is already booted", async () => {
+      const test = setup();
+      test.devices.setBootedDevices("ios", [
+        { name: iosImage.name, platform: "ios", deviceId: udid },
+      ]);
+
+      await expect(
+        test.newService().boot({ platform: "ios", preferRunning: false }),
+      ).rejects.toThrow("already running");
+      expect(test.freshChecks()).toBe(0);
+    });
+
+    it("asks only simctl, not devicectl, whether the simulator is already booted (#9920)", async () => {
+      const test = setup();
+      test.ownerReadiness.resolve();
+      const recheckOptions: unknown[] = [];
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      test.devices.getBootedDevicesDetailed = async (platform, options) => {
+        recheckOptions.push(options);
+        return await answer(platform, options);
+      };
+
+      await test.newService().boot({ platform: "ios" });
+
+      expect(recheckOptions).toHaveLength(1);
+      expect(recheckOptions[0]).toMatchObject({
+        bypassIosDeviceListCache: true,
+        skipPhysicalIosDiscovery: true,
+      });
+    });
+
+    it("falls through to the boot path when the simulator re-check never answers (#9920)", async () => {
+      const test = setup();
+      test.ownerReadiness.resolve();
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      let abandoned: AbortSignal | undefined;
+      test.devices.getBootedDevicesDetailed = async (platform, options) => {
+        if (options?.bypassIosDeviceListCache !== true) {
+          return await answer(platform, options);
+        }
+        abandoned = options.signal;
+        return await new Promise<never>(() => {});
+      };
+      const boot = test.newService().boot({ platform: "ios" });
+      await flushMicrotasks();
+      expect(test.starts()).toBe(0);
+
+      // The re-check's own bound, far inside the boot budget, releases the boot path.
+      test.timer.advanceTime(5_000);
+      const result = await boot;
+
+      expect(result.source).toBe("cold-boot");
+      expect(test.starts()).toBe(1);
+      expect(abandoned?.aborted).toBe(true);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    /** Hangs only the first cache-bypassing re-check; later reads answer truthfully. */
+    function hangFirstRecheck(test: ReturnType<typeof setup>) {
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      let hung = false;
+      test.devices.getBootedDevicesDetailed = async (platform, options) => {
+        if (options?.bypassIosDeviceListCache === true && !hung) {
+          hung = true;
+          return await new Promise<never>(() => {});
+        }
+        return await answer(platform, options);
+      };
+    }
+
+    function bootSiblingSimulator(test: ReturnType<typeof setup>) {
+      test.devices.setBootedDevices("ios", [
+        { name: iosImage.name, platform: "ios", deviceId: udid },
+      ]);
+    }
+
+    it("adopts the simulator a sibling booted when the slow re-check fell through to the boot path's already-running refusal", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+      hangFirstRecheck(test);
+      const boot = test.newService().boot({ platform: "ios" });
+      await flushMicrotasks();
+      expect(test.starts()).toBe(0);
+
+      test.timer.advanceTime(5_000);
+      const result = await boot;
+
+      expect(test.starts()).toBe(1);
+      expect(result.source).toBe("booted");
+      expect(result.device.deviceId).toBe(udid);
+      expect(result.sourceImage).toEqual(iosImage);
+      expect(result.processHandle).toBeUndefined();
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("adopts behind a recovery policy without letting it treat the sibling's boot as a failed one", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+      hangFirstRecheck(test);
+      const recoveryFailures: unknown[] = [];
+      const recovery: DeviceBootRecovery = {
+        run: async (_target, boot) => {
+          try {
+            return await boot();
+          } catch (error) {
+            recoveryFailures.push(error);
+            throw error;
+          }
+        },
+      };
+      const boot = service(
+        test.devices,
+        test.matcher,
+        recovery,
+        test.timer,
+        test.lifecycleCoordinator,
+      ).boot({ platform: "ios" });
+      await flushMicrotasks();
+
+      test.timer.advanceTime(5_000);
+
+      expect((await boot).source).toBe("booted");
+      expect(recoveryFailures).toEqual([]);
+    });
+
+    it("does not adopt on an untyped error that merely carries the already-running text", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+      hangFirstRecheck(test);
+      test.devices.startDevice = async (device) => {
+        throw new ActionableError(`ios device '${device.name}' is already running`);
+      };
+      const boot = test
+        .newService()
+        .boot({ platform: "ios" })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      test.timer.advanceTime(5_000);
+      const failure = await boot;
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect(failure).not.toBeInstanceOf(DeviceAlreadyRunningError);
+      expect((failure as Error).message).toContain("already running");
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("rethrows the already-running refusal when the follow-up read cannot find the simulator", async () => {
+      const test = setup();
+      hangFirstRecheck(test);
+      test.devices.startDevice = async (device) => {
+        throw new DeviceAlreadyRunningError(
+          `ios device '${device.name}' is already running`,
+          "ios",
+          device.deviceId,
+        );
+      };
+      const boot = test
+        .newService()
+        .boot({ platform: "ios" })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      test.timer.advanceTime(5_000);
+      const failure = await boot;
+
+      expect(failure).toBeInstanceOf(DeviceAlreadyRunningError);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("never adopts on the typed refusal of an explicit cold boot", async () => {
+      const test = setup();
+      bootSiblingSimulator(test);
+
+      const failure = await test
+        .newService()
+        .boot({ platform: "ios", preferRunning: false })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(DeviceAlreadyRunningError);
+      expect(test.freshChecks()).toBe(0);
+    });
+
+    it("still lets a caller abort cancel a hung simulator re-check", async () => {
+      const test = setup();
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      test.devices.getBootedDevicesDetailed = async (platform, options) =>
+        options?.bypassIosDeviceListCache === true
+          ? await new Promise<never>(() => {})
+          : await answer(platform, options);
+      const controller = new AbortController();
+      const boot = test
+        .newService()
+        .boot({ platform: "ios", signal: controller.signal })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      controller.abort();
+      test.timer.advanceTime(1_000);
+
+      expect(await boot).toBeInstanceOf(ActionableError);
+      expect(test.starts()).toBe(0);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("does not re-check or adopt when the caller neither owns nor was granted the lease", async () => {
+      const test = setup();
+      test.devices.setBootedDevices("ios", [
+        { name: iosImage.name, platform: "ios", deviceId: udid },
+      ]);
+      const unleased = test.newService({ onIdentityResolved: async () => {} });
+
+      await expect(unleased.boot({ platform: "ios" })).rejects.toThrow("already running");
+      expect(test.freshChecks()).toBe(0);
     });
   });
 

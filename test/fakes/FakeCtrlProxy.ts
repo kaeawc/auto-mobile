@@ -14,6 +14,16 @@ import {
   AccessibilityHierarchy,
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
+import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
+import type { OverlayAssetUpload } from "../../src/features/overlay/overlayAssets";
+import type { OverlayAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyOverlays";
+import type {
+  OverlayAssetResult,
+  OverlayDismiss,
+  OverlayEvent,
+  OverlayResult,
+  OverlayUpdate,
+} from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
@@ -88,6 +98,129 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     });
     onDispatch?.();
     return { success: true, totalTimeMs: duration };
+  }
+
+  private overlayResult: OverlayResult = { success: true };
+  private readonly overlayHistory: Array<
+    | {
+        method: "show";
+        spec: OverlaySpec;
+        timeoutMs: number;
+        perf?: PerformanceTracker;
+        displayId?: number;
+      }
+    | { method: "update"; update: OverlayUpdate; timeoutMs: number; perf?: PerformanceTracker }
+    | { method: "dismiss"; target: OverlayDismiss; timeoutMs: number; perf?: PerformanceTracker }
+  > = [];
+  private readonly overlayListeners = new Set<(event: OverlayEvent) => void>();
+
+  private readonly queuedOverlayResults: OverlayResult[] = [];
+
+  setOverlayResult(result: OverlayResult): void {
+    this.overlayResult = result;
+  }
+
+  /** Results returned, in order, by the next show/update requests before the default. */
+  queueOverlayResults(...results: OverlayResult[]): void {
+    this.queuedOverlayResults.push(...results);
+  }
+
+  private nextOverlayResult(): OverlayResult {
+    return this.queuedOverlayResults.shift() ?? this.overlayResult;
+  }
+
+  getOverlayHistory() {
+    return [...this.overlayHistory];
+  }
+
+  async requestShowOverlay(
+    spec: OverlaySpec,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+    displayId?: number,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestShowOverlay");
+    this.overlayHistory.push({
+      method: "show",
+      spec,
+      timeoutMs,
+      perf,
+      ...(displayId === undefined ? {} : { displayId }),
+    });
+    return this.nextOverlayResult();
+  }
+
+  async requestUpdateOverlay(
+    update: OverlayUpdate,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestUpdateOverlay");
+    this.overlayHistory.push({ method: "update", update, timeoutMs, perf });
+    return this.nextOverlayResult();
+  }
+
+  async requestDismissOverlay(
+    target: OverlayDismiss,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestDismissOverlay");
+    this.overlayHistory.push({ method: "dismiss", target, timeoutMs, perf });
+    return this.overlayResult;
+  }
+
+  private overlayAssetResult: OverlayAssetResult = {
+    success: true,
+    dispatched: true,
+    acknowledged: true,
+  };
+  private readonly overlayAssetHistory: Array<
+    | { method: "put"; asset: OverlayAssetUpload; options?: OverlayAssetRequestOptions }
+    | { method: "remove"; id: string; options?: OverlayAssetRequestOptions }
+  > = [];
+
+  setOverlayAssetResult(result: OverlayAssetResult): void {
+    this.overlayAssetResult = result;
+  }
+
+  getOverlayAssetHistory() {
+    return [...this.overlayAssetHistory];
+  }
+
+  async requestPutOverlayAsset(
+    asset: OverlayAssetUpload,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    this.checkFailure("requestPutOverlayAsset");
+    this.overlayAssetHistory.push({ method: "put", asset, options });
+    return this.overlayAssetResult;
+  }
+
+  async requestRemoveOverlayAsset(
+    id: string,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    this.checkFailure("requestRemoveOverlayAsset");
+    this.overlayAssetHistory.push({ method: "remove", id, options });
+    return this.overlayAssetResult;
+  }
+
+  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
+    this.overlayListeners.add(listener);
+    return () => {
+      this.overlayListeners.delete(listener);
+    };
+  }
+
+  getOverlayListenerCount(): number {
+    return this.overlayListeners.size;
+  }
+
+  emitOverlayEvent(event: OverlayEvent): void {
+    for (const listener of this.overlayListeners) {
+      listener(event);
+    }
   }
 
   // Session binding (matches CtrlProxyClient.bindSession for test compatibility)
@@ -734,6 +867,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
+  async requestInsertText(
+    text: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+    _options?: Parameters<AndroidCtrlProxy["requestInsertText"]>[3],
+    _transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
+  ): Promise<A11ySetTextResult> {
+    return this.requestSetText(text);
+  }
+
   async requestClearText(
     resourceId?: string,
     timeoutMs: number = 5000,
@@ -760,6 +903,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     action: "done" | "next" | "search" | "send" | "go" | "previous",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    _abortSignal?: AbortSignal,
+    _onDispatch?: () => void,
   ): Promise<A11yImeActionResult> {
     await this.applyDelay("imeAction");
 
@@ -893,13 +1038,20 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     text: string,
     occurrence: number,
     selector?: AccessibilityNodeSelector,
+    timeoutMs: number = 5000,
+    _perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yActionResult> {
+    signal?.throwIfAborted();
     await this.applyDelay("requestActivateAccessibilityLink");
     this.checkFailure("requestActivateAccessibilityLink");
+    signal?.throwIfAborted();
+    onDispatch?.();
     this.actionHistory.push({
       action: "activate_accessibility_link",
       resourceId: selector?.resourceId,
-      timeoutMs: 5000,
+      timeoutMs,
     });
     return {
       success: true,

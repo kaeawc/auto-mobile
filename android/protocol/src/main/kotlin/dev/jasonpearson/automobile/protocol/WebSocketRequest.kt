@@ -427,6 +427,63 @@ data class AddHighlight(
   val shape: HighlightShape? = null,
 ) : WebSocketRequest()
 
+// Agent-authored overlays
+/**
+ * [displayId] is the Android logical display, with the same meaning as the gesture requests'
+ * `displayId`. Absent/null means the service's default display (the pre-#9308 behaviour); hosts
+ * only send it to a device advertising `overlay_display_id_v1`, because an older device would
+ * ignore the unknown field and silently show the overlay on the wrong display.
+ */
+@Serializable
+@SerialName("show_overlay")
+data class ShowOverlay(
+  override val requestId: String? = null,
+  val spec: OverlaySpec,
+  val displayId: Int? = null,
+) : WebSocketRequest()
+
+/** Replacement spec.id must equal id; the host rejects mismatches before sending. */
+@Serializable
+@SerialName("update_overlay")
+data class UpdateOverlay(
+  override val requestId: String? = null,
+  val id: String,
+  val spec: OverlaySpec? = null,
+  val state: Map<String, OverlayScalar>? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("dismiss_overlay")
+data class DismissOverlay(
+  override val requestId: String? = null,
+  val id: String? = null,
+  val all: Boolean? = null,
+) : WebSocketRequest()
+
+/**
+ * Uploads one overlay image asset, replacing any asset with the same [id]. [dataBase64] is the
+ * encoded image (PNG, JPEG or WebP) in standard base64 without line breaks. Answered by one
+ * `overlay_result`. [toString] never renders the payload, so a stray log line cannot dump bytes.
+ */
+@Serializable
+@SerialName("put_overlay_asset")
+data class PutOverlayAsset(
+  override val requestId: String? = null,
+  val id: String,
+  val mimeType: String,
+  val dataBase64: String,
+) : WebSocketRequest() {
+  override fun toString(): String =
+    "PutOverlayAsset(requestId=$requestId, id=$id, mimeType=$mimeType, " +
+      "dataBase64=<${dataBase64.length} chars>)"
+}
+
+/** Removes one overlay asset. Idempotent: removing an unknown [id] still succeeds. */
+@Serializable
+@SerialName("remove_overlay_asset")
+data class RemoveOverlayAsset(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
 // =============================================================================
 // Storage Requests
 // =============================================================================

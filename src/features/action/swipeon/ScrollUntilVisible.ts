@@ -1,3 +1,4 @@
+import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { StaleDisplayError, type StaleDisplayDetails } from "../../../models/StaleDisplayError";
@@ -60,6 +61,7 @@ import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/s
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { annotateSearchCancellation, type SwipeCounter } from "./searchCancellation";
 import { DefaultObserveElementCollector } from "../../observe/ObserveElementCollector";
 import {
   getImeOccluderForElement,
@@ -126,7 +128,7 @@ interface ScrollUntilVisibleDependencies {
 
 /** Display targeting supplies transport only; matching and scroll recovery stay shared. */
 export interface ScrollUntilVisibleStrategy {
-  observe: () => Promise<ObserveResult>;
+  observe: (options?: { freshness: "fresh"; timeoutMs: number }) => Promise<ObserveResult>;
   swipe: (options: {
     x1: number;
     y1: number;
@@ -137,6 +139,11 @@ export interface ScrollUntilVisibleStrategy {
     holdDurationMs?: number;
     onSearchFallback?: () => void;
     searchDragState?: AndroidSearchDragState;
+    /**
+     * Called when the gesture is handed to the device, never before the strategy's own
+     * pre-send checks; a strategy that cannot see its send point calls it as it begins the send.
+     */
+    onDispatched?: () => void;
   }) => Promise<SwipeOnResult & { observation: ObserveResult }>;
 }
 
@@ -155,6 +162,7 @@ interface SearchSwipeDispatchOptions {
   signal?: AbortSignal;
   onSearchFallback: () => void;
   searchDragState: AndroidSearchDragState;
+  swipes: SwipeCounter;
 }
 
 export class ScrollUntilVisible {
@@ -219,24 +227,43 @@ export class ScrollUntilVisible {
     return this.executeWithStrategy({ options, progress, perf, signal });
   }
 
-  async executeWithStrategy({
-    options,
-    progress,
-    perf = new NoOpPerformanceTracker(),
-    signal,
-    strategy,
-  }: {
+  async executeWithStrategy(args: {
     options: SwipeOnResolvedOptions;
     progress?: ProgressCallback;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
     strategy?: ScrollUntilVisibleStrategy;
   }): Promise<SwipeOnResult> {
+    const swipes: SwipeCounter = { dispatched: 0 };
+    try {
+      return await withSwipeObservationReadScope(() => this.executeSearch({ ...args, swipes }));
+    } catch (error) {
+      // A search cancelled after it moved the screen must say so (#10151).
+      throw annotateSearchCancellation(error, args.signal, swipes);
+    }
+  }
+
+  private async executeSearch({
+    options,
+    progress,
+    perf = new NoOpPerformanceTracker(),
+    signal,
+    strategy,
+    swipes,
+  }: {
+    options: SwipeOnResolvedOptions;
+    progress?: ProgressCallback;
+    perf?: PerformanceTracker;
+    signal?: AbortSignal;
+    strategy?: ScrollUntilVisibleStrategy;
+    swipes: SwipeCounter;
+  }): Promise<SwipeOnResult> {
     const observe =
       strategy?.observe ??
-      (() =>
+      ((captureOptions?: { freshness: "fresh"; timeoutMs: number }) =>
         this.deps.observeScreen.execute({
-          freshness: "cached-ok",
+          freshness: captureOptions?.freshness ?? "cached-ok",
+          timeoutMs: captureOptions?.timeoutMs,
           skipScreenshot: true,
           skipAccessibilityAudit: true,
           signal,
@@ -248,7 +275,14 @@ export class ScrollUntilVisible {
 
     const observationFence = strategy ? undefined : this.deps.captureDisplayFence?.();
     // Get initial observation
-    let lastObservation = await perf.track("initialObserve", () => observe());
+    let lastObservation = await perf.track("initialObserve", async () =>
+      freshSwipeHierarchy(
+        await observe(),
+        (timeoutMs) => observe({ freshness: "fresh", timeoutMs }),
+        this.deps.timer,
+        signal,
+      ),
+    );
     throwIfAborted(signal);
     if (!lastObservation.viewHierarchy || !lastObservation.screenSize) {
       throw new Error("Failed to get initial observation for scrolling until visible.");
@@ -284,6 +318,7 @@ export class ScrollUntilVisible {
     };
 
     const maxTime = options.lookFor!.maxTime ?? 15000;
+    const maxSwipes = options.lookFor!.maxSwipes ?? Number.POSITIVE_INFINITY;
     const startTime = this.deps.timer.now();
     let foundElement: Element | null = null;
     let scrollIteration = 0;
@@ -382,7 +417,7 @@ export class ScrollUntilVisible {
     const reverseOptions = { ...lookForOptions, speed: "slow" as const };
 
     // Scroll until element is found
-    while (this.deps.timer.now() - startTime < maxTime) {
+    while (this.deps.timer.now() - startTime < maxTime && scrollIteration < maxSwipes) {
       throwIfAborted(signal);
       scrollIteration++;
       logger.info(
@@ -447,6 +482,7 @@ export class ScrollUntilVisible {
         signal,
         onSearchFallback,
         searchDragState,
+        swipes,
       });
       throwIfAborted(signal);
 
@@ -468,6 +504,18 @@ export class ScrollUntilVisible {
           interruptedDisplay,
         );
         break;
+      }
+
+      if (
+        !swipeResult.success &&
+        swipeResult.outcomeIndeterminate &&
+        this.deps.device.platform === "ios"
+      ) {
+        // The swipe was dispatched but unconfirmed: report it, never `found: false`.
+        perf.end();
+        throw new ActionableError(
+          `${swipeResult.error ?? "iOS scroll swipe outcome is indeterminate."} The scroll may have happened. Observe before retrying.`,
+        );
       }
 
       if (!swipeResult.success && this.deps.device.platform === "ios") {
@@ -573,6 +621,7 @@ export class ScrollUntilVisible {
             signal,
             onSearchFallback,
             searchDragState,
+            swipes,
           },
           onRecovery: () => {
             recoveryAttempted = true;
@@ -649,15 +698,14 @@ export class ScrollUntilVisible {
         );
 
         if (unchangedScrollCount >= maxUnchangedScrolls) {
-          if (reverseMode) {
-            // Reverse also exhausted — element truly not found
-            perf.end();
-            const elapsed = this.deps.timer.now() - startTime;
-            throw new ActionableError(
-              `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
-                `${target} not found${scopeDescription} after ${scrollIteration} iterations (${elapsed}ms).`,
-            );
-          }
+          this.checkReverseExhausted(reverseMode, {
+            perf,
+            startTime,
+            maxUnchangedScrolls,
+            target,
+            scopeDescription,
+            scrollIteration,
+          });
           // Switch to reverse half-screen recovery
           reverseMode = true;
           unchangedScrollCount = 0;
@@ -711,6 +759,30 @@ export class ScrollUntilVisible {
       ...(accessibilityWarnings.size ? { warnings: [...accessibilityWarnings] } : {}),
       ...(interruptedDisplay ? { staleDisplay: interruptedDisplay } : {}),
     };
+  }
+
+  private checkReverseExhausted(
+    reverseMode: boolean,
+    context: {
+      perf: PerformanceTracker;
+      startTime: number;
+      maxUnchangedScrolls: number;
+      target: string;
+      scopeDescription: string;
+      scrollIteration: number;
+    },
+  ): void {
+    const { perf, startTime, maxUnchangedScrolls, target, scopeDescription, scrollIteration } =
+      context;
+    if (reverseMode) {
+      // Reverse also exhausted — element truly not found
+      perf.end();
+      const elapsed = this.deps.timer.now() - startTime;
+      throw new ActionableError(
+        `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
+          `${target} not found${scopeDescription} after ${scrollIteration} iterations (${elapsed}ms).`,
+      );
+    }
   }
 
   private resolveLookForOptions(
@@ -889,6 +961,7 @@ export class ScrollUntilVisible {
     signal,
     onSearchFallback,
     searchDragState,
+    swipes,
   }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
     const { startX, startY, endX, endY } = coordinates;
     const activeDuration = duration;
@@ -906,6 +979,19 @@ export class ScrollUntilVisible {
 
     // Execute swipe with observedInteraction
     let iosDispatchTimestamp: number | undefined;
+    if (strategy) {
+      // The caller's loop and recoveries check the signal, but not between that check and here.
+      throwIfAborted(signal);
+    }
+    // The strategy sits behind observedInteraction's own awaits and abort checks, so a swipe is
+    // counted only when it reports the gesture reached the device, once per swipe.
+    let counted = false;
+    const onDispatched = () => {
+      if (!counted) {
+        counted = true;
+        swipes.dispatched++;
+      }
+    };
     return strategy
       ? await strategy.swipe({
           x1: Math.floor(startX),
@@ -917,6 +1003,7 @@ export class ScrollUntilVisible {
           onSearchFallback,
           searchDragState,
           previousObservation: lastObservation,
+          onDispatched,
         })
       : await this.deps.observedInteraction(
           async (_observeResult, fence) => {
@@ -927,6 +1014,7 @@ export class ScrollUntilVisible {
               },
             };
             throwIfAborted(signal);
+            swipes.dispatched++;
             const swipeRunner =
               this.deps.device.platform === "ios"
                 ? this.deps.voiceOverExecutor
@@ -948,7 +1036,11 @@ export class ScrollUntilVisible {
               boomerang,
               signal,
             );
-            if (this.deps.device.platform === "ios" && result.success) {
+            // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+            if (
+              this.deps.device.platform === "ios" &&
+              (result.success || result.outcomeIndeterminate)
+            ) {
               iosDispatchTimestamp = this.deps.timer.now();
               IOSCtrlProxyClient.getExistingInstance(this.deps.device.deviceId)?.invalidateCache();
             }

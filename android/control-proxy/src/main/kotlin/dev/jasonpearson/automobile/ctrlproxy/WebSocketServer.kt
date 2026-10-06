@@ -22,6 +22,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -58,6 +59,8 @@ class WebSocketServer(
   private val sendTimeoutMs: Long = OUTBOUND_SEND_TIMEOUT_MS,
   /** Non-blocking queue cleanup, invoked after ownership removal outside the connections lock. */
   private val onClientDisconnected: (ConnectedClient) -> Unit = {},
+  /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
+  private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -99,6 +102,31 @@ class WebSocketServer(
         // Expected for genuinely malformed payloads; correlation is best-effort by design.
         null
       }
+
+    /** Requests that carry image bytes; their frames and decoder snippets are never logged. */
+    private val overlayAssetRequestTypes = setOf("put_overlay_asset", "remove_overlay_asset")
+
+    /**
+     * True for an asset request, including one too broken for its `type` to parse: the raw text
+     * still names the type, and such a frame can be as full of image bytes as a well-formed one.
+     */
+    private fun isOverlayAssetFrame(raw: String, type: String?): Boolean =
+      if (type != null) type in overlayAssetRequestTypes
+      else overlayAssetRequestTypes.any { raw.contains("\"$it\"") }
+
+    /**
+     * kotlinx.serialization appends the input around the failing offset after "JSON input:"; for an
+     * asset frame that is image data, so only the diagnosis before it is returned.
+     */
+    private fun withoutInputSnippet(cause: String): String =
+      cause.substringBefore(JSON_INPUT_MARKER).trim().take(MAX_DIAGNOSIS_LENGTH)
+
+    private const val JSON_INPUT_MARKER = "JSON input:"
+    private const val MAX_DIAGNOSIS_LENGTH = 200
+
+    /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
+    private val overlayRequestTypes =
+      setOf("show_overlay", "update_overlay", "dismiss_overlay") + overlayAssetRequestTypes
 
     /** Log only the protocol type and length, never free-form request fields. */
     internal fun inboundFrameLogLine(connectionId: Int, raw: String): String {
@@ -162,6 +190,7 @@ class WebSocketServer(
         is CurrentFocusResult -> response.requestId
         is TraversalOrderResult -> response.requestId
         is HighlightResponse -> response.requestId
+        is OverlayResult -> response.requestId
         is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
         is PreferenceFilesResult -> response.requestId
         is PreferencesResult -> response.requestId
@@ -177,6 +206,7 @@ class WebSocketServer(
         is HierarchyUpdateEvent -> response.requestId
         // Other event/status frames never echo a requestId.
         is ConnectedResponse,
+        is OverlayEvent,
         is InteractionEvent,
         is PackageEvent,
         is NavigationEventResponse,
@@ -192,6 +222,13 @@ class WebSocketServer(
         is AnrEvent -> null
       }
 
+    /** The sealed wire serializer is the single source of registered top-level request names. */
+    private val registeredRequestTypes: List<String> = run {
+      val descriptor = ProtocolRequest.serializer().descriptor
+      val subtypes = descriptor.getElementDescriptor(descriptor.getElementIndex("value"))
+      List(subtypes.elementsCount) { subtypes.getElementDescriptor(it).serialName }
+    }
+
     /**
      * Maps an inbound-decode failure into an actionable, legible wire message. An unknown/
      * unregistered command type surfaces "Unknown command type: <type>" (symmetric to the iOS
@@ -204,14 +241,9 @@ class WebSocketServer(
         throwable.message?.takeIf { it.isNotBlank() }
           ?: throwable::class.simpleName
           ?: "unknown error"
-      val looksLikeUnknownType =
-        cause.contains("polymorphic", ignoreCase = true) ||
-          cause.contains("class discriminator", ignoreCase = true)
-      if (looksLikeUnknownType) {
-        extractStringField(raw, "type")?.let { type ->
-          return "Unknown command type: $type"
-        }
-      }
+      val type = extractStringField(raw, "type")
+      if (isOverlayAssetFrame(raw, type)) return "Malformed request: ${withoutInputSnippet(cause)}"
+      if (type != null && type !in registeredRequestTypes) return "Unknown command type: $type"
       val looksLikeOutOfRangeNumber =
         cause.contains("special floating-point value", ignoreCase = true) ||
           cause.contains("non-finite floating point", ignoreCase = true) ||
@@ -219,23 +251,50 @@ class WebSocketServer(
       if (looksLikeOutOfRangeNumber) {
         return "Malformed request: a numeric value is out of range or not representable."
       }
+      if (
+        type in listOf("show_overlay", "update_overlay", "dismiss_overlay") &&
+          cause.contains("Class discriminator was missing") &&
+          !cause.contains("at path:")
+      ) {
+        decodeFailurePath(raw, cause)?.let {
+          return "Malformed request: $cause at path: $it"
+        }
+      }
       return "Malformed request: $cause"
     }
+
+    // kotlinx omits the path for a missing discriminator; match its input object structurally.
+    private fun decodeFailurePath(raw: String, cause: String): String? = runCatching {
+      val target =
+        lenientJson.parseToJsonElement(cause.substringAfter("JSON input:", "").trim())
+          as? JsonObject ?: return@runCatching null
+      fun findPath(value: JsonElement, path: String): String? =
+        when {
+          value == target -> path
+          value is JsonObject ->
+            value.entries.firstNotNullOfOrNull { (key, child) -> findPath(child, "$path.$key") }
+          value is JsonArray ->
+            value.withIndex().firstNotNullOfOrNull { (index, child) ->
+              findPath(child, "$path[$index]")
+            }
+          else -> null
+        }
+      findPath(lenientJson.parseToJsonElement(raw), "$")
+    }
+      .getOrNull()
   }
 
   internal fun supportedCommands(): List<String> = buildList {
     // The handler dispatches exhaustively over this sealed hierarchy, so its serializer is the
     // source of truth for every request type accepted by the wire decoder.
-    val requestDescriptor = ProtocolRequest.serializer().descriptor
-    val subtypeDescriptor =
-      requestDescriptor.getElementDescriptor(requestDescriptor.getElementIndex("value"))
-    for (index in 0 until subtypeDescriptor.elementsCount) {
-      add(subtypeDescriptor.getElementDescriptor(index).serialName)
-    }
+    addAll(registeredRequestTypes)
     add("node_selector_actions")
     add("ime_key_events_v1")
     add("tap_double_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
+    // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
+    // decoder ignores unknown fields, so the overlay would silently land on the default display.
+    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("overlay_display_id_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
@@ -264,7 +323,10 @@ class WebSocketServer(
     ignoreUnknownKeys = true
   }
 
-  /** JSON configuration for protocol sealed classes with polymorphic serialization */
+  /**
+   * Host validation rejects unknown overlay fields and enforces limits. Device decoding remains
+   * lenient for compatibility; device re-validation belongs to #9297/#9299.
+   */
   private val protocolJson = Json {
     prettyPrint = false
     ignoreUnknownKeys = true
@@ -368,12 +430,18 @@ class WebSocketServer(
     disconnectClient(client, "Connection closed", CloseReason.Codes.NORMAL)
   }
 
+  private data class DisconnectSnapshot(
+    val discarded: Int,
+    val remaining: Int,
+    val observerSession: Int,
+  )
+
   private fun disconnectClient(
     client: ConnectedClient,
     reason: String,
     code: CloseReason.Codes = CloseReason.Codes.TRY_AGAIN_LATER,
   ) {
-    val discarded =
+    val snapshot =
       synchronized(connections) {
         if (!connections.remove(client)) null
         else {
@@ -386,14 +454,15 @@ class WebSocketServer(
           client.pendingHierarchy = null
           client.outgoing.cancel()
           client.ready.cancel()
-          count
+          DisconnectSnapshot(count, connections.size, observerSessionGen)
         }
       }
-    if (discarded == null) return
+    if (snapshot == null) return
     onClientDisconnected(client)
+    onClientCountChanged(snapshot.remaining, snapshot.observerSession)
     Log.w(
       TAG,
-      "Disconnecting client #${client.id}: $reason; discarded $discarded queued frames; shed ${client.droppedCount} frames total",
+      "Disconnecting client #${client.id}: $reason; discarded ${snapshot.discarded} queued frames; shed ${client.droppedCount} frames total",
     )
     client.sender.cancel()
     scope.launch {
@@ -861,13 +930,13 @@ class WebSocketServer(
     if (overflowed) disconnectClient(connection, "Outgoing buffer full")
   }
 
-  /** Send a typed error response only to the client whose inbound message failed. */
+  /** Send a typed terminal failure only to the client whose inbound message failed. */
   private suspend fun sendErrorResponse(
     connection: ConnectedClient,
-    response: ErrorResponse,
+    response: WebSocketResponse,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    response.requestId?.let { requestId ->
+    correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }
     }
     sendToClient(connection, message)
@@ -948,7 +1017,11 @@ class WebSocketServer(
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {
-      Log.w(TAG, "No message handler configured; ignoring inbound message: $message")
+      // Length only: an inbound frame can carry overlay asset bytes.
+      Log.w(
+        TAG,
+        "No message handler configured; ignoring inbound message (${message.length} chars)",
+      )
       return
     }
 
@@ -964,13 +1037,32 @@ class WebSocketServer(
         // Surface a structured error (correlated by best-effort requestId) rather than swallowing
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
         // #2985.
-        Log.w(TAG, "Failed to parse client message: $message", e)
+        val type = extractStringField(message, "type")
+        if (isOverlayAssetFrame(message, type)) {
+          // Never echo the frame or the decoder's input snippet: it holds asset bytes.
+          Log.w(
+            TAG,
+            "Failed to parse ${type ?: "asset request"} (${message.length} chars): " +
+              e.javaClass.simpleName,
+          )
+        } else {
+          Log.w(TAG, "Failed to parse client message: $message", e)
+        }
         sendErrorResponse(
           connection,
-          CorrelatedErrorReporter.frame(
-            requestId = extractRequestId(message),
-            errorMessage = describeDecodeFailure(message, e),
-          ),
+          if (type in overlayRequestTypes) {
+            OverlayResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = extractRequestId(message),
+              success = false,
+              error = describeDecodeFailure(message, e),
+            )
+          } else {
+            CorrelatedErrorReporter.frame(
+              requestId = extractRequestId(message),
+              errorMessage = describeDecodeFailure(message, e),
+            )
+          },
         )
         return
       }

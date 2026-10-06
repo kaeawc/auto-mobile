@@ -14,6 +14,9 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 
 export const android: BootedDevice = {
   deviceId: "emulator-5554",
@@ -87,7 +90,7 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
   return { create: () => catalogAdb };
 }
 
-export function createSendKeysHarness(device: BootedDevice) {
+export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObserver = observer) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
     { stdout: priorImeId, stderr: "" },
@@ -133,17 +136,135 @@ export function createSendKeysHarness(device: BootedDevice) {
   const adbFactory = createAdbFactory(adb, deliveries);
   return {
     adb,
+    adbFactory,
     client,
     inserted,
     replaced,
     committed,
     clientCalls,
     deliveries,
-    executor: new DefaultSendKeysCommandExecutor(device, adbFactory, observer, {
+    executor: new DefaultSendKeysCommandExecutor(device, adbFactory, observe, {
+      timer: new FakeTimer(),
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
     }),
   };
+}
+
+/** Count both execute-owned and terminal captures, like RealObserveScreen. */
+export function createSendKeysCaptureHarness(
+  scenario: "focused" | "imeAction" | "fallback" | "failure" = "focused",
+) {
+  const h = createSendKeysHarness(android);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const events: string[] = [];
+  const reads: ObserveScreenExecuteOptions[] = [];
+  const captures: ObserveResult[] = [];
+  const transitions = new FakeDisplayTransitionReader();
+  let value = "";
+  const frame = (id: string, updatedAt: number): ObserveResult => ({
+    deviceId: android.deviceId,
+    observationId: id,
+    platform: "android",
+    updatedAt,
+    screenSize: { width: 100, height: 100 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    displayRevision: transitions.fullRevision,
+    activeWindow: { appId: "com.example.app" },
+    viewHierarchy: {
+      updatedAt,
+      packageName: "com.example.app",
+      hierarchy: {
+        node: {
+          $: {
+            focused: "true",
+            class: "android.widget.EditText",
+            text:
+              scenario === "fallback"
+                ? h.deliveries.map((delivery) => delivery.text).join("")
+                : value,
+          },
+        },
+      },
+    },
+  });
+  const observer = {
+    async execute(options: ObserveScreenExecuteOptions = {}) {
+      reads.push(options);
+      const observation = frame(`read-${reads.length}`, reads.length);
+      events.push(`read:${observation.observationId}`);
+      if (!options.skipScreenshot) {
+        await observer.captureScreenshot(undefined, options.signal, observation);
+      }
+      return observation;
+    },
+    async captureScreenshot(_perf?: unknown, _signal?: AbortSignal, observation?: ObserveResult) {
+      if (!observation) {
+        throw new Error("Missing capture observation");
+      }
+      events.push(`capture:${observation.observationId}`);
+      captures.push(observation);
+      observation.screenshotCaptureAttempted = true;
+      observation.screenshotPath = `${observation.observationId}.png`;
+      observation.screenshotCapturedAt = 123;
+    },
+  };
+  const commit = h.client.commitViaIme;
+  h.client.commitViaIme = async (...args) => {
+    events.push("commit");
+    const result = await commit(...args);
+    // An acknowledged commit whose read-back never changes is a typed failure.
+    if (scenario !== "failure") {
+      value = args[0];
+    }
+    return result;
+  };
+  h.client.ime = async () => {
+    events.push("ime:done");
+    return { success: true };
+  };
+  if (scenario === "fallback") {
+    h.client.supportsImeCommit = async () => false;
+  }
+  const insert = h.client.insert;
+  h.client.insert = async (...args) => {
+    events.push("insert:fallback");
+    value = args[0];
+    return insert(...args);
+  };
+  const action = new SendKeys(android, h.adbFactory, {
+    observer,
+    timer,
+    timestampProvider: { now: async () => 1 },
+    lastRenderedObservation: () => frame("before", 0),
+    displayTransitions: transitions,
+    executor: new DefaultSendKeysCommandExecutor(android, h.adbFactory, observer, {
+      textClient: h.client,
+      inputKey: { press: async () => ({ success: true }) },
+      timer,
+    }),
+  });
+  const commands = [
+    { action: "type" as const, text: "shot0" },
+    ...(scenario === "imeAction" ? [{ action: "key" as const, key: "done" as const }] : []),
+  ];
+  const settleScreen = new FakeObserveScreen();
+  const realSettle = new RealSettleObserve(settleScreen, timer);
+  const settleObserve = {
+    async execute(options: Parameters<RealSettleObserve["execute"]>[0]) {
+      settleScreen.setObserveSequence([frame("settle-1", 20), frame("settle-2", 30)]);
+      events.push("settle:start");
+      const result = await realSettle.execute(options);
+      events.push(`settle:chosen:${result.observation.observationId}`);
+      return result;
+    },
+    async captureScreenshot(observation: ObserveResult, signal?: AbortSignal) {
+      await observer.captureScreenshot(undefined, signal, observation);
+    },
+  };
+  return { ...h, action, commands, observer, timer, events, reads, captures, settleObserve };
 }
 
 export function createSendKeysFocusHarness(device: BootedDevice = android) {

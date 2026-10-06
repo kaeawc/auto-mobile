@@ -526,6 +526,7 @@ describe("Screenshot comparison characterization", () => {
           backend,
         ),
       ).toEqual({
+        compared: true,
         similarity: difference === 0 ? 100 : 0,
         pixelDifference: difference,
         totalPixels: 4,
@@ -557,7 +558,7 @@ describe("Screenshot comparison characterization", () => {
           new FakeTimer(),
           backend,
         ),
-      ).toEqual({ similarity: 100, pixelDifference: 0, totalPixels: 2 });
+      ).toEqual({ compared: true, similarity: 100, pixelDifference: 0, totalPixels: 2 });
       expect(backend.executeCalls).toEqual([
         { source: input, pipeline: { operations: [], encoding: { mime: "image/png" } } },
         {
@@ -596,7 +597,7 @@ describe("Screenshot comparison characterization", () => {
           new FakeTimer(),
           backend,
         ),
-      ).toEqual({ similarity: 100, pixelDifference: 0, totalPixels: 1 });
+      ).toEqual({ compared: true, similarity: 100, pixelDifference: 0, totalPixels: 1 });
       expect(backend.executeCalls.map(({ pipeline }) => pipeline)).toEqual(
         [0, 1].map(() => ({
           operations: [
@@ -615,19 +616,20 @@ describe("Screenshot comparison characterization", () => {
     },
   );
 
-  test("returns the exact failure shape when conversion fails", async () => {
+  test("returns a typed could-not-compare failure, not similarity 0, when conversion fails (#10185)", async () => {
     const backend = new FakeImageBackend();
     backend.setShouldThrowOnExecute(true);
-    expect(
-      await ScreenshotComparator.compareImages(
-        Buffer.from("bad"),
-        Buffer.from("other"),
-        0.1,
-        false,
-        new FakeTimer(),
-        backend,
-      ),
-    ).toEqual({ similarity: 0, pixelDifference: -1, totalPixels: 0 });
+    const result = await ScreenshotComparator.compareImages(
+      Buffer.from("bad"),
+      Buffer.from("other"),
+      0.1,
+      false,
+      new FakeTimer(),
+      backend,
+    );
+    expect(result.compared).toBe(false);
+    expect(result).toEqual({ compared: false, error: expect.any(String) });
+    expect(result).not.toHaveProperty("similarity");
     expect(backend.executeCalls).toHaveLength(1);
   });
 });

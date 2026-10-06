@@ -198,6 +198,19 @@ describe("issue #6348: preference schemas reject undeclared arguments", () => {
     expect(result.success).toBe(false);
   });
 
+  test("accepts userId for sharedPreferences and rejects it for other scopes (#9919)", () => {
+    expect(setPreferenceSchema.parse({ ...validSetArgs, userId: 10 }).userId).toBe(10);
+    expect(setPreferenceSchema.safeParse({ ...validSetArgs, userId: -1 }).success).toBe(false);
+    expect(
+      getPreferenceSchema.safeParse({
+        platform: "android",
+        scope: "systemProperty",
+        key: "debug.example",
+        userId: 10,
+      }).success,
+    ).toBe(false);
+  });
+
   test("rejects a wholly invented property", () => {
     const result = getPreferenceSchema.safeParse({
       platform: "android",

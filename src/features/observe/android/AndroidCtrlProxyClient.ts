@@ -70,6 +70,7 @@ import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortM
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import {
   TrackedScreenGeometry,
   screenshotBindingPushOptions,
@@ -126,6 +127,7 @@ import {
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
+  OVERLAY_DISPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -170,8 +172,22 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus } from "./CtrlProxyFocus";
+import { CtrlProxyOverlays, type OverlayAssetRequestOptions } from "./CtrlProxyOverlays";
+import type { OverlaySpec } from "../../overlay/overlaySpec";
+import type { OverlayAssetUpload } from "../../overlay/overlayAssets";
+import type {
+  OverlayAssetResult,
+  OverlayDismiss,
+  OverlayEvent,
+  OverlayResult,
+  OverlayUpdate,
+} from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
-import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
+import {
+  CtrlProxyPackages,
+  packageEventAndroidUserId,
+  type PackageInfoOptions,
+} from "./CtrlProxyPackages";
 
 // Import types
 import type { DelegateContext } from "../shared/types";
@@ -239,7 +255,10 @@ export interface InteractionEvent {
 interface PackageEvent {
   action: "added" | "removed" | "replaced";
   packageName: string;
+  /** Android user id; APKs before #10067 sent the package uid here. */
   userId: number;
+  /** Raw package uid; present only on APKs whose `userId` is a real user id (#10067). */
+  uid?: number | null;
   isSystem?: boolean | null;
   removedForAllUsers?: boolean | null;
 }
@@ -248,8 +267,11 @@ interface PackageEvent {
  * Interface for handled exception event from SDK
  */
 interface HandledExceptionEvent {
-  timestamp: number;
+  timestamp?: number;
   exceptionClass: string;
+  /** The wire name the device writes (#10068). */
+  message?: string | null;
+  /** Legacy name from before #10068; read only when `message` is absent. */
   exceptionMessage?: string;
   stackTrace: string;
   customMessage?: string;
@@ -540,6 +562,12 @@ interface WsTraversalOrderResultMessage extends WsMessageBase {
     truncationReasons?: string[];
   };
 }
+
+interface WsOverlayResultMessage extends OverlayResult {
+  type: "overlay_result";
+  requestId: string;
+}
+type WsOverlayEventMessage = OverlayEvent;
 
 interface WsHighlightResponseMessage extends WsMessageBase {
   type: "highlight_response";
@@ -957,6 +985,8 @@ type WebSocketMessage =
   | WsPermissionResultMessage
   | WsCurrentFocusResultMessage
   | WsTraversalOrderResultMessage
+  | WsOverlayResultMessage
+  | WsOverlayEventMessage
   | WsHighlightResponseMessage
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
@@ -1107,6 +1137,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
     },
+    transport?: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs">,
   ): Promise<A11ySetTextResult>;
 
   commitViaIme(
@@ -1144,6 +1175,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yImeActionResult>;
 
   requestSelectAll(timeoutMs?: number, perf?: PerformanceTracker): Promise<A11ySelectAllResult>;
@@ -1173,6 +1206,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     selector?: AccessibilityNodeSelector,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yActionResult>;
 
   supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean>;
@@ -1237,6 +1272,32 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<A11yPermissionResult>;
 
+  requestShowOverlay(
+    spec: OverlaySpec,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    displayId?: number,
+  ): Promise<OverlayResult>;
+  requestUpdateOverlay(
+    update: OverlayUpdate,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult>;
+  requestDismissOverlay(
+    target: OverlayDismiss,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult>;
+  requestPutOverlayAsset(
+    asset: OverlayAssetUpload,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult>;
+  requestRemoveOverlayAsset(
+    id: string,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult>;
+  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void;
+
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -1275,6 +1336,9 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
  * always gets one retry before the loop concludes the failure is deterministic.
  */
 const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
+
+/** Isolation markers kept for hierarchy requests whose waiter already gave up. */
+const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
 
 /**
  * Process-held ownership claim for a device's CtrlProxy ADB forwards. The ADB
@@ -1567,6 +1631,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private _storage: CtrlProxyStorage | null = null;
   private _certificates: CtrlProxyCertificates | null = null;
   private _focus: CtrlProxyFocus | null = null;
+  private _overlays: CtrlProxyOverlays | null = null;
   private _highlights: CtrlProxyHighlights | null = null;
   private _packages: CtrlProxyPackages | null = null;
 
@@ -2167,6 +2232,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       },
       markObserverHierarchyRequest: (requestId, options) => {
         this.observerHierarchyRequestIds.set(requestId, options?.isolateResponse ?? false);
+        // Markers of unanswered requests outlive their waiter (a late reply must stay isolated);
+        // evict the oldest so an unresponsive runner cannot grow the map without bound.
+        while (this.observerHierarchyRequestIds.size > MAX_RETAINED_HIERARCHY_REQUEST_MARKERS) {
+          const oldest = this.observerHierarchyRequestIds.keys().next().value;
+          if (oldest === undefined) {
+            break;
+          }
+          this.observerHierarchyRequestIds.delete(oldest);
+        }
       },
       unmarkObserverHierarchyRequest: (requestId) => {
         this.observerHierarchyRequestIds.delete(requestId);
@@ -2254,6 +2328,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this._focus = value;
       },
       () => new CtrlProxyFocus(this.createDelegateContext()),
+    );
+  }
+
+  private get overlays(): CtrlProxyOverlays {
+    return this.lazyDelegate(
+      () => this._overlays,
+      (value) => {
+        this._overlays = value;
+      },
+      () => new CtrlProxyOverlays(this.createDelegateContext()),
     );
   }
 
@@ -2406,20 +2490,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.startScreenshotBackoff();
   }
 
-  private syncNetworkStateToDevice(): void {
+  /**
+   * Push THIS device's mock rules and error simulation from the host store.
+   * Runs on every (re)connect, and after a session release clears the store so
+   * the device drops what that session installed (issue #10061).
+   */
+  public syncNetworkStateToDevice(): void {
     try {
       const state = NetworkState.getInstance();
+      const deviceId = this.device.deviceId;
 
-      // Always sync mock rules on reconnect — buildNetworkMockRules uses limit
-      // (not remaining) so the device-side store reinitializes fresh counts.
-      // Sending an empty list clears stale rules that may linger from a
-      // previous connection.
-      const rules = buildNetworkMockRules(state);
+      // Always sync mock rules on reconnect, scoped to this device. The device
+      // store keeps consumption per mockId across a re-push (#10060). Sending an
+      // empty list clears stale rules that may linger from a previous connection.
+      const rules = buildNetworkMockRules(state, deviceId);
       this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })));
 
       // Always re-sync error simulation state (including disabled) so the
       // device doesn't keep stale simulation config from a previous connection
-      const sim = state.simulation;
+      const sim = state.getSimulation(deviceId);
       this.sendMessage(
         serializeCtrlProxyRequest(
           ctrlProxyRequests.setNetworkErrorSimulation({
@@ -3091,13 +3180,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  /** TalkBack activation with device-side double-tap timing. */
+  /** Double tap (TalkBack activation, tapOn/tapAny/tapAt) with device-side double-tap timing. */
   async requestDoubleTapCoordinates(
     x: number,
     y: number,
     onDispatch?: () => void,
+    options?: {
+      frameContext?: string;
+      displayId?: number;
+      signal?: AbortSignal;
+      beforeSend?: () => void;
+    },
   ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch);
+    return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch, options);
   }
 
   async requestTwoFingerSwipe(
@@ -3255,8 +3350,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       acceptsCaretNotPlaced?: boolean;
       precedingState?: InsertTextState;
     },
+    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
   ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf, options);
+    return this.text.requestInsertText(text, timeoutMs, perf, options, transport);
   }
 
   async commitViaIme(
@@ -3302,8 +3398,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     action: ImeAction,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    abortSignal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yImeActionResult> {
-    return this.text.requestImeAction(action, timeoutMs, perf);
+    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal, onDispatch);
   }
 
   async requestSelectAll(
@@ -3484,6 +3582,44 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
   // Delegated Public Methods - Highlights
   // ===========================================================================
+
+  requestShowOverlay(
+    spec: OverlaySpec,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    displayId?: number,
+  ): Promise<OverlayResult> {
+    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId);
+  }
+  requestUpdateOverlay(
+    update: OverlayUpdate,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    return this.overlays.requestUpdateOverlay(update, timeoutMs, perf);
+  }
+  requestDismissOverlay(
+    target: OverlayDismiss,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    return this.overlays.requestDismissOverlay(target, timeoutMs, perf);
+  }
+  requestPutOverlayAsset(
+    asset: OverlayAssetUpload,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    return this.overlays.requestPutOverlayAsset(asset, options);
+  }
+  requestRemoveOverlayAsset(
+    id: string,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    return this.overlays.requestRemoveOverlayAsset(id, options);
+  }
+  onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
+    return this.overlays.onOverlayEvent(listener);
+  }
 
   async requestAddHighlight(
     id: string,
@@ -3674,36 +3810,58 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return connected && this.isCommandSupported("request_activate_accessibility_link");
   }
 
+  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
+  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
     text: string,
     occurrence: number,
     selector?: AccessibilityNodeSelector,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
     const action = "activate_accessibility_link";
+    const combinedSignal = combineWithAmbientAbort(signal);
+    const checkCancellation = (): void => combinedSignal?.throwIfAborted();
+    let requestId: string | undefined;
+    let dispatched = false;
+    const unconfirmed = (error: string): A11yActionResult => ({
+      success: false,
+      action,
+      totalTimeMs: this.timer.now() - startTime,
+      error,
+      dispatched,
+      acknowledged: false,
+      ...(dispatched ? { retryable: false } : {}),
+    });
     try {
-      if (!(await this.supportsAccessibilityLinkActivation(perf))) {
-        return {
-          success: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Connected Android runner does not support semantic accessibility-link activation",
-        };
+      const supported = await this.awaitActionWork(
+        () => this.supportsAccessibilityLinkActivation(perf),
+        combinedSignal,
+      );
+      checkCancellation();
+      if (!supported) {
+        return unconfirmed(
+          "Connected Android runner does not support semantic accessibility-link activation",
+        );
       }
-      const requestId = this.requestManager.generateId("accessibility-link");
+      requestId = this.requestManager.generateId("accessibility-link");
       const resultPromise = this.requestManager.register<A11yActionResult>(
         requestId,
         "accessibility-link",
         timeoutMs,
-        () => ({
+        () => unconfirmed(`Semantic link activation timed out after ${timeoutMs}ms`),
+        (error, totalTimeMs) => ({
           success: false,
           action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Semantic link activation timed out after ${timeoutMs}ms`,
+          totalTimeMs,
+          error,
+          acknowledged: true,
         }),
       );
+      checkCancellation();
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
@@ -3717,15 +3875,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           }),
         ),
       );
-      return await resultPromise;
+      dispatched = true;
+      onDispatch?.();
+      const result = await this.awaitCancellableRequest(
+        requestId,
+        resultPromise,
+        combinedSignal,
+        startTime,
+      );
+      checkCancellation();
+      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
     } catch (error) {
-      logger.warn(`[CTRL_PROXY] Semantic link activation failed: ${error}`);
-      return {
-        success: false,
-        action,
-        totalTimeMs: this.timer.now() - startTime,
-        error: `${error}`,
-      };
+      if (requestId) {
+        this.requestManager.resolveError(
+          requestId,
+          errorMessage(error),
+          this.timer.now() - startTime,
+        );
+      }
+      logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
+      return unconfirmed(errorMessage(error));
+    } finally {
+      if (!dispatched) {
+        checkCancellation();
+      }
     }
   }
 
@@ -4533,12 +4706,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
   }
 
-  /** Tell the Kotlin service that recording has started (enables interaction event emission). */
+  /** Send start_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStarted(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
   }
 
-  /** Tell the Kotlin service that recording has stopped (disables interaction event emission). */
+  /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
   }
@@ -4696,9 +4869,34 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private ensureLocalPortAvailableForForwarding(): void {
+  private async ensureLocalPortAvailableForForwarding(signal?: AbortSignal): Promise<void> {
+    if (this.closed) {
+      return;
+    }
     const currentAllocation = PortManager.getPort(this.portAllocationId);
-    const currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+    let currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+    if (currentAllocation === this.localPort) {
+      const backoff = fixedBackoff(50);
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (currentPortIsAvailable) {
+          return;
+        }
+        if (this.closed) {
+          return;
+        }
+        throwIfAborted(signal);
+        // adb tears down its listener asynchronously after --remove; this short busy window is expected and bounded.
+        logger.debug(
+          `[CTRL_PROXY] Local port ${this.localPort} busy after forward removal; retrying probe (${attempt}/3)`,
+        );
+        await awaitWhileRequestIsLive(this.timer.sleep(backoff.delayForAttempt(attempt)), signal);
+        if (this.closed) {
+          return;
+        }
+        throwIfAborted(signal);
+        currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
+      }
+    }
     if (currentAllocation === this.localPort && currentPortIsAvailable) {
       return;
     }
@@ -4753,11 +4951,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (!clearedCurrentPort) {
         throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
       }
+      await this.ensureLocalPortAvailableForForwarding(signal);
       if (this.closed) {
         return;
       }
-
-      this.ensureLocalPortAvailableForForwarding();
       logger.debug(
         `[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`,
       );
@@ -5024,10 +5221,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (rejectedCommand) {
         this.rejectedCommands.add(rejectedCommand);
       }
-      const errorText = rewriteUnknownCommandError(
-        message.error || "Runner reported an unstructured protocol error",
-        "android",
-      );
+      const deviceError = message.error || "Runner reported an unstructured protocol error";
+      // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
+      const errorText =
+        rejectedCommand &&
+        [
+          "show_overlay",
+          "update_overlay",
+          "dismiss_overlay",
+          "put_overlay_asset",
+          "remove_overlay_asset",
+        ].includes(rejectedCommand)
+          ? deviceError
+          : rewriteUnknownCommandError(deviceError, "android");
       logger.warn(
         `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
       );
@@ -5144,6 +5350,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: message.totalTimeMs,
           error: message.error,
           perfTiming: message.perfTiming,
+          acknowledged: true,
         });
       }
     },
@@ -5429,6 +5636,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }),
 
+    overlay_result: (message) =>
+      this.resolvePendingResponse(message, (message): OverlayResult => ({
+        success: message.success,
+        error: message.error,
+        requestId: message.requestId,
+        timestamp: message.timestamp,
+        ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
+          ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
+          : {}),
+      })),
+
     highlight_response: (message) =>
       this.resolvePendingResponse(message, (message): HighlightOperationResult => ({
         success: message.success ?? false,
@@ -5624,6 +5842,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (event) {
         await this.handlePackageEvent(event, message.timestamp);
       }
+    },
+
+    overlay_event: (message) => {
+      this.overlays.handleOverlayEvent(message);
     },
 
     interaction_event: (message) => {
@@ -5951,6 +6173,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
     } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
+      // The app may be back in front without a navigation event (#10193). The signal names this
+      // device: on the shared global manager another device's tick must not switch the app.
+      if (navigationPackage) {
+        this.getNavigationGraphManager()
+          .recordAppForeground(navigationPackage, this.device.deviceId)
+          .catch((error) =>
+            logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
+          );
+      }
     } else {
       // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
       // non-SDK apps never emit navigation_event, so this is the only path that gives
@@ -6425,6 +6656,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     const deviceId = this.device.deviceId;
+    const androidUserId = packageEventAndroidUserId(event);
     const eventTimestamp = typeof timestamp === "number" ? timestamp : this.timer.now();
     const repo = this.getInstalledAppsRepository();
 
@@ -6439,13 +6671,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (event.removedForAllUsers) {
           await repo.removeInstalledAppForDevice(deviceId, event.packageName);
         } else {
-          await repo.removeInstalledApp(deviceId, event.userId, event.packageName);
+          await repo.removeInstalledApp(deviceId, androidUserId, event.packageName);
         }
       } else {
         const isSystem = event.isSystem === true;
         await repo.upsertInstalledApp(
           deviceId,
-          event.userId,
+          androidUserId,
           event.packageName,
           isSystem,
           eventTimestamp,
@@ -6454,16 +6686,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Notify work profile monitor that this user has accessibility service
       // (if we're receiving package events, the service is working for this user)
-      if (event.userId > 0 && this.workProfileMonitor) {
-        this.workProfileMonitor.setProfileHasAccessibilityService(event.userId, true);
+      if (androidUserId > 0 && this.workProfileMonitor) {
+        this.workProfileMonitor.setProfileHasAccessibilityService(androidUserId, true);
       }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);
     }
   }
 
-  private enqueueNavigationGraphWrite(event: NavigationEvent): Promise<void> {
+  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
     const navigationGraphManager = this.getNavigationGraphManager();
+    // Stamp the device that received the event: the manager's telemetry must not read the
+    // recorder's ambient context, which another device's client may have set (#10195).
+    const event: NavigationEvent = { ...received, deviceId: this.device.deviceId };
     const navWrite = this.navigationWriteTail.then(
       () => navigationGraphManager.recordNavigationEvent(event),
       () => navigationGraphManager.recordNavigationEvent(event),
@@ -6489,7 +6724,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return this.supportedCommands.has(messageType);
     }
     // Legacy behavior for services that predate full_command_set_v1 (older APKs).
-    if (messageType === "gesture_display_id_v1" || messageType === "tap_double_v1") {
+    if (
+      messageType === "gesture_display_id_v1" ||
+      messageType === "tap_double_v1" ||
+      messageType === OVERLAY_DISPLAY_CAPABILITY
+    ) {
       return this.supportedCommands?.has(messageType) === true;
     }
     if (this.supportedCommands === null) {

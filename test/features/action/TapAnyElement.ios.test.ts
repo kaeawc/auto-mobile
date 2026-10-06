@@ -76,6 +76,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     fakeTimer.enableAutoAdvance();
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
+    // Gesture tests start with this call's observer read; cached-resolution safety
+    // is covered separately with a real selector and a configured hierarchy fake.
+    spyOn(fakeObserveScreen, "getMostRecentCachedObserveResult").mockImplementation(async () => ({
+      ...createObserveResult(),
+      freshness: { isFresh: false },
+    }));
     fakeWindow.configureCachedActiveWindow(null);
 
     const iosModule = await import("../../../src/features/observe/ios");
@@ -120,7 +126,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
         });
         expect(tap).not.toHaveBeenCalled();
       } else {
-        expect(tap).toHaveBeenCalledWith(42, 84, 17000, 19000, undefined, undefined, undefined);
+        expect(tap).toHaveBeenCalledWith(
+          42,
+          84,
+          17000,
+          19000,
+          undefined,
+          undefined,
+          undefined,
+          expect.any(Function),
+        );
         expect(activate).not.toHaveBeenCalled();
       }
     },
@@ -204,7 +219,14 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
   test("tap reports failure when the proxy reports failure", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
-    fakeIosClient.setTapResult({ success: false, error: "boom", totalTimeMs: 1 });
+    // An explicit runner refusal: dispatched and acknowledged, so a plain failure.
+    fakeIosClient.setTapResult({
+      success: false,
+      error: "boom",
+      totalTimeMs: 1,
+      dispatched: true,
+      acknowledged: true,
+    });
 
     const result = await tapAny.execute({ action: "tap" });
 
@@ -347,7 +369,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 6000 });
 
     expect(result.success).toBe(true);
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 6000, 8000, undefined, undefined, undefined);
+    expect(tapSpy).toHaveBeenCalledWith(
+      42,
+      84,
+      6000,
+      8000,
+      undefined,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
   });
 
   // Issue #6276 (follow-up to #6248 review thread funaf): an ordinary
@@ -375,6 +406,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       undefined,
       undefined,
+      expect.any(Function),
     );
   });
 
@@ -427,6 +459,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       undefined,
       undefined,
+      expect.any(Function),
     );
     expect(tapSpy).toHaveBeenNthCalledWith(
       2,
@@ -437,6 +470,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       undefined,
       undefined,
+      expect.any(Function),
     );
   });
 
@@ -556,6 +590,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       undefined,
       undefined,
+      expect.any(Function),
     );
   });
 
@@ -626,6 +661,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       undefined,
       undefined,
+      expect.any(Function),
     );
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1501 }]);
   });
@@ -652,6 +688,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       undefined,
       undefined,
+      expect.any(Function),
     );
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1 }]);
   });
@@ -679,7 +716,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
       undefined,
-      undefined,
+      { abortSignal: undefined, onDispatch: expect.any(Function) },
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
@@ -702,6 +739,160 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("element not found");
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
+
+  describe("a dispatched but unconfirmed tap is indeterminate (#9971)", () => {
+    const resourceIdElement = {
+      bounds: { left: 0, top: 0, right: 84, bottom: 168 },
+      "resource-id": "com.test.app:id/submit_button",
+      clickable: "true",
+    } as Element;
+    const unconfirmed = {
+      success: false,
+      error: "Timeout waiting for action_result",
+      dispatched: true,
+      acknowledged: false,
+    };
+
+    test("requestAction (resource-id) under VoiceOver", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeElementSelector.setNextElement(resourceIdElement);
+      fakeIosClient.setActionResult(unconfirmed);
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tap outcome is indeterminate");
+      expect(result.error).toContain("Do not retry automatically");
+    });
+
+    test("requestAction acknowledged refusal stays a plain failure", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeElementSelector.setNextElement(resourceIdElement);
+      fakeIosClient.setActionResult({
+        success: false,
+        error: "element not found",
+        dispatched: true,
+        acknowledged: true,
+      });
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("VoiceOver action failed");
+      expect(result.error).not.toContain("indeterminate");
+    });
+
+    test("requestAction that was never dispatched stays a plain failure", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeElementSelector.setNextElement(resourceIdElement);
+      fakeIosClient.setActionResult({
+        success: false,
+        error: "Not connected to CtrlProxy",
+        dispatched: false,
+        acknowledged: false,
+      });
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.error).toContain("VoiceOver action failed");
+      expect(result.error).not.toContain("indeterminate");
+    });
+
+    test("requestAction receives the request's signal and a dispatch marker", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeElementSelector.setNextElement(resourceIdElement);
+      const actionSpy = spyOn(fakeIosClient, "requestAction");
+      const controller = new AbortController();
+
+      await tapAny.execute({ action: "tap" }, undefined, controller.signal);
+
+      const options = actionSpy.mock.calls[0]?.[5];
+      expect(options?.abortSignal).toBe(controller.signal);
+      expect(typeof options?.onDispatch).toBe("function");
+    });
+
+    test("requestVoiceOverActivate by label", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeIosClient.setVoiceOverActivateResult({
+        success: false,
+        error: "Timeout waiting for action_result",
+        dispatched: true,
+        acknowledged: false,
+      });
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tap outcome is indeterminate");
+    });
+
+    test("requestVoiceOverActivate acknowledged refusal stays a plain failure", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeIosClient.setVoiceOverActivateResult({
+        success: false,
+        error: "Element not found",
+        dispatched: true,
+        acknowledged: true,
+      });
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.error).toContain('VoiceOver action failed for label "Target Button"');
+    });
+
+    test("coordinate tap timeout", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      fakeIosClient.setTapResult({
+        success: false,
+        totalTimeMs: 5000,
+        error: "Tap timed out after 5000ms",
+        dispatched: true,
+        acknowledged: false,
+      });
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tap outcome is indeterminate");
+    });
+
+    test("coordinate tap runner refusal stays plain", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      fakeIosClient.setTapResult({
+        success: false,
+        totalTimeMs: 10,
+        error: "Element gone",
+        dispatched: true,
+        acknowledged: true,
+      });
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.error).toContain("CtrlProxy iOS tap failed: Element gone");
+    });
+
+    test("an unconfirmed second tap of a double tap notes that one tap was delivered", async () => {
+      fakeVoiceOverDetector.setVoiceOverEnabled(false);
+      let calls = 0;
+      spyOn(fakeIosClient, "requestTapCoordinates").mockImplementation(async () => {
+        calls++;
+        return calls === 1
+          ? { success: true, totalTimeMs: 1 }
+          : {
+              success: false,
+              totalTimeMs: 5000,
+              error: "Tap timed out after 5000ms",
+              dispatched: true,
+              acknowledged: false,
+            };
+      });
+
+      const result = await tapAny.execute({ action: "doubleTap" });
+
+      expect(result.error).toContain("Tap outcome is indeterminate");
+      expect(result.error).toContain("one tap was delivered");
+    });
   });
 
   // Thread PRRT_kwDOP-GF5M6funaa: when the selected element has BOTH a unique
@@ -729,7 +920,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
       undefined,
-      undefined,
+      { abortSignal: undefined, onDispatch: expect.any(Function) },
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
@@ -756,7 +947,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       undefined,
       DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
       undefined,
-      { duration: 1750 },
+      { duration: 1750, abortSignal: undefined, onDispatch: expect.any(Function) },
     );
     expect(fakeIosClient.getActionHistory()[0]?.duration).toBe(1750);
   });

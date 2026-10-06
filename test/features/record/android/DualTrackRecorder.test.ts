@@ -10,6 +10,7 @@ import type {
   A11ySource,
 } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
+import { sendKeysSchema } from "../../../../src/server/interactionTools";
 import { logger } from "../../../../src/utils/logger";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
@@ -1509,6 +1510,71 @@ describe("DualTrackRecorder", () => {
     expect(steps[1].tool).toBe("pressButton");
     expect(steps[2].tool).toBe("sendKeys");
     expect(steps[2].params.commands[0].text).toBe("world");
+  });
+
+  describe("emptied text field (#9929)", () => {
+    const element = { "resource-id": "com.example:id/search" };
+    const clearStep = { tool: "sendKeys", params: { commands: [{ action: "clear" }] } };
+
+    test.each([null, ""])("text %p after typed text coalesces into a clear", async (empty) => {
+      await recorder.start();
+
+      fakeA11y.emit({ type: "inputText", timestamp: 100, text: "hello", element });
+      fakeA11y.emit({ type: "inputText", timestamp: 200, text: empty, element });
+
+      const { steps } = await recorder.stop();
+      expect(steps).toEqual([clearStep]);
+      expect(sendKeysSchema.safeParse(steps[0].params).success).toBe(true);
+    });
+
+    test.each([null, ""])("text %p as the first event records a clear", async (empty) => {
+      await recorder.start();
+
+      fakeA11y.emit({ type: "inputText", timestamp: 100, text: empty, element });
+
+      const { steps } = await recorder.stop();
+      expect(steps).toEqual([clearStep]);
+      expect(sendKeysSchema.safeParse(steps[0].params).success).toBe(true);
+    });
+
+    test("a later non-empty value replaces the clear with a valid type step", async () => {
+      await recorder.start();
+
+      fakeA11y.emit({ type: "inputText", timestamp: 100, text: "hello", element });
+      fakeA11y.emit({ type: "inputText", timestamp: 200, text: null, element });
+      fakeA11y.emit({ type: "inputText", timestamp: 300, text: "world", element });
+
+      const { steps } = await recorder.stop();
+      expect(steps).toEqual([
+        {
+          tool: "sendKeys",
+          params: { commands: [{ action: "type", text: "world", operation: "replace" }] },
+        },
+      ]);
+      expect(sendKeysSchema.safeParse(steps[0].params).success).toBe(true);
+    });
+
+    test("an emptied field after an intervening step keeps the earlier typed text", async () => {
+      await recorder.start();
+
+      fakeA11y.emit({ type: "inputText", timestamp: 100, text: "hello", element });
+      fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
+      fakeA11y.emit({ type: "inputText", timestamp: 200, text: null, element });
+
+      const { steps } = await recorder.stop();
+      expect(steps).toHaveLength(3);
+      expect(steps[0].params.commands[0].text).toBe("hello");
+      expect(steps[2]).toEqual(clearStep);
+    });
+
+    test("an inputText event with no text value at all is still ignored", async () => {
+      await recorder.start();
+
+      fakeA11y.emit({ type: "inputText", timestamp: 100, element });
+
+      const { steps } = await recorder.stop();
+      expect(steps).toEqual([]);
+    });
   });
 
   test("windowChange A11y events are not emitted as steps", async () => {

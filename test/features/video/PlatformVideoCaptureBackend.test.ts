@@ -189,8 +189,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     };
 
     await new PlatformVideoCaptureBackend(fakeFactory).start(config);
-    expect(fakeFactory.getFakeClient().getSpawnCalls()[0]).toContain("--display-id");
-    expect(fakeFactory.getFakeClient().getSpawnCalls()[0]).toContain("22");
+    expect(fakeFactory.getFakeClient().getSpawnCalls()[0]?.join(" ")).toContain("--display-id 22");
 
     await new PlatformVideoCaptureBackend(fakeFactory).start({
       ...config,
@@ -198,7 +197,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       device: { platform: "android", deviceId: "single", name: "Phone" },
       display: undefined,
     });
-    expect(fakeFactory.getFakeClient().getSpawnCalls()[1]).not.toContain("--display-id");
+    expect(fakeFactory.getFakeClient().getSpawnCalls()[1]?.join(" ")).not.toContain("--display-id");
   });
 
   test("unknown API retries once without display flag after an immediate usage error", async () => {
@@ -244,8 +243,10 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     });
     const calls = fakeFactory.getFakeClient().getSpawnCalls();
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toContain("--display-id");
-    expect(calls[1]).not.toContain("--display-id");
+    expect(calls[0]?.join(" ")).toContain("--display-id");
+    expect(calls[1]?.join(" ")).not.toContain("--display-id");
+    // The retry keeps the pid-reporting wrapper.
+    expect(calls[1]?.[1]).toStartWith("echo $$; exec screenrecord ");
     expect(handle.warning).toContain("rejected --display-id");
     expect(handle.physicalDisplayId).toBeUndefined();
   });
@@ -340,8 +341,20 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
             exitState: { exitCode: number | null };
             stderr: string[];
           };
-          backendHandle.exitState.exitCode = exitCode;
-          backendHandle.stderr.push("first", "second");
+          // The recorder exits in response to the stop request (a code-1 exit seen BEFORE
+          // the stop is a crash, covered by the #10186 tests), so apply the exit state
+          // when the device-side stop command is issued.
+          const adb = factory.getFakeClient();
+          const executeCommand = adb.executeCommand.bind(adb);
+          let exited = false;
+          spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+            if (!exited) {
+              exited = true;
+              backendHandle.exitState.exitCode = exitCode;
+              backendHandle.stderr.push("first", "second");
+            }
+            return executeCommand(...args);
+          });
           const probe = {
             async codec(): Promise<string> {
               events.push("codec");
@@ -422,6 +435,21 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(
         fakeFactory.getFakeClient().wasCommandExecuted("shell rm -f /sdcard/auto-mobile-test.mp4"),
       ).toBe(true);
+      expect(signals).toContain("SIGKILL");
+    });
+
+    test("forceStop with deviceWide:false runs no device-wide kill but reaps host adb and removes our temp file", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeProcess = new FakeChildProcess();
+      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+      const signals = spyOnKill(fakeProcess);
+
+      await backend.forceStop(handle, { deviceWide: false });
+
+      const commands = fakeFactory.getFakeClient().getAllCommands();
+      expect(commands.filter((command) => /pkill|killall|kill /.test(command))).toEqual([]);
+      expect(commands).toContain("shell rm -f /sdcard/auto-mobile-test.mp4");
       expect(signals).toContain("SIGKILL");
     });
 
@@ -978,12 +1006,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         });
         expect(factory.getFakeClient().getSpawnCalls()).toContainEqual([
           "shell",
-          "screenrecord",
-          "--bit-rate",
-          "1000",
-          "--time-limit",
-          "180",
-          "/sdcard/auto-mobile-clamp.mp4",
+          "echo $$; exec screenrecord --bit-rate 1000 --time-limit 180 /sdcard/auto-mobile-clamp.mp4",
         ]);
       },
     );

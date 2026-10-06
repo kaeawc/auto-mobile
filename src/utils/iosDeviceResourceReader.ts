@@ -70,6 +70,19 @@ export class IosDeviceResourceReader {
     this.timer = options.timer ?? defaultTimer;
     this.readDirectory = options.readDirectory ?? readdir;
   }
+  private readonly observationReads = new WeakMap<
+    DeviceResourceObservationRequest,
+    Map<string, Promise<string>>
+  >();
+
+  createObservationRequest(
+    request: DeviceResourceObservationRequest,
+  ): DeviceResourceObservationRequest {
+    const observation = { ...request };
+    this.observationReads.set(observation, new Map());
+    return observation;
+  }
+
   async resolveDefinitions(
     request: DeviceResourceObservationRequest,
     labels: readonly string[],
@@ -138,8 +151,20 @@ export class IosDeviceResourceReader {
     return result.stdout;
   }
 
-  command(request: DeviceResourceObservationRequest, args: string[]): Promise<string> {
-    return this.execute(request, ["spawn", request.device.deviceId, ...args]);
+  async command(request: DeviceResourceObservationRequest, args: string[]): Promise<string> {
+    this.remaining(request);
+    const reads = this.observationReads.get(request);
+    const cacheable = args[0] === "launchctl" && ["print-disabled", "print"].includes(args[1]!);
+    const key = JSON.stringify(args);
+    if (cacheable && reads?.has(key)) {
+      return reads.get(key)!;
+    }
+    const read = this.execute(request, ["spawn", request.device.deviceId, ...args]);
+    if (cacheable && reads) {
+      reads.set(key, read);
+      void read.then(undefined, () => reads.delete(key));
+    }
+    return read;
   }
 
   async readRuntimeInventory(

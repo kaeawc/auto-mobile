@@ -19,6 +19,11 @@ export interface HierarchyCollectorOptions {
   adbFactory: AdbClientFactory;
   timer: Timer;
   onAvailabilityLost?: (reason: string) => void;
+  /** Test seam for the Android raw read; defaults to the per-device CtrlProxy singleton. */
+  androidRawClient?: (
+    device: BootedDevice,
+    adbFactory: AdbClientFactory,
+  ) => Pick<AndroidCtrlProxyClient, "requestHierarchySync" | "invalidateCache">;
 }
 
 /**
@@ -98,40 +103,44 @@ export class HierarchyCollector {
         logger.debug(`[HierarchyCollector] Failed to clear availability cache: ${clearError}`);
       }
 
-      // Defensive/secondary path (#7534): the real `ViewHierarchy` resolves
-      // rather than throws for this failure class (see the resolved-result
-      // check in the success branch above, which is now primary). This
-      // string-matching guard stays for a `ViewHierarchy`/client
-      // implementation that genuinely throws instead.
-      const errorStr = String(error);
-      if (
-        device.platform === "android" &&
-        (errorStr.includes("WebSocket not connected") ||
-          errorStr.includes("Failed to connect to accessibility service"))
-      ) {
-        try {
-          this.opts.onAvailabilityLost?.(`CtrlProxy hierarchy connection lost: ${errorStr}`);
-        } catch (callbackError) {
-          logger.warn("[HierarchyCollector] Failed to report lost availability:", callbackError);
-        }
+      this.reportHierarchyError(result, device, error);
+    }
+  }
+
+  private reportHierarchyError(result: ObserveResult, device: BootedDevice, error: unknown): void {
+    // Defensive/secondary path (#7534): the real `ViewHierarchy` resolves
+    // rather than throws for this failure class (see the resolved-result
+    // check in the success branch above, which is now primary). This
+    // string-matching guard stays for a `ViewHierarchy`/client
+    // implementation that genuinely throws instead.
+    const errorStr = String(error);
+    if (
+      device.platform === "android" &&
+      (errorStr.includes("WebSocket not connected") ||
+        errorStr.includes("Failed to connect to accessibility service"))
+    ) {
+      try {
+        this.opts.onAvailabilityLost?.(`CtrlProxy hierarchy connection lost: ${errorStr}`);
+      } catch (callbackError) {
+        logger.warn("[HierarchyCollector] Failed to report lost availability:", callbackError);
       }
-      if (
-        errorStr.includes("null root node returned by UiTestAutomationBridge") ||
-        (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
-        errorStr.includes("screen appears to be off")
-      ) {
-        appendObserveError(result, {
-          phase: "viewHierarchy",
-          message: "Screen appears to be off or device is locked",
-          cause: errorStr,
-        });
-      } else {
-        appendObserveError(result, {
-          phase: "viewHierarchy",
-          message: "Failed to retrieve view hierarchy",
-          cause: errorStr,
-        });
-      }
+    }
+    if (
+      errorStr.includes("null root node returned by UiTestAutomationBridge") ||
+      (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
+      errorStr.includes("screen appears to be off")
+    ) {
+      appendObserveError(result, {
+        phase: "viewHierarchy",
+        message: "Screen appears to be off or device is locked",
+        cause: errorStr,
+      });
+    } else {
+      appendObserveError(result, {
+        phase: "viewHierarchy",
+        message: "Failed to retrieve view hierarchy",
+        cause: errorStr,
+      });
     }
   }
 
@@ -207,18 +216,31 @@ export class HierarchyCollector {
    * Fetch raw (unfiltered) view hierarchy and attach it to the result.
    * Invalidates the shared cache after fetching so that the unfiltered snapshot
    * does not bleed into subsequent normal observe calls.
+   *
+   * `displayId` (Android only) is the logical display of the observation the raw
+   * tree is attached to; omitted, CtrlProxy answers for its default display.
    */
-  async collectRaw(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+  async collectRaw(result: ObserveResult, signal?: AbortSignal, displayId?: number): Promise<void> {
     const { device, adbFactory, timer } = this.opts;
     try {
       if (device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(device, adbFactory);
+        const client = (
+          this.opts.androidRawClient ?? ((d, f) => AndroidCtrlProxyClient.getInstance(d, f))
+        )(device, adbFactory);
         const syncResult = await client.requestHierarchySync(
           new NoOpPerformanceTracker(),
           true, // disableAllFiltering
           signal,
+          undefined,
+          undefined,
+          displayId,
         );
-        client.invalidateCache();
+        // A read of a non-default display answers its caller only (#10106): it never wrote
+        // the unfiltered tree into the shared default-display cache, so there is nothing to
+        // drop, and dropping would cost the next default-display action a device read.
+        if (displayId === undefined || displayId === 0) {
+          client.invalidateCache();
+        }
         if (syncResult?.hierarchy) {
           result.rawViewHierarchy = {
             json: JSON.stringify(syncResult.hierarchy, null, 2),

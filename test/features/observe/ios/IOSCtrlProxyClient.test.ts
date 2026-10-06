@@ -759,12 +759,11 @@ describe("IOSCtrlProxyClient", function () {
     test("does not issue SDK-backed syncs when the foreground app has no SDK server", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.addMock({
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: { "X-Test": "yes" },
         responseBody: '{"ok":true}',
@@ -817,16 +816,82 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("syncNetworkMockRulesIfAvailable reports noCapability when the app lacks network_mocking", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities", "set_network_mock_rules"],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, false);
+
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("noCapability");
+        const sentTypes = socket.sentMessages.map((message) => JSON.parse(message).type);
+        expect(sentTypes).not.toContain("set_network_mock_rules");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("syncNetworkMockRulesIfAvailable reports sent only when the socket accepted the rules", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["get_sdk_capabilities", "set_network_mock_rules"],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("sent");
+
+        const sendSpy = spyOn(testClient, "sendMessage").mockReturnValue(false);
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("failed");
+        sendSpy.mockImplementation(() => {
+          throw new Error("send exploded");
+        });
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        expect(await testClient.syncNetworkMockRulesIfAvailable()).toBe("failed");
+        warnSpy.mockRestore();
+        sendSpy.mockRestore();
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("syncs SDK-backed state after capability detection", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation("tlsFailure", 20, 4);
-      state.addMock({
+      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, 4);
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: { "X-Test": "yes" },
         responseBody: '{"ok":true}',
@@ -886,21 +951,67 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("does not push another device's rules or simulation on connect (#10061)", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const state = NetworkState.getInstance();
+      state.startSimulation("emulator-5554", "tlsFailure", 20, 4);
+      state.addMock("emulator-5554", {
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        statusCode: 201,
+        responseHeaders: {},
+        responseBody: "{}",
+        contentType: "application/json",
+      });
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "set_network_mock_rules",
+              "set_network_error_simulation",
+            ],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+
+        const sync = socket.sentMessages.map((message) => JSON.parse(message));
+        expect(sync).toContainEqual({ type: "set_network_mock_rules", rules: [] });
+        expect(sync).toContainEqual({ type: "set_network_error_simulation", enabled: false });
+        expect(sync.some((message) => message.enabled === true)).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("syncs mock rules for legacy runners that advertise the command", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.addMock({
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 1,
-        remaining: 1,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "{}",
         contentType: "application/json",
       });
-      state.startSimulation("timeout", 10, 2);
+      state.startSimulation(testDevice.deviceId, "timeout", 10, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -1216,7 +1327,7 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("SDK capability transitions", function () {
     test("refreshes capabilities and syncs simulation after launching an SDK-enabled app", async function () {
-      NetworkState.getInstance().startSimulation("timeout", 20, 2);
+      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -3920,7 +4031,8 @@ describe("IOSCtrlProxyClient", function () {
         // Register an in-flight request over the live socket. A long timeout keeps
         // it pending so it can only settle via the port-change cancellation, never
         // by timing out during the test.
-        const inFlight = testClient.requestSwipe(0, 0, 10, 10, 300, 60000);
+        // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
+        const inFlight = testClient.requestDrag(0, 0, 10, 10, 0, 300, 0, 60000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -3945,6 +4057,116 @@ describe("IOSCtrlProxyClient", function () {
       } finally {
         await testClient.close();
       }
+    });
+
+    describe("on a live connection", function () {
+      const connectLive = async (
+        notifier?: DeviceConnectionLostNotifier,
+      ): Promise<{ client: IOSCtrlProxyClient; socket: CapturingWebSocket }> => {
+        const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+        const client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          factory,
+          fakeTimer,
+          undefined,
+          undefined,
+          notifier,
+        );
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        if (!socket) {
+          throw new Error("no socket was created");
+        }
+        await waitForSocketOpen(socket);
+        return { client, socket };
+      };
+
+      test("keeps an error listener on the retired socket so a late error cannot crash the process", async function () {
+        const { client, socket } = await connectLive();
+        try {
+          client["updatePort"](serverPort + 1);
+
+          // removeAllListeners() with nothing re-attached would make this emit throw.
+          expect(socket.listenerCount("error")).toBe(1);
+          expect(() => socket.emit("error", new Error("write after close"))).not.toThrow();
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("detaches the retired socket's lifecycle listeners and drops it from the client", async function () {
+        const { client, socket } = await connectLive();
+        try {
+          client["updatePort"](serverPort + 1);
+
+          expect(client["ws"]).toBeNull();
+          expect(client["lifecycleSocket"]).toBeNull();
+          expect(socket.listenerCount("close")).toBe(0);
+          expect(socket.listenerCount("message")).toBe(0);
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("runs the lost-connection teardown so old-connection state does not leak to the new socket", async function () {
+        const lostDeviceIds: string[] = [];
+        const { client } = await connectLive({
+          onDeviceConnectionLost: (deviceId) => {
+            lostDeviceIds.push(deviceId);
+          },
+        });
+        try {
+          client["supportedCommands"] = new Set(["request_hierarchy"]);
+          client["cachedHierarchy"] = {
+            hierarchy: {
+              updatedAt: 1,
+              packageName: "com.test.app",
+              hierarchy: { text: "old" },
+            },
+            receivedAt: 0,
+            fresh: true,
+          };
+
+          client["updatePort"](serverPort + 1);
+
+          expect(lostDeviceIds).toEqual([testDevice.deviceId]);
+          expect(client["supportedCommands"]).toBeNull();
+          expect(client["cachedHierarchy"]).toBeNull();
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("does not schedule a reconnect or count a failed attempt for the old endpoint", async function () {
+        const { client } = await connectLive();
+        try {
+          client["updatePort"](serverPort + 1);
+
+          expect(client["reconnectTimeoutId"]).toBeNull();
+          expect(client["consecutiveConnectionFailures"]).toBe(0);
+          expect(client["autoReconnectEnabled"]).toBe(true);
+        } finally {
+          await client.close();
+        }
+      });
+
+      test("is a no-op teardown when the port is unchanged", async function () {
+        const lostDeviceIds: string[] = [];
+        const { client, socket } = await connectLive({
+          onDeviceConnectionLost: (deviceId) => {
+            lostDeviceIds.push(deviceId);
+          },
+        });
+        try {
+          client["updatePort"](serverPort);
+
+          expect(client["ws"]).toBe(socket);
+          expect(lostDeviceIds).toEqual([]);
+        } finally {
+          await client.close();
+        }
+      });
     });
   });
 

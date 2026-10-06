@@ -99,6 +99,10 @@ export interface SkeletonElement {
    * when a clickable container encloses text beyond its primary label — e.g. a
    * preference row's summary line or an alarm's day-of-week schedule — so compact
    * state text is not lost. Omitted when there is no secondary text.
+   *
+   * An Android text field that has entered text carries its distinct hint here (the
+   * label stays the entered text), so the placeholder it was addressed by before
+   * typing remains visible (issue #9346).
    */
   sublabel?: string;
   /** Compose test tag, when supplied by the app; usable as the stable owner key for `subtext`. */
@@ -109,7 +113,7 @@ export interface SkeletonElement {
   bounds: [number, number, number, number];
   /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */
   affordances: Affordance[];
-  /** Fully covered by the Android IME window; this row has no actionable affordance. */
+  /** Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance. */
   occluded?: true;
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;

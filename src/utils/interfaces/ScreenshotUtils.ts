@@ -1,3 +1,5 @@
+import type { ScreenshotComparisonResult } from "../screenshot/ScreenshotComparator";
+
 /**
  * Interface for screenshot utilities
  * Provides image manipulation, comparison, and analysis capabilities
@@ -30,10 +32,5 @@ export interface ScreenshotUtils {
     buffer2: Buffer,
     threshold?: number,
     fastMode?: boolean,
-  ): Promise<{
-    similarity: number;
-    pixelDifference: number;
-    totalPixels: number;
-    filePath?: string;
-  }>;
+  ): Promise<ScreenshotComparisonResult>;
 }

@@ -28,6 +28,7 @@ import {
   type AndroidBuildToolsLocator,
 } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -54,15 +55,41 @@ import {
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
 
-const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
+import {
+  ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+  IOS_SIMULATOR_DOWNGRADE_REINSTALL_TIMEOUT_MS,
+} from "./installAppTimeout";
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
+import {
+  ANDROID_INSTALL_OUTLIVED_WARNING,
+  indeterminateAndroidInstallMessage,
+  readAndroidPriorPackageState,
+  resolveTimedOutAndroidInstall,
+  type AndroidPriorPackageState,
+  type TimedOutInstallVerdict,
+} from "./androidInstallTimeoutRecovery";
+
+export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
 const IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS = 200;
 
 interface AndroidInstallAttempt {
   success: boolean;
   output: string;
+  /** Only the command's own stdout/stderr; never the echoed command line or APK path. */
+  diagnostics: string;
   threw: boolean;
+  /** The adb call hit its step budget: the device-side install may still commit. */
+  timedOut?: boolean;
   error?: unknown;
+}
+
+interface AndroidInstallRecovery {
+  installAttempt: AndroidInstallAttempt;
+  warning?: string;
+  /** Downgrade recovery uninstalled the old copy, so the reinstall is effectively fresh. */
+  removedPriorCopy?: boolean;
 }
 
 interface AndroidPackageUsers {
@@ -225,20 +252,18 @@ export class InstallApp {
   ): Promise<InstallAppResult> {
     const preparation = await this.prepareAndroidInstall(artifactPath, userId, perf, signal);
     let { packageName, isInstalled } = preparation;
-    const { targetUserId, beforePackages, warnings } = preparation;
+    const { targetUserId, beforePackages, warnings, prior } = preparation;
 
     const installation = await this.installAndroidWithRecovery(
       packageName,
       targetUserId,
       `install --user ${targetUserId} -r "${artifactPath}"`,
+      prior,
       perf,
       signal,
     );
     const installAttempt = installation.installAttempt;
-    if (installation.warning) {
-      warnings.push(installation.warning);
-      isInstalled = false; // The app was removed, so this is effectively a fresh install.
-    }
+    isInstalled = this.absorbInstallRecovery(installation, warnings, isInstalled);
 
     // Preserve prior behavior: a hard install failure (non-zero exit) surfaces as a thrown error.
     if (!installAttempt.success && installAttempt.threw && installAttempt.error !== undefined) {
@@ -274,6 +299,18 @@ export class InstallApp {
     };
   }
 
+  /** Collect the recovery warning; a removed prior copy makes this effectively a fresh install. */
+  private absorbInstallRecovery(
+    installation: AndroidInstallRecovery,
+    warnings: string[],
+    isInstalled: boolean,
+  ): boolean {
+    if (installation.warning) {
+      warnings.push(installation.warning);
+    }
+    return installation.removedPriorCopy ? false : isInstalled;
+  }
+
   private async prepareAndroidInstall(
     artifactPath: string,
     userId: number | undefined,
@@ -285,6 +322,7 @@ export class InstallApp {
     targetUserId: number;
     beforePackages: Set<string>;
     warnings: string[];
+    prior: AndroidPriorPackageState;
   }> {
     const warnings: string[] = [];
 
@@ -297,12 +335,15 @@ export class InstallApp {
     }
     const packageName = packageNameResult.packageName?.trim();
 
-    // Auto-detect target user if not specified
+    // Auto-detect target user if not specified. installedOnly makes a reinstall
+    // target the user(s) that already have the package; a first install still
+    // resolves through the default policy (no running user has it).
     const targetUserId = await perf.track("detectTargetUser", async () => {
       return (
         await new AndroidUserTargetResolver(this.adb).resolve({
           packageName,
           explicitUserId: userId,
+          installedOnly: true,
           signal,
         })
       ).userId;
@@ -318,16 +359,25 @@ export class InstallApp {
       return this.listPackagesForUser(targetUserId, signal);
     });
 
-    return { packageName, isInstalled, targetUserId, beforePackages, warnings };
+    // Only an upgrade needs a version snapshot: if the install later times out, the old
+    // copy is listed either way, so presence alone cannot show the new one committed.
+    const prior = packageName
+      ? await perf.track("readPriorPackageState", () =>
+          readAndroidPriorPackageState(this.adb, packageName, isInstalled, signal),
+        )
+      : { installed: isInstalled };
+
+    return { packageName, isInstalled, targetUserId, beforePackages, warnings, prior };
   }
 
   private async installAndroidWithRecovery(
     packageName: string | undefined,
     targetUserId: number,
     installArgs: string,
+    prior: AndroidPriorPackageState,
     perf: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<{ installAttempt: AndroidInstallAttempt; warning?: string }> {
+  ): Promise<AndroidInstallRecovery> {
     const installAttempt = await perf.track("adbInstall", () =>
       this.runAndroidInstall(installArgs, signal),
     );
@@ -335,7 +385,16 @@ export class InstallApp {
       this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
     }
-    if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt.output)) {
+    if (installAttempt.timedOut) {
+      return this.recoverTimedOutAndroidInstall(
+        installAttempt,
+        packageName,
+        targetUserId,
+        prior,
+        signal,
+      );
+    }
+    if (installAttempt.success || !this.isAndroidDowngradeError(installAttempt.diagnostics)) {
       return { installAttempt };
     }
     // APK versions are package-wide, so a per-user uninstall cannot enable a downgrade.
@@ -346,6 +405,63 @@ export class InstallApp {
       );
     }
     return this.recoverAndroidDowngrade(packageName, targetUserId, installArgs, perf, signal);
+  }
+
+  /**
+   * A timed-out `adb install` is an unknown outcome, not a failure (the same stance as
+   * UninstallApp.recoverTimedOutAndroidUninstall): the host process was killed but the
+   * device-side session may still commit. Always stale the cache, then ask the device.
+   */
+  private async recoverTimedOutAndroidInstall(
+    installAttempt: AndroidInstallAttempt,
+    packageName: string | undefined,
+    targetUserId: number,
+    prior: AndroidPriorPackageState,
+    signal?: AbortSignal,
+  ): Promise<AndroidInstallRecovery> {
+    const verdict = await this.resolveTimedOutInstallState(
+      packageName,
+      targetUserId,
+      prior,
+      signal,
+    );
+    if (verdict.outcome === "completed") {
+      return {
+        installAttempt: { success: true, output: "", diagnostics: "", threw: false },
+        warning: ANDROID_INSTALL_OUTLIVED_WARNING,
+      };
+    }
+    return {
+      installAttempt: {
+        ...installAttempt,
+        threw: false,
+        output: indeterminateAndroidInstallMessage(packageName, targetUserId, verdict.detail),
+      },
+    };
+  }
+
+  /** Stale the caches around the live read: the device may commit while it is polled. */
+  private async resolveTimedOutInstallState(
+    packageName: string | undefined,
+    targetUserId: number,
+    prior: AndroidPriorPackageState,
+    signal?: AbortSignal,
+  ): Promise<TimedOutInstallVerdict> {
+    this.cacheInvalidator.invalidate(this.device);
+    await this.markInstalledAppsCacheStale(true);
+    try {
+      return await resolveTimedOutAndroidInstall({
+        adb: this.adb,
+        timer: this.timer ?? defaultTimer,
+        packageName,
+        userId: targetUserId,
+        prior,
+        signal,
+      });
+    } finally {
+      this.cacheInvalidator.invalidate(this.device);
+      await this.markInstalledAppsCacheStale(true);
+    }
   }
 
   private async isAndroidPackageInstalled(
@@ -481,7 +597,7 @@ export class InstallApp {
     installArgs: string,
     perf: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<{ installAttempt: AndroidInstallAttempt; warning?: string }> {
+  ): Promise<AndroidInstallRecovery> {
     const inventory = await this.listAndroidPackageUsers(packageName, targetUserId, signal);
     const { installedUserIds } = inventory;
     logger.warn(
@@ -494,37 +610,81 @@ export class InstallApp {
     await this.markInstalledAppsCacheStale(true);
     const removedUsers =
       installedUserIds.length > 0 ? ` (removed for users: ${installedUserIds.join(", ")})` : "";
+    const uninstallNotice = `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app${removedUsers}`;
     const failureContext = [
-      `The previous version of ${packageName} was uninstalled during downgrade recovery (INSTALL_FAILED_VERSION_DOWNGRADE); the device now has no copy of the app${removedUsers}.`,
+      `${uninstallNotice}; the app is not installed.`,
       ...inventory.warnings,
     ].join(" ");
     let installAttempt: AndroidInstallAttempt;
     try {
-      installAttempt = await perf.track("adbReinstall", () =>
-        this.runAndroidInstall(installArgs, signal),
+      // Once removal succeeds, finish reinstalling even if the request is cancelled.
+      // Escape both explicit and ambient aborts while retaining the ADB step deadline.
+      installAttempt = await runWithAbortSignal(undefined, () =>
+        raceWithDeadline(
+          () => perf.track("adbReinstall", () => this.runAndroidInstall(installArgs)),
+          {
+            timer: this.timer ?? defaultTimer,
+            timeoutMs: ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+            label: "Android downgrade reinstall",
+            timeoutError: () =>
+              new AdbCommandTimeoutError(
+                `Android downgrade reinstall timed out after ${ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS}ms`,
+              ),
+          },
+        ),
       );
     } catch (error) {
-      // Cancellation still rejects, but must disclose the already completed uninstall.
-      throw new ActionableError(`${failureContext} ${this.extractErrorText(error)}`, {
-        cause: error,
-      });
+      if (!(error instanceof AdbCommandTimeoutError)) {
+        // A failed must-finish reinstall must disclose the already completed uninstall.
+        throw new ActionableError(`${failureContext} ${this.extractErrorText(error)}`, {
+          cause: error,
+        });
+      }
+      installAttempt = {
+        success: false,
+        output: error.message,
+        diagnostics: "",
+        threw: true,
+        timedOut: true,
+        error,
+      };
+    }
+    let outlivedWarning: string | undefined;
+    if (installAttempt.timedOut) {
+      // The reinstall may still commit on the device, so "not installed" is unverified: ask.
+      const verdict = await runWithAbortSignal(undefined, () =>
+        this.resolveTimedOutInstallState(packageName, targetUserId, { installed: false }),
+      );
+      if (verdict.outcome === "indeterminate") {
+        throw new ActionableError(
+          [
+            `${uninstallNotice}.`,
+            indeterminateAndroidInstallMessage(packageName, targetUserId, verdict.detail),
+            ...inventory.warnings,
+          ].join(" "),
+          { cause: installAttempt.error },
+        );
+      }
+      outlivedWarning = ANDROID_INSTALL_OUTLIVED_WARNING;
+      installAttempt = { success: true, output: "", diagnostics: "", threw: false };
     }
     if (!installAttempt.success) {
       const output = `${failureContext} ${installAttempt.output}`;
       if (installAttempt.threw) {
         throw new ActionableError(output, { cause: installAttempt.error });
       }
-      return { installAttempt: { ...installAttempt, output } };
+      return { installAttempt: { ...installAttempt, output }, removedPriorCopy: true };
     }
     this.cacheInvalidator.invalidate(this.device);
     await this.markInstalledAppsCacheStale(true);
-    const warning = await this.restoreAndroidPackageUsers(
+    const restoreWarning = await this.restoreAndroidPackageUsers(
       packageName,
       targetUserId,
       inventory,
       signal,
     );
-    return { installAttempt, warning };
+    const warning = [outlivedWarning, restoreWarning].filter(Boolean).join(" ");
+    return { installAttempt, warning, removedPriorCopy: true };
   }
 
   private async restoreAndroidPackageUsers(
@@ -540,6 +700,8 @@ export class InstallApp {
       warnings: [],
     };
     try {
+      signal?.throwIfAborted();
+      getAbortSignal()?.throwIfAborted();
       for (const userId of installedUserIds.filter((id) => id !== targetUserId)) {
         signal?.throwIfAborted();
         const restoration = await this.restoreAndroidPackageUser(packageName, userId, signal);
@@ -672,7 +834,12 @@ export class InstallApp {
     }
   }
 
-  private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";
+  /**
+   * pm's own failure line. The `Failure [` prefix keeps an APK path that merely contains the
+   * code (adb echoes the path in its stderr: `adb: failed to install <path>: Failure [...]`)
+   * from reading as a downgrade, which would uninstall the app.
+   */
+  private static readonly ANDROID_DOWNGRADE_MARKER = "Failure [INSTALL_FAILED_VERSION_DOWNGRADE";
 
   private setInstalledAppsRepository(installedAppsRepository?: InstalledAppsStore): void {
     if (installedAppsRepository) {
@@ -713,14 +880,30 @@ export class InstallApp {
         signal,
       );
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
-      return { success: output.includes("Success"), output, threw: false };
+      return { success: output.includes("Success"), output, diagnostics: output, threw: false };
     } catch (error) {
       if (this.isAndroidCancellation(error, signal)) {
         throw error;
       }
       logger.warn(`[InstallApp] ADB install failed: ${errorMessage(error)}`, error);
-      return { success: false, output: this.extractErrorText(error), threw: true, error };
+      return {
+        success: false,
+        output: this.extractErrorText(error),
+        diagnostics: this.extractCommandStreams(error),
+        threw: true,
+        timedOut: error instanceof AdbCommandTimeoutError,
+        error,
+      };
     }
+  }
+
+  /**
+   * stdout/stderr of a failed command, found by walking `cause` (a real AdbClient rejection
+   * keeps them on the wrapped raw error); the message echoes the command line.
+   */
+  private extractCommandStreams(error: unknown): string {
+    const { stdout, stderr } = adbFailureOutput(error);
+    return [stderr, stdout].filter((value) => value.trim().length > 0).join("\n");
   }
 
   private isAndroidCancellation(error: unknown, signal?: AbortSignal): boolean {
@@ -777,6 +960,42 @@ export class InstallApp {
         .join("\n");
     }
     return String(error);
+  }
+
+  /**
+   * The part of an iOS install failure that the tool itself printed, for classification only.
+   * The rejection's `message` is `Command failed: <argv>` plus stderr, and the argv carries the
+   * user's artifact path, so searching it would match a path such as `build/downgrade-test/`.
+   * Prefer stderr/stdout (walking `cause` for wrapped errors); when none is attached, drop the
+   * command line from the message. Either way the artifact path (and its basename) is removed,
+   * because the tool may echo it in its own output.
+   */
+  private iosToolOutput(error: unknown, artifactPath: string): string {
+    let current: unknown = error;
+    for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+      const details = current as Error & { stderr?: unknown; stdout?: unknown };
+      const streams = [details.stderr, details.stdout].filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
+      if (streams.length > 0) {
+        return this.withoutArtifactPath(streams.join("\n"), artifactPath);
+      }
+      current = current.cause;
+    }
+    return this.withoutArtifactPath(
+      errorMessage(error)
+        .split("\n")
+        .filter((line) => !line.includes("Command failed:"))
+        .join("\n"),
+      artifactPath,
+    );
+  }
+
+  /** Remove the artifact path, and its basename, so a tool that echoes either cannot match a keyword. */
+  private withoutArtifactPath(text: string, artifactPath: string): string {
+    const withoutPath = text.split(artifactPath).join("");
+    const base = path.basename(artifactPath);
+    return base.length > 0 ? withoutPath.split(base).join("") : withoutPath;
   }
 
   /**
@@ -995,7 +1214,7 @@ export class InstallApp {
       return false;
     } catch (error) {
       const text = this.extractErrorText(error);
-      if (!this.isiOSDowngradeError(text)) {
+      if (!this.isiOSDowngradeError(this.iosToolOutput(error, appPath))) {
         throw error;
       }
       const recoveryBackend = this.iosDowngradeRecoveryBackendResolver(this.device.deviceId, {
@@ -1023,14 +1242,45 @@ export class InstallApp {
           terminateError,
         );
       }
-      await recoveryBackend.uninstallApp(bundleId);
+      // Bounded and cancellable: a cancel before this dispatches leaves the app installed. Once it
+      // has returned, the reinstall below is not abandoned by a cancel (issue #10073).
+      await recoveryBackend.uninstallApp(bundleId, signal);
       this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
-      if (signal?.aborted) {
-        throw new Error(OPERATION_CANCELLED_MESSAGE);
-      }
-      await backend.installApp(appPath);
+      await this.reinstallAfterIosDowngradeUninstall(appPath, bundleId, backend);
       return true;
+    }
+  }
+
+  /** Once the uninstall has succeeded, finish the reinstall even if the request is cancelled. */
+  private async reinstallAfterIosDowngradeUninstall(
+    appPath: string,
+    bundleId: string,
+    backend: IosInstallBackend,
+  ): Promise<void> {
+    try {
+      // Escape the ambient abort (simctl reads it) while keeping the step deadline.
+      // The explicit timeout also reaches simctl: with no ambient signal it would otherwise fall
+      // back to the client's 60 s default and kill the child before this 120 s budget could fire.
+      await runWithAbortSignal(undefined, () =>
+        raceWithDeadline(
+          () =>
+            backend.installApp(appPath, {
+              timeoutMs: IOS_SIMULATOR_DOWNGRADE_REINSTALL_TIMEOUT_MS,
+            }),
+          {
+            timer: this.timer ?? defaultTimer,
+            timeoutMs: IOS_SIMULATOR_DOWNGRADE_REINSTALL_TIMEOUT_MS,
+            label: "iOS downgrade reinstall",
+          },
+        ),
+      );
+    } catch (error) {
+      // A failed must-finish reinstall must disclose the already completed uninstall.
+      throw new ActionableError(
+        `The previous version of ${bundleId} was uninstalled during downgrade recovery (the installed version was newer than the artifact); the simulator now has no copy of the app; the app is not installed. ${this.extractErrorText(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -1050,7 +1300,7 @@ export class InstallApp {
       await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);
-      if (this.isiOSDowngradeError(text)) {
+      if (this.isiOSDowngradeError(this.iosToolOutput(error, ipaPath))) {
         // devicectl has no downgrade flag, so guide the user to uninstall first.
         throw new Error(
           `Install failed because a newer version is already installed on the device. ` +

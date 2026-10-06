@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, test, spyOn, mock } from "bun:test";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
 import {
@@ -11,7 +12,13 @@ import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { logger } from "../../../src/utils/logger";
-import type { Element } from "../../../src/models";
+import type { Element, ViewHierarchyResult } from "../../../src/models";
+import {
+  testTagHierarchy,
+  testTagHierarchyWithFirstRowMoved,
+  testTagHierarchyWithoutFirstRow,
+  testTagRows,
+} from "../talkback/capturedTestTagTargets";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
@@ -59,10 +66,12 @@ describe("TapAnyElement", () => {
     );
     tapAny.setRefreshViewHierarchyForTesting(async () => null);
     tapAny.observedInteraction = (action) =>
-      action({
-        viewHierarchy: { hierarchy: { node: {} } },
-        screenSize: { width: 500, height: 500 },
-      });
+      action(
+        recordObservationRead({
+          viewHierarchy: { hierarchy: { node: {} } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
 
     await tapAny.execute({ action: "longPress", duration: LONG_PRESS_HARD_MAX_MS });
     const swipe = adb
@@ -220,7 +229,7 @@ describe("TapAnyElement", () => {
       );
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
       tapAny.observedInteraction = (action) =>
-        action({ viewHierarchy, screenSize: { width: 10, height: 10 } });
+        action(recordObservationRead({ viewHierarchy, screenSize: { width: 10, height: 10 } }));
       tapAny.setRefreshViewHierarchyForTesting(async () => null);
 
       const result = await tapAny.execute({ action: "tap" });
@@ -296,9 +305,15 @@ describe("TapAnyElement Android gesture dispatch", () => {
       },
     );
     tapAny.observedInteraction = (action) =>
-      action({ viewHierarchy: observedHierarchy, screenSize: { width: 500, height: 500 } });
+      action(
+        recordObservationRead({
+          viewHierarchy: observedHierarchy,
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
+    let refreshCount = 0;
     tapAny.setRefreshViewHierarchyForTesting(async () => ({
-      hierarchy: { node: { marker: "after" } },
+      hierarchy: { node: { marker: `after-${++refreshCount}` } },
     }));
     return {
       tapAny,
@@ -607,8 +622,11 @@ test.each([false, true])(
 );
 
 describe("TapAnyElement node long press fallbacks", () => {
-  function setup(advertised = true) {
-    const element: Element = {
+  function setup(
+    advertised = true,
+    target: { element: Element; fresh: ViewHierarchyResult | null } | undefined = undefined,
+  ) {
+    const element: Element = target?.element ?? {
       ...makeElement(),
       "test-tag": "widget_42",
       actions: advertised ? ["long_click"] : [],
@@ -628,11 +646,13 @@ describe("TapAnyElement node long press fallbacks", () => {
       },
     );
     tapAny.observedInteraction = (action) =>
-      action({
-        viewHierarchy: { hierarchy: { node: {} } },
-        screenSize: { width: 500, height: 500 },
-      });
-    tapAny.setRefreshViewHierarchyForTesting(async () => null);
+      action(
+        recordObservationRead({
+          viewHierarchy: { hierarchy: { node: {} } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
+    tapAny.setRefreshViewHierarchyForTesting(async () => target?.fresh ?? null);
     return { proxy, adb, tapAny };
   }
 
@@ -701,6 +721,57 @@ describe("TapAnyElement node long press fallbacks", () => {
     expect(adb.getAllCommands()).toEqual([]);
   });
 
+  describe("advertised long_click reports node not found", () => {
+    const row: Element = { ...testTagRows[0]!, actions: ["long_click"] };
+    const notFound = "Element not found with NodeSelector(testTag=submit-form)";
+    const notFoundResult = {
+      success: false,
+      action: "long_click" as const,
+      totalTimeMs: 1,
+      error: notFound,
+    };
+
+    test("falls back to coordinates while a fresh hierarchy still shows the element in place", async () => {
+      const { proxy, adb, tapAny } = setup(true, { element: row, fresh: testTagHierarchy });
+      proxy.setActionResult(notFoundResult);
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+        expect(result.success).toBe(true);
+        expect(proxy.getNodeActionHistory()).toHaveLength(1);
+        expect(adb.getAllCommands()).toEqual([
+          "shell input touchscreen swipe 120 130 120 130 1200",
+        ]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test.each([
+      ["gone", testTagHierarchyWithoutFirstRow],
+      ["moved", testTagHierarchyWithFirstRowMoved],
+      ["unavailable", null],
+    ] satisfies [string, ViewHierarchyResult | null][])(
+      "fails instead of pressing a possibly stale coordinate (%s)",
+      async (_name, fresh) => {
+        const { proxy, adb, tapAny } = setup(true, { element: row, fresh });
+        proxy.setActionResult(notFoundResult);
+        const warning = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await tapAny.execute({ action: "longPress", duration: 1200 });
+          expect(result.success).toBe(false);
+          expect(result.error).toContain(
+            `Semantic long press failed for the selected element: ${notFound}`,
+          );
+          expect(proxy.getNodeActionHistory()).toHaveLength(1);
+          expect(adb.getAllCommands()).toEqual([]);
+        } finally {
+          warning.mockRestore();
+        }
+      },
+    );
+  });
+
   test.each([false, true])(
     "logs a thrown node action and falls back (advertised=%s)",
     async (advertised) => {
@@ -743,10 +814,12 @@ describe("tapAny long press safety", () => {
       },
     );
     action.observedInteraction = (callback) =>
-      callback({
-        viewHierarchy: { hierarchy: { node: element } },
-        screenSize: { width: 500, height: 500 },
-      });
+      callback(
+        recordObservationRead({
+          viewHierarchy: { hierarchy: { node: element } },
+          screenSize: { width: 500, height: 500 },
+        }),
+      );
     action.setRefreshViewHierarchyForTesting(async () => null);
     return { adb, timer, action, displayLookup };
   }

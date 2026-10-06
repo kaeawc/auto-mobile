@@ -1,4 +1,5 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -9,6 +10,29 @@ import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { PooledDevice, DeviceRecoveryPolicy } from "./devicePool";
 import type { Session } from "./sessionManager";
 import type { AndroidRecoveryRecordLedger } from "./androidRecoveryRecordLedger";
+
+interface SameAvdRecoveryContext {
+  device: PooledDevice;
+  avdName: string;
+  preservedSessionId: string | undefined;
+  preservedSession: Session | undefined;
+  preservedAutolockSessionId: string | undefined;
+  recoveryImage: DeviceInfo;
+  incidentId: string | undefined;
+  handoffOwner: symbol;
+}
+
+function trackLateShutdowns(retainLeaseUntil: (settlement: Promise<unknown>) => void) {
+  const settlements: Promise<unknown>[] = [];
+  return {
+    retainLeaseUntil: (settlement: Promise<unknown>): void => {
+      settlements.push(settlement);
+      retainLeaseUntil(settlement);
+    },
+    settledWhen: (retained: boolean): Promise<unknown> | undefined =>
+      retained ? Promise.allSettled(settlements) : undefined,
+  };
+}
 
 export class UnconfirmedRecoveryShutdownError extends ActionableError {
   constructor(avdName: string, cause: unknown) {
@@ -54,6 +78,7 @@ export interface AndroidRebootCoordinatorPoolPort {
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
     replacementHandoffOwner: symbol,
+    lateShutdownSettled?: Promise<unknown>,
   ): void;
   stopAndroidEmulatorForRecovery(
     device: PooledDevice,
@@ -172,13 +197,17 @@ export class AndroidRebootCoordinator {
     const replacementHandoffOwner = Symbol("same-avd-recovery-handoff");
     let recoveryAttempt = 0;
     let retainRecoveryImage = false;
+    // Late kills this attempt fenced via the lifecycle lease. When the image is
+    // retained, the pool lifts it only after these settle and a fresh
+    // observation proves the AVD's state (see finishAndroidRecoveryAttempt).
+    const lateShutdowns = trackLateShutdowns(retainLeaseUntil);
     try {
       let replacementState: "stopped" | "same-avd" | "declined";
       try {
         replacementState = await this.pool.stopAndroidEmulatorForRecovery(
           device,
           avdName,
-          retainLeaseUntil,
+          lateShutdowns.retainLeaseUntil,
           allowActiveStop,
           replacementHandoffOwner,
           preservedSessionId,
@@ -197,8 +226,7 @@ export class AndroidRebootCoordinator {
         return false;
       }
       if (replacementState !== "stopped") {
-        return await this.finishAndroidRecoveryWithoutActiveStop(
-          replacementState,
+        return await this.finishAndroidRecoveryWithoutActiveStop(replacementState, {
           device,
           avdName,
           preservedSessionId,
@@ -206,8 +234,8 @@ export class AndroidRebootCoordinator {
           preservedAutolockSessionId,
           recoveryImage,
           incidentId,
-          replacementHandoffOwner,
-        );
+          handoffOwner: replacementHandoffOwner,
+        });
       }
       if (
         !this.pool.detachSessionForAndroidRecovery(device, preservedSessionId, preservedSession)
@@ -255,6 +283,7 @@ export class AndroidRebootCoordinator {
         recoveryDeviceIds,
         retainRecoveryImage,
         replacementHandoffOwner,
+        lateShutdowns.settledWhen(retainRecoveryImage),
       );
     }
   }
@@ -374,6 +403,11 @@ export class AndroidRebootCoordinator {
           outcome: "succeeded",
         });
       } catch (error) {
+        if (isEmulatorLaunchCancelledError(error) && error.process) {
+          // A launch cancelled after the spawn throws instead of returning its child
+          // (#10075); adopt it so the stop step below confirms its exit.
+          childProcess = error.process;
+        }
         if (
           signal.aborted ||
           this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)
@@ -406,40 +440,24 @@ export class AndroidRebootCoordinator {
 
   private async finishAndroidRecoveryWithoutActiveStop(
     replacementState: "same-avd" | "declined",
-    device: PooledDevice,
-    avdName: string,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
-    preservedAutolockSessionId: string | undefined,
-    recoveryImage: DeviceInfo,
-    incidentId: string | undefined,
-    handoffOwner: symbol,
+    context: SameAvdRecoveryContext,
   ): Promise<boolean> {
     if (replacementState === "declined") {
       return false;
     }
-    return await this.recoverSameAvdReplacement(
-      device,
-      avdName,
-      preservedSessionId,
-      preservedSession,
-      preservedAutolockSessionId,
-      recoveryImage,
-      incidentId,
-      handoffOwner,
-    );
+    return await this.recoverSameAvdReplacement(context);
   }
 
-  private async recoverSameAvdReplacement(
-    device: PooledDevice,
-    avdName: string,
-    preservedSessionId: string | undefined,
-    preservedSession: Session | undefined,
-    preservedAutolockSessionId: string | undefined,
-    recoveryImage: DeviceInfo,
-    incidentId: string | undefined,
-    handoffOwner: symbol,
-  ): Promise<boolean> {
+  private async recoverSameAvdReplacement({
+    device,
+    avdName,
+    preservedSessionId,
+    preservedSession,
+    preservedAutolockSessionId,
+    recoveryImage,
+    incidentId,
+    handoffOwner,
+  }: SameAvdRecoveryContext): Promise<boolean> {
     if (
       !(await this.pool.rebindSameAvdReplacementSession(
         device,

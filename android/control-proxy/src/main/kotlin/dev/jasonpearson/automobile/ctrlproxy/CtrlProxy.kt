@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -13,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Point
@@ -31,6 +33,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
@@ -50,6 +53,19 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.overlay.AndroidOverlayDisplays
+import dev.jasonpearson.automobile.ctrlproxy.overlay.BitmapOverlayImageDecoder
+import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
+import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetDirectory
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetStore
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayImageCache
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
@@ -78,6 +94,8 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -121,6 +139,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -132,6 +151,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -332,6 +352,54 @@ internal data class AccessibilityEventWork(
 }
 
 /**
+ * True only for an event from CtrlProxy's own accessibility-overlay window (the highlight overlay
+ * or the interactive overlay). CtrlProxy's package also owns the CtrlProxy keyboard
+ * (`TYPE_INPUT_METHOD`) and `MainActivity` (`TYPE_APPLICATION`), whose events must still advance
+ * `frameContext` and refresh the hierarchy, so they are never skipped. Fails open: an unknown
+ * window type ([windowType] null) is processed, because handling one extra event is safe while
+ * dropping a keyboard event leaves stale key coordinates passing the staleness check.
+ */
+internal fun shouldSkipOwnOverlayEvent(
+  eventPackage: String?,
+  ownPackage: String,
+  windowType: Int?,
+): Boolean =
+  eventPackage == ownPackage && windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+
+/**
+ * Window type of the window [event] came from, or null when it cannot be determined (no source
+ * node, window not retrievable, or the node call throws). Reads the source node's window rather
+ * than enumerating `windows`, so no window list is allocated per event.
+ */
+private fun ownEventWindowType(event: AccessibilityEvent): Int? {
+  val source =
+    try {
+      event.source
+    } catch (_: Exception) {
+      // Fail open: a source that cannot be read leaves the type unknown, so the event is processed.
+      return null
+    }
+  if (source == null) return null
+  return try {
+    val window = source.window
+    try {
+      window?.type
+    } finally {
+      window?.recycle()
+    }
+  } catch (_: Exception) {
+    // Fail open: a window that cannot be read leaves the type unknown, so the event is processed.
+    null
+  } finally {
+    try {
+      source.recycle()
+    } catch (_: Exception) {
+      /* already recycled */
+    }
+  }
+}
+
+/**
  * True when [eventType] changes the UI enough to advance the `frameContext` staleness token. This
  * is DELIBERATELY independent of the observer count (issue #5470 review): the token must keep
  * advancing even while nobody is connected, otherwise a token minted before the last client
@@ -434,6 +502,44 @@ internal fun navigationEventResponse(event: TimestampedNavigationEvent): Navigat
         sequenceNumber = event.sequenceNumber,
       ),
   )
+
+/** Android multi-user range: a package uid is `userId * PER_USER_RANGE + appId`. */
+internal const val PACKAGE_EVENT_USER_ID_RANGE = 100_000
+
+/**
+ * The Android user id for a package broadcast's `Intent.EXTRA_UID` (#10067). The extra is the
+ * package's kernel uid (e.g. 10234 for user 0, 1010234 for user 10), not a user id; an absent extra
+ * (`-1`) means the primary user.
+ */
+internal fun packageEventUserId(uid: Int): Int =
+  if (uid >= 0) uid / PACKAGE_EVENT_USER_ID_RANGE else 0
+
+/**
+ * The `package_event` payload. `userId` is the Android user id; `uid` carries the raw package uid
+ * when known and doubles as the marker that `userId` is a real user id: APKs that predate #10067
+ * sent the uid in `userId` and no `uid`, which the host converts itself.
+ */
+internal fun packageEventJson(
+  action: String,
+  packageName: String,
+  userId: Int,
+  uid: Int?,
+  isSystem: Boolean?,
+  removedForAllUsers: Boolean,
+): JsonObject = buildJsonObject {
+  put("action", action)
+  put("packageName", packageName)
+  put("userId", userId)
+  if (uid != null) {
+    put("uid", uid)
+  }
+  if (isSystem != null) {
+    put("isSystem", isSystem)
+  }
+  if (removedForAllUsers) {
+    put("removedForAllUsers", true)
+  }
+}
 
 internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
   if (reportedMs > 0) reportedMs else nowMs
@@ -904,6 +1010,52 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       },
     )
   }
+  private lateinit var overlayController: OverlayController
+  private val overlayResultSink =
+    object : OverlayResultSink {
+      override suspend fun send(requestId: String?, success: Boolean, error: String?) =
+        sendWithMissingAssets(requestId, success, error, emptyList())
+
+      override suspend fun sendWithMissingAssets(
+        requestId: String?,
+        success: Boolean,
+        error: String?,
+        missingAssets: List<String>,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "overlay_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              overlayResultFrame(requestId, success, error, missingAssets)
+            }
+          }
+        }
+      }
+    }
+  // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
+  // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
+  // main-thread clear or lookup never touches the disk.
+  private val overlayAssets by lazy {
+    OverlayAssetStore(
+      OverlayAssetDirectory(File(cacheDir, "overlay-assets")),
+      session = {
+        if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+      },
+      fileWorker = Dispatchers.IO.asExecutor(),
+    )
+  }
+  // Decoded bitmaps of stored assets, dropped as soon as the store replaces, removes or clears one.
+  private val overlayImages by lazy {
+    OverlayImageCache(overlayAssets, BitmapOverlayImageDecoder()).also {
+      overlayAssets.setChangeListener(it::invalidate)
+    }
+  }
+  private val overlayAssetController by lazy {
+    OverlayAssetController(
+      overlayAssets,
+      overlayResultSink,
+      OverlayBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
+    )
+  }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
   private lateinit var overlayDrawer: OverlayDrawer
@@ -930,8 +1082,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
   private val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
     Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
-
-  @Volatile private var isRecording: Boolean = false
 
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
@@ -1179,7 +1329,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
         val packageName = intent.data?.schemeSpecificPart ?: return
         val uid = intent.getIntExtra(Intent.EXTRA_UID, -1)
-        val userId = if (uid >= 0) uid else 0
+        val userId = packageEventUserId(uid)
         val isReplacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
         // EXTRA_REMOVED_FOR_ALL_USERS may not be available in all SDK versions, use string
         // literal
@@ -1207,7 +1357,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
 
         serviceScope.launch {
-          broadcastPackageEvent(eventAction, packageName, userId, isSystem, removedForAllUsers)
+          broadcastPackageEvent(
+            eventAction,
+            packageName,
+            userId,
+            uid.takeIf { it >= 0 },
+            isSystem,
+            removedForAllUsers,
+          )
         }
       }
     }
@@ -1372,6 +1529,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val screenStateReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
+        refreshOverlayWindow()
         when (intent?.action) {
           Intent.ACTION_SCREEN_ON -> {
             Log.i(TAG, "Screen turned ON, triggering hierarchy extraction")
@@ -1507,6 +1665,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
           onTransition = { transition ->
             serviceScope.launch {
+              if (::overlayController.isInitialized) {
+                overlayController.onDisplayTransition(
+                  transition.displayId,
+                  removed = transition.change == "removed",
+                )
+              }
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
                 webSocketServer.broadcast(displayTransitionFrame(transition))
               }
@@ -1522,6 +1686,55 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
+      if (!::overlayController.isInitialized) {
+        val overlayDisplays = AndroidOverlayDisplays(this)
+        overlayController =
+          OverlayController(
+            DefaultInteractiveOverlayHost(
+              context = this,
+              displayWindows = overlayDisplays,
+              onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
+              onWindowLost = ::refreshOverlayWindow,
+              isBlocked = ::isOverlayBlocked,
+              backScope = serviceScope,
+            ),
+            overlayResultSink,
+            onDismissed = {
+              withContext(Dispatchers.Main.immediate) {
+                overlayManager.setInteractiveOverlayAttached(false)
+              }
+            },
+            lifecycle =
+              OverlayLifecycle(
+                CoroutineOverlayScheduler(serviceScope),
+                isBlocked = ::isOverlayBlocked,
+                observerSession = {
+                  if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
+                  else 0
+                },
+                clientCount = {
+                  // Unknown (server not up yet) counts as connected: never drop an overlay on a
+                  // guess.
+                  if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 1
+                },
+              ),
+            eventSink =
+              OverlayEventSink { event ->
+                if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+                  resultBroadcaster.guard(null, "overlay_event") {
+                    webSocketServer.broadcastWithPerf { _ -> overlayEventFrame(event) }
+                  }
+                }
+              },
+            displays = overlayDisplays,
+            clearAssets = { overlayAssets.clear() },
+            hasAsset = { overlayAssets.lookup(it) != null },
+            images = overlayImages,
+          )
+        // Service start: drop anything a previous process left in the cache directory.
+        overlayAssets.purgeLeftovers()
+      }
+      overlayManager.setInteractiveOverlayAttached(overlayController.isShowing)
 
       // Register broadcast receiver for commands
       val commandFilter = IntentFilter().apply { addAction(ACTION_EXTRACT_HIERARCHY) }
@@ -1634,6 +1847,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         IntentFilter().apply {
           addAction(Intent.ACTION_SCREEN_ON)
           addAction(Intent.ACTION_SCREEN_OFF)
+          addAction(Intent.ACTION_USER_PRESENT)
         }
       registerReceiver(screenStateReceiver, screenStateFilter)
       Log.d(TAG, "Screen state receiver registered")
@@ -1730,6 +1944,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
         val queuedHandler = queuedMessageHandler()
+        val overlays = overlayController
         webSocketServer =
           WebSocketServer(
             port = 8765,
@@ -1738,6 +1953,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientDisconnected = { client ->
               queuedHandler.disconnect(client)
               gestureStreamRouter.cancelOwnedBy(client)
+            },
+            onClientCountChanged = { count, session ->
+              serviceScope.launch { overlays.onClientCountChanged(count, session) }
             },
             onPermanentStartFailure = { disableSelf() },
           )
@@ -1813,6 +2031,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun onUnbind(intent: Intent?): Boolean {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
+    if (::overlayController.isInitialized) {
+      // Dismiss (reason teardown) without terminal destruction: a same-process rebind reuses this
+      // controller, and onServiceConnected has early-exit paths that would leave a destroyed one.
+      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.dismissForUnbind() }
+    }
     return super.onUnbind(intent)
   }
 
@@ -1896,6 +2119,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.destroy()
     }
 
+    if (::overlayController.isInitialized) {
+      // Independent of serviceScope cancellation below. Main-immediate runs inline when possible;
+      // a pending request releases the controller mutex on cancellation, then cleanup resumes.
+      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.destroy() }
+    }
     if (::overlayManager.isInitialized) {
       overlayManager.destroy()
     }
@@ -2806,6 +3034,38 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     handleAddHighlight(requestId, highlightId, shape)
 
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {
+    launchRequestScope(requestId) { overlayController.show(requestId, spec, displayId) }
+  }
+
+  override fun updateOverlay(
+    requestId: String?,
+    id: String,
+    spec: OverlaySpec?,
+    state: Map<String, OverlayScalar>?,
+  ) {
+    launchRequestScope(requestId) { overlayController.update(requestId, id, spec, state) }
+  }
+
+  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {
+    launchRequestScope(requestId) { overlayController.dismiss(requestId, id, all) }
+  }
+
+  override fun putOverlayAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  ) {
+    launchRequestScope(requestId) {
+      overlayAssetController.put(requestId, id, mimeType, dataBase64)
+    }
+  }
+
+  override fun removeOverlayAsset(requestId: String?, id: String) {
+    launchRequestScope(requestId) { overlayAssetController.remove(requestId, id) }
+  }
+
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
     handleListPreferenceFiles(requestId, packageName)
 
@@ -2871,12 +3131,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     handleClearPreferences(requestId, packageName, fileName)
 
   override fun startRecording() {
-    isRecording = true
+    // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording started")
   }
 
   override fun stopRecording() {
-    isRecording = false
+    // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording stopped")
   }
 
@@ -3007,11 +3267,45 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  private fun isOverlayBlocked(): Boolean {
+    val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
+    // Missing safety services fail closed rather than allowing an overlay over an unknown lock
+    // state.
+    return keyguard?.isKeyguardLocked != false || power?.isInteractive != true
+  }
+
+  private fun refreshOverlayWindow() {
+    if (::overlayController.isInitialized) {
+      val controller = overlayController
+      serviceScope.launch { controller.onConfigurationChanged() }
+    }
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    refreshOverlayWindow()
+  }
+
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null) {
       Log.w(TAG, "onAccessibilityEvent: no event")
       return
     }
+
+    // Overlay animations must not feed the hierarchy debouncer or navigation tracking. Only the
+    // overlay's OWN accessibility-overlay windows are dropped: this package also owns the CtrlProxy
+    // keyboard (input-method window) and MainActivity, whose events must keep advancing
+    // frameContext
+    // and feeding the hierarchy push. The window type is resolved only for own-package events.
+    val eventPackage = event.packageName?.toString()
+    val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
+    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    if (
+      event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+        event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+    )
+      refreshOverlayWindow()
 
     try {
       when (event.eventType) {
@@ -3296,6 +3590,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     packageName: String,
     userId: Int,
+    uid: Int?,
     isSystem: Boolean?,
     removedForAllUsers: Boolean,
   ) {
@@ -3310,17 +3605,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         webSocketFrameJson("package_event", timestamp = timestamp) {
           put(
             "event",
-            buildJsonObject {
-              put("action", action)
-              put("packageName", packageName)
-              put("userId", userId)
-              if (isSystem != null) {
-                put("isSystem", isSystem)
-              }
-              if (removedForAllUsers) {
-                put("removedForAllUsers", true)
-              }
-            },
+            packageEventJson(action, packageName, userId, uid, isSystem, removedForAllUsers),
           )
         }
       webSocketServer.broadcast(message)
@@ -5642,7 +5927,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       val root = rootInActiveWindow
-      val owner = selector?.let { findNodeBySelector(root, it) }
+      val owner = selector?.let { sel -> findNodeInDisplayWindows { findNodeBySelector(it, sel) } }
       if (selector != null && owner == null) {
         throw IllegalStateException("Selected link owner is no longer present")
       }
@@ -5743,8 +6028,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("findNode")
-      val root = rootInActiveWindow
-      val targetNode =
+      val targetNode = findNodeInDisplayWindows { root ->
         if (effectiveSelector != null) {
           findNodeBySelector(root, effectiveSelector)
         } else if (resourceId != null) {
@@ -5752,6 +6036,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } else {
           null
         }
+      }
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
@@ -6777,21 +7062,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
     collectFocusableNodes(root, focusableNodes)
 
-    // Find current node's position and return the previous one
-    var previousNode: android.view.accessibility.AccessibilityNodeInfo? = null
-    for (node in focusableNodes) {
-      if (isSameNode(node, currentNode)) {
-        // Recycle all nodes except the previous one
-        focusableNodes.forEach { n -> if (n != previousNode) n.recycle() }
-        return previousNode
-      }
-      previousNode?.recycle()
-      previousNode = node
-    }
-
-    // If current node not found, recycle all
-    focusableNodes.forEach { it.recycle() }
-    return null
+    // Find current node's position and return the previous one. Each copy is released exactly once.
+    return selectPreviousFocusable(focusableNodes) { isSameNode(it, currentNode) }
   }
 
   /** Collect all focusable and editable nodes in document order (pre-order traversal). */
@@ -6827,6 +7099,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       node1.viewIdResourceName == node2.viewIdResourceName &&
       node1.text?.toString() == node2.text?.toString()
   }
+
+  /**
+   * Search the active window's root first, then the other windows the hierarchy extractor reports
+   * for the active display (topmost first), for the first node [find] returns. The extractor's own
+   * window enumeration is reused so node actions and focus read-back cannot disagree with
+   * `observe`; the active window goes first so a bare id prefers the app over an IME/system window.
+   */
+  private fun findNodeInDisplayWindows(
+    find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?
+  ): AccessibilityNodeInfo? =
+    findNodeAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
+
+  private fun displayWindowsOrEmpty(): List<AccessibilityWindowInfo> =
+    try {
+      viewHierarchyExtractor.selectDisplayWindows(this).windows
+    } catch (e: Exception) {
+      // Best-effort widening: on failure fall back to the active window alone, today's behaviour.
+      Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
+      emptyList()
+    }
 
   private fun findNodeBySelector(
     root: android.view.accessibility.AccessibilityNodeInfo?,
@@ -7886,8 +8178,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("findFocus")
-      val rootNode = rootInActiveWindow
-      val focusedNode = rootNode?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+      val focusedNode = findNodeInDisplayWindows {
+        it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+      }
       perfProvider.endOperation("findFocus")
 
       if (focusedNode == null) {

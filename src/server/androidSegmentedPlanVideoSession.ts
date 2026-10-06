@@ -15,6 +15,7 @@ import {
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
+import type { ForceStopOptions } from "../features/video";
 import type {
   VideoRecordingConfigInput,
   VideoRecordingHighlightEntry,
@@ -27,10 +28,11 @@ import type { VideoRecordingPanel } from "../models";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 // Spend at most the existing headroom between rotation and screenrecord's hard cap.
-const ROTATION_STOP_TIMEOUT_MS =
+// This is also the product's budget for one whole segment stop-and-pull.
+export const ROTATION_STOP_TIMEOUT_MS =
   ANDROID_SCREENRECORD_MAX_SECONDS * 1000 - ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
 
-interface SegmentedSessionResult {
+export interface SegmentedSessionResult {
   filePaths: string[];
   recordingIds: string[];
   metadata: VideoRecordingMetadata[];
@@ -68,6 +70,13 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
    * hook removes by session identity.
    */
   onFinalized?: () => void;
+  /**
+   * Invoked with the finalize result when the {@link maxDurationSeconds} auto-stop (not a
+   * caller-driven stop, whose caller already holds the result) finalizes the session, so
+   * the owner can persist what a caller-driven stop would — notably the `segments.json`
+   * manifest. A rejection is logged and never fails the auto-stop.
+   */
+  onAutoStopped?: (result: SegmentedSessionResult) => Promise<void> | void;
   startVideoRecording?: (
     request: Parameters<typeof defaultStartVideoRecording>[0],
   ) => Promise<ActiveVideoRecording>;
@@ -76,7 +85,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
   getVideoRecordingMetadata?: typeof defaultGetVideoRecordingMetadata;
   getVideoRecordingStatus?: typeof defaultGetVideoRecordingStatus;
-  rollbackVideoRecordingStart?: (recordingId: string) => Promise<void>;
+  rollbackVideoRecordingStart?: (recordingId: string, options?: ForceStopOptions) => Promise<void>;
 }
 
 /**
@@ -123,6 +132,10 @@ export class AndroidSegmentedPlanVideoSession {
   private timerDriven = false;
 
   private readonly onFinalized: (() => void) | undefined;
+
+  private readonly onAutoStopped:
+    | ((result: SegmentedSessionResult) => Promise<void> | void)
+    | undefined;
 
   /** Guards {@link onFinalized} so a second (no-op) {@link stop} does not re-notify. */
   private finalizedNotified = false;
@@ -173,7 +186,10 @@ export class AndroidSegmentedPlanVideoSession {
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 
-  private readonly rollbackVideoRecordingStartFn: (recordingId: string) => Promise<void>;
+  private readonly rollbackVideoRecordingStartFn: (
+    recordingId: string,
+    options?: ForceStopOptions,
+  ) => Promise<void>;
 
   constructor(options: AndroidSegmentedPlanVideoSessionOptions) {
     this.device = options.device;
@@ -188,6 +204,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.display = options.display;
     this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
+    this.onAutoStopped = options.onAutoStopped;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
     this.getVideoRecordingMetadataFn =
@@ -279,12 +296,28 @@ export class AndroidSegmentedPlanVideoSession {
       logger.info(
         `[SegmentedPlanVideo] Session reached maxDurationSeconds=${this.maxDurationSeconds}, auto-stopping`,
       );
-      this.stop().catch((error) => {
-        logger.warn(
-          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`,
-        );
-      });
+      void this.autoStop();
     }, this.maxDurationSeconds * 1000);
+  }
+
+  private async autoStop(): Promise<void> {
+    let result: SegmentedSessionResult;
+    try {
+      result = await this.stop();
+    } catch (error) {
+      logger.warn(
+        `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`,
+      );
+      return;
+    }
+    try {
+      await this.onAutoStopped?.(result);
+    } catch (error) {
+      logger.warn(
+        `[SegmentedPlanVideo] Persisting the auto-stopped session result failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   /**
@@ -352,6 +385,60 @@ export class AndroidSegmentedPlanVideoSession {
     this.warnings.splice(0);
     this.gapStartedAtMs = undefined;
     this.notifyFinalized();
+  }
+
+  /**
+   * Cancellation after the plan's session handed the device back. The device may now
+   * belong to another session, so nothing here pulls from it or issues a device-wide
+   * command: only the active segment and failed pending stops are discarded (host
+   * reap, our own temp file, and our rows), and completed segments, which are already
+   * on the host, are returned exactly as {@link finalize} would return them.
+   */
+  async finalizeWithoutDevice(): Promise<SegmentedSessionResult> {
+    this.stopping = true;
+    this.timerDriven = false;
+    this.clearTimers();
+    this.sessionAbortController.abort();
+    this.rotationAbortController?.abort();
+    await this.pendingRotation;
+    const discardIds = Array.from(
+      new Set([
+        ...this.pendingStops.keys(),
+        ...(this.activeRecordingId ? [this.activeRecordingId] : []),
+      ]),
+    ).toReversed();
+    const results = await Promise.allSettled(
+      discardIds.map((id) => this.rollbackVideoRecordingStartFn(id, { deviceWide: false })),
+    );
+    results.forEach((result, index) => {
+      this.rememberWarning(
+        result.status === "rejected"
+          ? `Failed to discard segment ${discardIds[index]} after the device was released: ${errorMessage(result.reason)}`
+          : `Segment ${discardIds[index]} was discarded because the plan's device was released; its device-side recorder may run until its own time limit`,
+      );
+    });
+    this.activeRecordingId = undefined;
+    this.pendingStops.clear();
+    this.notifyFinalized();
+    return this.completedResult();
+  }
+
+  /** The segments already stopped and archived on the host, without touching the device. */
+  completedResult(): SegmentedSessionResult {
+    return {
+      filePaths: [...this.completedFilePaths],
+      recordingIds: [...this.completedRecordingIds],
+      metadata: [...this.completedMetadata],
+      highlights:
+        this.completedHighlights.length > 0
+          ? this.completedHighlights.toSorted(
+              (a, b) => a.timeline.appearedAtSeconds - b.timeline.appearedAtSeconds,
+            )
+          : undefined,
+      ...(this.completedMetadata.length === 0 && this.warnings.length > 0
+        ? { warnings: [...this.warnings] }
+        : {}),
+    };
   }
 
   private clearTimers(): void {
@@ -775,19 +862,6 @@ export class AndroidSegmentedPlanVideoSession {
       }
     }
     this.recordGap(this.timer.now());
-    return {
-      filePaths: [...this.completedFilePaths],
-      recordingIds: [...this.completedRecordingIds],
-      metadata: [...this.completedMetadata],
-      highlights:
-        this.completedHighlights.length > 0
-          ? this.completedHighlights.toSorted(
-              (a, b) => a.timeline.appearedAtSeconds - b.timeline.appearedAtSeconds,
-            )
-          : undefined,
-      ...(this.completedMetadata.length === 0 && this.warnings.length > 0
-        ? { warnings: [...this.warnings] }
-        : {}),
-    };
+    return this.completedResult();
   }
 }

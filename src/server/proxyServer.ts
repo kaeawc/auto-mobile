@@ -13,6 +13,7 @@ import {
 import { logger } from "../utils/logger";
 import {
   DaemonBoundSessionExpiredError,
+  DaemonSessionStalledError,
   DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
   DaemonRestartDeferredError,
@@ -42,6 +43,7 @@ import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSel
 import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
 import { shapeToolCallError } from "./shapeToolCallError";
+import { livenessHandoverPayload, type LivenessHandover } from "../daemon/proxyLivenessRecovery";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -70,6 +72,11 @@ export interface ProxyMcpServerOptions {
 }
 
 function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
+  if (error instanceof DaemonSessionStalledError) {
+    // `daemon_stalled` / `proxy_stalled` (#10053): the harness is told which sessions and devices
+    // are affected and what to do, rather than the generic "acquire a replacement session".
+    return error.toPayload();
+  }
   return sessionOwnershipLostPayload({
     message:
       `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
@@ -249,6 +256,30 @@ export function deviceControlTransportFailureResult(
   };
 }
 
+/**
+ * Tell the harness now, as an MCP logging notification, that automatic liveness recovery was
+ * exhausted (#10053). A harness idle between tool calls would otherwise learn only on its next
+ * call. The payload is the same structured error that call returns.
+ */
+async function forwardLivenessHandover(
+  server: McpServer,
+  handover: LivenessHandover,
+): Promise<void> {
+  try {
+    // sendLoggingMessage honours a level the client set with logging/setLevel; a client that
+    // asked for fewer messages than `error` is not sent the notification and still learns from
+    // the structured error on its next tool call.
+    await server.server.sendLoggingMessage({
+      level: "error",
+      logger: "auto-mobile.liveness",
+      data: livenessHandoverPayload(handover),
+    });
+  } catch (error) {
+    // Best-effort: the next tool call for an affected session returns the same error.
+    logger.warn("[ProxyServer] Failed to forward liveness handover notification", error);
+  }
+}
+
 async function forwardResourceUpdate(server: McpServer, uri: string): Promise<void> {
   try {
     await server.server.notification({
@@ -419,6 +450,8 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         // a stale (cold, over-broad) tool list for the session.
         resources: { subscribe: true, listChanged: true },
         tools: { listChanged: true },
+        // Declared so the proxy can tell an idle harness its sessions were lost (#10053).
+        logging: {},
         prompts: {},
       },
     },
@@ -450,9 +483,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   const stopResourceUpdates = proxy.onResourceUpdated((uri) => {
     void forwardResourceUpdate(server, uri);
   });
+  const stopLivenessHandovers = proxy.onLivenessHandover((handover) => {
+    void forwardLivenessHandover(server, handover);
+  });
   const previousOnClose = server.server.onclose;
   server.server.onclose = () => {
     stopResourceUpdates();
+    stopLivenessHandovers();
     previousOnClose?.();
     void proxy.close().catch((error) => {
       logger.warn("[ProxyServer] Failed to close daemon proxy", error);

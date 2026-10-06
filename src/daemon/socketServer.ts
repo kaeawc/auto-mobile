@@ -20,7 +20,9 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { dropMcpRecording } from "../server/mcpRecordingManager";
+import { isToolUnavailableWireError } from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
+import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -29,6 +31,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_TOOL_UNAVAILABLE_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -111,6 +114,7 @@ import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
@@ -129,6 +133,7 @@ import {
   setAndroidKeyValueDirect,
   withAndroidSharedPreferencesInspectionFallback,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { rethrowForRouteWithoutUserId } from "../features/preferences/resolveAndroidPreferencesUser";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   resolveApkChecksum,
@@ -157,6 +162,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { indeterminateTapError } from "../features/action/coordinateTapDispatch";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type { KeyValueType, PreferenceStoreResolution } from "../features/storage/storageTypes";
 import type {
@@ -283,13 +289,14 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
   }
 }
 
-function mcpRequestFailureDetails(
+export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
 ): Pick<DaemonResponse, "code" | "overloadFailure" | "requestFailureCause"> {
   return {
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }
@@ -327,9 +334,6 @@ export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
-/** Bound queued bytes to max(cap, one frame); bytes measure memory and frames are ~100+ bytes, so no count cap is needed. */
-const DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES = 1024 * 1024;
-
 export class DaemonSocketQueueOverflowError extends Error {
   readonly reason = "queue_overflow";
 
@@ -679,23 +683,26 @@ function assertSocketInputNotAborted(signal?: AbortSignal): void {
   signal?.throwIfAborted();
 }
 
+/** Owner context the socket path hands to an `input/*` handler (#10006). */
+interface InputRequestContext {
+  /** Aborts on socket close and on `daemon/cancelRequest` for this frame. */
+  signal?: AbortSignal;
+  /** When the frame was received; the whole budget, socket queue wait included, runs from here. */
+  receivedAtMs?: number;
+}
+
+/** Owner fence and device-key wait bound for one tracked `input/*` execution. */
+interface InputDeviceGate {
+  ownerSignal?: AbortSignal;
+  chainWait?: McpForwardChainWait;
+}
+
 /** Wire method name for each streamed-gesture frame kind (issue: streaming gesture input). */
 const GESTURE_FRAME_METHODS = {
   start: "input/gestureStart",
   move: "input/gestureMove",
   end: "input/gestureEnd",
 } as const;
-
-/**
- * A streamed gesture the runner has accepted (a `gestureStart` that acked) but not yet ended,
- * retained so its owning socket can issue a cancelling `gestureEnd` if it tears down mid-drag.
- * [targetDevice] is captured at start so the cancel can be forwarded without re-resolving the
- * device on a socket whose session state is already gone.
- */
-interface OwnedGesture {
-  targetDevice: BootedDevice;
-  gestureId: string;
-}
 
 /** Timeout for the best-effort cancelling `gestureEnd` issued when a socket owning a gesture closes. */
 const OWNED_GESTURE_CANCEL_TIMEOUT_MS = 5000;
@@ -791,6 +798,16 @@ interface AndroidAppendTextOptions {
   signal?: AbortSignal;
 }
 
+type InputTargetAction =
+  | "input/tap"
+  | "input/swipe"
+  | "input/typeText"
+  | "input/pressButton"
+  | "input/key"
+  | "input/gestureStart"
+  | "input/gestureMove"
+  | "input/gestureEnd";
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -802,6 +819,8 @@ export class UnixSocketServer {
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
+  private readonly outboundWriteGuards = new WeakMap<Socket, OutboundWriteGuard>();
   private readonly backpressuredSocketIdle = new WeakMap<
     Socket,
     { start: () => void; refresh: () => void; responseFlushed: () => void }
@@ -813,6 +832,11 @@ export class UnixSocketServer {
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private readonly resourceSubscriptions = new Map<string, Set<string>>();
+  /**
+   * The session that owned each resolved input target at resolution time, so a rebind between
+   * resolution and execution cannot leave the input running as an unowned call (#9958).
+   */
+  private readonly inputTargetOwners = new WeakMap<BootedDevice, string>();
   private resourceUpdatedUnsubscribe: (() => void) | null = null;
   /** Session-release frames written but not yet flushed to their client sockets. */
   private pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
@@ -928,10 +952,13 @@ export class UnixSocketServer {
    * socket here and the matching `gestureEnd` clears it. The runner deliberately parks a continued
    * stroke while it waits, with no duration ceiling, so a socket that closes/errors before sending
    * its end (desktop crash, timeout, disconnect) would leave the on-device touch and the runner's
-   * registry entry live indefinitely; {@link cancelOwnedGestures} issues a cancelling end for each
-   * on socket teardown (issue: streaming gesture input).
+   * registry entry live indefinitely; {@link GestureOwnershipRegistry} issues a cancelling end for
+   * each on socket teardown, and for a start acked after its socket already closed (#10005).
    */
-  private ownedGesturesBySocket: Map<string, Map<string, OwnedGesture>> = new Map();
+  private readonly ownedGestures = new GestureOwnershipRegistry({
+    isSocketLive: (socketSessionId) => this.clientSockets.has(socketSessionId),
+    cancelGesture: (targetDevice, gestureId) => this.cancelGestureOnDevice(targetDevice, gestureId),
+  });
 
   constructor(
     socketPath: string = SOCKET_PATH,
@@ -1205,13 +1232,16 @@ export class UnixSocketServer {
           return;
         }
         if (idleTimeout) {
-          refreshIdle();
+          if (socket.writableLength === 0) {
+            refreshIdle();
+          }
         } else {
           socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
         }
       },
     });
     socket.on("drain", refreshIdle);
+    socket.on("drain", () => this.outboundWriteGuards.get(socket)?.flushed());
 
     if (this.onFrameTrace) {
       socket.on("drain", () => this.traceFrame("socket_drain", "*"));
@@ -1244,6 +1274,7 @@ export class UnixSocketServer {
         this.timer.clearTimeout(idleTimeout);
       }
       this.backpressuredSocketIdle.delete(socket);
+      this.outboundWriteGuards.get(socket)?.dispose();
       if (this.onFrameTrace) {
         this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
       }
@@ -1431,7 +1462,7 @@ export class UnixSocketServer {
     this.releaseMcpRecording(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
-    this.trackRequestHandler(this.cancelOwnedGestures(sessionId));
+    this.trackRequestHandler(this.ownedGestures.cancelAllFor(sessionId));
   }
 
   private trackRequestHandler(handler: Promise<void>): void {
@@ -1695,8 +1726,9 @@ export class UnixSocketServer {
     try {
       const payload = JSON.stringify(frame) + "\n";
       const byteLength = Buffer.byteLength(payload);
-      const queuedBytes = socket.writableLength + byteLength;
-      if (queuedBytes > Math.max(DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, byteLength)) {
+      const guard = this.outboundWriteGuard(socket, sessionId);
+      const queuedBytes = guard.admit(byteLength);
+      if (queuedBytes !== undefined) {
         const error = new DaemonSocketQueueOverflowError(
           queuedBytes,
           DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES,
@@ -1711,9 +1743,11 @@ export class UnixSocketServer {
       const ok = socket.write(payload, (error) => {
         if (!error && !socket.destroyed && socket.writableLength === 0) {
           this.backpressuredSocketIdle.get(socket)?.refresh();
+          guard.flushed();
         }
         onFlushed?.(error);
       });
+      guard.written();
       if (onWritten) {
         onWritten(socket.writableLength, byteLength);
       }
@@ -1728,6 +1762,25 @@ export class UnixSocketServer {
         socket.destroy();
       }
     }
+  }
+
+  /**
+   * The socket's outbound guard. A reader that frees no queued bytes for the
+   * stall deadline is destroyed with the reason logged; a reader that is
+   * draining, however slowly, is not.
+   */
+  private outboundWriteGuard(socket: Socket, sessionId: string): OutboundWriteGuard {
+    let guard = this.outboundWriteGuards.get(socket);
+    if (!guard) {
+      guard = new OutboundWriteGuard(socket, this.timer, (stall) => {
+        logger.warn(
+          `Daemon RPC socket ${sessionId} reader stalled: no queued bytes freed for ${stall.stalledMs}ms with ${stall.queuedBytes} bytes queued; destroying`,
+        );
+        socket.destroy();
+      });
+      this.outboundWriteGuards.set(socket, guard);
+    }
+    return guard;
   }
 
   /**
@@ -1752,13 +1805,7 @@ export class UnixSocketServer {
     }
 
     if (!this.acceptingRequests) {
-      return {
-        id: request.id,
-        type: "mcp_response",
-        success: false,
-        error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-        daemonShuttingDown: daemonShuttingDownFailure(),
-      };
+      return this.shuttingDownBeforeStartResponse(request);
     }
     const handshakeError = this.rejectOnHandshakeMismatch(request);
     if (handshakeError) {
@@ -1827,7 +1874,16 @@ export class UnixSocketServer {
           await this.waitForStartup(request, deadline, cancellation.signal);
         }
 
-        const localResult = await this.handleLocalSocketRequest(request, sessionId);
+        const localResult = await this.runLocalSocketRequest(
+          request,
+          sessionId,
+          ownerSocket,
+          cancellation.signal,
+          receivedAtMs,
+          (signal) => {
+            activeRequestSignal = signal;
+          },
+        );
         if (localResult !== undefined) {
           return {
             id: request.id,
@@ -1949,14 +2005,11 @@ export class UnixSocketServer {
       .run<DaemonResponse | undefined>(
         resolveSocketAdmissionLane(request),
         () => {
-          if (this.closing) {
-            return Promise.resolve({
-              id: request.id,
-              type: "mcp_response" as const,
-              success: false,
-              error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              daemonShuttingDown: daemonShuttingDownFailure(),
-            });
+          // Same predicate as the entry check: a request still queued when quiesce() began
+          // has not started, so it is refused as provably undispatched rather than admitted
+          // mid-shutdown. close() also clears acceptingRequests, so this covers both stages.
+          if (!this.acceptingRequests) {
+            return Promise.resolve(this.shuttingDownBeforeStartResponse(request));
           }
           onAdmitted?.(deadline);
           if (this.onFrameTrace) {
@@ -1984,6 +2037,17 @@ export class UnixSocketServer {
         },
       )
       .finally(cancellation.dispose);
+  }
+
+  /** Retryable refusal for a request that has not started work (no `requestMayHaveDispatched`). */
+  private shuttingDownBeforeStartResponse(request: DaemonRequest): DaemonResponse {
+    return {
+      id: request.id,
+      type: "mcp_response",
+      success: false,
+      error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+      daemonShuttingDown: daemonShuttingDownFailure(),
+    };
   }
 
   private mcpForwardFailureResponse({
@@ -2090,7 +2154,12 @@ export class UnixSocketServer {
     }
     const controller = session.requestCancellations.get(targetId);
     if (!controller) {
-      // Already answered (a timeout racing the response) or never seen: nothing to cancel.
+      // Already answered (a timeout racing the response) or never seen: nothing to cancel. Leave a
+      // trace: a cancel that reaches the daemon after the work finished otherwise looks identical to
+      // one that was never sent, which hid a client delivering its cancel late (#10151).
+      logger.debug(
+        `[SocketCancel] socketSession=${session.sessionId} cancel for request ${targetId} found no in-flight request (already answered or never seen)`,
+      );
       return { id: request.id, type: "mcp_response", success: true, result: { cancelled: false } };
     }
     session.requestCancellations.delete(targetId);
@@ -3948,7 +4017,13 @@ export class UnixSocketServer {
       return undefined;
     }
 
-    const record = args as Record<string, unknown>;
+    return this.getObjectRequestArgumentScopeKey(args as Record<string, unknown>, args);
+  }
+
+  private getObjectRequestArgumentScopeKey(
+    record: Record<string, unknown>,
+    args: object,
+  ): string | undefined {
     const hasSessionUuid = isNonBlankSessionUuid(record.sessionUuid);
     const hasDeviceLabel = typeof record.device === "string" && record.device.length > 0;
 
@@ -4486,34 +4561,66 @@ export class UnixSocketServer {
     return this.featureFlagService;
   }
 
+  /**
+   * `input/*` frames get the same owner fence as forwarded MCP calls: a signal that aborts on
+   * socket close and on `daemon/cancelRequest`, and a budget that runs from receipt (#10006).
+   * Other local requests run unfenced, as before.
+   */
+  private async runLocalSocketRequest(
+    request: DaemonRequest,
+    sessionId: string,
+    ownerSocket: Socket,
+    cancelSignal: AbortSignal,
+    receivedAtMs: number,
+    onOwnerSignal: (signal: AbortSignal) => void,
+  ): Promise<unknown> {
+    if (!request.method.startsWith("input/")) {
+      return await this.handleLocalSocketRequest(request, sessionId);
+    }
+    const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
+    onOwnerSignal(owner.signal);
+    try {
+      return await this.handleLocalSocketRequest(request, sessionId, owner.signal, receivedAtMs);
+    } finally {
+      owner.dispose();
+    }
+  }
+
   private async handleLocalSocketRequest(
     request: DaemonRequest,
     socketSessionId?: string,
     signal?: AbortSignal,
+    receivedAtMs?: number,
   ): Promise<any | undefined> {
+    if (request.method.startsWith("input/")) {
+      // A frame whose socket closed or whose client cancelled it while it sat in the socket
+      // queue must not even resolve a device (#10006).
+      signal?.throwIfAborted();
+    }
+    const input: InputRequestContext = { signal, receivedAtMs };
     if (request.method === "input/tap") {
-      return await this.handleInputTap(request, socketSessionId);
+      return await this.handleInputTap(request, socketSessionId, input);
     }
     if (request.method === "input/swipe") {
-      return await this.handleInputSwipe(request, socketSessionId);
+      return await this.handleInputSwipe(request, socketSessionId, input);
     }
     if (request.method === "input/typeText") {
-      return await this.handleInputTypeText(request, socketSessionId);
+      return await this.handleInputTypeText(request, socketSessionId, input);
     }
     if (request.method === "input/pressButton") {
-      return await this.handleInputPressButton(request, socketSessionId);
+      return await this.handleInputPressButton(request, socketSessionId, input);
     }
     if (request.method === "input/key") {
-      return await this.handleInputKey(request, socketSessionId);
+      return await this.handleInputKey(request, socketSessionId, input);
     }
     if (request.method === "input/gestureStart") {
-      return await this.handleInputGesture(request, "start", socketSessionId);
+      return await this.handleInputGesture(request, "start", socketSessionId, input);
     }
     if (request.method === "input/gestureMove") {
-      return await this.handleInputGesture(request, "move", socketSessionId);
+      return await this.handleInputGesture(request, "move", socketSessionId, input);
     }
     if (request.method === "input/gestureEnd") {
-      return await this.handleInputGesture(request, "end", socketSessionId);
+      return await this.handleInputGesture(request, "end", socketSessionId, input);
     }
 
     switch (request.method) {
@@ -4893,7 +5000,8 @@ export class UnixSocketServer {
       async () => {
         resolution = (await viaSdk()) || undefined;
       },
-      viaDirectFile,
+      // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
+      (adb) => viaDirectFile(adb).catch(rethrowForRouteWithoutUserId),
     );
     return { ...result, resolution };
   }
@@ -5072,8 +5180,9 @@ export class UnixSocketServer {
   private async handleInputTap(
     request: DaemonRequest,
     socketSessionId?: string,
+    input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = this.timer.now();
+    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputTapParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
@@ -5105,16 +5214,20 @@ export class UnixSocketServer {
             [args.x, args.y],
             client.getScreenScaleMetadata?.() ?? null,
           );
-          return args.frameContext === undefined
-            ? await client.requestTapCoordinates(args.x, args.y, args.duration, remainingTimeoutMs)
-            : await client.requestTapCoordinates(
-                args.x,
-                args.y,
-                args.duration,
-                remainingTimeoutMs,
-                undefined,
-                args.frameContext,
-              );
+          // The signal reaches the send step itself, so an owner that went away while the client
+          // was still connecting never has its tap written to the device (#10006).
+          return await this.dispatchFencedInput("Tap", signal, (onDispatch) =>
+            client.requestTapCoordinates(
+              args.x,
+              args.y,
+              args.duration,
+              remainingTimeoutMs,
+              undefined,
+              args.frameContext,
+              onDispatch,
+              signal,
+            ),
+          );
         }
         const iosClient = IOSCtrlProxyClient.getInstance(targetDevice);
         const [x, y] = await this.toIosRunnerCoordinates(
@@ -5131,6 +5244,8 @@ export class UnixSocketServer {
           request.method,
           "handleInputTap",
         );
+        // The scale probe awaited the runner; the owner may have left meanwhile.
+        assertSocketInputNotAborted(signal);
         return args.frameContext === undefined
           ? await iosClient.requestTapCoordinates(x, y, args.duration, gestureTimeoutMs)
           : await iosClient.requestTapCoordinates(
@@ -5142,6 +5257,13 @@ export class UnixSocketServer {
               args.frameContext,
             );
       },
+      this.inputDeviceGate(
+        request.method,
+        "UnixSocketServer.handleInputTap",
+        totalTimeoutMs,
+        queueEnterMs,
+        input,
+      ),
     );
 
     if (!gestureResult.success) {
@@ -5160,8 +5282,9 @@ export class UnixSocketServer {
   private async handleInputSwipe(
     request: DaemonRequest,
     socketSessionId?: string,
+    input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = this.timer.now();
+    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputSwipeParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
@@ -5189,25 +5312,20 @@ export class UnixSocketServer {
 
         if (args.platform === "android") {
           const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
-          return args.frameContext === undefined
-            ? await client.requestSwipe(
-                args.startX,
-                args.startY,
-                args.endX,
-                args.endY,
-                args.durationMs,
-                remainingTimeoutMs,
-              )
-            : await client.requestSwipe(
-                args.startX,
-                args.startY,
-                args.endX,
-                args.endY,
-                args.durationMs,
-                remainingTimeoutMs,
-                undefined,
-                args.frameContext,
-              );
+          return await this.dispatchFencedInput("Swipe", signal, (onDispatch) =>
+            client.requestSwipe(
+              args.startX,
+              args.startY,
+              args.endX,
+              args.endY,
+              args.durationMs,
+              remainingTimeoutMs,
+              undefined,
+              args.frameContext,
+              onDispatch,
+              signal,
+            ),
+          );
         }
         const client = IOSCtrlProxyClient.getInstance(targetDevice);
         const [startX, startY, endX, endY] = await this.toIosRunnerCoordinates(
@@ -5222,6 +5340,7 @@ export class UnixSocketServer {
           request.method,
           "handleInputSwipe",
         );
+        assertSocketInputNotAborted(signal);
         return args.frameContext === undefined
           ? await client.requestDrag(
               startX,
@@ -5245,6 +5364,13 @@ export class UnixSocketServer {
               args.frameContext,
             );
       },
+      this.inputDeviceGate(
+        request.method,
+        "UnixSocketServer.handleInputSwipe",
+        totalTimeoutMs,
+        queueEnterMs,
+        input,
+      ),
     );
 
     if (!gestureResult.success) {
@@ -5276,9 +5402,10 @@ export class UnixSocketServer {
     request: DaemonRequest,
     kind: "start" | "move" | "end",
     socketSessionId?: string,
+    input?: InputRequestContext,
   ): Promise<any | undefined> {
     const method = GESTURE_FRAME_METHODS[kind];
-    const queueEnterMs = this.timer.now();
+    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputGestureParams(request.params, method);
     const targetDevice = await this.resolveInputTargetDevice(
@@ -5305,6 +5432,13 @@ export class UnixSocketServer {
         const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         return this.forwardGestureFrame(client, kind, args, remainingTimeoutMs);
       },
+      this.inputDeviceGate(
+        method,
+        "UnixSocketServer.handleInputGesture",
+        totalTimeoutMs,
+        queueEnterMs,
+        input,
+      ),
     );
 
     if (!gestureResult.success) {
@@ -5316,9 +5450,10 @@ export class UnixSocketServer {
     // forward (no client session) can't be cancelled on close, so it isn't tracked.
     if (socketSessionId) {
       if (kind === "start") {
-        this.rememberOwnedGesture(socketSessionId, targetDevice, args.gestureId);
+        // A start acked after its socket closed is cancelled here instead of recorded (#10005).
+        await this.ownedGestures.onStartAcked(socketSessionId, targetDevice, args.gestureId);
       } else if (kind === "end") {
-        this.forgetOwnedGesture(socketSessionId, targetDevice.deviceId, args.gestureId);
+        this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, args.gestureId);
       }
     }
 
@@ -5333,65 +5468,20 @@ export class UnixSocketServer {
     };
   }
 
-  private static ownedGestureKey(deviceId: string, gestureId: string): string {
-    return `${deviceId}::${gestureId}`;
-  }
-
-  private rememberOwnedGesture(
-    socketSessionId: string,
-    targetDevice: BootedDevice,
-    gestureId: string,
-  ): void {
-    const key = UnixSocketServer.ownedGestureKey(targetDevice.deviceId, gestureId);
-    const forSocket =
-      this.ownedGesturesBySocket.get(socketSessionId) ?? new Map<string, OwnedGesture>();
-    forSocket.set(key, { targetDevice, gestureId });
-    this.ownedGesturesBySocket.set(socketSessionId, forSocket);
-  }
-
-  private forgetOwnedGesture(socketSessionId: string, deviceId: string, gestureId: string): void {
-    const forSocket = this.ownedGesturesBySocket.get(socketSessionId);
-    if (!forSocket) {
-      return;
-    }
-    forSocket.delete(UnixSocketServer.ownedGestureKey(deviceId, gestureId));
-    if (forSocket.size === 0) {
-      this.ownedGesturesBySocket.delete(socketSessionId);
-    }
-  }
-
   /**
-   * Cancel every gesture a closing/erroring socket still owns. Best-effort: each cancelling
-   * `gestureEnd` is forwarded through the same per-device keyed queue as live frames (so it can't
-   * race an in-flight frame) and a failure is logged, never thrown — the socket is already gone.
+   * Cancelling `gestureEnd` for one gesture, forwarded through the same per-device keyed queue as
+   * live frames so it can't race an in-flight frame.
    */
-  private async cancelOwnedGestures(socketSessionId: string): Promise<void> {
-    const forSocket = this.ownedGesturesBySocket.get(socketSessionId);
-    if (!forSocket || forSocket.size === 0) {
-      this.ownedGesturesBySocket.delete(socketSessionId);
-      return;
-    }
-    this.ownedGesturesBySocket.delete(socketSessionId);
-    for (const { targetDevice, gestureId } of forSocket.values()) {
-      try {
-        await this.runKeyedMcpForward(
-          `device:${targetDevice.deviceId}`,
-          async () => {
-            const client = AndroidCtrlProxyClient.getInstance(
-              targetDevice,
-              defaultAdbClientFactory,
-            );
-            // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
-            return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
-          },
-          `device:${targetDevice.deviceId}`,
-        );
-      } catch (error) {
-        logger.warn(
-          `Failed to cancel orphaned gesture ${gestureId} on ${targetDevice.deviceId} for closed socket ${socketSessionId}: ${error}`,
-        );
-      }
-    }
+  private cancelGestureOnDevice(targetDevice: BootedDevice, gestureId: string): Promise<unknown> {
+    return this.runKeyedMcpForward(
+      `device:${targetDevice.deviceId}`,
+      async () => {
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        // Coordinates are ignored for a cancel (the runner lifts in place), so 0,0 is fine.
+        return client.requestGestureEnd(gestureId, 0, 0, true, OWNED_GESTURE_CANCEL_TIMEOUT_MS);
+      },
+      `device:${targetDevice.deviceId}`,
+    );
   }
 
   /** Relay one gesture frame to the Android runner's continued-gesture path. */
@@ -5462,8 +5552,9 @@ export class UnixSocketServer {
   private async handleInputTypeText(
     request: DaemonRequest,
     socketSessionId?: string,
+    input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = this.timer.now();
+    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputTypeTextParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
@@ -5531,6 +5622,13 @@ export class UnixSocketServer {
               : undefined,
         );
       },
+      this.inputDeviceGate(
+        request.method,
+        "UnixSocketServer.handleInputTypeText",
+        totalTimeoutMs,
+        queueEnterMs,
+        input,
+      ),
     );
 
     if (!inputResult.success) {
@@ -5556,8 +5654,9 @@ export class UnixSocketServer {
   private async handleInputPressButton(
     request: DaemonRequest,
     socketSessionId?: string,
+    input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = this.timer.now();
+    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputPressButtonParams(request.params);
     const targetDevice = await this.resolveInputTargetDevice(
@@ -5596,6 +5695,13 @@ export class UnixSocketServer {
           ? await pressButton.press(args.button, remainingTimeoutMs, undefined, signal)
           : await pressButton.press(args.button, remainingTimeoutMs, args.frameContext, signal);
       },
+      this.inputDeviceGate(
+        request.method,
+        "UnixSocketServer.handleInputPressButton",
+        totalTimeoutMs,
+        queueEnterMs,
+        input,
+      ),
     );
 
     if (!buttonResult.success) {
@@ -5614,8 +5720,9 @@ export class UnixSocketServer {
   private async handleInputKey(
     request: DaemonRequest,
     socketSessionId?: string,
+    input?: InputRequestContext,
   ): Promise<any | undefined> {
-    const queueEnterMs = this.timer.now();
+    const queueEnterMs = input?.receivedAtMs ?? this.timer.now();
     const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
     const args = this.parseInputKeyParams(request.params);
     if (args.platform === "ios") {
@@ -5661,6 +5768,13 @@ export class UnixSocketServer {
           (timeoutError) => (dispatched ? InputKey.indeterminateError(timeoutError) : undefined),
         );
       },
+      this.inputDeviceGate(
+        request.method,
+        "UnixSocketServer.handleInputKey",
+        totalTimeoutMs,
+        queueEnterMs,
+        input,
+      ),
     );
 
     if (!keyResult.success) {
@@ -5682,10 +5796,12 @@ export class UnixSocketServer {
     text: string,
     imeAction: ImeAction | undefined,
     timeoutMs: number,
-    append: boolean = false,
-    frameContext?: string,
-    onConfirmedAppendCharsSent?: (charsSent: number) => void,
-    signal?: AbortSignal,
+    ...[append = false, frameContext, onConfirmedAppendCharsSent, signal]: [
+      append?: boolean,
+      frameContext?: string,
+      onConfirmedAppendCharsSent?: (charsSent: number) => void,
+      signal?: AbortSignal,
+    ]
   ): Promise<{ success: boolean; error?: string; charsSent?: number }> {
     // Charge set-text and the optional submit/IME action against a single
     // shared budget. Otherwise submit:true would hand each request the full
@@ -6013,6 +6129,26 @@ export class UnixSocketServer {
     ) {
       throw new Error("input/tap requires numeric x and y params");
     }
+    this.validateInputTapOptions(args);
+
+    return {
+      platform: args.platform,
+      deviceId: args.deviceId,
+      x: args.x,
+      y: args.y,
+      duration: args.duration,
+      frameContext: args.frameContext,
+    };
+  }
+
+  private validateInputTapOptions(args: Record<string, unknown>): asserts args is Record<
+    string,
+    unknown
+  > & {
+    duration?: number;
+    deviceId?: string;
+    frameContext?: string;
+  } {
     if (
       args.duration !== undefined &&
       (typeof args.duration !== "number" || !Number.isInteger(args.duration))
@@ -6028,15 +6164,6 @@ export class UnixSocketServer {
     ) {
       throw new Error("input/tap frameContext must be a non-empty string when provided");
     }
-
-    return {
-      platform: args.platform,
-      deviceId: args.deviceId,
-      x: args.x,
-      y: args.y,
-      duration: args.duration,
-      frameContext: args.frameContext,
-    };
   }
 
   private parseInputSwipeParams(params: unknown): {
@@ -6057,27 +6184,7 @@ export class UnixSocketServer {
     if (args.platform !== "android" && args.platform !== "ios") {
       throw new Error("input/swipe requires platform 'android' or 'ios'");
     }
-    if (
-      typeof args.startX !== "number" ||
-      !Number.isFinite(args.startX) ||
-      typeof args.startY !== "number" ||
-      !Number.isFinite(args.startY) ||
-      typeof args.endX !== "number" ||
-      !Number.isFinite(args.endX) ||
-      typeof args.endY !== "number" ||
-      !Number.isFinite(args.endY)
-    ) {
-      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
-    }
-    if (
-      args.durationMs !== undefined &&
-      (typeof args.durationMs !== "number" ||
-        !Number.isInteger(args.durationMs) ||
-        args.durationMs < 1 ||
-        args.durationMs > 60_000)
-    ) {
-      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
-    }
+    this.validateInputSwipeGeometry(args);
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/swipe deviceId must be a string when provided");
     }
@@ -6098,6 +6205,43 @@ export class UnixSocketServer {
       durationMs: args.durationMs ?? 300,
       frameContext: args.frameContext,
     };
+  }
+
+  private validateInputSwipeCoordinates(args: Record<string, unknown>): void {
+    if (
+      typeof args.startX !== "number" ||
+      !Number.isFinite(args.startX) ||
+      typeof args.startY !== "number" ||
+      !Number.isFinite(args.startY) ||
+      typeof args.endX !== "number" ||
+      !Number.isFinite(args.endX) ||
+      typeof args.endY !== "number" ||
+      !Number.isFinite(args.endY)
+    ) {
+      throw new Error("input/swipe requires numeric startX, startY, endX, and endY params");
+    }
+  }
+
+  private validateInputSwipeGeometry(args: Record<string, unknown>): asserts args is Record<
+    string,
+    unknown
+  > & {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    durationMs?: number;
+  } {
+    this.validateInputSwipeCoordinates(args);
+    if (
+      args.durationMs !== undefined &&
+      (typeof args.durationMs !== "number" ||
+        !Number.isInteger(args.durationMs) ||
+        args.durationMs < 1 ||
+        args.durationMs > 60_000)
+    ) {
+      throw new Error("input/swipe durationMs must be integer milliseconds between 1 and 60000");
+    }
   }
 
   private parseInputTypeTextParams(params: unknown): {
@@ -6128,12 +6272,7 @@ export class UnixSocketServer {
     if (args.platform !== "android" && args.platform !== "ios") {
       throw new Error("input/typeText requires platform 'android' or 'ios'");
     }
-    if (typeof args.text !== "string" || args.text.length === 0) {
-      throw new Error("input/typeText requires non-empty string text param");
-    }
-    if (args.submit !== undefined && typeof args.submit !== "boolean") {
-      throw new Error("input/typeText submit must be a boolean when provided");
-    }
+    this.validateInputTypeTextContent(args);
     if (args.deviceId !== undefined && typeof args.deviceId !== "string") {
       throw new Error("input/typeText deviceId must be a string when provided");
     }
@@ -6152,6 +6291,17 @@ export class UnixSocketServer {
       append: args.mode === "append",
       frameContext: args.frameContext as string | undefined,
     };
+  }
+
+  private validateInputTypeTextContent(
+    args: Record<string, unknown>,
+  ): asserts args is Record<string, unknown> & { text: string; submit?: boolean } {
+    if (typeof args.text !== "string" || args.text.length === 0) {
+      throw new Error("input/typeText requires non-empty string text param");
+    }
+    if (args.submit !== undefined && typeof args.submit !== "boolean") {
+      throw new Error("input/typeText submit must be a boolean when provided");
+    }
   }
 
   private parseInputPressButtonParams(params: unknown): {
@@ -6272,15 +6422,35 @@ export class UnixSocketServer {
     platform: "android" | "ios",
     deviceId: string | undefined,
     socketSessionId: string | undefined,
-    action:
-      | "input/tap"
-      | "input/swipe"
-      | "input/typeText"
-      | "input/pressButton"
-      | "input/key"
-      | "input/gestureStart"
-      | "input/gestureMove"
-      | "input/gestureEnd",
+    action: InputTargetAction,
+    bypassAndroidDeviceListCache: boolean = false,
+  ): Promise<BootedDevice> {
+    const targetDevice = await this.selectInputTargetDevice(
+      platform,
+      deviceId,
+      socketSessionId,
+      action,
+      bypassAndroidDeviceListCache,
+    );
+    this.captureInputTargetOwner(targetDevice);
+    return targetDevice;
+  }
+
+  private captureInputTargetOwner(targetDevice: BootedDevice): void {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const owner = this.daemonState.getSessionManager().getSessionForDevice?.(targetDevice.deviceId);
+    if (owner) {
+      this.inputTargetOwners.set(targetDevice, owner);
+    }
+  }
+
+  private async selectInputTargetDevice(
+    platform: "android" | "ios",
+    deviceId: string | undefined,
+    socketSessionId: string | undefined,
+    action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean = false,
   ): Promise<BootedDevice> {
     const bootedDevices = await this.discoverInputTargetDevices(
@@ -6325,11 +6495,78 @@ export class UnixSocketServer {
     toolName: string,
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal) => Promise<T>,
+    gate?: InputDeviceGate,
   ): Promise<T> {
     const executionKey = `device:${targetDevice.deviceId}`;
-    return await this.runTrackedDeviceInput(toolName, targetDevice, async (signal) =>
-      this.runKeyedMcpForward(executionKey, () => operation(signal), executionKey),
+    return await this.runTrackedDeviceInput(
+      toolName,
+      targetDevice,
+      async (signal) =>
+        this.runKeyedMcpForward(
+          executionKey,
+          () => operation(signal),
+          executionKey,
+          gate?.chainWait,
+        ),
+      gate?.ownerSignal,
     );
+  }
+
+  /**
+   * What an `input/*` handler needs on top of the tracked execution: the owner's abort signal
+   * (socket close / client cancel) and a bound on how long it may park on the device key, both
+   * measured against the budget that started at frame receipt (#10006).
+   */
+  private inputDeviceGate(
+    toolName: string,
+    origin: string,
+    totalTimeoutMs: number,
+    budgetStartMs: number,
+    input?: InputRequestContext,
+  ): InputDeviceGate {
+    const remainingMs = () => totalTimeoutMs - (this.timer.now() - budgetStartMs);
+    return {
+      ownerSignal: input?.signal,
+      chainWait: {
+        remainingMs,
+        timeoutError: (executionKey) =>
+          new McpTimeoutError({
+            toolName,
+            timeoutMs: totalTimeoutMs,
+            origin,
+            detail: `spent ${totalTimeoutMs - remainingMs()}ms waiting in queue for ${executionKey}`,
+            code: MCP_QUEUE_TIMEOUT_ERROR_CODE,
+          }),
+      },
+    };
+  }
+
+  /**
+   * Send one coordinate gesture with the owner signal fencing the send. Once the frame has been
+   * written, an abort is no longer proof that nothing happened: the failure is reported as
+   * indeterminate rather than as a clean cancellation.
+   */
+  private async dispatchFencedInput<T>(
+    gesture: "Tap" | "Swipe",
+    signal: AbortSignal | undefined,
+    send: (onDispatch: () => void) => Promise<T>,
+  ): Promise<T> {
+    let dispatched = false;
+    try {
+      return await send(() => {
+        dispatched = true;
+      });
+    } catch (error) {
+      if (dispatched && signal?.aborted) {
+        const reason = errorMessage(error);
+        throw gesture === "Tap"
+          ? indeterminateTapError(reason)
+          : new ActionableError(
+              `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
+            );
+      }
+      throw error;
+    }
   }
 
   /**
@@ -6364,6 +6601,7 @@ export class UnixSocketServer {
     toolName: string,
     targetDevice: BootedDevice,
     operation: (signal?: AbortSignal) => Promise<T>,
+    ownerSignal?: AbortSignal,
   ): Promise<T> {
     // FUNNEL 2, ahead of the session lookup: a device-addressed input on a
     // quarantined serial must be refused WITH OR WITHOUT a session. The
@@ -6378,10 +6616,19 @@ export class UnixSocketServer {
     if (sessionUuid) {
       this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }
+    const resolvedOwner = this.inputTargetOwners.get(targetDevice);
+    if (resolvedOwner !== undefined && resolvedOwner !== sessionUuid) {
+      // The target was resolved for `resolvedOwner`, which has since left the device (rebind or
+      // release). Running now would drive it as an unowned call or as the next owner's (#9958).
+      throw new ActionableError(
+        `Session ${resolvedOwner} no longer owns device '${targetDevice.deviceId}' (it was rebound ` +
+          `or released after this input resolved its target); the input was not sent.`,
+      );
+    }
     const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
-    executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
     const signal = execution.abortController.signal;
     try {
+      executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
       signal.throwIfAborted();
       return await runWithToolSelectionContext(
         {
@@ -6394,24 +6641,30 @@ export class UnixSocketServer {
             },
           },
         },
-        () => runWithAbortSignal(signal, () => operation(signal)),
+        () => this.runFencedInputOperation(signal, ownerSignal, operation),
       );
     } finally {
       executionTracker.endExecution(execution.id);
     }
   }
 
+  /**
+   * Run an input operation under the tracker's signal AND the owner's: an `input/*` frame whose
+   * socket closed or whose client cancelled it aborts exactly like a torn-down session (#10006).
+   */
+  private runFencedInputOperation<T>(
+    trackerSignal: AbortSignal,
+    ownerSignal: AbortSignal | undefined,
+    operation: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const signal = ownerSignal ? AbortSignal.any([trackerSignal, ownerSignal]) : trackerSignal;
+    signal.throwIfAborted();
+    return runWithAbortSignal(signal, () => operation(signal));
+  }
+
   private async discoverInputTargetDevices(
     platform: "android" | "ios",
-    action:
-      | "input/tap"
-      | "input/swipe"
-      | "input/typeText"
-      | "input/pressButton"
-      | "input/key"
-      | "input/gestureStart"
-      | "input/gestureMove"
-      | "input/gestureEnd",
+    action: InputTargetAction,
     bypassAndroidDeviceListCache: boolean,
   ): Promise<BootedDevice[]> {
     const discovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
@@ -6464,8 +6717,7 @@ export class UnixSocketServer {
      * every reset, and this daemon's own `deadline`) uses THIS value
      * instead, independent of queue wait (#6222 review, P1).
      */
-    originalTimeoutMs: number,
-    signal?: AbortSignal,
+    ...[originalTimeoutMs, signal]: [originalTimeoutMs: number, signal?: AbortSignal]
   ): Promise<any> {
     signal?.throwIfAborted();
     const requestOptions = this.mcpRequestOptions(timeoutMs, signal);

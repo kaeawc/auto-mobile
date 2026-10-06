@@ -567,7 +567,9 @@ const migrateStepFields = (
     // Keep step-level keys (not tool params) at the step level. `optional` must survive migration —
     // importPlanFromYaml runs migratePlan() before PlanNormalizer, so moving it into params here
     // would strip the flag before the executor sees it, making a best-effort step mandatory (#2853).
-    if (["tool", "command", "label", "params", "optional"].includes(key)) {
+    // `expectations` is likewise a plan-step field: as a tool param a strict schema rejects the
+    // step (#9925). PlanNormalizer keeps it off `params` and the executor warns it is unevaluated.
+    if (["tool", "command", "label", "params", "optional", "expectations"].includes(key)) {
       continue;
     }
     inlineParams[key] = value;
@@ -594,6 +596,25 @@ const migrateStepFields = (
   step.params = mergedParams;
 
   return changed;
+};
+
+/**
+ * Apply the per-step legacy-shape migration to one step outside `plan.steps` (a
+ * `criticalSection` sub-step, #9927) so it matches a top-level step. Returns a
+ * migrated copy; the input is left untouched. Idempotent, so a step that was
+ * already migrated (or authored in the current shape) comes back equivalent.
+ */
+export const migratePlanStep = (
+  step: unknown,
+  stepIndex: number,
+  context: { platform?: unknown; devices?: unknown } = {},
+): unknown => {
+  if (!isRecord(step)) {
+    return step;
+  }
+  const copy = structuredClone(step);
+  migrateStepFields(copy, stepIndex, [], context.platform, context.devices);
+  return copy;
 };
 
 export const migratePlan = (

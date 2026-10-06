@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "./ios/types";
 import { linkWindowRoots } from "./linkWindowRoots";
 import {
   AdbClientFactory,
@@ -392,12 +393,15 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // `result.fresh` says whether the delegate verified this tree against the
       // device on this call or served a host-side cache entry unverified; carry
       // it so ObserveScreen can report freshness instead of assuming it.
-      return this.normalizeIosHierarchy(
-        result.hierarchy,
-        result.updatedAt,
-        result.reconnectStatus,
-        result.frameContext,
-        result.fresh,
+      return Object.assign(
+        this.normalizeIosHierarchy(
+          result.hierarchy,
+          result.updatedAt,
+          result.reconnectStatus,
+          result.frameContext,
+          result.fresh,
+        ),
+        { [iosHierarchyAcquisition]: result[iosHierarchyAcquisition] },
       );
     });
 

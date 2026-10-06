@@ -52,8 +52,15 @@ import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOption
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { hierarchyChanged, hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { throwIfAborted } from "../../utils/toolUtils";
+import {
+  beginPostActionCaptureAction,
+  deferTerminalScreenshot,
+} from "../../utils/PostActionCaptureContext";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
-import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
+import {
+  resolveNavigationGraphForDevice,
+  type NavigationGraphResolver,
+} from "../navigation/deviceNavigationGraph";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
@@ -100,6 +107,12 @@ export interface DisplayFenceOption {
 }
 
 const NO_OP_DISPLAY_FENCE: DisplayFence = Object.freeze({ assertCurrent: () => {} });
+
+/** Intermediate action reads resolve targets and effects; terminal evidence is captured once. */
+export const INTERMEDIATE_OBSERVATION_OPTIONS = {
+  skipScreenshot: true,
+  skipAccessibilityAudit: true,
+} satisfies ObserveScreenExecuteOptions;
 
 export function resolveDisplayFence(options?: DisplayFenceOption): DisplayFence {
   return options?.displayFence ?? NO_OP_DISPLAY_FENCE;
@@ -162,6 +175,14 @@ interface ObservedChangeOptions {
   skipPreviousObserve?: boolean;
   skipUiStability?: boolean;
   observationTimestampProvider?: () => number | undefined;
+  /**
+   * Host-clock time (`timer.now()`) at which the action's input was dispatched.
+   * Converted to the device clock with the skew measured once at action start
+   * (`actionStartTime` minus the host time of that read), so no second device
+   * read is needed after the input (#9879). Ignored when
+   * `observationTimestampProvider` yields a value.
+   */
+  observationHostTimestampProvider?: () => number | undefined;
   overrideMinTimestamp?: number;
   signal?: AbortSignal;
   deferPredictionOutcome?: boolean;
@@ -187,6 +208,9 @@ export class BaseVisualChange {
   }
 
   windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
+
+  /** Selects the navigation graph this device records on; a seam for tests (#10197). */
+  navigationGraphResolver: NavigationGraphResolver = resolveNavigationGraphForDevice;
 
   device: BootedDevice;
   adb: AdbExecutor;
@@ -296,6 +320,7 @@ export class BaseVisualChange {
     block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
     options: ObservedChangeOptions,
   ): Promise<any> {
+    await beginPostActionCaptureAction();
     const timeoutMs = options.timeoutMs || 12000;
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
@@ -361,6 +386,7 @@ export class BaseVisualChange {
             BaseVisualChange.shouldRefetchCachedObservation(cached!, options.skipCallerDisplayFence)
           ) {
             return this.observeScreen.execute({
+              ...INTERMEDIATE_OBSERVATION_OPTIONS,
               freshness:
                 staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
               timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
@@ -382,6 +408,7 @@ export class BaseVisualChange {
         logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
+            ...INTERMEDIATE_OBSERVATION_OPTIONS,
             freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
             timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
             skipStaleWindowRecovery: true,
@@ -433,6 +460,11 @@ export class BaseVisualChange {
       }
       return this.timer.now();
     });
+    // Host-device clock skew, measured once with the action-start read. Zero on
+    // iOS and whenever the device clock was unavailable (host-time fallback).
+    // Taken after the read so any round trip makes the converted floor earlier,
+    // never later, than the true post-input device time.
+    const clockSkewMs = actionStartTime - this.timer.now();
 
     const blockResult = await perf.track("executeBlock", async () => {
       throwIfAborted(options.signal);
@@ -471,7 +503,10 @@ export class BaseVisualChange {
     }
 
     let observationStartTime = actionStartTime;
-    const observationTimestampOverride = options.observationTimestampProvider?.();
+    const hostTimestamp = options.observationHostTimestampProvider?.();
+    const observationTimestampOverride =
+      options.observationTimestampProvider?.() ??
+      (typeof hostTimestamp === "number" ? hostTimestamp + clockSkewMs : undefined);
     if (
       typeof observationTimestampOverride === "number" &&
       !Number.isNaN(observationTimestampOverride)
@@ -639,6 +674,14 @@ export class BaseVisualChange {
       return;
     }
     if (this.shouldCapturePostActionScreenshot() || serverConfig.isAccessibilityAuditEnabled()) {
+      if (
+        this.observeScreen.captureScreenshot &&
+        deferTerminalScreenshot(observation, async (chosen, requestSignal) => {
+          await this.observeScreen.captureScreenshot?.(perf, requestSignal ?? signal, chosen);
+        })
+      ) {
+        return;
+      }
       await this.observeScreen.captureScreenshot?.(perf, signal, observation);
       return;
     }
@@ -1020,8 +1063,7 @@ export class BaseVisualChange {
         perf,
         minTimestamp,
         signal: options.signal,
-        skipScreenshot: true,
-        skipAccessibilityAudit: true,
+        ...INTERMEDIATE_OBSERVATION_OPTIONS,
       },
       shouldRetry,
       blockResult,
@@ -1122,7 +1164,9 @@ export class BaseVisualChange {
       return undefined;
     }
 
-    const navigationGraph = NavigationGraphManager.getInstance();
+    // The graph this device's navigation events are recorded on (its bound session's, else the
+    // global one); resolved once so the outcome is judged on the graph the context came from.
+    const navigationGraph = this.navigationGraphResolver(this.device);
     const appId = navigationGraph.getCurrentAppId();
     const fromScreen = navigationGraph.getCurrentScreen();
 
@@ -1135,6 +1179,7 @@ export class BaseVisualChange {
       fromScreen,
       toolName: context.toolName,
       toolArgs: context.toolArgs,
+      navigationGraph,
     };
   }
 

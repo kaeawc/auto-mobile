@@ -68,6 +68,8 @@ describe("BaseVisualChange cached freshness", () => {
               freshness: "fresh",
               timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
               skipStaleWindowRecovery: true,
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
               display: undefined,
               queryOptions,
               perf,

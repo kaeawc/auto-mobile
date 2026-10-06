@@ -1,6 +1,15 @@
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
+import {
+  awaitTerminationWithinRequest,
+  terminateColdBootProcess,
+  terminateOwnedEmulatorProcess,
+  type OwnedTermination,
+  type OwnedTerminationWait,
+} from "./coldBootProcessTermination";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
+import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type {
   DeviceMatchCriteria,
   FormFactor,
@@ -27,6 +36,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
@@ -43,6 +53,8 @@ import {
 } from "./DisplayInventoryProvider";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+/** Bound on the iOS post-lease "did a sibling already boot this simulator" re-check (#9920). */
+const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
 
 /** A boot deadline failure, kept distinct from platform command failures. */
 export class DeviceBootTimeoutError extends ActionableError {
@@ -375,6 +387,21 @@ export interface DeviceBootServiceDependencies {
   onAndroidColdBootTrackingChanged?: (avdName: string, phase: "claimed" | "released") => void;
   /** Existing lease held by a caller through later session/readiness work. */
   lifecycleLease?: VirtualDeviceLifecycleLease;
+  /**
+   * Called with the exit promise of an owned emulator that survived SIGTERM and
+   * SIGKILL, so an injected lease's owner can hold it until the process is gone
+   * (#9901). A lease this service reserves itself is held automatically.
+   */
+  retainLeaseUntil?: (settlement: Promise<void>) => void;
+  /**
+   * Set by a long-lived owner (the daemon): once the request is cancelled or out of budget, the
+   * emulator's termination may carry on in the background while the lease stays held (#9920).
+   * Left unset by a one-shot process (`--boot-device`) that exits as soon as `boot` returns,
+   * which would take the SIGKILL escalation's timer down with it: there `boot` waits in full.
+   */
+  cleanupMayOutliveRequest?: boolean;
+  /** Liveness probe for an emulator that survived SIGKILL; injected so tests never signal a real pid. */
+  isProcessRunning?: (pid: number) => boolean;
   /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
   allowExternalLeaseAdoptionRecheck?: boolean;
 }
@@ -387,6 +414,18 @@ interface BootDeadlineContext {
   signal?: AbortSignal;
   lifecycleLease?: VirtualDeviceLifecycleLease;
   ownsLifecycleLease: boolean;
+  /** Exit promises of owned emulators that could not be confirmed dead; the lease outlives them. */
+  unconfirmedProcessExits: Promise<void>[];
+  /**
+   * Terminations the request stopped waiting for (it was cancelled or out of budget). Each
+   * settles only once its AVD is free, so the lease outlives them (#9920).
+   */
+  pendingTerminations: Promise<void>[];
+  /**
+   * The termination of a cancelled launch's child when this service cannot hold the lease for it.
+   * The start phase rejects on the abort regardless, so the boot awaits this before it rejects.
+   */
+  unheldLaunchTermination?: Promise<OwnedTermination>;
   /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
   freshProvision?: boolean;
 }
@@ -422,6 +461,8 @@ export class DeviceBootService {
       signal: request.signal,
       lifecycleLease: this.dependencies.lifecycleLease,
       ownsLifecycleLease: false,
+      unconfirmedProcessExits: [],
+      pendingTerminations: [],
       freshProvision: request.freshProvision === true,
     };
     if (!context.lifecycleLease && !this.dependencies.onIdentityResolved) {
@@ -460,10 +501,34 @@ export class DeviceBootService {
       }
       return await this.bootMatchingDevice(request, context, progress);
     } finally {
-      if (context.ownsLifecycleLease) {
-        context.lifecycleLease?.release();
-      }
+      this.releaseOwnedLifecycleLease(context);
     }
+  }
+
+  private releaseOwnedLifecycleLease(context: BootDeadlineContext): void {
+    if (!context.ownsLifecycleLease) {
+      return;
+    }
+    const lease = context.lifecycleLease;
+    if (context.unconfirmedProcessExits.length === 0 && context.pendingTerminations.length === 0) {
+      lease?.release();
+      return;
+    }
+    // An emulator this boot started is still running and holding its AVD lock
+    // files: the stable key is not free until it actually exits (#9901), or a
+    // liveness re-check finds its pid gone (#9920).
+    void this.releaseOnceProcessesSettle(context, lease);
+  }
+
+  private async releaseOnceProcessesSettle(
+    context: BootDeadlineContext,
+    lease: VirtualDeviceLifecycleLease | undefined,
+  ): Promise<void> {
+    // A pending termination records its survivor in `unconfirmedProcessExits`
+    // before it settles, so read that list only after the terminations are done.
+    await Promise.allSettled(context.pendingTerminations);
+    await Promise.allSettled(context.unconfirmedProcessExits);
+    lease?.release();
   }
 
   private async bindLifecycleIdentity(
@@ -825,6 +890,28 @@ export class DeviceBootService {
       : result;
   }
 
+  /**
+   * Whether bootImage should re-check for a now-running device once its
+   * lifecycle lease settles. Explicit cold-boot intent is never turned into
+   * adoption (#7197). Android only does so behind an in-flight cold boot; iOS
+   * has no marker, because a sibling boot of the same UDID holds the stable
+   * lease this call is about to queue on, so its re-check always applies (#9902).
+   */
+  private shouldAdoptAfterLease(
+    context: BootDeadlineContext,
+    image: DeviceInfo,
+    preferRunning: boolean | undefined,
+    hasInFlightColdBoot: boolean,
+  ): boolean {
+    // The daemon's externally managed lease is held through its later
+    // reservation/session handoff, which tolerates this shared-cold-boot
+    // re-check via throwIfFreshStartAlreadyBound in deviceTools.
+    const holdsLease =
+      context.ownsLifecycleLease || this.dependencies.allowExternalLeaseAdoptionRecheck === true;
+    const explicitColdBoot = preferRunning === false && !image.isRunning;
+    return holdsLease && !explicitColdBoot && (image.platform === "ios" || hasInFlightColdBoot);
+  }
+
   private async bootMatchedImage(
     image: DeviceInfo,
     context: BootDeadlineContext,
@@ -834,12 +921,20 @@ export class DeviceBootService {
     exactTarget?: boolean,
   ): Promise<DeviceBootResult> {
     // A cached `isRunning: false` overlay can go stale: an externally started
-    // same-name AVD (or several) may already be live. iOS keeps trusting the
-    // cached flag because its identity (UDID) cannot silently collide the
-    // same way; android always re-discovers with a fresh cache-bypassing
-    // sweep before trusting the overlay (#7178).
+    // same-name AVD (or several) may already be live. android always
+    // re-discovers with a fresh cache-bypassing sweep before trusting the
+    // overlay (#7178). iOS keeps trusting the cached flag here because its
+    // identity (UDID) cannot silently collide the same way, but bootImage
+    // re-checks the simulator after its UDID lease settles (#9902), so a
+    // sibling acquisition that booted it meanwhile is adopted, not re-booted.
     if (!image.isRunning && image.platform !== "android") {
-      return this.bootImage(image, context, progress, false);
+      return this.bootImage(
+        image,
+        context,
+        progress,
+        false,
+        this.shouldAdoptAfterLease(context, image, preferRunning, false),
+      );
     }
     const booted = await this.discoverBootedDevices(
       image.platform,
@@ -862,33 +957,20 @@ export class DeviceBootService {
       image.platform === "android" &&
       hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name);
     const explicitlyRequestedColdBoot = preferRunning === false && !image.isRunning;
-    // The daemon's externally managed lease is held through its later
-    // reservation/session handoff, which tolerates this shared-cold-boot
-    // re-check via throwIfFreshStartAlreadyBound in deviceTools.
-    const canAdoptAfterLease =
-      (context.ownsLifecycleLease ||
-        this.dependencies.allowExternalLeaseAdoptionRecheck === true) &&
-      !explicitlyRequestedColdBoot;
+    const adoptAfterLease = this.shouldAdoptAfterLease(
+      context,
+      image,
+      preferRunning,
+      hasInFlightColdBoot,
+    );
     if (!running) {
-      return this.bootImage(
-        image,
-        context,
-        progress,
-        false,
-        hasInFlightColdBoot && canAdoptAfterLease,
-      );
+      return this.bootImage(image, context, progress, false, adoptAfterLease);
     }
     if (hasInFlightColdBoot || explicitlyRequestedColdBoot) {
       // An in-flight owner may finish while this selector reservation waits to
       // bind the AVD's stable identity. Re-check only that case after binding:
       // explicit cold-boot intent must never be turned into adoption (#7197).
-      return this.bootImage(
-        image,
-        context,
-        progress,
-        false,
-        hasInFlightColdBoot && canAdoptAfterLease,
-      );
+      return this.bootImage(image, context, progress, false, adoptAfterLease);
     }
     const result = await this.waitForRunningDevice(
       enrichBootedDevice(running, image),
@@ -1082,6 +1164,82 @@ export class DeviceBootService {
     };
   }
 
+  /**
+   * The image's live device once its lifecycle lease settled, if another
+   * acquisition (or an outside actor) booted it while this one was queued.
+   * Android defers to a still-in-flight cold boot; iOS needs no marker because
+   * a sibling boot of the same UDID holds the stable lease this call just won.
+   */
+  private async findRunningImageAfterLease(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+    boundedIosRecheck = true,
+  ): Promise<BootedDevice | undefined> {
+    const phase = "re-checking the running device after the shared lifecycle lease settled";
+    if (image.platform === "android") {
+      const booted = await this.discoverBootedDevices(image.platform, context, phase, true, true);
+      const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
+      return running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)
+        ? running
+        : undefined;
+    }
+    // Bypass the simulator-list cache: the cached list is what made this image
+    // look stopped, and `startDevice` itself bypasses it before refusing a boot.
+    // The image is a simctl simulator, so devicectl discovery cannot answer for its UDID.
+    const discoverSimulators = (signal: AbortSignal) =>
+      this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
+        bypassIosDeviceListCache: true,
+        skipPhysicalIosDiscovery: true,
+        signal,
+      });
+    // The boot path's own "already running" refusal means the list already
+    // answered within the boot budget, so that follow-up read is not bounded.
+    const discovery = await this.runPhase(context, phase, (signal) =>
+      boundedIosRecheck
+        ? this.boundedIosRecheck(phase, signal, discoverSimulators)
+        : discoverSimulators(signal),
+    );
+    // An unanswered inventory proves nothing; fall through to the boot path,
+    // whose own running-state check reports an unreadable simulator list.
+    return discovery?.succeededPlatforms.has("ios")
+      ? findBootedDeviceMatchingImage(image, discovery.devices)
+      : undefined;
+  }
+
+  /**
+   * This optimization must never cost the boot its budget: a `simctl list` that
+   * never answers is abandoned after its own short timeout (#9920) and the
+   * caller falls through to the boot path, which reports the real state. Caller
+   * abort and the boot deadline still win through `signal`.
+   */
+  private async boundedIosRecheck<T>(
+    phase: string,
+    signal: AbortSignal,
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T | undefined> {
+    const recheck = new AbortController();
+    const timedOut = new Error(`${phase} timed out`);
+    try {
+      return await raceWithDeadline(operation(AbortSignal.any([signal, recheck.signal])), {
+        timer: this.timer,
+        timeoutMs: IOS_POST_LEASE_RECHECK_TIMEOUT_MS,
+        signal,
+        label: phase,
+        timeoutError: () => timedOut,
+        onTimeout: () => recheck.abort(timedOut),
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      logger.warn(
+        `[startDevice] Simulator re-check did not answer within ${IOS_POST_LEASE_RECHECK_TIMEOUT_MS}ms; ` +
+          "continuing to the boot path",
+      );
+      return undefined;
+    }
+  }
+
   private async bootImage(
     image: DeviceInfo,
     context: BootDeadlineContext,
@@ -1101,23 +1259,10 @@ export class DeviceBootService {
       },
       async () => await this.revalidateImageIdentity(image, context),
     );
-    if (adoptRunningAfterLease && image.platform === "android") {
-      const booted = await this.discoverBootedDevices(
-        image.platform,
-        context,
-        "re-checking the running device after the shared lifecycle lease settled",
-        true,
-        true,
-      );
-      const running = findUniqueBootedAndroidDeviceByName(booted, image.name);
-      if (running && !hasInFlightAndroidColdBoot(this.lifecycleCoordinator, image.name)) {
-        const adopted = await this.waitForRunningDevice(
-          enrichBootedDevice(running, image),
-          context,
-          progress,
-        );
-        // Another launch for this AVD may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
-        return { ...adopted, sourceImage: image };
+    if (adoptRunningAfterLease) {
+      const adopted = await this.adoptRunningImageAfterLease(image, context, progress);
+      if (adopted) {
+        return adopted;
       }
     }
     // This outer marker spans every bootImageOnce invocation made by this
@@ -1132,11 +1277,69 @@ export class DeviceBootService {
     try {
       return await this.bootRecovery.run(
         image,
-        async () => this.bootImageOnce(image, context, progress, provisioned),
+        async () =>
+          this.bootImageAdoptingAlreadyRunning(
+            image,
+            context,
+            progress,
+            provisioned,
+            adoptRunningAfterLease,
+          ),
         context.signal,
       );
     } finally {
       releaseInFlightAndroidColdBoot?.();
+    }
+  }
+
+  private async adoptRunningImageAfterLease(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    boundedIosRecheck = true,
+  ): Promise<DeviceBootResult | undefined> {
+    const running = await this.findRunningImageAfterLease(image, context, boundedIosRecheck);
+    if (!running) {
+      return undefined;
+    }
+    const adopted = await this.waitForRunningDevice(
+      enrichBootedDevice(running, image),
+      context,
+      progress,
+    );
+    // Another launch for this device may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
+    return { ...adopted, sourceImage: image };
+  }
+
+  /**
+   * An iOS post-lease re-check that timed out falls through to the boot path,
+   * whose own running-state check can then find a sibling's simulator booted
+   * and refuse with a typed error. Adopt it exactly as the re-check would have.
+   * This runs inside the recovery callback so a recovery policy never mistakes
+   * a sibling's boot for a failed one.
+   */
+  private async bootImageAdoptingAlreadyRunning(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    provisioned: boolean,
+    adoptRunningAfterLease: boolean,
+  ): Promise<DeviceBootResult> {
+    try {
+      return await this.bootImageOnce(image, context, progress, provisioned);
+    } catch (error) {
+      if (
+        !adoptRunningAfterLease ||
+        image.platform !== "ios" ||
+        !(error instanceof DeviceAlreadyRunningError)
+      ) {
+        throw error;
+      }
+      const adopted = await this.adoptRunningImageAfterLease(image, context, progress, false);
+      if (!adopted) {
+        throw error;
+      }
+      return adopted;
     }
   }
 
@@ -1156,6 +1359,12 @@ export class DeviceBootService {
     );
     try {
       return await this.bootImageOnceWithOwnedLaunchTracking(image, context, progress, provisioned);
+    } catch (error) {
+      // The start phase rejects on an abort without waiting for a cancelled launch's child, so a
+      // service that cannot hold the lease confirms that child's exit before its caller sees the
+      // failure (and may release a lease it owns).
+      await context.unheldLaunchTermination;
+      throw error;
     } finally {
       releaseInFlightAndroidColdBoot?.();
     }
@@ -1169,12 +1378,20 @@ export class DeviceBootService {
   ): Promise<DeviceBootResult> {
     let disposeStartHandleCancellation = () => {};
     const handle = await this.runPhase(context, "starting the device", async (signal) => {
-      const started = await this.dependencies.deviceManager.startDevice(
-        image,
-        this.remaining(context, "starting the device"),
-      );
+      const started = await this.startDeviceOwningCancelledLaunch(image, context);
       const cancelStarted = () => {
-        started?.kill();
+        if (started) {
+          // No lease ordering is possible here: the phase already rejected. Still escalate so
+          // a late handle that ignores SIGTERM is not left running with nothing tracking it.
+          void terminateColdBootProcess(started, image.name, this.timer).confirmed.catch(
+            (error: unknown) => {
+              logger.warn(
+                `[startDevice] Late start handle cleanup failed for ${image.name}: ${errorMessage(error)}`,
+                error,
+              );
+            },
+          );
+        }
       };
       if (signal.aborted) {
         cancelStarted();
@@ -1185,14 +1402,25 @@ export class DeviceBootService {
       return started;
     });
     disposeStartHandleCancellation();
-    let handleCancelled = false;
-    const cancelHandle = () => {
-      if (handle && !handleCancelled) {
-        handleCancelled = true;
-        handle.kill();
+    let termination: Promise<OwnedTermination> | undefined;
+    let cleanupWait: Promise<OwnedTerminationWait> | undefined;
+    // Idempotent: the abort listener, the readiness failure path and the catch
+    // block share one termination, and the two that wait share one bounded wait.
+    const cancelHandle = (): Promise<OwnedTermination> => {
+      if (!handle) {
+        return Promise.resolve({ state: "confirmed" });
       }
+      termination ??= this.terminateOwnedHandle(handle, image, context);
+      return termination;
     };
-    context.signal?.addEventListener("abort", cancelHandle, { once: true });
+    const awaitCleanup = (): Promise<OwnedTerminationWait> => {
+      cleanupWait ??= this.awaitOwnedCleanup(cancelHandle(), context);
+      return cleanupWait;
+    };
+    const cancelOnAbort = () => {
+      void cancelHandle();
+    };
+    context.signal?.addEventListener("abort", cancelOnAbort, { once: true });
     try {
       await this.reportProgress(context, progress, 60, "Device started, waiting for readiness...");
       const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
@@ -1203,7 +1431,9 @@ export class DeviceBootService {
           this.remaining(context, "waiting for device boot readiness"),
           context.signal,
           this.timer,
-          cancelHandle,
+          async () => {
+            await awaitCleanup();
+          },
           () => this.timeoutError(context, "waiting for device boot readiness"),
           // A freshly-provisioned Android AVD's first boot is a genuine cold
           // boot; opt it into bounded ADB-offline recovery (#7054). Fresh state
@@ -1226,11 +1456,135 @@ export class DeviceBootService {
         provisioned,
       };
     } catch (error) {
-      cancelHandle();
-      throw error;
+      const wait = await awaitCleanup();
+      throw annotateTerminationOutcome(error, wait, handle);
     } finally {
-      context.signal?.removeEventListener("abort", cancelHandle);
+      context.signal?.removeEventListener("abort", cancelOnAbort);
     }
+  }
+
+  /**
+   * Terminates the emulator this boot started (never an adopted one). A survivor
+   * is marked on the lease and watched until its pid is gone, and that watch is
+   * retained so the AVD's lifecycle lease is not handed out while it still holds
+   * the AVD (#9901); the watch's liveness re-check bounds how long (#9920).
+   */
+  private async terminateOwnedHandle(
+    handle: ChildProcess,
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+  ): Promise<OwnedTermination> {
+    const outcome = await terminateOwnedEmulatorProcess(handle, image.name, this.timer, {
+      markHeldByUnkillableProcess: (pid) =>
+        context.lifecycleLease?.markHeldByUnkillableProcess?.(pid),
+      isProcessRunning: this.dependencies.isProcessRunning,
+    });
+    if (outcome.state === "survived") {
+      context.unconfirmedProcessExits.push(outcome.gone);
+      this.dependencies.retainLeaseUntil?.(outcome.gone);
+    }
+    return outcome;
+  }
+
+  /**
+   * Waits for the owned emulator's termination, but only while the request is
+   * live. When the request is cancelled or out of budget the cleanup carries on
+   * in the background and keeps the lease held (#9920), but only for a long-lived
+   * owner (`cleanupMayOutliveRequest`) with a lease it can hold. A one-shot CLI
+   * process, or a lease this service does not own and cannot hand the survivor
+   * to, is still waited on in full.
+   */
+  private async awaitOwnedCleanup(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): Promise<OwnedTerminationWait> {
+    if (!this.canHoldCleanup(context)) {
+      return (await termination).state;
+    }
+    const wait = await awaitTerminationWithinRequest(termination, {
+      timer: this.timer,
+      deadlineMs: context.deadlineMs,
+      signal: context.signal,
+    });
+    if (wait === "pending") {
+      this.holdLeaseUntilSettled(termination, context);
+    }
+    return wait;
+  }
+
+  /**
+   * Whether the cleanup of an emulator this boot started may outlive the request:
+   * a long-lived owner (`cleanupMayOutliveRequest`) with a lease it can hold.
+   */
+  private canHoldCleanup(context: BootDeadlineContext): boolean {
+    return (
+      this.dependencies.cleanupMayOutliveRequest === true &&
+      (context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined)
+    );
+  }
+
+  /**
+   * Keeps the AVD's lifecycle lease held until `termination` has settled (and, for a
+   * survivor, until it is finally gone): the request stopped waiting for it.
+   */
+  private holdLeaseUntilSettled(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): void {
+    const settled = termination.then(
+      (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
+      () => undefined,
+    );
+    context.pendingTerminations.push(settled);
+    this.dependencies.retainLeaseUntil?.(settled);
+  }
+
+  /**
+   * Starts the device, and when the launch is cancelled after the emulator was
+   * spawned (a cancel during its startup validation), takes the child from the
+   * cancellation error: it terminates it with the same SIGTERM -> bounded wait ->
+   * SIGKILL escalation as any other owned handle and holds the lease until the exit
+   * is confirmed. The phase rejects on the abort regardless, so this must register
+   * its hold before returning (#10075).
+   */
+  private async startDeviceOwningCancelledLaunch(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await this.dependencies.deviceManager.startDevice(
+        image,
+        this.remaining(context, "starting the device"),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        this.ownCancelledLaunchTermination(
+          this.terminateOwnedHandle(error.process, image, context),
+          context,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * A service that can hold the lease keeps it until the termination settles and
+   * lets the phase reject at once. One that cannot (a lease it neither owns nor can
+   * retain, or a one-shot owner) records the termination on the context and `boot`
+   * awaits it before the failure reaches the caller, so the caller never releases its
+   * lease while the child is still shutting down. A child that survives SIGKILL is the
+   * one case left uncovered there, as in `awaitOwnedCleanup`: it is logged and the
+   * caller's lease is released.
+   */
+  private ownCancelledLaunchTermination(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): void {
+    if (this.canHoldCleanup(context)) {
+      this.holdLeaseUntilSettled(termination, context);
+      return;
+    }
+    context.unheldLaunchTermination = termination;
   }
 
   private async reportProgress(
@@ -1344,4 +1698,51 @@ export function enrichBootedDevicesFromImages(
       (canMatchAndroidByName ? imagesByName.get(device.name) : undefined);
     return image?.platform === device.platform ? enrichBootedDevice(device, image) : device;
   });
+}
+
+/**
+ * Reports the original boot failure with the cleanup outcome added as context.
+ * The error is never mutated (it may be the caller's own abort reason, and a
+ * DOMException's message is read-only): an annotated copy keeps the class so
+ * callers' type checks still classify it, and anything that cannot be copied
+ * is wrapped with the original as `cause`.
+ */
+function annotateTerminationOutcome(
+  error: unknown,
+  wait: OwnedTerminationWait,
+  handle: ChildProcess | null,
+): unknown {
+  const pid = handle?.pid ?? "unknown";
+  if (wait === "survived") {
+    return withCleanupNote(
+      error,
+      `Cleanup also failed: emulator process ${pid} did not exit after SIGTERM and SIGKILL, ` +
+        "so its AVD stays reserved until the process is gone (its liveness is re-checked " +
+        "periodically); terminate that process manually if it does not.",
+    );
+  }
+  if (wait === "unobservable") {
+    return withCleanupNote(
+      error,
+      `Cleanup also failed: the exit of emulator process ${pid} could not be observed, so its ` +
+        "AVD was released; terminate that process manually if it is still running.",
+    );
+  }
+  return error;
+}
+
+function withCleanupNote(error: unknown, note: string): unknown {
+  if (error instanceof Error && !(error instanceof DOMException)) {
+    const copy: Error = Object.create(
+      Object.getPrototypeOf(error),
+      Object.getOwnPropertyDescriptors(error),
+    );
+    Object.defineProperty(copy, "message", {
+      value: `${error.message} ${note}`,
+      writable: true,
+      configurable: true,
+    });
+    return copy;
+  }
+  return new ActionableError(`${errorMessage(error)} ${note}`, { cause: error });
 }

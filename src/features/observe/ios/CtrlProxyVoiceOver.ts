@@ -11,7 +11,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
-import { getAbortSignal } from "../../../utils/AbortContext";
+import { combineWithAmbientAbort, getAbortSignal } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { ActionableError } from "../../../models/ActionableError";
@@ -33,6 +33,8 @@ export interface VoiceOverActivationOptions {
 export interface CtrlProxyRequestActionOptions {
   abortSignal?: AbortSignal;
   duration?: number;
+  /** Fires once the request frame was written; after it the action may have run. */
+  onDispatch?: () => void;
 }
 
 /**
@@ -109,7 +111,8 @@ export class CtrlProxyVoiceOver {
     perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
-    return sendCommand<CtrlProxyActionResult>(this.context, {
+    let dispatched = false;
+    const result = await sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "action",
       responseType: "action",
       messageType: "request_action",
@@ -123,9 +126,22 @@ export class CtrlProxyVoiceOver {
       perf,
       cancelScreenshotBackoff: false,
       abortSignal: options?.abortSignal,
+      onDispatch: () => {
+        dispatched = true;
+        options?.onDispatch?.();
+      },
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
+      // A write that was never answered may have run: say so, and do not invite a retry.
+      timeoutError: () => ({
+        success: false,
+        error: "Timeout waiting for action_result",
+        ...(dispatched ? { dispatched, acknowledged: false, retryable: false } : {}),
+      }),
     });
+    // Only the unanswered path above sets acknowledged:false; any reply confirms the runner answered.
+    return dispatched
+      ? { ...result, dispatched, acknowledged: result.acknowledged ?? true }
+      : result;
   }
 
   /**
@@ -137,33 +153,60 @@ export class CtrlProxyVoiceOver {
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
+  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
+  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
     text: string,
     occurrence: number,
     ownerResourceId?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
   ): Promise<CtrlProxyActionResult> {
-    return sendCommand<CtrlProxyActionResult>(this.context, {
-      idPrefix: "accessibility_link",
-      responseType: "action",
-      messageType: "request_activate_accessibility_link",
-      params: { text, occurrence, ownerResourceId: ownerResourceId ?? null },
-      timeoutMs,
-      perf,
-      cancelScreenshotBackoff: false,
-      notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      // Capability misses and unknown-command replies already carry actionable
-      // unsupported errors; preserve other runner failures verbatim as well.
-      unsupportedCommandError: (_messageType, error) => ({
-        success: false,
-        error,
-      }),
-      timeoutError: () => ({
-        success: false,
-        error: "Timeout waiting for semantic link activation",
-      }),
+    const combinedSignal = combineWithAmbientAbort(signal);
+    let dispatched = false;
+    const unconfirmed = (error: string): CtrlProxyActionResult => ({
+      success: false,
+      error,
+      dispatched,
+      acknowledged: false,
+      ...(dispatched ? { retryable: false } : {}),
     });
+    try {
+      combinedSignal?.throwIfAborted();
+      const result = await sendCommand<CtrlProxyActionResult>(this.context, {
+        idPrefix: "accessibility_link",
+        responseType: "action",
+        messageType: "request_activate_accessibility_link",
+        params: { text, occurrence, ownerResourceId: ownerResourceId ?? null },
+        timeoutMs,
+        perf,
+        cancelScreenshotBackoff: false,
+        abortSignal: combinedSignal,
+        onDispatch: () => {
+          dispatched = true;
+          onDispatch?.();
+        },
+        notConnectedError: () => unconfirmed("Not connected to CtrlProxy"),
+        // Capability misses and runner refusals preserve their original errors.
+        unsupportedCommandError: (_messageType, error) => ({ success: false, error }),
+        timeoutError: () => unconfirmed("Timeout waiting for semantic link activation"),
+      });
+      return { ...result, dispatched, acknowledged: result.acknowledged ?? dispatched };
+    } catch (error) {
+      // A dispatched structured runner refusal retains its original throw contract.
+      if (dispatched && error instanceof ActionableError && error !== combinedSignal?.reason) {
+        throw error;
+      }
+      logger.warn("[CtrlProxyVoiceOver] Semantic link activation transport failed", error);
+      return unconfirmed(errorMessage(error));
+    } finally {
+      // Pre-dispatch cancellation must escape without a failure result or fallback.
+      if (!dispatched) {
+        combinedSignal?.throwIfAborted();
+      }
+    }
   }
 
   /**

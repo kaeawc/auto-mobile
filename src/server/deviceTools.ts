@@ -1,4 +1,8 @@
 import {
+  DefaultDeviceResourceObserver,
+  type DeviceResourceObserver,
+} from "../utils/deviceResourceObserver";
+import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
 } from "../daemon/devicePoolRefresh";
@@ -21,6 +25,7 @@ import {
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { terminateColdBootProcess } from "../devices/coldBootProcessTermination";
 import { createHash } from "node:crypto";
 import { z } from "zod/v4";
 import { androidAvdConfigurationSchema } from "../models/AndroidAvdConfiguration";
@@ -1250,6 +1255,7 @@ export function detailedDiscoveryOptions(
 
 export interface DeviceToolsDependencies {
   deviceResourceControllerFactory: () => DeviceResourceController;
+  deviceResourceObserverFactory: () => DeviceResourceObserver;
   deviceManagerFactory: () => PlatformDeviceManager;
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
@@ -3464,6 +3470,8 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
       deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
+      deviceResourceObserverFactory: () =>
+        new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
@@ -3540,6 +3548,8 @@ function resolveDeviceToolsLifecycleCoordinator(
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
+    deviceResourceObserverFactory:
+      deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
     deviceResourceControllerFactory:
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
@@ -4072,8 +4082,6 @@ export function validatePooledDeviceMapping(device: BootedDevice, requestedIdent
   }
 }
 
-const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
-
 /**
  * Collects the process-exit settlements of cold boots this request cancelled but
  * never owned. `prepareDevice` defers its lifecycle-lease release onto every one
@@ -4098,92 +4106,19 @@ export function cancelUnownedColdBoot(
     );
     return undefined;
   }
-  const processHandle = boot.processHandle;
-  const alreadySettled =
-    typeof processHandle.once !== "function" ||
-    processHandle.exitCode !== null ||
-    processHandle.signalCode !== null;
-  const processSettlement = alreadySettled
-    ? Promise.resolve()
-    : new Promise<void>((resolve) => {
-        processHandle.once("exit", () => resolve());
-      });
-  try {
-    processHandle.kill();
-  } catch (error) {
-    logger.warn(
-      `[DeviceTools] Failed to cancel unowned cold boot ${boot.device.deviceId}: ${error}`,
-      error,
-    );
-  }
-  if (alreadySettled) {
-    return processSettlement;
-  }
-  return awaitColdBootSettlement(processSettlement, processHandle, boot.device.deviceId);
-}
-
-/**
- * An emulator that ignores SIGTERM never emits `exit`, so an unbounded wait on
- * its settlement strands every resource whose release is deferred onto it (the
- * lifecycle lease above all). Bound the wait with the injected timer, escalate
- * to SIGKILL, and let the caller proceed either way.
- */
-async function awaitColdBootSettlement(
-  processSettlement: Promise<void>,
-  processHandle: NonNullable<DeviceBootResult["processHandle"]>,
-  deviceId: string,
-): Promise<void> {
-  const timer = getDeviceToolsDependencies().timer;
-  if (await raceColdBootExit(processSettlement, timer)) {
-    return;
-  }
-  logger.warn(
-    `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
-      `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms; escalating to SIGKILL`,
+  const termination = terminateColdBootProcess(
+    boot.processHandle,
+    boot.device.deviceId,
+    getDeviceToolsDependencies().timer,
   );
-  try {
-    processHandle.kill("SIGKILL");
-  } catch (error) {
-    // Best effort: the child may have died between the race and here, and the
-    // caller must not stay blocked on the escalation either.
-    logger.debug(`[DeviceTools] SIGKILL for cold boot ${deviceId} failed: ${error}`);
-  }
-  // `kill()` only requests signal delivery: the emulator is still running — and
-  // still holding its AVD's lock files — until it emits `exit`. Resolving here
-  // would hand the stable key to the next request mid-shutdown, so wait for the
-  // real exit, bounded by one more grace so the release can never be stranded.
-  if (!(await raceColdBootExit(processSettlement, timer))) {
-    logger.warn(
-      `[DeviceTools] Unowned cold boot ${deviceId} did not exit within ` +
-        `${COLD_BOOT_SETTLEMENT_GRACE_MS}ms of SIGKILL; releasing its deferred ` +
-        "resources anyway",
-    );
-  }
-}
-
-/**
- * Waits for `settlement`, bounded by one `COLD_BOOT_SETTLEMENT_GRACE_MS` grace
- * on the injected timer. Resolves true when the process settled first, false
- * when the grace expired.
- */
-async function raceColdBootExit(settlement: Promise<void>, timer: Timer): Promise<boolean> {
-  const deadline = new Error("Cold boot exit wait timed out");
-  try {
-    return await raceWithDeadline(
-      settlement.then(() => true),
-      {
-        timer,
-        timeoutMs: COLD_BOOT_SETTLEMENT_GRACE_MS,
-        label: "Cold boot exit",
-        timeoutError: () => deadline,
-      },
-    );
-  } catch (error) {
-    if (error === deadline) {
-      return false;
+  return termination.confirmed.then((confirmed) => {
+    if (!confirmed) {
+      logger.warn(
+        `[DeviceTools] Unowned cold boot ${boot.device.deviceId} still running after SIGKILL; ` +
+          "releasing its deferred resources anyway",
+      );
     }
-    throw error;
-  }
+  });
 }
 
 export function clearColdBootShutdownMarker(

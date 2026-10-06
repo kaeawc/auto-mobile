@@ -318,7 +318,12 @@ describe("sendKeys selector focus recovery", () => {
       expect(close).toHaveBeenCalledTimes(1);
       expect(tap).toHaveBeenCalledTimes(2);
       expect(tap.mock.calls[1][0]).toEqual({ ...selector, action: "focus", display: undefined });
-      expect(freshReads).toContainEqual({ signal: undefined, freshness: "fresh", minTimestamp: 0 });
+      expect(freshReads).toContainEqual({
+        signal: undefined,
+        freshness: "fresh",
+        minTimestamp: 0,
+        skipScreenshot: true,
+      });
       expect(factory.getCallCount()).toBe(4);
     } finally {
       tap.mockRestore();

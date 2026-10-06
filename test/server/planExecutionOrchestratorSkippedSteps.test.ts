@@ -89,3 +89,91 @@ test.each([{ skippedSteps: undefined }, { skippedSteps: [] }])(
     expect(await run()).not.toHaveProperty("skippedSteps");
   },
 );
+
+test("failed criticalSection warnings reach the response without captureObserveSteps", async () => {
+  const warnings = [
+    { stepIndex: 0, tool: "sendKeys", warnings: ["keyboard dismissal failed"] },
+    {
+      stepIndex: 1,
+      tool: "criticalSection",
+      device: "A",
+      warnings: [
+        "step 1 (sendKeys): keyboard dismissal failed",
+        "step 2 (tapOn): optional step failed; skipped: element not found",
+      ],
+    },
+  ];
+  const failedStep = {
+    stepIndex: 1,
+    tool: "criticalSection",
+    error: "required sub-step failed",
+    failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
+  };
+  execute.mockResolvedValue({ ...base, success: false, warnings, failedStep });
+  const result = await run();
+  expect(result).toMatchObject({ success: false, warnings, failedStep, error: failedStep.error });
+  expect(result).not.toHaveProperty("debug");
+});
+
+test.each([{ warnings: undefined }, { warnings: [] }])(
+  "failure with no warnings omits the warnings key (%j)",
+  async ({ warnings }) => {
+    execute.mockResolvedValue({
+      ...base,
+      success: false,
+      warnings,
+      failedStep: { stepIndex: 1, tool: "criticalSection", error: "required failure" },
+    });
+    expect(await run()).not.toHaveProperty("warnings");
+  },
+);
+
+test("all deviceFailures reach a failed response without captureObserveSteps", async () => {
+  const deviceFailures = [
+    {
+      device: "A",
+      stepIndex: 1,
+      tool: "observe",
+      error: "required failure",
+    },
+    { device: "B", stepIndex: -1, tool: "unknown", error: "track failure" },
+  ];
+  const failedStep = {
+    ...deviceFailures[0],
+    failureObservation: { capturedAtMs: 0, activeWindow: { appId: "fake.app" } },
+  };
+  const skippedSteps = [{ device: "A", stepIndex: 0, tool: "tapOn", error: "optional failure" }];
+  const warnings = [{ device: "B", stepIndex: 1, tool: "observe", warnings: ["best effort"] }];
+  execute.mockResolvedValue({
+    ...base,
+    success: false,
+    deviceFailures,
+    failedStep,
+    skippedSteps,
+    warnings,
+  });
+  const result = await run();
+  expect(result).toMatchObject({
+    success: false,
+    deviceFailures,
+    failedStep,
+    skippedSteps,
+    warnings,
+    error: failedStep.error,
+  });
+  expect(result.deviceFailures).toEqual(deviceFailures);
+  expect(result).not.toHaveProperty("debug");
+});
+
+test.each([{ deviceFailures: undefined }, { deviceFailures: [] }])(
+  "no device failures omits the key (%j)",
+  async ({ deviceFailures }) => {
+    execute.mockResolvedValue({
+      ...base,
+      success: false,
+      deviceFailures,
+      failedStep: { stepIndex: 1, tool: "observe", error: "failure" },
+    });
+    expect(await run()).not.toHaveProperty("deviceFailures");
+  },
+);

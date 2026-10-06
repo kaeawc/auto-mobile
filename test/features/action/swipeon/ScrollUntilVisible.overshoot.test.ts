@@ -1,9 +1,12 @@
+import { recordObservationRead } from "../../../../src/features/observe/observationReadScope";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
 import type { ElementGeometry } from "../../../../src/utils/interfaces/ElementGeometry";
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
+import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
@@ -87,7 +90,7 @@ function makeScrollUntilVisible({
   const fakeObserveScreen = {
     execute: async (options?: Record<string, unknown>) => {
       observeOptions?.push(options);
-      return observeResults[Math.min(callIdx, observeResults.length - 1)];
+      return recordObservationRead(observeResults[Math.min(callIdx, observeResults.length - 1)]);
     },
     getMostRecentCachedObserveResult: async () =>
       observeResults[Math.min(callIdx, observeResults.length - 1)],
@@ -218,6 +221,82 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal),
     ).rejects.toThrow("Operation cancelled");
     expect(talkBackExecutor.getSwipeCalls()).toHaveLength(1);
+  });
+
+  test("a search cancelled after its swipes reports how many it dispatched and starts no more (#10151)", async () => {
+    const controller = new AbortController();
+    let interactions = 0;
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [0, 1, 2, 3, 4].map((id) => makeObserveResult(id)),
+      talkBackExecutor,
+      onInteraction: () => {
+        interactions++;
+        if (interactions === 3) {
+          controller.abort();
+        }
+      },
+    });
+    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(SwipeSearchCancelledError);
+    expect((error as SwipeSearchCancelledError).swipesDispatched).toBe(3);
+    expect((error as SwipeSearchCancelledError).message).toBe(
+      "Operation cancelled after 3 swipe(s) were dispatched; the screen has scrolled. Observe before retrying.",
+    );
+    expect(talkBackExecutor.getSwipeCalls()).toHaveLength(3);
+  });
+
+  test("a cancel that lands during a swipe stops before the settle poll that follows it (#10151)", async () => {
+    const controller = new AbortController();
+    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    let observesAtSwipe: number | undefined;
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
+      talkBackExecutor,
+      observeOptions,
+      onInteraction: () => {
+        observesAtSwipe = observeOptions.length;
+        controller.abort();
+      },
+    });
+    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect((error as SwipeSearchCancelledError).swipesDispatched).toBe(1);
+    expect(observesAtSwipe).toBeGreaterThan(0);
+    expect(observeOptions).toHaveLength(observesAtSwipe!);
+    expect(talkBackExecutor.getSwipeCalls()).toHaveLength(1);
+  });
+
+  test("a search cancelled before any swipe keeps the generic cancellation (#10151)", async () => {
+    const controller = new AbortController();
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+    });
+    controller.abort();
+    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).not.toBeInstanceOf(SwipeSearchCancelledError);
+    expect((error as Error).message).toBe("Operation cancelled");
+    expect(talkBackExecutor.getSwipeCalls()).toEqual([]);
   });
 
   test("automatic scrolling keeps the outer scrollable ahead of a nested carousel", async () => {
@@ -919,6 +998,67 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     });
     expect(talkBackExecutor.getDirections()).toEqual(["up"]);
     expect(terminalEvidence).toEqual([observation]);
+  });
+
+  test("indeterminate iOS swipe stops the lookFor loop instead of reporting found false (#9972)", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const error =
+      "Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (Swipe timed out after 5000ms). The swipe may have been applied. Do not retry automatically.";
+    talkBackExecutor.setFailureResult({ success: false, outcomeIndeterminate: true, error });
+    const terminalEvidence: ObserveResult[] = [];
+    const cacheInvalidations: string[] = [];
+    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      invalidateCache: () => cacheInvalidations.push("ios"),
+    } as unknown as IOSCtrlProxyClient);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      device: { ...DEVICE, platform: "ios" },
+      terminalEvidence,
+    });
+
+    try {
+      await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
+        `${error} The scroll may have happened. Observe before retrying.`,
+      );
+    } finally {
+      existing.mockRestore();
+    }
+
+    // One swipe only: no retry, no terminal found:false evidence, and a post-swipe cache read.
+    expect(talkBackExecutor.getDirections()).toEqual(["up"]);
+    expect(terminalEvidence).toEqual([]);
+    expect(cacheInvalidations).toEqual(["ios"]);
+  });
+
+  test("a definite iOS swipe failure does not invalidate the hierarchy cache", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
+    const cacheInvalidations: string[] = [];
+    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      invalidateCache: () => cacheInvalidations.push("ios"),
+    } as unknown as IOSCtrlProxyClient);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      device: { ...DEVICE, platform: "ios" },
+    });
+
+    try {
+      const result = await suv.execute(BASE_OPTIONS);
+      expect(result).toMatchObject({ success: false, found: false, error: "gesture rejected" });
+    } finally {
+      existing.mockRestore();
+    }
+    expect(cacheInvalidations).toEqual([]);
   });
 
   test("scroll proceeds past a failed swipe if observation is still returned", async () => {

@@ -648,4 +648,101 @@ class WebSocketRequestTest {
     assertEquals(null, request.packageName)
     assertEquals(null, request.fileName)
   }
+
+  @Test
+  fun `overlay requests round trip byte identical nested objects`() {
+    val literals =
+      listOf(
+        """{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}""",
+        """{"type":"update_overlay","requestId":"r2","id":"panel","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}""",
+        """{"type":"update_overlay","requestId":"r3","id":"panel","state":{"label":"Next","enabled":true,"count":2.5}}""",
+        """{"type":"dismiss_overlay","requestId":"r4","id":"panel"}""",
+        """{"type":"dismiss_overlay","requestId":"r5","all":true}""",
+      )
+    literals.forEach { literal ->
+      val request = json.decodeFromString<WebSocketRequest>(literal)
+      assertEquals(literal, json.encodeToString(request))
+      assertEquals(request, json.decodeFromString<WebSocketRequest>(json.encodeToString(request)))
+    }
+    val show = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(literals.first()))
+    assertEquals("panel", show.spec.id)
+    assertEquals(OverlayTextNode(text = "Hello"), show.spec.root)
+    assertTrue(json.encodeToString<WebSocketRequest>(show).contains("\"spec\":{"))
+    val patch = assertIs<UpdateOverlay>(json.decodeFromString<WebSocketRequest>(literals[2]))
+    assertEquals(OverlayScalar.Numeric(2.5), patch.state?.get("count"))
+    assertIs<DismissOverlay>(json.decodeFromString<WebSocketRequest>(literals.last()))
+  }
+
+  @Test
+  fun `show_overlay displayId is optional on the wire and round trips`() {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    // Absent stays absent: a request from a host that predates display targeting is unchanged.
+    val absent = """{"type":"show_overlay","requestId":"r1","spec":$spec}"""
+    val decoded = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(absent))
+    assertEquals(null, decoded.displayId)
+    assertEquals(absent, json.encodeToString<WebSocketRequest>(decoded))
+    // An explicit null decodes as the default display, and is not echoed back.
+    val explicitNull = """{"type":"show_overlay","requestId":"r1","spec":$spec,"displayId":null}"""
+    assertEquals(
+      decoded,
+      assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(explicitNull)),
+    )
+    // Same literal as the TypeScript wire fixture in ctrlProxyProtocol.test.ts.
+    val explicit = """{"type":"show_overlay","requestId":"r1","spec":$spec,"displayId":2}"""
+    val request = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(explicit))
+    assertEquals(2, request.displayId)
+    assertEquals(explicit, json.encodeToString<WebSocketRequest>(request))
+  }
+
+  @Test
+  fun `overlay asset requests round trip byte identical shared literals`() {
+    val put =
+      """{"type":"put_overlay_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""
+    val remove = """{"type":"remove_overlay_asset","requestId":"r7","id":"hero"}"""
+    for (literal in listOf(put, remove)) {
+      val request = json.decodeFromString<WebSocketRequest>(literal)
+      assertEquals(literal, json.encodeToString(request))
+    }
+    val decoded = assertIs<PutOverlayAsset>(json.decodeFromString<WebSocketRequest>(put))
+    assertEquals("r6", decoded.requestId)
+    assertEquals("hero", decoded.id)
+    assertEquals("image/png", decoded.mimeType)
+    assertEquals("iVBORw0KGgo=", decoded.dataBase64)
+    assertEquals(
+      "r7",
+      assertIs<RemoveOverlayAsset>(json.decodeFromString<WebSocketRequest>(remove)).requestId,
+    )
+  }
+
+  @Test
+  fun `overlay asset requests reject missing required fields`() {
+    for (literal in
+      listOf(
+        """{"type":"put_overlay_asset","requestId":"r","mimeType":"image/png","dataBase64":"AA=="}""",
+        """{"type":"put_overlay_asset","requestId":"r","id":"a","dataBase64":"AA=="}""",
+        """{"type":"put_overlay_asset","requestId":"r","id":"a","mimeType":"image/png"}""",
+        """{"type":"remove_overlay_asset","requestId":"r"}""",
+      )) {
+      assertFailsWith<SerializationException>(literal) {
+        json.decodeFromString<WebSocketRequest>(literal)
+      }
+    }
+  }
+
+  @Test
+  fun `put overlay asset never renders its payload`() {
+    val payload = "SECRETBYTES".repeat(20)
+    val request = PutOverlayAsset("r", "hero", "image/png", payload)
+    assertFalse(request.toString().contains("SECRETBYTES"))
+    assertTrue(request.toString().contains("${payload.length} chars"))
+  }
+
+  @Test
+  fun `request decoder remains lenient inside nested overlay spec`() {
+    val literal =
+      """{"type":"show_overlay","requestId":"r","spec":{"id":"panel","extra":true,"window":{"placement":{"type":"fullscreen","future":true}},"root":{"type":"text","text":"Hello","unknown":1}}}"""
+    val request = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(literal))
+    assertEquals(OverlayTextNode(text = "Hello"), request.spec.root)
+  }
 }

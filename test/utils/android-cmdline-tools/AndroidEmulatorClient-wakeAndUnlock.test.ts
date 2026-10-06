@@ -169,7 +169,7 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
       try {
         await runWakeAndUnlock();
 
-        expect(recorded).toHaveBeenCalledWith(DEVICE.deviceId);
+        expect(recorded).toHaveBeenCalledWith(DEVICE.deviceId, DEVICE.name);
         expect(fakeAdb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
         expect(remember).not.toHaveBeenCalled();
       } finally {

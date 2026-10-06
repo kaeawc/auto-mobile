@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import {
   directlyExtractsTar,
@@ -10,16 +10,21 @@ import {
 const ROOT = join(import.meta.dir, "..", "..");
 
 describe("archive extraction boundary (issue #4065)", () => {
-  // Whole-tree scan: reads the full `src` tree and AST-parses the files that name a launcher and
-  // `tar`, so it is not a <100ms unit test — grant it far more than Bun's 5s default, matching the
-  // sibling sdkmanager boundary. The real gate is the fast-validate `archive-extraction-boundary`
-  // check (scripts/check-archive-extraction-boundary.ts); this test guards the same detector.
-  test("only ArchiveExtractor directly runs tar extraction", async () => {
-    // A silently-empty scan yields zero offenders and passes green while checking nothing.
-    expect(sourceFiles(join(ROOT, "src")).length).toBeGreaterThan(100);
-    const offenders = await findOffenders(ROOT);
-    expect(offenders, offenders.join("\n")).toEqual([]);
+  let sources: readonly string[];
+  let offenders: readonly string[];
+
+  // Capture the immutable repository scan once, outside the per-test budget. Detector cases
+  // below still parse their own inputs, and both tree assertions inspect this real scan.
+  beforeAll(async () => {
+    sources = Object.freeze(sourceFiles(join(ROOT, "src")));
+    offenders = Object.freeze(await findOffenders(ROOT));
   }, 30_000);
+
+  test("only ArchiveExtractor directly runs tar extraction", () => {
+    // A silently-empty scan yields zero offenders and passes green while checking nothing.
+    expect(sources.length).toBeGreaterThan(100);
+    expect(offenders, offenders.join("\n")).toEqual([]);
+  });
 
   test("detects argv-first tar extraction regardless of flag position or order", () => {
     expect(
@@ -164,7 +169,7 @@ describe("archive extraction boundary (issue #4065)", () => {
   });
 
   test("every documented exception still exists", () => {
-    const present = new Set(sourceFiles(join(ROOT, "src")).map((file) => file.replace(/\\/g, "/")));
+    const present = new Set(sources.map((file) => file.replace(/\\/g, "/")));
     expect(
       [...EXCEPTIONS.keys()].filter(
         (path) => ![...present].some((file) => file.endsWith(`/${path}`)),

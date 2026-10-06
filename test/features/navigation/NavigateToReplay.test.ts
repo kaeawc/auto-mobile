@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { SmartNavigationHelper } from "../../../src/features/navigation/SmartNavigationHelper";
+import type { ForegroundObserver } from "../../../src/features/navigation/foregroundOverlay";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { BootedDevice } from "../../../src/models";
@@ -31,6 +32,10 @@ const edge = (from: string, to: string): NavigationEdge => ({
   edgeType: "tool",
   interaction: { toolName: "tapOn", args: { text: `to${to}` }, timestamp: 0 },
 });
+
+// A failed replay re-observes the device before any fallback edge (#10133); a fake keeps
+// that off the real observe path (which would spawn device tools) and reports no overlay.
+const cleanForegroundObserver: ForegroundObserver = { execute: async () => ({}) };
 
 async function drainMicrotasks(): Promise<void> {
   for (let i = 0; i < 60; i++) {
@@ -78,8 +83,50 @@ describe("NavigateTo replay safety", () => {
     waiter: ScreenTransitionWaiter | null = { waitForScreen: async () => true },
     setup = noSetup,
   ): NavigateTo {
-    return new NavigateTo(device, new FakeAdbClientFactory(), setup, waiter, graph, timer);
+    return new NavigateTo(
+      device,
+      new FakeAdbClientFactory(),
+      setup,
+      waiter,
+      graph,
+      timer,
+      undefined,
+      undefined,
+      () => cleanForegroundObserver,
+    );
   }
+
+  test("replay routes on the current device after stripping stored routing metadata", async () => {
+    const captured: Record<string, unknown>[] = [];
+    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+      captured.push(args);
+      return { success: true };
+    });
+    const recorded = edge("A", "D");
+    recorded.interaction!.args = {
+      text: "toD",
+      platform: "android",
+      deviceId: "old-device",
+      device: "old-label",
+      sessionUuid: "old-session",
+    };
+    graph.setPathResult({ found: true, path: [recorded], startScreen: "A", targetScreen: "D" });
+    const result = await makeNav({
+      waitForScreen: async (screen) => {
+        graph.setCurrentScreenValue(screen);
+        return true;
+      },
+    }).execute(options);
+    expect(result.success).toBe(true);
+    expect(captured[0]).toMatchObject({
+      text: "toD",
+      platform: device.platform,
+      deviceId: device.deviceId,
+    });
+    expect(captured[0].device).toBeUndefined();
+    expect(captured[0].sessionUuid).toBeUndefined();
+    expect(recorded.interaction!.args.deviceId).toBe("old-device");
+  });
 
   for (const failedStep of [1, 2]) {
     test(`stops at missed replay step ${failedStep} and reports only dispatched actions`, async () => {

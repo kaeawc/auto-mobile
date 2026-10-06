@@ -71,7 +71,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   test("has an own handler for every typed wire variant", () => {
     // The `satisfies WebSocketMessageHandlers` clause is the union-wide compile-time check.
     // There is no separate runtime list of the union's string literals.
-    expect(Object.keys(client.webSocketMessageHandlers)).toHaveLength(58);
+    expect(Object.keys(client.webSocketMessageHandlers)).toHaveLength(60);
     expect(Object.hasOwn(client.webSocketMessageHandlers, "custom_event")).toBe(false);
     for (const type of [
       "keystore_discovery",
@@ -179,6 +179,26 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       expect(timer.getCurrentTime()).toBe(0);
     },
   );
+
+  test("a tap_coordinates_result reply, including a refusal, is marked acknowledged", async () => {
+    const pending = client.requestManager.register("tap-ack", "tap_coordinates", 1000, () => ({
+      success: false,
+    }));
+    await client.handleWebSocketMessage(
+      JSON.stringify({
+        type: "tap_coordinates_result",
+        requestId: "tap-ack",
+        success: false,
+        error: "Stale frame context for input/tap",
+        totalTimeMs: 2,
+      }),
+    );
+    expect(await pending).toMatchObject({
+      success: false,
+      error: "Stale frame context for input/tap",
+      acknowledged: true,
+    });
+  });
 
   test("resolves a pending settings response through the shared helper", async () => {
     const pending = client.requestManager.register("settings-1", "settings_get", 1000, () => ({

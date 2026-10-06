@@ -16,6 +16,25 @@ describe("RequestManager", () => {
     manager.reset();
   });
 
+  test("throwing response error factory rejects and clears the waiter", async () => {
+    const failure = new Error("factory failed");
+    const promise = manager.register(
+      "throwing",
+      "overlay_result",
+      50,
+      () => null,
+      () => {
+        throw failure;
+      },
+    );
+    expect(manager.resolveError("throwing", "device failed")).toBe(true);
+    await expect(promise).rejects.toBe(failure);
+    expect(manager.getPendingCount()).toBe(0);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    fakeTimer.advanceTime(50);
+    expect(manager.resolveError("throwing", "late")).toBe(false);
+  });
+
   test("should generate unique request IDs", () => {
     const id1 = manager.generateId("screenshot");
     const id2 = manager.generateId("screenshot");

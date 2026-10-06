@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -1013,17 +1014,17 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await expect(
-        (tapOnElement as any).executeAndroidTapWithAccessibility(
-          "longPress",
-          50,
-          50,
-          element,
-          1000,
-          {},
-          undefined,
-        ),
-      ).rejects.toThrow("Semantic long press failed");
+      const failure = await (tapOnElement as any)
+        .executeAndroidTapWithAccessibility("longPress", 50, 50, element, 1000, {}, undefined)
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect((failure as ActionableError).message).toBe(
+        "Semantic long press failed for the selected element: performAction returned false",
+      );
 
       expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
@@ -1136,7 +1137,7 @@ describe("TapOnElement screen-reader navigation result", () => {
     }
     const targetElement = coordinate?.element ?? element;
     const observation = {
-      viewHierarchy: { hierarchy: {} },
+      viewHierarchy: { hierarchy: { node: { $: targetElement } } },
       screenSize: { width: 100, height: 100 },
     } as any;
     const command = new TapOnElement(
@@ -1164,6 +1165,8 @@ describe("TapOnElement screen-reader navigation result", () => {
         } as FeatureFlagService,
       },
     );
+    command.refreshViewHierarchy = async () => observation.viewHierarchy;
+    coordinate?.driver.setElements([targetElement], 0);
     spyOn(command as any, "observedInteraction").mockImplementation(async (block: any) => ({
       ...(await block(observation)),
       observation,
@@ -1432,6 +1435,10 @@ describe("TapOnElement TalkBack dispatch uncertainty", () => {
         talkBackStrategy: new TalkBackTapStrategy({ timer }),
         talkBackDriverFactory: { createDriver: () => driver },
       },
+    );
+    driver.setElements(
+      [{ "resource-id": "test:id/button", bounds: { left: 0, top: 0, right: 100, bottom: 100 } }],
+      0,
     );
     const attempt = tap.executeAndroidTap("tap", 50, 50, 500, {
       "resource-id": "test:id/button",

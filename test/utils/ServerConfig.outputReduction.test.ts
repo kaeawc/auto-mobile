@@ -11,6 +11,7 @@ describe("ServerConfig output-reduction flags", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
     serverConfig.setActionsDiffObserveEnabled(false);
     serverConfig.setActionsNoObserveEnabled(false);
+    serverConfig.setActionsCompactMetadataEnabled(false);
     serverConfig.setToolOutputsDir(undefined);
   });
 
@@ -30,6 +31,12 @@ describe("ServerConfig output-reduction flags", () => {
     expect(serverConfig.isActionsDiffObserveEnabled()).toBe(false);
     serverConfig.setActionsDiffObserveEnabled(true);
     expect(serverConfig.isActionsDiffObserveEnabled()).toBe(true);
+  });
+
+  test("compact metadata defaults off and toggles", () => {
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
   });
 
   test("actions-no-observe defaults off and toggles", () => {

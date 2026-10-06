@@ -69,6 +69,9 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "actions-diff-observe":
         serverConfig.setActionsDiffObserveEnabled(enabled);
         break;
+      case "actions-compact-metadata":
+        serverConfig.setActionsCompactMetadataEnabled(enabled);
+        break;
       case "actions-no-observe":
         serverConfig.setActionsNoObserveEnabled(enabled);
         break;

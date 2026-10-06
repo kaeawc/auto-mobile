@@ -19,6 +19,8 @@ import type {
   XCTestHierarchy,
 } from "../../../../src/features/observe/ios/types";
 import { RequestManager } from "../../../../src/utils/RequestManager";
+import { iosHierarchyAcquisition } from "../../../../src/features/observe/ios/types";
+import { decodeCtrlProxyMessage } from "../../../../src/features/observe/ios/decodeCtrlProxyMessage";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const CACHE_TTL_MS = 500;
@@ -34,6 +36,7 @@ interface Harness {
   setCached: (entry: CtrlProxyCachedHierarchy | null) => void;
   /** Simulate a disconnected/reconnecting runner, so no fetch can succeed. */
   setConnected: (connected: boolean) => void;
+  setRunnerCache: (hierarchy: XCTestHierarchy) => void;
 }
 
 function makeHierarchy(updatedAt: number, marker: string): XCTestHierarchy {
@@ -53,6 +56,7 @@ function createHarness(): Harness {
   const requests: Array<{ type: string; disableAllFiltering: boolean; sinceTimestamp?: number }> =
     [];
   let connected = true;
+  let runnerCache: XCTestHierarchy | undefined;
 
   const context: HierarchyDelegateContext = {
     getWebSocket: () =>
@@ -75,9 +79,13 @@ function createHarness(): Harness {
           );
           // Respond immediately with a hierarchy stamped at the current fake time,
           // so each fetch is distinguishable from the previously cached one.
-          requestManager.resolve(message.requestId, {
-            hierarchy: makeHierarchy(timer.now(), `fetch-${fetches}`),
+          const decoded = decodeCtrlProxyMessage({
+            type: "hierarchy_update",
+            requestId: message.requestId,
+            data: runnerCache ?? makeHierarchy(timer.now(), `fetch-${fetches}`),
+            ...(runnerCache ? { servedFromCache: true } : {}),
           });
+          requestManager.resolve(message.requestId, decoded?.result);
         },
       }) as never,
     requestManager,
@@ -104,6 +112,9 @@ function createHarness(): Harness {
     setConnected: (value) => {
       connected = value;
     },
+    setRunnerCache: (value) => {
+      runnerCache = value;
+    },
   };
 }
 
@@ -119,6 +130,72 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(h.fetchCount()).toBe(1);
     expect(h.getCached()).not.toBeNull();
   }
+
+  test("runner cache uses its capture timestamp and cannot restart the host TTL", async () => {
+    await primeCache();
+    h.timer.advanceTime(CACHE_TTL_MS * 4);
+    h.setRunnerCache(makeHierarchy(100, "polled-before-change"));
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+
+    expect(result[iosHierarchyAcquisition]).toBe("client-cache");
+    expect(result.fresh).toBe(false);
+    expect(result.updatedAt).toBe(100);
+    expect(h.getCached()?.captureReceivedAt).toBe(100);
+    expect(h.getCached()?.receivedAt).toBe(CACHE_TTL_MS * 4);
+    expect(h.getCached()?.fresh).toBe(false);
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    expect(h.fetchCount()).toBe(3);
+    expect(h.getCached()?.captureReceivedAt).toBe(100);
+  });
+
+  test("same-capture runner cache cannot improve the host cache's first sighting", async () => {
+    const cached = makeHierarchy(40, "same-capture");
+    h.setCached({ hierarchy: cached, receivedAt: 0, captureReceivedAt: 0, fresh: true });
+    h.timer.advanceTime(CACHE_TTL_MS);
+    h.setRunnerCache(cached);
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 30);
+
+    expect(result[iosHierarchyAcquisition]).toBe("client-cache");
+    expect(result.fresh).toBe(false);
+    expect(h.getCached()?.captureReceivedAt).toBe(0);
+  });
+
+  test("observer runner-cache reply is not a fresh device capture and leaves host cache alone", async () => {
+    await primeCache();
+    const previous = h.getCached();
+    h.timer.advanceTime(CACHE_TTL_MS);
+    h.setRunnerCache(makeHierarchy(100, "observer-cache"));
+
+    const result = await h.hierarchy.requestHierarchySync(
+      undefined,
+      false,
+      undefined,
+      1000,
+      false,
+      {
+        observerMode: true,
+      },
+    );
+
+    expect(result?.[iosHierarchyAcquisition]).toBe("client-cache");
+    expect(result?.fresh).toBe(false);
+    expect(result?.hierarchy.updatedAt).toBe(100);
+    expect(h.getCached()).toBe(previous);
+  });
+
+  test("runner-cache clock skew never establishes a new freshness budget", async () => {
+    h.setRunnerCache(makeHierarchy(3_600_000, "ahead-device-clock"));
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+
+    expect(result.fresh).toBe(false);
+    expect(result[iosHierarchyAcquisition]).toBe("client-cache");
+    expect(h.getCached()?.captureReceivedAt).toBe(h.timer.now());
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+    expect(h.fetchCount()).toBe(2);
+  });
 
   test("an expired cache forwards minTimestamp to the stale check", async () => {
     h.setCached({

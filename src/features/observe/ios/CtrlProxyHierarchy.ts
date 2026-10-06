@@ -256,8 +256,8 @@ export class CtrlProxyHierarchy {
         }
         return {
           hierarchy: result.hierarchy,
-          [iosHierarchyAcquisition]: "device",
-          fresh: true,
+          [iosHierarchyAcquisition]: result[iosHierarchyAcquisition],
+          fresh: result.fresh !== false,
           updatedAt: result.hierarchy.updatedAt,
           perfTiming: result.perfTiming,
           frameContext: result.frameContext,
@@ -576,6 +576,7 @@ export class CtrlProxyHierarchy {
     );
     const promise = this.context.requestManager.register<{
       hierarchy?: XCTestHierarchy;
+      servedFromCache?: boolean;
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
       error?: string;
@@ -744,14 +745,24 @@ export class CtrlProxyHierarchy {
   }
 
   private acceptHierarchyResponse(
-    result: { hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string },
+    result: {
+      hierarchy: XCTestHierarchy;
+      servedFromCache?: boolean;
+      perfTiming?: CtrlProxyPerfTiming;
+      frameContext?: string;
+    },
     requestOptions: { observerMode?: boolean } | undefined,
   ): CtrlProxySyncedHierarchy {
     this.observeReceivedHierarchy(result.hierarchy);
+    // A cached runner reply has not re-verified the screen. Use the existing cache
+    // acquisition class so it cannot satisfy a caller requiring a device capture.
+    const acquisition = result.servedFromCache === true ? "client-cache" : "device";
+    const fresh = result.servedFromCache !== true;
     if (this.isObserverRequest(requestOptions)) {
       return {
         hierarchy: result.hierarchy,
-        [iosHierarchyAcquisition]: "device",
+        [iosHierarchyAcquisition]: acquisition,
+        fresh,
         perfTiming: result.perfTiming,
         frameContext: result.frameContext,
       };
@@ -762,8 +773,14 @@ export class CtrlProxyHierarchy {
     const newCache: CachedHierarchy = {
       hierarchy: result.hierarchy,
       receivedAt: now,
-      captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
-      fresh: true,
+      captureReceivedAt: result.servedFromCache
+        ? Math.min(
+            result.hierarchy.updatedAt,
+            this.captureReceivedAt(result.hierarchy, previous, now),
+          )
+        : this.captureReceivedAt(result.hierarchy, previous, now),
+      // Clock skew cannot establish freshness for an unverified runner cache.
+      fresh,
       perfTiming: result.perfTiming,
       frameContext: result.frameContext,
     };
@@ -771,7 +788,8 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: result.hierarchy,
-      [iosHierarchyAcquisition]: "device",
+      [iosHierarchyAcquisition]: acquisition,
+      fresh,
       perfTiming: result.perfTiming,
       frameContext: result.frameContext,
     };

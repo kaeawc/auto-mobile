@@ -43,7 +43,7 @@ extension CommandHandler {
     )
         async throws -> HierarchyUpdateResponse
     {
-        try await hierarchyResponse(request, sinceTimestamp: nil)
+        try await hierarchyResponse(request)
     }
 
     func handleRequestHierarchyIfStale(
@@ -52,24 +52,21 @@ extension CommandHandler {
     )
         async throws -> HierarchyUpdateResponse
     {
-        try await hierarchyResponse(request, sinceTimestamp: request.sinceTimestamp)
+        try await hierarchyResponse(request)
     }
 
-    /// Read, compare and (when stale) capture in one main-actor turn.
+    /// Capture and record in one main-actor turn.
     @MainActor
-    private func hierarchyForRequest(_ request: RequestHierarchy, sinceTimestamp: Int64?) throws -> ViewHierarchy {
+    private func hierarchyForRequest(_ request: RequestHierarchy) throws -> ViewHierarchy {
         let disableAllFiltering = request.disableAllFiltering ?? false
-        if !disableAllFiltering, let sinceTimestamp,
-           let cached = hierarchyDebouncer?.getLastHierarchy(), cached.updatedAt > sinceTimestamp
-        {
-            return cached
-        }
+        // sinceTimestamp is accepted for wire compatibility, but iOS has no UI-change
+        // event signal. Even the active poll interval can miss a change after the last
+        // poll, so a host TTL re-verification must always capture the current screen.
         return try captureAndRecordHierarchy(disableAllFiltering: disableAllFiltering)
     }
 
     private func hierarchyResponse(
-        _ request: RequestHierarchy,
-        sinceTimestamp: Int64?
+        _ request: RequestHierarchy
     )
         async throws -> HierarchyUpdateResponse
     {
@@ -79,7 +76,7 @@ extension CommandHandler {
         let hierarchy: ViewHierarchy
         do {
             hierarchy = try await trackedAsync("extraction") {
-                try await self.hierarchyForRequest(request, sinceTimestamp: sinceTimestamp)
+                try await self.hierarchyForRequest(request)
             }
         } catch {
             print("[CommandHandler] Hierarchy extraction failed: \(error)")
@@ -95,7 +92,8 @@ extension CommandHandler {
             requestId: request.requestId,
             data: enriched,
             perfTiming: perfTiming,
-            frameContext: frameContext.context(for: enriched)
+            frameContext: frameContext.context(for: enriched),
+            servedFromCache: false
         )
     }
 

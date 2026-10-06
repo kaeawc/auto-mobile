@@ -11,7 +11,7 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
     var foregroundBundleId: String?
     var appState: ObservedAppState = .notRunning
     private(set) var filteringRequests: [Bool] = []
-    private let hierarchy: ViewHierarchy
+    var hierarchy: ViewHierarchy
     var onCapture: (() throws -> Void)?
 
     init(hierarchy: ViewHierarchy = RewriteFakeElementLocator.defaultHierarchy) {

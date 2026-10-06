@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class CommandHierarchyCaptureTests: XCTestCase {
-    func testStaleHierarchyRequestUsesStrictlyNewerCacheWithoutCapture() async throws {
+    func testStaleHierarchyRequestCapturesEvenWithStrictlyNewerCache() async throws {
         let fixture = CaptureFixture()
         fixture.debouncer.cachedHierarchy = fixture.raw
         let request = RequestHierarchy(requestId: "fresh", sinceTimestamp: 0)
@@ -16,8 +16,68 @@ final class CommandHierarchyCaptureTests: XCTestCase {
         XCTAssertEqual(response.data?.updatedAt, fixture.raw.updatedAt)
         XCTAssertEqual(response.data?.insets.source, "ios-sdk-safe-area")
         XCTAssertNotNil(response.frameContext)
-        XCTAssertTrue(fixture.locator.filteringRequests.isEmpty)
-        XCTAssertTrue(fixture.debouncer.recordedCaptures.isEmpty)
+        XCTAssertEqual(response.servedFromCache, false)
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testStaleRequestCapturesWithRealIdleBackoffCache() async throws {
+        try await assertRealPollCacheDoesNotReplaceCapture(idle: true)
+    }
+
+    func testChangeAfterRecentActivePollIsCapturedWithRealDebouncer() async throws {
+        try await assertRealPollCacheDoesNotReplaceCapture(idle: false)
+    }
+
+    private func assertRealPollCacheDoesNotReplaceCapture(idle: Bool) async throws {
+        let timer = FakeProxyTimer(mode: .manual, initialTime: 10000)
+        let polled = ViewHierarchy(
+            updatedAt: timer.now(),
+            hierarchy: RewriteFakeElementLocator.defaultHierarchy.hierarchy
+        )
+        let pollLocator = RewriteFakeElementLocator(hierarchy: polled)
+        pollLocator.onCapture = {
+            pollLocator.hierarchy = ViewHierarchy(updatedAt: timer.now(), hierarchy: polled.hierarchy)
+        }
+        let perf = FakePerfTracking(flushResult: nil)
+        let debouncer = HierarchyDebouncer(hierarchyExtractor: pollLocator, perf: perf, timer: timer)
+        debouncer.start()
+        defer { debouncer.stop() }
+        if idle {
+            // Two unchanged polls grow the next cadence from 1s to 2s to 4s.
+            timer.advance(by: HierarchyDebouncer.defaultPollIntervalMs)
+            timer.advance(by: HierarchyDebouncer.defaultPollIntervalMs * HierarchyDebouncer.idleBackoffMultiplier)
+            timer.advance(by: HierarchyDebouncer.defaultPollIntervalMs + 1)
+        } else {
+            // The screen changes immediately after the initial active-cadence poll.
+            timer.advance(by: 1)
+        }
+        let beforeCalls = pollLocator.filteringRequests.count
+        let cached = try XCTUnwrap(debouncer.getLastHierarchy())
+        let cacheAge = timer.now() - cached.updatedAt
+        if idle {
+            XCTAssertGreaterThan(cacheAge, HierarchyDebouncer.defaultPollIntervalMs)
+        } else {
+            XCTAssertLessThan(cacheAge, HierarchyDebouncer.defaultPollIntervalMs)
+        }
+        let changed = ViewHierarchy(updatedAt: timer.now(), hierarchy: UIElementInfo(text: "command"))
+        let commandLocator = RewriteFakeElementLocator(hierarchy: changed)
+        let handler = CommandHandler(
+            elementLocator: commandLocator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: perf, hierarchyDebouncer: debouncer
+        )
+        XCTAssertEqual(debouncer.getLastHierarchy()?.hierarchy?.text, polled.hierarchy?.text)
+
+        let response = try await handler.handleRequestHierarchyIfStale(
+            RequestHierarchy(requestId: "reverify", sinceTimestamp: polled.updatedAt - 1), startTime: Date()
+        )
+
+        XCTAssertEqual(response.data?.hierarchy?.text, "command")
+        XCTAssertEqual(response.data?.updatedAt, timer.now())
+        XCTAssertEqual(response.servedFromCache, false)
+        XCTAssertEqual(commandLocator.filteringRequests, [false])
+        XCTAssertEqual(debouncer.getLastHierarchy()?.updatedAt, changed.updatedAt)
+        XCTAssertEqual(pollLocator.filteringRequests.count, beforeCalls)
+        XCTAssertEqual(beforeCalls, idle ? 3 : 1)
     }
 
     func testStaleHierarchyRequestCapturesWhenCacheIsOlderOrEqual() async throws {

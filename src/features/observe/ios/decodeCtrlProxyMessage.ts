@@ -57,6 +57,9 @@ function decodeHierarchyUpdate(
       hierarchy: message.data,
       perfTiming: message.perfTiming,
       frameContext: message.frameContext,
+      ...(message.servedFromCache === undefined
+        ? {}
+        : { servedFromCache: message.servedFromCache }),
     },
   };
 }

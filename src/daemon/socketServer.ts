@@ -2154,7 +2154,12 @@ export class UnixSocketServer {
     }
     const controller = session.requestCancellations.get(targetId);
     if (!controller) {
-      // Already answered (a timeout racing the response) or never seen: nothing to cancel.
+      // Already answered (a timeout racing the response) or never seen: nothing to cancel. Leave a
+      // trace: a cancel that reaches the daemon after the work finished otherwise looks identical to
+      // one that was never sent, which hid a client delivering its cancel late (#10151).
+      logger.debug(
+        `[SocketCancel] socketSession=${session.sessionId} cancel for request ${targetId} found no in-flight request (already answered or never seen)`,
+      );
       return { id: request.id, type: "mcp_response", success: true, result: { cancelled: false } };
     }
     session.requestCancellations.delete(targetId);

@@ -108,6 +108,25 @@ export class RtpH264TrackWriter {
     }
   }
 
+  /**
+   * The producer delivered a complete transport packet (the Android video-server
+   * frames each encoder output as one packet, so a packet ends on an access-unit
+   * boundary). Release the NAL still held for a next start code and send the
+   * picture it completes now instead of when a later packet starts. A
+   * parameter-set-only packet (SPS/PPS) is left pending so it still travels
+   * with the IDR that follows; the emitted bytes are identical to the
+   * boundary-less path, only earlier.
+   */
+  endOfPacket(): void {
+    for (const nal of this.parser.flush()) {
+      this.consumeNal(nal);
+    }
+    for (const accessUnit of this.assembler.flushPicture()) {
+      this.writeAccessUnit(accessUnit, this.accessUnitStartMs ?? this.timer.now());
+      this.accessUnitStartMs = null;
+    }
+  }
+
   /** Flush the trailing NAL unit / access unit at end of stream. */
   flush(): void {
     for (const nal of this.parser.flush()) {

@@ -2551,6 +2551,7 @@ describe("DeviceBootService", () => {
         service(devices, matcher, undefined, timer, lifecycleCoordinator, lifecycleOptions);
       return {
         devices,
+        timer,
         lifecycleCoordinator,
         newService,
         starts: () => starts,
@@ -2722,6 +2723,73 @@ describe("DeviceBootService", () => {
         test.newService().boot({ platform: "ios", preferRunning: false }),
       ).rejects.toThrow("already running");
       expect(test.freshChecks()).toBe(0);
+    });
+
+    it("asks only simctl, not devicectl, whether the simulator is already booted (#9920)", async () => {
+      const test = setup();
+      test.ownerReadiness.resolve();
+      const recheckOptions: unknown[] = [];
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      test.devices.getBootedDevicesDetailed = async (platform, options) => {
+        recheckOptions.push(options);
+        return await answer(platform, options);
+      };
+
+      await test.newService().boot({ platform: "ios" });
+
+      expect(recheckOptions).toHaveLength(1);
+      expect(recheckOptions[0]).toMatchObject({
+        bypassIosDeviceListCache: true,
+        skipPhysicalIosDiscovery: true,
+      });
+    });
+
+    it("falls through to the boot path when the simulator re-check never answers (#9920)", async () => {
+      const test = setup();
+      test.ownerReadiness.resolve();
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      let abandoned: AbortSignal | undefined;
+      test.devices.getBootedDevicesDetailed = async (platform, options) => {
+        if (options?.bypassIosDeviceListCache !== true) {
+          return await answer(platform, options);
+        }
+        abandoned = options.signal;
+        return await new Promise<never>(() => {});
+      };
+      const boot = test.newService().boot({ platform: "ios" });
+      await flushMicrotasks();
+      expect(test.starts()).toBe(0);
+
+      // The re-check's own bound, far inside the boot budget, releases the boot path.
+      test.timer.advanceTime(5_000);
+      const result = await boot;
+
+      expect(result.source).toBe("cold-boot");
+      expect(test.starts()).toBe(1);
+      expect(abandoned?.aborted).toBe(true);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
+    });
+
+    it("still lets a caller abort cancel a hung simulator re-check", async () => {
+      const test = setup();
+      const answer = test.devices.getBootedDevicesDetailed.bind(test.devices);
+      test.devices.getBootedDevicesDetailed = async (platform, options) =>
+        options?.bypassIosDeviceListCache === true
+          ? await new Promise<never>(() => {})
+          : await answer(platform, options);
+      const controller = new AbortController();
+      const boot = test
+        .newService()
+        .boot({ platform: "ios", signal: controller.signal })
+        .catch((error: unknown) => error);
+      await flushMicrotasks();
+
+      controller.abort();
+      test.timer.advanceTime(1_000);
+
+      expect(await boot).toBeInstanceOf(ActionableError);
+      expect(test.starts()).toBe(0);
+      expectNoLeasesHeld(test.lifecycleCoordinator);
     });
 
     it("does not re-check or adopt when the caller neither owns nor was granted the lease", async () => {

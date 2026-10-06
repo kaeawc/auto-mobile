@@ -140,7 +140,19 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         checkPreviousSignalCrash()
     }
 
-    private func installSignalHandlers() {
+    /// Injectable `sigaction(2)` entry point (testing seam). Tests substitute a
+    /// fake kernel table so the monitored fatal signals are never really re-routed.
+    var sigactionCall: SigactionCall = { signalNumber, newAction, oldAction in
+        sigaction(signalNumber, newAction, oldAction)
+    }
+
+    /// Signals this instance routes through the crash handler. Tests narrow it.
+    var signalsToMonitor: [Int32] = AutoMobileCrashes.monitoredSignals
+
+    func installSignalHandlers() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+
         lock.lock()
         guard !installedSignalHandlers else {
             lock.unlock()
@@ -149,21 +161,64 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         installedSignalHandlers = true
         lock.unlock()
 
-        for sig in Self.monitoredSignals {
-            let prev = signal(sig, signalHandler)
+        let table = autoMobileSignalTable
+        table.recording.pointee = 1
+        for sig in signalsToMonitor {
+            installSignalHandler(for: sig, table: table)
+        }
+    }
+
+    private func installSignalHandler(for sig: Int32, table: SignalHandlerTable) {
+        let idx = Int(sig)
+        guard idx > 0, idx < SignalHandlerTable.slotCount else { return }
+        var current = sigaction()
+        guard sigactionCall(sig, nil, &current) == 0 else {
+            InternalLogger.warning("Could not read the current action for signal \(sig); leaving it alone")
+            return
+        }
+        // Our handler already current (installed twice), or still linked into a later
+        // reporter's chain after uninstall: keep the saved predecessor. Capturing the
+        // current action as "previous" would create a handler cycle.
+        guard !isOwnSignalAction(current), table.slotState[idx] == 0 else { return }
+
+        table.previousActions[idx] = current
+        table.slotState[idx] = 1
+        table.ignoredOnce[idx] = 0
+        var ours = sigaction()
+        ours.__sigaction_u.__sa_sigaction = autoMobileSignalHandler
+        ours.sa_mask = current.sa_mask
+        ours.sa_flags = signalInstallFlags(previous: current)
+        if sigactionCall(sig, &ours, nil) != 0 {
+            table.slotState[idx] = 0
+            InternalLogger.warning("Could not install the crash handler for signal \(sig)")
+        }
+    }
+
+    /// Restore the saved actions, but only where our handler is still current. A
+    /// reporter installed after us chains through our handler, so overwriting its
+    /// registration would silently remove it: those slots stay linked, and the
+    /// handler becomes a dormant forwarder because recording is switched off.
+    func uninstallSignalHandlers() {
+        lock.lock()
+        guard installedSignalHandlers else {
+            lock.unlock()
+            return
+        }
+        installedSignalHandlers = false
+        lock.unlock()
+
+        let table = autoMobileSignalTable
+        table.recording.pointee = 0
+        for sig in signalsToMonitor {
             let idx = Int(sig)
-            // Store previous handler for chaining (skip SIG_DFL/SIG_ERR/SIG_IGN
-            // which are sentinel values, not real function pointers).
-            // Use unsafeBitCast since @convention(c) function pointers
-            // don't conform to Equatable.
-            if idx >= 0, idx < previousSignalHandlers.count {
-                let prevRaw = unsafeBitCast(prev, to: Int.self)
-                let dflRaw = unsafeBitCast(SIG_DFL, to: Int.self)
-                let errRaw = unsafeBitCast(SIG_ERR, to: Int.self)
-                let ignRaw = unsafeBitCast(SIG_IGN, to: Int.self)
-                if prevRaw != dflRaw, prevRaw != errRaw, prevRaw != ignRaw {
-                    previousSignalHandlers[idx] = prev
-                }
+            guard idx > 0, idx < SignalHandlerTable.slotCount, table.slotState[idx] != 0 else { continue }
+            var current = sigaction()
+            guard sigactionCall(sig, nil, &current) == 0, isOwnSignalAction(current) else { continue }
+            var saved = table.previousActions[idx]
+            if sigactionCall(sig, &saved, nil) == 0 {
+                table.slotState[idx] = 0
+            } else {
+                InternalLogger.warning("Could not restore the previous action for signal \(sig)")
             }
         }
     }
@@ -213,6 +268,10 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     func reset() {
         lifecycleLock.lock()
 
+        // Independent of exception-handler state: enableSignalHandlers() is public
+        // and may have been called without initialize().
+        uninstallSignalHandlers()
+
         lock.lock()
         // If we were never initialized (e.g. host opted out via
         // enableCrashReporting: false, or shutdown() is called a second time),
@@ -231,7 +290,6 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         // Direct backing-field write: we already hold `lock` here, and the computed
         // `currentScreenProvider` setter would re-acquire the non-recursive lock.
         _currentScreenProvider = nil
-        // Note: signal handlers cannot be safely uninstalled, leave installedSignalHandlers as-is
         lock.unlock()
 
         let currentHandler = captureUncaughtHandler()
@@ -261,37 +319,209 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
 // MARK: - Signal Handler (must be a C function)
 
-/// File path for persisting signal number across crashes.
-/// Computed once during initialization and stored as a C string for signal safety.
-private var signalCrashFilePath: UnsafeMutablePointer<CChar>?
+/// Three-argument `SA_SIGINFO` handler: `(signal, siginfo_t *, ucontext_t *)`.
+typealias SignalInfoHandler = @convention(c) (Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void
 
-/// Previous signal handlers saved before installing ours, for chaining.
-/// Array indexed by signal number for O(1) lookup in the signal handler.
-private var previousSignalHandlers: [(@convention(c) (Int32) -> Void)?] = Array(repeating: nil, count: 64)
+/// One-argument handler registered without `SA_SIGINFO`.
+typealias SignalPlainHandler = @convention(c) (Int32) -> Void
 
-/// Global signal handler for signal-based faults (SIGABRT, SIGSEGV, etc.).
-/// Only performs async-signal-safe operations: writes signal number to a file
-/// using POSIX write(), then chains to the previous handler or re-raises.
-private func signalHandler(sig: Int32) {
-    // Write signal number to file using only async-signal-safe functions
-    if let path = signalCrashFilePath {
-        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
-        if fd >= 0 {
-            var sigValue = sig
-            _ = Darwin.write(fd, &sigValue, MemoryLayout<Int32>.size)
-            close(fd)
-        }
+/// `sigaction(2)` as an injectable function (see `AutoMobileCrashes.sigactionCall`).
+typealias SigactionCall = (Int32, UnsafePointer<sigaction>?, UnsafeMutablePointer<sigaction>?) -> Int32
+
+/// What the crash handler does with the action that was registered before ours.
+enum SignalChainAction {
+    /// Previous action had `SA_SIGINFO`: call it with all three arguments.
+    case invokeSigInfo(SignalInfoHandler)
+    /// Previous action was a plain one-argument handler.
+    case invokePlain(SignalPlainHandler)
+    /// Previous action was `SIG_IGN`.
+    case ignore
+    /// Previous action was `SIG_DFL` (or unusable): restore the default and re-raise.
+    case restoreDefaultAndReraise
+}
+
+private let sigDflRaw = 0
+private let sigIgnRaw = 1
+private let sigErrRaw = -1
+
+/// Decide how to chain to `previous`, exactly as the kernel would have dispatched
+/// it. `SA_SIGINFO` selects the union member: reading `sa_handler` of an
+/// `SA_SIGINFO` action (or vice versa) is what broke crash reporters (#10141).
+func chainAction(forPrevious previous: sigaction) -> SignalChainAction {
+    if previous.sa_flags & SA_SIGINFO != 0 {
+        guard let handler = previous.__sigaction_u.__sa_sigaction else { return .restoreDefaultAndReraise }
+        return .invokeSigInfo(handler)
+    }
+    let raw = unsafeBitCast(previous.__sigaction_u.__sa_handler, to: Int.self)
+    switch raw {
+    case sigDflRaw, sigErrRaw: return .restoreDefaultAndReraise
+    case sigIgnRaw: return .ignore
+    default:
+        guard let handler = previous.__sigaction_u.__sa_handler else { return .restoreDefaultAndReraise }
+        return .invokePlain(handler)
+    }
+}
+
+/// Flags for our registration. Always `SA_SIGINFO` (we forward `siginfo_t`) and
+/// `SA_ONSTACK` (a no-op unless the thread has an alternate stack, but required to
+/// run on it for stack-overflow faults, which reporters arrange); `SA_NODEFER` is
+/// inherited. `SA_RESETHAND` is not: it would uninstall us on the first signal, so
+/// the chain emulates it instead.
+func signalInstallFlags(previous: sigaction) -> Int32 {
+    SA_SIGINFO | SA_ONSTACK | (previous.sa_flags & SA_NODEFER)
+}
+
+/// Whether `action` is our crash handler.
+func isOwnSignalAction(_ action: sigaction) -> Bool {
+    guard action.sa_flags & SA_SIGINFO != 0, let handler = action.__sigaction_u.__sa_sigaction else { return false }
+    let ours: SignalInfoHandler = autoMobileSignalHandler
+    return unsafeBitCast(handler, to: UnsafeRawPointer.self) == unsafeBitCast(ours, to: UnsafeRawPointer.self)
+}
+
+/// All state the signal handler touches, allocated once up front so the handler
+/// never allocates, takes a lock, or goes through Swift's exclusivity-checked
+/// global variables. Every field is a `let`; only pointee memory changes.
+/// Writers are the install/uninstall paths; the handler only reads (plus the
+/// re-entrancy counter and one-shot flags), accepting benign races.
+final class SignalHandlerTable: @unchecked Sendable {
+    static let slotCount = 64
+    static let pathCapacity = 1024
+
+    /// Saved previous action per signal number.
+    let previousActions: UnsafeMutablePointer<sigaction>
+    /// 0 = nothing saved (default behaviour), 1 = `previousActions` is valid.
+    let slotState: UnsafeMutablePointer<UInt8>
+    /// Set once a `SIG_IGN` predecessor was honoured for this signal.
+    let ignoredOnce: UnsafeMutablePointer<UInt8>
+    /// NUL-terminated crash-file path.
+    let pathBuffer: UnsafeMutablePointer<CChar>
+    let pathReady: UnsafeMutablePointer<Int32>
+    /// 1 while the SDK is enabled; 0 makes the handler a pure forwarder.
+    let recording: UnsafeMutablePointer<Int32>
+    /// Handler nesting depth (crash while handling a crash).
+    let depth: UnsafeMutablePointer<Int32>
+
+    init() {
+        previousActions = .allocate(capacity: Self.slotCount)
+        previousActions.initialize(repeating: sigaction(), count: Self.slotCount)
+        slotState = .allocate(capacity: Self.slotCount)
+        slotState.initialize(repeating: 0, count: Self.slotCount)
+        ignoredOnce = .allocate(capacity: Self.slotCount)
+        ignoredOnce.initialize(repeating: 0, count: Self.slotCount)
+        pathBuffer = .allocate(capacity: Self.pathCapacity)
+        pathBuffer.initialize(repeating: 0, count: Self.pathCapacity)
+        pathReady = .allocate(capacity: 1)
+        pathReady.initialize(to: 0)
+        recording = .allocate(capacity: 1)
+        recording.initialize(to: 0)
+        depth = .allocate(capacity: 1)
+        depth.initialize(to: 0)
     }
 
-    // Chain to previous handler if one was installed
+    /// Copy `path` into the pre-allocated buffer. Returns false when it does not fit.
+    func setCrashFilePath(_ path: String) -> Bool {
+        pathReady.pointee = 0
+        let length = path.withCString { strlcpy(pathBuffer, $0, Self.pathCapacity) }
+        guard length < Self.pathCapacity else { return false }
+        pathReady.pointee = 1
+        return true
+    }
+
+    /// Forget everything. Tests only.
+    func resetForTesting() {
+        previousActions.update(repeating: sigaction(), count: Self.slotCount)
+        slotState.update(repeating: 0, count: Self.slotCount)
+        ignoredOnce.update(repeating: 0, count: Self.slotCount)
+        pathReady.pointee = 0
+        recording.pointee = 0
+        depth.pointee = 0
+    }
+}
+
+/// Process-global table. Touched at install time so lazy initialization has
+/// completed before the handler can ever run.
+let autoMobileSignalTable = SignalHandlerTable()
+
+/// Global handler for signal-based faults (SIGABRT, SIGSEGV, etc.), registered
+/// with `sigaction` + `SA_SIGINFO`. Only async-signal-safe work: `open`/`write`/
+/// `close` of the pre-allocated path, `sigaction`/`pthread_sigmask`/`raise`, and
+/// raw memory reads. Then it chains to the previous action with the arguments
+/// that action expects.
+func autoMobileSignalHandler(
+    _ sig: Int32,
+    _ info: UnsafeMutablePointer<siginfo_t>?,
+    _ context: UnsafeMutableRawPointer?
+) {
+    let table = autoMobileSignalTable
+    // A fault inside this handler (possibly a different signal, or the same one
+    // under SA_NODEFER): do not record or chain again, just die by the signal.
+    guard table.depth.pointee == 0 else {
+        restoreDefaultAndReraise(sig)
+        return
+    }
+    table.depth.pointee += 1
+    defer { table.depth.pointee -= 1 }
+
+    if table.recording.pointee != 0, table.pathReady.pointee != 0 {
+        recordSignal(sig, path: table.pathBuffer)
+    }
+
     let idx = Int(sig)
-    if idx >= 0, idx < previousSignalHandlers.count, let prev = previousSignalHandlers[idx] {
-        prev(sig)
-    } else {
-        // No previous handler — re-raise with default
-        signal(sig, SIG_DFL)
-        raise(sig)
+    guard idx > 0, idx < SignalHandlerTable.slotCount, table.slotState[idx] != 0 else {
+        restoreDefaultAndReraise(sig)
+        return
     }
+    let previous = table.previousActions[idx]
+    switch chainAction(forPrevious: previous) {
+    case let .invokeSigInfo(handler):
+        resetToDefaultIfRequested(previous, sig: sig)
+        handler(sig, info, context)
+    case let .invokePlain(handler):
+        resetToDefaultIfRequested(previous, sig: sig)
+        handler(sig)
+    case .ignore:
+        // Honour SIG_IGN once. A synchronous fault re-executes after we return and
+        // would loop forever, so a second delivery escalates to the default.
+        if table.ignoredOnce[idx] != 0 {
+            restoreDefaultAndReraise(sig)
+        } else {
+            table.ignoredOnce[idx] = 1
+        }
+    case .restoreDefaultAndReraise:
+        restoreDefaultAndReraise(sig)
+    }
+}
+
+private func recordSignal(_ sig: Int32, path: UnsafeMutablePointer<CChar>) {
+    let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+    guard fd >= 0 else { return }
+    var sigValue = sig
+    _ = Darwin.write(fd, &sigValue, MemoryLayout<Int32>.size)
+    close(fd)
+}
+
+/// The kernel resets a `SA_RESETHAND` action to `SIG_DFL` before invoking it;
+/// emulate that, since we are standing in for the action.
+private func resetToDefaultIfRequested(_ previous: sigaction, sig: Int32) {
+    guard previous.sa_flags & SA_RESETHAND != 0 else { return }
+    setDefaultAction(sig)
+}
+
+private func setDefaultAction(_ sig: Int32) {
+    var action = sigaction()
+    action.__sigaction_u.__sa_handler = SIG_DFL
+    _ = sigaction(sig, &action, nil)
+}
+
+/// Restore the default action and re-deliver so the process dies with the right
+/// signal and exit status. The signal is blocked while we run, so unblock it.
+private func restoreDefaultAndReraise(_ sig: Int32) {
+    setDefaultAction(sig)
+    var set = sigset_t()
+    sigemptyset(&set)
+    sigaddset(&set, sig)
+    _ = pthread_sigmask(SIG_UNBLOCK, &set, nil)
+    raise(sig)
 }
 
 // MARK: - Previous Signal Crash Detection
@@ -302,13 +532,29 @@ extension AutoMobileCrashes {
         let cacheDir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true)
             .first ?? NSTemporaryDirectory()
         let filePath = (cacheDir as NSString).appendingPathComponent("automobile_last_signal_crash")
-        signalCrashFilePath = strdup(filePath)
+        if !autoMobileSignalTable.setCrashFilePath(filePath) {
+            InternalLogger.warning("Signal crash file path is too long; signal crashes will not be recorded")
+        }
+    }
+
+    private static func signalName(for value: Int32) -> String {
+        switch value {
+        case SIGABRT: "SIGABRT"
+        case SIGSEGV: "SIGSEGV"
+        case SIGBUS: "SIGBUS"
+        case SIGFPE: "SIGFPE"
+        case SIGILL: "SIGILL"
+        case SIGTRAP: "SIGTRAP"
+        default: "SIGNAL(\(value))"
+        }
     }
 
     /// Check if the previous session ended with a signal crash.
     func checkPreviousSignalCrash() {
         guard AutoMobileSDK.shared.isEnabled else { return }
-        guard let path = signalCrashFilePath else { return }
+        let table = autoMobileSignalTable
+        guard table.pathReady.pointee != 0 else { return }
+        let path = table.pathBuffer
 
         let fd = open(path, O_RDONLY)
         guard fd >= 0 else { return }
@@ -320,16 +566,7 @@ extension AutoMobileCrashes {
 
         guard bytesRead == MemoryLayout<Int32>.size, sigValue != 0 else { return }
 
-        let signalName: String
-        switch sigValue {
-        case SIGABRT: signalName = "SIGABRT"
-        case SIGSEGV: signalName = "SIGSEGV"
-        case SIGBUS: signalName = "SIGBUS"
-        case SIGFPE: signalName = "SIGFPE"
-        case SIGILL: signalName = "SIGILL"
-        case SIGTRAP: signalName = "SIGTRAP"
-        default: signalName = "SIGNAL(\(sigValue))"
-        }
+        let signalName = Self.signalName(for: sigValue)
 
         lock.lock()
         let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""

@@ -38,6 +38,14 @@ export interface VirtualDeviceLifecycleLease {
     revalidate?: () => Promise<StableVirtualDeviceIdentity>,
   ): Promise<void>;
   transitionToTeardown(): void;
+  /**
+   * Records that the process this lease's owner started could not be terminated
+   * and still holds the device. Later start/provision/configure requests for the
+   * device are refused at once, naming the pid, instead of queueing behind a
+   * release that may take arbitrarily long (#9920). The record ends with the
+   * lease. Optional so a hand-written lease that does not track survivors stays valid.
+   */
+  markHeldByUnkillableProcess?(pid: number | undefined): void;
   release(): void;
 }
 
@@ -63,6 +71,8 @@ export class DeviceLifecyclePreemptedError extends ActionableError {
 interface LifecycleOwner {
   operation: VirtualDeviceLifecycleOperation;
   controller: AbortController;
+  /** Set once the owner's process survived SIGKILL; `pid` is undefined when unknown. */
+  unkillableHold?: { pid: number | undefined };
   release(): void;
 }
 
@@ -74,9 +84,17 @@ interface LifecycleWaiter {
 }
 
 interface LifecycleState {
+  identity: VirtualDeviceLifecycleIdentity;
   owner?: LifecycleOwner;
   waiters: LifecycleWaiter[];
 }
+
+/** Operations that must not queue behind a device held by an unkillable process. */
+const REFUSED_BEHIND_UNKILLABLE_HOLD: ReadonlySet<VirtualDeviceLifecycleOperation> = new Set([
+  "start",
+  "provision",
+  "configure",
+]);
 
 function lifecycleIdentityKey(identity: VirtualDeviceLifecycleIdentity): string {
   return identity.kind === "stable"
@@ -199,6 +217,15 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
           owner.controller = controller;
         }
       },
+      markHeldByUnkillableProcess: (pid) => {
+        if (released) {
+          return;
+        }
+        for (const [key, owner] of ownerByKey) {
+          owner.unkillableHold = { pid };
+          this.rejectWaitersHeldByUnkillableProcess(key, pid);
+        }
+      },
       release: () => {
         if (released) {
           return;
@@ -210,6 +237,20 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
         ownerByKey.clear();
       },
     };
+  }
+
+  private rejectWaitersHeldByUnkillableProcess(key: string, pid: number | undefined): void {
+    const state = this.states.get(key);
+    if (!state) {
+      return;
+    }
+    const error = this.unkillableHoldError(state.identity, pid);
+    for (const waiter of [...state.waiters]) {
+      if (REFUSED_BEHIND_UNKILLABLE_HOLD.has(waiter.operation)) {
+        this.removeWaiter(key, state, waiter);
+        waiter.reject(error);
+      }
+    }
   }
 
   private async acquire(
@@ -235,11 +276,12 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     if (options.signal?.aborted) {
       throw reservationCancellationError(options.signal, options.operation);
     }
-    const state = this.states.get(key) ?? { waiters: [] };
+    const state = this.states.get(key) ?? { identity, waiters: [] };
     this.states.set(key, state);
     if (!state.owner) {
       return this.assignOwner(key, state, options.operation, controller);
     }
+    this.assertNotHeldByUnkillableProcess(state.owner, identity, options.operation);
     const remainingMs = options.deadlineMs - this.timer.now();
     if (remainingMs <= 0) {
       throw this.timeoutError(identity, options.operation);
@@ -342,6 +384,29 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
     if (!state.owner && state.waiters.length === 0) {
       this.states.delete(key);
     }
+  }
+
+  private assertNotHeldByUnkillableProcess(
+    owner: LifecycleOwner,
+    identity: VirtualDeviceLifecycleIdentity,
+    operation: VirtualDeviceLifecycleOperation,
+  ): void {
+    if (owner.unkillableHold && REFUSED_BEHIND_UNKILLABLE_HOLD.has(operation)) {
+      throw this.unkillableHoldError(identity, owner.unkillableHold.pid);
+    }
+  }
+
+  private unkillableHoldError(
+    identity: VirtualDeviceLifecycleIdentity,
+    pid: number | undefined,
+  ): ActionableError {
+    const value = identity.kind === "stable" ? identity.stableId : identity.selector;
+    return new ActionableError(
+      `${identity.platform} device '${value}' is held by unkillable process ` +
+        `${pid ?? "(pid unknown)"}: it did not exit after SIGTERM and SIGKILL and may still hold ` +
+        "the device. Terminate that process manually; the hold is released automatically " +
+        "once it is gone.",
+    );
   }
 
   private timeoutError(

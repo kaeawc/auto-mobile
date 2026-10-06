@@ -110,6 +110,12 @@ export interface BootedDeviceDiscoveryOptions {
   bypassAndroidDeviceListCache?: boolean;
   /** Bypass iOS's short simulator-list cache to verify simulator identity. */
   bypassIosDeviceListCache?: boolean;
+  /**
+   * Skip devicectl physical-device discovery. For a caller that already holds a
+   * simulator UDID, a physical sweep can neither find nor prove anything and only
+   * adds latency (#9920). The result then reports no physical source as succeeded.
+   */
+  skipPhysicalIosDiscovery?: boolean;
   /** Cancels short-lived platform discovery work. */
   signal?: AbortSignal;
   /**
@@ -333,6 +339,15 @@ export async function waitForDeviceReadyOrCancel(
     }
     throw failure;
   }
+}
+
+function skippedPhysicalIosDiscovery(): {
+  devices: BootedDevice[];
+  complete: false;
+  error?: undefined;
+} {
+  // Nothing was asked of devicectl: no devices, not authoritative, and no failure to report.
+  return { devices: [], complete: false };
 }
 
 /**
@@ -830,6 +845,26 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
+  private async discoverPhysicalIosDevices(
+    signal: AbortSignal | undefined,
+  ): Promise<PhysicalIosDeviceDiscovery> {
+    // Physical-device discovery runs regardless of the simulator outcome and
+    // cannot fail the sweep: it is best-effort by contract.
+    const physical = await raceWithDeadline(this.listPhysicalIosDevices(), {
+      timer: defaultTimer,
+      signal,
+      label: "iOS physical-device discovery",
+      relabelDefaultAbort: false,
+    });
+    if (!physical.complete) {
+      logger.debug(
+        "[DeviceManager] iOS physical-device discovery was incomplete; " +
+          "reporting last-known physical devices, which cannot prove one disconnected.",
+      );
+    }
+    return physical;
+  }
+
   private async discoverBootedIosDevices(options: BootedDeviceDiscoveryOptions): Promise<{
     devices: BootedDevice[];
     simulatorsSucceeded: boolean;
@@ -858,19 +893,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
     // Physical-device discovery runs regardless of the simulator outcome and
     // cannot fail the sweep: it is best-effort by contract.
-    const physicalPromise = this.listPhysicalIosDevices();
-    const physical = await raceWithDeadline(physicalPromise, {
-      timer: defaultTimer,
-      signal,
-      label: "iOS physical-device discovery",
-      relabelDefaultAbort: false,
-    });
-    if (!physical.complete) {
-      logger.debug(
-        "[DeviceManager] iOS physical-device discovery was incomplete; " +
-          "reporting last-known physical devices, which cannot prove one disconnected.",
-      );
-    }
+    const physical = options.skipPhysicalIosDiscovery
+      ? skippedPhysicalIosDiscovery()
+      : await this.discoverPhysicalIosDevices(signal);
     const freshPhysicalIds = physical.complete
       ? physical.devices.map((device) => device.deviceId)
       : [];

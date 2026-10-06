@@ -96,6 +96,38 @@ describe("NavigateTo replay safety", () => {
     );
   }
 
+  test("replay routes on the current device after stripping stored routing metadata", async () => {
+    const captured: Record<string, unknown>[] = [];
+    ToolRegistry.register("tapOn", "Fake tap", {}, async (args) => {
+      captured.push(args);
+      return { success: true };
+    });
+    const recorded = edge("A", "D");
+    recorded.interaction!.args = {
+      text: "toD",
+      platform: "android",
+      deviceId: "old-device",
+      device: "old-label",
+      sessionUuid: "old-session",
+    };
+    graph.setPathResult({ found: true, path: [recorded], startScreen: "A", targetScreen: "D" });
+    const result = await makeNav({
+      waitForScreen: async (screen) => {
+        graph.setCurrentScreenValue(screen);
+        return true;
+      },
+    }).execute(options);
+    expect(result.success).toBe(true);
+    expect(captured[0]).toMatchObject({
+      text: "toD",
+      platform: device.platform,
+      deviceId: device.deviceId,
+    });
+    expect(captured[0].device).toBeUndefined();
+    expect(captured[0].sessionUuid).toBeUndefined();
+    expect(recorded.interaction!.args.deviceId).toBe("old-device");
+  });
+
   for (const failedStep of [1, 2]) {
     test(`stops at missed replay step ${failedStep} and reports only dispatched actions`, async () => {
       let waits = 0;

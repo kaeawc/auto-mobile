@@ -1,10 +1,9 @@
 import type { TalkBackNavigationDriver } from "../../src/features/talkback/TalkBackNavigationDriver";
 import type {
-  AccessibilityNodeSelector,
   A11yActionResult,
   A11yTapCoordinatesResult,
 } from "../../src/features/observe/android/types";
-import { FakeFocusNavigationDriver } from "./FakeFocusNavigationDriver";
+import { FakeFocusNavigationDriver, type FocusRequest } from "./FakeFocusNavigationDriver";
 
 /**
  * Fake implementation of TalkBackNavigationDriver for testing.
@@ -16,16 +15,11 @@ export class FakeTalkBackNavigationDriver
 {
   tapResult: A11yTapCoordinatesResult = { success: true, totalTimeMs: 1 };
   actionResult: A11yActionResult = { success: true, action: "click", totalTimeMs: 1 };
-  nodeActionSelectorsSupported = true;
   doubleTapCapabilitySupported = true;
 
   tapHistory: Array<{ x: number; y: number; durationMs: number }> = [];
   doubleTapHistory: Array<{ x: number; y: number }> = [];
-  actionHistory: Array<{
-    action: string;
-    resourceId?: string;
-    selector?: AccessibilityNodeSelector;
-  }> = [];
+  actionHistory: FocusRequest[] = [];
 
   tapDispatched = false;
 
@@ -96,30 +90,17 @@ export class FakeTalkBackNavigationDriver
     return result;
   }
 
-  async requestAction(action: string, resourceId?: string): Promise<A11yActionResult> {
-    this.actionHistory.push({ action, resourceId });
+  /** `focus` requests move the cursor (see the base fake); every other action is recorded here. */
+  protected override handleAction(request: FocusRequest, signal?: AbortSignal): A11yActionResult {
+    if (request.action === "focus") {
+      return super.handleAction(request, signal);
+    }
+    this.actionHistory.push(request);
 
     if (this.actionOverrides.length > 0) {
       return this.actionOverrides.shift()!;
     }
 
     return this.actionResult;
-  }
-
-  async requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-  ): Promise<A11yActionResult> {
-    this.actionHistory.push({ action, selector });
-
-    if (this.actionOverrides.length > 0) {
-      return this.actionOverrides.shift()!;
-    }
-
-    return this.actionResult;
-  }
-
-  async supportsNodeActionSelectors(): Promise<boolean> {
-    return this.nodeActionSelectorsSupported;
   }
 }

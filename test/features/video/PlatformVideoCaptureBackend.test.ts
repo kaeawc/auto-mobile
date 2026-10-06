@@ -341,8 +341,20 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
             exitState: { exitCode: number | null };
             stderr: string[];
           };
-          backendHandle.exitState.exitCode = exitCode;
-          backendHandle.stderr.push("first", "second");
+          // The recorder exits in response to the stop request (a code-1 exit seen BEFORE
+          // the stop is a crash, covered by the #10186 tests), so apply the exit state
+          // when the device-side stop command is issued.
+          const adb = factory.getFakeClient();
+          const executeCommand = adb.executeCommand.bind(adb);
+          let exited = false;
+          spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+            if (!exited) {
+              exited = true;
+              backendHandle.exitState.exitCode = exitCode;
+              backendHandle.stderr.push("first", "second");
+            }
+            return executeCommand(...args);
+          });
           const probe = {
             async codec(): Promise<string> {
               events.push("codec");

@@ -32,6 +32,16 @@ function reportedTextSizePx(element: Element): number | null {
   return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : null;
 }
 
+/** Whether the whole element rectangle lies inside the decoded image (hierarchy px == raster px on Android). */
+function boundsInsideImage(image: RawImage, bounds: Element["bounds"]): boolean {
+  return (
+    bounds.left >= 0 &&
+    bounds.top >= 0 &&
+    bounds.right <= image.width &&
+    bounds.bottom <= image.height
+  );
+}
+
 interface RGB {
   r: number;
   g: number;
@@ -344,7 +354,23 @@ export class ContrastChecker {
     wcagLevel: WcagLevel,
     density?: number,
   ): Promise<Map<Element, ContrastResult | null>> {
+    return (await this.checkContrastBatchWithCoverage(screenshotPath, elements, wcagLevel, density))
+      .results;
+  }
+
+  /**
+   * {@link checkContrastBatch} that also reports the elements whose bounds are not entirely
+   * inside the decoded screenshot (#10220). Those are never measured: their pixels are not the
+   * element's, and the edge-clamped read would invent a colour. They are absent from `results`.
+   */
+  async checkContrastBatchWithCoverage(
+    screenshotPath: string,
+    elements: Element[],
+    wcagLevel: WcagLevel,
+    density?: number,
+  ): Promise<{ results: Map<Element, ContrastResult | null>; outsideImage: Element[] }> {
     const results = new Map<Element, ContrastResult | null>();
+    const outsideImage: Element[] = [];
 
     try {
       // Load screenshot once for all elements
@@ -352,6 +378,10 @@ export class ContrastChecker {
       const screenshotFingerprint = await this.getScreenshotFingerprint(screenshotPath);
 
       for (const element of elements) {
+        if (!boundsInsideImage(image, element.bounds)) {
+          outsideImage.push(element);
+          continue;
+        }
         try {
           const cached = this.getBatchCachedContrast(
             element,
@@ -382,12 +412,13 @@ export class ContrastChecker {
     } catch (error) {
       logger.warn(`Batch contrast checking error: ${errorMessage(error)}`, error);
       // Return null for all elements on screenshot load failure
+      outsideImage.length = 0;
       for (const element of elements) {
         results.set(element, null);
       }
     }
 
-    return results;
+    return { results, outsideImage };
   }
 
   /**
@@ -406,6 +437,11 @@ export class ContrastChecker {
 
     // Skip if element is too small to analyze
     if (width < 2 || height < 2) {
+      return null;
+    }
+
+    // Pixels outside the raster are not the element's: never measure an edge-clamped guess.
+    if (!boundsInsideImage(image, element.bounds)) {
       return null;
     }
 

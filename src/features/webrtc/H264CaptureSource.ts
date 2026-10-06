@@ -24,7 +24,11 @@ export interface H264CaptureSourceOptions {
   onSourceFrame?: () => void;
   /** Native Simulator idle callback from an attached stream; carries no encoded frame. */
   onSourceIdle?: () => void;
-  /** The encoded helper completed one self-contained access-unit record. */
+  /**
+   * The source finished delivering one self-contained record through `onData`: an iOS encoded-helper
+   * access unit, or one length-framed packet from the Android persistent encoder (config or frame).
+   * Sources that only stream raw bytes (iOS ffmpeg, Android screenrecord) never call it.
+   */
   onEncodedAccessUnit?: () => void;
   /** Whether this Simulator helper can attest native idle callbacks. */
   onIdleAttestationSupport?: (supported: boolean) => void;

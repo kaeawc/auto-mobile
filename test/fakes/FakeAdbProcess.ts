@@ -33,7 +33,7 @@ export class FakeAdbProcess extends EventEmitter implements AdbProcess {
   }
 
   /** Schedule a clean/failed exit that fires once the caller's listeners attach. */
-  scheduleExit(code: number, signal: NodeJS.Signals | null = null, stderr?: string): void {
+  scheduleExit(code: number | null, signal: NodeJS.Signals | null = null, stderr?: string): void {
     setImmediate(() => {
       if (stderr) {
         this.stderr.push(stderr);

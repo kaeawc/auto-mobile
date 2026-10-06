@@ -25,6 +25,7 @@ import type {
   NewNavigationSuggestionObservation,
 } from "./types";
 import { logger } from "../utils/logger";
+import { storedEdgeActionKey } from "../features/navigation/edgeReplayKey";
 
 /**
  * Flat row of a node-provenance join (nav (app,build) Phase 2, #4985):
@@ -348,7 +349,10 @@ export class NavigationRepository {
   }
 
   /**
-   * Get all edges for an app.
+   * Get every edge ROW for an app: one per recorded traversal (the append-only
+   * traversal log). Use this when the number of traversals matters (e.g. the graph
+   * summary's traversalCount); readers that treat edges as transitions want
+   * {@link getDistinctEdges}.
    */
   async getEdges(appId: string): Promise<NavigationEdge[]> {
     const db = this.getDb();
@@ -358,6 +362,65 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .orderBy("timestamp", "asc")
       .execute();
+  }
+
+  /**
+   * Distinct transitions of an app: the newest traversal row (highest id, which is
+   * insertion order and so immune to a device clock stepping backwards, #10031) of
+   * each screen-pair/action group. SQL first collapses identical stored arguments;
+   * the canonical replay key then collapses legacy rows carrying device routing.
+   * Hydration still reads O(distinct transitions), not all traversals (#10194).
+   */
+  async getDistinctEdges(appId: string): Promise<NavigationEdge[]> {
+    return this.collapseReplayEquivalentEdges(
+      await this.selectNewestEdgePerTransition(appId).execute(),
+    );
+  }
+
+  private collapseReplayEquivalentEdges<
+    T extends Pick<NavigationEdge, "id" | "from_screen" | "to_screen" | "tool_name" | "tool_args">,
+  >(rows: T[]): T[] {
+    const newest = new Map<string, T>();
+    for (const row of rows) {
+      const key = JSON.stringify([
+        row.from_screen,
+        row.to_screen,
+        storedEdgeActionKey(row.tool_name, row.tool_args),
+      ]);
+      const previous = newest.get(key);
+      if (!previous || row.id > previous.id) {
+        newest.set(key, row);
+      }
+    }
+    const ids = new Set([...newest.values()].map((row) => row.id));
+    return rows.filter((row) => ids.has(row.id));
+  }
+
+  /**
+   * Query for the newest `navigation_edges` row of each distinct transition of an
+   * app, optionally restricted to one endpoint screen (served by the from/to index).
+   * A transition is identified by its screen pair plus the recorded tool call, the
+   * raw identity used before canonical replay-key collapse; GROUP BY treats NULL
+   * `tool_name` / `tool_args` (an unattributed edge) as one group.
+   */
+  private selectNewestEdgePerTransition(
+    appId: string,
+    endpoint: { column: "from_screen" | "to_screen"; screen: string } | null = null,
+  ) {
+    const db = this.getDb();
+    let newestIds = db
+      .selectFrom("navigation_edges")
+      .select((eb) => eb.fn.max<number>("id").as("id"))
+      .where("app_id", "=", appId);
+    let rows = db.selectFrom("navigation_edges").selectAll().where("app_id", "=", appId);
+    if (endpoint) {
+      newestIds = newestIds.where(endpoint.column, "=", endpoint.screen);
+      rows = rows.where(endpoint.column, "=", endpoint.screen);
+    }
+    return rows
+      .where("id", "in", newestIds.groupBy(["from_screen", "to_screen", "tool_name", "tool_args"]))
+      .orderBy("timestamp", "asc")
+      .orderBy("id", "asc");
   }
 
   /**
@@ -395,23 +458,23 @@ export class NavigationRepository {
   }
 
   /**
-   * Get edges from a specific screen.
+   * Get the distinct transitions leaving a specific screen (newest traversal row of
+   * each, see {@link getDistinctEdges}).
    */
   async getEdgesFrom(appId: string, fromScreen: string): Promise<NavigationEdge[]> {
-    const db = this.getDb();
-    return db
-      .selectFrom("navigation_edges")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("from_screen", "=", fromScreen)
-      .execute();
+    return this.collapseReplayEquivalentEdges(
+      await this.selectNewestEdgePerTransition(appId, {
+        column: "from_screen",
+        screen: fromScreen,
+      }).execute(),
+    );
   }
 
   /**
    * Adjacency-only read for graph walks: the distinct (to_screen, tool_name, tool_args)
    * combinations leaving `fromScreen`, app-scoped like getEdgesFrom. Edge modals, UI
    * elements, scroll positions and provenance are not read, `tool_args` stays the raw
-   * stored string (never parsed here, so a malformed payload cannot throw), and
+   * stored string (malformed payloads retain their raw identity), and
    * duplicate rows for the same transition collapse to one. Uses the existing
    * idx_navigation_edges_from index; no schema change.
    */
@@ -424,24 +487,32 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .where("from_screen", "=", fromScreen)
       .execute();
-    return rows.map((row) => ({
-      toScreen: row.to_screen,
-      toolName: row.tool_name,
-      toolArgs: row.tool_args,
-    }));
+    const transitions = new Map<string, NavigationEdgeTarget>();
+    for (const row of rows) {
+      const key = JSON.stringify([
+        row.to_screen,
+        storedEdgeActionKey(row.tool_name, row.tool_args),
+      ]);
+      transitions.set(key, {
+        toScreen: row.to_screen,
+        toolName: row.tool_name,
+        toolArgs: row.tool_args,
+      });
+    }
+    return [...transitions.values()];
   }
 
   /**
-   * Get edges to a specific screen.
+   * Get the distinct transitions entering a specific screen (newest traversal row of
+   * each, see {@link getDistinctEdges}).
    */
   async getEdgesTo(appId: string, toScreen: string): Promise<NavigationEdge[]> {
-    const db = this.getDb();
-    return db
-      .selectFrom("navigation_edges")
-      .selectAll()
-      .where("app_id", "=", appId)
-      .where("to_screen", "=", toScreen)
-      .execute();
+    return this.collapseReplayEquivalentEdges(
+      await this.selectNewestEdgePerTransition(appId, {
+        column: "to_screen",
+        screen: toScreen,
+      }).execute(),
+    );
   }
 
   /**
@@ -957,31 +1028,22 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .executeTakeFirst();
 
-    const edges = await db
-      .selectFrom("navigation_edges")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
-      .executeTakeFirst();
-
-    const toolEdges = await db
-      .selectFrom("navigation_edges")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
-      .where("tool_name", "is not", null)
-      .executeTakeFirst();
-
-    const unknownEdges = await db
-      .selectFrom("navigation_edges")
-      .select(db.fn.countAll<number>().as("count"))
-      .where("app_id", "=", appId)
-      .where("tool_name", "is", null)
-      .executeTakeFirst();
+    // Count distinct transitions, not traversal rows (#10194); see getDistinctEdges.
+    // Payloads such as ui_state are unnecessary for replay identity or counts.
+    const transitions = this.collapseReplayEquivalentEdges(
+      await this.selectNewestEdgePerTransition(appId)
+        .clearSelect()
+        .select(["id", "from_screen", "to_screen", "tool_name", "tool_args"])
+        .execute(),
+    );
+    const edgeCount = transitions.length;
+    const toolEdgeCount = transitions.filter((edge) => edge.tool_name !== null).length;
 
     return {
       nodeCount: Number(nodes?.count || 0),
-      edgeCount: Number(edges?.count || 0),
-      toolEdgeCount: Number(toolEdges?.count || 0),
-      unknownEdgeCount: Number(unknownEdges?.count || 0),
+      edgeCount,
+      toolEdgeCount,
+      unknownEdgeCount: edgeCount - toolEdgeCount,
     };
   }
 

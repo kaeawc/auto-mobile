@@ -14,7 +14,7 @@ struct SettingsTab: View {
                 Section("Account") {
                     HStack {
                         Image(systemName: "person.circle.fill")
-                            .font(.system(size: 50))
+                            .font(theme.typography.profileIcon)
                             .foregroundStyle(theme.primary)
 
                         VStack(alignment: .leading) {
@@ -87,6 +87,7 @@ struct SettingsTab: View {
             }
             .scrollContentBackground(.hidden)
             .background(theme.background)
+            .playgroundContent()
             .navigationTitle("Settings")
         }
         .trackNavigation(destination: "SettingsTab")
@@ -112,7 +113,7 @@ struct StorageSettingsView: View {
             Section {
                 VStack(spacing: 16) {
                     Text(String(format: "%.1f MB", total))
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .font(theme.typography.displayMedium).fontWeight(.bold)
                         .foregroundStyle(theme.textPrimary)
 
                     Text("Total Storage Used")
@@ -131,6 +132,7 @@ struct StorageSettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Storage")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -168,7 +170,7 @@ struct CacheSettingsView: View {
             Section {
                 VStack(spacing: 12) {
                     Image(systemName: "trash.circle.fill")
-                        .font(.system(size: 60))
+                        .font(theme.typography.featureIcon)
                         .foregroundStyle(theme.primary)
 
                     Text("45.2 MB")
@@ -205,6 +207,7 @@ struct CacheSettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Clear Cache")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Clear Cache?", isPresented: $showingClearAlert) {

@@ -34,6 +34,7 @@ struct DiscoverTab: View {
             }
             .scrollContentBackground(.hidden)
             .background(theme.background)
+            .playgroundContent()
             .navigationTitle("Discover")
             .searchable(text: $searchText, prompt: "Search videos")
             .onAppear {
@@ -63,13 +64,13 @@ struct VideoRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: video.thumbnail)
-                .font(.system(size: 24))
+                .font(theme.typography.thumbnailIcon)
                 .foregroundStyle(theme.primary)
                 .frame(width: 60, height: 40)
                 .background(theme.surfaceVariant)
-                .cornerRadius(8)
+                .cornerRadius(theme.shapes.thumbnail)
                 // Hand-drawn crayon frame on the thumbnail tile (non-destructive overlay).
-                .crayonBorder(color: theme.primary, cornerRadius: 8, seed: 17)
+                .crayonBorder(color: theme.primary, cornerRadius: theme.shapes.thumbnail, seed: 17)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(video.title)
@@ -99,10 +100,10 @@ struct VideoDetailView: View {
                     .aspectRatio(16 / 9, contentMode: .fit)
 
                 Image(systemName: "play.circle.fill")
-                    .font(.system(size: 60))
+                    .font(theme.typography.featureIcon)
                     .foregroundStyle(Color.autoMobileWhite)
             }
-            .cornerRadius(12)
+            .cornerRadius(theme.shapes.small)
             .padding(.horizontal)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -128,6 +129,7 @@ struct VideoDetailView: View {
             Spacer()
         }
         .background(theme.background)
+        .playgroundContent()
         .navigationTitle("Video")
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(

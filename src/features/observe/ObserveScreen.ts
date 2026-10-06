@@ -1623,6 +1623,21 @@ export class RealObserveScreen implements ObserveScreen {
               readOnly: preserveDisplayState,
             });
 
+      // An explicit observe must hand back a tree it verified against the device, or
+      // report that it could not (#9963). Reconciliation above may already have
+      // re-extracted; only a cache hit still served unverified costs one more read.
+      if (options?.verifyCachedHierarchy && !postCaptureForeground.activityAttributionMismatch) {
+        await this.verifyCachedAndroidHierarchy(result, {
+          signal,
+          remainingMs: Math.min(
+            500,
+            (options.timeoutMs ?? DEFAULT_HIERARCHY_READ_TIMEOUT_MS) -
+              (this.timer.now() - startTime),
+          ),
+          eligible: !observerMode && !preserveDisplayState && !explicitlyRouted,
+        });
+      }
+
       // Reconciliation can replace the tree. Bind the final hierarchy's panel
       // before screenshot routing or transition fencing observes this result.
       if (this.device.platform === "ios") {
@@ -2020,13 +2035,83 @@ export class RealObserveScreen implements ObserveScreen {
     options: ObserveScreenExecuteOptions | undefined,
     remainingMs: number,
   ): Promise<void> {
-    const signal = options?.signal;
+    const hierarchy = await this.readIndependentHierarchy(
+      result.viewHierarchy?.updatedAt,
+      options?.signal,
+      remainingMs,
+      "Known-stale hierarchy refresh",
+    );
+    if (
+      hierarchy?.fresh === true &&
+      hasUsableHierarchy(hierarchy) &&
+      hierarchy.packageName === foreground &&
+      this.platformValidator.validate(this.device.platform, hierarchy).valid
+    ) {
+      this.applyRecapturedHierarchy(result, hierarchy);
+      this.recorrelateActiveWindowToRecapture(result, hierarchy);
+      // Earlier back-stack/lock samples describe the discarded window.
+      delete result.backStack;
+      delete result.deviceLock;
+    }
+  }
+
+  /**
+   * Explicit-observe verification (#9963). CtrlProxy serves a push-cache entry younger
+   * than its serve window without a device read, which `computeFreshness` reports as
+   * unverified, so the next action re-observes in full. Replace such a hit with one
+   * synchronous extraction of the same window. Only an unverified same-package tree is
+   * replaced, and nothing sampled alongside it is discarded; when the read fails the
+   * cached tree stays and its freshness verdict keeps saying it was not verified.
+   */
+  private async verifyCachedAndroidHierarchy(
+    result: ObserveResult,
+    options: { signal?: AbortSignal; remainingMs: number; eligible: boolean },
+  ): Promise<void> {
+    const cached = result.viewHierarchy;
+    if (
+      !options.eligible ||
+      this.device.platform !== "android" ||
+      cached === undefined ||
+      cached.fresh === true ||
+      !hasUsableHierarchy(cached) ||
+      options.remainingMs <= 0
+    ) {
+      return;
+    }
+    const hierarchy = await this.readIndependentHierarchy(
+      cached.updatedAt,
+      options.signal,
+      options.remainingMs,
+      "Cached hierarchy verification",
+    );
+    if (
+      hierarchy?.fresh === true &&
+      hasUsableHierarchy(hierarchy) &&
+      hierarchy.packageName === cached.packageName &&
+      this.platformValidator.validate(this.device.platform, hierarchy).valid
+    ) {
+      this.applyRecapturedHierarchy(result, hierarchy);
+    }
+  }
+
+  /**
+   * One extraction that must not be served from the host cache. A positive, inclusive
+   * device floor requests independent extraction without requiring the replacement to
+   * have a later timestamp. Failures are logged and yield `undefined`; only an abort
+   * propagates.
+   */
+  private async readIndependentHierarchy(
+    updatedAt: number | undefined,
+    signal: AbortSignal | undefined,
+    remainingMs: number,
+    label: string,
+  ): Promise<ViewHierarchyResult | undefined> {
     const retryController = new AbortController();
     const retrySignal = signal
       ? AbortSignal.any([signal, retryController.signal])
       : retryController.signal;
     try {
-      const hierarchy = await raceWithDeadline(
+      return await raceWithDeadline(
         // Use the same reader as the initial collection, including its injected
         // client. A fresh action capture can construct a separate resident client.
         () =>
@@ -2034,9 +2119,7 @@ export class RealObserveScreen implements ObserveScreen {
             {},
             new NoOpPerformanceTracker(),
             true,
-            // A positive, inclusive device floor requests independent extraction
-            // without requiring the replacement to have a later timestamp.
-            Math.max(1, result.viewHierarchy?.updatedAt ?? 1),
+            Math.max(1, updatedAt ?? 1),
             retrySignal,
             { timeoutMs: remainingMs, requireFreshExtraction: true },
           ),
@@ -2044,28 +2127,14 @@ export class RealObserveScreen implements ObserveScreen {
           timer: this.timer,
           timeoutMs: remainingMs,
           signal,
-          label: "Known-stale hierarchy refresh",
+          label,
           onTimeout: () => retryController.abort(),
         },
       );
-      if (
-        hierarchy?.fresh === true &&
-        hasUsableHierarchy(hierarchy) &&
-        hierarchy.packageName === foreground &&
-        this.platformValidator.validate(this.device.platform, hierarchy).valid
-      ) {
-        this.applyRecapturedHierarchy(result, hierarchy);
-        this.recorrelateActiveWindowToRecapture(result, hierarchy);
-        // Earlier back-stack/lock samples describe the discarded window.
-        delete result.backStack;
-        delete result.deviceLock;
-      }
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn(
-        `[ObserveScreen] Known-stale hierarchy refresh failed: ${describeError(error)}`,
-        error,
-      );
+      logger.warn(`[ObserveScreen] ${label} failed: ${describeError(error)}`, error);
+      return undefined;
     }
   }
 

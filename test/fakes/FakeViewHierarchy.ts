@@ -1,4 +1,7 @@
-import type { ViewHierarchy } from "../../src/features/observe/interfaces/ViewHierarchy";
+import type {
+  HierarchyReadOptions,
+  ViewHierarchy,
+} from "../../src/features/observe/interfaces/ViewHierarchy";
 import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/models";
 
 /**
@@ -7,6 +10,7 @@ import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/mod
  */
 export class FakeViewHierarchy implements ViewHierarchy {
   private calls: { skipWaitForFresh?: boolean; minTimestamp?: number }[] = [];
+  private readOptionsByCall: (number | HierarchyReadOptions | undefined)[] = [];
   private recompositionTrackingCalls = 0;
   private configuredHierarchy: ViewHierarchyResult = { hierarchy: {} };
   private configuredHierarchySequence: ViewHierarchyResult[] = [];
@@ -25,12 +29,14 @@ export class FakeViewHierarchy implements ViewHierarchy {
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
     _signal?: AbortSignal,
+    readOptions?: number | HierarchyReadOptions,
   ): Promise<ViewHierarchyResult> {
     if (this.shouldFail && this.failureError) {
       throw this.failureError;
     }
 
     this.calls.push({ skipWaitForFresh, minTimestamp });
+    this.readOptionsByCall.push(readOptions);
     return { ...(this.configuredHierarchySequence.shift() ?? this.configuredHierarchy) };
   }
 
@@ -151,6 +157,11 @@ export class FakeViewHierarchy implements ViewHierarchy {
     return this.calls;
   }
 
+  /** The sixth getViewHierarchy argument of each call, index-aligned with getCalls(). */
+  getReadOptions(): ReadonlyArray<number | HierarchyReadOptions | undefined> {
+    return this.readOptionsByCall;
+  }
+
   getRecompositionTrackingCallCount(): number {
     return this.recompositionTrackingCalls;
   }
@@ -167,6 +178,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
    */
   reset(): void {
     this.calls = [];
+    this.readOptionsByCall = [];
     this.recompositionTrackingCalls = 0;
     this.configuredHierarchy = { hierarchy: {} };
     this.configuredHierarchySequence = [];

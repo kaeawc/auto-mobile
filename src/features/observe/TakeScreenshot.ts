@@ -513,7 +513,15 @@ export class TakeScreenshot implements ScreenshotService {
       if (!Number.isSafeInteger(options.displayId) || options.displayId < 0) {
         throw new Error(`Invalid Android display id: ${options.displayId}`);
       }
-      return `-d ${options.displayId} `;
+      // screencap -d takes the SurfaceFlinger physical id, not the logical id from the
+      // display list; keep the logical id only when no physical id can be resolved.
+      const physicalId = await this.physicalDisplayIdResolver.resolveLogical(
+        this.adb,
+        this.device.deviceId,
+        options.displayId,
+        signal,
+      );
+      return `-d ${physicalId ?? options.displayId} `;
     }
     const displayId = await this.physicalDisplayIdResolver.resolve(
       this.adb,

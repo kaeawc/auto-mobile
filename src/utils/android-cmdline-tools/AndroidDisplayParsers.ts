@@ -62,3 +62,16 @@ export function logicalDisplayIdForPanel(
   const info = infos.find((entry) => entry.uniqueId?.split(":").slice(1).join(":") === panelKey);
   return info ? Number(info.logicalId) : undefined;
 }
+
+/**
+ * Map an Android logical display id to the SurfaceFlinger physical display id
+ * that `screencap -d` accepts (the digits of a `local:<physicalId>` uniqueId).
+ * Virtual and other non-local displays have no physical id.
+ */
+export function physicalDisplayIdForLogicalId(
+  infos: readonly AndroidDisplayInfo[],
+  logicalId: number,
+): string | undefined {
+  const info = infos.find((entry) => entry.logicalId === String(logicalId));
+  return /^local:(\d+)$/.exec(info?.uniqueId ?? "")?.[1];
+}

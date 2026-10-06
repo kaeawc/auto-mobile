@@ -4,7 +4,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { NetworkState, type SimulatedErrorType } from "./NetworkState";
-import { buildNetworkMockRules } from "./networkMockRules";
+import { buildNetworkMockRules, describeInvalidMockPattern } from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -400,6 +400,13 @@ function createNetworkHandler(state: NetworkState) {
   };
 }
 
+function assertValidMockPattern(field: "host" | "path", pattern: string): void {
+  const reason = describeInvalidMockPattern(pattern);
+  if (reason !== null) {
+    throw new ActionableError(`Invalid ${field} regex: ${pattern} (${reason})`);
+  }
+}
+
 function mockRuleFields(args: MockNetworkArgs) {
   return {
     host: args.host,
@@ -441,17 +448,9 @@ export function registerNetworkTools(): void {
         throw new ActionableError("Network mocking is only supported on Android and iOS devices.");
       }
 
-      // Validate regex patterns before creating the mock rule
-      try {
-        new RegExp(args.host);
-      } catch {
-        throw new ActionableError(`Invalid host regex: ${args.host}`);
-      }
-      try {
-        new RegExp(args.path);
-      } catch {
-        throw new ActionableError(`Invalid path regex: ${args.path}`);
-      }
+      // The device compiles these with its own regex engine; reject only what is certainly invalid.
+      assertValidMockPattern("host", args.host);
+      assertValidMockPattern("path", args.path);
       assertValidResponseHeaders(args.responseHeaders);
 
       const mock = state.addMock(mockRuleFields(args));

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { NetworkState } from "../../src/server/NetworkState";
-import { buildNetworkMockRules } from "../../src/server/networkMockRules";
+import {
+  buildNetworkMockRules,
+  describeInvalidMockPattern,
+} from "../../src/server/networkMockRules";
 
 describe("buildNetworkMockRules", function () {
   let state: NetworkState;
@@ -109,5 +112,40 @@ describe("buildNetworkMockRules", function () {
     });
 
     expect(buildNetworkMockRules(state)).toHaveLength(2);
+  });
+});
+
+describe("describeInvalidMockPattern", function () {
+  test("accepts ordinary patterns and valid quantifiers", function () {
+    for (const pattern of [
+      "api\\.example\\.com",
+      ".*",
+      "/users/\\d{3}/profile",
+      "/a{2,}/b{1,4}",
+      "/users/\\{id\\}",
+      "/users/[{}]+",
+      "\\p{L}+",
+      "\\Q{id}\\E",
+    ]) {
+      expect(describeInvalidMockPattern(pattern)).toBeNull();
+    }
+  });
+
+  test("accepts leading inline flags that JavaScript cannot compile", function () {
+    for (const pattern of ["(?i)api\\.example\\.com", "(?is)a.b", "(?i)(?-s)x", "(?x) a {b "]) {
+      expect(describeInvalidMockPattern(pattern)).toBeNull();
+    }
+  });
+
+  test("rejects an unescaped brace that is not a quantifier and names its index", function () {
+    expect(describeInvalidMockPattern("/users/{id}/profile")).toContain("unescaped '{' at index 7");
+    expect(describeInvalidMockPattern("(?i)/users/{id}")).toContain("unescaped '{' at index 11");
+    expect(describeInvalidMockPattern("a{,5}")).toContain("unescaped '{' at index 1");
+    expect(describeInvalidMockPattern("a{2")).toContain("unescaped '{' at index 1");
+  });
+
+  test("still reports what JavaScript itself rejects", function () {
+    expect(describeInvalidMockPattern("[invalid")).not.toBeNull();
+    expect(describeInvalidMockPattern("(?)x")).not.toBeNull();
   });
 });

@@ -1052,3 +1052,26 @@ describe("preference store resolution decoding", () => {
     });
   }
 });
+
+describe("decodeCtrlProxyMessage errorCode (#10161)", () => {
+  // Matches `WebSocketResponse.errorCode` / `CommandError.wireCode`, pinned in
+  // runnerErrorCodes.contract.test.ts. The code is additive: absent from older runners.
+  test("a gesture failure keeps the runner's typed errorCode", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "swipe_result",
+        success: false,
+        error: "Command request_swipe exceeded deadline at 5000ms (gesture completed late)",
+        errorCode: "deadline_completed_late",
+      }),
+    );
+    expect(decoded?.result).toMatchObject({ success: false, errorCode: "deadline_completed_late" });
+  });
+
+  test("a reply from a runner without the field decodes without one", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "swipe_result", success: false, error: "boom" }),
+    );
+    expect(decoded?.result).not.toHaveProperty("errorCode");
+  });
+});

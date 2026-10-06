@@ -139,6 +139,58 @@ describe("BaseVisualChange post-action observation", () => {
     },
   );
 
+  describe("a cancel during the observation after a partial application (#10161)", () => {
+    async function cancelDuringObservation(
+      platform: "ios" | "android",
+      result: Record<string, unknown>,
+    ) {
+      const action = createVisualChange(platform);
+      const controller = new AbortController();
+      // The caller cancels while the post-action observation is in flight.
+      fakeObserveScreen.execute = async () => {
+        controller.abort();
+        throw controller.signal.reason;
+      };
+      return action
+        .observedInteraction(async () => result, {
+          previousObservation: makeObserve(),
+          changeExpected: false,
+          skipUiStability: true,
+          observePartialApplication: true,
+          signal: controller.signal,
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+    }
+    const partial = {
+      success: false,
+      retryable: false,
+      partialApplication: true,
+      error: "Boomerang partially applied",
+    };
+
+    test.each(["ios", "android"] as const)(
+      "%s cancellation keeps the forward-delivered note",
+      async (platform) => {
+        const error = await cancelDuringObservation(platform, partial);
+
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain("Boomerang partially applied");
+        expect((error as Error).message).toContain("forward swipe was delivered");
+        expect((error as Error).message).toContain("do not retry automatically");
+      },
+    );
+
+    test("a cancel after an ordinary result stays a plain cancellation", async () => {
+      const error = await cancelDuringObservation("ios", { success: true });
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain("forward swipe was delivered");
+    });
+  });
+
   test("iOS unconfirmed text still skips observation when the opt-in is set", async () => {
     const action = createVisualChange("ios");
     fakeObserveScreen.setObserveResult(makeObserve());

@@ -153,7 +153,7 @@ export class Clipboard {
 
     throwIfAborted(signal);
     const client = this.getIOSCtrlProxy();
-    const before =
+    const baseline =
       action === "paste" ? await this.readIOSPasteValueBefore(client, signal) : undefined;
     throwIfAborted(signal);
     let dispatched = false;
@@ -181,14 +181,9 @@ export class Clipboard {
       return { success: false, action, error: result.error };
     }
 
-    if (before !== undefined && !(await this.verifyIOSPaste(before, signal))) {
-      return {
-        success: false,
-        action,
-        method: "a11y",
-        error:
-          "Paste was sent but the focused field's value did not change; nothing appears to have been pasted (outcome unconfirmed). The simulator may have minimized the software keyboard for a hardware keyboard. Try pasting again.",
-      };
+    const unconfirmed = await this.unconfirmedIOSPaste(baseline, signal);
+    if (unconfirmed) {
+      return unconfirmed;
     }
 
     logger.info(`[Clipboard] ${action} via iOS CtrlProxy: ${result.totalTimeMs}ms`);
@@ -200,25 +195,60 @@ export class Clipboard {
     };
   }
 
+  /** A failure result when the paste cannot be reported as applied; `undefined` to report success. */
+  private async unconfirmedIOSPaste(
+    baseline: { field: FocusedTextField | undefined; pasteboardUnreadable: boolean } | undefined,
+    signal?: AbortSignal,
+  ): Promise<ClipboardResult | undefined> {
+    const before = baseline?.field;
+    const verification =
+      before === undefined ? "unverifiable" : await this.verifyIOSPaste(before, signal);
+    if (verification === "unchanged") {
+      return {
+        success: false,
+        action: "paste",
+        method: "a11y",
+        error:
+          "Paste was sent but the focused field's value did not change; nothing appears to have been pasted (outcome unconfirmed). The simulator may have minimized the software keyboard for a hardware keyboard. Try pasting again.",
+      };
+    }
+    if (verification === "unverifiable" && baseline?.pasteboardUnreadable) {
+      // The runner pastes through an unreadable pasteboard (Cmd+V needs no text), so with no field
+      // comparison there is nothing to back a success claim.
+      return this.indeterminatePasteResult(
+        "the pasteboard could not be read and the focused field's value could not be compared before and after the paste",
+      );
+    }
+    return undefined;
+  }
+
   private async readIOSPasteValueBefore(
     client: ClipboardCtrlProxy,
     signal?: AbortSignal,
-  ): Promise<FocusedTextField | undefined> {
+  ): Promise<{ field: FocusedTextField | undefined; pasteboardUnreadable: boolean } | undefined> {
+    let pasteboardUnreadable = false;
     try {
       const clipboard = await awaitWhileRequestIsLive(
         client.requestClipboard("get", undefined, undefined, undefined, signal),
         signal,
       );
-      if (!clipboard.success || !clipboard.text) {
-        logger.info("[Clipboard] iOS paste verification skipped: clipboard empty or unreadable");
+      if (clipboard.success && !clipboard.text) {
+        // A pasteboard known to be empty is refused by the runner, so there is nothing to verify.
+        logger.info("[Clipboard] iOS paste verification skipped: clipboard empty");
         return undefined;
       }
-      return await this.readIOSFocusedValue(Clipboard.PASTE_VERIFICATION_TIMEOUT_MS, signal);
+      pasteboardUnreadable = !clipboard.success;
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn("[Clipboard] iOS clipboard pre-read failed; paste verification skipped", error);
-      return undefined;
+      logger.warn(
+        "[Clipboard] iOS clipboard pre-read failed; the field is the only evidence",
+        error,
+      );
+      pasteboardUnreadable = true;
     }
+    // Cmd+V needs no pasteboard text, so an unreadable pasteboard still gets a field baseline.
+    const field = await this.readIOSFocusedValue(Clipboard.PASTE_VERIFICATION_TIMEOUT_MS, signal);
+    return { field, pasteboardUnreadable };
   }
 
   private async readIOSFocusedValue(
@@ -249,30 +279,40 @@ export class Clipboard {
     }
   }
 
-  private async verifyIOSPaste(before: FocusedTextField, signal?: AbortSignal): Promise<boolean> {
+  /**
+   * "unverifiable" covers a secure field (its value is never read) and a field that cannot be read
+   * after the paste: neither proves a dropped paste.
+   */
+  private async verifyIOSPaste(
+    before: FocusedTextField,
+    signal?: AbortSignal,
+  ): Promise<"changed" | "unchanged" | "unverifiable"> {
     if (before.secure) {
       logger.info("[Clipboard] iOS paste verification skipped for a secure field");
-      return true;
+      return "unverifiable";
     }
     const deadline = this.timer.now() + Clipboard.PASTE_VERIFICATION_TIMEOUT_MS;
     for (;;) {
       throwIfAborted(signal);
       const remaining = deadline - this.timer.now();
       if (remaining <= 0) {
-        return false;
+        return "unchanged";
       }
       const after = await this.readIOSFocusedValue(remaining, signal);
       if (after?.secure) {
         logger.info("[Clipboard] iOS paste verification skipped for a secure field");
-        return true;
+        return "unverifiable";
       }
       // Missing hierarchy/value makes the outcome indeterminate, not a proven dropped paste.
-      if (after === undefined || after.value !== before.value) {
-        return true;
+      if (after === undefined) {
+        return "unverifiable";
+      }
+      if (after.value !== before.value) {
+        return "changed";
       }
       const delay = Math.min(Clipboard.PASTE_VERIFICATION_POLL_MS, deadline - this.timer.now());
       if (delay <= 0) {
-        return false;
+        return "unchanged";
       }
       await awaitWhileRequestIsLive(this.timer.sleep(delay), signal);
     }

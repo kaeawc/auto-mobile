@@ -306,7 +306,8 @@ final class CommandHandler: CommandHandling {
                 type: request.requestType.responseType.rawValue,
                 requestId: request.requestId,
                 error: error.localizedDescription,
-                totalTimeMs: totalTimeMs(from: startTime)
+                totalTimeMs: totalTimeMs(from: startTime),
+                errorCode: (error as? CommandError)?.wireCode
             )
         }
     }

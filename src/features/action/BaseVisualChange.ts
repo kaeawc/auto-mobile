@@ -69,6 +69,7 @@ import {
 } from "../observe/automaticScreenshotPolicy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
+import { withForwardDeliveredNote } from "./swipeon/boomerangReturnLeg";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -318,6 +319,27 @@ export class BaseVisualChange {
    * @param options - Options controlling observation behavior
    */
   async observedInteraction(
+    block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
+    options: ObservedChangeOptions,
+  ): Promise<any> {
+    if (!options.observePartialApplication) {
+      return this.runObservedInteraction(block, options);
+    }
+    // A partial result carries "the forward swipe was delivered"; a cancel during the observation
+    // that follows must keep that note instead of reading as a plain cancellation.
+    let partiallyApplied = false;
+    try {
+      return await this.runObservedInteraction(async (observeResult, fence) => {
+        const result = await block(observeResult, fence);
+        partiallyApplied = result?.success === false && result.partialApplication === true;
+        return result;
+      }, options);
+    } catch (error) {
+      throw partiallyApplied && options.signal?.aborted ? withForwardDeliveredNote(error) : error;
+    }
+  }
+
+  private async runObservedInteraction(
     block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
     options: ObservedChangeOptions,
   ): Promise<any> {

@@ -48,6 +48,8 @@ export interface BaseResult {
  */
 export interface GestureTimingResult extends BaseResult {
   gestureTimeMs?: number;
+  /** iOS runner's typed failure code (`runnerErrorCodes.ts`); absent from older runners. */
+  errorCode?: string;
   /**
    * Pinch-only (iOS): which mechanism performed the gesture —
    * "event-path" (private synthesis, honors center) or "element-anchored"

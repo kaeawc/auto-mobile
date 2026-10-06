@@ -21,7 +21,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +40,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 private const val TermsOfService = "Terms of Service"
@@ -57,7 +57,7 @@ fun XmlSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
   ) {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Semantic Links: View/XML") },
           navigationIcon = {
             IconButton(
@@ -107,7 +107,7 @@ fun ComposeSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
 
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Semantic Links: Compose") },
           navigationIcon = {
             IconButton(

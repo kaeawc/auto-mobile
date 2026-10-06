@@ -1,3 +1,4 @@
+import { scopedSelectionMatrix } from "../../helpers/scopedSelectionMatrix";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -292,3 +293,22 @@ test("target ambiguity candidates mentioning source do not misroute vision enric
   });
   h.noTouch();
 });
+
+for (const row of scopedSelectionMatrix) {
+  test(`drag strict diagnostics matrix: ${row.name}`, async () => {
+    const h = harness("default");
+    const result = await h.execute({
+      source: {
+        elementId: "remove",
+        container: row.container,
+        selectionStrategy: row.selectionStrategy,
+      },
+      target: { elementId: "cart_B" },
+    });
+    if (row.anyContainer) {
+      expect(result.error).toContain("dragAndDrop source: ");
+    } else {
+      expect(result.success).toBe(true);
+    }
+  });
+}

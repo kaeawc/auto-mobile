@@ -1,3 +1,4 @@
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -819,7 +820,7 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
     const options = fenceOptions.selectionOptions;
-    if (options && (options.container || options.selectionStrategy === "unique")) {
+    if (options && isStrictlyScoped(options, "any-container")) {
       const capture = identifyObservedHierarchy(
         this.device.platform,
         probe.hierarchy,
@@ -1683,7 +1684,7 @@ export class TapAnyElement extends BaseVisualChange {
     const target = {
       element,
       capture: selectedCapture,
-      scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+      scoped: isStrictlyScoped(options),
       talkBackState,
     };
     const action = options.action;

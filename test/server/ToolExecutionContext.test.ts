@@ -3,7 +3,11 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createToolExecutionContext } from "../../src/server/ToolExecutionContext";
+import {
+  consumeSetupTiming,
+  storeSetupTiming,
+  createToolExecutionContext,
+} from "../../src/server/ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
@@ -84,6 +88,91 @@ describe("ToolExecutionContext", () => {
     await setup();
   };
   const test = warmedTests(reset);
+
+  test("setup timing belongs to each session on a shared device", async () => {
+    await sessionManager.createSession("timing-a", "device-1", "android");
+    await sessionManager.createSession("timing-b", "device-1", "android");
+    const timingA = [{ name: "setup-a", durationMs: 5 }];
+    const timingB = [{ name: "setup-b", durationMs: 7 }];
+    const legacyTiming = [{ name: "legacy", durationMs: 3 }];
+    storeSetupTiming("device-1", timingA, "timing-a", sessionManager);
+    expect(consumeSetupTiming("device-1", "timing-b", sessionManager)).toBeNull();
+    storeSetupTiming("device-1", timingB, "timing-b", sessionManager);
+    storeSetupTiming("device-1", legacyTiming);
+    expect(consumeSetupTiming("device-1", "timing-b", sessionManager)).toBe(timingB);
+    expect(consumeSetupTiming("device-1", "timing-a", sessionManager)).toBe(timingA);
+    expect(consumeSetupTiming("device-1", "timing-a", sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1")).toBe(legacyTiming);
+    expect(consumeSetupTiming("device-1")).toBeNull();
+  });
+
+  test("setup timing falls back for direct mode and unassigned sessions", async () => {
+    const directTiming = [{ name: "direct", durationMs: 2 }];
+    storeSetupTiming("timing-direct-device", directTiming, "direct-session", undefined);
+    expect(consumeSetupTiming("timing-direct-device", "direct-session", undefined)).toBe(
+      directTiming,
+    );
+    expect(consumeSetupTiming("timing-direct-device", "direct-session", undefined)).toBeNull();
+
+    await sessionManager.createSession("timing-unassigned", "another-device", "android");
+    const unassignedTiming = [{ name: "unassigned", durationMs: 4 }];
+    storeSetupTiming("device-1", unassignedTiming, "timing-unassigned", sessionManager);
+    expect(consumeSetupTiming("device-1", "timing-unassigned", sessionManager)).toBe(
+      unassignedTiming,
+    );
+    expect(consumeSetupTiming("device-1", "timing-unassigned", sessionManager)).toBeNull();
+  });
+
+  test("fallback setup timing is isolated and evicted oldest first at its cap", async () => {
+    await sessionManager.createSession("timing-resolved", "device-1", "android");
+    await sessionManager.createSession("timing-unassigned-owner", "another-device", "android");
+    const fallbackTiming = [{ name: "fallback", durationMs: 1 }];
+    storeSetupTiming("device-1", fallbackTiming, "timing-unassigned-owner", sessionManager);
+    expect(consumeSetupTiming("device-1", "timing-resolved", sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1", "timing-unassigned-owner", sessionManager)).toBe(
+      fallbackTiming,
+    );
+
+    const firstTiming = [{ name: "first", durationMs: 1 }];
+    storeSetupTiming("timing-cap-0", firstTiming);
+    for (let index = 1; index <= 256; index += 1) {
+      storeSetupTiming(`timing-cap-${index}`, [{ name: "entry", durationMs: index }]);
+    }
+    expect(consumeSetupTiming("timing-cap-0")).toBeNull();
+    expect(consumeSetupTiming("timing-cap-256")).not.toBeNull();
+  });
+
+  test("released sessions discard pending setup timing, including late writes", async () => {
+    await sessionManager.createSession("timing-release", "device-1", "android");
+    const timing = [{ name: "setup", durationMs: 5 }];
+    storeSetupTiming("device-1", timing, "timing-release", sessionManager);
+    await sessionManager.releaseSession("timing-release");
+    expect(consumeSetupTiming("device-1", "timing-release", sessionManager)).toBeNull();
+    storeSetupTiming("device-1", timing, "timing-release", sessionManager);
+    await sessionManager.createSession("timing-new", "device-1", "android");
+    expect(consumeSetupTiming("device-1", "timing-release", sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1", "timing-new", sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1")).toBeNull();
+  });
+
+  test("expired sessions discard pending setup timing", async () => {
+    const session = await sessionManager.createSession("timing-expiry", "device-1", "android");
+    storeSetupTiming(
+      "device-1",
+      [{ name: "setup", durationMs: 5 }],
+      session.sessionId,
+      sessionManager,
+    );
+    sessionManager.stopCleanupTimer();
+    fakeTimer.advanceTime(session.expiresAt - fakeTimer.now() + 1);
+    expect(consumeSetupTiming("device-1", session.sessionId, sessionManager)).toBeNull();
+    await sessionManager.releaseSession(session.sessionId);
+    await sessionManager.createSession("timing-after-expiry", "device-1", "android");
+    expect(consumeSetupTiming("device-1", session.sessionId, sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1", "timing-after-expiry", sessionManager)).toBeNull();
+    expect(consumeSetupTiming("device-1")).toBeNull();
+  });
+
   beforeEach(reset);
   afterEach(cleanup);
   afterAll(cleanup);

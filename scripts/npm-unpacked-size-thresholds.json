@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
   "thresholds": {
-    "unpackedBytes": 27262976,
+    "unpackedBytes": 22020096,
     "warnHeadroomBytes": 1048576
   },
   "metadata": {
-    "generatedAt": "2026-10-04",
-    "description": "26 MiB NPM unpacked-size cap: measured 23,707,712 bytes plus 3 MiB, rounded up to a whole MiB; emitted source maps omit sourcesContent by default (#9571)"
+    "generatedAt": "2026-10-05",
+    "description": "21 MiB NPM unpacked-size cap assumes trimming: measured 18,345,761 bytes plus 3 MiB, rounded up to a whole MiB; untrimmed reference 23,838,787 bytes (#9571)"
   }
 }

@@ -460,6 +460,9 @@ describe("overlay MCP tool", () => {
         pendingCount: OVERLAY_EVENT_BUFFER_CAPACITY,
         lastSequence: OVERLAY_EVENT_BUFFER_CAPACITY + 1,
         droppedCount: 1,
+        pages: {},
+        state: { title: "Hello" },
+        lastKnown: true,
       },
     ]);
     expect(client.getOverlayHistory()).toEqual(history);
@@ -468,6 +471,71 @@ describe("overlay MCP tool", () => {
       droppedCount: 1,
       pendingCount: OVERLAY_EVENT_BUFFER_CAPACITY - 1,
     });
+  });
+
+  test("status retains the latest event snapshot across consumption and updates without device requests", async () => {
+    await call({ action: "show", spec });
+    const pushed = {
+      ...event(2),
+      pages: { carousel: 1, nested: 2 },
+      state: { title: "Chosen", enabled: true, count: 3 },
+    };
+    client.emitOverlayEvent(pushed);
+    client.emitOverlayEvent(event(1));
+    pushed.pages.carousel = 99;
+    pushed.state.title = "mutated";
+    await call({ action: "awaitEvent", id: "panel" });
+    await call({ action: "update", id: "panel", state: { title: "requested" } });
+    const history = client.getOverlayHistory();
+    const snapshot = (await call({ action: "status" })).payload.overlays?.[0];
+    expect(snapshot).toMatchObject({
+      pages: { carousel: 1, nested: 2 },
+      state: { title: "Chosen", enabled: true, count: 3 },
+      lastKnown: true,
+      lastAction: "update",
+    });
+    expect(client.getOverlayHistory()).toEqual(history);
+    await call({ action: "show", spec });
+    expect((await call({ action: "status" })).payload.overlays?.[0]).not.toHaveProperty(
+      "lastKnown",
+    );
+  });
+
+  test("a failed replacement show preserves the shown overlay's last known state", async () => {
+    await call({ action: "show", spec });
+    client.emitOverlayEvent({ ...event(1), pages: { pager: 2 } });
+    const show = spyOn(client, "requestShowOverlay").mockResolvedValue({
+      success: false,
+      error: "refused",
+    });
+    try {
+      await call({ action: "show", spec: { ...spec, id: "replacement" } });
+      expect((await call({ action: "status" })).payload.overlays?.[0]).toMatchObject({
+        id: "panel",
+        pages: { pager: 2 },
+        state: { title: "Hello" },
+        lastKnown: true,
+      });
+    } finally {
+      show.mockRestore();
+    }
+  });
+
+  test("status captures events during the show acknowledgement", async () => {
+    const show = spyOn(client, "requestShowOverlay").mockImplementation(async () => {
+      client.emitOverlayEvent({ ...event(1), pages: { pager: 2 } });
+      return { success: true };
+    });
+    try {
+      await call({ action: "show", spec });
+      expect((await call({ action: "status" })).payload.overlays?.[0]).toMatchObject({
+        pages: { pager: 2 },
+        state: { title: "Hello" },
+        lastKnown: true,
+      });
+    } finally {
+      show.mockRestore();
+    }
   });
 
   test("device-side dismissal removes status and remains deliverable", async () => {

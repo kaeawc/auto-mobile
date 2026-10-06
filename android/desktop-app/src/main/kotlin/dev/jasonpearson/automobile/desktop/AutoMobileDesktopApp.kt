@@ -32,6 +32,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBindi
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
+import dev.jasonpearson.automobile.desktop.core.daemon.rememberPaneSessionUuidProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -141,6 +142,9 @@ fun AutoMobileDesktopApp(
       refreshAfterDaemonRecovery()
     }
   val desktopDaemonSession = desktopSessionState.session
+  // Identity changes only with the session or its registration (#10231), never on an unrelated
+  // root recomposition, so the facets' sockets stay connected while a divider is dragged.
+  val paneSessionUuidProvider = rememberPaneSessionUuidProvider(desktopSessionState)
 
   // Update availability (#5225): collect the controller and run one check at app startup — hoisted
   // above the surface switch so it runs regardless of the launch surface (onboarding, picker, or
@@ -555,9 +559,9 @@ fun AutoMobileDesktopApp(
                     WorkspaceFacet(
                       column,
                       tool,
-                      // Capture registration readiness so a newly registered session recomposes
-                      // the facets even though the session's underlying provider is stable.
-                      sessionUuidProvider = { desktopSessionState.sessionUuidProvider() },
+                      // A newly registered session recomposes the facets because the provider's
+                      // identity changes with registration; unrelated root recompositions do not.
+                      sessionUuidProvider = paneSessionUuidProvider,
                     )
                   },
                   observationStreamFactory = {
@@ -608,7 +612,7 @@ fun AutoMobileDesktopApp(
                         column = column,
                         clientProvider = workspaceControlClientProvider,
                         enabled = controlActive,
-                        sessionUuidProvider = { desktopSessionState.sessionUuidProvider() },
+                        sessionUuidProvider = paneSessionUuidProvider,
                       )
                     DeviceStreamView(
                       column,

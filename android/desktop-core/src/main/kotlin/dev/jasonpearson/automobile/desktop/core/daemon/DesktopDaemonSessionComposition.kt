@@ -38,6 +38,33 @@ data class DesktopDaemonSessionState(
     get() = session?.sessionUuidProvider ?: { null }
 }
 
+private val NO_SESSION_UUID: () -> String? = { null }
+
+/**
+ * The session provider handed to pane facets and the focused pane's control stream (#10231).
+ *
+ * [rememberDesktopDaemonSession] returns a NEW [DesktopDaemonSessionState] on every call, and the
+ * type is unstable (it holds a [DesktopDaemonSession]), so a lambda written as `{
+ * state.sessionUuidProvider() }` at the call site is rebuilt on every app-root recomposition — a
+ * drag delta on a pane divider, a focus change, a tool toggle. The facets key their Logs telemetry
+ * client, Performance and control observation streams and Failures push client on provider
+ * identity, so each recomposition reconnected all of them.
+ *
+ * This provider's identity changes only with the session or its registration state, the two things
+ * whose change SHOULD reconnect. A fresh wrapper per registration change (rather than the session's
+ * own, never-changing provider) is deliberate: the registration flag is a plain `StateFlow`, not
+ * Compose state, so a changed provider is what recomposes the facets so they re-read readiness.
+ */
+@Composable
+fun rememberPaneSessionUuidProvider(state: DesktopDaemonSessionState): () -> String? {
+  val session = state.session
+  return remember(session, state.isRegistered) {
+    val delegate = session?.sessionUuidProvider ?: NO_SESSION_UUID
+    val provider: () -> String? = { delegate() }
+    provider
+  }
+}
+
 /** Owns the Compose-lifetime daemon session, binding, heartbeat recovery, and release. */
 @Composable
 fun rememberDesktopDaemonSession(

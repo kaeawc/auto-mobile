@@ -748,13 +748,15 @@ export class NavigationGraphManager implements NavigationGraphService {
       return;
     }
 
+    // Ensure the app row exists BEFORE committing the in-memory switch (#9992). A rejected
+    // insert (busy/locked shared DB) must leave the manager on its previous app so the next
+    // event retries; assigning first left currentAppId pointing at an app with no row, and every
+    // later event hit the navigation_nodes.app_id foreign key. The error propagates to the caller.
+    await this.repository.getOrCreateApp(appId);
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     this.currentAppId = appId;
     this.currentScreen = null;
     this.activeNavigation = null;
-
-    // Ensure app exists in database
-    await this.repository.getOrCreateApp(appId);
-    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     logger.info(`[NAVIGATION_GRAPH] Set current app: ${appId}`);
     this.notifyGraphUpdated();
   }

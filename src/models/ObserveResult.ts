@@ -99,6 +99,10 @@ export interface SkeletonElement {
    * when a clickable container encloses text beyond its primary label — e.g. a
    * preference row's summary line or an alarm's day-of-week schedule — so compact
    * state text is not lost. Omitted when there is no secondary text.
+   *
+   * An Android text field that has entered text carries its distinct hint here (the
+   * label stays the entered text), so the placeholder it was addressed by before
+   * typing remains visible (issue #9346).
    */
   sublabel?: string;
   /** Compose test tag, when supplied by the app; usable as the stable owner key for `subtext`. */

@@ -4591,7 +4591,7 @@ export class DaemonMcpProxy {
       if (!this.livenessSupersessionLogged) {
         this.livenessSupersessionLogged = true;
         logger.warn(
-          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership lost; this proxy no longer protects its deadline. Stop its keeper after handoff or explicitly claim with a fresh token.`,
+          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership lost; this proxy no longer protects its deadline. Stop its keeper or explicitly claim with a fresh token.`,
         );
       }
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);

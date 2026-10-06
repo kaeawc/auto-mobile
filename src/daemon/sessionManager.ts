@@ -5472,11 +5472,11 @@ export class SessionManager {
     ownerToken: string,
   ): Promise<LivenessReleaseOutcome> {
     const session = this.getSession(sessionId);
-    if (!session) {
+    if (!session || !this.isAdmittedForAutomation(session)) {
       return "not-found";
     }
     return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-      if (this.getSession(sessionId) !== session) {
+      if (this.getSession(sessionId) !== session || !this.isAdmittedForAutomation(session)) {
         return "not-found";
       }
       if (session.livenessOwnerToken === undefined) {
@@ -5485,6 +5485,9 @@ export class SessionManager {
       if (session.livenessOwnerToken !== ownerToken) {
         return "not-owner";
       }
+      // Tick adoption has no claim history. Fence all keeper ticks before the release write yields.
+      session.livenessOwnershipClaims ??= new Set<string>();
+      session.livenessOwnershipClaims.add(ownerToken);
       session.livenessOwnerToken = undefined;
       // Fence an older heartbeat write's failure rollback across the handoff.
       session.activityGeneration++;
@@ -5492,6 +5495,9 @@ export class SessionManager {
         await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
       } catch (error) {
         session.livenessOwnerToken = ownerToken;
+        if (!this.isAdmittedForAutomation(session)) {
+          return "not-found";
+        }
         throw error;
       }
       return "released";

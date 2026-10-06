@@ -185,7 +185,8 @@ session and changes nothing: the owner, policy, and every deadline stay as the
 owner left them. A claim from a token that already claimed and was displaced
 returns `{ success: false, code: "liveness_owner_superseded", error: "..." }`
 and records nothing; it cannot take an owned session back. An explicit release
-opens the session to a new claim, including one from a previously used token. To take a session from a displaced owner, claim with a fresh token after
+opens the session to a new claim, including one from a previously used token.
+To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
 
 A stdio/HTTP proxy bound with `--initial-session-uuid` claims on its first
@@ -244,8 +245,10 @@ that token: it retains the session UUID, device reservation, liveness policy,
 activity clocks and existing deadline, including heartbeat suspect grace. It
 adds no schema state or former-owner proof. On restart the row follows the usual
 unowned rehydration path. A tokenless keeper tick does not adopt ownership.
-Within the running daemon, former-owner ticks cannot adopt the released session:
-they return `liveness_owner_unowned` with guidance to make an explicit claim.
+While the daemon keeps running, former-owner ticks cannot adopt the released
+session: they return `liveness_owner_unowned` with guidance to make an explicit
+claim. After a daemon restart, a released session can be re-adopted by its former
+owner's token-bearing keeper tick, because the daemon's claim history is empty.
 Legacy recovery of rows without ownership continues to follow the existing rules.
 
 Stop the old keeper after release. The next proxy's explicit claim succeeds and

@@ -53,6 +53,55 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
     expect(warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
   });
 
+  test("moves the cursor with one focus action, then activates with exactly one double tap (#10209, #10144)", async () => {
+    const { driver, tap } = harness();
+
+    await tap.executeAndroidTap("tap", 50, 1045, 500, rows[10], undefined, {
+      screenReaderNavigation: true,
+    });
+
+    expect(driver.focusHistory).toEqual([
+      { action: "focus", resourceId: "test:id/row10", selector: undefined },
+    ]);
+    expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 1045 }]);
+    expect(driver.tapHistory).toEqual([]);
+    expect(driver.actionHistory).toEqual([]);
+  });
+
+  test("a refused focus action fails the call and sends no tap (#10209)", async () => {
+    const { driver, tap } = harness();
+    driver.focusResult = {
+      success: false,
+      action: "focus",
+      totalTimeMs: 1,
+      error: "Accessibility action is unavailable: focus",
+    };
+
+    await expect(
+      tap.executeAndroidTap("tap", 50, 345, 500, rows[3], undefined, {
+        screenReaderNavigation: true,
+      }),
+    ).rejects.toThrow("Accessibility action is unavailable: focus");
+
+    expect(driver.doubleTapHistory).toEqual([]);
+    expect(driver.tapHistory).toEqual([]);
+  });
+
+  test("a screen that changed while the cursor was being moved fails the call and sends no tap (#10209)", async () => {
+    const { driver, tap } = harness();
+    driver.autoFocusOnAction = false;
+    driver.onFocusAction = () => driver.setElements(rows.slice(4), 0);
+
+    await expect(
+      tap.executeAndroidTap("tap", 50, 345, 500, rows[3], undefined, {
+        screenReaderNavigation: true,
+      }),
+    ).rejects.toThrow("The screen changed while moving the TalkBack cursor");
+
+    expect(driver.doubleTapHistory).toEqual([]);
+    expect(driver.tapHistory).toEqual([]);
+  });
+
   test("an ACTION_CLICK activation after navigation reports no warning (#10144)", async () => {
     const { driver, tap } = harness();
     driver.doubleTapCapabilitySupported = false;
@@ -70,19 +119,17 @@ describe("tapOn screenReaderNavigation activation and cancellation", () => {
   test("the request's signal stops navigation and the activation, with no coordinate fallback (#10145)", async () => {
     const { driver, tap } = harness();
     const controller = new AbortController();
-    driver.onSwipe = () => {
-      if (driver.getSwipeCount() === 3) {
-        controller.abort();
-      }
-    };
+    driver.onFocusAction = () => controller.abort();
 
     await expect(
       tap.executeAndroidTap("tap", 50, 1045, 500, rows[10], controller.signal, {
         screenReaderNavigation: true,
       }),
-    ).rejects.toThrow("Focus navigation partially applied: 3 swipes already moved");
+    ).rejects.toThrow(
+      "Focus navigation partially applied: 1 accessibility-focus request already moved",
+    );
 
-    expect(driver.getSwipeCount()).toBe(3);
+    expect(driver.getFocusRequestCount()).toBe(1);
     expect(driver.doubleTapHistory).toEqual([]);
     expect(driver.tapHistory).toEqual([]);
     expect(driver.actionHistory).toEqual([]);

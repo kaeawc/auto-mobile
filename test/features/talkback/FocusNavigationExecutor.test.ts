@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   FocusNavigationExecutor,
+  FocusNavigationUnavailableError,
+  screenFingerprint,
   type FocusNavigationDriverFactory,
-  type FocusNavigationPath,
 } from "../../../src/features/talkback/FocusNavigationExecutor";
-import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { Element } from "../../../src/models/Element";
-import type { ElementSelector as FocusElementSelector } from "../../../src/features/talkback/ElementSelector";
 import { FakeFocusNavigationDriver } from "../../fakes/FakeFocusNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -20,314 +20,228 @@ const makeElement = (resourceId: string, index: number): Element => ({
   "resource-id": resourceId,
 });
 
-describe("FocusNavigationExecutor", () => {
-  test("uses injected driver and FakeTimer to stop early", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [makeElement("a", 0), makeElement("b", 1), makeElement("c", 2)];
-    driver.setElements(elements, 0);
+const traversal = (count: number): Element[] =>
+  Array.from({ length: count }, (_, index) => makeElement(`e${index}`, index));
 
-    const targetSelector: FocusElementSelector = { resourceId: "c" };
-    const path: FocusNavigationPath = {
-      currentFocusIndex: 0,
-      targetFocusIndex: 2,
-      swipeCount: 5,
-      direction: "forward",
-    };
+function setup(elements: Element[], focusedIndex: number | null) {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const driver = new FakeFocusNavigationDriver();
+  driver.exposeHierarchy = true;
+  driver.setElements(elements, focusedIndex);
+  const driverFactory: FocusNavigationDriverFactory = { createDriver: () => driver };
+  return { timer, driver, executor: new FocusNavigationExecutor({ timer, driverFactory }) };
+}
 
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+const failureOf = (promise: Promise<unknown>) =>
+  promise.then(
+    () => undefined,
+    (error: unknown) => error as Error,
+  );
 
-    // Start navigation (non-blocking)
-    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
-      verificationInterval: 1,
-      swipeDelay: 123,
-    });
+describe("FocusNavigationExecutor (accessibility-focus actions, #10209)", () => {
+  test("moves the cursor onto a distant target with one focus action, never a gesture", async () => {
+    const { driver, executor, timer } = setup(traversal(12), 0);
 
-    // Interleave time advancement with async execution
-    // Each iteration: advance time, then let async code run
-    for (let i = 0; i < 10; i++) {
-      timer.advanceTime(200);
-      await new Promise((r) => setImmediate(r));
-    }
+    await expect(executor.navigateToElement("device-1", { resourceId: "e10" })).resolves.toBe(true);
 
-    const result = await resultPromise;
-
-    expect(result).toBe(true);
-    expect(driver.getSwipeCount()).toBe(2);
-    expect(timer.getSleepHistory()).toEqual([123, 123]);
+    expect(driver.focusHistory).toEqual([
+      { action: "focus", resourceId: "e10", selector: undefined },
+    ]);
+    expect(driver.getFocusedElement()?.["resource-id"]).toBe("e10");
+    // Exactly the settle delay, so the read-back sees the applied cursor.
+    expect(timer.getSleepHistory()).toEqual([100]);
   });
 
-  test("throws when focus does not move across swipes", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [makeElement("a", 0), makeElement("b", 1), makeElement("c", 2)];
-    driver.setElements(elements, 0);
-    driver.autoAdvanceOnSwipe = false;
+  test("hands the request signal to the focus action", async () => {
+    const { driver, executor } = setup(traversal(3), 0);
+    const controller = new AbortController();
 
-    const targetSelector: FocusElementSelector = { resourceId: "c" };
-    const path: FocusNavigationPath = {
-      currentFocusIndex: 0,
-      targetFocusIndex: 2,
-      swipeCount: 3,
-      direction: "forward",
-    };
+    await executor.navigateToElement(
+      "device-1",
+      { resourceId: "e2" },
+      { signal: controller.signal },
+    );
 
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
-
-    let thrownError: Error | null = null;
-    const resultPromise = executor
-      .navigateToElement("device-1", targetSelector, path, {
-        verificationInterval: 1,
-        swipeDelay: 0,
-      })
-      .catch((e) => {
-        thrownError = e as Error;
-      });
-
-    // Interleave time advancement with async execution
-    for (let i = 0; i < 10; i++) {
-      timer.advanceTime(100);
-      await new Promise((r) => setImmediate(r));
-    }
-
-    await resultPromise;
-
-    expect(thrownError).not.toBeNull();
-    expect(thrownError!.message).toContain("Focus did not move after multiple swipes");
+    expect(driver.focusSignals).toHaveLength(1);
+    expect(driver.focusSignals[0]).toBeDefined();
+    expect(driver.focusSignals[0]!.aborted).toBe(false);
   });
 
-  test("recalculates when traversal order moves target farther away", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const a = makeElement("a", 0);
-    const b = makeElement("b", 1);
-    const c = makeElement("c", 2);
-    const d = makeElement("d", 3);
-    const e = makeElement("e", 4);
-    driver.setElements([a, b, c, d, e], 0);
+  test("sends nothing when the target already holds the cursor", async () => {
+    const { driver, executor } = setup(traversal(3), 2);
 
-    const targetSelector: FocusElementSelector = { resourceId: "c" };
-    const calculator = new FocusPathCalculator();
-    const path = calculator.calculatePath(a, targetSelector, [a, b, c, d, e])!;
+    await expect(executor.navigateToElement("device-1", { resourceId: "e2" })).resolves.toBe(true);
 
-    driver.onSwipe = () => {
-      if (driver.getSwipeCount() === 1) {
-        driver.replaceElements([a, b, d, e, c], true);
-      }
-    };
-
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
-
-    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
-      verificationInterval: 1,
-      swipeDelay: 0,
-    });
-
-    // Interleave time advancement with async execution
-    for (let i = 0; i < 10; i++) {
-      timer.advanceTime(100);
-      await new Promise((r) => setImmediate(r));
-    }
-
-    const result = await resultPromise;
-
-    expect(result).toBe(true);
-    expect(driver.getSwipeCount()).toBe(4);
-  });
-
-  test("returns true without swiping when target is already focused (zero-swipe path)", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [makeElement("a", 0), makeElement("b", 1), makeElement("c", 2)];
-    // Focus is already on the target element "c" (index 2).
-    driver.setElements(elements, 2);
-
-    const targetSelector: FocusElementSelector = { resourceId: "c" };
-    const path: FocusNavigationPath = {
-      currentFocusIndex: 2,
-      targetFocusIndex: 2,
-      swipeCount: 0,
-      direction: "forward",
-    };
-
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
-
-    const result = await executor.navigateToElement("device-1", targetSelector, path, {
-      verificationInterval: 1,
-      swipeDelay: 0,
-    });
-
-    expect(result).toBe(true);
-    expect(driver.getSwipeCount()).toBe(0);
+    expect(driver.getFocusRequestCount()).toBe(0);
   });
 
   test("reaches a unique target after it moved from the selector bounds", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
+    const { driver, executor } = setup([], null);
     const movedTarget = { text: "Save", bounds: makeElement("a", 1).bounds };
     driver.setElements([movedTarget], 0);
-    const executor = new FocusNavigationExecutor({
-      timer,
-      driverFactory: { createDriver: () => driver },
-    });
 
     await expect(
-      executor.navigateToElement(
-        "device-1",
-        { text: "Save", bounds: makeElement("a", 0).bounds },
-        { currentFocusIndex: 0, targetFocusIndex: 0, swipeCount: 0, direction: "forward" },
-        { swipeDelay: 0 },
-      ),
+      executor.navigateToElement("device-1", { text: "Save", bounds: makeElement("a", 0).bounds }),
     ).resolves.toBe(true);
-    expect(driver.getSwipeCount()).toBe(0);
+    expect(driver.getFocusRequestCount()).toBe(0);
   });
 
-  test("continues past a substring match with different bounds on a zero-swipe path", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const first = { text: "Save as draft", bounds: makeElement("a", 0).bounds };
-    const target = { text: "Save", bounds: makeElement("b", 1).bounds };
-    driver.setElements([first, target], 0);
-    const executor = new FocusNavigationExecutor({
-      timer,
-      driverFactory: { createDriver: () => driver },
-    });
+  test("reports the cursor before and after the move", async () => {
+    const elements = traversal(4);
+    const { executor } = setup(elements, 0);
+    const observed: Array<Element | null> = [];
 
-    const resultPromise = executor.navigateToElement(
+    await executor.navigateToElement(
       "device-1",
-      { text: "Save", bounds: target.bounds },
-      { currentFocusIndex: 0, targetFocusIndex: 1, swipeCount: 0, direction: "forward" },
-      { swipeDelay: 0 },
+      { resourceId: "e3" },
+      { onFocusObserved: (focus) => observed.push(focus) },
     );
-    for (let i = 0; i < 10; i++) {
-      timer.advanceTime(100);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
 
-    await expect(resultPromise).resolves.toBe(true);
-    expect(driver.getSwipeCount()).toBe(1);
-    expect(driver.getFocusedElement()).toEqual(target);
+    expect(observed).toEqual([elements[0], elements[3]]);
   });
 
-  test("does not accept the wrong duplicate label when selector bounds are stale", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const wrong = { text: "Save", bounds: makeElement("a", 0).bounds };
-    const target = { text: "Save", bounds: makeElement("b", 1).bounds };
-    driver.setElements([wrong, target], 0);
-    const executor = new FocusNavigationExecutor({
-      timer,
-      driverFactory: { createDriver: () => driver },
+  test("addresses a test-tag target with a stable node selector", async () => {
+    const { driver, executor } = setup([], null);
+    const tagged: Element = { bounds: makeElement("a", 0).bounds, "test-tag": "pay" };
+    driver.setElements([tagged], null);
+
+    await expect(
+      executor.navigateToElement("device-1", { testTag: "pay", bounds: tagged.bounds }),
+    ).resolves.toBe(true);
+
+    expect(driver.focusHistory).toEqual([
+      {
+        action: "focus",
+        selector: { resourceId: undefined, testTag: "pay", uniqueId: undefined },
+      },
+    ]);
+  });
+
+  describe("failures after a focus request was sent (never a coordinate fallback)", () => {
+    test("a refused action fails naming the refusal and sends no tap", async () => {
+      const { driver, executor } = setup(traversal(3), 0);
+      driver.focusResult = {
+        success: false,
+        action: "focus",
+        totalTimeMs: 1,
+        error: "Accessibility action is unavailable: focus",
+      };
+
+      const failure = await failureOf(executor.navigateToElement("device-1", { resourceId: "e2" }));
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect(failure).not.toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("Accessibility action is unavailable: focus");
+      expect(failure!.message).toContain("No tap was sent");
+      expect(driver.getFocusRequestCount()).toBe(1);
     });
 
-    const resultPromise = executor.navigateToElement(
-      "device-1",
-      { text: "Save", bounds: target.bounds },
-      { currentFocusIndex: 0, targetFocusIndex: 1, swipeCount: 0, direction: "forward" },
-      { swipeDelay: 0 },
-    );
-    for (let i = 0; i < 10; i++) {
-      timer.advanceTime(100);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    test("an acknowledged action whose cursor never arrived is a failure, not progress", async () => {
+      const { driver, executor } = setup(traversal(3), 0);
+      driver.autoFocusOnAction = false;
 
-    await expect(resultPromise).resolves.toBe(true);
-    expect(driver.getSwipeCount()).toBe(1);
-    expect(driver.getFocusedElement()).toEqual(target);
-  });
+      const failure = await failureOf(executor.navigateToElement("device-1", { resourceId: "e2" }));
 
-  test("recalculates and navigates when zero-swipe path but target is not yet focused", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [makeElement("a", 0), makeElement("b", 1), makeElement("c", 2)];
-    // Focus is on "a" (index 0) but the caller supplied a stale zero-swipe path.
-    driver.setElements(elements, 0);
-
-    const targetSelector: FocusElementSelector = { resourceId: "c" };
-    const path: FocusNavigationPath = {
-      currentFocusIndex: 0,
-      targetFocusIndex: 2,
-      swipeCount: 0,
-      direction: "forward",
-    };
-
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
-
-    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
-      verificationInterval: 1,
-      swipeDelay: 0,
+      expect(failure).not.toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("did not move onto the target");
+      expect(failure!.message).toContain(`focus is on "e0"`);
+      expect(failure!.message).not.toContain("screen changed");
     });
 
-    for (let i = 0; i < 10; i++) {
-      timer.advanceTime(100);
-      await new Promise((r) => setImmediate(r));
-    }
+    test("a screen that changed during navigation with the cursor unmoved is a failure naming it", async () => {
+      const { driver, executor } = setup(traversal(3), 0);
+      driver.autoFocusOnAction = false;
+      // The request "scrolled" the app's pager: other nodes at other places, cursor unchanged.
+      driver.onFocusAction = () => {
+        driver.replaceElements(
+          [
+            makeElement("e0", 0),
+            makeElement("e1", 5),
+            makeElement("e2", 6),
+            makeElement("slide-1", 7),
+          ],
+          true,
+        );
+      };
 
-    const result = await resultPromise;
+      const failure = await failureOf(executor.navigateToElement("device-1", { resourceId: "e2" }));
 
-    expect(result).toBe(true);
-    expect(driver.getSwipeCount()).toBe(2);
+      expect(failure).not.toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("The screen changed while moving the TalkBack cursor");
+      expect(failure!.message).toContain("No tap was sent");
+    });
+
+    test("the cursor landing on the target wins even when the screen changed around it", async () => {
+      const { driver, executor } = setup(traversal(3), 0);
+      driver.onFocusAction = () => {
+        driver.replaceElements([...traversal(3), makeElement("badge", 9)], true);
+        driver.focusedIndex = 2;
+      };
+
+      await expect(executor.navigateToElement("device-1", { resourceId: "e2" })).resolves.toBe(
+        true,
+      );
+    });
   });
 
-  test("throws an actionable error (not a ReferenceError) when zero-swipe path but target is not found", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [makeElement("a", 0), makeElement("b", 1)];
-    driver.setElements(elements, 0);
+  describe("failures before anything was dispatched (a non-cursor fallback is still safe)", () => {
+    test("a target without a stable selector cannot be addressed", async () => {
+      const { driver, executor } = setup([], null);
+      driver.setElements([{ text: "Tap", bounds: makeElement("a", 0).bounds }], null);
 
-    const targetSelector: FocusElementSelector = { resourceId: "does-not-exist" };
-    const path: FocusNavigationPath = {
-      currentFocusIndex: 0,
-      targetFocusIndex: 0,
-      swipeCount: 0,
-      direction: "forward",
-    };
+      const failure = await failureOf(executor.navigateToElement("device-1", { text: "Tap" }));
 
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
+      expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("without a touch gesture");
+      expect(driver.getFocusRequestCount()).toBe(0);
+    });
 
-    let thrownError: Error | null = null;
-    await executor
-      .navigateToElement("device-1", targetSelector, path, {
-        verificationInterval: 1,
-        swipeDelay: 0,
-      })
-      .catch((e) => {
-        thrownError = e as Error;
-      });
+    test("a resource-id shared by several nodes cannot be addressed", async () => {
+      const { driver, executor } = setup([], null);
+      driver.setElements([makeElement("dup", 0), makeElement("dup", 1), makeElement("x", 2)], 2);
 
-    expect(thrownError).not.toBeNull();
-    expect(thrownError).not.toBeInstanceOf(ReferenceError);
-    expect(thrownError!.message).toBe(
-      'Target not found (resourceId="does-not-exist"). Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.',
-    );
-    expect(driver.getSwipeCount()).toBe(0);
-  });
+      const failure = await failureOf(
+        executor.navigateToElement("device-1", { resourceId: "dup" }),
+      );
 
-  test.each([0, 1])(
-    "reports child-cap truncation for a missing target after %i swipes",
-    async (swipeCount) => {
-      const timer = new FakeTimer();
-      const driver = new FakeFocusNavigationDriver();
-      const elements = [makeElement("a", 0), makeElement("b", 1)];
-      driver.setElements(elements, 0);
+      expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("shared by 2 elements");
+      expect(driver.getFocusRequestCount()).toBe(0);
+    });
+
+    test("a runner without node selectors cannot be asked to focus a test-tag target", async () => {
+      const { driver, executor } = setup([], null);
+      const tagged: Element = { bounds: makeElement("a", 0).bounds, "test-tag": "pay" };
+      driver.setElements([tagged], null);
+      driver.nodeActionSelectorsSupported = false;
+
+      const failure = await failureOf(
+        executor.navigateToElement("device-1", { testTag: "pay", bounds: tagged.bounds }),
+      );
+
+      expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("does not support stable node selectors");
+      expect(driver.getFocusRequestCount()).toBe(0);
+    });
+
+    test("a target absent from the traversal cannot be addressed", async () => {
+      const { driver, executor } = setup(traversal(2), 0);
+
+      const failure = await failureOf(
+        executor.navigateToElement("device-1", { resourceId: "does-not-exist" }),
+      );
+
+      expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toBe(
+        'Target not found in the accessibility traversal (resourceId="does-not-exist"). Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.',
+      );
+      expect(driver.getFocusRequestCount()).toBe(0);
+    });
+
+    test("reports child-cap truncation for a missing target", async () => {
+      const elements = traversal(2);
+      const { driver, executor } = setup(elements, 0);
       driver.queueTraversalResult({
         elements,
         focusedIndex: 0,
@@ -335,247 +249,50 @@ describe("FocusNavigationExecutor", () => {
         totalTimeMs: 1,
         truncationReasons: ["max_children"],
       });
-      const executor = new FocusNavigationExecutor({
-        timer,
-        driverFactory: { createDriver: () => driver },
-      });
 
       await expect(
-        executor.navigateToElement(
-          "device-1",
-          { resourceId: "missing" },
-          {
-            currentFocusIndex: 0,
-            targetFocusIndex: swipeCount,
-            swipeCount,
-            direction: "forward",
-          },
-          { verificationInterval: 1, swipeDelay: 0 },
-        ),
+        executor.navigateToElement("device-1", { resourceId: "missing" }),
       ).rejects.toThrow(
         "the accessibility traversal was truncated (max_children); the target may be beyond the cap",
       );
-    },
-  );
-
-  test("self-corrects when the supplied path points the wrong direction (#3917)", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [
-      makeElement("a", 0),
-      makeElement("b", 1),
-      makeElement("c", 2),
-      makeElement("d", 3),
-      makeElement("e", 4),
-    ];
-    // Cursor is really on "c" (index 2); the target "a" is behind it (index 0).
-    driver.setElements(elements, 2);
-
-    const targetSelector: FocusElementSelector = { resourceId: "a" };
-    // A path built while the cursor was unresolved: forward-from-0, which points
-    // AWAY from the target.
-    const path: FocusNavigationPath = {
-      currentFocusIndex: null,
-      targetFocusIndex: 0,
-      swipeCount: 2,
-      direction: "forward",
-    };
-
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
-
-    const resultPromise = executor.navigateToElement("device-1", targetSelector, path, {
-      verificationInterval: 1,
-      swipeDelay: 0,
-    });
-    for (let i = 0; i < 15; i++) {
-      timer.advanceTime(100);
-      await new Promise((r) => setImmediate(r));
-    }
-    const result = await resultPromise;
-
-    expect(result).toBe(true);
-    // Once the cursor is observed, navigation reverses and converges on "a" —
-    // the final swipe is backward (endX < startX).
-    const lastSwipe = driver.swipeHistory[driver.swipeHistory.length - 1];
-    expect(lastSwipe.x2).toBeLessThan(lastSwipe.x1);
-  });
-
-  test("bails when the TalkBack cursor can't be tracked instead of marching to maxSwipes (#3917)", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [makeElement("a", 0), makeElement("b", 1), makeElement("c", 2)];
-    // No cursor is ever reported (focusedIndex null, autoAdvance off), so the
-    // cursor position can never be resolved in the traversal order.
-    driver.setElements(elements, null);
-    driver.autoAdvanceOnSwipe = false;
-
-    const targetSelector: FocusElementSelector = { resourceId: "c" };
-    // A large swipe count that, without the progress guard, would march blindly.
-    const path: FocusNavigationPath = {
-      currentFocusIndex: null,
-      targetFocusIndex: 2,
-      swipeCount: 50,
-      direction: "forward",
-    };
-
-    const driverFactory: FocusNavigationDriverFactory = {
-      createDriver: () => driver,
-    };
-    const executor = new FocusNavigationExecutor({ timer, driverFactory });
-
-    let thrownError: Error | null = null;
-    const resultPromise = executor
-      .navigateToElement("device-1", targetSelector, path, {
-        verificationInterval: 1,
-        swipeDelay: 0,
-      })
-      .catch((e) => {
-        thrownError = e as Error;
-      });
-    for (let i = 0; i < 20; i++) {
-      timer.advanceTime(100);
-      await new Promise((r) => setImmediate(r));
-    }
-    await resultPromise;
-
-    expect(thrownError).not.toBeNull();
-    expect(thrownError!.message).toContain("could not track the TalkBack cursor position");
-    // Bailed after a couple of no-progress checks, nowhere near the 50 swipes.
-    expect(driver.getSwipeCount()).toBeLessThan(10);
-  });
-
-  test("reports every swipe without treating delayed focus updates as a trap", async () => {
-    const timer = new FakeTimer();
-    const driver = new FakeFocusNavigationDriver();
-    const elements = [
-      makeElement("a", 0),
-      makeElement("b", 1),
-      makeElement("c", 2),
-      makeElement("d", 3),
-      makeElement("e", 4),
-    ];
-    driver.setElements(elements, 0);
-    driver.autoAdvanceOnSwipe = false;
-    driver.onSwipe = () => {
-      if (driver.getSwipeCount() === 4) {
-        driver.focusedIndex = 4;
-      }
-    };
-    const observed: Element[] = [];
-    const executor = new FocusNavigationExecutor({
-      timer,
-      driverFactory: { createDriver: () => driver },
     });
 
-    const result = await executor.navigateToElement(
-      "device-1",
-      { resourceId: "e" },
-      { currentFocusIndex: 0, targetFocusIndex: 4, swipeCount: 5, direction: "forward" },
-      {
-        verificationInterval: 5,
-        swipeDelay: 0,
-        onFocusObserved: (element) => {
-          if (element) {
-            observed.push(element);
-          }
-        },
-      },
-    );
-
-    expect(result).toBe(true);
-    expect(driver.getSwipeCount()).toBe(4);
-    expect(observed).toEqual([elements[0], elements[0], elements[0], elements[4]]);
-  });
-
-  describe("navigation guards", () => {
-    const makeDriverFactory = (
-      driver: FakeFocusNavigationDriver,
-    ): FocusNavigationDriverFactory => ({
-      createDriver: () => driver,
-    });
-
-    test("rejects a path that needs more swipes than the maxSwipes cap", async () => {
-      const driver = new FakeFocusNavigationDriver();
-      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
-      const executor = new FocusNavigationExecutor({
-        timer: new FakeTimer(),
-        driverFactory: makeDriverFactory(driver),
+    test("an unreadable traversal cannot be navigated", async () => {
+      const { driver, executor } = setup(traversal(2), 0);
+      driver.queueTraversalResult({
+        elements: [],
+        focusedIndex: null,
+        totalCount: 0,
+        totalTimeMs: 1,
+        error: "Traversal order timeout after 5000ms",
       });
 
-      await expect(
-        executor.navigateToElement(
-          "device-1",
-          { resourceId: "c" },
-          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 5, direction: "forward" },
-          { maxSwipes: 2, swipeDelay: 0 },
-        ),
-      ).rejects.toThrow(/max: 2/);
-      // Bailed before touching the device — no swipes issued.
-      expect(driver.getSwipeCount()).toBe(0);
+      const failure = await failureOf(executor.navigateToElement("device-1", { resourceId: "e1" }));
+
+      expect(failure).toBeInstanceOf(FocusNavigationUnavailableError);
+      expect(failure!.message).toContain("Traversal order timeout");
     });
 
     test("rejects focus navigation on a non-Android device", async () => {
       const driver = new FakeFocusNavigationDriver();
-      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
+      driver.setElements(traversal(3), 0);
       const executor = new FocusNavigationExecutor({
         timer: new FakeTimer(),
-        driverFactory: makeDriverFactory(driver),
+        driverFactory: { createDriver: () => driver },
         deviceResolver: (deviceId) => ({ name: deviceId, deviceId, platform: "ios" }),
       });
 
-      await expect(
-        executor.navigateToElement(
-          "udid-ios",
-          { resourceId: "c" },
-          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 2, direction: "forward" },
-          { swipeDelay: 0 },
-        ),
-      ).rejects.toThrow(/only supported on Android/);
-      expect(driver.getSwipeCount()).toBe(0);
+      await expect(executor.navigateToElement("udid-ios", { resourceId: "e2" })).rejects.toThrow(
+        /only supported on Android/,
+      );
+      expect(driver.getFocusRequestCount()).toBe(0);
     });
+  });
 
-    test("rejects a zero-sized screen instead of hanging", async () => {
-      const driver = new FakeFocusNavigationDriver();
-      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
-      // A finite-but-non-positive screen size must be rejected, not marched into
-      // the swipe loop (which would wedge to the test timeout).
-      driver.setScreenSize({ width: 0, height: 0 });
-      const executor = new FocusNavigationExecutor({
-        timer: new FakeTimer(),
-        driverFactory: makeDriverFactory(driver),
-      });
-
-      await expect(
-        executor.navigateToElement(
-          "device-1",
-          { resourceId: "c" },
-          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 3, direction: "forward" },
-          { swipeDelay: 0 },
-        ),
-      ).rejects.toThrow(/screen size/);
-      expect(driver.getSwipeCount()).toBe(0);
-    });
-
-    test("surfaces a failed swipe as a navigation failure rather than success", async () => {
-      const driver = new FakeFocusNavigationDriver();
-      driver.setElements([makeElement("a", 0), makeElement("c", 2)], 0);
-      driver.setSwipeResult({ success: false, totalTimeMs: 1, error: "proxy swipe rejected" });
-      const executor = new FocusNavigationExecutor({
-        timer: new FakeTimer(),
-        driverFactory: makeDriverFactory(driver),
-      });
-
-      await expect(
-        executor.navigateToElement(
-          "device-1",
-          { resourceId: "c" },
-          { currentFocusIndex: 0, targetFocusIndex: 2, swipeCount: 1, direction: "forward" },
-          { swipeDelay: 0 },
-        ),
-      ).rejects.toThrow(/proxy swipe rejected/);
-    });
+  test("screenFingerprint ignores order and cursor but not what is shown or where", () => {
+    const [a, b] = traversal(2);
+    expect(screenFingerprint([a, b])).toBe(screenFingerprint([b, a]));
+    expect(screenFingerprint([a, b])).not.toBe(screenFingerprint([a, { ...b, text: "x" }]));
+    expect(screenFingerprint([a, b])).not.toBe(screenFingerprint([a, makeElement("e1", 9)]));
   });
 });

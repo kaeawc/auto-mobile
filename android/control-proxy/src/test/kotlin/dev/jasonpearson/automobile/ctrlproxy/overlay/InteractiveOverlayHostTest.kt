@@ -47,10 +47,16 @@ class InteractiveOverlayHostTest {
   private lateinit var timer: FakeOverlaySettleTimer
   private lateinit var manager: RecordingOverlayWindowManager
   private lateinit var host: InteractiveOverlayHost
+  private var density = 2.5f
+  private var blocked = false
+  private var lost = 0
 
   @Before
   fun setUp() {
     history.clear()
+    density = 2.5f
+    blocked = false
+    lost = 0
     main = FakeOverlayMainThread()
     timer = FakeOverlaySettleTimer(history)
     manager = RecordingOverlayWindowManager(main, history)
@@ -61,12 +67,56 @@ class InteractiveOverlayHostTest {
         sdkInt = 30,
         mainThread = main,
         settleTimer = timer,
-        densityProvider = { 2.5f },
+        densityProvider = { density },
+        isBlocked = { blocked },
         onWindowAttached = { history += "hook" },
+        onWindowLost = { lost++ },
       )
     // Warm platform/Compose constructors outside test bodies; no window attaches or composition
     // runs.
     ComposeView(RuntimeEnvironment.getApplication())
+  }
+
+  @Test
+  fun `relayout refreshes density without recreating view owner or composition and keeps touch through`() =
+    runTest {
+      host.show(
+        InteractiveOverlayRequest(OverlayPlacement.Sheet(OverlayPlacement.Edge.BOTTOM, 20f))
+      )
+      val view = manager.view!!
+      val owner = view.findViewTreeLifecycleOwner()
+      density = 3f
+      host.withTouchThrough {
+        assertTrue(host.relayout())
+        assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+        assertEquals(60, manager.updated.last().height)
+      }
+      assertSame(view, manager.view)
+      assertSame(owner, view.findViewTreeLifecycleOwner())
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
+
+  @Test
+  fun `show-time keyguard check refuses attachment and relayout hides an existing window`() =
+    runTest {
+      blocked = true
+      assertFalse(host.show())
+      assertTrue(manager.added.isEmpty())
+      blocked = false
+      assertTrue(host.show())
+      blocked = true
+      assertTrue(host.relayout())
+      assertFalse(host.isShowing)
+      assertEquals(1, manager.removals)
+    }
+
+  @Test
+  fun `fullscreen opacity cannot fade host dismiss control`() = runTest {
+    host.show(InteractiveOverlayRequest(OverlayPlacement.Fullscreen(), opacityPercent = 0))
+    assertEquals(1f, manager.view!!.alpha, 0f)
+    host.setOpacity(25)
+    assertEquals(1f, manager.view!!.alpha, 0f)
   }
 
   @Test
@@ -234,6 +284,7 @@ class InteractiveOverlayHostTest {
     assertNull(host.currentPlacement)
     assertFalse(host.isTouchThroughActive)
     assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
+    assertEquals(1, lost)
     assertTrue(host.show())
     assertNotSame(oldView, manager.view)
     assertEquals(2, manager.added.size)
@@ -253,6 +304,7 @@ class InteractiveOverlayHostTest {
     assertFalse(host.isShowing)
     assertNull(host.currentPlacement)
     assertFalse(host.isTouchThroughActive)
+    assertEquals(1, lost)
     assertTrue(host.show())
     assertEquals(2, manager.added.size)
   }
@@ -270,12 +322,25 @@ class InteractiveOverlayHostTest {
       .exceptionOrNull()
     assertTrue(error is IllegalStateException)
     assertEquals("Failed to restore overlay touchability", error!!.message)
+    assertEquals(1, lost)
     assertFalse(host.isShowing)
     assertNull(host.currentPlacement)
     assertFalse(host.isTouchThroughActive)
     assertEquals(Lifecycle.State.DESTROYED, owner.lifecycle.currentState)
     assertTrue(host.show())
     assertEquals(2, manager.added.size)
+  }
+
+  @Test
+  fun `retryable update failure and normal dismiss do not report a lost window`() = runTest {
+    host.show()
+    manager.failUpdate = true
+    assertFalse(host.relayout())
+    assertTrue(host.isShowing)
+    assertEquals(0, lost)
+    manager.failUpdate = false
+    assertTrue(host.dismiss())
+    assertEquals(0, lost)
   }
 
   @Test

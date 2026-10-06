@@ -425,6 +425,21 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(signals).toContain("SIGKILL");
     });
 
+    test("forceStop with deviceWide:false runs no device-wide kill but reaps host adb and removes our temp file", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeProcess = new FakeChildProcess();
+      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+      const signals = spyOnKill(fakeProcess);
+
+      await backend.forceStop(handle, { deviceWide: false });
+
+      const commands = fakeFactory.getFakeClient().getAllCommands();
+      expect(commands.filter((command) => /pkill|killall|kill /.test(command))).toEqual([]);
+      expect(commands).toContain("shell rm -f /sdcard/auto-mobile-test.mp4");
+      expect(signals).toContain("SIGKILL");
+    });
+
     test("forceStop surfaces device temp-file cleanup failures", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       fakeFactory

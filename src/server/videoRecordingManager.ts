@@ -16,6 +16,7 @@ import {
   VideoRecorderService,
   parseVideoRecordingConfig,
   type ActiveVideoRecording,
+  type ForceStopOptions,
   type StartVideoRecordingOptions,
   type VideoCaptureBackend,
 } from "../features/video";
@@ -1305,7 +1306,10 @@ export async function startVideoRecording(
   }
 }
 
-export async function rollbackVideoRecordingStart(recordingId: string): Promise<void> {
+export async function rollbackVideoRecordingStart(
+  recordingId: string,
+  options?: ForceStopOptions,
+): Promise<void> {
   recordingDisplaySessions.get(recordingId)?.unsubscribe();
   recordingDisplaySessions.delete(recordingId);
   const { videoRecorderService, recordingRepository } = await getVideoRecordingDependencies();
@@ -1313,7 +1317,7 @@ export async function rollbackVideoRecordingStart(recordingId: string): Promise<
   const serviceOwnsRecording = videoRecorderService.listActiveRecordingIds().includes(recordingId);
   if (serviceOwnsRecording) {
     try {
-      await videoRecorderService.discardRecording(recordingId);
+      await videoRecorderService.discardRecording(recordingId, options);
     } catch (error) {
       if (videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
         throw error;

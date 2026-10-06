@@ -29,6 +29,11 @@ import {
   TEXT_MCP_REQUEST_HEADROOM_MS,
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
 } from "../features/action/textTransportTimeout";
+import * as yaml from "js-yaml";
+import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
+import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
 import type { DaemonRequest } from "./types";
 import {
   DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS,
@@ -88,6 +93,22 @@ export function clampCallerMcpRequestTimeoutMs(raw: unknown): number | undefined
  * `android/junit-runner/.../AutoMobilePlanTypes.kt`.
  */
 export const MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS = 600_000;
+
+/**
+ * Allowance added on top of a plan's summed step budgets for what runs outside any step: the
+ * plan's terminal result, cleanup and session release. Reuses the wait-budget headroom so the
+ * plan deadline tracks the same dispatch/report allowance every wait step already carries.
+ */
+export const EXECUTE_PLAN_BUDGET_HEADROOM_MS = WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
+
+/** `planContent` larger than this is not parsed on the request path; it saturates at the cap. */
+export const MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS = 1_000_000;
+
+/** Steps visited (nested `criticalSection` sub-steps included) before the budget saturates. */
+export const MAX_EXECUTE_PLAN_BUDGET_STEPS = 5_000;
+
+/** Nesting depth of `criticalSection` sub-steps visited before the budget saturates. */
+const MAX_EXECUTE_PLAN_BUDGET_DEPTH = 8;
 
 /**
  * Floor for device preparation — cold-booting an emulator can take 45-90s depending on
@@ -686,6 +707,146 @@ function resolveTextToolBudgetMs(
   );
 }
 
+/**
+ * The budget one plan step asks for, from the SAME resolution a standalone call gets: the
+ * argument-driven wait budget for tools that have one (`observe` waitFor, `barrier`,
+ * `criticalSection`, `explore`, `deviceSnapshot`, the file-push tools), otherwise the tool's own
+ * fixed floor, device-preparation budget or long-press budget (`installApp`, `launchApp`, ...).
+ * The generic 30 s default and `observe`'s cold-start floor are deliberately NOT counted: they
+ * are deadlines for ordinary calls, not waits the plan asks for, and counting them per step would
+ * stretch every plain plan to the global cap. Steps with no known budget contribute 0; the
+ * `executePlan` floor remains their safety net. A nested `executePlan` is not a plan step.
+ */
+function resolvePlanStepBudgetMs(tool: string, params: Record<string, unknown>): number {
+  if (tool === "executePlan") {
+    return 0;
+  }
+  const argumentResolver = ARGUMENT_BUDGET_RESOLVERS.get(tool);
+  if (argumentResolver) {
+    return argumentResolver(params);
+  }
+  const request: DaemonRequest = {
+    id: "plan-step",
+    type: "mcp_request",
+    method: "tools/call",
+    params: { name: tool, arguments: params },
+  };
+  return Math.max(
+    resolveToolTimeoutFloorMs(tool) ?? 0,
+    resolveDevicePreparationToolBudgetMs(request) ?? 0,
+    resolveTapOnLongPressBudgetMs(request) ?? 0,
+    resolveTapAnyLongPressBudgetMs(request) ?? 0,
+  );
+}
+
+interface PlanBudgetAccumulator {
+  /** Summed step budgets per execution track; sequential plans use the single "" track. */
+  readonly tracks: Map<string, number>;
+  stepsLeft: number;
+  /** A bound was hit, so the budget is unknown rather than small. */
+  saturated: boolean;
+}
+
+function addPlanStepBudgets(
+  steps: unknown,
+  multiDevice: boolean,
+  parentTrack: string | undefined,
+  accumulator: PlanBudgetAccumulator,
+  depth: number,
+): void {
+  if (!Array.isArray(steps)) {
+    return;
+  }
+  if (depth > MAX_EXECUTE_PLAN_BUDGET_DEPTH) {
+    accumulator.saturated = true;
+    return;
+  }
+  // Iterate the array, not an index range, but still stop at the visit bound: a
+  // sparse/huge array must cost O(bound), not O(length).
+  for (const raw of steps) {
+    if (accumulator.stepsLeft <= 0) {
+      accumulator.saturated = true;
+      return;
+    }
+    accumulator.stepsLeft -= 1;
+    const step = PlanNormalizer.toolAndParams(raw);
+    if (!step) {
+      continue;
+    }
+    // Multi-device plans run one parallel track per `params.device`; sub-steps of a
+    // criticalSection run serially on the section owner's device, so they stay on its track.
+    const track =
+      parentTrack ??
+      (multiDevice && typeof step.params.device === "string" ? step.params.device : "");
+    accumulator.tracks.set(
+      track,
+      (accumulator.tracks.get(track) ?? 0) + resolvePlanStepBudgetMs(step.tool, step.params),
+    );
+    if (step.tool === "criticalSection") {
+      addPlanStepBudgets(step.params.steps, multiDevice, track, accumulator, depth + 1);
+    }
+  }
+}
+
+function parsePlanContentForBudget(planContent: string): Record<string, unknown> | undefined {
+  try {
+    return asRecord(yaml.load(planContent, PLAN_YAML_LOAD_OPTIONS));
+  } catch (error) {
+    // Invalid YAML is surfaced by executePlan itself as a structured error; the request
+    // deadline just falls back to the floor.
+    logger.debug(`executePlan budget: plan content is not parseable YAML: ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+/**
+ * Deadline an `executePlan` call needs for its steps, or 0 when it cannot be derived. Steps run
+ * under the plan's inherited signal with no per-step transport deadline, so a plan whose steps
+ * ask for long waits must be budgeted as a whole (#9882). Sequential steps SUM; the per-device
+ * tracks of a multi-device plan run in parallel, so the longest track's sum applies (this does
+ * not model barrier synchronization, where a track also waits for the slowest peer). Pure and
+ * bounded: it never throws, and a plan too large to walk saturates at the global cap, where such
+ * a plan can still hit the transport timeout.
+ */
+function resolveExecutePlanStepsBudgetMs(planContent: unknown): number {
+  if (typeof planContent !== "string") {
+    return 0;
+  }
+  if (planContent.length > MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS) {
+    return MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+  }
+  const plan = parsePlanContentForBudget(planContent);
+  if (!plan) {
+    return 0;
+  }
+  const accumulator: PlanBudgetAccumulator = {
+    tracks: new Map(),
+    stepsLeft: MAX_EXECUTE_PLAN_BUDGET_STEPS,
+    saturated: false,
+  };
+  const multiDevice = Array.isArray(plan.devices) && plan.devices.length > 0;
+  addPlanStepBudgets(plan.steps, multiDevice, undefined, accumulator, 0);
+  if (accumulator.saturated) {
+    return MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+  }
+  const longestTrackMs = [...accumulator.tracks.values()].reduce(
+    (longest, track) => Math.max(longest, track),
+    0,
+  );
+  return Math.min(
+    longestTrackMs + EXECUTE_PLAN_BUDGET_HEADROOM_MS,
+    MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    MAX_SETTIMEOUT_DELAY_MS,
+  );
+}
+
+function resolveExecutePlanBudgetMs(request: DaemonRequest): number {
+  if (request.method !== "tools/call" || request.params?.name !== "executePlan") {
+    return 0;
+  }
+  return resolveExecutePlanStepsBudgetMs(asRecord(request.params?.arguments)?.planContent);
+}
+
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const base = clampCallerMcpRequestTimeoutMs(request.timeoutMs) ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS;
   const floor =
@@ -697,6 +858,7 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   return Math.max(
     base,
     resolveArgumentBudgetToolBudgetMs(request),
+    resolveExecutePlanBudgetMs(request),
     resolveTextToolBudgetMs(request, floor),
     floor ?? 0,
     devicePreparationBudget ?? 0,

@@ -59,6 +59,8 @@ class WebSocketServer(
   private val sendTimeoutMs: Long = OUTBOUND_SEND_TIMEOUT_MS,
   /** Non-blocking queue cleanup, invoked after ownership removal outside the connections lock. */
   private val onClientDisconnected: (ConnectedClient) -> Unit = {},
+  /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
+  private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -399,12 +401,18 @@ class WebSocketServer(
     disconnectClient(client, "Connection closed", CloseReason.Codes.NORMAL)
   }
 
+  private data class DisconnectSnapshot(
+    val discarded: Int,
+    val remaining: Int,
+    val observerSession: Int,
+  )
+
   private fun disconnectClient(
     client: ConnectedClient,
     reason: String,
     code: CloseReason.Codes = CloseReason.Codes.TRY_AGAIN_LATER,
   ) {
-    val discarded =
+    val snapshot =
       synchronized(connections) {
         if (!connections.remove(client)) null
         else {
@@ -417,14 +425,15 @@ class WebSocketServer(
           client.pendingHierarchy = null
           client.outgoing.cancel()
           client.ready.cancel()
-          count
+          DisconnectSnapshot(count, connections.size, observerSessionGen)
         }
       }
-    if (discarded == null) return
+    if (snapshot == null) return
     onClientDisconnected(client)
+    onClientCountChanged(snapshot.remaining, snapshot.observerSession)
     Log.w(
       TAG,
-      "Disconnecting client #${client.id}: $reason; discarded $discarded queued frames; shed ${client.droppedCount} frames total",
+      "Disconnecting client #${client.id}: $reason; discarded ${snapshot.discarded} queued frames; shed ${client.droppedCount} frames total",
     )
     client.sender.cancel()
     scope.launch {

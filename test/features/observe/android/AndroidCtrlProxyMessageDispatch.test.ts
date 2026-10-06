@@ -180,6 +180,26 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     },
   );
 
+  test("a tap_coordinates_result reply, including a refusal, is marked acknowledged", async () => {
+    const pending = client.requestManager.register("tap-ack", "tap_coordinates", 1000, () => ({
+      success: false,
+    }));
+    await client.handleWebSocketMessage(
+      JSON.stringify({
+        type: "tap_coordinates_result",
+        requestId: "tap-ack",
+        success: false,
+        error: "Stale frame context for input/tap",
+        totalTimeMs: 2,
+      }),
+    );
+    expect(await pending).toMatchObject({
+      success: false,
+      error: "Stale frame context for input/tap",
+      acknowledged: true,
+    });
+  });
+
   test("resolves a pending settings response through the shared helper", async () => {
     const pending = client.requestManager.register("settings-1", "settings_get", 1000, () => ({
       success: false,

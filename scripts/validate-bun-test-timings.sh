@@ -197,6 +197,8 @@ changed_test_list="$recheck_dir/changed-test-files.txt"
 recheck_summary="$recheck_dir/summary.txt"
 recheck_verdict_file="$recheck_dir/verdict.txt"
 budget_summary="$recheck_dir/unit-timing-budget-summary.md"
+failure_list="$recheck_dir/failures.txt"
+failure_counts="$recheck_dir/failure-counts.txt"
 
 : > "$changed_test_list"
 for file in ${changed_test_files[@]+"${changed_test_files[@]}"}; do
@@ -401,6 +403,8 @@ awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
   -v limit_budget="$recheck_budget_seconds" \
   -v verdict_file="$recheck_verdict_file" \
+  -v failure_list="$failure_list" \
+  -v failure_counts="$failure_counts" \
   -v summary_file="$budget_summary" \
   -v identity_counts_file="$identity_counts" \
   -v recheck_file="$recheck_rows" \
@@ -410,7 +414,7 @@ awk -F"$field_sep" \
 BEGIN {
   printf "# Unit timing budget summary\n\nBudget: %dms; configured re-runs: %d\n", limit_ms, recheck_runs > summary_file
 }
-function record(verdict, measured_median,    values, count, sample_index, label_text) {
+function record(verdict, measured_median,    values, count, sample_index, label_text, safe_label, sample_text) {
   # HTML-escape the label so testcase text cannot become Markdown structure.
   label_text = label
   gsub(/&/, "\\&amp;", label_text)
@@ -418,11 +422,24 @@ function record(verdict, measured_median,    values, count, sample_index, label_
   gsub(/>/, "\\&gt;", label_text)
   printf "\n<pre>%s</pre>\n\n- First sample: %.2fms\n- Re-run samples: ", label_text, $4 > summary_file
   count = (key in samples) ? split(samples[key], values, ",") : 0
+  sample_text = ""
   for (sample_index = 1; sample_index <= count; sample_index += 1) {
     printf "%s%.2fms", (sample_index > 1 ? " / " : ""), values[sample_index] > summary_file
+    sample_text = sample_text (sample_index > 1 ? " / " : "") sprintf("%.2fms", values[sample_index])
   }
   if (!count) printf "none" > summary_file
   printf "\n- Completed samples: %d of %d\n- Median: %s\n- Verdict: %s\n", runs[key] + 0, recheck_runs, measured_median, verdict > summary_file
+  if (verdict ~ /^FAIL/) {
+    safe_label = label
+    gsub(/%/, "%25", safe_label)
+    gsub(sprintf("%c", 13), "%0D", safe_label)
+    gsub(sprintf("%c", 10), "%0A", safe_label)
+    printf "FAIL: %s | %s | first sample: %.2fms | re-run samples: %s | median: %s\n", \
+      safe_label, verdict, $4, (count ? sample_text : "none"), measured_median >> failure_list
+    failures++
+  } else {
+    cleared++
+  }
 }
 function median(key,    values, count, outer, inner, swap) {
   count = split(samples[key], values, ",")
@@ -486,6 +503,7 @@ FILENAME == recheck_file {
   if ($5 + 0 > 1) {
     label = label " #" $5
   }
+  if ((key in samples) || ($1 in unverified) || ($1 in rechecked)) rechecked_tests++
   if ($1 in unverified) {
     record("FAIL (could not verify within the recheck budget)", "not computed")
     printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms; file %s). Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.\n", limit_budget, label, $4, $1 > "/dev/stderr"
@@ -527,6 +545,10 @@ FILENAME == recheck_file {
 END {
   printf "\nOverall verdict: %s\n", (fail ? "FAIL" : "PASS") > summary_file
   print (fail ? 1 : 0) > verdict_file
+  if (fail) {
+    printf "FAIL: %d test(s)\n", failures >> failure_list
+    printf "Rechecked tests: %d\nCleared tests: %d\nFailing tests: %d\n", rechecked_tests, cleared, failures > failure_counts
+  }
 }
 ' "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
 
@@ -534,6 +556,13 @@ IFS= read -r recheck_verdict < "$recheck_verdict_file"
 # cat handles partial writes/EAGAIN; losing diagnostic stdout must not change
 # the budget verdict. Keep stderr diagnostics and processing failures visible.
 cat "$recheck_summary" || true
+if [[ "$recheck_verdict" -eq 1 ]]; then
+  {
+    printf '\n## Failing tests\n\n'
+    cat "$failure_list"
+    cat "$failure_counts"
+  } >> "$budget_summary" || true
+fi
 cat "$budget_summary" || true
 if [[ -n "${BUN_TEST_TIMING_REPORT_DIR:-}" && -d "$BUN_TEST_TIMING_REPORT_DIR" ]]; then
   cp "$budget_summary" "$BUN_TEST_TIMING_REPORT_DIR/unit-timing-budget-summary.md" || {
@@ -544,5 +573,17 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   cat "$budget_summary" >> "$GITHUB_STEP_SUMMARY" || {
     echo "Could not append unit timing summary to $GITHUB_STEP_SUMMARY." >&2
   }
+fi
+if [[ "$recheck_verdict" -eq 1 ]]; then
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    while IFS= read -r failure_line; do
+      if [[ "$failure_line" == FAIL:* && "$failure_line" != 'FAIL: '*test\(s\) ]]; then
+        printf '::error::%s\n' "$failure_line" >&2 || true
+      fi
+    done < "$failure_list"
+  fi
+  # stderr remains visible when CI stdout is non-blocking or has been closed.
+  printf '\nUnit timing budget failures:\n' >&2 || true
+  cat "$failure_list" "$failure_counts" >&2 || true
 fi
 exit "$recheck_verdict"

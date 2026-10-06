@@ -668,7 +668,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         [],
       );
       expect(
-        debug.mock.calls.filter(([message]) =>
+        warn.mock.calls.filter(([message]) =>
           String(message).includes("liveness ownership superseded"),
         ),
       ).toHaveLength(1);

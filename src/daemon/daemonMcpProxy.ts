@@ -136,6 +136,7 @@ export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMis
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
+const CLI_LIVENESS_RELEASE_TIMEOUT_MS = 200;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -3845,10 +3846,17 @@ export class DaemonMcpProxy {
         },
         { timeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS },
       );
-      await this.client.callDaemonMethod(
-        DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
-        { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
-        { timeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS },
+      await raceWithDeadline(
+        this.client.callDaemonMethod(
+          DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
+          { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
+          { timeoutMs: CLI_LIVENESS_RELEASE_TIMEOUT_MS },
+        ),
+        {
+          timer: this.timer,
+          timeoutMs: CLI_LIVENESS_RELEASE_TIMEOUT_MS,
+          label: "CLI liveness release",
+        },
       );
       return sessionUuid;
     } catch (error) {
@@ -3856,10 +3864,17 @@ export class DaemonMcpProxy {
       // caller's answer. A failed declaration only means the next invocation may
       // have to re-acquire, which is the pre-#6870 behaviour — never a reason to
       // fail the invocation that just ran.
-      logger.warn(
-        `[DaemonMcpProxy] CLI session liveness handoff failed: ${errorMessage(error)}`,
-        error,
-      );
+      if (isLivenessOwnerConflictError(error)) {
+        // A tool call on a proxy-owned session is valid; exit must leave that owner alone.
+        logger.debug(
+          `[DaemonMcpProxy] CLI session liveness handoff refused: ${errorMessage(error)}`,
+        );
+      } else {
+        logger.warn(
+          `[DaemonMcpProxy] CLI session liveness handoff failed: ${errorMessage(error)}`,
+          error,
+        );
+      }
       return undefined;
     }
   }
@@ -4590,11 +4605,14 @@ export class DaemonMcpProxy {
       "code" in error &&
       error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
     ) {
-      // Another claimant owns liveness now. Preserve the old successful no-op's
-      // local acknowledgement without fencing, reconnecting or re-claiming.
+      // #10115: a refusal proves transport reachability, not ownership. Do not
+      // fence or re-claim: that would undo a deliberate handoff. Report the loss
+      // visibly once; the local acknowledgement only prevents transport recovery.
       if (!this.livenessSupersessionLogged) {
         this.livenessSupersessionLogged = true;
-        logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded`);
+        logger.warn(
+          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded; this proxy no longer protects its deadline. Stop its keeper after handoff or explicitly claim with a fresh token.`,
+        );
       }
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
       return true;

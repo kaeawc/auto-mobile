@@ -207,8 +207,12 @@ no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
 guidance to re-claim or stop, instead of printing `heartbeat recorded`. There is
 no co-ownership.
 
-The proxy treats supersession as informational, logs it once at debug level,
-and continues without fencing, reconnecting or releasing the session. Only the
+The proxy treats supersession as an ownership refusal, warns once that it no
+longer protects the session's deadline, and continues without fencing,
+reconnecting, automatically re-claiming or releasing the session. The refusal
+acknowledges transport reachability only; it is not proof of liveness ownership.
+A deliberate handoff must stop the old keeper; an unintended loss requires an
+explicit claim (with a fresh token if another client has taken ownership). Only the
 current owner's ticks protect liveness: a proxy stall past the heartbeat timeout
 can therefore reap the session even while a displaced external keeper ticks.
 Legacy tokenless heartbeats after a token has claimed ownership remain
@@ -237,8 +241,9 @@ auto-mobile --daemon release-liveness-ownership S --liveness-owner-token T
 The equivalent daemon request takes `{ sessionId: S, livenessOwnerToken: T }`.
 Only the current token can release an owned session. A foreign token receives
 `liveness_owner_superseded`; an unknown or releasing session receives
-`daemon_session_not_found`. Repeating release on an unowned session succeeds
-with `alreadyUnowned: true` and changes nothing. A successful first release
+`daemon_session_not_found`. Repeating release with the releasing owner's token
+succeeds with `alreadyUnowned: true` and changes nothing. A never-owned session
+or a mismatched token returns `liveness_owner_superseded`. A successful first release
 returns `alreadyUnowned: false`. A failed persistence write fails the request
 and retains ownership.
 
@@ -246,11 +251,19 @@ After release, recurring ticks from the former owner are superseded and
 legacy tokenless ticks are no-ops. An explicit claim by any token (including a
 previously used token) may win while the session is unowned; after another token
 wins, the existing displaced-token fencing applies again. Release never resets
-the lease clock. Tool activity cannot extend the deliberately unowned window:
-without a claim, a heartbeat-policy session expires after its remaining lease
-plus the existing 10-second suspect grace as `heartbeat-timeout`; a CLI-idle
-session expires at its existing idle deadline as `cli-idle-timeout`, without
-additional grace. Existing active-execution and daemon-stall handling still apply.
+the lease clock. Released state, ownership proof and the existing heartbeat
+deadline survive daemon restart. Tool activity cannot extend a released
+heartbeat-policy session: it expires after its remaining lease and existing
+grace as `heartbeat-timeout`. An awaiting-owner session receives no extra grace.
+A released CLI-idle session keeps its usual activity-based idle window: every
+tool call restarts it, until an explicit claim switches it to heartbeat policy.
+It expires as `cli-idle-timeout`, without additional grace. Existing
+active-execution and daemon-stall handling still apply.
+
+The extra exit release round trip is bounded to 200 ms, including an
+unresponsive transport. Failure never changes the completed command's result.
+An expected conflict against a live proxy owner is logged at debug; unexpected
+handoff failures remain warnings.
 
 ### Supported liveness stack
 

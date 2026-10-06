@@ -6,11 +6,7 @@ import {
   type Session,
 } from "./sessionManager";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import {
-  effectiveLastHeartbeat,
-  ownerLeaseHeartbeat,
-  suspectGraceMsFor,
-} from "./livenessOwnerLease";
+import { sessionLeaseSnapshot, suspectGraceMsFor } from "./livenessOwnerLease";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -250,12 +246,10 @@ export class SessionHeartbeatMonitor {
   private staleReason(session: Session, now: number): SessionHeartbeatReleaseReason | undefined {
     const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
     // The daemon's own stall is never held against the owner (#10051).
-    const lastHeartbeat = session.livenessOwnershipReleased
-      ? ownerLeaseHeartbeat(session)
-      : effectiveLastHeartbeat({
-          lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt,
-          stallForgivenAt: session.stallForgivenAt,
-        });
+    const lastHeartbeat = sessionLeaseSnapshot(
+      { ...session, lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt },
+      now,
+    ).lastHeartbeat;
 
     // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
     // the 10 s heartbeat contract: the `--cli` process that owns it exits between

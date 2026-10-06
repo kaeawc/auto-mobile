@@ -27,6 +27,7 @@ import {
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
   type DeviceSessionPersistence,
+  type LivenessOwnershipRelease,
 } from "../db/deviceSessionRepository";
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -296,6 +297,8 @@ export interface Session {
   livenessOwnerToken?: string;
   /** Deliberately unowned; only an explicit claim can end the existing lease/grace window. */
   livenessOwnershipReleased?: boolean;
+  /** Former owner's proof and the unchanged lease deadline, persisted across restart. */
+  livenessOwnershipRelease?: LivenessOwnershipRelease;
   /**
    * Tokens whose explicit ownership claim this daemon has already processed.
    * A client may retry the same claim when its reply is lost; if a newer owner
@@ -2262,9 +2265,19 @@ export class SessionManager {
 
   private recoverySessionFields(
     persisted: DeviceSession | undefined,
-  ): Pick<
-    Session,
-    "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims" | "lastOwnerHeartbeat"
+  ): Partial<
+    Pick<
+      Session,
+      | "persistenceMetadata"
+      | "livenessOwnerToken"
+      | "livenessOwnershipClaims"
+      | "lastOwnerHeartbeat"
+      | "livenessOwnershipReleased"
+      | "livenessOwnershipRelease"
+      | "lastHeartbeat"
+      | "lastUsedAt"
+      | "expiresAt"
+    >
   > {
     if (!persisted) {
       return {};
@@ -2276,6 +2289,21 @@ export class SessionManager {
         mcpSessionId: persisted.mcp_session_id,
         daemonSessionId: persisted.daemon_session_id,
       },
+      ...(typeof persisted.liveness_released_by === "string" && !persisted.liveness_owner_token
+        ? {
+            livenessOwnerToken: undefined,
+            livenessOwnershipReleased: true,
+            livenessOwnershipRelease: {
+              releasedBy: persisted.liveness_released_by,
+              lastOwnerHeartbeat: persisted.liveness_released_heartbeat_ms!,
+              graceMs: persisted.liveness_released_grace_ms!,
+            },
+            lastOwnerHeartbeat: persisted.liveness_released_heartbeat_ms!,
+            lastHeartbeat: persisted.last_used_at_ms,
+            lastUsedAt: persisted.last_used_at_ms,
+            expiresAt: persisted.expires_at_ms,
+          }
+        : {}),
       ...(persisted.liveness_owner_token
         ? {
             livenessOwnerToken: persisted.liveness_owner_token,
@@ -5479,21 +5507,38 @@ export class SessionManager {
         return "not-found";
       }
       if (session.livenessOwnerToken === undefined) {
-        return "already-unowned";
+        return session.livenessOwnershipReleased &&
+          session.livenessOwnershipRelease?.releasedBy === ownerToken
+          ? "already-unowned"
+          : "superseded";
       }
       if (session.livenessOwnerToken !== ownerToken) {
         return "superseded";
       }
       const previouslyReleased = session.livenessOwnershipReleased;
+      const previousRelease = session.livenessOwnershipRelease;
+      const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+      const release = {
+        releasedBy: ownerToken,
+        lastOwnerHeartbeat:
+          session.ownership === "awaiting-owner"
+            ? (session.awaitingOwnerSince ?? ownerLeaseHeartbeat(session))
+            : ownerLeaseHeartbeat(session),
+        graceMs: suspectGraceMsFor(session),
+      };
       session.livenessOwnerToken = undefined;
       session.livenessOwnershipReleased = true;
+      session.livenessOwnershipRelease = release;
+      session.lastOwnerHeartbeat = release.lastOwnerHeartbeat;
       // Fence a failed older heartbeat write's activity rollback across this handoff.
       session.activityGeneration++;
       try {
-        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
+        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null, release);
       } catch (error) {
         session.livenessOwnerToken = ownerToken;
         session.livenessOwnershipReleased = previouslyReleased;
+        session.livenessOwnershipRelease = previousRelease;
+        session.lastOwnerHeartbeat = previousOwnerHeartbeat;
         throw error;
       }
       return "released";
@@ -5550,6 +5595,7 @@ export class SessionManager {
       throw error;
     }
     session.livenessOwnershipReleased = undefined;
+    session.livenessOwnershipRelease = undefined;
     return "claimed";
   }
 

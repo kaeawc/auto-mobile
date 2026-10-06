@@ -80,6 +80,35 @@ export function amStartReportedFailure(stdout: string, stderr: string): boolean 
   );
 }
 
+const ADB_FAILURE_CAUSE_DEPTH = 5;
+
+function outputText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return Buffer.isBuffer(value) ? value.toString() : "";
+}
+
+/**
+ * The command's own stdout/stderr carried by a rejected adb call, found by walking `cause`.
+ * `adb shell` propagates the remote exit status, so `am start` for a package that is not
+ * installed exits 1 and rejects the call: the text arrives on the error (the raw execFile
+ * error, wrapped by `wrapCommandError`), not in a resolved result. The error `message` is
+ * never read, because it echoes the command line and so the package name.
+ */
+export function adbFailureOutput(error: unknown): { stdout: string; stderr: string } {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < ADB_FAILURE_CAUSE_DEPTH && current instanceof Error; depth += 1) {
+    const streams = current as Error & { stdout?: unknown; stderr?: unknown };
+    stdout.push(outputText(streams.stdout));
+    stderr.push(outputText(streams.stderr));
+    current = current.cause;
+  }
+  return { stdout: stdout.join("\n"), stderr: stderr.join("\n") };
+}
+
 const PACKAGE_NOT_INSTALLED_ERROR = "App is not installed";
 
 /** Raised inside the launch action when a live read shows the package was removed (#10192). */
@@ -2096,7 +2125,13 @@ export class LaunchApp extends BaseVisualChange {
       logger.warn(
         `[LaunchApp] Intent launch failed: ${errorMessage(error)}, falling back to monkey`,
       );
-      return { success: false };
+      // A non-zero exit from `am start` rejects the call; classify am's own output, not the
+      // message, so a transport failure (no output of its own) is not read as an am error.
+      const output = adbFailureOutput(error);
+      return {
+        success: false,
+        amReportedError: amStartReportedFailure(output.stdout, output.stderr),
+      };
     }
   }
 

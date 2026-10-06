@@ -19,6 +19,7 @@ import {
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { getAndroidAppMetadataFromAdb } from "../../../src/features/observe/GetAppMetadata";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
@@ -2313,8 +2314,12 @@ describe("InstallApp", () => {
     const dumpsysCommand = `shell dumpsys package '${packageName}'`;
     const present = () => createExecResult(`package:${packageName}`);
     const absent = () => createExecResult("");
-    // The "before" snapshot is the captured fixture; the "after" snapshot only moves its
-    // lastUpdateTime, as a committed upgrade would.
+    // "Before" is a real capture (an API 36 `dumpsys package` of the playground app). "After" is
+    // DERIVED, not captured: no pair of captures taken either side of a committed upgrade exists,
+    // so it is the same text with only the lastUpdateTime line moved, which is the one field a
+    // committed upgrade of an unchanged versionCode changes. The sanity test below asserts on the
+    // parsed fields that the derivation changed exactly that and nothing else, so a fixture
+    // refresh that drops the line cannot turn this into a silent no-op.
     const dumpsysBefore = readFileSync(
       path.join(
         import.meta.dir,
@@ -2323,9 +2328,14 @@ describe("InstallApp", () => {
       "utf8",
     );
     const dumpsysAfter = dumpsysBefore.replace(
-      "lastUpdateTime=2026-10-03 17:28:08",
-      "lastUpdateTime=2026-10-06 09:15:42",
+      /lastUpdateTime=.*/,
+      "lastUpdateTime=2099-01-01 00:00:00",
     );
+    const parsedMetadata = async (dumpsys: string) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(dumpsysCommand, createExecResult(dumpsys));
+      return getAndroidAppMetadataFromAdb(adb, packageName);
+    };
     const timeoutError = () =>
       new AdbCommandTimeoutError(`Command timed out after 120000ms: adb -s x ${installCommand}`);
 
@@ -2394,6 +2404,22 @@ describe("InstallApp", () => {
       expect(fakeTimer.getSleepHistory()).toEqual([2_000, 2_000]);
       expect(repo.markStaleCalls).toBeGreaterThan(0);
       expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("the derived after-upgrade snapshot differs from the capture only in lastUpdateTime", async () => {
+      const before = await parsedMetadata(dumpsysBefore);
+      const after = await parsedMetadata(dumpsysAfter);
+
+      expect(before).not.toBeNull();
+      expect(after).not.toBeNull();
+      expect(before?.lastUpdateTime).toBeDefined();
+      expect(after?.lastUpdateTime).toBeDefined();
+      expect(after?.lastUpdateTime).not.toBe(before?.lastUpdateTime);
+      expect({ ...after, lastUpdateTime: undefined }).toEqual({
+        ...before,
+        lastUpdateTime: undefined,
+      });
+      expect(before?.buildNumber).toBe("1");
     });
 
     test("upgrade whose lastUpdateTime moved after the timeout is a success", async () => {

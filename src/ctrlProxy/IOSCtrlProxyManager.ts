@@ -23,6 +23,8 @@ import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";
 import { XcodebuildClient, type Xcodebuild } from "../utils/ios-cmdline-tools/XcodebuildClient";
 import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
 import { SimctlCommandTimeoutError } from "../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { resolveIosDeviceBackend } from "../utils/ios-cmdline-tools/IosDeviceBackend";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { exponentialBackoff } from "../utils/Backoff";
 import { ForcedRestartBudget } from "./ForcedRestartBudget";
@@ -1856,11 +1858,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.info(
         `[IOSCtrlProxy] Found legacy app ${IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID}, uninstalling`,
       );
-      await this.deviceAppManager.uninstallApp(
-        this.device.deviceId,
-        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
-        simulator,
-      );
+      await resolveIosDeviceBackend(this.device.deviceId, {
+        simctl: new SimCtlClient(
+          this.device,
+          (file, args) => this.processExecutor.executeCommand(file, args),
+          this.timer,
+        ),
+        deviceAppUninstaller: this.deviceAppManager,
+      }).uninstallApp(IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID, undefined, {
+        terminateFirst: false,
+      });
       logger.info(`[IOSCtrlProxy] Legacy app uninstalled`);
     } catch (error) {
       if (error instanceof SimctlCommandTimeoutError) {
@@ -3693,11 +3700,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         expectedHash,
       });
       try {
-        await this.deviceAppManager.uninstallApp(
-          this.device.deviceId,
-          IOSCtrlProxyManager.APP_BUNDLE_ID,
-          simulator,
-        );
+        await resolveIosDeviceBackend(this.device.deviceId, {
+          simctl: new SimCtlClient(
+            this.device,
+            (file, args) => this.processExecutor.executeCommand(file, args),
+            this.timer,
+          ),
+          deviceAppUninstaller: this.deviceAppManager,
+        }).uninstallApp(IOSCtrlProxyManager.APP_BUNDLE_ID, undefined, { terminateFirst: false });
         logger.info("[IOSCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
       } catch (error) {
         logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${errorMessage(error)}`);

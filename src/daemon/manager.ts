@@ -99,6 +99,10 @@ import {
 } from "./daemonFiles";
 import { recordProvesFormerSocketOwner } from "./incumbentOwnerGuard";
 import {
+  compareProcessGenerationTokens,
+  type ProcessGenerationTokenComparison,
+} from "./processGeneration";
+import {
   formatLockContent,
   parseLockContent,
   releaseExclusiveLock,
@@ -2152,8 +2156,12 @@ export class DaemonManager implements DaemonManagerLike {
     status: DaemonStatus,
     candidate: DaemonProcessRecord,
   ): boolean {
-    if (status.processGenerationToken !== undefined) {
-      return candidate.processGenerationToken === status.processGenerationToken;
+    const tokenVerdict = this.compareRecordedTokens(
+      status.processGenerationToken,
+      candidate.processGenerationToken,
+    );
+    if (tokenVerdict !== "incomparable") {
+      return tokenVerdict === "same";
     }
     const expectedStartedAt = status.processStartedAt ?? status.startedAt;
     return (
@@ -2168,11 +2176,12 @@ export class DaemonManager implements DaemonManagerLike {
     expected: DaemonProcessRecord,
     candidate: DaemonProcessRecord,
   ): boolean {
-    if (expected.processGenerationToken !== undefined) {
-      return (
-        expected.pid === candidate.pid &&
-        candidate.processGenerationToken === expected.processGenerationToken
-      );
+    const tokenVerdict = this.compareRecordedTokens(
+      expected.processGenerationToken,
+      candidate.processGenerationToken,
+    );
+    if (tokenVerdict !== "incomparable") {
+      return expected.pid === candidate.pid && tokenVerdict === "same";
     }
     return (
       expected.pid === candidate.pid &&
@@ -2183,6 +2192,25 @@ export class DaemonManager implements DaemonManagerLike {
     );
   }
 
+  /**
+   * Verdict of a recorded token against an observed one. "incomparable" means
+   * the legacy birth-time rule applies: no recorded token at all, or tokens from
+   * different schemes (a record written by an older build against a token this
+   * build read; see `compareProcessGenerationTokens`). A recorded token with no
+   * observed token is "different": the token-bearing process must be proven.
+   */
+  private compareRecordedTokens(
+    recorded: string | undefined,
+    observed: string | undefined,
+  ): ProcessGenerationTokenComparison {
+    if (recorded === undefined) {
+      return "incomparable";
+    }
+    return observed === undefined
+      ? "different"
+      : compareProcessGenerationTokens(recorded, observed);
+  }
+
   private isConfirmedDifferentDaemonGeneration(
     expected: DaemonProcessRecord,
     candidate: DaemonProcessRecord,
@@ -2191,9 +2219,14 @@ export class DaemonManager implements DaemonManagerLike {
       return false;
     }
     if (expected.processGenerationToken !== undefined) {
+      // Only a token from the same comparable scheme can prove a different
+      // generation; an unreadable or older-scheme token is never proof.
       return (
         candidate.processGenerationToken !== undefined &&
-        candidate.processGenerationToken !== expected.processGenerationToken
+        compareProcessGenerationTokens(
+          expected.processGenerationToken,
+          candidate.processGenerationToken,
+        ) === "different"
       );
     }
     return (

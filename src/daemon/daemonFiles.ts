@@ -11,6 +11,7 @@ import {
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import {
+  compareProcessGenerationTokens,
   readDarwinProcessGenerationToken,
   readLinuxProcessGenerationToken,
 } from "./processGeneration";
@@ -661,7 +662,9 @@ export function readProcessGenerationTokenForPid(pid: number): string | undefine
  * PID is proof. Every uncertain input (no recorded token, no readable live
  * token, a reader failure, a record carrying only a wall-clock birth time)
  * returns false so the caller keeps treating the PID as the recorded process;
- * this never decides "dead" on a guess. Shared by peer-liveness discovery, the
+ * this never decides "dead" on a guess. Tokens from different schemes (for
+ * example a record written by an older build) are not comparable and so are
+ * never proof either. Shared by peer-liveness discovery, the
  * daemon manager's start/stop bookkeeping and the bind guard's incumbent check
  * (issue #10108).
  */
@@ -680,7 +683,10 @@ export function isConfirmedRecycledProcess(
   }
   try {
     const currentToken = readProcessGenerationToken(pid);
-    return typeof currentToken === "string" && currentToken !== recordedToken;
+    return (
+      typeof currentToken === "string" &&
+      compareProcessGenerationTokens(recordedToken, currentToken) === "different"
+    );
   } catch (error) {
     logger.warn(
       `Failed to read process generation token for live PID ${pid} from ${source}: ${error}`,

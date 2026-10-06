@@ -2983,67 +2983,51 @@ describe("Daemon manager process detection", () => {
         pid: 20,
         ppid: 1,
         command: "bun /repo/src/index.ts --daemon-mode",
-        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
-        processGenerationToken: `darwin:${lstart}`,
+        startedAt: Date.UTC(2026, 8, 13, 10, 57, 4),
+        processGenerationToken: `darwin-utc:${lstart}`,
       },
       {
         pid: 21,
         ppid: 1,
         command: "bun /tmp/node_modules/@kaeawc/auto-mobile/dist/src/index.js --daemon-mode",
-        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
-        processGenerationToken: `darwin:${lstart}`,
+        startedAt: Date.UTC(2026, 8, 13, 10, 57, 4),
+        processGenerationToken: `darwin-utc:${lstart}`,
       },
       {
         pid: 22,
         ppid: 1,
         command:
           "/opt/homebrew/opt/bun/bin/bun /opt/homebrew/Cellar/auto-mobile/0.0.73/libexec/dist/src/index.js --daemon-mode",
-        startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime(),
-        processGenerationToken: `darwin:${lstart}`,
+        startedAt: Date.UTC(2026, 8, 13, 10, 57, 4),
+        processGenerationToken: `darwin-utc:${lstart}`,
       },
     ]);
   });
 
-  test("retains Darwin's raw lstart token through the repeated DST fall-back hour", () => {
+  test("retains Darwin's raw lstart token through the hour that repeats in US local time", () => {
     const lstart = "Sun Nov 1 01:30:00 2026";
     const record = parseDarwinDaemonProcessTable(
       `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
     )[0]!;
 
     expect(record.processGenerationToken).toBe(darwinProcessGenerationToken(lstart));
-    expect(record.processGenerationToken).toBe(`darwin:${lstart}`);
+    expect(record.processGenerationToken).toBe(`darwin-utc:${lstart}`);
   });
 
-  test.skipIf(process.platform === "win32")(
-    "pins Darwin local Date resolution during the repeated DST fall-back hour",
-    () => {
-      const originalTimezone = process.env.TZ;
-      try {
-        process.env.TZ = "America/Los_Angeles";
-        const timezoneOffset = new Date(2026, 10, 1, 1, 30, 0).getTimezoneOffset();
-        if (timezoneOffset !== 420 && timezoneOffset !== 480) {
-          // This runtime ignored the TZ override, so Date cannot resolve the pinned local time reliably.
-          return;
-        }
-        const lstart = "Sun Nov 1 01:30:00 2026";
-        const record = parseDarwinDaemonProcessTable(
-          `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
-        )[0]!;
+  test("resolves the scan's UTC lstart to one epoch, independent of the reader's zone", () => {
+    // The scan pins TZ=UTC, so lstart is UTC wall time: no repeated fall-back
+    // hour and no dependence on this process's own zone.
+    const lstart = "Sun Nov 1 01:30:00 2026";
+    const record = parseDarwinDaemonProcessTable(
+      `20 1 ${lstart} bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode`,
+    )[0]!;
 
-        expect(record.startedAt).toBe(1_793_521_800_000);
-      } finally {
-        if (originalTimezone === undefined) {
-          delete process.env.TZ;
-        } else {
-          process.env.TZ = originalTimezone;
-        }
-      }
-    },
-  );
+    expect(record.startedAt).toBe(Date.UTC(2026, 10, 1, 1, 30, 0));
+  });
 
   test.each([
     ["linux", "ps -eo pid=,ppid=,etimes=,command="],
-    ["darwin", "LC_ALL=C ps -axo pid=,ppid=,lstart=,command="],
+    ["darwin", "LC_ALL=C TZ=UTC ps -axo pid=,ppid=,lstart=,command="],
   ] as const)(
     "uses the %s process table command with an expanded buffer and bounded timeout",
     (platform, command) => {
@@ -3069,11 +3053,9 @@ describe("Daemon manager process detection", () => {
           pid: 20,
           ppid: 1,
           command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+          ...(platform === "darwin" ? { startedAt: Date.UTC(2026, 8, 13, 10, 57, 4) } : {}),
           ...(platform === "darwin"
-            ? { startedAt: new Date(2026, 8, 13, 10, 57, 4).getTime() }
-            : {}),
-          ...(platform === "darwin"
-            ? { processGenerationToken: "darwin:Sun Sep 13 10:57:04 2026" }
+            ? { processGenerationToken: "darwin-utc:Sun Sep 13 10:57:04 2026" }
             : {}),
           ...(platform === "linux" ? { processGenerationToken: linuxProcessGenerationToken } : {}),
         },

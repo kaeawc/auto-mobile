@@ -19,8 +19,10 @@ import {
 } from "../../src/daemon/constants";
 import type { DaemonStatus, PidFileData } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
+import { darwinProcessGenerationToken } from "../../src/daemon/processGeneration";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { LSTART_AMERICA_CHICAGO, LSTART_UTC, legacyLocalToken } from "./psLstartFixtures";
 
 class NamespaceProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   records: DaemonProcessRecord[] = [];
@@ -672,5 +674,50 @@ describe("--daemon stop keeping a dead record x the unit-test launch-log guard (
     expect(h.signals).toEqual([]);
     expect(existsSync(h.pidPath)).toBe(true);
     expect(launchLogs()).toEqual([]);
+  });
+});
+
+describe("a LIVE daemon whose record carries a token from an older scheme (issue #10116 review B1)", () => {
+  // An older build wrote `darwin:<local wall time>`; this build reads the same
+  // live process as `darwin-utc:<UTC wall time>`. The strings can never match,
+  // and that mismatch must not be read as "the daemon died".
+  const OLD_BUILD_TOKEN = legacyLocalToken(LSTART_AMERICA_CHICAGO);
+  const LIVE_TOKEN = darwinProcessGenerationToken(LSTART_UTC)!;
+
+  function liveWithOldRecord(h: ReturnType<typeof harness>): void {
+    h.addOwn(false);
+    h.identity.owner = { running: false };
+    h.identity.record!.processGenerationToken = OLD_BUILD_TOKEN;
+    h.processes.tokens.set(201, LIVE_TOKEN);
+    writeFileSync(h.pidPath, JSON.stringify(h.identity.record));
+  }
+
+  test("status still reports the daemon running", async () => {
+    const h = harness();
+    liveWithOldRecord(h);
+
+    await expect(h.manager.status(false)).resolves.toMatchObject({ running: true, pid: 201 });
+  });
+
+  test("stop of an observed generation refuses and keeps the record", async () => {
+    const h = harness();
+    liveWithOldRecord(h);
+    const observed: DaemonStatus = { ...h.identity.record!, running: true };
+
+    await expect(h.manager.stop(undefined, observed)).rejects.toThrow();
+
+    expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(true);
+  });
+
+  test("start refuses instead of treating the daemon as exited", async () => {
+    const h = harness();
+    liveWithOldRecord(h);
+
+    await expect(h.manager.start()).rejects.toThrow();
+
+    expect(h.calls).toHaveLength(0);
+    expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(true);
   });
 });

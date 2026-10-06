@@ -4,6 +4,21 @@ import { runDaemonProcessCommand, type DaemonProcessCommandRunner } from "./Daem
 import type { DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 
 const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
+/**
+ * Darwin token prefix for `ps lstart` rendered with the time zone pinned to UTC.
+ * The earlier `darwin:` prefix carried the reader's LOCAL wall time, so the same
+ * live process printed a different string under a different `TZ`. Tokens from
+ * the two schemes are never comparable (see `compareProcessGenerationTokens`).
+ */
+const DARWIN_PROCESS_GENERATION_PREFIX = "darwin-utc";
+/** The retired, time-zone-dependent Darwin prefix: never proof of anything. */
+const LEGACY_DARWIN_PROCESS_GENERATION_PREFIX = "darwin";
+/**
+ * Environment every Darwin `ps lstart` read must run under. `lstart` is local
+ * wall time, so TZ is pinned for stability across daemon and CLI environments,
+ * and LC_ALL pins the month/day names to the C locale.
+ */
+export const DARWIN_PS_LSTART_ENV = { LC_ALL: "C", TZ: "UTC" } as const;
 const CURRENT_PROCESS_GENERATION_CAPTURE_TIMEOUT_MS = 1_000;
 const LEGACY_DAEMON_GENERATION_FIELDS = [
   "pid",
@@ -39,10 +54,44 @@ export function daemonGenerationMatches(
   );
 }
 
-/** Canonicalizes Darwin's locale-independent `ps lstart` representation. */
+/**
+ * Canonicalizes Darwin's `ps lstart` representation. The input MUST come from a
+ * `ps` run under `DARWIN_PS_LSTART_ENV`; the token is only stable across
+ * readers when the zone was pinned.
+ */
 export function darwinProcessGenerationToken(lstart: string): string | undefined {
   const normalized = lstart.trim().replace(/\s+/g, " ");
-  return normalized.length > 0 ? `darwin:${normalized}` : undefined;
+  return normalized.length > 0 ? `${DARWIN_PROCESS_GENERATION_PREFIX}:${normalized}` : undefined;
+}
+
+export type ProcessGenerationTokenComparison = "same" | "different" | "incomparable";
+
+/** The scheme prefix (text before the first colon); an unprefixed token has "". */
+function processGenerationTokenPrefix(token: string): string {
+  const colon = token.indexOf(":");
+  return colon < 0 ? "" : token.slice(0, colon);
+}
+
+/**
+ * Whether two tokens name the same process generation. Equal strings are the
+ * same. Unequal strings are only PROOF of different generations when both come
+ * from one comparable scheme: tokens with different prefixes (including a
+ * record written by an older build against a token read by this one) and the
+ * retired time-zone-dependent `darwin:` scheme are "incomparable", which every
+ * caller must treat as "cannot tell" and so keep trusting the recorded process.
+ */
+export function compareProcessGenerationTokens(
+  recorded: string,
+  current: string,
+): ProcessGenerationTokenComparison {
+  if (recorded === current) {
+    return "same";
+  }
+  const prefix = processGenerationTokenPrefix(recorded);
+  return prefix === processGenerationTokenPrefix(current) &&
+    prefix !== LEGACY_DARWIN_PROCESS_GENERATION_PREFIX
+    ? "different"
+    : "incomparable";
 }
 
 /**
@@ -93,9 +142,10 @@ export function createLinuxProcessGenerationTokenReader(
 export const readLinuxProcessGenerationToken = createLinuxProcessGenerationTokenReader();
 
 /**
- * Reads only the current Darwin process's `lstart` value, instead of scanning
- * the process table. The C locale preserves the same canonical format used by
- * DaemonManager's full-table recovery scan.
+ * Reads only one Darwin process's `lstart` value, instead of scanning the
+ * process table. The pinned C locale and UTC zone preserve the same canonical
+ * format used by DaemonManager's full-table recovery scan, independent of the
+ * reader's `TZ`.
  */
 export function readDarwinProcessGenerationToken(
   pid: number,
@@ -105,7 +155,7 @@ export function readDarwinProcessGenerationToken(
     return darwinProcessGenerationToken(
       runCommand("ps", ["-p", String(pid), "-o", "lstart="], {
         timeout: CURRENT_PROCESS_GENERATION_CAPTURE_TIMEOUT_MS,
-        env: { ...process.env, LC_ALL: "C" },
+        env: { ...process.env, ...DARWIN_PS_LSTART_ENV },
       }),
     );
   } catch (error) {

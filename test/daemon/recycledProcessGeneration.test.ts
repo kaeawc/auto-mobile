@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { isConfirmedRecycledProcess } from "../../src/daemon/daemonFiles";
+import { darwinProcessGenerationToken } from "../../src/daemon/processGeneration";
 import { PsDaemonProcessFinder } from "../../src/daemon/processTable";
+import {
+  LSTART_AMERICA_CHICAGO,
+  LSTART_ASIA_TOKYO,
+  LSTART_UTC,
+  legacyLocalToken,
+} from "./psLstartFixtures";
+
+// One real process, printed by `ps` under three zones (see psLstartFixtures.ts).
+const UTC_TOKEN = darwinProcessGenerationToken(LSTART_UTC)!;
+const LOCAL_TOKEN = legacyLocalToken(LSTART_AMERICA_CHICAGO);
+const TOKYO_LOCAL_TOKEN = legacyLocalToken(LSTART_ASIA_TOKYO);
 
 /**
  * A PID record is proof its daemon exited only when its recorded generation
@@ -17,6 +29,50 @@ describe("isConfirmedRecycledProcess (issue #10108)", () => {
         "test",
       ),
     ).toBe(true);
+  });
+
+  test("a different current-scheme darwin token is proof of recycling", () => {
+    expect(
+      isConfirmedRecycledProcess(
+        10,
+        { processGenerationToken: UTC_TOKEN },
+        () => "darwin-utc:Tue Oct 6 09:30:00 2026",
+        "test",
+      ),
+    ).toBe(true);
+  });
+
+  test("a record written by an older build is never judged recycled (live token in the new scheme)", () => {
+    expect(
+      isConfirmedRecycledProcess(
+        10,
+        { processGenerationToken: LOCAL_TOKEN },
+        () => UTC_TOKEN,
+        "test",
+      ),
+    ).toBe(false);
+  });
+
+  test("a current-scheme record is never judged recycled against an old-scheme live token", () => {
+    expect(
+      isConfirmedRecycledProcess(
+        10,
+        { processGenerationToken: UTC_TOKEN },
+        () => LOCAL_TOKEN,
+        "test",
+      ),
+    ).toBe(false);
+  });
+
+  test("two different legacy darwin tokens are never proof (they depend on the zone)", () => {
+    expect(
+      isConfirmedRecycledProcess(
+        10,
+        { processGenerationToken: LOCAL_TOKEN },
+        () => TOKYO_LOCAL_TOKEN,
+        "test",
+      ),
+    ).toBe(false);
   });
 
   test("the same live token is the recorded process", () => {

@@ -11,7 +11,7 @@ import * as telemetryPushSocketServer from "../../src/daemon/telemetryPushSocket
 import * as testRecordingSocketServer from "../../src/daemon/testRecordingSocketServer";
 import * as videoRecordingSocketServer from "../../src/daemon/videoRecordingSocketServer";
 import * as videoStreamSocketServer from "../../src/daemon/videoStreamSocketServer";
-import * as webRtcStreamSocketServer from "../../src/daemon/webRtcStreamSocketServer";
+import * as webRtcStreamSocketServer from "../../src/daemon/webrtcStreamSocketServer";
 const cases = [
   {
     name: "Appearance",

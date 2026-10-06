@@ -1,10 +1,25 @@
 import { expect, test } from "bun:test";
-import { resolveVideoStreamDevice } from "../../src/daemon/videoStreamSocketServer";
+import {
+  resolveVideoStreamDevice,
+  validateCaptureHints,
+} from "../../src/daemon/videoStreamSocketServer";
 import type { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const android: BootedDevice = { deviceId: "android", name: "Android", platform: "android" };
 const ios: BootedDevice = { deviceId: "ios", name: "iOS", platform: "ios" };
+
+for (const platform of [undefined, "android", "ios"] as const) {
+  test(`video subscribe accepts ${platform ?? "an absent"} platform`, () => {
+    expect(validateCaptureHints({ action: "subscribe", platform })).toBeNull();
+  });
+}
+
+for (const platform of ["", null, "windows", 5] as const) {
+  test(`video subscribe rejects malformed platform ${JSON.stringify(platform)}`, () => {
+    expect(validateCaptureHints({ action: "subscribe", platform })).toContain("Invalid platform");
+  });
+}
 
 for (const platform of ["android", "ios"] as const) {
   test(`video discovery scopes to ${platform}`, async () => {

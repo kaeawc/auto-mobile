@@ -269,13 +269,22 @@ function validateSize(size: VideoStreamSocketRequest["size"]): string | null {
  * first invalid field or null when all hints are usable. TypeScript's wire types are erased at
  * runtime, so this is the only thing standing between a malformed hint and the encoder argv.
  */
-export function validateCaptureHints(request: VideoStreamSocketRequest): string | null {
+export function validateCaptureHints(
+  request: Omit<VideoStreamSocketRequest, "platform"> & { platform?: unknown },
+): string | null {
   return (
+    validatePlatform(request.platform) ??
     validateQuality(request.quality) ??
     validateFps(request.fps) ??
     validateBitrate(request.bitrateKbps) ??
     validateSize(request.size)
   );
+}
+
+function validatePlatform(platform: unknown): string | null {
+  return platform === undefined || platform === "android" || platform === "ios"
+    ? null
+    : `Invalid platform ${JSON.stringify(platform)}; expected "android" or "ios".`;
 }
 
 function subscribeFailureResponse(

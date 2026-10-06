@@ -965,6 +965,13 @@ modifiers on semantic keys:
 }
 ```
 
+On Android, starting the server or daemon with `--dismiss-keyboard-after-input`
+(the JUnit runner's `automobile.daemon.dismiss.keyboard.after.input`) closes the
+soft keyboard once after a `sendKeys` call whose commands all succeeded and entered
+text, through the same state-checked close as the `keyboard` tool. A failed close adds a
+warning and never fails the call; failed or indeterminate calls, iOS, and calls
+routed to an explicit `display` are left alone.
+
 `sendKeys.container` accepts the same nested chain: the outermost scope resolves
 first, then each inner container and the field resolve among strict descendants
 of their immediate scope, across anonymous wrappers. Each container may specify

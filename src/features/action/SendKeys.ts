@@ -19,6 +19,7 @@ import {
   deferTerminalScreenshot,
 } from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
+import { serverConfig } from "../../utils/ServerConfig";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -306,6 +307,11 @@ export interface SendKeysDependencies {
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
   keyboard?: SendKeysKeyboard;
+  /**
+   * Whether to close the soft keyboard after a successful text entry (`--dismiss-keyboard-after-input`,
+   * #10221). Defaults to the server option.
+   */
+  dismissKeyboardAfterInput?: () => boolean;
   observer?: SendKeysObserver;
   timestampProvider?: SendKeysTimestampProvider;
   timer?: Timer;
@@ -2683,6 +2689,7 @@ export class SendKeys {
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
   private readonly keyboard?: SendKeysKeyboard;
+  private readonly dismissKeyboardAfterInput: () => boolean;
   private readonly observer: SendKeysObserver;
   private readonly timestampProvider: SendKeysTimestampProvider;
   private readonly timer: Timer;
@@ -2696,6 +2703,9 @@ export class SendKeys {
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
     this.keyboard = dependencies.keyboard;
+    this.dismissKeyboardAfterInput =
+      dependencies.dismissKeyboardAfterInput ??
+      (() => serverConfig.isDismissKeyboardAfterInputEnabled());
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.displayTransitionReader = dependencies.displayTransitions ?? displayTransitions;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
@@ -3012,6 +3022,7 @@ export class SendKeys {
       return this.buildResult(execution.results, execution.failure);
     }
     signal?.throwIfAborted();
+    await this.dismissKeyboardAfterTextEntry(execution, signal, routing);
     const observation = await observe(actionStartTimestamp);
     return this.buildResult(execution.results, execution.failure, observation);
   }
@@ -3055,6 +3066,73 @@ export class SendKeys {
       }
     }
     return undefined;
+  }
+
+  /**
+   * `--dismiss-keyboard-after-input`: the `inputText` tool closed the soft keyboard after every
+   * entry until `sendKeys` replaced it and stopped reading the option (#10221). It exists for CI
+   * emulators where an open keyboard covers the next tap target.
+   *
+   * Runs once, after the whole sequence succeeded and before the final observation, so a sequence
+   * that types, moves to the next field and types again keeps its keyboard. Skipped on iOS (the
+   * option was always Android-only), after a failure or indeterminate outcome (the caller must not
+   * be told more than the entry reported), when no command entered text, and on an explicitly
+   * routed display (`Keyboard.close` cannot target one). It reuses the state-checked keyboard
+   * close, so an already-hidden keyboard is left alone and a raw Back is never sent blind. A failed
+   * close is a warning on the last text entry, never a failure of the entry.
+   */
+  private async dismissKeyboardAfterTextEntry(
+    execution: { results: SendKeysCommandResult[]; failure?: SendKeysFailure },
+    signal: AbortSignal | undefined,
+    routing: SendKeysRouting,
+  ): Promise<void> {
+    if (
+      execution.failure ||
+      this.device.platform !== "android" ||
+      !this.dismissKeyboardAfterInput()
+    ) {
+      return;
+    }
+    const lastEntry = execution.results.findLast(
+      (result) => result.action === "type" && result.success,
+    );
+    if (!lastEntry) {
+      return;
+    }
+    if (routing.display !== undefined) {
+      this.addCommandWarning(
+        lastEntry,
+        "keyboard dismissal skipped: it cannot target an explicitly routed display.",
+      );
+      return;
+    }
+    signal?.throwIfAborted();
+    const cause = await this.closeKeyboardBestEffort(signal);
+    signal?.throwIfAborted();
+    if (cause !== undefined) {
+      this.addCommandWarning(lastEntry, `keyboard dismissal failed: ${cause}`);
+    }
+  }
+
+  /** The reason the keyboard could not be closed, or undefined once it is (or already was) closed. */
+  private async closeKeyboardBestEffort(signal?: AbortSignal): Promise<string | undefined> {
+    const keyboard =
+      this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer);
+    try {
+      const closed = await keyboard.execute("close", signal);
+      return closed.success ? undefined : (closed.error ?? "unknown error");
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[SendKeys] Keyboard dismissal after input failed: ${errorMessage(error)}`,
+        error,
+      );
+      return errorMessage(error);
+    }
+  }
+
+  private addCommandWarning(result: SendKeysCommandResult, warning: string): void {
+    result.warning = result.warning ? `${result.warning} ${warning}` : warning;
   }
 
   private async focusTarget(

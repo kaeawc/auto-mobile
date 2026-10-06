@@ -3910,7 +3910,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -4006,7 +4006,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -9766,7 +9766,7 @@
                       }
                     },
                     "occluded": {
-                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                       "type": "boolean",
                       "const": true
                     },
@@ -9861,7 +9861,7 @@
                       }
                     },
                     "occluded": {
-                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                       "type": "boolean",
                       "const": true
                     },
@@ -11551,7 +11551,7 @@
                 }
               },
               "occluded": {
-                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                 "type": "boolean",
                 "const": true
               },
@@ -11647,7 +11647,7 @@
                 }
               },
               "occluded": {
-                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                 "type": "boolean",
                 "const": true
               },
@@ -16436,7 +16436,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -16532,7 +16532,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -21257,7 +21257,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -21353,7 +21353,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -28585,7 +28585,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -28681,7 +28681,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -32261,7 +32261,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -32357,7 +32357,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },

@@ -31,3 +31,4 @@ Node Host Integration Tests*|*WATCHDOG: integration test exceeded*toolRegistry.c
 iOS Device Capture to WHEP|*did not recover to a fresh IDR*|RERUN-DONT-FIX|macos-26 capture stall after healthy connect; advisory PR job, no longer runs on main since #8583; #7222
 *|*dependabot*sharp*sharp: could not load the sharp module*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
 *|*dependabot*sharp*sharp native matrix is incoherent*|KNOWN-NONFIX|pinned sharp/jimp graph rejects the bump by design; close or ignore the Dependabot PR, do not patch code
+*|*the runner has received a shutdown signal*|RERUN-DONT-FIX|hosted runner shut down mid-job (exit 143), infrastructure failure unrelated to the change; rerun the job (gh refuses --failed until the whole run finishes); #10015

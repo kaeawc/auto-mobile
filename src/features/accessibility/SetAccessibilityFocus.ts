@@ -128,24 +128,38 @@ export class SetAccessibilityFocus {
       return { success: false, error: message };
     }
 
-    // Confirm the cursor moved (best-effort; never fail the operation on a read
-    // error). `confirmed` records whether the read-back actually succeeded so
-    // callers can distinguish "focused, couldn't confirm" from "didn't focus"
-    // (#3922).
-    let focusedElement: Element | undefined;
-    let confirmed = false;
-    try {
-      const focus = await service.requestCurrentFocus();
-      focusedElement = focus.focusedElement ?? undefined;
-      confirmed = true;
-    } catch (error) {
-      logger.warn(`[accessibilityFocus] Failed to read current focus after ${action}: ${error}`);
-    }
-
+    const { focusedElement, readError } = await this.readBackFocus(service, action);
+    const confirmed = readError === undefined;
     const warning = confirmed
       ? undefined
-      : `Focus ${action} was dispatched but the resulting focus state could not be read back to confirm it.`;
+      : `Focus ${action} was acknowledged by the accessibility service but the resulting focus state could not be read back to confirm it (${readError}).`;
     return { success: true, focusedElement, confirmed, warning };
+  }
+
+  /**
+   * Confirm the cursor moved (best-effort; never fail the operation on a read
+   * error). The production client never throws from `requestCurrentFocus`: a
+   * missing connection, timeout or send failure resolves with `error` set, so an
+   * error result is treated exactly like a thrown read. `readError` is set iff
+   * the read-back was not confirmed, letting callers distinguish "focused,
+   * couldn't confirm" from "didn't focus" (#3922, #10036).
+   */
+  private async readBackFocus(
+    service: AccessibilityFocusService,
+    action: string,
+  ): Promise<{ focusedElement?: Element; readError?: string }> {
+    try {
+      const focus = await service.requestCurrentFocus();
+      if (focus.error) {
+        logger.warn(`[accessibilityFocus] Focus read-back after ${action} failed: ${focus.error}`);
+        return { readError: focus.error };
+      }
+      return { focusedElement: focus.focusedElement ?? undefined };
+    } catch (error) {
+      const message = errorMessage(error);
+      logger.warn(`[accessibilityFocus] Failed to read current focus after ${action}: ${message}`);
+      return { readError: message };
+    }
   }
 
   /** Resolve observed identity locally; only a unique real native ID crosses the service boundary. */

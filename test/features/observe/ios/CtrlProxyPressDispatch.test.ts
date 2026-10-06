@@ -25,6 +25,20 @@ interface PressCase {
 
 const cases: PressCase[] = [
   {
+    name: "coordinate tap",
+    request: (h, s, d) =>
+      new CtrlProxyGestures(h.context).requestTapCoordinates(
+        1,
+        2,
+        50,
+        50,
+        undefined,
+        undefined,
+        s,
+        d,
+      ),
+  },
+  {
     name: "home",
     home: true,
     request: (h, s, d) =>
@@ -65,6 +79,23 @@ const cases: PressCase[] = [
         undefined,
         10,
         s,
+        d,
+      ),
+  },
+  {
+    name: "pinch",
+    request: (h, s, d) =>
+      new CtrlProxyGestures(h.context).requestPinchWithDispatch(
+        {
+          centerX: 100,
+          centerY: 200,
+          distanceStart: 40,
+          distanceEnd: 120,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 50,
+          signal: s,
+        },
         d,
       ),
   },
@@ -253,6 +284,9 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
     const swipe = spyOn(CtrlProxyGestures.prototype, "requestMultiFingerSwipe").mockResolvedValue(
       result,
     );
+    const pinch = spyOn(CtrlProxyGestures.prototype, "requestPinchWithDispatch").mockResolvedValue(
+      result,
+    );
     const client = IOSCtrlProxyClient.createForTesting(
       { deviceId: "physical-iphone", platform: "ios", name: "iPhone" },
       8765,
@@ -296,7 +330,25 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
         ),
       ).toBe(result);
       expect(swipe).toHaveBeenCalledWith(1, 2, 3, 4, 2, 300, 50, undefined, 10, signal, onDispatch);
+      expect(await client.requestPinch(1, 2, 3, 4, 0, 300, 50, undefined, signal, onDispatch)).toBe(
+        result,
+      );
+      expect(pinch).toHaveBeenCalledWith(
+        {
+          centerX: 1,
+          centerY: 2,
+          distanceStart: 3,
+          distanceEnd: 4,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 50,
+          perf: undefined,
+          signal,
+        },
+        onDispatch,
+      );
     } finally {
+      pinch.mockRestore();
       home.mockRestore();
       back.mockRestore();
       recent.mockRestore();

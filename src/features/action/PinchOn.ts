@@ -93,7 +93,17 @@ type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPin
   observation?: ObserveResult;
   staleDisplay?: PinchOnResult["staleDisplay"];
   pinchPath?: string;
+  /** iOS: the request was written to the runner; a reply was (not) received. */
+  dispatched?: boolean;
+  acknowledged?: boolean;
 };
+
+function isPinchOutcomeIndeterminate(result: ObservedPinchResult): boolean {
+  return (
+    Boolean(result.error?.startsWith("Pinch timed out after ")) ||
+    (result.dispatched === true && result.acknowledged === false)
+  );
+}
 
 interface PinchOnDependencies extends DisplayFenceDependencies {
   timer?: Timer;
@@ -401,6 +411,7 @@ export class PinchOn extends BaseVisualChange {
               duration,
               resolveGestureCtrlProxyTimeoutMs(duration),
               perf,
+              signal,
             ),
             signal,
           );
@@ -467,8 +478,9 @@ export class PinchOn extends BaseVisualChange {
         warning: target.warning,
         observation: pinchResult.observation,
         ...(pinchResult.staleDisplay ? { staleDisplay: pinchResult.staleDisplay } : {}),
-        // sendCommand's timeout result means dispatch completed without a confirmed reply.
-        error: pinchResult.error?.startsWith("Pinch timed out after ")
+        // A timeout, or an iOS request sent but never answered (socket close), means dispatch
+        // completed without a confirmed reply.
+        error: isPinchOutcomeIndeterminate(pinchResult)
           ? `Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (${pinchResult.error}). Do not retry automatically.`
           : pinchResult.error,
       };

@@ -3831,6 +3831,7 @@ describe("SendKeys post-action capture boundary", () => {
         freshness: "cached-ok",
         signal: undefined,
         skipScreenshot: true,
+        skipAccessibilityAudit: true,
       });
       expect(h.reads.every((read) => read.skipScreenshot === true)).toBe(true);
       await settleEmbeddedObservationInResponse(createStructuredToolResponse(result), {

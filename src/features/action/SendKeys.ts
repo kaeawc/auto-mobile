@@ -35,7 +35,7 @@ import {
 } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
-  iosFocusMoved,
+  iosFieldMatch,
   iosTypedTextNotVerifiedNote,
   judgeIosTypedText,
   readIosFocusedField,
@@ -988,16 +988,39 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (before.kind === "secure") {
       return { verified: false };
     }
-    if (before.kind === "unreadable") {
+    // An insert is judged against the field's content before typing, so without it there is
+    // nothing to compare. A replace clears first and is judged against the empty string: its read
+    // before typing only tells which field it was, so losing that read costs the identity check,
+    // not the content check.
+    if (before.kind === "unreadable" && operation !== "replace") {
       return this.iosNotVerified(`the field could not be read before typing: ${before.reason}`);
     }
     const after = await this.readIosField(signal, display, 1);
     if (after.kind === "unreadable") {
       return this.iosNotVerified(after.reason);
     }
-    // Before any content or secure-field judgement: the read after typing is of whatever holds
-    // focus now, which a Return or Next key, or a field that advances itself, may have changed.
-    if (iosFocusMoved(before, after)) {
+    return this.judgeIosAfterRead(
+      text,
+      operation,
+      before.kind === "text" ? before : undefined,
+      after,
+    );
+  }
+
+  /**
+   * Judge the read after typing. `before` is the field's read before typing, absent when that
+   * was unreadable (a replace only). Identity is settled before any content or secure-field
+   * judgement: the read after typing is of whatever holds focus now, which a Return or Next key,
+   * or a field that advances itself, may have changed.
+   */
+  private judgeIosAfterRead(
+    text: string,
+    operation: SendKeysOperation,
+    before: Extract<IosFieldRead, { kind: "text" }> | undefined,
+    after: Exclude<IosFieldRead, { kind: "unreadable" }>,
+  ): Pick<TextActionResult, "verified" | "warning"> {
+    const match = iosFieldMatch(before, after);
+    if (match === "moved") {
       return this.iosNotVerified(
         "focus moved to a different field after typing, so its content was not compared",
       );
@@ -1005,7 +1028,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (after.kind === "secure") {
       return { verified: false };
     }
-    const verdict = judgeIosTypedText({ typed: text, operation, before, after });
+    const verdict = judgeIosTypedText({
+      typed: text,
+      operation,
+      before: before ?? { text: "" },
+      after,
+    });
+    if (match === "unconfirmed") {
+      // Not known to be the field typed into. A replace that left exactly the typed text is
+      // verified anyway (another field coincidentally holding exactly that text is not a
+      // realistic false positive); anything else would quote a field that may be another one.
+      return verdict.kind === "match" && operation === "replace"
+        ? { verified: true }
+        : this.iosNotVerified(
+            "the focused field could not be confirmed as the one typed into, so its content was not compared",
+          );
+    }
     if (verdict.kind === "match") {
       return { verified: true };
     }

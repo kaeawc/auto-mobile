@@ -506,11 +506,13 @@ describe("sendKeys iOS read-back when the focus moved while typing (#10167 revie
     const read = (overrides: Record<string, unknown>) =>
       readIosFocusedField(observationFor(fake, { "view-id": undefined, ...overrides }));
 
-    expect(read({})).toMatchObject({ identity: "shape:UITextField|Email" });
+    expect(read({})).toMatchObject({ identity: "shape:UITextField|Email|frame:32,223,370,245" });
     expect(read({ "hint-text": "Password" })).toMatchObject({
-      identity: "shape:UITextField|Password",
+      identity: "shape:UITextField|Password|frame:32,223,370,245",
     });
-    expect(read({ "view-id": "login.email" })).toMatchObject({ identity: "view-id:login.email" });
+    expect(read({ "view-id": "login.email" })).toMatchObject({
+      identity: "view-id:login.email|frame:32,223,370,245",
+    });
   });
 
   test("a different field without a view-id is not mistaken for the typed-into one", async () => {
@@ -627,7 +629,7 @@ describe("iOS focused-field read", () => {
       kind: "text",
       text: "mt8@example.com",
       placeholder: "Email",
-      identity: "view-id:s2-598fedefa9cbde41",
+      identity: "view-id:s2-598fedefa9cbde41|frame:32,223,370,245",
     });
   });
 
@@ -648,5 +650,176 @@ describe("iOS focused-field read", () => {
     expect(
       judgeIosTypedText({ typed: "b", operation: "replace", before: { text: "zzz" }, after }),
     ).toMatchObject({ kind: "mismatch", warning: expect.stringContaining("longer than expected") });
+  });
+});
+
+/** Reads in call order: the first is before typing, the second after; later calls repeat the last. */
+function readsInOrder(...reads: Array<(fake: FakeIOSCtrlProxy) => ObserveResult>) {
+  let call = 0;
+  return async (fake: FakeIOSCtrlProxy): Promise<ObserveResult> =>
+    reads[Math.min(call++, reads.length - 1)]!(fake);
+}
+
+const NO_FOCUSED_FIELD = (): ObserveResult => ({ timestamp: 1 }) as ObserveResult;
+const withoutFrame = (fake: FakeIOSCtrlProxy): ObserveResult =>
+  observationFor(fake, { bounds: undefined });
+
+describe("sendKeys iOS read-back field identity (#10167 review)", () => {
+  // The capture's view-id is kept: an app that gives every OTP box the same accessibility
+  // identifier reports it for each of them, so only the frame tells the boxes apart.
+  const NEXT_BOX = { bounds: [80, 223, 120, 245], value: "7" };
+
+  test.each<SendKeysOperation>(["insert", "replace"])(
+    "focus that auto-advanced to a field sharing the view-id is a moved focus, not quoted (%s)",
+    async (operation) => {
+      const h = setup(
+        { value: "" },
+        { observe: readsInOrder(observationFor, (fake) => observationFor(fake, NEXT_BOX)) },
+      );
+
+      const result = await type(h, "1", operation);
+
+      expect(result).toMatchObject({ success: true, verified: false });
+      expect(result.warning).toContain("focus moved to a different field");
+      expect(result.warning).not.toContain("holds");
+      expect(result.warning).not.toContain('"7"');
+    },
+  );
+
+  test("the identity is the view-id together with the frame of the captured field", () => {
+    const fake = new FakeIOSCtrlProxy();
+    fake.setFocusedTextField({ placeholder: "Email" });
+
+    const read = readIosFocusedField(observationFor(fake));
+
+    expect(read).toMatchObject({ identity: "view-id:s2-598fedefa9cbde41|frame:32,223,370,245" });
+  });
+
+  test("a field whose frame is not reported has no identity, so it is not compared", async () => {
+    const h = setup({ value: "ab" }, { observe: readsInOrder(observationFor, withoutFrame) });
+
+    const result = await type(h, "cd");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("could not be confirmed");
+    expect(result.warning).not.toContain("holds");
+    expect(result.warning).not.toContain('"abcd"');
+  });
+
+  test("a field that kept its frame is still compared", async () => {
+    const h = setup({ value: "ab", accept: (current, typed) => (current + typed).slice(0, 3) });
+
+    const result = await type(h, "cd");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain('holds "abc"');
+  });
+});
+
+describe("sendKeys iOS read-back of a field that kept its content (#10167 review)", () => {
+  test("a full field that rejected input already in it warns that it is unchanged", async () => {
+    const h = setup({ value: "hello world", accept: (current) => current });
+
+    const result = await type(h, "world");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("unchanged, so the field did not take the input");
+    expect(result.warning).not.toContain("selection is not reported");
+  });
+
+  test.each(["o", "hello", "hello world", "d"])(
+    "an unchanged field after typing %p is a mismatch, never undecided",
+    (typed) => {
+      expect(
+        judgeIosTypedText({
+          typed,
+          operation: "insert",
+          before: { text: "hello world" },
+          after: { text: "hello world" },
+        }),
+      ).toMatchObject({
+        kind: "mismatch",
+        warning: expect.stringContaining("unchanged, so the field did not take the input"),
+      });
+    },
+  );
+
+  test("a changed field that is the typed text over a range is still undecided", () => {
+    expect(
+      judgeIosTypedText({
+        typed: "o",
+        operation: "insert",
+        before: { text: "hello world" },
+        after: { text: "o" },
+      }),
+    ).toMatchObject({ kind: "unverifiable" });
+  });
+});
+
+describe("sendKeys iOS replace without a readable field before typing (#10167 review)", () => {
+  test("a replace whose pre-read failed still verifies content from the read after typing", async () => {
+    const h = setup({ value: "old" }, { observe: readsInOrder(NO_FOCUSED_FIELD, observationFor) });
+
+    const result = await type(h, "new", "replace");
+
+    expect(h.fake.getFocusedTextFieldValue()).toBe("new");
+    expect(result).toMatchObject({ success: true, verified: true });
+    expect(result.warning).toBeUndefined();
+    expect(h.reads).toHaveLength(2);
+  });
+
+  test("a replace with no frame to confirm focus by verifies content that matches exactly", async () => {
+    const h = setup({ value: "old" }, { observe: readsInOrder(withoutFrame, observationFor) });
+
+    const result = await type(h, "new", "replace");
+
+    expect(result).toMatchObject({ success: true, verified: true });
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("a replace whose pre-read failed does not quote content that differs", async () => {
+    const h = setup(
+      { value: "old", accept: (_current, typed) => typed.slice(0, 2) },
+      { observe: readsInOrder(NO_FOCUSED_FIELD, observationFor) },
+    );
+
+    const result = await type(h, "new", "replace");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("could not be confirmed");
+    expect(result.warning).not.toContain("holds");
+    expect(result.warning).not.toContain('"ne"');
+  });
+
+  test("a replace whose pre-read failed and whose field is secure stays unverified and silent", async () => {
+    const h = setup(
+      { secure: true, value: "old" },
+      { observe: readsInOrder(NO_FOCUSED_FIELD, observationFor) },
+    );
+
+    const result = await type(h, "hunter2", "replace");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("an insert whose pre-read failed has no baseline, so it is still not verified", async () => {
+    const h = setup({ value: "ab" }, { observe: readsInOrder(NO_FOCUSED_FIELD, observationFor) });
+
+    const result = await type(h, "cd");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("was not read back");
+    expect(h.reads).toHaveLength(1);
+  });
+
+  test("a replace whose pre-read and post-read both fail is not verified", async () => {
+    const h = setup({ value: "old" }, { observe: readsInOrder(NO_FOCUSED_FIELD) });
+
+    const result = await type(h, "new", "replace");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("was not read back");
+    expect(h.fake.getFocusedTextFieldValue()).toBe("new");
   });
 });

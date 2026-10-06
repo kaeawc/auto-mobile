@@ -9,6 +9,7 @@ import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   BootedDevice,
   ClearTextResult,
+  ElementBounds,
   ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../models";
@@ -196,13 +197,26 @@ export function getFocusedTextInputProperties(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
 ): Record<string, unknown> | undefined {
+  return getFocusedTextInput(viewHierarchy, parser)?.properties;
+}
+
+/**
+ * `getFocusedTextInputProperties` plus the node's parsed frame, which `extractNodeProperties`
+ * strips from the properties. Undefined `bounds` when the node reports none that parse.
+ */
+export function getFocusedTextInput(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser = new DefaultElementParser(),
+): { properties: Record<string, unknown>; bounds: ElementBounds | undefined } | undefined {
   for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
     for (const root of rootGroup) {
-      let found: Record<string, unknown> | undefined;
+      let found:
+        | { properties: Record<string, unknown>; bounds: ElementBounds | undefined }
+        | undefined;
       parser.traverseNode(root, (node: ViewHierarchyNode) => {
         const properties = parser.extractNodeProperties(node);
         if (found === undefined && isFocusedTextInputProperties(properties)) {
-          found = properties;
+          found = { properties, bounds: parser.parseNodeBounds(node)?.bounds };
         }
       });
       if (found !== undefined) {

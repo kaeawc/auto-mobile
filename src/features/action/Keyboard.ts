@@ -9,7 +9,6 @@ import {
   Element,
   ElementBounds,
   KeyboardResult,
-  ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
@@ -485,7 +484,8 @@ export class Keyboard {
 
     // Show the IME without a touch first: a coordinate tap lands inside the field
     // and moves the caret into existing text (#9942, #10152).
-    const scope = this.observedPackage(hierarchy, focusedInput);
+    // The runner's windows[] carry no package, so the hierarchy's package is the only scope.
+    const scope = hierarchy?.packageName;
     const click = await this.showWithoutTouch(focusedInput, hierarchy, scope, signal);
     // Once a click reached the device the field may already be activated (a read-only
     // picker would toggle twice), so a tap is only a fallback when no click was sent.
@@ -973,45 +973,6 @@ export class Keyboard {
       bounds.right > screenWidth ||
       bounds.bottom > screenHeight
     );
-  }
-
-  /**
-   * The package the focused field was observed in: its window's when the field sits in a window
-   * that names one, otherwise the foreground app's. Matched by bounds, since an `Element` does
-   * not carry its window. Undefined (no scoping, an older runner's behaviour) when neither is known.
-   */
-  private observedPackage(
-    hierarchy: ViewHierarchyResult | null,
-    field: Element,
-  ): string | undefined {
-    for (const window of hierarchy?.windows ?? []) {
-      if (!window.packageName) {
-        continue;
-      }
-      const roots = this.parser.extractWindowRootGroups({ hierarchy: {}, windows: [window] })[0];
-      if (roots?.some((root) => this.hasFocusedFieldAt(root, field.bounds))) {
-        return window.packageName;
-      }
-    }
-    return hierarchy?.packageName;
-  }
-
-  private hasFocusedFieldAt(root: ViewHierarchyNode, bounds: ElementBounds): boolean {
-    let found = false;
-    this.parser.traverseNode(root, (node: ViewHierarchyNode) => {
-      const focused = this.parser.extractNodeProperties(node).focused;
-      if (found || (focused !== "true" && focused !== true)) {
-        return;
-      }
-      const at = this.parser.parseNodeBounds(node)?.bounds;
-      found =
-        at !== undefined &&
-        at.left === bounds.left &&
-        at.top === bounds.top &&
-        at.right === bounds.right &&
-        at.bottom === bounds.bottom;
-    });
-    return found;
   }
 
   private isValidBounds(bounds: ElementBounds): boolean {

@@ -1,28 +1,37 @@
-import type { ObserveResult } from "../../models";
-import { getFocusedTextInputProperties, isSecureTextInputProperties } from "./ClearText";
+import type { ElementBounds, ObserveResult } from "../../models";
+import { getFocusedTextInput, isSecureTextInputProperties } from "./ClearText";
 import type { SendKeysOperation } from "./SendKeys";
 
 /** What the focused iOS text field holds, as the runner reports it (#10167). */
 export type IosFieldRead =
-  | { kind: "text"; text: string; placeholder?: string; identity: string }
-  | { kind: "secure"; identity: string }
+  | { kind: "text"; text: string; placeholder?: string; identity: string | undefined }
+  | { kind: "secure"; identity: string | undefined }
   | { kind: "unreadable"; reason: string };
 
 /**
- * Which field a read came from, compared between the read before typing and the read after it.
- * `view-id` is the runner's identity for a node: the accessibility identifier when the app set
- * one, otherwise an id derived from the node's path in the tree, so two different fields do not
- * share it. Without a `view-id` the class and placeholder are all the hierarchy offers, and two
- * fields that differ only by position would look alike (the weaker case).
+ * Which field a read came from, compared between the read before typing and the read after it:
+ * the runner's `view-id` together with the node's frame. `view-id` alone is not unique: it is the
+ * accessibility identifier when the app set one, so OTP digit boxes or repeated rows can share it,
+ * and a focus move between them would look like no move at all. The frame tells such fields apart
+ * (it is compared exactly: a field whose frame changes while typed into reads as not confirmed,
+ * which only costs the read-back). Without a `view-id` the class and placeholder stand in for it.
+ * A field with no frame cannot be told from identically named siblings, so it has no identity.
  */
-function focusedFieldIdentity(field: Record<string, unknown>): string {
+function focusedFieldIdentity(
+  field: Record<string, unknown>,
+  bounds: ElementBounds | undefined,
+): string | undefined {
+  if (bounds === undefined) {
+    return undefined;
+  }
+  const frame = `frame:${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
   const viewId = field["view-id"] ?? field.viewId;
   if (typeof viewId === "string" && viewId !== "") {
-    return `view-id:${viewId}`;
+    return `view-id:${viewId}|${frame}`;
   }
   const nodeClass = field.class ?? field.className;
   const hint = field["hint-text"];
-  return `shape:${typeof nodeClass === "string" ? nodeClass : ""}|${typeof hint === "string" ? hint : ""}`;
+  return `shape:${typeof nodeClass === "string" ? nodeClass : ""}|${typeof hint === "string" ? hint : ""}|${frame}`;
 }
 
 /** Longest field or typed text quoted in a warning, in code points. */
@@ -42,11 +51,12 @@ export function readIosFocusedField(observation: ObserveResult): IosFieldRead {
   if (!hierarchy || hierarchy.hierarchy?.error) {
     return { kind: "unreadable", reason: "the view hierarchy was unavailable" };
   }
-  const field = getFocusedTextInputProperties(hierarchy);
-  if (field === undefined) {
+  const focused = getFocusedTextInput(hierarchy);
+  if (focused === undefined) {
     return { kind: "unreadable", reason: "no focused text field was found" };
   }
-  const identity = focusedFieldIdentity(field);
+  const field = focused.properties;
+  const identity = focusedFieldIdentity(field, focused.bounds);
   if (isSecureTextInputProperties(field)) {
     return { kind: "secure", identity };
   }
@@ -129,6 +139,10 @@ function describeDifference(before: string, expected: string, actual: string): s
  * shape cannot be told apart from text that was lost.
  */
 function replacedSomeRange(before: string, typed: string, actual: string): boolean {
+  // A field that kept its content did not take the input, whatever it would have replaced.
+  if (actual === before) {
+    return false;
+  }
   for (let start = 0; start < before.length && actual.startsWith(before.slice(0, start)); start++) {
     const rest = actual.slice(start);
     if (!rest.startsWith(typed)) {
@@ -201,14 +215,21 @@ export function iosTypedTextNotVerifiedNote(reason: string): string {
   return `The typed text was not read back from the field (${reason}), so the result was not verified.`;
 }
 
+export type IosFieldMatch = "same" | "moved" | "unconfirmed";
+
 /**
  * Whether the read after typing is of the field that was typed into. Compared on `identity` and
  * never on content: when the focus moved (a Return or Next key, a field that advances itself)
- * the later field's content must not be compared, quoted or judged.
+ * the later field's content must not be compared, quoted or judged. "unconfirmed" means the
+ * identity of the read after typing, or of the read before it (absent when that was unreadable),
+ * is not known, so it cannot be said either way.
  */
-export function iosFocusMoved(
-  before: Exclude<IosFieldRead, { kind: "unreadable" }>,
+export function iosFieldMatch(
+  before: Exclude<IosFieldRead, { kind: "unreadable" }> | undefined,
   after: Exclude<IosFieldRead, { kind: "unreadable" }>,
-): boolean {
-  return before.identity !== after.identity;
+): IosFieldMatch {
+  if (before?.identity === undefined || after.identity === undefined) {
+    return "unconfirmed";
+  }
+  return before.identity === after.identity ? "same" : "moved";
 }

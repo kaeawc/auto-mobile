@@ -297,38 +297,6 @@ describe("Keyboard open on a Compose text field with no stable selector (#10152)
       expect(client.focusedInputActions).toEqual([{ action: "click", expectedPackage: PACKAGE }]);
     });
 
-    test("a field in a window of another package is scoped to that window's package", async () => {
-      const dialog = closedWithFocusedComposeField();
-      const field = new DefaultElementFinder().findFocusedTextInput(dialog) as Element;
-      hierarchy.setResults([
-        {
-          ...dialog,
-          // The focused field lives only in a dialog window owned by another package.
-          hierarchy: { node: { $: { class: "android.widget.FrameLayout", bounds: field.bounds } } },
-          windows: [
-            {
-              id: 9,
-              type: 1,
-              packageName: "com.dialog.owner",
-              hierarchy: {
-                node: {
-                  $: { focused: "true", class: "android.widget.EditText", bounds: field.bounds },
-                },
-              },
-            },
-          ],
-        },
-        settledKeyboard(),
-      ]);
-
-      await open();
-
-      expect(client.focusedInputActions[0]).toEqual({
-        action: "click",
-        expectedPackage: "com.dialog.owner",
-      });
-    });
-
     test("a hierarchy that names no package sends an unscoped click, as before", async () => {
       const { packageName, ...unnamed } = closedWithFocusedComposeField();
       void packageName;

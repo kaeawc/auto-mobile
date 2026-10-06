@@ -287,6 +287,10 @@ data class NodeSelector(
 }
 
 @Serializable
+@SerialName("request_click_focused_input")
+data class RequestClickFocusedInput(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
 @SerialName("request_action")
 data class RequestAction(
   override val requestId: String? = null,

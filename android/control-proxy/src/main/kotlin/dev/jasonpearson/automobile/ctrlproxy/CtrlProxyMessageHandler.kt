@@ -27,6 +27,7 @@ import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
 import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
+import dev.jasonpearson.automobile.protocol.RequestClickFocusedInput
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDeviceInfo
@@ -395,6 +396,7 @@ class CtrlProxyMessageHandler(
           actions.requestImeAction(request.requestId, request.action, request.frameContext)
         }
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
+      is RequestClickFocusedInput -> actions.requestClickFocusedInput(request.requestId)
       is RequestAction ->
         actions.requestAction(
           request.requestId,

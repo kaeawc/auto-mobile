@@ -2938,6 +2938,47 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
 
+  override fun requestClickFocusedInput(requestId: String?) {
+    rememberedInsert = null
+    val startTime = System.currentTimeMillis()
+    // Like performNodeAction, stay on the inbound command queue until settling and replying.
+    try {
+      val outcome =
+        clickFocusedInput(
+          findFocusedInput = {
+            findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
+          },
+          click = { node ->
+            nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
+              node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+          },
+          recycle = { node -> node.recycle() },
+          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+        )
+      kotlinx.coroutines.runBlocking {
+        broadcastActionResult(
+          requestId,
+          "click",
+          outcome.success,
+          outcome.error,
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    } catch (e: Exception) {
+      if (e is CancellationException) throw e
+      Log.e(TAG, "Focused input click failed", e)
+      kotlinx.coroutines.runBlocking {
+        broadcastActionResult(
+          requestId,
+          "click",
+          false,
+          e.message ?: "Focused input click failed",
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    }
+  }
+
   override fun requestAction(
     requestId: String?,
     action: String,
@@ -6007,6 +6048,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
+  private fun refreshHierarchyAfterNodeAction() {
+    val freshHierarchy =
+      hierarchyDebouncer.extractAfterQuiescence(
+        quiescenceMs = HierarchyQuiescence.POLL_MS,
+        maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+        pollIntervalMs = 10L,
+      )
+    if (freshHierarchy != null) {
+      kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
+    }
+  }
+
   private fun performNodeAction(
     requestId: String?,
     action: String,
@@ -6068,15 +6122,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Wait for UI to settle after click/long_click/scroll, then extract fresh hierarchy
       if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescence(
-            quiescenceMs = HierarchyQuiescence.POLL_MS,
-            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-            pollIntervalMs = 10L,
-          )
-        if (freshHierarchy != null) {
-          kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
-        }
+        refreshHierarchyAfterNodeAction()
       }
 
       val totalTime = System.currentTimeMillis() - startTime

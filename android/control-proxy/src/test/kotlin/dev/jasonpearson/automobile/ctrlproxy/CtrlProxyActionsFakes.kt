@@ -93,6 +93,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) {}
 
+  override fun requestClickFocusedInput(requestId: String?) {}
+
   override fun requestAction(
     requestId: String?,
     action: String,
@@ -417,6 +419,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     record("requestImeAction", requestId, action, frameContext)
 
   override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
+
+  override fun requestClickFocusedInput(requestId: String?) =
+    record("requestClickFocusedInput", requestId)
 
   override fun requestAction(
     requestId: String?,

@@ -63,6 +63,17 @@ fi
 "$adb_bin" -s "$device_id" root > /dev/null
 "$adb_bin" -s "$device_id" wait-for-device
 
+# AVD snapshots can retain the keyguard if it appeared after snapshot
+# preparation attempted to dismiss it. Verify the selected emulator is unlocked
+# before foregrounding the graph fixture.
+"$adb_bin" -s "$device_id" shell wm dismiss-keyguard > /dev/null 2>&1 || true
+"$adb_bin" -s "$device_id" shell input keyevent 82 > /dev/null 2>&1 || true
+keyguard_state="$("$adb_bin" -s "$device_id" shell dumpsys window policy 2>&1 || true)"
+if [[ "${keyguard_state}" == *isKeyguardShowing=true* || "${keyguard_state}" == *mShowingLockscreen=true* ]]; then
+  echo "error: Android keyguard is still showing before navigation graph launch" >&2
+  exit 1
+fi
+
 # The preceding permission-contract check reinstalls CtrlProxy, which reconnects
 # its accessibility service while no app window transition is in flight. On a
 # cold CI emulator that can leave getRootInActiveWindow() empty indefinitely,

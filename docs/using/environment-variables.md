@@ -161,22 +161,43 @@ The proxy's default heartbeat cadence derives from this timeout.
 export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
 ```
 
-Liveness ownership has a single token per session. The latest claim with a new
-token wins, even if the previous owner is still heartbeating. A stdio/HTTP proxy
-bound with `--initial-session-uuid` claims on its first heartbeat and restores
-the strict heartbeat policy. An external keeper can claim with
+Liveness ownership has a single token per session, and the daemon protects it.
+A claim from a different token is rejected while the current owner's lease is
+live. The lease is the session's heartbeat timeout measured from the owner's
+last heartbeat, the same deadline the heartbeat monitor reaps on, so a claim
+succeeds exactly when the session would otherwise be released. A claim succeeds
+when the session is unowned, the owner's lease has expired, or the token matches
+the current owner (a restarted owner resuming). A session on the CLI idle policy
+never has a live lease for this purpose: its one-shot CLI owners exit between
+invocations, so the next invocation's new token can always claim it.
+
+A rejected claim returns
+`{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
+session and changes nothing: the owner, policy, and every deadline stay as the
+owner left them. A claim from a token that already claimed and was displaced
+returns `{ success: false, code: "liveness_owner_superseded", error: "..." }`
+and records nothing; it never succeeds silently and can never take the session
+back. To take a session from a displaced owner, claim with a fresh token after
+that owner's lease has expired.
+
+A stdio/HTTP proxy bound with `--initial-session-uuid` claims on its first
+heartbeat and restores the strict heartbeat policy. By default the proxy mints a
+new owner token per process, so a restarted proxy is a different token and is
+locked out while the previous process's lease is live. A harness that restarts
+its proxy passes a stable token with `--liveness-owner-token <token>` (alongside
+`--initial-session-uuid`); the restarted proxy then claims with the same token
+and resumes the session without a conflict. Use a distinct token per harness. A
+keeper for a one-shot CLI session can claim with
 `--daemon heartbeat S --liveness-owner-token T --claim-liveness-ownership`;
-that CLI claim adopts the CLI idle policy described below. Ordinary ticks from
-the current owner refresh deadlines without changing the policy.
+that CLI claim adopts the CLI idle policy described below, and is refused on a
+proxy-owned session (see "Supported liveness stack"). Ordinary ticks from the
+current owner refresh deadlines without changing the policy.
 
 A displaced token's non-claiming `daemon/heartbeat` returns
 `{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes
 no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
-guidance to re-claim or stop, instead of printing `heartbeat recorded`. Claims
-are idempotent per token: repeating a displaced token's claim is still a
-successful no-op. To take ownership back, use a fresh token with
-`--claim-liveness-ownership`, then use that token on subsequent ticks. This
-displaces the other keeper; there is no co-ownership.
+guidance to re-claim or stop, instead of printing `heartbeat recorded`. There is
+no co-ownership.
 
 The proxy treats supersession as informational, logs it once at debug level,
 and continues without fencing, reconnecting or releasing the session. Only the
@@ -185,8 +206,111 @@ can therefore reap the session even while a displaced external keeper ticks.
 Legacy tokenless heartbeats after a token has claimed ownership remain
 successful no-ops. Missing or releasing sessions still return
 `daemon_session_not_found`. A keeper cannot currently claim through the
-heartbeat CLI without adopting its CLI policy; policy-independent claims and
-co-ownership require a separate ownership-policy decision.
+heartbeat CLI without adopting its CLI policy.
+
+### Supported liveness stack
+
+The only supported liveness stack is harness → stdio proxy → daemon. The harness
+proves liveness to its proxy over stdio; the proxy is the only liveness owner of
+the sessions it holds, and heartbeats and claims them at the daemon with its
+owner token. Nothing else should heartbeat a proxy's session.
+
+`--daemon heartbeat` is the keeper for one-shot `--cli` sessions only, and it
+refuses a proxy-owned session. A session is proxy-owned when a token has
+claimed it under the strict `heartbeat` policy. The command sends a keeper
+marker, and the daemon answers every claim or tick against such a session with
+`{ success: false, code: "liveness_owner_is_proxy", error: "..." }` before
+any ownership logic runs, whatever token the keeper presents and whether or not
+the proxy's lease is still live. The refusal changes nothing: owner, policy and
+every deadline stay as the proxy left them. The command exits non-zero and prints
+the message, the `[liveness_owner_is_proxy]` code, and the instruction to stop
+the keeper. This is distinct from `liveness_owner_conflict`, which is a
+different token's claim on a live lease and can succeed once the lease expires.
+Keeping a one-shot CLI session alive with `--daemon heartbeat` behaves as before.
+
+A harness checks a session's state with `--daemon session-info <session-id>`. It
+prints the session's `assignedDevice`, `platform`, `lastUsedAt`, `expiresAt` and,
+while the session is being released, `releasing: true`. A missing session fails
+with `daemon_session_not_found`. The harness reads this to decide whether a session
+survived; it must not heartbeat the session itself to find out. It also prints
+`liveness`: `{ state: "live" | "suspect", remainingMs }`, the time left on the
+lease (live) or on the 10 s grace window (suspect).
+
+### Stalled liveness: `daemon_stalled` and `proxy_stalled`
+
+When a lease expires the daemon does not release the session at once: it holds
+it as suspect for a 10 s grace window with its device still reserved for the
+owner token. A heartbeat from the owner token inside the window restores the
+session with the same UUID; no tool call runs against a suspect session until
+then. The proxy uses that window for its own recovery, so a stall is reported to
+the harness only when recovery has failed. Recovery always fits inside the lease
+plus the grace window (20 s at the default 10 s timeout) at the 2 s and 5 s
+heartbeat cadences. The proxy applies this to every session it holds, one
+session at a time.
+
+Two distinct states, each with exactly three automatic recovery attempts:
+
+- `daemon_stalled`: the daemon's socket is open or reconnectable but heartbeat
+  acknowledgements stop. Each attempt reconnects if needed and heartbeats again
+  with the same owner token (from the second attempt a silent socket is replaced
+  with a fresh one). An attempt that is acknowledged ends the episode and the
+  session stays usable; nothing is surfaced to the harness and the recovery is
+  logged. The proxy also starts this recovery when a tool call is refused with
+  `daemon_session_suspect`, the daemon's signal that the session still exists and
+  its owner can restore it.
+- `proxy_stalled`: the proxy's own heartbeat tick fired later than the lease
+  allows, which it can only notice after it resumes. It re-heartbeats every
+  session it holds with the same owner token. A session the daemon kept as suspect
+  is restored with the same UUID. A session the daemon already released is lost.
+
+After the third failed attempt the proxy hands over. It stops heartbeating the
+affected sessions and returns this structured error on the next tool call that
+names an affected session (or reaches it implicitly), and it sends the same body
+as an MCP `notifications/message` (`level: "error"`,
+`logger: "auto-mobile.liveness"`, `data: <the error body>`) so a harness that is
+idle between calls is told too:
+
+```json
+{
+  "error": {
+    "code": "daemon_stalled",
+    "message": "...",
+    "sessions": [
+      {
+        "sessionUuid": "…",
+        "deviceId": "emulator-5554",
+        "lastAcknowledgedHeartbeatAt": 1760000000000
+      }
+    ],
+    "attempts": 3,
+    "maxAttempts": 3,
+    "lastAcknowledgedHeartbeatAt": 1760000000000,
+    "retryable": true,
+    "recovery": { "action": "restart_daemon_then_resume_by_session_uuid" }
+  }
+}
+```
+
+| Field                                    | Meaning                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                  |
+| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it). |
+| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                     |
+| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                          |
+| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                             |
+| `recovery.action`                        | `restart_daemon_then_resume_by_session_uuid` for `daemon_stalled`; `reacquire_lost_sessions` for `proxy_stalled`.                                                                     |
+
+For `daemon_stalled` the harness restarts the daemon, then resumes each session
+by passing its `sessionUuid` on a tool call: the first call after the error
+re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
+reacquire them with `getAndroid` or `getApple`. **A proxy never stops or
+restarts the daemon**, because every harness shares it: restarting it is a
+harness action. A proxy's heartbeat and recovery connections are observation-only
+and fail rather than start a daemon.
+
+A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
+the other owner's lease plus its grace window (plus one heartbeat interval), so a
+restarted proxy can win a session whose previous owner has gone.
 
 ## CLI session lifetime
 

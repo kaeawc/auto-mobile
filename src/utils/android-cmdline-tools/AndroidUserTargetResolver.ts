@@ -25,8 +25,24 @@ export interface UserTargetRequest<InstalledOnly extends boolean = false> {
   signal?: AbortSignal;
 }
 
-/** Device state was read, but no unambiguous active target can be selected. */
-export class AndroidUserTargetUnavailableError extends Error {}
+/**
+ * Device state was read, but no unambiguous active target can be selected.
+ * `kind` separates an ambiguous choice (several managed profiles) from a missing
+ * one (no running primary, which is also what an empty or unparsed user list
+ * looks like); `users` is every user the device listed, so a caller can tell a
+ * single-user device from a multi-user one before deciding how to react.
+ */
+export class AndroidUserTargetUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly details: { kind: "ambiguous" | "unavailable"; users: readonly AndroidUser[] } = {
+      kind: "unavailable",
+      users: [],
+    },
+  ) {
+    super(message);
+  }
+}
 
 /**
  * Resolves the user for one public operation. Explicit IDs (including zero)
@@ -78,10 +94,10 @@ export class AndroidUserTargetResolver {
     if (users !== allUsers && users.length === 1) {
       return { userId: users[0].userId, source: "installedUser" };
     }
-    return this.selectDefaultUser(users);
+    return this.selectDefaultUser(users, allUsers);
   }
 
-  private selectDefaultUser(users: AndroidUser[]): ResolvedUserTarget {
+  private selectDefaultUser(users: AndroidUser[], allUsers: AndroidUser[]): ResolvedUserTarget {
     const managedProfiles = users.filter(
       (user) => user.running && (user.profileType ?? classifyAndroidUser(user.flags)) === "managed",
     );
@@ -93,6 +109,7 @@ export class AndroidUserTargetResolver {
     if (managedProfiles.length > 1) {
       throw new AndroidUserTargetUnavailableError(
         `Android target user is ambiguous: ${managedProfiles.length} managed profiles are running`,
+        { kind: "ambiguous", users: allUsers },
       );
     }
 
@@ -105,6 +122,7 @@ export class AndroidUserTargetResolver {
 
     throw new AndroidUserTargetUnavailableError(
       "Android target user is unavailable: no running primary or uniquely selectable managed profile",
+      { kind: "unavailable", users: allUsers },
     );
   }
 

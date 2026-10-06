@@ -103,6 +103,21 @@ describe("changeLocalization handler", () => {
     ]);
   });
 
+  test("surfaces a locale warning from the adapter on a successful change", async () => {
+    localeResult = {
+      method: "cmd locale set-app-locales com.example.app --user 0",
+      warning: "assumed user 0",
+    };
+    const result = await call("android", { locale: "en-US", appId: "com.example.app" });
+    expect(result.success).toBe(true);
+    expect(result.warning).toBe("assumed user 0");
+  });
+
+  test("adds no warning field when the adapter reports none", async () => {
+    const result = await call("android", { locale: "en-US", appId: "com.example.app" });
+    expect("warning" in result).toBe(false);
+  });
+
   test.each([
     undefined,
     "cmd locale set-app-locales com.example.app",

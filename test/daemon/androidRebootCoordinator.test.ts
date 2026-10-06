@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import type { BootedDevice } from "../../src/models";
+import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
 import {
   AndroidRebootCoordinator,
+  UnconfirmedRecoveryShutdownError,
   type AndroidRebootCoordinatorPoolPort,
 } from "../../src/daemon/androidRebootCoordinator";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
@@ -75,13 +77,28 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
   clearAndroidRecoveryHandoffOwnerIfCurrent(): void {
     this.calls.push("clear-owner");
   }
-  finishAndroidRecoveryAttempt(): void {
+  readonly finishes: { retainRecoveryImage: boolean; lateShutdownSettled?: Promise<unknown> }[] =
+    [];
+  finishAndroidRecoveryAttempt(
+    _avdName: string,
+    _recoveryDeviceIds: ReadonlySet<string>,
+    retainRecoveryImage: boolean,
+    _replacementHandoffOwner: symbol,
+    lateShutdownSettled?: Promise<unknown>,
+  ): void {
     this.calls.push("finish");
+    this.finishes.push({ retainRecoveryImage, lateShutdownSettled });
   }
-  async stopAndroidEmulatorForRecovery(): Promise<"stopped"> {
+  async stopAndroidEmulatorForRecovery(
+    _device: PooledDevice,
+    _avdName: string,
+    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+  ): Promise<"stopped"> {
     this.calls.push("stop");
+    this.onStop?.(retainLeaseUntil);
     return "stopped";
   }
+  onStop: ((retainLeaseUntil: (settlement: Promise<unknown>) => void) => void) | undefined;
   async rebindSameAvdReplacementSession(): Promise<boolean> {
     this.calls.push("rebind-same-avd");
     return true;
@@ -115,8 +132,17 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     // This represents the pool-owned bind operation, which may self-lock internally.
     this.calls.push(`bind:${sessionId ?? "none"}`);
   }
-  async stopEmulatorProcess(_child?: ChildProcess | null): Promise<void> {
+  readonly stoppedProcesses: Array<ChildProcess | null | undefined> = [];
+  onStopProcess:
+    | ((child: ChildProcess | null | undefined, retain: (s: Promise<unknown>) => void) => void)
+    | undefined;
+  async stopEmulatorProcess(
+    child?: ChildProcess | null,
+    retainLeaseUntil?: (settlement: Promise<unknown>) => void,
+  ): Promise<void> {
+    this.stoppedProcesses.push(child);
     this.calls.push("stop-process");
+    this.onStopProcess?.(child, retainLeaseUntil ?? (() => {}));
   }
   consumeAndroidRecoveryCancellation(): boolean {
     this.cancellationChecks++;
@@ -215,6 +241,77 @@ describe("AndroidRebootCoordinator", () => {
     expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
     expect(outcomes).toEqual(["not-attempted"]);
     expect(attempts).toEqual([]);
+  });
+  test("stops the child a cancelled launch carries on its error (#10075)", async () => {
+    const controller = new AbortController();
+    const spawned = { pid: 4242 } as ChildProcess;
+    const { coordinator, port } = setup(async () => {
+      controller.abort(new Error("cancel launch"));
+      throw new EmulatorLaunchCancelledError("Pixel", spawned);
+    });
+    expect(
+      await coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+        oldDevice,
+        "incident",
+        {},
+        controller.signal,
+        () => {},
+      ),
+    ).toBe(false);
+    expect(port.stoppedProcesses).toEqual([spawned]);
+    expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
+  });
+  describe("a relaunch cancelled during startup validation (#10075)", () => {
+    const cancelledLaunch = () => {
+      const controller = new AbortController();
+      const spawned = { pid: 4242 } as ChildProcess;
+      const harnessed = setup(async () => {
+        controller.abort(new Error("cancel launch"));
+        throw new EmulatorLaunchCancelledError("Pixel", spawned);
+      });
+      const leaseSettlements: Promise<unknown>[] = [];
+      const exited = Promise.withResolvers<void>();
+      const cancelledRun = () =>
+        harnessed.coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+          oldDevice,
+          "incident",
+          {},
+          controller.signal,
+          (settlement) => {
+            leaseSettlements.push(settlement);
+          },
+        );
+      return { ...harnessed, spawned, exited, leaseSettlements, cancelledRun };
+    };
+
+    test("a child that cannot be confirmed exited keeps the lease on its exit and does not reserve the image", async () => {
+      const h = cancelledLaunch();
+      h.port.onStopProcess = (_child, retain) => {
+        retain(h.exited.promise);
+        throw new Error("emulator process 4242 did not exit after SIGKILL");
+      };
+      await expect(h.cancelledRun()).rejects.toThrow("did not exit after SIGKILL");
+      expect(h.port.stoppedProcesses).toEqual([h.spawned]);
+      // The lifecycle lease is what fences the AVD until the child exits: the pool's
+      // own retained-lease hook receives the child's exit, not a wrapper...
+      expect(h.leaseSettlements).toHaveLength(1);
+      expect(h.leaseSettlements[0]).toBe(h.exited.promise);
+      // ...so the #10076 unconfirmed-reservation path is not entered for a relaunch
+      // cleanup failure: the image reservation ends with the attempt.
+      expect(h.port.finishes).toEqual([
+        { retainRecoveryImage: false, lateShutdownSettled: undefined },
+      ]);
+    });
+
+    test("a child confirmed exited leaves neither the lease nor the image held", async () => {
+      const h = cancelledLaunch();
+      expect(await h.cancelledRun()).toBe(false);
+      expect(h.port.stoppedProcesses).toEqual([h.spawned]);
+      expect(h.leaseSettlements).toEqual([]);
+      expect(h.port.finishes).toEqual([
+        { retainRecoveryImage: false, lateShutdownSettled: undefined },
+      ]);
+    });
   });
   test.each([1, 3])("cancels at checkpoint %i in handoff order", async (checkpoint) => {
     const { coordinator, port, outcomes, attempts, timer } = setup();
@@ -385,6 +482,59 @@ describe("AndroidRebootCoordinator", () => {
     expect(outcomes).toEqual(["not-attempted"]);
     expect(attempts).toEqual([]);
     expect(port.calls).toEqual(["set-image", "recovering:emulator-5554", "stop", "finish"]);
+  });
+
+  describe("an unconfirmed shutdown", () => {
+    const unconfirm = (port: FakePoolPort, lateKill?: Promise<unknown>) => {
+      port.onStop = (retainLeaseUntil) => {
+        if (lateKill) {
+          retainLeaseUntil(lateKill);
+        }
+        throw new UnconfirmedRecoveryShutdownError("Pixel", new Error("x"));
+      };
+    };
+
+    test.each([undefined, "session"])(
+      "retains the image for the attempt end and hands the late kill to the pool (session %s)",
+      async (preserveSessionId) => {
+        const { coordinator, port } = setup();
+        const lateKill = Promise.withResolvers<void>();
+        unconfirm(port, lateKill.promise);
+        await expect(run(coordinator, { preserveSessionId })).rejects.toBeInstanceOf(
+          UnconfirmedRecoveryShutdownError,
+        );
+        expect(port.finishes).toHaveLength(1);
+        expect(port.finishes[0].retainRecoveryImage).toBe(true);
+        let settled = false;
+        void port.finishes[0].lateShutdownSettled?.then(() => {
+          settled = true;
+        });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        lateKill.resolve();
+        await port.finishes[0].lateShutdownSettled;
+        expect(settled).toBe(true);
+      },
+    );
+
+    test("a settled failure is passed on without a late kill promise to wait for", async () => {
+      const { coordinator, port } = setup();
+      unconfirm(port);
+      await expect(run(coordinator)).rejects.toBeInstanceOf(UnconfirmedRecoveryShutdownError);
+      expect(await port.finishes[0].lateShutdownSettled).toEqual([]);
+    });
+
+    test("an ordinary stop failure does not retain the image", async () => {
+      const { coordinator, port, outcomes } = setup();
+      port.onStop = () => {
+        throw new Error("kill failed");
+      };
+      expect(await run(coordinator)).toBe(false);
+      expect(outcomes).toEqual(["exhausted"]);
+      expect(port.finishes).toEqual([
+        { retainRecoveryImage: false, lateShutdownSettled: undefined },
+      ]);
+    });
   });
 
   test("never accesses assignmentMutex directly through its port", async () => {

@@ -2690,7 +2690,7 @@ export class DaemonMcpProxy {
    * Get list of available tools from daemon
    */
   async listTools(): Promise<ProxiedToolDefinition[]> {
-    this.throwIfBoundSessionUnavailable();
+    const releasedResultMint = this.discoveryAfterResultMintRelease();
     // Return cached tools if available
     if (this.cachedTools) {
       return this.cachedTools;
@@ -2702,8 +2702,13 @@ export class DaemonMcpProxy {
       // with empty params against the fresh UNSEEDED transport, which returns the
       // full unfiltered tool list instead of the session-scoped one. Reusing the
       // session-scoped params re-seeds the retry after a reconnect (issue #4610).
+      // After a result-minted session is released there is no session to bind:
+      // the connection is unbound and lists the surface that contains the
+      // getAndroid/getApple recovery tools (#9997).
       const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = this.withToolSelectionProfile(this.withBoundSessionUuid({}));
+      const forwardedParams = this.withToolSelectionProfile(
+        releasedResultMint ? {} : this.withBoundSessionUuid({}),
+      );
       const result = await this.withRecoverableReconnect(
         () =>
           this.requireClient().callDaemonMethod(
@@ -2711,6 +2716,7 @@ export class DaemonMcpProxy {
             this.withToolSelectionProfile(forwardedParams),
           ),
         this.sessionUuidFromArgs(forwardedParams),
+        releasedResultMint,
       );
       const tools = result?.tools ?? [];
       // If a list_changed or bound-session release invalidated this cache WHILE the
@@ -3200,6 +3206,34 @@ export class DaemonMcpProxy {
     this.invalidateCache();
     this.clearBoundSessionUuid();
     void this.stopBoundSessionHeartbeat();
+    // A result-minted binding scoped the tool list the client last fetched; the
+    // connection is now unbound, so prompt a re-list (binding does the same).
+    // A declared binding's discovery keeps failing, so there is nothing to refresh.
+    if (this.terminalBoundSession.fromResultMint) {
+      this.notifyListChanged("tools");
+    }
+  }
+
+  /**
+   * Entry gate for tools/list, resources/list and resources/templates/list.
+   * Returns true when the only fence is a RESULT-MINTED session that was
+   * released: the connection is then unbound and recovers in-band through
+   * getAndroid/getApple, so discovery must keep working and list the surface that
+   * contains those tools (#9997). A client-declared binding cannot recover on its
+   * transport, so its fence still raises the ownership-lost error (#5689).
+   */
+  private discoveryAfterResultMintRelease(): boolean {
+    if (!this.terminalBoundSession && this.isBoundSessionReplayExpired()) {
+      this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    }
+    const terminal = this.terminalBoundSession;
+    if (!terminal) {
+      return false;
+    }
+    if (!terminal.fromResultMint) {
+      throw this.boundSessionExpiredError();
+    }
+    return true;
   }
 
   private throwIfBoundSessionFenced(allowReleasedSession = false): void {
@@ -3482,8 +3516,13 @@ export class DaemonMcpProxy {
     // A reconnect already in progress is shared by ensureConnected(). If it has
     // consumed the safe retry window, stop claiming ownership before the daemon
     // can reap it silently while all later ticks wait on the same connection.
+    // Only an in-flight reconnect qualifies: a socket that merely closed (no
+    // reconnect started) must get its bounded attempt below first. At the stdio
+    // cadence the threshold equals one interval, so fencing on `!connected`
+    // alone would fence the first tick without ever trying to reconnect (#9995).
     if (
       !this.connected &&
+      this.connecting !== null &&
       this.boundSessionUuidAt !== undefined &&
       this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
     ) {
@@ -3502,21 +3541,42 @@ export class DaemonMcpProxy {
         this.heartbeatLeashMs - elapsedMs - 1,
       ),
     );
-    await raceWithDeadline(() => this.sendBoundSessionHeartbeat(() => !abandoned), {
-      timer: this.timer,
-      timeoutMs: deadlineMs,
-      label: "Bound-session heartbeat",
-      onTimeout: () => {
-        abandoned = true;
-        if (
-          this.boundSessionUuid === sessionUuid &&
-          this.boundSessionUuidAt !== undefined &&
-          this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
-        ) {
-          this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
-        }
-      },
-    });
+    try {
+      await raceWithDeadline(() => this.sendBoundSessionHeartbeat(() => !abandoned), {
+        timer: this.timer,
+        timeoutMs: deadlineMs,
+        label: "Bound-session heartbeat",
+        onTimeout: () => {
+          abandoned = true;
+          if (
+            this.boundSessionUuid === sessionUuid &&
+            this.boundSessionUuidAt !== undefined &&
+            this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+          ) {
+            this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+          }
+        },
+      });
+    } catch (error) {
+      this.fenceIfLastSafeAttemptFailed(sessionUuid, lastSafeAttemptMs);
+      throw error;
+    }
+  }
+
+  // The tick at or past `lastSafeAttemptMs` is the last one that can still reach
+  // the daemon before the lease lapses. If its reconnect attempt failed fast
+  // (rather than hanging into the deadline's onTimeout) and the transport is
+  // still down, no later tick can save the session, so fence it now (#9995).
+  private fenceIfLastSafeAttemptFailed(sessionUuid: string, lastSafeAttemptMs: number): void {
+    if (
+      this.boundSessionUuid === sessionUuid &&
+      !this.terminalBoundSession &&
+      !this.connected &&
+      this.boundSessionUuidAt !== undefined &&
+      this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+    ) {
+      this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+    }
   }
 
   private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {
@@ -4011,7 +4071,7 @@ export class DaemonMcpProxy {
    * Get list of available resources from daemon
    */
   async listResources(): Promise<ProxiedResourceDefinition[]> {
-    this.throwIfBoundSessionUnavailable();
+    const releasedResultMint = this.discoveryAfterResultMintRelease();
     // Return cached resources if available
     if (this.cachedResources) {
       return this.cachedResources;
@@ -4019,15 +4079,18 @@ export class DaemonMcpProxy {
 
     try {
       const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = this.withBoundSessionUuid({});
+      const forwardedParams = releasedResultMint ? {} : this.withBoundSessionUuid({});
       const result = await this.withRecoverableReconnect(
         () => this.requireClient().callDaemonMethod("resources/list", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
+        releasedResultMint,
       );
       const resources = result?.resources ?? [];
       // Discard a response invalidated mid-flight rather than caching the stale
-      // scope (issue #4655); the next listResources() refetches.
-      if (this.discoveryEpoch === discoveryEpoch) {
+      // scope (issue #4655); the next listResources() refetches. An unbound list
+      // after a result-minted release is never cached: re-acquiring a session
+      // does not invalidate the resource cache, so it would outlive the rebind.
+      if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
         this.cachedResources = resources;
       }
       return resources;
@@ -4041,7 +4104,7 @@ export class DaemonMcpProxy {
    * Get list of resource templates from daemon
    */
   async listResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
-    this.throwIfBoundSessionUnavailable();
+    const releasedResultMint = this.discoveryAfterResultMintRelease();
     // Return cached templates if available
     if (this.cachedResourceTemplates) {
       return this.cachedResourceTemplates;
@@ -4049,15 +4112,17 @@ export class DaemonMcpProxy {
 
     try {
       const discoveryEpoch = this.discoveryEpoch;
-      const forwardedParams = this.withBoundSessionUuid({});
+      const forwardedParams = releasedResultMint ? {} : this.withBoundSessionUuid({});
       const result = await this.withRecoverableReconnect(
         () => this.requireClient().callDaemonMethod("resources/list-templates", forwardedParams),
         this.sessionUuidFromArgs(forwardedParams),
+        releasedResultMint,
       );
       const templates = result?.resourceTemplates ?? [];
       // Discard a response invalidated mid-flight rather than caching the stale
-      // scope (issue #4655); the next listResourceTemplates() refetches.
-      if (this.discoveryEpoch === discoveryEpoch) {
+      // scope (issue #4655); the next listResourceTemplates() refetches. Not
+      // cached while unbound after a result-minted release (see listResources).
+      if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
         this.cachedResourceTemplates = templates;
       }
       return templates;

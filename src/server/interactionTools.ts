@@ -63,7 +63,7 @@ import {
 import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
-import { Keyboard } from "../features/action/Keyboard";
+import { Keyboard, KeyboardOpenIndeterminateError } from "../features/action/Keyboard";
 import { withAndroidImeLock } from "../features/action/androidImeLock";
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
@@ -3381,7 +3381,11 @@ export function registerInteractionTools() {
       const response = createStructuredToolResponse(result);
       return withIsErrorOnFailure(response, result.success);
     } catch (error) {
-      throwIfAborted(signal);
+      // A click/tap already sent when the abort landed is indeterminate; keep that
+      // warning instead of reporting a plain cancellation.
+      if (!(error instanceof KeyboardOpenIndeterminateError)) {
+        throwIfAborted(signal);
+      }
       throw toActionableError(error, `Failed to execute keyboard ${args.action}`);
     }
   };

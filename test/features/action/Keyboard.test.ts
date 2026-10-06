@@ -21,12 +21,26 @@ import {
   iosKeyboardMinimizedHierarchy,
 } from "../../fixtures/observe/iosKeyboardStates";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeKeyboardOpenClient } from "../../fakes/FakeKeyboardOpenClient";
 
 describe("Keyboard", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeAdbFactory: AdbClientFactory;
   let fakeHierarchy: FakeKeyboardHierarchyProvider;
   let fakeTimer: FakeTimer;
+  let fakeClient: FakeKeyboardOpenClient;
+
+  const newKeyboard = () =>
+    new Keyboard(
+      testDevice,
+      fakeAdbFactory,
+      fakeHierarchy,
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      fakeClient,
+    );
 
   const testDevice: BootedDevice = {
     deviceId: "test-device",
@@ -114,11 +128,12 @@ describe("Keyboard", () => {
     fakeHierarchy = new FakeKeyboardHierarchyProvider();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    fakeClient = new FakeKeyboardOpenClient();
   });
 
   test("detect returns bounds from input method window", async () => {
     fakeHierarchy.setResults([keyboardWindowHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("detect");
 
@@ -135,7 +150,7 @@ describe("Keyboard", () => {
         windows: windowInfo === "missing" ? undefined : [],
       };
       fakeHierarchy.setResults([hierarchy]);
-      const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = newKeyboard();
 
       const result = await keyboard.execute("detect");
 
@@ -156,7 +171,7 @@ describe("Keyboard", () => {
     "detect rejects app label %s when window info has no IME",
     async (contentDesc) => {
       fakeHierarchy.setResults([heuristicFalsePositiveHierarchy(contentDesc)]);
-      const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const keyboard = newKeyboard();
 
       const result = await keyboard.execute("detect");
 
@@ -168,7 +183,7 @@ describe("Keyboard", () => {
   test("detect accepts a bounds-less IME window corroborated by the heuristic", async () => {
     const hierarchy = boundlessImeWindowHierarchy();
     fakeHierarchy.setResults([hierarchy]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("detect");
 
@@ -196,7 +211,7 @@ describe("Keyboard", () => {
       },
     };
     fakeHierarchy.setResults([closedHierarchy, closedHierarchy, keyboardWindowHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
@@ -212,7 +227,7 @@ describe("Keyboard", () => {
 
   test("open taps focused input when keyboard is closed", async () => {
     fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
@@ -221,9 +236,405 @@ describe("Keyboard", () => {
     expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(true);
   });
 
+  describe("open without moving the caret (#9942)", () => {
+    const selectorField = (extra: Record<string, string | number> = {}): ViewHierarchyResult => ({
+      hierarchy: {
+        node: {
+          $: {
+            focused: "true",
+            class: "android.widget.EditText",
+            "resource-id": "com.example:id/notes",
+            bounds: { left: 10, top: 20, right: 210, bottom: 120 },
+            ...extra,
+          },
+        },
+      },
+    });
+
+    test("shows the keyboard through a node click and sends no coordinate tap", async () => {
+      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result).toMatchObject({ success: true, open: true, message: "Keyboard opened" });
+      expect(fakeClient.nodeActions).toEqual([
+        { action: "click", selector: { resourceId: "com.example:id/notes" } },
+      ]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
+    test("still polls until the IME window appears after the click", async () => {
+      fakeHierarchy.setResults([selectorField(), baseHierarchy(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(true);
+      expect(fakeTimer.getSleepHistory()).toEqual([100]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
+    test("uses a test-tag selector when the runner supports node selectors", async () => {
+      fakeHierarchy.setResults([
+        selectorField({ "resource-id": "", "test-tag": "notes-field" }),
+        keyboardWindowHierarchy(),
+      ]);
+
+      await newKeyboard().execute("open");
+
+      expect(fakeClient.nodeActions[0]?.selector).toEqual({ testTag: "notes-field" });
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
+    test("falls back to the tap when the runner lacks node selectors", async () => {
+      fakeClient.supportsSelectors = false;
+      fakeHierarchy.setResults([
+        selectorField({ "resource-id": "", "test-tag": "notes-field" }),
+        keyboardWindowHierarchy(),
+      ]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(true);
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+    });
+
+    test("falls back to the tap when the resource-id is shared by another node", async () => {
+      const shared: ViewHierarchyResult = {
+        hierarchy: {
+          node: {
+            $: {},
+            node: [
+              selectorField().hierarchy.node,
+              {
+                $: {
+                  "resource-id": "com.example:id/notes",
+                  bounds: { left: 0, top: 500, right: 100, bottom: 600 },
+                },
+              },
+            ],
+          },
+        },
+      };
+      fakeHierarchy.setResults([shared, keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(true);
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+    });
+
+    test("falls back to the tap when the node click is refused", async () => {
+      fakeClient.actionResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "Accessibility action is unavailable: click",
+      };
+      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result).toMatchObject({ success: true, open: true });
+      expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+    });
+
+    test("does not tap after an accepted click that shows no IME", async () => {
+      fakeHierarchy.setResults([selectorField()]);
+      fakeHierarchy.setDefaultResult(baseHierarchy());
+
+      const result = await newKeyboard().execute("open");
+
+      expect(fakeClient.nodeActions.length).toBe(1);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      expect(result).toMatchObject({
+        success: false,
+        open: false,
+        message: "Failed to open keyboard",
+      });
+    });
+
+    test("does not tap after a click that was dispatched but never acknowledged", async () => {
+      fakeClient.actionResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 5000,
+        error: "Action timeout after 5000ms",
+        dispatched: true,
+        acknowledged: false,
+      };
+      fakeHierarchy.setResults([selectorField()]);
+      fakeHierarchy.setDefaultResult(baseHierarchy());
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Keyboard open outcome is indeterminate");
+      expect(result.error).toContain("Action timeout after 5000ms");
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      expect(fakeHierarchy.getCallCount()).toBe(1);
+    });
+
+    test("still taps when the runner refused the click with an acknowledged failure", async () => {
+      fakeClient.actionResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "Accessibility action is unavailable: click",
+        dispatched: true,
+        acknowledged: true,
+      };
+      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+    });
+
+    describe("selector uniqueness", () => {
+      const withDuplicate = (
+        field: Record<string, string | number>,
+        duplicate: Record<string, string | number>,
+      ) =>
+        ({
+          hierarchy: {
+            node: {
+              $: {},
+              node: [
+                selectorField(field).hierarchy.node,
+                {
+                  $: {
+                    class: "android.widget.TextView",
+                    bounds: { left: 0, top: 500, right: 100, bottom: 600 },
+                    ...duplicate,
+                  },
+                },
+              ],
+            },
+          },
+        }) satisfies ViewHierarchyResult;
+
+      test.each([
+        ["test-tag", { "test-tag": "notes-field" }],
+        ["unique-id", { "unique-id": "notes-unique" }],
+      ])("taps instead of clicking when the %s is shared by another node", async (_, ids) => {
+        const field = { "resource-id": "", ...ids };
+        fakeHierarchy.setResults([withDuplicate(field, ids), keyboardWindowHierarchy()]);
+
+        const result = await newKeyboard().execute("open");
+
+        expect(result.success).toBe(true);
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+      });
+
+      test("clicks when the full collection-indexed selector is unique although the tag repeats", async () => {
+        const ids = {
+          "test-tag": "row",
+          "collection-row-index": 2,
+          "collection-column-index": 0,
+        };
+        const sameTagOtherRow = { ...ids, "collection-row-index": 3 };
+        fakeHierarchy.setResults([
+          withDuplicate({ "resource-id": "", ...ids }, sameTagOtherRow),
+          keyboardWindowHierarchy(),
+        ]);
+
+        await newKeyboard().execute("open");
+
+        expect(fakeClient.nodeActions.length).toBe(1);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("taps instead of clicking when the hierarchy is incomplete", async () => {
+        fakeHierarchy.setResults([
+          { ...selectorField(), ctrlProxyIncomplete: true },
+          keyboardWindowHierarchy(),
+        ]);
+
+        await newKeyboard().execute("open");
+
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+      });
+    });
+
+    test("reports a moved caret when only the tap fallback can show the keyboard", async () => {
+      fakeClient.queueInsertStates(
+        { isShowingHintText: false, selectionStart: 30, selectionEnd: 30 },
+        { isShowingHintText: false, selectionStart: 12, selectionEnd: 12 },
+      );
+      fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe(
+        "Keyboard opened (the tap used to show it moved the caret from 30-30 to 12-12)",
+      );
+    });
+
+    test("stays quiet when the tap fallback leaves the caret where it was", async () => {
+      const state = { isShowingHintText: false, selectionStart: 5, selectionEnd: 9 };
+      fakeClient.queueInsertStates(state, state);
+      fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result.message).toBe("Keyboard opened");
+    });
+
+    describe("cancellation", () => {
+      const live = () => new AbortController();
+
+      test("hands the signal to the selector probe and the node click", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([
+          selectorField({ "resource-id": "", "test-tag": "notes-field" }),
+          keyboardWindowHierarchy(),
+        ]);
+
+        await newKeyboard().execute("open", controller.signal);
+
+        expect(fakeClient.selectorSupportSignals).toEqual([controller.signal]);
+        expect(fakeClient.nodeActionSignals).toEqual([controller.signal]);
+      });
+
+      test("an abort before the click sends nothing and keeps the abort", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeClient.onNodeAction = undefined;
+        const keyboard = newKeyboard();
+        const open = keyboard.execute("open", controller.signal);
+        controller.abort();
+
+        await expect(open).rejects.toThrow("Operation cancelled");
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an acknowledged click followed by an abort stops without a tap or a poll", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeHierarchy.setDefaultResult(baseHierarchy());
+        fakeClient.onNodeAction = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Operation cancelled",
+        );
+
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+        expect(fakeTimer.getSleepCallCount()).toBe(0);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an abort that lands on a sent but unacknowledged click is indeterminate", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeHierarchy.setDefaultResult(baseHierarchy());
+        fakeClient.actionResult = {
+          success: false,
+          action: "click",
+          totalTimeMs: 1,
+          error: "Error: Operation cancelled",
+          dispatched: true,
+          acknowledged: false,
+        };
+        fakeClient.onNodeAction = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Keyboard open outcome is indeterminate",
+        );
+
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+        expect(fakeTimer.getSleepCallCount()).toBe(0);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an abort that lands before the click was sent stays a plain abort", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([selectorField()]);
+        fakeClient.actionResult = {
+          success: false,
+          action: "click",
+          totalTimeMs: 1,
+          error: "Error: Operation cancelled",
+          dispatched: false,
+          acknowledged: false,
+        };
+        fakeClient.onNodeAction = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Operation cancelled",
+        );
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      });
+
+      test("an abort during the caret read sends no tap", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([focusedInputHierarchy()]);
+        fakeClient.onCaretRead = () => controller.abort();
+
+        await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+          "Operation cancelled",
+        );
+        expect(fakeClient.caretReadCount).toBe(1);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+      });
+
+      test("an abort that lands on a started tap fallback is indeterminate", async () => {
+        const controller = live();
+        fakeHierarchy.setResults([focusedInputHierarchy()]);
+        fakeHierarchy.setDefaultResult(baseHierarchy());
+        // adb terminates the started process on abort and rejects once it has settled.
+        const calls: unknown[][] = [];
+        const execute = spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+          calls.push(args);
+          controller.abort();
+          throw new Error("Operation cancelled");
+        });
+
+        try {
+          await expect(newKeyboard().execute("open", controller.signal)).rejects.toThrow(
+            "Keyboard open outcome is indeterminate: the tap was dispatched",
+          );
+        } finally {
+          execute.mockRestore();
+        }
+
+        // Waits for the aborted process to settle (sixth argument) instead of abandoning it.
+        expect(calls).toEqual([
+          ["shell input tap 110 70", undefined, undefined, undefined, controller.signal, true],
+        ]);
+
+        expect(fakeHierarchy.getCallCount()).toBe(1);
+        expect(fakeTimer.getSleepCallCount()).toBe(0);
+      });
+
+      test("a tap fallback failure without an abort still propagates unchanged", async () => {
+        fakeHierarchy.setResults([focusedInputHierarchy()]);
+        fakeAdb.setCommandError("shell input tap", new Error("adb offline"));
+
+        await expect(newKeyboard().execute("open", live().signal)).rejects.toThrow("adb offline");
+      });
+    });
+
+    test("does not touch the node-action client when the keyboard is already open", async () => {
+      fakeHierarchy.setResults([keyboardWindowHierarchy()]);
+
+      await newKeyboard().execute("open");
+
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    });
+  });
+
   test("open is idempotent when keyboard is already open", async () => {
     fakeHierarchy.setResults([keyboardWindowHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
@@ -236,7 +647,7 @@ describe("Keyboard", () => {
 
   test("close sends back keyevent when keyboard is open", async () => {
     fakeHierarchy.setResults([keyboardWindowHierarchy(), baseHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -251,7 +662,7 @@ describe("Keyboard", () => {
     // match is app content, not the keyboard. Sending Back here would navigate
     // the app (#5899).
     fakeHierarchy.setResults([heuristicFalsePositiveHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -264,7 +675,7 @@ describe("Keyboard", () => {
 
   test("close sends Back for a real IME window that exposes no bounds", async () => {
     fakeHierarchy.setResults([boundlessImeWindowHierarchy(), baseHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -277,7 +688,7 @@ describe("Keyboard", () => {
     // keyboardNodeHierarchy exposes no window metadata at all — the deliberate
     // fallback for IMEs that never surface an IME window.
     fakeHierarchy.setResults([keyboardNodeHierarchy(), baseHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -295,7 +706,7 @@ describe("Keyboard", () => {
       baseHierarchy(),
       keyboardWindowHierarchy(),
     ]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
@@ -311,7 +722,7 @@ describe("Keyboard", () => {
       keyboardWindowHierarchy(),
       baseHierarchy(),
     ]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -323,7 +734,7 @@ describe("Keyboard", () => {
   test("open gives up within the bounded timeout when state never settles", async () => {
     fakeHierarchy.setResults([focusedInputHierarchy()]);
     fakeHierarchy.setDefaultResult(baseHierarchy());
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
@@ -338,7 +749,7 @@ describe("Keyboard", () => {
   test("close gives up within the bounded timeout when state never settles", async () => {
     fakeHierarchy.setResults([keyboardWindowHierarchy()]);
     fakeHierarchy.setDefaultResult(keyboardWindowHierarchy());
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -350,7 +761,7 @@ describe("Keyboard", () => {
 
   test("close is idempotent when keyboard is already closed", async () => {
     fakeHierarchy.setResults([baseHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -366,7 +777,7 @@ describe("Keyboard", () => {
     fakeHierarchy.setResults([focusedInputHierarchy()]);
     fakeHierarchy.setDefaultResult(baseHierarchy());
     controller.abort();
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     await expect(keyboard.execute("open", controller.signal)).rejects.toThrow(
       "Operation cancelled",
@@ -379,7 +790,7 @@ describe("Keyboard", () => {
   test("each confirmation read is bounded by the remaining budget", async () => {
     fakeHierarchy.setResults([focusedInputHierarchy()]);
     fakeHierarchy.setDefaultResult(baseHierarchy());
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     await keyboard.execute("open");
 
@@ -402,7 +813,7 @@ describe("Keyboard", () => {
     // read observes the IME that actually opened.
     fakeHierarchy.setCachedResult(focusedInputHierarchy());
     fakeHierarchy.setResults([keyboardWindowHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
@@ -421,7 +832,7 @@ describe("Keyboard", () => {
     // KEYCODE_BACK that would navigate the destination screen (#5887 / #5899).
     fakeHierarchy.setCachedResult(keyboardWindowHierarchy());
     fakeHierarchy.setResults([baseHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("close");
 
@@ -436,7 +847,7 @@ describe("Keyboard", () => {
 
   test("every confirmation read forces past the hierarchy cache", async () => {
     fakeHierarchy.setResults([focusedInputHierarchy(), baseHierarchy(), keyboardWindowHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     await keyboard.execute("open");
 
@@ -450,7 +861,7 @@ describe("Keyboard", () => {
     fakeHierarchy.setResults([keyboardWindowHierarchy()]);
     fakeHierarchy.setDefaultResult(keyboardWindowHierarchy());
     controller.abort();
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     await expect(keyboard.execute("close", controller.signal)).rejects.toThrow(
       "Operation cancelled",
@@ -462,7 +873,7 @@ describe("Keyboard", () => {
 
   test("detect does not poll or sleep", async () => {
     fakeHierarchy.setResults([baseHierarchy()]);
-    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+    const keyboard = newKeyboard();
 
     const result = await keyboard.execute("detect");
 

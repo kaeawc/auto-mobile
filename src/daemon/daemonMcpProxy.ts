@@ -2286,9 +2286,33 @@ export class DaemonMcpProxy {
           this.fenceBoundSessionUuid(sessionNotFoundFenceTarget, "session-not-found");
           throw this.boundSessionExpiredError();
         }
+        await this.throwIfRetryOutcomeUnknown(retryError, nonIdempotentToolName);
         throw retryError;
       }
     }
+  }
+
+  /**
+   * The single retry of a non-idempotent tool reached a written frame before the
+   * transport failed again: the retried call may have run, so surface the same
+   * outcome-unknown error as a first attempt instead of the raw transport error
+   * (an agent that sees only "Socket connection closed" would retry the action).
+   * A retry that provably never reached the daemon stays a plain not-delivered
+   * failure; nothing is retried again either way.
+   */
+  private async throwIfRetryOutcomeUnknown(
+    retryError: unknown,
+    nonIdempotentToolName: string | undefined,
+  ): Promise<void> {
+    if (!this.isRecoverableDaemonSessionError(retryError, true)) {
+      return;
+    }
+    const refusedToolName = this.ambiguousReplayToolName(retryError, true, nonIdempotentToolName);
+    if (refusedToolName === undefined) {
+      return;
+    }
+    await this.resetConnection();
+    throw new DaemonToolOutcomeUnknownError(refusedToolName, retryError);
   }
 
   private sessionNotFoundFenceTarget(
@@ -2724,7 +2748,11 @@ export class DaemonMcpProxy {
       // Return it to THIS caller but leave the cache empty so the next listTools()
       // refetches under the current scope, instead of resurrecting the list the
       // invalidation just cleared (issue #4655).
-      if (this.discoveryEpoch === discoveryEpoch) {
+      // The unbound list served after a result-minted release is not cached
+      // (like resources below): a later explicit-sessionUuid call can re-bind a
+      // surviving session without a cache invalidation, which would otherwise
+      // keep serving this unbound list under the new binding.
+      if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
         this.cachedTools = tools;
       }
       return tools;
@@ -3516,22 +3544,14 @@ export class DaemonMcpProxy {
     const lastSafeAttemptMs =
       this.heartbeatLeashMs -
       Math.min(this.heartbeatIntervalMs, Math.floor(this.heartbeatLeashMs / 2));
-    // A reconnect already in progress is shared by ensureConnected(). If it has
-    // consumed the safe retry window, stop claiming ownership before the daemon
-    // can reap it silently while all later ticks wait on the same connection.
-    // Only an in-flight reconnect qualifies: a socket that merely closed (no
-    // reconnect started) must get its bounded attempt below first. At the stdio
-    // cadence the threshold equals one interval, so fencing on `!connected`
-    // alone would fence the first tick without ever trying to reconnect (#9995).
-    if (
-      !this.connected &&
-      this.connecting !== null &&
-      this.boundSessionUuidAt !== undefined &&
-      this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
-    ) {
-      this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
-      throw this.boundSessionExpiredError();
-    }
+    // A reconnect already in progress (this tick's own, or another caller's: an
+    // idempotent tool's retry, the close handler's resource-subscription
+    // reconnect) is shared by ensureConnected(), so this tick joins it under the
+    // same bounded deadline below instead of fencing without an attempt. A
+    // daemon that restarted just before the tick would otherwise be fenced with
+    // most of the lease left and a reconnect about to finish (#9995). The
+    // deadline's onTimeout and the fast-failure catch fence before the lease
+    // lapses when the shared reconnect cannot recover.
 
     let abandoned = false;
     const elapsedMs =
@@ -3574,6 +3594,7 @@ export class DaemonMcpProxy {
     if (
       this.boundSessionUuid === sessionUuid &&
       !this.terminalBoundSession &&
+      !this.closing &&
       !this.connected &&
       this.boundSessionUuidAt !== undefined &&
       this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs

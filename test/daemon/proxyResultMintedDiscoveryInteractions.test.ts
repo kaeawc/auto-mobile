@@ -79,7 +79,7 @@ function mintingClient(mintedSession: () => string): FakeDaemonClient {
   return new FakeDaemonClient({
     daemonMethodResults: discoveryResults(),
     toolResultFor: (toolName) =>
-      toolName === "getAndroid"
+      toolName === "getAndroid" || toolName === "getApple"
         ? { content: [{ type: "text", text: JSON.stringify({ sessionId: mintedSession() }) }] }
         : undefined,
   });
@@ -274,6 +274,65 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
         { method: "resources/list", params: { sessionUuid: FIRST_SESSION } },
         { method: "resources/list-templates", params: { sessionUuid: FIRST_SESSION } },
       ]);
+    });
+  });
+
+  describe("(d) unbound tool list while released, then re-binding a surviving session", () => {
+    test("does not serve a tool list cached while released after an explicit sessionUuid re-binds", async () => {
+      const timer = new FakeTimer();
+      let minted = FIRST_SESSION;
+      const client = mintingClient(() => minted);
+      const target = createProxy(timer, [client], () => client);
+
+      await target.callTool("getAndroid", {});
+      minted = SECOND_SESSION;
+      await target.callTool("getApple", {});
+      client.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        SECOND_SESSION,
+        "device-killed",
+      );
+
+      client.callDaemonMethodCalls.length = 0;
+      await target.listTools();
+      await target.listTools();
+      // Unbound lists are not cached while released (as resources already are).
+      expect(listCalls(client)).toEqual([
+        { method: "tools/list", params: {} },
+        { method: "tools/list", params: {} },
+      ]);
+
+      // An explicit call for the surviving first session re-binds it with no
+      // acquisition result, so nothing else would drop a cached unbound list.
+      await target.callTool("observe", { sessionUuid: FIRST_SESSION });
+      client.callDaemonMethodCalls.length = 0;
+      await target.listTools();
+      expect(listCalls(client)).toEqual([
+        { method: "tools/list", params: { sessionUuid: FIRST_SESSION } },
+      ]);
+    });
+  });
+
+  describe("(e) closing during the last safe reconnect", () => {
+    test("does not fence a proxy that is shutting down or announce a list change", async () => {
+      const timer = new FakeTimer();
+      const mint = mintingClient(() => FIRST_SESSION);
+      const racing = new HeldSubscribeClient();
+      const target = createProxy(timer, [mint, racing], () => new RefusingClient());
+      const listChanged: string[] = [];
+      target.onListChanged((kind) => listChanged.push(kind));
+
+      await target.callTool("getAndroid", {});
+      mint.emitConnectionClosed();
+      // At the stdio cadence the first tick is the last safe attempt.
+      const tick = timer.advanceTimeAsync(5_000);
+      await waitForSubscribe(racing);
+      listChanged.length = 0;
+      await target.close();
+      racing.closeSocketThenReleaseSubscribe();
+      await tick;
+
+      expect(listChanged).toEqual([]);
     });
   });
 });

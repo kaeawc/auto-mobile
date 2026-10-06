@@ -959,7 +959,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     try {
       await proxy.ensureConnected();
       firstClient.emitConnectionClosed();
+      // The last safe tick (8s) joins the stuck shared reconnect under its
+      // leash - elapsed - 1 deadline, so the fence lands 1ms before the leash.
       await timer.advanceTimeAsync(8_000);
+      await timer.advanceTimeAsync(1_999);
       await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
         ActionableError,
       );
@@ -1065,6 +1068,143 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         expect(unreachableClient.callDaemonMethodCalls).toEqual([]);
       } finally {
         finishConnect?.();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    // Another caller (an idempotent tool's retry, the close handler's resource
+    // subscription reconnect) owns the in-flight reconnect when the tick fires.
+    function slowRecoveredClient(): { client: FakeDaemonClient; finishConnect: () => void } {
+      const client = heartbeatForwardingClient(sessionManager);
+      let finish: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      client.connect = async () => {
+        await gate;
+      };
+      return { client, finishConnect: () => finish() };
+    }
+
+    // The close handler resets the old client asynchronously; wait for it so the
+    // next ensureConnected() starts a real reconnect instead of seeing `connected`.
+    async function startSharedReconnect(
+      proxy: DaemonMcpProxy,
+      closedClient: FakeDaemonClient,
+    ): Promise<{ shared: Promise<void> }> {
+      closedClient.emitConnectionClosed();
+      for (let i = 0; i < 50; i++) {
+        await Promise.resolve();
+      }
+      const shared = proxy.ensureConnected();
+      shared.catch(() => {});
+      await Promise.resolve();
+      // Boxed: returning the promise itself would make this async function adopt it.
+      return { shared };
+    }
+
+    test("the last tick joins a reconnect another caller just started instead of fencing", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const { client: recoveredClient, finishConnect } = slowRecoveredClient();
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = stdioProxy([firstClient, recoveredClient]);
+
+      try {
+        await proxy.ensureConnected();
+        // Daemon restarts at 4.8s; another caller starts the reconnect, which
+        // needs 500ms, so it is still in flight when the 5s tick fires.
+        await timer.advanceTimeAsync(4_800);
+        const { shared: sharedReconnect } = await startSharedReconnect(proxy, firstClient);
+        await timer.advanceTimeAsync(200);
+        await timer.advanceTimeAsync(300);
+        finishConnect();
+        await sharedReconnect;
+        for (let i = 0; i < 50; i++) {
+          await Promise.resolve();
+        }
+
+        expect(heartbeats(recoveredClient)).toBeGreaterThanOrEqual(1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+      } finally {
+        finishConnect();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a shared reconnect that never finishes still fences before the leash", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const { client: stuckClient, finishConnect } = slowRecoveredClient();
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = stdioProxy([firstClient, stuckClient]);
+
+      try {
+        await proxy.ensureConnected();
+        await timer.advanceTimeAsync(4_800);
+        await startSharedReconnect(proxy, firstClient);
+        await timer.advanceTimeAsync(200);
+        // Joined at the 5s tick, not fenced there; deadline = leash - elapsed - 1.
+        await timer.advanceTimeAsync(4_998);
+        await timer.advanceTimeAsync(1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
+          reason: "heartbeat-unreachable",
+        });
+        expect(stuckClient.callDaemonMethodCalls).toEqual([]);
+      } finally {
+        finishConnect();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("the 2s default cadence joins a shared reconnect at its last safe tick", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const { client: recoveredClient, finishConnect } = slowRecoveredClient();
+      let daemonRestarted = false;
+      const makeRefusingClient = (): FakeDaemonClient => {
+        const client = heartbeatForwardingClient(sessionManager);
+        client.connect = async () => {
+          throw new DaemonUnavailableError("connection refused");
+        };
+        return client;
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const clients: DaemonClientLike[] = [firstClient];
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: BOUND_SESSION,
+        clientFactory: () =>
+          clients.shift() ?? (daemonRestarted ? recoveredClient : makeRefusingClient()),
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+      });
+
+      try {
+        await proxy.ensureConnected();
+        // Ticks at 2s/4s/6s fail fast while the daemon is down; it restarts at
+        // 7.8s and another caller starts a 500ms reconnect that is still in
+        // flight when the 8s tick (the last safe one at this cadence) fires.
+        firstClient.emitConnectionClosed();
+        await timer.advanceTimeAsync(7_800);
+        daemonRestarted = true;
+        const sharedReconnect = proxy.ensureConnected();
+        sharedReconnect.catch(() => {});
+        await timer.advanceTimeAsync(200);
+        await timer.advanceTimeAsync(300);
+        finishConnect();
+        await sharedReconnect;
+        for (let i = 0; i < 50; i++) {
+          await Promise.resolve();
+        }
+
+        expect(heartbeats(recoveredClient)).toBeGreaterThanOrEqual(1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+      } finally {
+        finishConnect();
         isAvailableSpy.mockRestore();
         await proxy.close();
       }

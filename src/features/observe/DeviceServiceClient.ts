@@ -489,6 +489,42 @@ export abstract class DeviceServiceClient {
   }
 
   /**
+   * Retire the live socket because its endpoint changed underneath it (e.g. the
+   * service restarted on a new port) while the client itself stays usable.
+   *
+   * Runs the same teardown a lost connection does — pending requests rejected
+   * with `error`, health check stopped, `onConnectionClosed()` so per-connection
+   * caches/polling do not leak onto the next socket — but, unlike
+   * {@link close}, leaves auto-reconnect enabled and, unlike
+   * {@link finishEstablishedConnection}, does not count a failed attempt or
+   * schedule a reconnect (the caller dials the new endpoint itself). The old
+   * socket's listeners are detached first, keeping a lone `error` listener: a
+   * closing socket can still emit "error", and an EventEmitter with none
+   * throws. No-op when there is no live socket.
+   */
+  protected retireLiveSocket(error: Error): void {
+    const socket = this.ws;
+    if (!socket) {
+      return;
+    }
+    this.ws = null;
+    this.clearLifecycleSocket(socket);
+    this.stopHealthCheck();
+    this.requestManager.cancelAll(error);
+    socket.removeAllListeners();
+    socket.on("error", (socketError) => {
+      logger.debug(`[${this.logTag}] Ignoring error on retired WebSocket: ${socketError}`);
+    });
+    try {
+      socket.close();
+    } catch (closeError) {
+      // The socket may already be closing; it is being discarded either way.
+      logger.debug(`[${this.logTag}] Error closing retired WebSocket: ${closeError}`);
+    }
+    this.onConnectionClosed();
+  }
+
+  /**
    * Eagerly abort a handshake that is stuck in CONNECTING.
    *
    * Called by close() and updatePort() right after bumping

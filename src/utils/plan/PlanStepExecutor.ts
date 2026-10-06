@@ -551,8 +551,10 @@ export class DefaultPlanStepExecutor<
       "success" in checkResult &&
       checkResult.success === false
     ) {
-      const error =
-        "error" in checkResult ? formatToolError(checkResult.error) : "Tool execution failed";
+      const fallbackError = context.targetDevice
+        ? String(Reflect.get(checkResult, "message") ?? "returned failure status")
+        : "Tool execution failed";
+      const error = "error" in checkResult ? formatToolError(checkResult.error) : fallbackError;
       return this.resultFromToolFailure(step, context, response, toolResult, error);
     }
     const error = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, step.tool);

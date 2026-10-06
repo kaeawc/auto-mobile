@@ -6,6 +6,7 @@ import { registerCriticalSectionTools } from "../../src/server/criticalSectionTo
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { PlanStepError } from "../../src/utils/plan/PlanStepExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -141,6 +142,72 @@ describe("criticalSection shares plan step execution (#6535)", () => {
       undefined,
       undefined,
     );
+  });
+
+  test.each([false, true])(
+    "failed criticalSection plan step reuses the section observation (throws=%s)",
+    async (throws) => {
+      ToolRegistry.register("sharedFailure", "Failure", schema, async () => {
+        if (throws) {
+          throw new Error("missing element");
+        }
+        return { success: false, error: "missing element" };
+      });
+      let sectionError: unknown;
+      const sectionHandler = spyOn(
+        ToolRegistry.getToolForPlan("criticalSection")!,
+        "handler",
+      ).mockImplementation(async () => {
+        try {
+          return await runSection([{ tool: "sharedFailure", params: { device: "A" } }]);
+        } catch (error) {
+          sectionError = error;
+          throw error;
+        }
+      });
+      try {
+        const result = await runPlan([
+          {
+            tool: "criticalSection",
+            params: {
+              lock: "shared-step",
+              deviceCount: 1,
+              steps: [{ tool: "sharedFailure", params: { device: "A" } }],
+            },
+          },
+        ]);
+        expect(result.success).toBe(false);
+        expect(sectionError).toBeInstanceOf(PlanStepError);
+        if (!(sectionError instanceof PlanStepError)) {
+          throw new Error("Expected section failure diagnostics");
+        }
+        expect(sectionError.failureObservation).toBeDefined();
+        expect(result.failedStep?.failureObservation).toBe(sectionError.failureObservation);
+        expect(observe).toHaveBeenCalledTimes(1);
+        expect(observe.mock.calls[0]?.[0]).toBe(device);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        sectionHandler.mockRestore();
+      }
+    },
+  );
+
+  test.each([
+    { payload: { success: false, message: "missing element" }, sectionError: "missing element" },
+    { payload: { success: false }, sectionError: "returned failure status" },
+  ])("failure without error keeps caller-specific text: %j", async ({ payload, sectionError }) => {
+    ToolRegistry.register("sharedFailure", "Failure", schema, async () => payload);
+    const steps: PlanStep[] = [{ tool: "sharedFailure", params: { device: "A" } }];
+    const result = await runPlan(steps);
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toBe("Tool execution failed");
+    await expect(runSection(steps)).rejects.toMatchObject({
+      message: expect.stringContaining(sectionError),
+      failedStep: { error: sectionError },
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test.each([false, true])(

@@ -52,6 +52,21 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   "postNotification",
   // Form filling
   "setUIState",
+  // Telephony, biometrics and accessibility services (#9966)
+  "accessibility",
+  "biometricAuth",
+  "phoneCall",
+  "sendSms",
+  // App state and fixtures (#9966). The file-staging tools are recorded only
+  // when every file carries inline content; see referencesHostFile.
+  "setNotificationPolicy",
+  "setPreference",
+  "resetKeychain",
+  "resetAppLogs",
+  "putAppFile",
+  "stageSharedStorage",
+  "stageSharedStorageFixtures",
+  "stageSessionDownloads",
 ]);
 
 /**
@@ -82,16 +97,50 @@ const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   systemTray: new Set(["list", "find"]),
 };
 
-// displayConfig reads current values unless one of these set fields is present.
-const DISPLAY_CONFIG_SET_FIELDS = ["fontScale", "density", "theme", "reset"];
+/**
+ * Tools that read current values unless one of these set fields is present:
+ * displayConfig changes a value only with a set field, accessibility reports
+ * the TalkBack/VoiceOver state when neither toggle is given.
+ */
+const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  displayConfig: ["fontScale", "density", "theme", "reset"],
+  accessibility: ["talkback", "voiceover"],
+};
 
 /** True when a recorded call only queried state, so replaying it adds nothing. */
 export function isReadOnlyCall(toolName: string, params: Record<string, unknown>): boolean {
-  if (toolName === "displayConfig") {
-    return DISPLAY_CONFIG_SET_FIELDS.every((field) => params[field] === undefined);
+  const setFields = READ_UNLESS_SET_FIELDS[toolName];
+  if (setFields) {
+    return setFields.every((field) => params[field] === undefined);
   }
   const readOnly = READ_ONLY_ACTIONS[toolName];
   return readOnly !== undefined && typeof params.action === "string" && readOnly.has(params.action);
+}
+
+/** Tools that write caller-supplied files, from a host path or inline content. */
+const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set([
+  "putAppFile",
+  "stageSharedStorage",
+  "stageSharedStorageFixtures",
+  "stageSessionDownloads",
+]);
+
+function hasSourcePath(entry: unknown): boolean {
+  return typeof entry === "object" && entry !== null && "sourcePath" in entry;
+}
+
+/**
+ * True when a file-staging call copies a host file (`sourcePath`). The path is
+ * resolved against the daemon's launch directory, so it does not exist on
+ * another host or checkout and a replay would fail; `contentText` and
+ * `contentBase64` are self-contained and are recorded. Covers both the
+ * canonical `files[]` shape and the legacy single-file putAppFile shape.
+ */
+export function referencesHostFile(toolName: string, params: Record<string, unknown>): boolean {
+  if (!FILE_STAGING_TOOLS.has(toolName)) {
+    return false;
+  }
+  return hasSourcePath(params) || (Array.isArray(params.files) && params.files.some(hasSourcePath));
 }
 
 /**
@@ -163,6 +212,12 @@ export class McpCallRecorder {
 
     const params = stripSessionScopedParams(toolName, stripInternalParams(args));
     if (isReadOnlyCall(toolName, params)) {
+      return;
+    }
+    if (referencesHostFile(toolName, params)) {
+      logger.warn(
+        `[McpCallRecorder] Not recording ${toolName}: it copies a host file (sourcePath), which a replay on another host cannot resolve; use contentText or contentBase64 to record it`,
+      );
       return;
     }
     this.steps.push({ tool: toolName, params });

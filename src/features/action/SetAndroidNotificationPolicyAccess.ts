@@ -13,7 +13,7 @@ import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/s
 import { shellQuote } from "../../utils/shellQuote";
 
 export interface SetAndroidNotificationPolicyAccessInput {
-  /** When true, runs `cmd notification allow_dnd`; when false, `disallow_dnd` (best-effort). */
+  /** When true, runs `cmd notification allow_dnd`; when false, `disallow_dnd`. A shell error in either direction is a failure. */
   allowed: boolean;
 }
 
@@ -60,30 +60,20 @@ export class SetAndroidNotificationPolicyAccess {
         const stderr = execResult.stderr ?? "";
         const bad = outputLooksLikeShellFailure(stdout, stderr);
 
-        if (input.allowed) {
-          if (bad) {
-            const message = `${stdout}\n${stderr}`.trim() || "allow_dnd reported an error";
-            throw new Error(message);
-          }
-          logger.info(`[SetAndroidNotificationPolicyAccess] allow_dnd ok for ${packageName}`);
-          return;
-        }
-
         if (bad) {
-          logger.warn(
-            `[SetAndroidNotificationPolicyAccess] disallow_dnd non-fatal output for ${packageName}: ${stdout}\n${stderr}`,
-          );
-        } else {
-          logger.info(`[SetAndroidNotificationPolicyAccess] disallow_dnd ok for ${packageName}`);
+          const message = `${stdout}\n${stderr}`.trim() || `${sub} reported an error`;
+          throw new Error(message);
         }
+        logger.info(`[SetAndroidNotificationPolicyAccess] ${sub} ok for ${packageName}`);
       });
       perf.end();
       return { success: true, appId: packageName };
     } catch (cause) {
       perf.end();
       const message = errorMessage(cause);
-      const label = input.allowed ? "allow_dnd failed" : "disallow_dnd threw";
-      logger.warn(`[SetAndroidNotificationPolicyAccess] ${label} for ${packageName}: ${message}`);
+      logger.warn(
+        `[SetAndroidNotificationPolicyAccess] ${sub} failed for ${packageName}: ${message}`,
+      );
       throwIfAborted(signal);
       return { success: false, appId: packageName, error: message };
     }

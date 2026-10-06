@@ -8,6 +8,7 @@ import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import {
   RESOURCE_URIS,
+  readObservationScreenshotBytes,
   registerObservationResources,
   resetSessionScreenshotResourceDependencies,
   resetScreenshotFileSystem,
@@ -717,6 +718,54 @@ describe("unscoped latest observation resources", () => {
     );
     expect(screenshot.mimeType).toBe("image/png");
     expect(screenshot.blob).toBe(image.toString("base64"));
+  });
+
+  describe("readObservationScreenshotBytes (host consumers such as the overlay tool)", () => {
+    const uriFor = (deviceId: string, observationId: string) =>
+      `automobile:observation/${encodeURIComponent(deviceId)}/${encodeURIComponent(observationId)}/screenshot`;
+
+    test("returns the raw bytes of the screenshot the resource would serve, through the lease", async () => {
+      const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+      const image = Buffer.from("89504e470d0a1a0a", "hex");
+      getScreenshotStateStore().updateForObservation(
+        deviceA.deviceId,
+        observationId,
+        "/tmp/device-a-bytes.png",
+      );
+      setScreenshotFileSystem({
+        stat: async () => ({ isFile: () => true }),
+        readFile: async () => image,
+      });
+      const result = await readObservationScreenshotBytes(uriFor(deviceA.deviceId, observationId));
+      expect(result).toEqual({ bytes: image, mimeType: "image/png" });
+    });
+
+    test("applies the resource's superseded or evicted check", async () => {
+      await cacheObservationFor(deviceA, "device-a-hierarchy");
+      const result = await readObservationScreenshotBytes(uriFor(deviceA.deviceId, "evicted"));
+      expect(result).toMatchObject({
+        error: expect.stringContaining("unknown or has been superseded"),
+      });
+    });
+
+    test("reports a capture that produced no screenshot", async () => {
+      const { observationId } = await cacheObservationFor(deviceA, "device-a-hierarchy");
+      const result = await readObservationScreenshotBytes(uriFor(deviceA.deviceId, observationId));
+      expect(result).toMatchObject({ error: expect.stringContaining("No screenshot available") });
+    });
+
+    test("refuses anything that is not an observation screenshot URI", async () => {
+      for (const uri of [
+        "automobile:observation/latest/screenshot",
+        "automobile:observation/session/session-123/latest/screenshot",
+        "file:///etc/passwd",
+        "automobile:observation/a/b/c/screenshot",
+      ]) {
+        expect(await readObservationScreenshotBytes(uri)).toMatchObject({
+          error: expect.stringContaining("not an observation screenshot URI"),
+        });
+      }
+    });
   });
 
   test("serves an observation's stored screenshot without waiting for an unrelated pending capture", async () => {

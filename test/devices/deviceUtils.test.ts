@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
-import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
+import { DeviceAlreadyRunningError } from "../../src/models/DeviceAlreadyRunningError";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
@@ -773,6 +774,42 @@ describe("MultiPlatformDeviceManager", () => {
       ).rejects.toThrow(
         "Failed to determine whether ios device 'iPhone 17 Pro' is already running: simctl executor failed",
       );
+      expect(launched).toBe(false);
+    });
+  });
+
+  test("startDevice refuses an already-booted simulator with a typed error and an unchanged message", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const booted: BootedDevice = { name: "iPhone 17 Pro", platform: "ios", deviceId: "IOS-17" };
+      let launched = false;
+      const fakeSimctl = {
+        getBootedSimulatorsChecked: async (): Promise<BootedDevice[]> => [booted],
+        startSimulator: async () => {
+          launched = true;
+          return null;
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        createFakeAndroidEmulator({}),
+      );
+
+      const failure = await manager
+        .startDevice({
+          name: "iPhone 17 Pro",
+          platform: "ios",
+          deviceId: "IOS-17",
+          isRunning: false,
+        })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(DeviceAlreadyRunningError);
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect((failure as DeviceAlreadyRunningError).message).toBe(
+        "ios device 'iPhone 17 Pro' is already running",
+      );
+      expect((failure as DeviceAlreadyRunningError).deviceId).toBe("IOS-17");
       expect(launched).toBe(false);
     });
   });

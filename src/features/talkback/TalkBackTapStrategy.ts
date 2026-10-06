@@ -5,15 +5,18 @@ import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { AccessibilityNodeSelector, A11yTapCoordinatesResult } from "../observe/android/types";
 import {
+  isSemanticActionRejected,
   resourceIdActionError,
   resolveTalkBackActionTarget,
   type TalkBackTargetContext,
 } from "./resourceIdActionError";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import {
+  assertFocusNavigationLive,
   FocusNavigationExecutor,
   type FocusNavigationDriverFactory,
 } from "./FocusNavigationExecutor";
@@ -176,6 +179,10 @@ export class TalkBackTapStrategy {
    * @param deviceId - The device ID
    * @param element - The target element (must have at least one of resource-id, text, or content-desc)
    * @param driver - The TalkBack navigation driver
+   * @param fence - Display fence asserted before each dispatch
+   * @param signal - Request cancellation; the ambient request signal is honoured too. A
+   *   cancelled request stops before the next swipe, never dispatches the activation, and
+   *   reports how many swipes already moved the cursor.
    * @returns Result indicating success/failure and method used
    */
   async executeTap(
@@ -183,6 +190,7 @@ export class TalkBackTapStrategy {
     element: Element,
     driver: TalkBackNavigationDriver,
     fence?: DisplayFence,
+    signal?: AbortSignal,
   ): Promise<TalkBackTapResult> {
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
     let swipeRequests = 0;
@@ -209,6 +217,7 @@ export class TalkBackTapStrategy {
         element,
         driver,
         fence,
+        signal: combineWithAmbientAbort(signal),
         resourceId,
         elementText,
         elementContentDesc,
@@ -336,6 +345,7 @@ export class TalkBackTapStrategy {
     element,
     driver,
     fence,
+    signal,
     resourceId,
     elementText,
     elementContentDesc,
@@ -346,6 +356,7 @@ export class TalkBackTapStrategy {
     element: Element;
     driver: TalkBackNavigationDriver;
     fence?: DisplayFence;
+    signal?: AbortSignal;
     resourceId?: string;
     elementText?: string;
     elementContentDesc?: string;
@@ -407,6 +418,7 @@ export class TalkBackTapStrategy {
       element,
       driver,
       fence,
+      signal,
       targetSelector,
       currentFocus,
       orderedElements,
@@ -421,6 +433,7 @@ export class TalkBackTapStrategy {
     element,
     driver,
     fence,
+    signal,
     targetSelector,
     currentFocus,
     orderedElements,
@@ -432,6 +445,7 @@ export class TalkBackTapStrategy {
     element: Element;
     driver: TalkBackNavigationDriver;
     fence?: DisplayFence;
+    signal?: AbortSignal;
     targetSelector: ElementSelector;
     currentFocus: Element | null;
     orderedElements: Element[];
@@ -461,6 +475,7 @@ export class TalkBackTapStrategy {
       `[TalkBackTapStrategy] Calculated path: ${navigationPath.swipeCount} swipes ${navigationPath.direction}`,
     );
 
+    let swipesSent = 0;
     // Navigate to element
     const navigationSuccess = await this.executor.navigateToElement(
       deviceId,
@@ -468,12 +483,16 @@ export class TalkBackTapStrategy {
       navigationPath,
       {
         displayFence: fence,
+        signal,
         maxSwipes: 100,
         // Fidelity assertions need every focused node, not periodic samples.
         verificationInterval: 1,
         swipeDelay: 100,
         onFocusObserved: (focus) => this.appendTraversalFocus(navigationResult, focus),
-        onSwipeRequested,
+        onSwipeRequested: () => {
+          swipesSent += 1;
+          onSwipeRequested();
+        },
       },
     );
 
@@ -485,8 +504,17 @@ export class TalkBackTapStrategy {
 
     logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
 
-    // Activate the focused element with double-tap gesture
-    const activationResult = await this.activateElement(element, driver, fence, orderedElements);
+    // Activate the focused element with double-tap gesture. The cursor has already moved, so a
+    // request that ended during navigation must not reach the activation.
+    const guard = () => assertFocusNavigationLive(signal, this.timer, swipesSent);
+    guard();
+    const activationResult = await this.activateElement(
+      element,
+      driver,
+      fence,
+      orderedElements,
+      guard,
+    );
     return { ...activationResult, screenReaderNavigation: navigationResult };
   }
 
@@ -752,7 +780,15 @@ export class TalkBackTapStrategy {
       if (longClickResult.dispatched && longClickResult.acknowledged !== true) {
         throw indeterminateTapError(longClickResult.error);
       }
-      if (advertisesAction(element, "long_click")) {
+      const rejected = await isSemanticActionRejected({
+        advertised: advertisesAction(element, "long_click"),
+        error: longClickResult.error,
+        needsNodeSelector: requiresNodeSelector(selector),
+        selected: element,
+        // Fresh read, not the target's hierarchy: it may predate the lookup miss.
+        readHierarchy: () => driver.getAccessibilityHierarchy?.() ?? Promise.resolve(null),
+      });
+      if (rejected) {
         return {
           success: false,
           ...confirmedElement,
@@ -783,12 +819,15 @@ export class TalkBackTapStrategy {
     driver: TalkBackNavigationDriver,
     fence: DisplayFence = { assertCurrent: () => {} },
     orderedElements: Element[],
+    assertLive: () => void,
   ): Promise<TalkBackTapResult> {
     const resourceId = element["resource-id"] as string | undefined;
     // Activate against the node TalkBack actually focused (live bounds), not the
     // caller's possibly-stale element (#3918).
     const center = await this.resolveActivationCenter(element, driver, orderedElements);
     const tapDuration = 50;
+    // The reads above can outlast the request; nothing is dispatched once it is over.
+    assertLive();
 
     // No usable bounds on either the focused node or the caller's element: never
     // tap (0,0). Try ACTION_CLICK on the resource-id, otherwise fail explicitly
@@ -815,14 +854,21 @@ export class TalkBackTapStrategy {
       };
     }
 
-    // First tap of double-tap activation
+    // One device request schedules both strokes (#9569), so the gap between the taps cannot
+    // grow with reply latency the way two separate requests did (#9562).
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence.assertCurrent();
-    const firstTap = await this.requestTapCoordinates(driver, center.x, center.y, tapDuration);
+    const activation = await this.requestTapCoordinates(
+      driver,
+      center.x,
+      center.y,
+      tapDuration,
+      true,
+    );
 
-    if (!firstTap.success) {
+    if (!activation.success) {
+      assertLive();
       if (resourceId) {
-        // If double-tap fails, try ACTION_CLICK on the resource-id
         logger.warn(
           `[TalkBackTapStrategy] Double-tap activation failed, trying ACTION_CLICK fallback`,
         );
@@ -832,6 +878,7 @@ export class TalkBackTapStrategy {
             success: false,
             method: "focus-navigation",
             error: `Activation failed: double-tap and ACTION_CLICK both failed`,
+            unsupportedCapability: activation.unsupportedCapability,
           };
         }
         return { success: true, method: "accessibility-action" };
@@ -840,39 +887,13 @@ export class TalkBackTapStrategy {
         success: false,
         method: "focus-navigation",
         error: `Activation failed: double-tap failed`,
+        unsupportedCapability: activation.unsupportedCapability,
       };
     }
 
-    await this.timer.sleep(200);
-
-    // Second tap
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence.assertCurrent();
-    const secondTap = await this.requestTapCoordinates(driver, center.x, center.y, tapDuration);
-
-    if (!secondTap.success) {
-      if (resourceId) {
-        // If second tap fails, try ACTION_CLICK as fallback
-        logger.warn(`[TalkBackTapStrategy] Second tap failed, trying ACTION_CLICK fallback`);
-        const clickResult = await this.executeDirectActivation(element, driver);
-        if (!clickResult.success) {
-          return {
-            success: false,
-            method: "focus-navigation",
-            error: `Activation failed: second tap and ACTION_CLICK both failed`,
-          };
-        }
-        return { success: true, method: "accessibility-action" };
-      }
-      return {
-        success: false,
-        method: "focus-navigation",
-        error: `Activation failed: second tap failed`,
-      };
-    }
-
-    logger.info(`[TalkBackTapStrategy] Element activated successfully via focus navigation`);
-    return { success: true, method: "focus-navigation" };
+    logger.info(`[TalkBackTapStrategy] Element activation gesture sent via focus navigation`);
+    // An acknowledged gesture does not prove the element was activated.
+    return { success: true, method: "focus-navigation", warnings: [TALKBACK_ACTIVATION_WARNING] };
   }
 
   private async requestTapCoordinates(

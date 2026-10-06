@@ -200,6 +200,11 @@ export interface ViewHierarchyWindowInfo {
   isFocused?: boolean;
   bounds?: ElementBounds;
   windowLayer?: number;
+  /**
+   * Package of the window's own root node (Android CtrlProxy). Omitted by older
+   * APKs and when the root reports none, so consumers must fall back to the
+   * capture-level `packageName`.
+   */
   packageName?: string;
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */

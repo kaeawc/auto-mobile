@@ -41,6 +41,21 @@ enum class NotificationStyle {
  */
 data class NotificationAction(val label: String, val actionId: String)
 
+/** Outcome of an attempt to post a notification. */
+internal enum class NotificationPostResult {
+  /** The notification was posted exactly as requested. */
+  POSTED,
+
+  /**
+   * A big-picture notification was posted, but its image could not be loaded so it fell back to a
+   * big-text notification.
+   */
+  POSTED_WITHOUT_IMAGE,
+
+  /** The notification was not posted. */
+  FAILED,
+}
+
 /** Debug-focused notification helper for AutoMobile tests. Requires app-under-test integration. */
 object AutoMobileNotifications {
   private const val TAG = "AutoMobileNotifications"
@@ -89,7 +104,8 @@ object AutoMobileNotifications {
    * @param imagePath Path or base64 data for big picture style
    * @param actions Actionable buttons to include on the notification
    * @param channelId Custom notification channel ID (uses default if null)
-   * @return true if the notification was posted successfully
+   * @return true if the notification was posted. A big-picture notification whose image could not
+   *   be loaded is still posted (as big text), so this returns true for it.
    */
   fun post(
     title: String,
@@ -107,7 +123,8 @@ object AutoMobileNotifications {
       return false
     }
 
-    return postWithContext(ctx, title, body, style, imagePath, actions, channelId)
+    return postWithContext(ctx, title, body, style, imagePath, actions, channelId) !=
+      NotificationPostResult.FAILED
   }
 
   internal fun postWithContext(
@@ -118,7 +135,8 @@ object AutoMobileNotifications {
     imagePath: String?,
     actions: List<NotificationAction>,
     channelId: String?,
-  ): Boolean {
+  ): NotificationPostResult {
+    var result = NotificationPostResult.POSTED
     return try {
       val notificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -147,6 +165,7 @@ object AutoMobileNotifications {
               "Big picture style requested but image could not be loaded."
             }
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            result = NotificationPostResult.POSTED_WITHOUT_IMAGE
           }
         }
         NotificationStyle.DEFAULT -> {
@@ -163,10 +182,10 @@ object AutoMobileNotifications {
       }
 
       notificationManager.notify(notificationId, builder.build())
-      true
+      result
     } catch (e: Exception) {
       AutoMobileSDK.logger.e(TAG, e) { "Failed to post notification" }
-      false
+      NotificationPostResult.FAILED
     }
   }
 

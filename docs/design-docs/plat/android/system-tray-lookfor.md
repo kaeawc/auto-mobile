@@ -81,8 +81,14 @@ result as proof that the tap failed or retry the tap automatically.
 
 A `dismiss` swipe says nothing about whether the row left the shade: an ongoing
 (foreground-service, media) notification snaps back. After the swipe the tool
-compares the number of rows matching the criteria before the swipe with the
-post-swipe observation it already takes. If the count did not drop it waits one
+compares the swiped row with the post-swipe observation it already takes. The
+row is identified by its non-volatile texts (title, body, app label); the count
+of rows reading exactly that way must drop. A row that survives with a changed
+body (download progress, a timer, a media position) still counts as present when
+a row with the same title and app label remains within one row height of the
+swiped position, because CtrlProxy exposes no notification key. A same-titled
+row with different text far from that position, or a differently titled row, is
+a different notification. If the row is still present the tool waits one
 swipe settle (400 ms), observes once more, and returns `success: false` with
 `isError: true` when the row is still there. The message names
 "ongoing/non-clearable" only when the matched row lists accessibility actions

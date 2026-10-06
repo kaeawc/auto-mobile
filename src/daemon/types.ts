@@ -113,6 +113,24 @@ export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded";
 
+/**
+ * The daemon registers the requested tool but its availability gate (debug-only,
+ * embedded-SDK-only, plan-only) rejects the call. Carried as the response `code`
+ * so the proxy never mistakes a gated tool for a stale daemon (issue #10177); a
+ * reconnect cannot change a gate. Daemons that predate it send no code.
+ */
+export const DAEMON_TOOL_UNAVAILABLE_CODE = "daemon_tool_unavailable";
+
+/** True for an error carrying the gate marker (a daemon response `code`, or the proxy's own error). */
+export function isGatedToolErrorCode(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_TOOL_UNAVAILABLE_CODE
+  );
+}
+
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
 export interface BoundSessionLoss {

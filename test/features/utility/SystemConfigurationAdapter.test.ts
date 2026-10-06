@@ -352,6 +352,120 @@ describe("SystemConfigurationAdapter", () => {
         expect(setCommands(adb)).toEqual([]);
       });
 
+      it("pins the work profile when the app is installed for both users", async () => {
+        // Same choice the pre-resolver code made (first running non-zero user), now via the
+        // shared resolver's managed-profile preference. Locale goes to the work copy, not user 0's.
+        const adb = backgroundApp([OWNER, WORK], {
+          0: packages("com.example.app"),
+          10: packages("com.example.app"),
+        });
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 10");
+        expect(setCommands(adb)).toEqual([
+          "shell cmd locale set-app-locales 'com.example.app' --user 10 --locales 'ja-JP'",
+        ]);
+      });
+
+      describe("single-user device whose user list cannot be trusted", () => {
+        const unreadable = (users: Array<typeof OWNER | typeof WORK>) => {
+          const adb = backgroundApp([OWNER], {});
+          adb.setUsers(users);
+          return adb;
+        };
+
+        it("falls back to user 0 with a warning when the user list comes back empty", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "0\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(true);
+          expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 0");
+          expect(result.warning).toContain("Could not read the device's Android user list");
+          expect(setCommands(adb)).toEqual([
+            "shell cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'",
+          ]);
+        });
+
+        it("falls back to user 0 when the only listed user is not marked running", async () => {
+          // dumpsys State: line missing or further than 10 lines from UserInfo.
+          const adb = unreadable([{ ...OWNER, running: false }]);
+          adb.setCommandResult("shell am get-current-user", "0\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeDefined();
+          expect(setCommands(adb)).toHaveLength(1);
+        });
+
+        it("does not warn on a normal single-user resolution", async () => {
+          const result = await setJa(backgroundApp([OWNER], {}));
+
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeUndefined();
+        });
+
+        it("keeps failing when a managed profile is known but nothing is running", async () => {
+          const adb = unreadable([
+            { ...OWNER, running: false },
+            { ...WORK, running: false },
+          ]);
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("keeps failing on an empty user list when the current user is not user 0", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "10\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("keeps failing when the user list is empty and the current-user probe fails too", async () => {
+          const adb = unreadable([]);
+          adb.setCommandError("shell am get-current-user", new Error("adb timeout"));
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("keeps failing when the user list is empty and the current user is unparseable", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "Error: system not ready\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("falls back when the current user can be read and is user 0", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "0\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeDefined();
+        });
+      });
+
       it("returns a typed failure when the Android user list cannot be read", async () => {
         const adb = backgroundApp([OWNER, WORK], { 0: packages("com.example.app") });
         adb.listUsers = async () => {
@@ -461,9 +575,10 @@ describe("SystemConfigurationAdapter", () => {
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe(
-        'Read-back verification failed for com.example.app: expected "ja-JP" but got "null"',
-      );
+      // The read-back could not be read, so the outcome is indeterminate and
+      // nothing is restored (#10155).
+      expect(result.error).toContain("Locale change outcome is indeterminate");
+      expect(result.error).toContain("could not be read back for com.example.app");
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     });
 

@@ -4,6 +4,7 @@ import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExe
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { ProviderUnavailableError } from "../storage/ProviderUnavailableError";
+import { parseJsonKeepingBigIntegers } from "./bigIntegerJson";
 
 /**
  * Database descriptor returned from listDatabases
@@ -49,6 +50,11 @@ export interface TableDataResult {
   rows: any[][];
   /** Total number of rows in table */
   total: number;
+  /**
+   * Zero-based columns whose integer cells fall outside ±(2^53 - 1) and are therefore returned
+   * as exact decimal strings instead of (rounded) numbers. Absent when there are none.
+   */
+  bigIntegerColumns?: number[];
   diagnostic?: SQLResult["diagnostic"];
 }
 
@@ -63,6 +69,11 @@ export interface SQLResult {
   rows?: any[][];
   /** Number of rows affected (mutation only) */
   rowsAffected?: number;
+  /**
+   * Query only. Zero-based columns whose integer cells fall outside ±(2^53 - 1) and are therefore returned
+   * as exact decimal strings instead of (rounded) numbers. Absent when there are none.
+   */
+  bigIntegerColumns?: number[];
   diagnostic?: {
     code: string;
     message: string;
@@ -197,7 +208,7 @@ export class DatabaseInspector {
     }
 
     try {
-      return JSON.parse(json) as T;
+      return parseJsonKeepingBigIntegers<T>(json);
     } catch {
       throw new ActionableError(`Failed to parse ContentProvider response: invalid JSON`);
     }

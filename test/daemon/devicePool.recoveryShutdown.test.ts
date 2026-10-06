@@ -3693,3 +3693,86 @@ test("terminal teardown wins over a joined device-restart release settlement", a
     sessions.stopCleanupTimer();
   }
 });
+
+async function setupSessionlessUnconfirmedRecovery() {
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const manager = new LaggingShutdownManager();
+  const pool = new DevicePool(
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    }),
+  );
+  manager.bootedDevices = [original];
+  await pool.addDevice(original, image);
+  // Android discovery cannot confirm the old emulator stopped.
+  manager.failedPlatforms.add("android");
+  await expect(pool.removeDisconnectedDevice(original.deviceId, false)).rejects.toBeInstanceOf(
+    ActionableError,
+  );
+  await flush();
+  expect(manager.startedDevices).toHaveLength(0);
+  return { timer, sessions, manager, pool };
+}
+
+test("a sessionless recovery with unconfirmed shutdown reserves the AVD and startDevice fails fast naming it", async () => {
+  const { timer, sessions, pool } = await setupSessionlessUnconfirmedRecovery();
+  try {
+    expect(pool.getRecoveringAndroidTargets().names).toEqual(new Set([original.name]));
+    await expect(pool.reserveAndroidStartupLease(original.name, true)).rejects.toThrow(
+      `Android AVD '${original.name}' is reserved by an interrupted emulator recovery`,
+    );
+    // Failed without a boot-budget wait: no FakeTimer sleep or deadline was needed.
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a later fresh observation showing the AVD gone lifts the sessionless reservation", async () => {
+  const { sessions, manager, pool } = await setupSessionlessUnconfirmedRecovery();
+  try {
+    manager.failedPlatforms.clear();
+    manager.bootedDevices = [];
+    await pool.refreshDevices();
+    expect(pool.getRecoveringAndroidTargets().names.size).toBe(0);
+    const release = await pool.reserveAndroidStartupLease(original.name, true);
+    await release();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a later fresh observation showing the AVD running lifts the reservation and leaves it pooled", async () => {
+  const { sessions, manager, pool } = await setupSessionlessUnconfirmedRecovery();
+  try {
+    manager.failedPlatforms.clear();
+    manager.bootedDevices = [original];
+    await pool.refreshDevices();
+    expect(pool.getRecoveringAndroidTargets().names.size).toBe(0);
+    expect(pool.getDevice(original.deviceId)).not.toBeNull();
+    const release = await pool.reserveAndroidStartupLease(original.name, true);
+    await release();
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("an inconclusive observation keeps the sessionless reservation", async () => {
+  const { sessions, manager, pool } = await setupSessionlessUnconfirmedRecovery();
+  try {
+    // Discovery still failing, then an unresolved identity: neither proves anything.
+    await pool.refreshDevices();
+    expect(pool.getRecoveringAndroidTargets().names).toEqual(new Set([original.name]));
+    manager.failedPlatforms.clear();
+    manager.bootedDevices = [{ ...original, name: "Unknown (emulator-5554)" }];
+    await pool.refreshDevices();
+    expect(pool.getRecoveringAndroidTargets().names).toEqual(new Set([original.name]));
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});

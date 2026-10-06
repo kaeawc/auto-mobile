@@ -88,7 +88,7 @@ describe("UninstallApp (iOS simulator)", () => {
     };
 
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
+    await repo.seedInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
     const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
       simctl: fakeSimctl,
       deviceAppUninstaller: fakeUninstaller,
@@ -436,7 +436,7 @@ describe("UninstallApp (Android)", () => {
 
   test("marks the Android installed-apps cache stale after a successful uninstall", async () => {
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
       { stdout: "package:com.android.settings" },
@@ -474,7 +474,7 @@ describe("UninstallApp (Android)", () => {
 
     const repo = new FakeInstalledAppsRepository();
     const adb = new VerificationFailureAdb();
-    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(adb), {
@@ -713,7 +713,7 @@ describe("UninstallApp (Android)", () => {
 
   test("returns not installed when package is missing", async () => {
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     setupNoApp(fakeAdb, 0);
@@ -854,5 +854,196 @@ describe("UninstallApp (iOS listing failure)", () => {
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(true);
     expect(fakeUninstaller.calls).toHaveLength(1);
+  });
+});
+
+describe("UninstallApp (iOS simulator cancellation, issue #10077)", () => {
+  const iosSimDevice: BootedDevice = {
+    deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+
+  let fakeSimctl: FakeSimctl;
+  let fakeUninstaller: FakeDeviceAppUninstaller;
+  let controller: AbortController;
+
+  const createUninstall = () =>
+    new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
+
+  beforeEach(() => {
+    fakeSimctl = new FakeSimctl();
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+    fakeUninstaller = new FakeDeviceAppUninstaller();
+    controller = new AbortController();
+  });
+
+  test("a request cancelled during the pre-uninstall terminate neither uninstalls nor succeeds", async () => {
+    fakeSimctl.terminateApp = async () => {
+      controller.abort();
+      throw new DOMException("The operation was aborted", "AbortError");
+    };
+
+    await expect(
+      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+    expect(fakeUninstaller.calls).toHaveLength(0);
+  });
+
+  test("a request cancelled after the installed-app pre-check dispatches nothing", async () => {
+    const realList = fakeSimctl.listAppsOrThrow.bind(fakeSimctl);
+    fakeSimctl.listAppsOrThrow = async (...args) => {
+      const apps = await realList(...args);
+      controller.abort();
+      return apps;
+    };
+
+    await expect(
+      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+    expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
+    expect(fakeUninstaller.calls).toHaveLength(0);
+  });
+
+  test("a cancellation during the dispatched uninstall is a cancellation, not a failure result", async () => {
+    fakeUninstaller.uninstallApp = async (deviceUdid, bundleId, isSimulator) => {
+      fakeUninstaller.calls.push({ deviceUdid, bundleId, isSimulator });
+      controller.abort();
+      throw new DOMException("The operation was aborted", "AbortError");
+    };
+
+    await expect(
+      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+  });
+
+  test("a cancelled post-uninstall verification is not reported as a trusted success", async () => {
+    fakeUninstaller.uninstallApp = async (deviceUdid, bundleId, isSimulator) => {
+      fakeUninstaller.calls.push({ deviceUdid, bundleId, isSimulator });
+      fakeSimctl.setInstalledApps([]);
+      controller.abort();
+      fakeSimctl.setListAppsError(new DOMException("The operation was aborted", "AbortError"));
+    };
+
+    await expect(
+      createUninstall().execute("com.example.app", false, undefined, controller.signal),
+    ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+  });
+
+  test("a timed-out uninstall surfaces its indeterminate outcome as a failure result", async () => {
+    fakeUninstaller.shouldThrow = new ActionableError(
+      "Uninstall outcome is indeterminate: xcrun simctl uninstall was dispatched but did not finish",
+    );
+
+    const result = await createUninstall().execute("com.example.app");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("indeterminate");
+  });
+
+  describe("installed-apps cache staleness once the uninstall was dispatched", () => {
+    class CountingRepository extends FakeInstalledAppsRepository {
+      staleCalls = 0;
+
+      override async markDeviceStale(deviceId: string): Promise<void> {
+        this.staleCalls += 1;
+        await super.markDeviceStale(deviceId);
+      }
+    }
+
+    function uninstallWith(repository: CountingRepository) {
+      return new UninstallApp(iosSimDevice, nullAdbFactory, {
+        simctl: fakeSimctl,
+        deviceAppUninstaller: fakeUninstaller,
+        installedAppsRepository: repository,
+      });
+    }
+
+    test("an indeterminate (killed) uninstall still marks the cache stale", async () => {
+      const repository = new CountingRepository();
+      fakeUninstaller.shouldThrow = new ActionableError(
+        "Uninstall outcome is indeterminate: xcrun simctl uninstall was dispatched but did not finish",
+      );
+
+      const result = await uninstallWith(repository).execute("com.example.app");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("indeterminate");
+      expect(repository.staleCalls).toBe(1);
+    });
+
+    test("a plain uninstall failure marks the cache stale", async () => {
+      const repository = new CountingRepository();
+      fakeUninstaller.shouldThrow = new Error("simctl uninstall exited 1");
+
+      const result = await uninstallWith(repository).execute("com.example.app");
+
+      expect(result.success).toBe(false);
+      expect(repository.staleCalls).toBe(1);
+    });
+
+    test("a cancel that kills the dispatched uninstall marks the cache stale", async () => {
+      const repository = new CountingRepository();
+      fakeUninstaller.uninstallApp = async () => {
+        controller.abort();
+        throw new DOMException("The operation was aborted", "AbortError");
+      };
+
+      await expect(
+        uninstallWith(repository).execute("com.example.app", false, undefined, controller.signal),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+      expect(repository.staleCalls).toBe(1);
+    });
+
+    test("a successful uninstall marks the cache stale exactly once", async () => {
+      const repository = new CountingRepository();
+      fakeUninstaller.uninstallApp = async () => {
+        fakeSimctl.setInstalledApps([]);
+      };
+
+      const result = await uninstallWith(repository).execute("com.example.app");
+
+      expect(result.success).toBe(true);
+      expect(repository.staleCalls).toBe(1);
+    });
+
+    test("a request cancelled before the uninstall dispatches leaves the cache alone", async () => {
+      const repository = new CountingRepository();
+      const realList = fakeSimctl.listAppsOrThrow.bind(fakeSimctl);
+      fakeSimctl.listAppsOrThrow = async (...args) => {
+        const apps = await realList(...args);
+        controller.abort();
+        return apps;
+      };
+
+      await expect(
+        uninstallWith(repository).execute("com.example.app", false, undefined, controller.signal),
+      ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+
+      expect(repository.staleCalls).toBe(0);
+    });
+  });
+
+  test("an uncancelled uninstall still succeeds with a signal supplied", async () => {
+    fakeUninstaller.uninstallApp = async (deviceUdid, bundleId, isSimulator) => {
+      fakeUninstaller.calls.push({ deviceUdid, bundleId, isSimulator });
+      fakeSimctl.setInstalledApps([]);
+    };
+
+    const result = await createUninstall().execute(
+      "com.example.app",
+      false,
+      undefined,
+      controller.signal,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.wasInstalled).toBe(true);
   });
 });

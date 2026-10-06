@@ -3,6 +3,7 @@ import type { Database } from "./types";
 import type { EVENT_TABLES } from "./eventTables";
 import { getDatabase } from "./database";
 import { logger } from "../utils/logger";
+import { pruneTableByInsertionOrder } from "./rowCapRetention";
 import { runAmortizedRetentionGate, type AmortizedRetentionState } from "./retentionGate";
 
 export const RETENTION_MAX_ROWS = 10_000;
@@ -35,42 +36,13 @@ export async function pruneEventTableByCount(
     state,
     async () => {
       try {
-        const resolvedDb = db ?? getDatabase();
-        const count = await resolvedDb
-          .selectFrom(table)
-          .select(resolvedDb.fn.countAll().as("count"))
-          .executeTakeFirstOrThrow();
-
-        if (Number(count.count) > maxRows) {
-          // Canonical retention idiom (#3137): pick the Nth-newest row as the
-          // threshold (offset maxRows - 1) and delete everything strictly older,
-          // breaking cutoff-timestamp ties on the monotonic `id`. This trims to
-          // *exactly* maxRows rows and deterministically prunes same-timestamp rows,
-          // unlike the prior `offset(maxRows)` + `timestamp < cutoff` form, which
-          // retained maxRows + 1 rows and could never remove rows equal to the
-          // cutoff timestamp (a burst of same-millisecond events at the cutoff could
-          // retain more than maxRows).
-          const threshold = await resolvedDb
-            .selectFrom(table)
-            .select(["id", "timestamp"])
-            .orderBy("timestamp", "desc")
-            .orderBy("id", "desc")
-            .limit(1)
-            .offset(maxRows - 1)
-            .executeTakeFirst();
-
-          if (threshold) {
-            await resolvedDb
-              .deleteFrom(table)
-              .where((eb) =>
-                eb.or([
-                  eb("timestamp", "<", threshold.timestamp),
-                  eb.and([eb("timestamp", "=", threshold.timestamp), eb("id", "<", threshold.id)]),
-                ]),
-              )
-              .execute();
-          }
-        }
+        // Keep the most recently INSERTED maxRows rows, ordered by the
+        // autoincrement `id` and never by the device-supplied `timestamp`
+        // (#10044): a device whose clock is behind the stored rows would
+        // otherwise have every event it just sent pruned. Same count(*)-gated
+        // offset probe and exact-maxRows trim as the earlier timestamp form
+        // (#3137), served by the primary key.
+        await pruneTableByInsertionOrder(db ?? getDatabase(), table, maxRows);
       } catch (error) {
         logger.warn(`${table} retention cleanup failed: ${error}`, error);
       }

@@ -83,7 +83,17 @@ describe("DownloadsFixtureService (#7007)", () => {
     expect(
       executor
         .getExecutedArgv()
-        .some((argv) => argv[0] === "push" && argv[2].endsWith("/run-42/docs/read.txt")),
+        .some(
+          (argv) =>
+            argv[0] === "push" && /\/run-42\/docs\/\.automobile-.*\.part$/.test(argv[2] ?? ""),
+        ),
+    ).toBe(true);
+    expect(
+      commands.some(
+        (command) =>
+          command.endsWith("'/storage/emulated/0/Download/run-42/docs/read.txt'") &&
+          command.startsWith("shell mv -f "),
+      ),
     ).toBe(true);
   });
 

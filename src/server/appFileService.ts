@@ -73,6 +73,11 @@ import { findIosSimulatorAppProcess } from "../features/action/CrashApp";
 import { readAndroidPackageProcesses } from "../utils/android-cmdline-tools/androidProcessState";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import {
+  androidRestoreBackupScript,
+  androidRollbackScript,
+  androidSaveBackupScript,
+} from "./androidFileBackup";
 
 export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
@@ -793,14 +798,6 @@ function androidAppFilePrefix(appTarget: AppContainersTarget, userId: number): s
     : androidRunAsPrefix(appTarget.appId, userId);
 }
 
-/** Delete newly created files and restore overwritten ones, reporting failure if any step fails. */
-function androidRollbackScript(created: string[], restores: string[]): string {
-  const steps = [...(created.length > 0 ? [`rm -f ${created.join(" ")}`] : []), ...restores].map(
-    (step) => `${step} || rc=1`,
-  );
-  return `rc=0; ${steps.join("; ")}; exit $rc`;
-}
-
 class AndroidAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
@@ -1040,11 +1037,8 @@ class AndroidAppFileProvider
     // Save the previous content before it is replaced so a failed batch can restore it. The copy
     // goes to a `.part` file and is renamed into place, so the backup path only ever exists
     // complete: a failed or killed `cp` leaves the original untouched and at most a `.part`.
-    const backupPart = `${backup}.part`;
     const saveBackup = keepPrevious
-      ? `{ if [ -f ${shellQuote(destination)} ]; then ` +
-        `cp ${shellQuote(destination)} ${shellQuote(backupPart)} && ` +
-        `mv -f ${shellQuote(backupPart)} ${shellQuote(backup)} && echo ${APP_FILE_BACKUP_MARKER}; fi; } && `
+      ? `${androidSaveBackupScript(destination, backup, APP_FILE_BACKUP_MARKER)} && `
       : "";
     const cleanupCommands = [
       ...(target.kind === "external" ? [] : [`shell rm -f ${shellQuote(staging)}`]),
@@ -1089,10 +1083,7 @@ class AndroidAppFileProvider
         // backup is a no-op when the destination was never replaced. A partial copy never reaches
         // the backup path, so the intact destination is left alone and only the `.part` is removed.
         cleanupCommands.push(
-          `${prefix} sh -c ${shellQuote(
-            `rm -f ${shellQuote(backupPart)}; ` +
-              `if [ -f ${shellQuote(backup)} ]; then mv -f ${shellQuote(backup)} ${shellQuote(destination)}; fi`,
-          )}`,
+          `${prefix} sh -c ${shellQuote(androidRestoreBackupScript(destination, backup))}`,
         );
       }
       await this.cleanupStaging(adb, cleanupCommands, request.destinationPath, cleanupFailures);

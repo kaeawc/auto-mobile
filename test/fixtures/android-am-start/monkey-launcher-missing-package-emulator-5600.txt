@@ -1,0 +1,16 @@
+$ adb shell monkey -p com.example.missing.pkg -c android.intent.category.LAUNCHER 1; echo exit=$?
+  bash arg: -p
+  bash arg: com.example.missing.pkg
+  bash arg: -c
+  bash arg: android.intent.category.LAUNCHER
+  bash arg: 1
+args: [-p, com.example.missing.pkg, -c, android.intent.category.LAUNCHER, 1]
+ arg: "-p"
+ arg: "com.example.missing.pkg"
+ arg: "-c"
+ arg: "android.intent.category.LAUNCHER"
+ arg: "1"
+data="com.example.missing.pkg"
+data="android.intent.category.LAUNCHER"
+** No activities found to run, monkey aborted.
+exit=252

@@ -1,0 +1,8 @@
+$ adb shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.example.missing.pkg ; echo exit=$?
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] pkg=com.example.missing.pkg }
+Error: Activity not started, unable to resolve Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 pkg=com.example.missing.pkg }
+exit=1
+$ adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.missing.pkg; echo exit=$?
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] pkg=com.example.missing.pkg }
+Error: Activity not started, unable to resolve Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 pkg=com.example.missing.pkg }
+exit=1

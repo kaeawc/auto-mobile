@@ -19,6 +19,22 @@ class NodeLookupTest {
   private fun root(label: String): AccessibilityNodeInfo =
     mockk(relaxed = true, name = label) { every { viewIdResourceName } returns label }
 
+  /** An editable field the focus fallback may move to unless a flag below says otherwise. */
+  private fun field(
+    label: String,
+    editable: Boolean = true,
+    focusable: Boolean = true,
+    visible: Boolean = true,
+    enabled: Boolean = true,
+  ): AccessibilityNodeInfo =
+    mockk(relaxed = true, name = label) {
+      every { viewIdResourceName } returns label
+      every { isEditable } returns editable
+      every { isFocusable } returns focusable
+      every { isVisibleToUser } returns visible
+      every { isEnabled } returns enabled
+    }
+
   private fun window(
     root: AccessibilityNodeInfo?,
     active: Boolean = false,
@@ -171,11 +187,12 @@ class NodeLookupTest {
 
   @Test
   fun `previous with two earlier fields returns the second and releases each copy once`() {
-    val first = root("a")
-    val second = root("b")
-    val third = root("c")
+    val first = field("a")
+    val second = field("b")
+    val third = field("c")
 
-    val previous = selectPreviousFocusable(listOf(first, second, third)) { it === third }
+    val previous =
+      selectAdjacentFocusable(listOf(first, second, third), forward = false) { it === third }
 
     assertSame(second, previous)
     verify(exactly = 1) { first.recycle() }
@@ -185,9 +202,9 @@ class NodeLookupTest {
 
   @Test
   fun `previous with four earlier fields never recycles a copy twice`() {
-    val nodes = listOf("a", "b", "c", "d", "e").map(::root)
+    val nodes = listOf("a", "b", "c", "d", "e").map { field(it) }
 
-    val previous = selectPreviousFocusable(nodes) { it === nodes[4] }
+    val previous = selectAdjacentFocusable(nodes, forward = false) { it === nodes[4] }
 
     assertSame(nodes[3], previous)
     nodes.forEachIndexed { i, n -> verify(exactly = if (i == 3) 0 else 1) { n.recycle() } }
@@ -195,30 +212,108 @@ class NodeLookupTest {
 
   @Test
   fun `previous when the current node is not found releases every copy exactly once`() {
-    val nodes = listOf("a", "b", "c").map(::root)
+    val nodes = listOf("a", "b", "c").map { field(it) }
 
-    assertNull(selectPreviousFocusable(nodes) { false })
+    assertNull(selectAdjacentFocusable(nodes, forward = false) { false })
 
     nodes.forEach { verify(exactly = 1) { it.recycle() } }
   }
 
   @Test
   fun `previous when the current node is first returns null and releases every copy once`() {
-    val nodes = listOf("a", "b").map(::root)
+    val nodes = listOf("a", "b").map { field(it) }
 
-    assertNull(selectPreviousFocusable(nodes) { it === nodes[0] })
+    assertNull(selectAdjacentFocusable(nodes, forward = false) { it === nodes[0] })
 
     nodes.forEach { verify(exactly = 1) { it.recycle() } }
   }
 
   @Test
   fun `previous with a single predecessor returns it`() {
-    val first = root("a")
-    val second = root("b")
+    val first = field("a")
+    val second = field("b")
 
-    assertSame(first, selectPreviousFocusable(listOf(first, second)) { it === second })
+    assertSame(
+      first,
+      selectAdjacentFocusable(listOf(first, second), forward = false) { it === second },
+    )
 
     verify(exactly = 0) { first.recycle() }
     verify(exactly = 1) { second.recycle() }
+  }
+
+  @Test
+  fun `next skips a disabled field and returns the enabled one behind it`() {
+    val email = field("email")
+    val referral = field("referral", enabled = false)
+    val password = field("password")
+
+    val next =
+      selectAdjacentFocusable(listOf(email, referral, password), forward = true) { it === email }
+
+    assertSame(password, next)
+    verify(exactly = 1) { referral.recycle() }
+    verify(exactly = 1) { email.recycle() }
+    verify(exactly = 0) { password.recycle() }
+  }
+
+  @Test
+  fun `previous skips an invisible field and returns the visible one before it`() {
+    val first = field("first")
+    val hidden = field("hidden", visible = false)
+    val last = field("last")
+
+    val previous =
+      selectAdjacentFocusable(listOf(first, hidden, last), forward = false) { it === last }
+
+    assertSame(first, previous)
+    verify(exactly = 1) { hidden.recycle() }
+  }
+
+  @Test
+  fun `next with only an ineligible field behind returns null and releases every copy once`() {
+    val email = field("email")
+    val readOnly = field("readOnly", focusable = false)
+
+    assertNull(selectAdjacentFocusable(listOf(email, readOnly), forward = true) { it === email })
+
+    verify(exactly = 1) { email.recycle() }
+    verify(exactly = 1) { readOnly.recycle() }
+  }
+
+  @Test
+  fun `a traversal hint that points at a disabled node falls through to the next strategy`() {
+    val disabledHint = field("hint", enabled = false)
+    val viaSearch = field("search")
+    val current = field("current")
+
+    val target =
+      selectTraversalTarget(listOf({ disabledHint }, { viaSearch }, { error("not reached") })) {
+        it === current
+      }
+
+    assertSame(viaSearch, target)
+    verify(exactly = 1) { disabledHint.recycle() }
+    verify(exactly = 0) { viaSearch.recycle() }
+  }
+
+  @Test
+  fun `a traversal strategy that returns the current node is rejected`() {
+    val current = field("current")
+    val other = field("other")
+
+    val target = selectTraversalTarget(listOf({ current }, { other })) { it === current }
+
+    assertSame(other, target)
+    verify(exactly = 1) { current.recycle() }
+  }
+
+  @Test
+  fun `no strategy yielding a reachable node returns null`() {
+    val invisible = field("invisible", visible = false)
+
+    assertNull(selectTraversalTarget(listOf({ null }, { invisible })) { false })
+
+    verify(exactly = 1) { invisible.recycle() }
   }
 }

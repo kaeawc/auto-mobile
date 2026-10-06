@@ -279,6 +279,86 @@ describe("SendKeys IME failure after typing", () => {
     },
   );
 
+  test.each([
+    {
+      name: "focus-traversal warns that the field's own handler did not run",
+      wire: { mechanism: "focus-traversal" },
+      mechanism: "focus-traversal",
+      warns: true,
+    },
+    {
+      name: "editor-action is the keyboard's own path and does not warn",
+      wire: { mechanism: "editor-action" },
+      mechanism: "editor-action",
+      warns: false,
+    },
+    {
+      name: "an older APK reply without a mechanism neither warns nor invents one",
+      wire: {},
+      mechanism: undefined,
+      warns: false,
+    },
+  ])("Android next: $name (#10219)", async ({ wire, mechanism, warns }) => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setScreenState(true);
+    const device = { ...androidDevice, deviceId: `ime-next-mechanism-${mechanism ?? "absent"}` };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      device,
+      adb,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.send = (data: unknown) => {
+          const request = JSON.parse(String(data)) as Record<string, unknown>;
+          if (request.type === "request_ime_action") {
+            socket.simulateMessage(
+              JSON.stringify({
+                type: "ime_action_result",
+                requestId: request.requestId,
+                action: "next",
+                success: true,
+                totalTimeMs: 1,
+                ...wire,
+              }),
+            );
+          }
+        };
+        return socket;
+      },
+      timer,
+    );
+    const { client: textClient } = createTextClient();
+    textClient.ime = (action) => client.requestImeAction(action);
+    const observer = createObserver(focusedAndroidObservation("", {}, 1));
+    const executor = new DefaultSendKeysCommandExecutor(device, createAdbFactory(adb), observer, {
+      textClient,
+      timer,
+    });
+    const sendKeys = new SendKeys(device, undefined, {
+      executor,
+      observer,
+      timer,
+      timestampProvider: { now: async () => 0 },
+    });
+    try {
+      expect(await client.ensureConnected()).toBe(true);
+      const result = await sendKeys.execute([{ action: "key", key: "next" }]);
+      const command = result.commands[0];
+      expect(result.success).toBe(true);
+      expect(command.mechanism).toBe(mechanism);
+      if (warns) {
+        expect(command.warning).toContain("moved focus directly");
+        expect(result.warning).toContain("'next' handler did not run");
+      } else {
+        expect(command.warning).toBeUndefined();
+        expect(result.warning).toBeUndefined();
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
   test("does not claim typing succeeded when the type step fails", async () => {
     const { client } = createTextClient();
     client.insert = async () => ({ success: false, error: "typing failed" });

@@ -701,6 +701,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
     private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
     private const val REMEMBER_TTL_MS = 5_000L
+    private const val EDITOR_ACTION_TIMEOUT_MS = 2_000L
 
     /**
      * The universe of accessibility event types we classify for subscription. [HANDLED_EVENT_TYPES]
@@ -5713,35 +5714,55 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  internal enum class ImeActionStep(val error: String? = null) {
+  internal enum class ImeActionStep(
+    val error: String? = null,
+    val mechanism: ImeActionMechanism? = null,
+  ) {
     NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
-    NEXT,
-    PREVIOUS,
-    IME_ENTER,
-    KEYCODE_ENTER,
+    /** The keyboard's own path: the action goes through the live input connection. */
+    EDITOR_ACTION(mechanism = ImeActionMechanism.EDITOR_ACTION),
+    NEXT(mechanism = ImeActionMechanism.FOCUS_TRAVERSAL),
+    PREVIOUS(mechanism = ImeActionMechanism.FOCUS_TRAVERSAL),
+    IME_ENTER(mechanism = ImeActionMechanism.IME_ENTER),
+    KEYCODE_ENTER(mechanism = ImeActionMechanism.KEYCODE_ENTER),
     UNSUPPORTED;
 
     companion object {
-      fun select(action: String, hasFocusedEditable: Boolean, sdkInt: Int): ImeActionStep {
+      /**
+       * [imeConnectionAvailable] is true when [CtrlProxyIme] is bound to the focused editor with a
+       * live input connection. Then every action is delivered like the keyboard's action key; only
+       * without one do next/previous fall back to moving focus and done/go/send/search to
+       * `ACTION_IME_ENTER` (API 30+) or an Enter key event.
+       */
+      fun select(
+        action: String,
+        hasFocusedEditable: Boolean,
+        sdkInt: Int,
+        imeConnectionAvailable: Boolean = false,
+      ): ImeActionStep {
         if (!hasFocusedEditable) {
           return NO_FOCUSED_EDITABLE
+        }
+        if (imeEditorActionId(action) == null) {
+          return UNSUPPORTED
+        }
+        if (imeConnectionAvailable) {
+          return EDITOR_ACTION
         }
         return when (action) {
           "next" -> NEXT
           "previous" -> PREVIOUS
-          "done",
-          "go",
-          "send",
-          "search" -> if (sdkInt >= android.os.Build.VERSION_CODES.R) IME_ENTER else KEYCODE_ENTER
-          else -> UNSUPPORTED
+          else -> if (sdkInt >= android.os.Build.VERSION_CODES.R) IME_ENTER else KEYCODE_ENTER
         }
       }
     }
   }
 
   /**
-   * Perform IME action using AccessibilityService. This properly handles focus movement
-   * (next/previous) and keyboard actions (done/go/search/send).
+   * Perform an IME action the way the keyboard's action key does: through the live input connection
+   * when the AutoMobile IME is bound (so the app's editor-action handler runs and decides where
+   * focus goes), otherwise by the accessibility fallbacks. The reply carries the `mechanism` used,
+   * and next/previous succeed only when the focused input actually changed.
    */
   private fun performImeAction(requestId: String?, action: String) {
     rememberedInsert = null
@@ -5757,12 +5778,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       focusedNode = findFocusedEditableNode(root)
       perfProvider.endOperation("findFocusedNode")
 
-      val step = ImeActionStep.select(action, focusedNode != null, android.os.Build.VERSION.SDK_INT)
-      val error = step.error
-      if (error != null) {
+      val ime = CtrlProxyIme.current()?.takeIf { it.hasLiveInputConnection() }
+      val step =
+        ImeActionStep.select(
+          action,
+          focusedNode != null,
+          android.os.Build.VERSION.SDK_INT,
+          ime != null,
+        )
+      val focused = focusedNode
+      if (focused == null || step.error != null) {
+        val error = step.error ?: ImeActionStep.NO_FOCUSED_EDITABLE.error
         perfProvider.end()
         val errorTime = System.currentTimeMillis()
-        Log.w(TAG, error)
+        Log.w(TAG, "$error")
         launchRequestScope(requestId) {
           broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
         }
@@ -5770,72 +5799,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("executeAction")
-      val success =
-        when (step) {
-          ImeActionStep.NEXT -> {
-            // Find next focusable element and focus it
-            val nextNode = findNextFocusableNode(root, focusedNode!!)
-            if (nextNode != null) {
-              val focusSuccess =
-                nextNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS
-                )
-              nextNode.recycle()
-              focusSuccess
-            } else {
-              Log.w(TAG, "No next focusable node found")
-              false
-            }
-          }
-          ImeActionStep.PREVIOUS -> {
-            // Find previous focusable element and focus it
-            val prevNode = findPreviousFocusableNode(root, focusedNode!!)
-            if (prevNode != null) {
-              val focusSuccess =
-                prevNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS
-                )
-              prevNode.recycle()
-              focusSuccess
-            } else {
-              Log.w(TAG, "No previous focusable node found")
-              false
-            }
-          }
-          ImeActionStep.IME_ENTER -> {
-            // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-            @Suppress("NewApi")
-            val actionId =
-              android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
-                .id
-            val imeResult = focusedNode!!.performAction(actionId)
-            Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-            imeResult
-          }
-          ImeActionStep.KEYCODE_ENTER -> {
-            // Pre-API 30: Fall back to pressing Enter key via input shell command
-            // This is less reliable but works on older devices
-            Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
-            try {
-              Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-            } catch (e: Exception) {
-              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
-              false
-            }
-          }
-          else -> {
-            Log.w(TAG, "Unknown IME action: $action")
-            false
-          }
-        }
+      val verdict = executeImeAction(step, action, root, focused, ime)
       perfProvider.endOperation("executeAction")
 
       perfProvider.end()
 
-      Log.d(TAG, "IME action completed: success=$success")
+      Log.d(TAG, "IME action completed: success=${verdict.success} mechanism=${step.mechanism}")
 
       // Wait for UI to settle, then extract fresh hierarchy
-      if (success) {
+      if (verdict.success) {
         val freshHierarchy =
           hierarchyDebouncer.extractAfterQuiescence(
             quiescenceMs = HierarchyQuiescence.POLL_MS,
@@ -5854,9 +5826,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         broadcastImeActionResult(
           requestId,
           action,
-          success,
-          if (success) null else "Action failed",
+          verdict.success,
+          verdict.error,
           totalTime,
+          step.mechanism?.wire,
         )
       }
     } catch (e: Exception) {
@@ -5871,6 +5844,164 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         focusedNode?.recycle()
       }
       root?.recycle()
+    }
+  }
+
+  /**
+   * Delivers the action by [step]'s mechanism, then judges it (next/previous by the focus change).
+   */
+  private fun executeImeAction(
+    step: ImeActionStep,
+    action: String,
+    root: android.view.accessibility.AccessibilityNodeInfo?,
+    focused: android.view.accessibility.AccessibilityNodeInfo,
+    ime: CtrlProxyIme?,
+  ): ImeActionVerdict {
+    val mechanism =
+      step.mechanism ?: return ImeActionVerdict(false, "Unsupported IME action '$action'")
+    val before = focusIdentity(focused)
+    val dispatch =
+      when (step) {
+        ImeActionStep.EDITOR_ACTION -> dispatchEditorAction(ime, action)
+        ImeActionStep.NEXT -> moveFocusByTraversal(root, focused, forward = true)
+        ImeActionStep.PREVIOUS -> moveFocusByTraversal(root, focused, forward = false)
+        ImeActionStep.IME_ENTER -> dispatchImeEnter(focused)
+        else -> dispatchKeycodeEnter()
+      }
+    val focusMoved =
+      if (dispatch.dispatched && isFocusMovingImeAction(action)) {
+        awaitFocusMoved(
+          before = before,
+          readFocus = ::readInputFocus,
+          nowMs = { android.os.SystemClock.uptimeMillis() },
+          pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },
+        )
+      } else {
+        null
+      }
+    return judgeImeAction(action, mechanism, dispatch, focusMoved)
+  }
+
+  /**
+   * `InputConnection.performEditorAction` on the main thread, awaited with a bound. A timeout is
+   * reported as indeterminate: the action may still be delivered later.
+   */
+  private fun dispatchEditorAction(ime: CtrlProxyIme?, action: String): ImeDispatch {
+    val actionId = imeEditorActionId(action)
+    if (ime == null || actionId == null) {
+      return ImeDispatch(false, "No live input connection for IME action '$action'")
+    }
+    val handled = CompletableDeferred<Boolean>()
+    ime.performEditorAction(actionId) { handled.complete(it) }
+    val result =
+      kotlinx.coroutines.runBlocking {
+        kotlinx.coroutines.withTimeoutOrNull(EDITOR_ACTION_TIMEOUT_MS) { handled.await() }
+      }
+    return when (result) {
+      true -> ImeDispatch(true)
+      false ->
+        ImeDispatch(
+          false,
+          "The editor did not handle IME action '$action' (no live input connection or the " +
+            "editor rejected it)",
+        )
+      null ->
+        ImeDispatch(
+          false,
+          "Timed out waiting for the keyboard to dispatch IME action '$action'; its outcome is " +
+            "indeterminate. Observe before retrying.",
+        )
+    }
+  }
+
+  /** API 30+: `ACTION_IME_ENTER` runs the editor's configured action on the focused node. */
+  private fun dispatchImeEnter(
+    focused: android.view.accessibility.AccessibilityNodeInfo
+  ): ImeDispatch {
+    @Suppress("NewApi")
+    val actionId =
+      android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
+    val imeResult = focused.performAction(actionId)
+    Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
+    return ImeDispatch(imeResult)
+  }
+
+  /** Pre-API 30: press Enter through the `input` shell command; less reliable. */
+  private fun dispatchKeycodeEnter(): ImeDispatch {
+    Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
+    return try {
+      ImeDispatch(Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0)
+    } catch (e: Exception) {
+      Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
+      ImeDispatch(false)
+    }
+  }
+
+  /**
+   * The no-input-connection fallback for next/previous: move accessibility focus to the node the
+   * framework's own focus search would pick (honouring `nextFocusForward`), then the accessibility
+   * traversal hints, then the neighbouring editable node in tree order, skipping nodes that are
+   * disabled, not visible or not focusable. The field's own Next handler does NOT run on this path.
+   */
+  private fun moveFocusByTraversal(
+    root: android.view.accessibility.AccessibilityNodeInfo?,
+    focused: android.view.accessibility.AccessibilityNodeInfo,
+    forward: Boolean,
+  ): ImeDispatch {
+    val direction =
+      if (forward) android.view.View.FOCUS_FORWARD else android.view.View.FOCUS_BACKWARD
+    val word = if (forward) "next" else "previous"
+    val target =
+      selectTraversalTarget(
+        strategies =
+          listOf(
+            { nodeOrNull("focusSearch") { focused.focusSearch(direction) } },
+            {
+              nodeOrNull("traversal hint") {
+                if (forward) focused.traversalBefore else focused.traversalAfter
+              }
+            },
+            { findAdjacentFocusableNode(root, focused, forward) },
+          ),
+        isCurrent = { it == focused || isSameNode(it, focused) },
+      )
+    if (target == null) {
+      Log.w(TAG, "No $word focusable node found")
+      return ImeDispatch(false, "No $word focusable node found")
+    }
+    val focusSuccess =
+      try {
+        target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS)
+      } finally {
+        target.recycle()
+      }
+    return ImeDispatch(focusSuccess, if (focusSuccess) null else "The $word field refused focus")
+  }
+
+  private fun nodeOrNull(
+    label: String,
+    block: () -> android.view.accessibility.AccessibilityNodeInfo?,
+  ): android.view.accessibility.AccessibilityNodeInfo? =
+    try {
+      block()
+    } catch (e: Exception) {
+      Log.w(TAG, "$label failed during IME focus traversal", e)
+      null
+    }
+
+  private fun focusIdentity(node: android.view.accessibility.AccessibilityNodeInfo): FocusIdentity =
+    FocusIdentity(node.hashCode(), node.viewIdResourceName)
+
+  /** The input-focused node of the active window right now, or null when none can be read. */
+  private fun readInputFocus(): FocusIdentity? {
+    val activeRoot = rootInActiveWindow ?: return null
+    val inputFocus =
+      activeRoot.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
+    return try {
+      inputFocus?.let(::focusIdentity)
+    } finally {
+      inputFocus?.recycle()
+      activeRoot.recycle()
     }
   }
 
@@ -7116,58 +7247,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Find the next focusable node after the given node in document order. */
-  private fun findNextFocusableNode(
+  /**
+   * The neighbouring eligible editable node of [currentNode] in document order (forward or
+   * backward), skipping disabled, invisible and non-focusable ones ([selectAdjacentFocusable]).
+   */
+  private fun findAdjacentFocusableNode(
     root: android.view.accessibility.AccessibilityNodeInfo?,
     currentNode: android.view.accessibility.AccessibilityNodeInfo,
+    forward: Boolean,
   ): android.view.accessibility.AccessibilityNodeInfo? {
     if (root == null) return null
 
-    // Collect all focusable editable nodes in document order
-    val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-    collectFocusableNodes(root, focusableNodes)
-
-    // Find current node's position and return the next one
-    var foundCurrent = false
-    for (node in focusableNodes) {
-      if (foundCurrent) {
-        // This is the next node - return it (don't recycle it)
-        // Recycle all remaining nodes
-        focusableNodes.forEach { n -> if (n != node) n.recycle() }
-        return node
-      }
-      if (isSameNode(node, currentNode)) {
-        foundCurrent = true
-      }
-    }
-
-    // If no next node found, recycle all collected nodes
-    focusableNodes.forEach { it.recycle() }
-    return null
+    val editableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
+    collectEditableNodes(root, editableNodes)
+    return selectAdjacentFocusable(editableNodes, forward) { isSameNode(it, currentNode) }
   }
 
-  /** Find the previous focusable node before the given node in document order. */
-  private fun findPreviousFocusableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    currentNode: android.view.accessibility.AccessibilityNodeInfo,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Collect all focusable editable nodes in document order
-    val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-    collectFocusableNodes(root, focusableNodes)
-
-    // Find current node's position and return the previous one. Each copy is released exactly once.
-    return selectPreviousFocusable(focusableNodes) { isSameNode(it, currentNode) }
-  }
-
-  /** Collect all focusable and editable nodes in document order (pre-order traversal). */
-  private fun collectFocusableNodes(
+  /** Collect all editable nodes in document order (pre-order traversal). */
+  private fun collectEditableNodes(
     node: android.view.accessibility.AccessibilityNodeInfo,
     result: MutableList<android.view.accessibility.AccessibilityNodeInfo>,
   ) {
-    // A node is a valid IME target if it's editable and focusable
-    if (node.isEditable && node.isFocusable) {
+    if (node.isEditable) {
       // Create a copy to add to our list (we'll recycle the originals as we traverse)
       result.add(android.view.accessibility.AccessibilityNodeInfo.obtain(node))
     }
@@ -7175,7 +7276,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Traverse children in order
     for (i in 0 until node.childCount) {
       val child = node.getChild(i) ?: continue
-      collectFocusableNodes(child, result)
+      collectEditableNodes(child, result)
       child.recycle()
     }
   }
@@ -7488,6 +7589,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    mechanism: String? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
@@ -7502,6 +7604,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (error != null) {
             put("error", error)
+          }
+          if (mechanism != null) {
+            put("mechanism", mechanism)
           }
         }
       }

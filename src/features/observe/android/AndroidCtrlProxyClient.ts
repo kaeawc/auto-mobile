@@ -31,6 +31,7 @@ import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwar
 import {
   BootedDevice,
   ImeAction,
+  ImeActionMechanism,
   ViewHierarchyResult,
   ScreenScaleMetadata,
   CurrentFocusResult,
@@ -496,6 +497,7 @@ interface WsInsertTextResultMessage extends WsRequestBase {
 interface WsImeActionResultMessage extends WsRequestBase {
   type: "ime_action_result";
   action: string;
+  mechanism?: ImeActionMechanism;
 }
 
 interface WsSelectAllResultMessage extends WsRequestBase {
@@ -5492,6 +5494,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         action: message.action,
         totalTimeMs: message.totalTimeMs,
         error: message.error,
+        ...(message.mechanism ? { mechanism: message.mechanism } : {}),
         perfTiming: message.perfTiming,
       })),
 

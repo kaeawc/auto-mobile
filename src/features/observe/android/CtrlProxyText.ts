@@ -9,8 +9,8 @@ import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ImeAction } from "../../../models";
-import type { ActionTimingResult, BaseResult } from "../shared/types";
-import type { A11ySetTextResult, DelegateContext } from "./types";
+import type { BaseResult } from "../shared/types";
+import type { A11yImeActionResult, A11ySetTextResult, DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
@@ -161,10 +161,10 @@ export class CtrlProxyText extends SharedTextDelegate {
     perf?: PerformanceTracker,
     abortSignal?: AbortSignal,
     onDispatch?: () => void,
-  ): Promise<ActionTimingResult> {
+  ): Promise<A11yImeActionResult> {
     let dispatched = false;
     const startMs = this.context.timer.now();
-    const unconfirmed = (reason: string, totalTimeMs: number): ActionTimingResult => ({
+    const unconfirmed = (reason: string, totalTimeMs: number): A11yImeActionResult => ({
       success: false,
       action,
       totalTimeMs,
@@ -174,7 +174,7 @@ export class CtrlProxyText extends SharedTextDelegate {
         : reason,
     });
     try {
-      return await sendCommand<ActionTimingResult>(this.context, {
+      return await sendCommand<A11yImeActionResult>(this.context, {
         idPrefix: "imeAction",
         responseType: "ime_action",
         messageType: "request_ime_action",

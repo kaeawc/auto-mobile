@@ -1046,6 +1046,17 @@ modifiers on semantic keys:
 }
 ```
 
+On Android, the semantic IME keys (`done`, `go`, `send`, `search`, `next`,
+`previous`) are delivered through the AutoMobile keyboard's input connection when
+it is the active input method, so the app's own editor-action handler runs and
+decides where focus goes. Without it, `next` and `previous` fall back to moving
+focus directly (skipping disabled, invisible and non-focusable fields), and the
+other keys use the accessibility IME-enter action. The command result reports
+the `mechanism` used (`editor-action`, `focus-traversal`, `ime-enter`,
+`keycode-enter`); a successful `focus-traversal` also carries a warning that the
+field's own handler did not run. `next` and `previous` succeed only when the
+focused input actually changed.
+
 `sendKeys.container` accepts the same nested chain: the outermost scope resolves
 first, then each inner container and the field resolve among strict descendants
 of their immediate scope, across anonymous wrappers. Each container may specify

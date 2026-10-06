@@ -9,6 +9,7 @@ import type {
   BootedDevice,
   ContentHiddenRegion,
   CtrlProxyIncompleteReason,
+  ImeActionMechanism,
   RecompositionNodeInfo,
   SemanticLink,
   ViewHierarchyWindowInfo,
@@ -274,7 +275,10 @@ export interface A11ySetTextResult extends BaseResult {
 }
 
 /** IME action result from accessibility service */
-export type A11yImeActionResult = ActionTimingResult;
+export type A11yImeActionResult = ActionTimingResult & {
+  /** How the service delivered the action; absent from older APKs and from early failures. */
+  mechanism?: ImeActionMechanism;
+};
 
 /** Select all result from accessibility service */
 export type A11ySelectAllResult = BaseResult;

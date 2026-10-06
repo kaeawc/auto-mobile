@@ -8,7 +8,7 @@ import type { ElementSelectionStrategy } from "../../models/ElementSelectionStra
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
-import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
+import type { BootedDevice, ImeAction, ImeActionMechanism, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -218,6 +218,8 @@ export interface SendKeysCommandResult extends BaseActionResult {
   retryable?: boolean;
   verified?: boolean;
   warning?: string;
+  /** Semantic IME keys on Android: how the action was delivered (see ImeActionMechanism). */
+  mechanism?: ImeActionMechanism;
   backend?: "autoMobileIme";
   capability?: "semanticText";
   keyboard?: KeyboardIdentity;
@@ -319,6 +321,8 @@ export type TextActionResult = {
   /** Device upper bound; this is not the verified committedGraphemes count. */
   committedUnits?: number;
   sessionUnsafe?: boolean;
+  /** Android IME actions only: how the action was delivered. */
+  mechanism?: ImeActionMechanism;
 };
 
 export interface SendKeysTextClient {
@@ -596,6 +600,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         modifiers,
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
+        ...imeMechanismFields(command.key, result),
         ...(result.error ? { error: result.error } : {}),
       };
     }
@@ -2422,6 +2427,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       commitViaIme: async () => ({ success: false, error: "IME commit is Android-only" }),
     };
   }
+}
+
+/**
+ * The accessibility fallback for IME next/previous moves focus directly, so the field's own action
+ * handler (validation, formatting, a custom focus move) did not run. The result says so (#10219).
+ */
+function imeMechanismFields(
+  key: string,
+  result: Pick<TextActionResult, "success" | "mechanism">,
+): Pick<SendKeysCommandResult, "mechanism" | "warning"> {
+  if (!result.mechanism) {
+    return {};
+  }
+  const warning =
+    result.success && result.mechanism === "focus-traversal"
+      ? `IME action '${key}' moved focus directly (the AutoMobile keyboard was not the active input method); the field's own '${key}' handler did not run.`
+      : undefined;
+  return { mechanism: result.mechanism, ...(warning ? { warning } : {}) };
 }
 
 export class SendKeys {

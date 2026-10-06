@@ -56,18 +56,51 @@ private fun findInRoot(
 }
 
 /**
- * The node focus should move to when stepping backwards from the node [isCurrent] identifies, or
- * null when the current node is missing or first. [nodes] are pooled copies in document order; each
- * is released exactly once — all but the returned node — so no copy is recycled twice (a second
- * `recycle()` throws "Already in the pool!" before API 33, issue #10071). The caller owns the
- * returned node.
+ * The node focus should move to when stepping from the node [isCurrent] identifies, forward or
+ * backward in tree order, or null when the current node is missing or there is no eligible
+ * neighbour. Disabled, invisible, non-focusable and non-editable nodes are skipped
+ * ([selectAdjacentCandidate]). [nodes] are pooled copies in document order; each is released
+ * exactly once — all but the returned node — so no copy is recycled twice (a second `recycle()`
+ * throws "Already in the pool!" before API 33, issue #10071). The caller owns the returned node.
  */
-internal fun selectPreviousFocusable(
+internal fun selectAdjacentFocusable(
   nodes: List<AccessibilityNodeInfo>,
+  forward: Boolean,
   isCurrent: (AccessibilityNodeInfo) -> Boolean,
 ): AccessibilityNodeInfo? {
-  val index = nodes.indexOfFirst(isCurrent)
-  val previous = if (index > 0) nodes[index - 1] else null
-  nodes.forEach { if (it !== previous) it.recycle() }
-  return previous
+  val candidates = nodes.map {
+    FocusCandidate(
+      isCurrent = isCurrent(it),
+      editable = it.isEditable,
+      focusable = it.isFocusable,
+      visibleToUser = it.isVisibleToUser,
+      enabled = it.isEnabled,
+    )
+  }
+  val target = selectAdjacentCandidate(candidates, forward)?.let(nodes::get)
+  nodes.forEach { if (it !== target) it.recycle() }
+  return target
+}
+
+/**
+ * The first node the lazily evaluated [strategies] yield that focus may move to: not [isCurrent],
+ * and reachable ([isReachableFocusTarget]). A rejected node is recycled and the next strategy is
+ * tried, so a framework hint that points at a disabled or hidden node falls through to the next
+ * source instead of being focused. The caller owns the returned node.
+ */
+internal fun selectTraversalTarget(
+  strategies: List<() -> AccessibilityNodeInfo?>,
+  isCurrent: (AccessibilityNodeInfo) -> Boolean,
+): AccessibilityNodeInfo? {
+  for (strategy in strategies) {
+    val node = strategy() ?: continue
+    if (
+      !isCurrent(node) &&
+        isReachableFocusTarget(node.isFocusable, node.isVisibleToUser, node.isEnabled)
+    ) {
+      return node
+    }
+    node.recycle()
+  }
+  return null
 }

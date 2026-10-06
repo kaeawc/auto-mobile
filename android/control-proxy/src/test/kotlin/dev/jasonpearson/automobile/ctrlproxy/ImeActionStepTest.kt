@@ -52,4 +52,50 @@ class ImeActionStepTest {
   fun `unknown actions remain unsupported with editable focus`() {
     assertEquals(ImeActionStep.UNSUPPORTED, ImeActionStep.select("unknown", true, 30))
   }
+
+  @Test
+  fun `a live input connection routes every action through the editor action`() {
+    for (sdkInt in listOf(29, 30)) {
+      for (action in actions) {
+        val step =
+          ImeActionStep.select(
+            action,
+            hasFocusedEditable = true,
+            sdkInt = sdkInt,
+            imeConnectionAvailable = true,
+          )
+        assertEquals("$action on API $sdkInt", ImeActionStep.EDITOR_ACTION, step)
+        assertEquals(ImeActionMechanism.EDITOR_ACTION, step.mechanism)
+        assertNull(step.error)
+      }
+    }
+  }
+
+  @Test
+  fun `without an input connection next and previous fall back to the traversal step`() {
+    for (action in listOf("next", "previous")) {
+      val step = ImeActionStep.select(action, true, 30, imeConnectionAvailable = false)
+      assertEquals(ImeActionMechanism.FOCUS_TRAVERSAL, step.mechanism)
+    }
+  }
+
+  @Test
+  fun `a live input connection never rescues a missing focus or an unknown action`() {
+    assertEquals(
+      ImeActionStep.NO_FOCUSED_EDITABLE,
+      ImeActionStep.select("next", false, 30, imeConnectionAvailable = true),
+    )
+    assertEquals(
+      ImeActionStep.UNSUPPORTED,
+      ImeActionStep.select("unknown", true, 30, imeConnectionAvailable = true),
+    )
+  }
+
+  @Test
+  fun `each mechanism reports its wire name`() {
+    assertEquals(
+      listOf("editor-action", "focus-traversal", "ime-enter", "keycode-enter"),
+      ImeActionMechanism.entries.map { it.wire },
+    )
+  }
 }

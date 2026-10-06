@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
@@ -65,6 +66,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   private var cancelActiveCommit: ((String) -> Unit)? = null
   private var lastPriorImeId: String? = null
   private var commitGeneration = 0L
+  @Volatile
   internal var isInputStarted = false
     private set
 
@@ -217,6 +219,30 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         delivery = delivery,
         onResult = ::finish,
       )
+    }
+  }
+
+  /** True when an editor is bound to this keyboard and its input connection is live. */
+  fun hasLiveInputConnection(): Boolean = isInputStarted && currentInputConnection != null
+
+  /**
+   * Delivers [actionId] (an `EditorInfo.IME_ACTION_*`) to the bound editor exactly as the
+   * keyboard's action key does, so the app's `OnEditorActionListener` / Compose `KeyboardActions`
+   * runs and the app decides where focus goes. [onResult] runs on the main thread with false when
+   * there is no live input connection or the editor did not handle the action.
+   */
+  fun performEditorAction(actionId: Int, onResult: (Boolean) -> Unit) {
+    mainHandler.post {
+      val connection = if (isInputStarted) connectionAdapter() else null
+      val handled =
+        connection != null &&
+          try {
+            connection.performEditorAction(actionId)
+          } catch (e: Exception) {
+            Log.w(TAG, "performEditorAction($actionId) threw", e)
+            false
+          }
+      onResult(handled)
     }
   }
 
@@ -409,6 +435,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         .getOrDefault(false)
     }
 
+    private const val TAG = "CtrlProxyIme"
     private const val INPUT_CONNECTION_SYNC_TIMEOUT_MS = 2_000L
     internal const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
     internal const val COMMIT_TIMEOUT_MS = 4_000L

@@ -96,8 +96,10 @@ describe("stageSharedStorage rollback of overwritten files", () => {
         ],
       ),
     );
-    // The overwritten file is never passed to a plain delete.
-    expect(commands.filter((command) => command.startsWith("shell rm -f"))).toEqual([]);
+    // The overwritten file is never passed to a plain delete; only the failed push's temp is.
+    expect(commands.filter((command) => command.startsWith("shell rm -f"))).toEqual([
+      `shell rm -f ${shellQuote(`${DIR}/.automobile-t-6.part`)}`,
+    ]);
   });
 
   test("restores without a MediaStore rescan for a non-media file", async () => {
@@ -126,9 +128,32 @@ describe("stageSharedStorage rollback of overwritten files", () => {
     );
   });
 
-  test("restores an overwritten file whose own push failed midway", async () => {
+  test("leaves an overwritten file untouched when its own push is cut off", async () => {
     const { executor, stage } = setup([1]);
     executor.setCommandError("push /fixtures/b.txt", new Error("push cut off"));
+
+    await expect(stage({ files: [fileAt("a.txt"), fileAt("b.txt")] })).rejects.toThrow(
+      "Rolled back: a.txt. Rollback failures: none.",
+    );
+
+    const commands = executor.getExecutedCommands();
+    // b.txt was never renamed over, so there is nothing to restore: no mv at all.
+    expect(
+      commands.filter((command) => command.includes(" mv -f ") && command.includes(".bak")),
+    ).toEqual([]);
+    expect(commands.slice(-3)).toEqual([
+      `shell rm -f ${shellQuote(`${DIR}/.automobile-t-4.part`)}`,
+      `shell rm -f ${q("a.txt")}`,
+      `shell rm -f ${shellQuote(`${DIR}/.automobile-t-2.bak`)}`,
+    ]);
+  });
+
+  test("restores an overwritten file when its rename fails after the push", async () => {
+    const { executor, stage } = setup([1]);
+    executor.setCommandError(
+      `mv -f ${shellQuote(`${DIR}/.automobile-t-4.part`)}`,
+      new Error("rename cut off"),
+    );
 
     await expect(stage({ files: [fileAt("a.txt"), fileAt("b.txt")] })).rejects.toThrow(
       "Rolled back: b.txt, a.txt. Rollback failures: none.",
@@ -169,7 +194,9 @@ describe("stageSharedStorage rollback of overwritten files", () => {
     }
 
     expect(
-      executor.getExecutedCommands().filter((command) => command.startsWith("shell rm -f")),
+      executor
+        .getExecutedCommands()
+        .filter((command) => command.startsWith("shell rm -f") && command.includes(".bak")),
     ).toEqual([]);
   });
 
@@ -186,7 +213,10 @@ describe("stageSharedStorage rollback of overwritten files", () => {
       "third.png",
     ]);
     const commands = executor.getExecutedCommands();
-    expect(commands.filter((command) => command.includes(" mv "))).toEqual([]);
+    // The saved copies are only ever removed, never moved back: every mv is a staged copy.
+    expect(
+      commands.filter((command) => command.includes(" mv ") && command.includes(".bak")),
+    ).toEqual([]);
     expect(commands.at(-1)).toBe(
       `shell rm -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${shellQuote(`${DIR}/.automobile-t-3.bak`)}`,
     );
@@ -248,8 +278,11 @@ describe("stageSharedStorage rollback of overwritten files", () => {
       const before = await commandsFor({ files, rollbackOnFailure: false });
       const after = await commandsFor({ files });
 
+      // Temp names draw ids after the backup plan, so only the id differs between the runs.
+      const sameIds = (commands: string[]) =>
+        commands.map((command) => command.replace(/\.automobile-t-\d+\.part/g, ".part"));
       const withoutProbe = after.filter((command) => !command.includes(MARKER));
-      expect(withoutProbe).toEqual(before);
+      expect(sameIds(withoutProbe)).toEqual(sameIds(before));
       expect(after).toHaveLength(before.length + 1);
     });
 

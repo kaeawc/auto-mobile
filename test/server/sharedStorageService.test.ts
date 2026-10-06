@@ -12,7 +12,9 @@ import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { UserTargetRequest } from "../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ActionableError } from "../../src/models/ActionableError";
+import { shellQuote } from "../../src/utils/shellQuote";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -191,7 +193,8 @@ describe("SharedStorageService", () => {
       effectiveSignal?.throwIfAborted();
       if (command.startsWith("shell rm -f")) {
         expect(getAbortSignal()).toBeUndefined();
-        expect(effectiveSignal?.aborted).toBe(false);
+        // The temp-file removal carries no signal at all; the rollback carries a fresh one.
+        expect(effectiveSignal?.aborted ?? false).toBe(false);
         expect(timeoutMs).toBe(5000);
         removed.push(command);
       }
@@ -207,6 +210,7 @@ describe("SharedStorageService", () => {
       adbFactory: adbFactoryFor(executor),
       timer,
       fileSystem,
+      idGenerator: new CountingIdGenerator("t"),
     });
     await expect(
       runWithAbortSignal(controller.signal, () =>
@@ -221,10 +225,13 @@ describe("SharedStorageService", () => {
           ],
         }),
       ),
-    ).rejects.toThrow(/aborted.*Rolled back: second.png, first.png.*Rollback failures: none/);
+    ).rejects.toThrow(/aborted.*Rolled back: first.png.*Rollback failures: none/);
     expect(controller.signal.aborted).toBe(true);
+    // The cancelled second file never reached its destination: only its hidden temp copy is
+    // removed, then the committed first file, both detached from the cancelled request.
     expect(removed).toEqual([
-      "shell rm -f '/storage/emulated/0/Download/cancelled-media/second.png' '/storage/emulated/0/Download/cancelled-media/first.png'",
+      "shell rm -f '/storage/emulated/0/Download/cancelled-media/.automobile-t-4.part'",
+      "shell rm -f '/storage/emulated/0/Download/cancelled-media/first.png'",
     ]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -362,7 +369,7 @@ describe("SharedStorageService", () => {
         controller.abort(new Error("request cancelled"));
         controller.signal.throwIfAborted();
       }
-      if (command.startsWith("shell rm -f")) {
+      if (command.startsWith("shell rm -f") && !command.includes(".part'")) {
         expect(getAbortSignal()).toBeUndefined();
         expect(signal?.aborted).toBe(false);
         if (signal) {
@@ -512,18 +519,20 @@ describe("SharedStorageService", () => {
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42'");
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/docs'");
     expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/media'");
-    expect(
-      commands.some(
-        (command) =>
-          command.includes("push ") &&
-          command.includes("/storage/emulated/0/Download/run-42/docs/read me.txt"),
+    // Each file is pushed to a hidden temp beside its destination and renamed into place.
+    const pushed = executor.getExecutedArgv().filter((argv) => argv[0] === "push");
+    expect(pushed.map((argv) => argv[2])).toEqual([
+      expect.stringMatching(
+        /^\/storage\/emulated\/0\/Download\/run-42\/docs\/\.automobile-.*\.part$/,
       ),
-    ).toBe(true);
-    expect(executor.getExecutedArgv()).toContainEqual([
-      "push",
-      expect.stringContaining("automobile-shared-storage-"),
-      "/storage/emulated/0/Download/run-42/docs/read me.txt",
+      expect.stringMatching(
+        /^\/storage\/emulated\/0\/Download\/run-42\/media\/\.automobile-.*\.part$/,
+      ),
     ]);
+    expect(pushed[0]?.[1]).toContain("automobile-shared-storage-");
+    expect(commands).toContain(
+      `shell mv -f ${shellQuote(pushed[0]?.[2] ?? "")} '/storage/emulated/0/Download/run-42/docs/read me.txt'`,
+    );
     expect(
       executor
         .getCommandCalls()
@@ -558,7 +567,7 @@ describe("SharedStorageService", () => {
     expect(
       executor
         .getCommandCalls()
-        .filter((call) => /shell (?:rm -rf|mkdir -p|am broadcast)|^push /.test(call.command))
+        .filter((call) => /shell (?:rm -rf|mkdir -p|mv -f|am broadcast)|^push /.test(call.command))
         .every((call) => call.waitForProcessSettlementAfterAbort === true),
     ).toBe(true);
   });
@@ -595,8 +604,15 @@ describe("SharedStorageService", () => {
     expect(executor.getExecutedArgv()).toContainEqual([
       "push",
       expect.stringContaining("automobile-shared-storage-"),
-      "/storage/emulated/12/Download/work-fixtures/document.txt",
+      expect.stringMatching(
+        /^\/storage\/emulated\/12\/Download\/work-fixtures\/\.automobile-.*\.part$/,
+      ),
     ]);
+    expect(executor.getExecutedCommands()).toContainEqual(
+      expect.stringMatching(
+        /^shell mv -f '[^']*\.automobile-[^']*\.part' '\/storage\/emulated\/12\/Download\/work-fixtures\/document\.txt'$/,
+      ),
+    );
   });
 
   test("honors explicit user zero while still preferring current-user resolution otherwise", async () => {

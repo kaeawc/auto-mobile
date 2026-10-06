@@ -64,7 +64,11 @@ describe("AccessibilityAuditor: clickable containers labelled by descendant text
 });
 
 describe("AccessibilityAuditor: descendant labels must say something", () => {
-  type MutableNode = { text?: string; node?: MutableNode | MutableNode[] };
+  type MutableNode = {
+    text?: string;
+    bounds?: number[];
+    node?: MutableNode | MutableNode[];
+  };
 
   function childTexts(node: MutableNode): MutableNode[] {
     const children = node.node === undefined ? [] : [node.node].flat();
@@ -83,13 +87,60 @@ describe("AccessibilityAuditor: descendant labels must say something", () => {
     return observation;
   }
 
-  test("a purely numeric badge or a lone decorative glyph does not label its clickable container", async () => {
-    const result = await auditCapture(
-      captureWithLabels({ "Primary Button": "3", "Secondary Button": "\u2022" }),
-    );
+  /**
+   * Add a sibling next to the labelled text of the real Playground buttons: the
+   * button container then holds more than the one text, as a badge-bearing control does.
+   */
+  function withSibling(
+    observation: ObserveResult,
+    labelledText: string,
+    sibling: MutableNode & { class?: string },
+  ): void {
+    const parents = [
+      observation.viewHierarchy!.hierarchy as MutableNode,
+      ...childTexts(observation.viewHierarchy!.hierarchy as MutableNode),
+    ];
+    const parent = parents.find((candidate) =>
+      (candidate.node === undefined ? [] : [candidate.node].flat()).some(
+        (child) => child.text === labelledText,
+      ),
+    )!;
+    parent.node = [...[parent.node].flat(), sibling] as MutableNode[];
+  }
 
-    // Two of the six descendant-labelled buttons now carry no usable name.
-    expect(missingLabels(result)).toHaveLength(2);
+  test("a lone decorative glyph does not label its clickable container", async () => {
+    const result = await auditCapture(captureWithLabels({ "Secondary Button": "\u2022" }));
+
+    expect(missingLabels(result)).toHaveLength(1);
+  });
+
+  test("a digit that is the whole control (a keypad key) labels its clickable container (#10134)", async () => {
+    // The Playground buttons are one clickable container holding one text child, the
+    // same shape as a dial-pad or PIN-pad key.
+    const result = await auditCapture(captureWithLabels({ "Primary Button": "1" }));
+
+    expect(missingLabels(result)).toEqual([]);
+  });
+
+  test("a numeric badge beside an icon does not label its clickable container", async () => {
+    const observation = captureWithLabels({ "Primary Button": "3" });
+    withSibling(observation, "3", {
+      class: "android.widget.ImageView",
+      bounds: [403, 1014, 440, 1063],
+    });
+
+    const result = await auditCapture(observation);
+
+    expect(missingLabels(result)).toHaveLength(1);
+  });
+
+  test("a number beside other text with no letters does not label its clickable container", async () => {
+    const observation = captureWithLabels({ "Primary Button": "3" });
+    withSibling(observation, "3", { text: "4", bounds: [440, 1014, 678, 1063] });
+
+    const result = await auditCapture(observation);
+
+    expect(missingLabels(result)).toHaveLength(1);
   });
 
   test("a text label (or a number next to a word) still labels the container", async () => {

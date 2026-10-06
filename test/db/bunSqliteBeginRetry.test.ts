@@ -25,7 +25,7 @@ class FakeSqliteError extends Error {
 }
 
 /** Scripted bun:sqlite fake: one outcome per statement execution, in order. */
-function scriptedDatabase(outcomes: (FakeSqliteError | null)[]): {
+function scriptedDatabase(outcomes: (FakeSqliteError | null | (() => FakeSqliteError))[]): {
   db: BunDatabase;
   executed: string[];
 } {
@@ -34,7 +34,7 @@ function scriptedDatabase(outcomes: (FakeSqliteError | null)[]): {
   const next = () => {
     const outcome = outcomes[calls++];
     if (outcome) {
-      throw outcome;
+      throw typeof outcome === "function" ? outcome() : outcome;
     }
   };
   const db = {
@@ -65,8 +65,7 @@ const zeroRandom: Random = {
 
 const busy = () => new FakeSqliteError("database is locked", "SQLITE_BUSY");
 
-function connection(db: BunDatabase, maxAttempts = 3) {
-  const timer = new FakeTimer();
+function connection(db: BunDatabase, maxAttempts = 3, timer = new FakeTimer()) {
   timer.enableAutoAdvance();
   const state = new BunSqliteConnectionState(db, undefined, {
     maxAttempts,
@@ -128,5 +127,63 @@ describe("BunSqliteConnectionState BEGIN IMMEDIATE busy retry", () => {
 
     expect(executed).toHaveLength(2);
     expect(timer.getSleepHistory()).toHaveLength(0);
+  });
+
+  describe("total wait budget at BEGIN (#10134)", () => {
+    /** A BUSY that took the connection's whole busy_timeout before failing. */
+    const slowBusy = (timer: FakeTimer, waitedMs: number) => () => {
+      timer.advanceTime(waitedMs);
+      return busy();
+    };
+
+    it("does not retry once an attempt has already waited the full busy_timeout", async () => {
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([slowBusy(timer, 5_000), null]);
+      const { state } = connection(db, 3, timer);
+
+      await expect(state.beginTransaction(Symbol("slow"))).rejects.toThrow();
+
+      expect(executed).toHaveLength(1);
+      expect(timer.getSleepHistory()).toHaveLength(0);
+    });
+
+    it("keeps retrying fast BUSY failures while the budget remains", async () => {
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([
+        slowBusy(timer, 1_000),
+        slowBusy(timer, 1_000),
+        null,
+      ]);
+      const { state } = connection(db, 3, timer);
+
+      await state.beginTransaction(Symbol("quick"));
+
+      expect(executed).toHaveLength(3);
+    });
+
+    it("stops after the attempt that crosses the budget even with attempts left", async () => {
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([
+        slowBusy(timer, 2_000),
+        slowBusy(timer, 3_100),
+        null,
+      ]);
+      const { state } = connection(db, 5, timer);
+
+      await expect(state.beginTransaction(Symbol("cross"))).rejects.toThrow();
+
+      expect(executed).toHaveLength(2);
+    });
+
+    it("the budget is per BEGIN, so a later transaction starts with a full budget", async () => {
+      const timer = new FakeTimer();
+      const { db, executed } = scriptedDatabase([slowBusy(timer, 5_000), busy(), null]);
+      const { state } = connection(db, 3, timer);
+
+      await expect(state.beginTransaction(Symbol("first"))).rejects.toThrow();
+      await state.beginTransaction(Symbol("second"));
+
+      expect(executed).toHaveLength(3);
+    });
   });
 });

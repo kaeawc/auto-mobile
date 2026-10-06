@@ -30,6 +30,16 @@ const MAX_CACHED_STATEMENTS = 200;
  * transaction (partial re-execution) — see `#shouldRetry`.
  */
 const DEFAULT_MAX_RETRY_ATTEMPTS = 3;
+/**
+ * Total wait allowed at a transaction's `BEGIN IMMEDIATE` across all attempts. Each
+ * attempt can itself block for the connection's `busy_timeout` (5 s,
+ * `SQLITE_BUSY_TIMEOUT_MS` in database.ts) while this connection's transaction lease
+ * is held and every other query queues behind it, so unbounded attempts would
+ * stretch the worst case to attempts x busy_timeout. A retry starts only while this
+ * budget remains: a BEGIN that fails fast is retried, one that already waited a full
+ * `busy_timeout` is not (#10134).
+ */
+export const DEFAULT_BEGIN_TOTAL_WAIT_MS = 5_000;
 const DEFAULT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
   initialDelayMs: 5,
   multiplier: 2,
@@ -122,6 +132,8 @@ interface BunSqliteRetryConfig {
   timer?: Timer;
   /** Jitter source (0..1). Injected + faked for deterministic tests. */
   random?: Random;
+  /** Total wait budget at a transaction's BEGIN; retries stop once it is spent (#10134). */
+  beginTotalWaitMs?: number;
 }
 
 class BunSqliteDriver implements Driver {
@@ -219,6 +231,7 @@ export class BunSqliteConnectionState {
   readonly #maxRetryAttempts: number;
   readonly #retryBackoff: BackoffPolicy;
   readonly #timer: Timer;
+  readonly #beginTotalWaitMs: number;
   readonly #random: Random;
   #optimizeTimer: NodeJS.Timeout | null = null;
 
@@ -234,6 +247,7 @@ export class BunSqliteConnectionState {
     this.#maxRetryAttempts = Math.max(1, retry?.maxAttempts ?? DEFAULT_MAX_RETRY_ATTEMPTS);
     this.#retryBackoff = retry?.backoff ?? DEFAULT_RETRY_BACKOFF;
     this.#timer = retry?.timer ?? defaultTimer;
+    this.#beginTotalWaitMs = retry?.beginTotalWaitMs ?? DEFAULT_BEGIN_TOTAL_WAIT_MS;
     this.#random = retry?.random ?? defaultRandom;
 
     this.#startPeriodicOptimize(optimizeIntervalMs);
@@ -325,6 +339,9 @@ export class BunSqliteConnectionState {
     await this.#enterQuery(owner);
 
     const { sql, parameters } = compiledQuery;
+    // Only a transaction's BEGIN carries a total-wait deadline (read before the first
+    // attempt so the attempt's own busy wait counts against it).
+    const beginDeadlineMs = isBegin ? this.#timer.now() + this.#beginTotalWaitMs : undefined;
 
     try {
       // Bounded BUSY/LOCKED retry (issue #2874). Reads the structured
@@ -337,7 +354,7 @@ export class BunSqliteConnectionState {
         try {
           return await this.#executeOnce<R>(sql, parameters);
         } catch (error) {
-          const delayMs = this.#prepareRetry(error, attempt, sql, isBegin);
+          const delayMs = this.#prepareRetry(error, attempt, sql, beginDeadlineMs);
           await this.#timer.sleep(delayMs);
         }
       }
@@ -347,8 +364,13 @@ export class BunSqliteConnectionState {
     }
   }
 
-  #prepareRetry(error: unknown, attempt: number, sql: string, isBegin: boolean): number {
-    if (!this.#shouldRetry(error, attempt, isBegin)) {
+  #prepareRetry(
+    error: unknown,
+    attempt: number,
+    sql: string,
+    beginDeadlineMs: number | undefined,
+  ): number {
+    if (!this.#shouldRetry(error, attempt, beginDeadlineMs)) {
       throw error;
     }
     const delayMs = this.#retryDelayMs(attempt);
@@ -364,10 +386,12 @@ export class BunSqliteConnectionState {
    * when: the code (via `err.cause.code`, #2793 contract) is `retryable`
    * (`SQLITE_BUSY`/`SQLITE_LOCKED`); attempts remain; the handle is still open;
    * and we are NOT inside a transaction (autocommit only — `#transactionOwner`
-   * is cleared), except for the transaction's own `BEGIN` (`isBegin`), which has
-   * opened nothing yet. Never retries `constraint`/`fatal`.
+   * is cleared), except for the transaction's own `BEGIN` (identified by its total-wait
+   * deadline), which has opened nothing yet and stops retrying once that deadline has
+   * passed. Never retries `constraint`/`fatal`.
    */
-  #shouldRetry(error: unknown, attempt: number, isBegin: boolean): boolean {
+  #shouldRetry(error: unknown, attempt: number, beginDeadlineMs: number | undefined): boolean {
+    const isBegin = beginDeadlineMs !== undefined;
     if (attempt >= this.#maxRetryAttempts) {
       return false;
     }
@@ -382,6 +406,9 @@ export class BunSqliteConnectionState {
     // the beginning lease while its BEGIN runs (the FIFO admission precedes it),
     // so the BEGIN itself is exempted explicitly.
     if (this.#transactionOwner !== null && !isBegin) {
+      return false;
+    }
+    if (isBegin && this.#timer.now() >= beginDeadlineMs) {
       return false;
     }
     return classifySqliteError(error) === "retryable";

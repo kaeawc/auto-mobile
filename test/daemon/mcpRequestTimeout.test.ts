@@ -22,7 +22,6 @@ import {
   DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
   MAX_OVERLAY_EVENT_TIMEOUT_MS,
 } from "../../src/features/overlay/overlayEventTimeout";
-import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../../src/features/observe/waitForTimeout";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,

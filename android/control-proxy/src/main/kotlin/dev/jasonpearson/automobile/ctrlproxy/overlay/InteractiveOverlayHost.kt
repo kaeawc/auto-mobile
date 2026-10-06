@@ -5,12 +5,16 @@ import android.os.Build
 import android.util.Log
 import android.view.WindowManager
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
@@ -21,6 +25,7 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -33,6 +38,7 @@ data class InteractiveOverlayRequest(
   val placement: OverlayPlacement = OverlayPlacement.Floating(),
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
+  val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { InteractiveOverlayTestContent() },
 ) {
   init {
@@ -53,6 +59,13 @@ interface InteractiveOverlayHost {
   suspend fun show(request: InteractiveOverlayRequest = InteractiveOverlayRequest()): Boolean
 
   suspend fun replace(request: InteractiveOverlayRequest): Boolean
+
+  /**
+   * Rebuilds only layout params, retaining the composition and its pager/scroll mechanics. A window
+   * found detached is cleared and reported as failure (check [isShowing] to tell it from a
+   * retryable failure).
+   */
+  suspend fun relayout(): Boolean
 
   /**
    * Removes immediately, allowing the app to regain focus. A window already detached counts as
@@ -92,6 +105,10 @@ interface InteractiveOverlayHost {
  * their normal permission-based type. Highlight touch/focus flags stay unchanged. The callback must
  * not throw or re-enter the host.
  *
+ * [onWindowLost] runs after an update found the window already detached and cleared it, from any
+ * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
+ * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
+ *
  * [context] must be the service/display context used for this window; [densityProvider] defaults to
  * its resources. All other platform access is constructor-injected. No permission probe occurs.
  */
@@ -104,6 +121,8 @@ class DefaultInteractiveOverlayHost(
   private val settleTimer: OverlaySettleTimer = CoroutineOverlaySettleTimer,
   private val densityProvider: () -> Float = { context.resources.displayMetrics.density },
   private val onWindowAttached: () -> Unit = {},
+  private val onWindowLost: () -> Unit = {},
+  private val isBlocked: () -> Boolean = { false },
 ) : InteractiveOverlayHost {
   private class Window(
     val view: ComposeView,
@@ -134,7 +153,7 @@ class DefaultInteractiveOverlayHost(
   override suspend fun replace(request: InteractiveOverlayRequest): Boolean = show(request)
 
   private fun showOnMain(request: InteractiveOverlayRequest): Boolean {
-    if (destroyed) return false
+    if (destroyed || isBlocked()) return false
     val params =
       interactiveOverlayLayoutParams(
         request.placement,
@@ -180,23 +199,32 @@ class DefaultInteractiveOverlayHost(
 
   private fun applyContent(current: Window) {
     val request = current.request
-    current.view.alpha = request.opacityPercent / 100f
-    current.view.setContent {
-      val fullscreen = request.placement as? OverlayPlacement.Fullscreen
-      val modifier =
-        if (fullscreen != null) {
-          Modifier.fillMaxSize().background(fullscreen.scrim ?: Color.Transparent)
-        } else Modifier
-      Box(modifier) { request.content() }
-    }
+    // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
+    current.view.alpha = overlayHostChrome(request).windowAlpha
+    current.view.setContent { InteractiveOverlayWindowContent(request) }
+  }
+
+  override suspend fun relayout(): Boolean = mainThread.onMain {
+    val current = window ?: return@onMain true
+    if (isBlocked()) return@onMain dismissOnMain()
+    val params =
+      interactiveOverlayLayoutParams(
+        current.request.placement,
+        current.request.hasTextField,
+        densityProvider(),
+        sdkInt,
+      )
+    if (touchThroughToken != null)
+      params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    update(current, params)
   }
 
   override suspend fun setOpacity(percent: Int) {
     require(percent in 0..100) { "Opacity must be in 0..100" }
     mainThread.onMain {
       window?.let {
-        it.view.alpha = percent / 100f
         it.request = it.request.copy(opacityPercent = percent)
+        applyContent(it)
       }
     }
   }
@@ -279,7 +307,10 @@ class DefaultInteractiveOverlayHost(
       windowManager.updateViewLayout(current.view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to update interactive overlay", error)
-      if (isNotAttached(error)) clearWindow(current)
+      if (isNotAttached(error)) {
+        clearWindow(current)
+        onWindowLost()
+      }
       return false
     }
     current.params = params
@@ -300,4 +331,59 @@ class DefaultInteractiveOverlayHost(
 @Composable
 fun InteractiveOverlayTestContent() {
   Box(Modifier.padding(16.dp)) { Text("CtrlProxy interactive overlay") }
+}
+
+/** Host chrome is computed from placement only, outside the author-controlled render tree. */
+data class OverlayHostChrome(
+  val dismissVisible: Boolean,
+  val windowAlpha: Float,
+  val contentAlpha: Float,
+)
+
+fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
+  val fullscreen = request.placement is OverlayPlacement.Fullscreen
+  val opacity = request.opacityPercent / 100f
+  return OverlayHostChrome(
+    fullscreen,
+    if (fullscreen) 1f else opacity,
+    if (fullscreen) opacity else 1f,
+  )
+}
+
+@Composable
+private fun InteractiveOverlayWindowContent(request: InteractiveOverlayRequest) {
+  val chrome = overlayHostChrome(request)
+  val fullscreen = request.placement as? OverlayPlacement.Fullscreen
+  val scope = rememberCoroutineScope()
+  if (chrome.dismissVisible) {
+    Column(Modifier.fillMaxSize()) {
+      // Reserve opaque, inset-aware space and clip the spec below it. Modal scrims cannot cover it.
+      Box(
+        Modifier.fillMaxWidth()
+          .background(Color.White)
+          .windowInsetsPadding(
+            WindowInsets.systemBars
+              .union(WindowInsets.displayCutout)
+              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+          )
+      ) {
+        TextButton(
+          onClick = { scope.launch { request.onHostDismiss() } },
+          modifier = Modifier.align(Alignment.CenterEnd),
+          colors = ButtonDefaults.textButtonColors(contentColor = Color.Black),
+        ) {
+          Text("Dismiss AutoMobile overlay")
+        }
+      }
+      Box(
+        Modifier.weight(1f)
+          .fillMaxWidth()
+          .clipToBounds()
+          .alpha(chrome.contentAlpha)
+          .background(fullscreen?.scrim ?: Color.Transparent)
+      ) {
+        request.content()
+      }
+    }
+  } else Box { request.content() }
 }

@@ -384,6 +384,10 @@ function warningsField(warnings: string[]): { warnings?: string[] } {
   return warnings.length ? { warnings } : {};
 }
 
+function withActivationWarning(warnings: string[], warning: string | undefined): string[] {
+  return warning ? [...warnings, warning] : warnings;
+}
+
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
   private readonly refreshedDisplayTransitions: Pick<
     DisplayTransitionTracker,
@@ -753,7 +757,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     owner?: Element,
     viewHierarchy?: ViewHierarchyResult,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; warning?: string }> {
     const confirmActivation = (result: CtrlProxyActionResult, invalidate: () => void): void => {
       if (result.dispatched && result.acknowledged !== true) {
         // A lost reply may mean the screen navigated; discard the pre-activation tree.
@@ -811,7 +815,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
       confirmActivation(result, () => this.invalidateIosCacheOnSuccess({ success: true }));
       this.invalidateIosCacheOnSuccess(result);
-      return { success: result.success, error: result.error };
+      // The runner's "first of N candidate owners" note must reach the caller (#10082).
+      return {
+        success: result.success,
+        error: result.error,
+        warning: result.warning,
+      };
     }
     return {
       success: false,
@@ -4107,6 +4116,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 bounds: { left: 0, top: 0, right: 0, bottom: 0 },
               } as Element,
               activatedSubtext: { text: options.accessibilityLink, occurrence },
+              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
             };
           }
 
@@ -4209,6 +4219,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               selectedElement: selectedElementMetadata,
               searchUntil: searchOutcome.stats,
               activatedSubtext: { text: options.subtext.text, occurrence },
+              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
             };
           }
           const initialTapPoint = this.geometry.getElementCenter(element);

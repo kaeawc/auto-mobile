@@ -117,14 +117,17 @@ async function handleIosAccessibility(device: BootedDevice, args: AccessibilityA
   iosVoiceOverDetector.invalidateCache(device.deviceId);
   const client = IOSCtrlProxyClient.getInstance(device);
   const featureFlags = FeatureFlagService.getInstance();
-  const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
-    device.deviceId,
-    client,
-    featureFlags,
-  );
-  const service = enabled ? ("voiceover" as const) : ("unknown" as const);
-  logger.debug(`[accessibility tool] VoiceOver state: enabled=${enabled}`);
-  return createStructuredToolResponse({ enabled, service });
+  const state = await iosVoiceOverDetector.resolveState(device.deviceId, client, featureFlags);
+  if (state === null) {
+    // An unreadable probe is not evidence of "off": omit `enabled`, like the Android branch (#9682).
+    return createStructuredToolResponse({
+      service: "unknown",
+      reason: "could not determine VoiceOver state: CtrlProxy VoiceOver probe unavailable",
+    });
+  }
+  const service = state ? ("voiceover" as const) : ("unknown" as const);
+  logger.debug(`[accessibility tool] VoiceOver state: enabled=${state}`);
+  return createStructuredToolResponse({ enabled: state, service });
 }
 
 export function registerAccessibilityTools() {

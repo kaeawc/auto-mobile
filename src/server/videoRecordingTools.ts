@@ -53,22 +53,40 @@ type SegmentedSessionRecordingDependencies = Pick<
   "rollbackVideoRecordingStart" | "startVideoRecording" | "stopVideoRecording"
 >;
 
+interface PersistedSegments {
+  segments: StoppedSegment[];
+  manifestPath: string | undefined;
+}
+
 /**
- * Registry of timer-driven segmented Android recordings, keyed by the first
- * segment's recordingId (the caller-facing handle). A single module-level owner
- * of this state — the video tools are registered once and close over it — rather
- * than scattered globals. Recordings whose duration fits within a single
- * `screenrecord` are NOT registered here.
+ * One write per finalized result. A session's stop promise is shared, so a caller-driven stop
+ * that joins an in-flight `maxDuration` auto-stop receives the very same result object the
+ * auto-stop persists; keying on it makes both paths share a single manifest write.
  */
+const persistedResults = new WeakMap<SegmentedSessionResult, Promise<PersistedSegments>>();
+
 /**
  * Maps a finalized segmented session to its ordered segments and writes the `segments.json`
  * manifest (which carries each segment's warnings). Shared by the caller-driven stop and the
- * `maxDuration` auto-stop so both leave the same on-disk record.
+ * `maxDuration` auto-stop so both leave the same on-disk record, written once per result.
  */
-async function persistSegmentedResult(
+function persistSegmentedResult(
+  handle: string,
+  result: SegmentedSessionResult,
+): Promise<PersistedSegments> {
+  const existing = persistedResults.get(result);
+  if (existing) {
+    return existing;
+  }
+  const persisting = writeSegmentedResult(handle, result);
+  persistedResults.set(result, persisting);
+  return persisting;
+}
+
+async function writeSegmentedResult(
   handle: string,
   { filePaths, recordingIds, metadata, warnings }: SegmentedSessionResult,
-): Promise<{ segments: StoppedSegment[]; manifestPath: string | undefined }> {
+): Promise<PersistedSegments> {
   if (recordingIds.length === 0 && warnings?.length) {
     throw new Error(warnings.join("; "));
   }
@@ -84,6 +102,13 @@ async function persistSegmentedResult(
   return { segments, manifestPath };
 }
 
+/**
+ * Registry of timer-driven segmented Android recordings, keyed by the first
+ * segment's recordingId (the caller-facing handle). A single module-level owner
+ * of this state — the video tools are registered once and close over it — rather
+ * than scattered globals. Recordings whose duration fits within a single
+ * `screenrecord` are NOT registered here.
+ */
 const segmentedSessions = (() => {
   const byHandle = new Map<string, AndroidSegmentedPlanVideoSession>();
   // Undefined in production (sessions fall back to their own defaultTimer); tests
@@ -509,13 +534,13 @@ async function startDeviceRecordings(
           timer: segmentedSessions.timer,
           maxDurationSeconds,
           startupAbortSignal: signal,
-          // Keep an auto-finalized session reachable until the all-device
-          // request commits: an abort still must roll back every segment.
           // The auto-stop discards the caller-facing result, so persist the manifest here.
           // The handle is the first segment's recordingId, known once start() returns.
           onAutoStopped: async (result) => {
             await persistSegmentedResult(started.handle ?? result.recordingIds[0] ?? "", result);
           },
+          // Keep an auto-finalized session reachable until the all-device
+          // request commits: an abort still must roll back every segment.
           onFinalized: () => {
             if (fanoutCommitted) {
               segmentedSessions.remove(session);

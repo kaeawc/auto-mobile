@@ -2,7 +2,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
-import { existsSync, promises as fsPromises } from "node:fs";
+import { existsSync, promises as fsPromises, statSync } from "node:fs";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -1018,7 +1018,16 @@ describe("videoRecording tool segmentation branch", () => {
     // The auto-stop persists the same manifest a caller-driven stop would (#10018): both
     // segments in order, with the warning the second segment carried.
     const manifestPath = path.join(fakeSegmentDir, "segments.json");
-    await waitFor(() => existsSync(manifestPath), "auto-stop to write segments.json");
+    // A real file write needs event-loop turns, which a microtask-only waitFor never yields.
+    // (Non-empty, not just present: the file is created before its bytes land.)
+    for (
+      let turn = 0;
+      turn < 200 && !(existsSync(manifestPath) && statSync(manifestPath).size > 0);
+      turn++
+    ) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(await fsPromises.readFile(manifestPath, "utf8")) as {
       sessionId: string;
       segmentCount: number;

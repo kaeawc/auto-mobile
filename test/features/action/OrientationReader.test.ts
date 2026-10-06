@@ -4,6 +4,8 @@ import { join } from "path";
 import {
   AndroidOrientationReader,
   IosOrientationReader,
+  orientationFromRotation,
+  rotationForOrientation,
 } from "../../../src/features/action/OrientationReader";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -114,5 +116,23 @@ describe("OrientationReader", () => {
     expect(
       await new IosOrientationReader().readOrientation({ ...device, platform: "ios" }),
     ).toBeNull();
+  });
+
+  test.each([null, false, true])(
+    "rotationForOrientation inverts orientationFromRotation for natural landscape %s",
+    (naturalLandscape) => {
+      for (const orientation of ["portrait", "landscape"] as const) {
+        const value = rotationForOrientation(orientation, naturalLandscape);
+        expect(orientationFromRotation(value, naturalLandscape)).toBe(orientation);
+      }
+    },
+  );
+
+  test("rotationForOrientation picks the rotation from the natural axes", () => {
+    expect(rotationForOrientation("portrait", false)).toBe(0);
+    expect(rotationForOrientation("landscape", false)).toBe(1);
+    expect(rotationForOrientation("portrait", true)).toBe(1);
+    expect(rotationForOrientation("landscape", true)).toBe(0);
+    expect(rotationForOrientation("portrait", null)).toBe(0);
   });
 });

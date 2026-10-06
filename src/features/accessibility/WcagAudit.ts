@@ -32,6 +32,8 @@ export interface WcagBaselineStore {
   clearBaseline(screenId: string): Promise<void>;
 }
 
+const NO_SCREENSHOT_REASON = "no screenshot for this observation";
+
 type AuditHierarchyOptions = {
   density?: number;
   windows?: ViewHierarchyWindowInfo[];
@@ -116,6 +118,7 @@ export class WcagAudit {
         screenshotPath,
         config.level,
         config.contrast,
+        density,
       );
       violations.push(...contrastViolations);
     }
@@ -144,6 +147,10 @@ export class WcagAudit {
 
     // Generate summary
     const summary = this.generateSummary(violations, filteredViolations, baselinedCount, config);
+    if (!screenshotPath) {
+      // Pixels are required for contrast; say so instead of implying a clean result.
+      summary.notEvaluated = [{ check: "insufficient-contrast", reason: NO_SCREENSHOT_REASON }];
+    }
 
     return {
       config,
@@ -211,6 +218,7 @@ export class WcagAudit {
     screenshotPath: string,
     wcagLevel: string,
     contrastConfig?: AccessibilityAuditConfig["contrast"],
+    density?: number,
   ): Promise<WcagViolation[]> {
     const violations: WcagViolation[] = [];
 
@@ -225,6 +233,7 @@ export class WcagAudit {
       screenshotPath,
       textElements,
       wcagLevel as "A" | "AA" | "AAA",
+      density,
     );
 
     // Process results and create violations

@@ -577,7 +577,9 @@ fi
 if [[ "$recheck_verdict" -eq 1 ]]; then
   if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
     while IFS= read -r failure_line; do
-      [[ "$failure_line" == FAIL:* ]] && printf '::error::%s\n' "$failure_line" >&2 || true
+      if [[ "$failure_line" == FAIL:* && "$failure_line" != 'FAIL: '*test\(s\) ]]; then
+        printf '::error::%s\n' "$failure_line" >&2 || true
+      fi
     done < "$failure_list"
   fi
   # stderr remains visible when CI stdout is non-blocking or has been closed.

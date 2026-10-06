@@ -1109,6 +1109,7 @@ EOF
   run_timing_gate_with_recheck_times "0.010 0.150 0.160"
   [ "$status" -eq 1 ]
   [[ "$output" == *"::error::FAIL: suite.slow | FAIL (median over budget)"* ]]
+  [[ "$output" != *"::error::FAIL: 1 test(s)"* ]]
   unset GITHUB_ACTIONS
   rm -f "$STUB_RECHECK_INDEX"
   run_timing_gate_with_recheck_times "0.010 0.150 0.160"

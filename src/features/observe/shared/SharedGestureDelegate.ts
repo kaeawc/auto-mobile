@@ -40,6 +40,20 @@ export interface PinchRequest {
   beforeSend?: () => void;
 }
 
+/** Everything `request_tap_coordinates` needs; the tap twin of `PinchRequest`. */
+export interface TapRequest {
+  x: number;
+  y: number;
+  duration: number;
+  timeoutMs: number;
+  perf?: PerformanceTracker;
+  frameContext?: string;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+  displayId?: number;
+  beforeSend?: () => void;
+}
+
 export interface TapDiagnosticParameters {
   diagnostics?: true;
   tapStrategy?:
@@ -115,18 +129,7 @@ export class SharedGestureDelegate {
   }
 
   /** The tap wire request, shared so a platform can wrap its dispatch contract around it. */
-  protected tapCommandOptions(tap: {
-    x: number;
-    y: number;
-    duration: number;
-    timeoutMs: number;
-    perf?: PerformanceTracker;
-    frameContext?: string;
-    signal?: AbortSignal;
-    onDispatch?: () => void;
-    displayId?: number;
-    beforeSend?: () => void;
-  }): SendCommandOptions<BaseResult> {
+  protected tapCommandOptions(tap: TapRequest): SendCommandOptions<BaseResult> {
     const displayParams = this.gestureDisplayParams(tap.displayId);
     return {
       idPrefix: "tap",
@@ -174,6 +177,10 @@ export class SharedGestureDelegate {
   /**
    * Transport seam for the single-finger swipe. iOS overrides it to report a dispatched but
    * unconfirmed swipe, while every other consumer keeps the plain request/response contract.
+   *
+   * Unlike `tapCommandOptions`/`pinchCommandOptions` this wraps the send rather than building the
+   * request: `requestSwipe` builds its options inline and post-processes the reply (iOS perf
+   * timing), so a builder seam would force iOS to re-implement the 12-argument `requestSwipe`.
    */
   protected sendSwipeCommand(
     options: SendCommandOptions<GestureTimingResult>,

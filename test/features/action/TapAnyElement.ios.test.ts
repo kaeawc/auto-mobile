@@ -219,7 +219,14 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
   test("tap reports failure when the proxy reports failure", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
-    fakeIosClient.setTapResult({ success: false, error: "boom", totalTimeMs: 1 });
+    // An explicit runner refusal: dispatched and acknowledged, so a plain failure.
+    fakeIosClient.setTapResult({
+      success: false,
+      error: "boom",
+      totalTimeMs: 1,
+      dispatched: true,
+      acknowledged: true,
+    });
 
     const result = await tapAny.execute({ action: "tap" });
 

@@ -292,6 +292,9 @@ class WebSocketServer(
     add("ime_key_events_v1")
     add("tap_double_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
+    // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
+    // decoder ignores unknown fields, so the overlay would silently land on the default display.
+    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("overlay_display_id_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

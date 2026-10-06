@@ -127,6 +127,7 @@ import {
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
+  OVERLAY_DISPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -1265,6 +1266,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     spec: OverlaySpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<OverlayResult>;
   requestUpdateOverlay(
     update: OverlayUpdate,
@@ -3558,8 +3560,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     spec: OverlaySpec,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<OverlayResult> {
-    return this.overlays.requestShowOverlay(spec, timeoutMs, perf);
+    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId);
   }
   requestUpdateOverlay(
     update: OverlayUpdate,
@@ -6678,7 +6681,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       return this.supportedCommands.has(messageType);
     }
     // Legacy behavior for services that predate full_command_set_v1 (older APKs).
-    if (messageType === "gesture_display_id_v1" || messageType === "tap_double_v1") {
+    if (
+      messageType === "gesture_display_id_v1" ||
+      messageType === "tap_double_v1" ||
+      messageType === OVERLAY_DISPLAY_CAPABILITY
+    ) {
       return this.supportedCommands?.has(messageType) === true;
     }
     if (this.supportedCommands === null) {

@@ -63,8 +63,8 @@ class OverlayControllerTest {
   fun `show update state and dismiss dispatch through the real message handler`() = runTest {
     val actions =
       object : NoOpCtrlProxyActions() {
-        override fun showOverlay(requestId: String?, spec: OverlaySpec) {
-          launch { controller.show(requestId, spec) }
+        override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {
+          launch { controller.show(requestId, spec, displayId) }
         }
 
         override fun updateOverlay(

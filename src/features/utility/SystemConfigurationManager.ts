@@ -13,6 +13,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
 import { buildAppleLanguages, isIosSimulator } from "./system-configuration/iosHelpers";
+import { checkTimeZoneId } from "./system-configuration/parsing";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -80,7 +81,14 @@ export class SystemConfigurationManager {
         error: "zoneId must be a non-empty string",
       };
     }
-    return this.adapter.setTimeZone(trimmedZone);
+    // Validate once, before any adapter writes: both platforms store whatever
+    // string they are given and read it back unchanged (issue #10190).
+    const check = checkTimeZoneId(trimmedZone, this.device.platform);
+    if (check.error) {
+      return { success: false, zoneId, error: check.error };
+    }
+    const result = await this.adapter.setTimeZone(trimmedZone);
+    return check.note ? withTimeZoneNote(result, check.note) : result;
   }
 
   async setTextDirection(
@@ -237,4 +245,11 @@ export class SystemConfigurationManager {
 
     return result;
   }
+}
+
+/** Say, on whichever outcome, that the host could not validate the id it let through. */
+function withTimeZoneNote(result: SetTimeZoneResult, note: string): SetTimeZoneResult {
+  return result.success
+    ? { ...result, warning: result.warning ? `${result.warning} ${note}` : note }
+    : { ...result, error: result.error ? `${result.error}. ${note}` : note };
 }

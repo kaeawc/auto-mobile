@@ -3,6 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { runWithToolDispatchReporter } from "../../../src/utils/ToolDispatchContext";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type {
   HierarchyCapture,
@@ -461,6 +462,19 @@ describe("tapOn display verification", () => {
         expect(h.timer.getSleepHistory()).not.toContain(PRE_RETRY_DELAY_MS);
       });
     }
+    test(`${route} reports its dispatch to the running tool call before the tap goes out (#10196)`, async () => {
+      const h = harness(ctrlProxy);
+      const order: string[] = [];
+      h.onDispatch(() => order.push("tap"));
+      const result = await runWithToolDispatchReporter(
+        () => order.push("report"),
+        () => h.execute({}),
+      );
+      expect(result.success).toBe(true);
+      // A report made after the command returned could land past the navigation event the tap caused.
+      expect(order[0]).toBe("report");
+      expect(order).toContain("tap");
+    });
     test(`${route} preTapStability: waits for targeted bounds and taps refreshed point`, async () => {
       const h = harness(ctrlProxy);
       h.capture.read = (index) => hierarchy({ left: index === 1 ? 25 : 40 });

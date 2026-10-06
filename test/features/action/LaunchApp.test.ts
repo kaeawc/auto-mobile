@@ -1834,6 +1834,16 @@ describe("LaunchApp", () => {
         stdout: "Error: no launcher activity",
         stderr: "",
       });
+      // An am error after the cache said installed triggers one live install check (#10192);
+      // these packages are installed (they have launcher dumps), just without a launcher.
+      const listing = {
+        stdout: [packageName, playgroundPackage, "com.android.egg"]
+          .map((name) => `package:${name}`)
+          .join("\n"),
+        stderr: "",
+      };
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", listing);
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", listing);
     });
 
     afterEach(() => ctrlProxySpy.mockRestore());

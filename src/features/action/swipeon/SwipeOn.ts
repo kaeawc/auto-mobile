@@ -114,6 +114,14 @@ const DISPLAY_SWIPE_OPTIONS = [
 /** TalkBack state for an explicit-display swipe; `unknownWarning` is set when detection is unconfirmed. */
 type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
 
+/** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
+function withUnknownTalkBackWarning(result: SwipeOnResult, warning?: string): SwipeOnResult {
+  if (!warning || result.warnings?.includes(warning)) {
+    return result;
+  }
+  return { ...result, warnings: [...(result.warnings ?? []), warning] };
+}
+
 type AutoTargetDecision = {
   element?: Element;
   container?: SwipeOnOptions["container"];
@@ -856,7 +864,7 @@ export class SwipeOn extends BaseVisualChange {
     } else {
       target.assertCurrent();
     }
-    return result;
+    return withUnknownTalkBackWarning(result, talkBack.unknownWarning);
   }
 
   private async dispatchDisplaySwipeLeg(options: {

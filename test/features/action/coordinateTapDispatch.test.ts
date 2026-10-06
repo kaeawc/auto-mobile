@@ -13,6 +13,7 @@ import {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { DOUBLE_TAP_GAP_MS, LONG_PRESS_MIN_MS } from "../../../src/features/action/tapAtGesture";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { TALKBACK_ACTIVATION_WARNING } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { observation } from "../../helpers/tapAtCoordinate";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -781,11 +782,96 @@ describe("androidDisplayTapDispatch with TalkBack on (#9905)", () => {
         "doubleTap",
         "longPress",
       ]);
-      expect(onDispatched).toHaveBeenCalledTimes(3);
+      // tap + doubleTap (two activation touches) + longPress
+      expect(onDispatched).toHaveBeenCalledTimes(4);
       expect(requestTapCoordinates).not.toHaveBeenCalled();
       expect(adb.getExecutedCommands()).toEqual([]);
     },
   );
+
+  test("forwards the unconfirmed-activation warnings the strategy reports on success", async () => {
+    const strategy = strategyFake();
+    strategy.executePreciseTap.mockResolvedValue({
+      success: true,
+      method: "coordinate-fallback",
+      focusCompleted: true,
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    } as never);
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "tap" },
+      {
+        target: talkBackTarget(0),
+        onDispatched: () => {},
+        onWarning,
+        talkBack: { strategy, driver },
+      },
+    );
+    await dispatch({ x: 1, y: 2 });
+    expect(onWarning.mock.calls).toEqual([[TALKBACK_ACTIVATION_WARNING]]);
+  });
+
+  test("a successful TalkBack double tap reports both delivered touches", async () => {
+    const strategy = strategyFake();
+    strategy.executeCoordinateFallback.mockResolvedValue({
+      success: true,
+      method: "coordinate-fallback",
+      completedTaps: 2,
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    } as never);
+    const onDispatched = mock(() => {});
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "doubleTap" },
+      { target: talkBackTarget(0), onDispatched, onWarning, talkBack: { strategy, driver } },
+    );
+    await dispatch({ x: 1, y: 2 });
+    expect(onDispatched).toHaveBeenCalledTimes(2);
+    expect(onWarning.mock.calls).toEqual([[TALKBACK_ACTIVATION_WARNING]]);
+  });
+
+  test("a long press carries no activation warning and one delivery", async () => {
+    const strategy = strategyFake();
+    const onDispatched = mock(() => {});
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "longPress" },
+      { target: talkBackTarget(0), onDispatched, onWarning, talkBack: { strategy, driver } },
+    );
+    await dispatch({ x: 1, y: 2 });
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test("a failed TalkBack activation does not forward a success warning", async () => {
+    const strategy = strategyFake();
+    strategy.executePreciseTap.mockResolvedValue({
+      success: false,
+      method: "coordinate-fallback",
+      error: "nope",
+      warnings: [TALKBACK_ACTIVATION_WARNING],
+    } as never);
+    const onWarning = mock((_warning: string) => {});
+    const dispatch = await androidDisplayTapDispatch(
+      rawClient().client,
+      new FakeAdbExecutor(),
+      { action: "tap" },
+      {
+        target: talkBackTarget(0),
+        onDispatched: () => {},
+        onWarning,
+        talkBack: { strategy, driver },
+      },
+    );
+    await expect(dispatch({ x: 1, y: 2 })).rejects.toThrow("TalkBack coordinate tap failed");
+    expect(onWarning).not.toHaveBeenCalled();
+  });
 
   test("a failed TalkBack activation throws and reports the delivered focus touch", async () => {
     const strategy = strategyFake();

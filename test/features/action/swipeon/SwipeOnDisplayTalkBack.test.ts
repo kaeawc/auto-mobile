@@ -122,3 +122,23 @@ test("TalkBack state unknown: swipeOn follows the raw route and carries the unkn
   expect(h.ctrl.getSwipeHistory()).toHaveLength(1);
   expect(h.talkback).not.toHaveBeenCalled();
 });
+
+for (const route of ["ctrlproxy", "adb"] as const) {
+  test(`TalkBack state unknown: swipeOn lookFor keeps the raw ${route} swipe and carries the unknown-state warning once`, async () => {
+    const h = harness({ route });
+    h.detector.setDefaultResult(null);
+    const result = await h.action.execute(search);
+    expect(result.success).toBe(true);
+    expect(result.found).toBe(true);
+    expect(result.warnings).toEqual([TALKBACK_STATE_UNKNOWN_WARNING]);
+    expect(h.legs().length).toBeGreaterThan(0);
+    expect(h.talkback).not.toHaveBeenCalled();
+  });
+
+  test(`TalkBack off: swipeOn lookFor carries no warning via ${route}`, async () => {
+    const h = harness({ route });
+    const result = await h.action.execute(search);
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+}

@@ -1102,6 +1102,44 @@ class WebSocketServerTest {
     }
 
   @Test
+  fun `malformed overlay asset requests get one correlated overlay result and no echoed bytes`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      val cases =
+        listOf(
+          """{"type":"put_overlay_asset","requestId":"put-bad","id":"hero","mimeType":"image/png","dataBase64":{}}""",
+          """{"type":"put_overlay_asset","requestId":"put-missing","mimeType":"image/png","dataBase64":"$bytes"}""",
+          """{"type":"remove_overlay_asset","requestId":"remove-bad","id":7}""",
+        )
+      for (raw in cases) {
+        val before = transport.messages.size
+        server.handleClientMessage(raw, owner)
+        runCurrent()
+        assertEquals(before + 1, transport.messages.size)
+        val result =
+          Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as OverlayResult
+        assertEquals(
+          Regex("\"requestId\":\"([^\"]+)\"").find(raw)!!.groupValues[1],
+          result.requestId,
+        )
+        assertFalse(result.success)
+        assertTrue(result.error.orEmpty().startsWith("Malformed request:"))
+        assertFalse(result.error.orEmpty().contains("SECRETBYTES"))
+      }
+    }
+
+  @Test
+  fun `asset requests are advertised so older devices can be detected by absence`() {
+    val commands = WebSocketServer(port = 0, scope = testScope).supportedCommands()
+    assertTrue(commands.contains("put_overlay_asset"))
+    assertTrue(commands.contains("remove_overlay_asset"))
+    assertTrue(commands.contains("full_command_set_v1"))
+  }
+
+  @Test
   fun `dismiss payload failure is an overlay result while other known commands keep error frames`() =
     runTest(testScope.testScheduler) {
       server = serverWithHandler { error("Malformed payload must never dispatch") }

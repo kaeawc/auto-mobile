@@ -22,7 +22,10 @@ import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
-import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import {
+  TALKBACK_ACTIVATION_WARNING,
+  TalkBackTapStrategy,
+} from "../../../src/features/talkback/TalkBackTapStrategy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 
 const device = {
@@ -93,6 +96,8 @@ function harness(
     vision?: boolean;
     /** true: TalkBack on, null: state unknown; default off. */
     talkBack?: boolean | null;
+    /** Place the selected "external" panel on display 0 instead of display 2. */
+    defaultDisplay?: boolean;
   } = {},
 ) {
   const transitions = new FakeDisplayTransitionReader();
@@ -106,8 +111,9 @@ function harness(
   const screenshots = new FakeScreenshotCapturer();
   const executor = new FakeAdbExecutor();
   executor.setCommandResponse("cmd display get-displays", {
-    stdout:
-      'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+    stdout: options.defaultDisplay
+      ? 'Display id 0: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}\nDisplay id 2: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}'
+      : 'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
     stderr: "",
     toString: () => "",
     trim: () => "",
@@ -132,7 +138,9 @@ function harness(
     viewHierarchy: { ...current, updatedAt: timer.now() + 1 },
   });
   let decoy = hierarchy({ displayId: 0, left: 120 });
-  capture.read = (_index, request) => ({ ...(request.displayId === 2 ? current : decoy) });
+  capture.read = (_index, request) => ({
+    ...(request.displayId === 2 || options.defaultDisplay ? current : decoy),
+  });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const detector = new FakeAccessibilityDetector();
@@ -1116,6 +1124,48 @@ describe("tapOn explicit display with TalkBack (#9905)", () => {
       });
     }
   }
+
+  test("TalkBack on, explicit display 0: a completed activation carries the unconfirmed warning", async () => {
+    const h = harness(true, { talkBack: true, defaultDisplay: true });
+    const result = await h.execute({});
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+    expect(h.dispatches).toEqual([]);
+    expect(h.talkBackDriver.doubleTapHistory).toHaveLength(1);
+  });
+
+  test("TalkBack on, explicit display 0: a long press carries no activation warning", async () => {
+    const h = harness(true, { talkBack: true, defaultDisplay: true });
+    const result = await h.execute({ action: "longPress" });
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+  });
+
+  test("TalkBack on, non-default display: a missing element reports the refusal, not not-found", async () => {
+    const h = harness(true, { talkBack: true });
+    const result = await h.execute({ text: "Missing" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("TalkBack coordinate activation cannot target display 2");
+    expect(result.error).not.toContain("not found");
+    expect(h.dispatches).toEqual([]);
+  });
+
+  test("TalkBack on, non-default display: an already-satisfied ensureChecked still refuses", async () => {
+    const h = harness(true, { talkBack: true, checked: true });
+    const result = await h.execute({ ensureChecked: true });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("TalkBack coordinate activation cannot target display 2");
+    expect(result.skipped).toBeUndefined();
+    expect(h.dispatches).toEqual([]);
+  });
+
+  test("TalkBack off: a missing element keeps the not-found error", async () => {
+    const h = harness(true, { talkBack: false });
+    const result = await h.execute({ text: "Missing" });
+    expect(result.success).toBe(false);
+    expect(result.error).not.toContain("TalkBack");
+  });
 
   test("TalkBack off keeps the raw display dispatch and carries no TalkBack warning", async () => {
     const h = harness(true, { talkBack: false });

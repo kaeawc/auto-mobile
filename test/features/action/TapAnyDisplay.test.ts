@@ -13,8 +13,12 @@ import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
-import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import {
+  TALKBACK_ACTIVATION_WARNING,
+  TalkBackTapStrategy,
+} from "../../../src/features/talkback/TalkBackTapStrategy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
@@ -330,6 +334,39 @@ test("tapAny TalkBack on refuses a session-pinned display the same way", async (
   expect(result.success).toBe(false);
   expect(result.error).toContain("TalkBack coordinate activation cannot target display 3");
   expect(h.dispatches).toEqual([]);
+});
+
+test("tapAny TalkBack on, explicit display 0: a completed activation carries the unconfirmed warning", async () => {
+  const h = harness(true, device, true);
+  h.transitions.panel = { key: inner, role: "inner" };
+  h.observation.display = { key: inner, role: "inner", posture: "opened", generation: 0 };
+  h.observation.viewHierarchy!.displayId = 0;
+  const result = await h.action.execute({ action: "tap", display: "inner" });
+  expect(result.error).toBeUndefined();
+  expect(result.success).toBe(true);
+  expect(result.warnings).toEqual([TALKBACK_ACTIVATION_WARNING]);
+  expect(h.dispatches).toEqual([]);
+  // The unchanged-hierarchy retry re-dispatches through the same TalkBack strategy.
+  expect(h.talkBackDriver.doubleTapHistory.length).toBeGreaterThan(0);
+});
+
+test("tapAny TalkBack on, display 0: a cancellation after a completed double tap rethrows", async () => {
+  const h = harness(true, device, true);
+  h.transitions.panel = { key: inner, role: "inner" };
+  h.observation.display = { key: inner, role: "inner", posture: "opened", generation: 0 };
+  h.observation.viewHierarchy!.displayId = 0;
+  const controller = new AbortController();
+  const requestDoubleTap = h.talkBackDriver.requestDoubleTapCoordinates.bind(h.talkBackDriver);
+  h.talkBackDriver.requestDoubleTapCoordinates = async (...args) => {
+    const result = await requestDoubleTap(...args);
+    controller.abort();
+    return result;
+  };
+  await expect(
+    h.action.execute({ action: "doubleTap", display: "inner" }, undefined, controller.signal),
+  ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+  // One atomic request delivered both touches; no partial-application error result.
+  expect(h.talkBackDriver.doubleTapHistory).toHaveLength(1);
 });
 
 test("tapAny TalkBack state unknown keeps the raw display dispatch and warns", async () => {

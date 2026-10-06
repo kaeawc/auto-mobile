@@ -103,6 +103,13 @@ class WebSocketServer(
         null
       }
 
+    /** Requests that carry image bytes; their frames and decoder snippets are never logged. */
+    private val overlayAssetRequestTypes = setOf("put_overlay_asset", "remove_overlay_asset")
+
+    /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
+    private val overlayRequestTypes =
+      setOf("show_overlay", "update_overlay", "dismiss_overlay") + overlayAssetRequestTypes
+
     /** Log only the protocol type and length, never free-form request fields. */
     internal fun inboundFrameLogLine(connectionId: Int, raw: String): String {
       val type =
@@ -988,7 +995,11 @@ class WebSocketServer(
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {
-      Log.w(TAG, "No message handler configured; ignoring inbound message: $message")
+      // Length only: an inbound frame can carry overlay asset bytes.
+      Log.w(
+        TAG,
+        "No message handler configured; ignoring inbound message (${message.length} chars)",
+      )
       return
     }
 
@@ -1004,13 +1015,16 @@ class WebSocketServer(
         // Surface a structured error (correlated by best-effort requestId) rather than swallowing
         // the failure: a silent return leaves the daemon's awaiter hanging until timeout. See
         // #2985.
-        Log.w(TAG, "Failed to parse client message: $message", e)
+        val type = extractStringField(message, "type")
+        if (type in overlayAssetRequestTypes) {
+          // Never echo the frame or the decoder's input snippet: it holds asset bytes.
+          Log.w(TAG, "Failed to parse $type (${message.length} chars): ${e.javaClass.simpleName}")
+        } else {
+          Log.w(TAG, "Failed to parse client message: $message", e)
+        }
         sendErrorResponse(
           connection,
-          if (
-            extractStringField(message, "type") in
-              listOf("show_overlay", "update_overlay", "dismiss_overlay")
-          ) {
+          if (type in overlayRequestTypes) {
             OverlayResult(
               timestamp = System.currentTimeMillis(),
               requestId = extractRequestId(message),

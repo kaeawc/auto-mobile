@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import type { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
 import { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import type { ObserveResult } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -188,8 +189,8 @@ test.each([undefined, 0])(
   },
 );
 
-test("an unanswered explicit display read releases its marker so a later frame is not swallowed", async () => {
-  const { client, socket, stream, timer } = await connectedClient("owner-display-timeout");
+test("an unanswered explicit display read keeps its marker so the late reply stays isolated", async () => {
+  const { client, socket, stream, backoff, timer } = await connectedClient("owner-display-timeout");
   try {
     const pending = client.requestHierarchySync(
       new NoOpPerformanceTracker(),
@@ -199,16 +200,144 @@ test("an unanswered explicit display read releases its marker so a later frame i
       undefined,
       2,
     );
-    await sentHierarchyRequest(socket);
+    const { requestId } = await sentHierarchyRequest(socket);
     expect(markerCount(client)).toBe(1);
     timer.advanceTime(100);
     expect(await pending).toBeNull();
-    expect(markerCount(client)).toBe(0);
+    expect(markerCount(client)).toBe(1);
 
     // An uncorrelated push after the failed read is an ordinary default-display update.
     socket.simulateMessage(frame("default later", DEFAULT_DISPLAY, 0, 3));
     expect(cachedText(client)).toBe("default later");
     expect(stream).toHaveBeenCalledTimes(1);
+    stream.mockClear();
+    backoff.mockClear();
+    const scaleBefore = client.getScreenScaleMetadata();
+
+    // The display-2 reply arrives after the waiter gave up: it is dropped, not adopted.
+    socket.simulateMessage(frame("external late", SECOND_DISPLAY, 2, 4, requestId));
+    expect(cachedText(client)).toBe("default later");
+    expect(client.getScreenScaleMetadata()).toEqual(scaleBefore);
+    expect(stream).not.toHaveBeenCalled();
+    expect(backoff).not.toHaveBeenCalled();
+    expect(markerCount(client)).toBe(0);
+  } finally {
+    await client.close();
+  }
+});
+
+test("an aborted explicit display read keeps its marker until the late reply is consumed", async () => {
+  const { client, socket, stream, timer } = await connectedClient("owner-display-abort");
+  try {
+    const controller = new AbortController();
+    const pending = client.requestHierarchySync(
+      new NoOpPerformanceTracker(),
+      false,
+      controller.signal,
+      1000,
+      undefined,
+      2,
+    );
+    const { requestId } = await sentHierarchyRequest(socket);
+    controller.abort();
+    await pending.catch(() => null);
+    // The in-flight wait notices the abort on its next poll and gives up.
+    timer.advanceTime(100);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(markerCount(client)).toBe(1);
+    socket.simulateMessage(frame("external late", SECOND_DISPLAY, 2, 2, requestId));
+    expect(cachedText(client)).toBe("default");
+    expect(stream).not.toHaveBeenCalled();
+    expect(markerCount(client)).toBe(0);
+  } finally {
+    await client.close();
+  }
+});
+
+test("retained markers are cleared on socket close and capped for an unresponsive runner", async () => {
+  const { client, socket, timer } = await connectedClient("owner-display-marker-cap");
+  try {
+    for (let i = 0; i < 70; i++) {
+      const pending = client.requestHierarchySync(
+        new NoOpPerformanceTracker(),
+        false,
+        undefined,
+        100,
+        undefined,
+        2,
+      );
+      await sentHierarchyRequest(socket);
+      timer.advanceTime(100);
+      expect(await pending).toBeNull();
+    }
+    expect(markerCount(client)).toBe(64);
+    client.onConnectionClosed();
+    expect(markerCount(client)).toBe(0);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a runner error for an explicit display read releases its marker", async () => {
+  const { client, socket } = await connectedClient("owner-display-runner-error");
+  try {
+    const pending = client.requestHierarchySync(
+      new NoOpPerformanceTracker(),
+      false,
+      undefined,
+      1000,
+      undefined,
+      2,
+    );
+    const { requestId } = await sentHierarchyRequest(socket);
+    socket.simulateMessage(JSON.stringify({ type: "error", requestId, error: "capture failed" }));
+    await pending.catch(() => null);
+    expect(markerCount(client)).toBe(0);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a legacy id-less frame from another display does not answer an explicit display read", async () => {
+  const { client, socket, timer } = await connectedClient("owner-display-legacy-mismatch");
+  try {
+    // Model a legacy APK: it never advertised or echoed a request id on this connection.
+    (Reflect.get(client, "hierarchy") as CtrlProxyHierarchy).resetConnectionScopedState();
+    const pending = client.requestHierarchySync(
+      new NoOpPerformanceTracker(),
+      false,
+      undefined,
+      200,
+      undefined,
+      2,
+    );
+    await sentHierarchyRequest(socket);
+    // A legacy APK echoes no request id: this is the default display's push, not display 2's.
+    socket.simulateMessage(frame("default push", DEFAULT_DISPLAY, 0, 5));
+    timer.advanceTime(100);
+    timer.advanceTime(200);
+    expect(await pending).toBeNull();
+  } finally {
+    await client.close();
+  }
+});
+
+test("a legacy id-less frame for the requested display still answers the read", async () => {
+  const { client, socket, timer } = await connectedClient("owner-display-legacy-match");
+  try {
+    (Reflect.get(client, "hierarchy") as CtrlProxyHierarchy).resetConnectionScopedState();
+    const pending = client.requestHierarchySync(
+      new NoOpPerformanceTracker(),
+      false,
+      undefined,
+      200,
+      undefined,
+      2,
+    );
+    await sentHierarchyRequest(socket);
+    socket.simulateMessage(frame("external legacy", SECOND_DISPLAY, 2, 5));
+    timer.advanceTime(50);
+    expect((await pending)?.hierarchy.hierarchy.text).toBe("external legacy");
   } finally {
     await client.close();
   }

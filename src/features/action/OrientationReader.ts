@@ -50,8 +50,10 @@ export async function readNaturalLandscape(
       undefined,
       signal,
     );
-    // Keep this parser aligned with AxisRanges.ts's queryDisplaySize parser.
-    const size = stdout.match(/Physical size:\s*(\d+)x(\d+)/);
+    // `wm size` prints `Override size:` after `Physical size:` once `wm size WxH` was applied;
+    // the override is the size rotation 0 actually presents, so it wins when present.
+    const size =
+      stdout.match(/Override size:\s*(\d+)x(\d+)/) ?? stdout.match(/Physical size:\s*(\d+)x(\d+)/);
     return size ? Number(size[1]) > Number(size[2]) : null;
   } catch (error) {
     // A size probe is best effort; rotation alone still provides the prior answer.

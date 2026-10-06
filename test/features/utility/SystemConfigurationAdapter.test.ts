@@ -251,48 +251,211 @@ describe("SystemConfigurationAdapter", () => {
       );
     });
 
-    it("falls back to a running Android work-profile user for app-scoped locale commands", async () => {
-      const adb = new FakeAdbClient();
-      adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
-      adb.setForegroundApp({ packageName: "com.other.app", userId: 0 });
-      adb.setUsers([
-        { userId: 0, name: "Owner", running: true },
-        { userId: 10, name: "Work", running: true },
-      ]);
-      const appLocaleResponses = [
-        "Locales for com.example.app for user 10 are []\n",
-        "Locales for com.example.app for user 10 are [ja-JP]\n",
-      ];
-      const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
-        if (command === "shell cmd locale get-app-locales 'com.example.app' --user 10") {
-          await original(command, ...rest);
-          const stdout =
-            appLocaleResponses.shift() ?? "Locales for com.example.app for user 10 are [ja-JP]\n";
-          return {
-            stdout,
-            stderr: "",
-            toString: () => stdout,
-            trim: () => stdout.trim(),
-            includes: (s: string) => stdout.includes(s),
-          };
-        }
-        return original(command, ...rest);
-      }) as any;
+    describe("app-scoped locale user targeting (issue #10012)", () => {
+      const OWNER = { userId: 0, name: "Owner", flags: 0x13, running: true };
+      const WORK = { userId: 10, name: "Work", flags: 0x30, running: true };
+      const SECONDARY = { userId: 11, name: "Guest", flags: 0x400, running: true };
+      const packages = (...names: string[]) => names.map((name) => `package:${name}\n`).join("");
 
-      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
-      const result = await adapter.setLocale("ja-JP", {
-        broadcast: false,
-        appId: "com.example.app",
+      /** Background app on API 36 whose per-user locale read-back succeeds. */
+      const backgroundApp = (
+        users: Array<{ userId: number; name: string; flags: number; running: boolean }>,
+        installedFor: Record<number, string>,
+      ) => {
+        const adb = new FakeAdbClient();
+        adb.setCommandResult("shell getprop ro.build.version.sdk", "36");
+        adb.setForegroundApp({ packageName: "com.other.app", userId: 0 });
+        adb.setUsers(users);
+        for (const user of users) {
+          adb.setCommandResult(
+            `shell pm list packages --user ${user.userId}`,
+            installedFor[user.userId] ?? "",
+          );
+          adb.setCommandResultSequence(
+            `shell cmd locale get-app-locales 'com.example.app' --user ${user.userId}`,
+            [
+              `Locales for com.example.app for user ${user.userId} are []\n`,
+              `Locales for com.example.app for user ${user.userId} are [ja-JP]\n`,
+            ],
+          );
+        }
+        return adb;
+      };
+      const setJa = (adb: FakeAdbClient) =>
+        new AndroidSystemConfigurationAdapter(androidDevice, adb).setLocale("ja-JP", {
+          broadcast: false,
+          appId: "com.example.app",
+        });
+      const setCommands = (adb: FakeAdbClient) =>
+        adb
+          .getCommandCalls()
+          .map((call) => call.command)
+          .filter((command) => command.startsWith("shell cmd locale set-app-locales"));
+
+      it("targets the running user where the app is installed for a backgrounded app", async () => {
+        const adb = backgroundApp([OWNER, WORK], { 10: packages("com.example.app") });
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 10");
+        expect(setCommands(adb)).toEqual([
+          "shell cmd locale set-app-locales 'com.example.app' --user 10 --locales 'ja-JP'",
+        ]);
       });
 
-      expect(result.success).toBe(true);
-      expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 10");
-      expect(
-        adb.wasCommandExecuted(
-          "cmd locale set-app-locales 'com.example.app' --user 10 --locales 'ja-JP'",
-        ),
-      ).toBe(true);
+      it("does not send a personal-only app to a running work profile", async () => {
+        const adb = backgroundApp([OWNER, WORK], { 0: packages("com.example.app") });
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 0");
+        expect(setCommands(adb)).toEqual([
+          "shell cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'",
+        ]);
+      });
+
+      it("does not treat a running non-managed secondary user as a work profile", async () => {
+        const adb = backgroundApp([OWNER, SECONDARY], { 0: packages("com.example.app") });
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(true);
+        expect(setCommands(adb)).toEqual([
+          "shell cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'",
+        ]);
+      });
+
+      it("keeps a single-user device on user 0 without probing installs", async () => {
+        const adb = backgroundApp([OWNER], {});
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(true);
+        expect(setCommands(adb)).toEqual([
+          "shell cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'",
+        ]);
+        expect(adb.wasCommandExecuted("pm list packages")).toBe(false);
+      });
+
+      it("returns a typed failure, without mutating, when the target user is ambiguous", async () => {
+        const adb = backgroundApp(
+          [OWNER, WORK, { userId: 12, name: "Work 2", flags: 0x30, running: true }],
+          { 10: packages("com.example.app"), 12: packages("com.example.app") },
+        );
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("ambiguous");
+        expect(setCommands(adb)).toEqual([]);
+      });
+
+      it("pins the work profile when the app is installed for both users", async () => {
+        // Same choice the pre-resolver code made (first running non-zero user), now via the
+        // shared resolver's managed-profile preference. Locale goes to the work copy, not user 0's.
+        const adb = backgroundApp([OWNER, WORK], {
+          0: packages("com.example.app"),
+          10: packages("com.example.app"),
+        });
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 10");
+        expect(setCommands(adb)).toEqual([
+          "shell cmd locale set-app-locales 'com.example.app' --user 10 --locales 'ja-JP'",
+        ]);
+      });
+
+      describe("single-user device whose user list cannot be trusted", () => {
+        const unreadable = (users: Array<typeof OWNER | typeof WORK>) => {
+          const adb = backgroundApp([OWNER], {});
+          adb.setUsers(users);
+          return adb;
+        };
+
+        it("falls back to user 0 with a warning when the user list comes back empty", async () => {
+          const adb = unreadable([]);
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(true);
+          expect(result.method).toBe("cmd locale set-app-locales com.example.app --user 0");
+          expect(result.warning).toContain("Could not read the device's Android user list");
+          expect(setCommands(adb)).toEqual([
+            "shell cmd locale set-app-locales 'com.example.app' --user 0 --locales 'ja-JP'",
+          ]);
+        });
+
+        it("falls back to user 0 when the only listed user is not marked running", async () => {
+          // dumpsys State: line missing or further than 10 lines from UserInfo.
+          const adb = unreadable([{ ...OWNER, running: false }]);
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeDefined();
+          expect(setCommands(adb)).toHaveLength(1);
+        });
+
+        it("does not warn on a normal single-user resolution", async () => {
+          const result = await setJa(backgroundApp([OWNER], {}));
+
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeUndefined();
+        });
+
+        it("keeps failing when a managed profile is known but nothing is running", async () => {
+          const adb = unreadable([
+            { ...OWNER, running: false },
+            { ...WORK, running: false },
+          ]);
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("keeps failing on an empty user list when the current user is not user 0", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "10\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(false);
+          expect(result.error).toContain("unavailable");
+          expect(setCommands(adb)).toEqual([]);
+        });
+
+        it("falls back when the current user can be read and is user 0", async () => {
+          const adb = unreadable([]);
+          adb.setCommandResult("shell am get-current-user", "0\n");
+
+          const result = await setJa(adb);
+
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeDefined();
+        });
+      });
+
+      it("returns a typed failure when the Android user list cannot be read", async () => {
+        const adb = backgroundApp([OWNER, WORK], { 0: packages("com.example.app") });
+        adb.listUsers = async () => {
+          throw new Error("adb offline");
+        };
+
+        const result = await setJa(adb);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe(
+          "Failed to resolve Android user for com.example.app: adb offline",
+        );
+        expect(setCommands(adb)).toEqual([]);
+      });
     });
 
     it("uses root-backed system locale after adb root below Android 13 and reports system scope", async () => {

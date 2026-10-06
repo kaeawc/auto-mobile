@@ -208,6 +208,34 @@ const createTrayHierarchy = (title: string): ViewHierarchyResult => ({
   },
 });
 
+// A shade that is still open but holds no notification rows: what the tray
+// looks like once the swiped row has left it.
+const createEmptyTrayHierarchy = (): ViewHierarchyResult => ({
+  packageName: SYSTEM_TRAY_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        class: "NotificationShade",
+        packageName: SYSTEM_TRAY_PACKAGE,
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      },
+    },
+  },
+});
+
+const createEmptyTrayObservation = (): ObserveResult =>
+  createObservation(createEmptyTrayHierarchy());
+
+// Observe factory that serves `before` until a swipe ran, then the empty shade,
+// so a dismiss test confirms the row left the tray (#10010).
+const emptyShadeAfterSwipe =
+  (fakeAdb: FakeAdbExecutor, before: (index: number) => ObserveResult) =>
+  (index: number): ObserveResult =>
+    fakeAdb.getExecutedCommands().some((command) => command.includes("input swipe"))
+      ? createEmptyTrayObservation()
+      : before(index);
+
 const device: BootedDevice = {
   name: "Pixel_6",
   platform: "android",
@@ -1842,8 +1870,10 @@ describe("systemTray headerless two-notification group", () => {
       const fakeTimer = new FakeTimer();
       const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
       const fakeObserveScreen = new FakeObserveScreen();
-      fakeObserveScreen.setObserveResult(() =>
-        createObservation(headerlessTwoNotificationGroups.expanded),
+      fakeObserveScreen.setObserveResult(
+        emptyShadeAfterSwipe(fakeAdb, () =>
+          createObservation(headerlessTwoNotificationGroups.expanded),
+        ),
       );
       const installedAppsSpy = mockInstalledApps(["com.android.shell"]);
       setSystemTrayDependencies({
@@ -1894,11 +1924,13 @@ describe("systemTray headerless two-notification group", () => {
       const fakeTimer = new FakeTimer();
       const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000, 2000]);
       const fakeObserveScreen = new FakeObserveScreen();
-      fakeObserveScreen.setObserveResult((index) =>
-        createObservation(
-          index === 0
-            ? headerlessTwoNotificationGroups.collapsed
-            : headerlessTwoNotificationGroups.expanded,
+      fakeObserveScreen.setObserveResult(
+        emptyShadeAfterSwipe(fakeAdb, (index) =>
+          createObservation(
+            index === 0
+              ? headerlessTwoNotificationGroups.collapsed
+              : headerlessTwoNotificationGroups.expanded,
+          ),
         ),
       );
       const installedAppsSpy = mockInstalledApps(["com.android.shell"]);
@@ -2263,11 +2295,13 @@ describe("systemTray group expansion", () => {
     const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
     const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
     const fakeObserveScreen = new FakeObserveScreen();
-    fakeObserveScreen.setObserveResult((index) =>
-      createObservation({
-        ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
-        updatedAt: 2001 + fakeTimer.now(),
-      }),
+    fakeObserveScreen.setObserveResult(
+      emptyShadeAfterSwipe(fakeAdb, (index) =>
+        createObservation({
+          ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
+          updatedAt: 2001 + fakeTimer.now(),
+        }),
+      ),
     );
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -2315,8 +2349,10 @@ describe("systemTray group expansion", () => {
       60,
     );
     const fakeObserveScreen = new FakeObserveScreen();
-    fakeObserveScreen.setObserveResult((index) =>
-      createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+    fakeObserveScreen.setObserveResult(
+      emptyShadeAfterSwipe(fakeAdb, (index) =>
+        createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+      ),
     );
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -2349,8 +2385,10 @@ describe("systemTray group expansion", () => {
     const collapsedHierarchy = createCtrlProxyCapturedGroupTray(false);
     const expandedHierarchy = createCtrlProxyCapturedGroupTray(true);
     const fakeObserveScreen = new FakeObserveScreen();
-    fakeObserveScreen.setObserveResult((index) =>
-      createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+    fakeObserveScreen.setObserveResult(
+      emptyShadeAfterSwipe(fakeAdb, (index) =>
+        createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+      ),
     );
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -2506,8 +2544,10 @@ describe("systemTray group expansion", () => {
       { expanded: true },
     );
     const fakeObserveScreen = new FakeObserveScreen();
-    fakeObserveScreen.setObserveResult((index) =>
-      createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+    fakeObserveScreen.setObserveResult(
+      emptyShadeAfterSwipe(fakeAdb, (index) =>
+        createObservation(index === 0 ? collapsedHierarchy : expandedHierarchy),
+      ),
     );
     const installedAppsSpy = mockInstalledApps(["com.example.fub"]);
     setSystemTrayDependencies({
@@ -2722,6 +2762,7 @@ describe("systemTray group expansion", () => {
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(collapsedHierarchy),
       createObservation(expandedHierarchy),
+      createEmptyTrayObservation(),
     ]);
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -2814,11 +2855,13 @@ describe("systemTray group expansion", () => {
       { expanded: true },
     );
     const fakeObserveScreen = new FakeObserveScreen();
-    fakeObserveScreen.setObserveResult((index) =>
-      createObservation({
-        ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
-        updatedAt: 2001 + fakeTimer.now(),
-      }),
+    fakeObserveScreen.setObserveResult(
+      emptyShadeAfterSwipe(fakeAdb, (index) =>
+        createObservation({
+          ...(index === 0 ? collapsedHierarchy : expandedHierarchy),
+          updatedAt: 2001 + fakeTimer.now(),
+        }),
+      ),
     );
 
     setSystemTrayDependencies({
@@ -2868,7 +2911,7 @@ describe("systemTray group expansion", () => {
     );
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(hierarchy),
-      createObservation(hierarchy),
+      createEmptyTrayObservation(),
     ]);
 
     setSystemTrayDependencies({
@@ -2911,7 +2954,7 @@ describe("systemTray group expansion", () => {
     );
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(hierarchy),
-      createObservation(hierarchy),
+      createEmptyTrayObservation(),
     ]);
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -3086,6 +3129,7 @@ describe("systemTray group expansion", () => {
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(collapsedHierarchy),
       createObservation(expandedHierarchy),
+      createEmptyTrayObservation(),
     ]);
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -3265,6 +3309,7 @@ describe("systemTray group expansion", () => {
       createObservation(createTrayWithExpandedNotifications(["Different notification"])),
       createObservation(collapsedHierarchy),
       createObservation(expandedHierarchy),
+      createEmptyTrayObservation(),
     ]);
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -3304,6 +3349,7 @@ describe("systemTray group expansion", () => {
       createObservation(createTrayWithExpandedNotifications(["Different notification"])),
       createObservation(collapsedHierarchy),
       createObservation(expandedHierarchy),
+      createEmptyTrayObservation(),
     ]);
     setSystemTrayDependencies({
       timer: fakeTimer,
@@ -3472,7 +3518,7 @@ describe("systemTray group expansion", () => {
     const hierarchy = createTrayWithExpandedNotifications(["Zillow Real-Time Tour request"]);
     const fakeObserveScreen = new SequencedObserveScreen([
       createObservation(hierarchy),
-      createObservation(hierarchy),
+      createEmptyTrayObservation(),
     ]);
 
     setSystemTrayDependencies({
@@ -3550,6 +3596,350 @@ describe("systemTray group expansion", () => {
 
     const reResult = await reMatchPromise;
     expect(reResult.match).toBeNull();
+  });
+});
+
+describe("systemTray dismiss outcome verification (#10010)", () => {
+  const SWIPE_SETTLE_MS = 400;
+  const TITLE = "Zillow Real-Time Tour request";
+
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  // Row hierarchy where each row advertises the given accessibility actions.
+  const traysWithActions = (titles: string[], actions: string[]): ViewHierarchyResult => {
+    const tray = createTrayWithExpandedNotifications(titles);
+    const rows = (tray.hierarchy as { node: { node: Array<{ $: Record<string, unknown> }> } }).node
+      .node;
+    for (const row of rows) {
+      row.$.actions = actions;
+    }
+    return tray;
+  };
+
+  const runDismiss = async (
+    observations: ObserveResult[],
+    timer: FakeTimer = new FakeTimer(),
+  ): Promise<{
+    payload: { success: boolean; message: string; observation?: unknown };
+    isError: boolean | undefined;
+    observe: SequencedObserveScreen;
+    adb: SequencedFakeAdbExecutor;
+    timer: FakeTimer;
+  }> => {
+    timer.enableAutoAdvance();
+    const adb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const observe = new SequencedObserveScreen(observations);
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observe,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "dismiss",
+      notification: { title: TITLE },
+      awaitTimeout: 1000,
+      platform: "android",
+    });
+    return {
+      payload: JSON.parse((response.content[0] as { text: string }).text),
+      isError: (response as { isError?: boolean }).isError,
+      observe,
+      adb,
+      timer,
+    };
+  };
+
+  test("reports success without extra device calls when the row is gone after the swipe", async () => {
+    const result = await runDismiss([
+      createObservation(createTrayWithExpandedNotifications([TITLE])),
+      createEmptyTrayObservation(),
+    ]);
+
+    expect(result.payload.success).toBe(true);
+    expect(result.payload.message).toBe("Dismissed notification");
+    expect(result.isError).toBeUndefined();
+    expect(result.observe.getExecuteCallCount()).toBe(2);
+    expect(result.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("fails when an ongoing row snaps back and still matches after the swipe", async () => {
+    const stuck = createObservation(createTrayWithExpandedNotifications([TITLE]));
+    const result = await runDismiss([stuck, stuck]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.success).toBe(false);
+    expect(result.payload.message).toBe(
+      "Could not dismiss notification: it is still present in the system tray after the swipe.",
+    );
+    expect(result.payload.observation).toBeDefined();
+    expect(result.adb.getExecutedCommands().filter((c) => c.includes("input swipe"))).toHaveLength(
+      1,
+    );
+    // One settle plus exactly one extra observe after the first post-swipe read.
+    expect(result.timer.getSleepHistory()).toEqual([SWIPE_SETTLE_MS]);
+    expect(result.observe.getExecuteCallCount()).toBe(3);
+  });
+
+  test("names ongoing/non-clearable when the stuck row exposes no dismiss action", async () => {
+    const stuck = createObservation(traysWithActions([TITLE], ["click", "long_click"]));
+    const result = await runDismiss([stuck, stuck]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.success).toBe(false);
+    expect(result.payload.message).toContain("ongoing/non-clearable");
+    expect(result.payload.message).toContain("still in the system tray");
+  });
+
+  test("does not call a stuck row non-clearable when it still advertises a dismiss action", async () => {
+    const stuck = createObservation(traysWithActions([TITLE], ["click", "dismiss"]));
+    const result = await runDismiss([stuck, stuck]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.message).not.toContain("non-clearable");
+    expect(result.payload.message).toContain("still present");
+  });
+
+  test("accepts a row that is still sliding out of the first post-swipe read", async () => {
+    const sliding = createObservation(createTrayWithExpandedNotifications([TITLE]));
+    const result = await runDismiss([sliding, sliding, createEmptyTrayObservation()]);
+
+    expect(result.isError).toBeUndefined();
+    expect(result.payload.success).toBe(true);
+    expect(result.payload.message).toBe("Dismissed notification");
+    expect(result.timer.getSleepHistory()).toEqual([SWIPE_SETTLE_MS]);
+    expect(result.observe.getExecuteCallCount()).toBe(3);
+  });
+
+  test("a surviving row with the same title does not hide that the swiped one left", async () => {
+    const result = await runDismiss([
+      createObservation(createTrayWithExpandedNotifications([TITLE, TITLE])),
+      createObservation(createTrayWithExpandedNotifications([TITLE])),
+    ]);
+
+    expect(result.payload.success).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(result.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("fails when two same-titled rows both remain after the swipe", async () => {
+    const both = createObservation(createTrayWithExpandedNotifications([TITLE, TITLE]));
+    const result = await runDismiss([both, both]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.success).toBe(false);
+  });
+
+  test("keeps the existing success when the post-swipe read is not the shade", async () => {
+    const result = await runDismiss([
+      createObservation(createTrayWithExpandedNotifications([TITLE])),
+      createObservation(createClosedHierarchy()),
+    ]);
+
+    expect(result.payload.success).toBe(true);
+    expect(result.payload.message).toBe("Dismissed notification");
+    expect(result.isError).toBeUndefined();
+    expect(result.timer.getSleepHistory()).toEqual([]);
+    expect(result.observe.getExecuteCallCount()).toBe(2);
+  });
+});
+
+// Dismiss verification against the real captured expanded group (Delta and
+// Gamma child rows under a Shell header). The post-swipe shades below are that
+// capture with rows removed or replaced, which is the shape a group has once a
+// child leaves: the summary and the sibling rows are still in the shade.
+describe("systemTray dismiss verification on captured groups (#10010)", () => {
+  type RawNode = { [key: string]: unknown; node?: RawNode | RawNode[] };
+  const SWIPE_SETTLE_MS = 400;
+  const HEADERLESS_ROW_ID = "android:id/notification_headerless_view_row";
+
+  afterEach(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
+
+  const childrenOf = (node: RawNode): RawNode[] =>
+    node.node === undefined ? [] : Array.isArray(node.node) ? node.node : [node.node];
+
+  const subtreeTexts = (node: RawNode): string[] => [
+    ...(typeof node.text === "string" ? [node.text] : []),
+    ...childrenOf(node).flatMap(subtreeTexts),
+  ];
+
+  const mapRawTree = (node: RawNode, edit: (child: RawNode) => RawNode | null): RawNode => {
+    const children = childrenOf(node)
+      .map(edit)
+      .filter((child): child is RawNode => child !== null)
+      .map((child) => mapRawTree(child, edit));
+    return { ...node, node: children };
+  };
+
+  const editedExpandedGroup = (edit: (child: RawNode) => RawNode | null): ViewHierarchyResult => {
+    const expanded = structuredClone(headerlessTwoNotificationGroups.expanded);
+    const root = (expanded.hierarchy as unknown as { node: RawNode }).node;
+    return {
+      ...expanded,
+      hierarchy: { node: mapRawTree(root, edit) },
+    } as unknown as ViewHierarchyResult;
+  };
+
+  const withoutChildRow = (title: string): ViewHierarchyResult =>
+    editedExpandedGroup((child) =>
+      child["resource-id"] === HEADERLESS_ROW_ID && subtreeTexts(child).includes(title)
+        ? null
+        : child,
+    );
+
+  const renameTexts = (node: RawNode, from: string, to: string): RawNode => ({
+    ...node,
+    ...(typeof node.text === "string" ? { text: node.text.replace(from, to) } : {}),
+    node: childrenOf(node).map((child) => renameTexts(child, from, to)),
+  });
+
+  const withTitleReplaced = (from: string, to: string): ViewHierarchyResult =>
+    editedExpandedGroup((child) =>
+      child["resource-id"] === HEADERLESS_ROW_ID && subtreeTexts(child).includes(from)
+        ? renameTexts(child, from, to)
+        : child,
+    );
+
+  // The captured shade with every row removed and a status-bar style node left
+  // behind that still names the dismissed app text outside any row.
+  const shadeWithOnlyStatusBarIcon = (iconText: string): ViewHierarchyResult => {
+    const expanded = structuredClone(headerlessTwoNotificationGroups.expanded);
+    const root = (expanded.hierarchy as unknown as { node: RawNode }).node;
+    const icon: RawNode = {
+      "resource-id": "com.android.systemui:id/status_bar_icon",
+      bounds: [0, 0, 80, 80],
+      package: "com.android.systemui",
+      class: "android.widget.ImageView",
+      "content-desc": iconText,
+    };
+    return {
+      ...expanded,
+      hierarchy: { node: { ...root, node: [icon] } },
+    } as unknown as ViewHierarchyResult;
+  };
+
+  const runGroupDismiss = async (
+    notification: { title?: string; appId?: string },
+    observations: ObserveResult[],
+  ) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new SequencedFakeAdbExecutor([1000, 1000]);
+    const observe = new SequencedObserveScreen(observations);
+    const installedAppsSpy = mockInstalledApps(["com.android.shell"]);
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      appLabelResolver: async () => "Shell",
+      observeScreenFactory: () => observe,
+    });
+    ToolRegistry.clearTools();
+    registerInteractionTools();
+    try {
+      const response = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+        action: "dismiss",
+        notification,
+        awaitTimeout: 1000,
+        platform: "android",
+      });
+      return {
+        payload: JSON.parse((response.content[0] as { text: string }).text) as {
+          success: boolean;
+          message: string;
+        },
+        isError: (response as { isError?: boolean }).isError,
+        observe,
+        adb,
+        timer,
+      };
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  };
+
+  const gammaCriteria = { title: "Gamma", appId: "com.android.shell" };
+  const expandedObservation = () => createObservation(headerlessTwoNotificationGroups.expanded);
+
+  test("succeeds when the group still holds the sibling row after the swipe", async () => {
+    const result = await runGroupDismiss(gammaCriteria, [
+      expandedObservation(),
+      createObservation(withoutChildRow("Gamma")),
+    ]);
+
+    expect(result.payload.message).toBe("Dismissed notification");
+    expect(result.payload.success).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(result.adb.getExecutedCommands().filter((c) => c.includes("input swipe"))).toEqual([
+      "shell input swipe 938 1054 141 1054 300",
+    ]);
+    // Row already gone on the first post-swipe read: no settle, no extra observe.
+    expect(result.timer.getSleepHistory()).toEqual([]);
+    expect(result.observe.getExecuteCallCount()).toBe(2);
+  });
+
+  test("fails when the swiped child is still in the group after the swipe", async () => {
+    const result = await runGroupDismiss(gammaCriteria, [
+      expandedObservation(),
+      expandedObservation(),
+    ]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.success).toBe(false);
+    expect(result.payload.message).toContain("still present");
+    expect(result.timer.getSleepHistory()).toEqual([SWIPE_SETTLE_MS]);
+    expect(result.observe.getExecuteCallCount()).toBe(3);
+  });
+
+  test("a new matching notification arriving during the settle does not hide the dismissal", async () => {
+    // appId-only criteria match both group children (Delta is the topmost).
+    // After the swipe Delta is gone and a new Shell notification, Epsilon,
+    // joined: still two matches, but the swiped row itself left.
+    const result = await runGroupDismiss({ appId: "com.android.shell" }, [
+      expandedObservation(),
+      createObservation(withTitleReplaced("Delta", "Epsilon")),
+    ]);
+
+    expect(result.adb.getExecutedCommands().filter((c) => c.includes("input swipe"))).toEqual([
+      "shell input swipe 938 835 141 835 300",
+    ]);
+    expect(result.payload.success).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(result.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a matching sibling leaving does not stand in for a swiped row that snapped back", async () => {
+    // Same appId-only criteria: Delta is swiped but stays; Gamma, another match,
+    // is the one that disappeared. The swiped row did not leave. (A pin: the old
+    // count-based check also reports this one, because a one-child group stops
+    // listing child rows.)
+    const result = await runGroupDismiss({ appId: "com.android.shell" }, [
+      expandedObservation(),
+      createObservation(withoutChildRow("Gamma")),
+      createObservation(withoutChildRow("Gamma")),
+    ]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.success).toBe(false);
+  });
+
+  test("a status-bar node still naming the text does not inflate the count once no rows are left", async () => {
+    // Title-only criteria take the root-text fallback once no row candidates remain.
+    const result = await runGroupDismiss({ title: "Gamma" }, [
+      expandedObservation(),
+      createObservation(shadeWithOnlyStatusBarIcon("Gamma")),
+    ]);
+
+    expect(result.payload.success).toBe(true);
+    expect(result.isError).toBeUndefined();
+    expect(result.timer.getSleepHistory()).toEqual([]);
+    expect(result.observe.getExecuteCallCount()).toBe(2);
   });
 });
 

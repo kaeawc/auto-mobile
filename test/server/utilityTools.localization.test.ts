@@ -58,12 +58,13 @@ describe("changeLocalization handler", () => {
   });
   afterEach(() => restore());
 
-  async function call(platform: "android" | "ios", args: object) {
+  async function callRaw(platform: "android" | "ios", args: object) {
     const device: BootedDevice = { deviceId: "fake-device", name: "Fake", platform };
-    const response = await ToolRegistry.getTool("changeLocalization")!.deviceAwareHandler!(
-      device,
-      args,
-    );
+    return await ToolRegistry.getTool("changeLocalization")!.deviceAwareHandler!(device, args);
+  }
+
+  async function call(platform: "android" | "ios", args: object) {
+    const response = await callRaw(platform, args);
     return JSON.parse(response.content[0].text!);
   }
 
@@ -100,6 +101,21 @@ describe("changeLocalization handler", () => {
       ["calendar", "gregory"],
       ["broadcast"],
     ]);
+  });
+
+  test("surfaces a locale warning from the adapter on a successful change", async () => {
+    localeResult = {
+      method: "cmd locale set-app-locales com.example.app --user 0",
+      warning: "assumed user 0",
+    };
+    const result = await call("android", { locale: "en-US", appId: "com.example.app" });
+    expect(result.success).toBe(true);
+    expect(result.warning).toBe("assumed user 0");
+  });
+
+  test("adds no warning field when the adapter reports none", async () => {
+    const result = await call("android", { locale: "en-US", appId: "com.example.app" });
+    expect("warning" in result).toBe(false);
   });
 
   test.each([
@@ -189,6 +205,37 @@ describe("changeLocalization handler", () => {
       error: "Failed to set time zone",
     });
     expect(calls.map(([name]) => name)).toEqual(["locale", "timeZone", "broadcast"]);
+  });
+
+  test("a failed change sets isError and keeps the payload unchanged (issue #10013)", async () => {
+    success = false;
+    error = "Android API 30 does not support app-scoped locale changes";
+    const response = await callRaw("android", { locale: "ja-JP", appId: "com.example.app" });
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text!)).toEqual({
+      success: false,
+      changes: {},
+      intentBroadcast: false,
+      error: "Android API 30 does not support app-scoped locale changes",
+    });
+  });
+
+  test("a partial failure sets isError while keeping the applied changes", async () => {
+    success = false;
+    localeResult = { success: true, languageTag: "en-GB" };
+    const response = await callRaw("android", {
+      locale: "en-US",
+      appId: "com.example.app",
+      timeZone: "UTC",
+    });
+    expect(response.isError).toBe(true);
+    expect(JSON.parse(response.content[0].text!).changes).toEqual({ locale: "en-GB" });
+  });
+
+  test("a successful change does not set isError", async () => {
+    const response = await callRaw("android", { timeZone: "UTC" });
+    expect(response.isError).toBeUndefined();
+    expect(JSON.parse(response.content[0].text!).success).toBe(true);
   });
 
   test("empty input neither mutates settings nor broadcasts", async () => {

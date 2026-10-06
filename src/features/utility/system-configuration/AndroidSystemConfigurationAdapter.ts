@@ -1,6 +1,10 @@
 import { ensureAndroidRoot } from "../../../utils/android-cmdline-tools/ensureAndroidRoot";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  AndroidUserTargetResolver,
+  AndroidUserTargetUnavailableError,
+} from "../../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { shellQuote } from "../../../utils/shellQuote";
@@ -194,7 +198,11 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       );
     }
 
-    const targetUserId = await this.resolveTargetUserId(appId);
+    const target = await this.resolveTargetUserId(appId);
+    if ("error" in target) {
+      return { success: false, languageTag, error: target.error };
+    }
+    const targetUserId = target.userId;
     const previousLanguageTag = await this.getAppLocaleTag(appId, targetUserId);
 
     try {
@@ -234,31 +242,92 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       method: `cmd locale set-app-locales ${appId} --user ${targetUserId}`,
       localeScope: "app",
       broadcasted,
+      ...(target.warning ? { warning: target.warning } : {}),
     };
   }
 
-  private async resolveTargetUserId(appId: string): Promise<number> {
+  /**
+   * Resolve the user for an app-scoped locale change with the shared resolver
+   * (foreground instance, then the running user where the package is
+   * installed). Ambiguous device state is a typed failure rather than a silent
+   * fallback to a user the app may not be installed in. The one exception is a
+   * device whose user list could not be read and shows no sign of a second
+   * user: see {@link singleUserFallback}.
+   */
+  private async resolveTargetUserId(
+    appId: string,
+  ): Promise<{ userId: number; warning?: string } | { error: string }> {
     try {
-      const foregroundApp = await this.adb.getForegroundApp();
-      if (foregroundApp?.packageName === appId) {
-        return foregroundApp.userId;
+      const target = await new AndroidUserTargetResolver(this.adb).resolve({
+        packageName: appId,
+        installedOnly: true,
+      });
+      return { userId: target.userId };
+    } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to resolve Android user for ${appId}: ${errorMessage(error)}`,
+        error,
+      );
+      const fallback = await this.singleUserFallback(appId, error);
+      if (fallback) {
+        return fallback;
       }
-    } catch (error) {
-      logger.debug(
-        `[SystemConfigurationManager] Failed to resolve foreground Android app user for ${appId}: ${error}`,
-      );
+      return {
+        error:
+          error instanceof AndroidUserTargetUnavailableError
+            ? error.message
+            : `Failed to resolve Android user for ${appId}: ${errorMessage(error)}`,
+      };
     }
+  }
 
+  /**
+   * Keep a single-user device working when its user list cannot be trusted.
+   * `listUsers` returns [] on an adb timeout or unparseable output, and marks
+   * user 0 not running when its `State:` line is missing or far from its
+   * `UserInfo` line; the resolver then finds no running primary and refuses.
+   * That refusal is right when another user exists, but on a device with only
+   * user 0 it turned a working call into a failure. Fall back to user 0, with a
+   * warning, only when the failure is that missing target (not an ambiguous
+   * one), no user other than 0 was listed, and the current user is not a
+   * secondary one. A known managed profile keeps the failure.
+   */
+  private async singleUserFallback(
+    appId: string,
+    error: unknown,
+  ): Promise<{ userId: 0; warning: string } | null> {
+    if (
+      !(error instanceof AndroidUserTargetUnavailableError) ||
+      error.details.kind !== "unavailable" ||
+      error.details.users.some((user) => user.userId !== 0) ||
+      (await this.currentUserIsSecondary())
+    ) {
+      return null;
+    }
+    return {
+      userId: 0,
+      warning: `Could not read the device's Android user list and found no sign of a second user, so ${appId}'s locale was set for user 0. If the device has a work profile or secondary user, verify the locale on the intended one.`,
+    };
+  }
+
+  private async currentUserIsSecondary(): Promise<boolean> {
     try {
-      const workProfile = (await this.adb.listUsers()).find(
-        (user) => user.userId > 0 && user.running,
+      const result = await this.adb.executeCommand(
+        "shell am get-current-user",
+        undefined,
+        undefined,
+        true,
       );
-      return workProfile?.userId ?? 0;
+      const currentUserId = Number.parseInt(result.stdout.trim(), 10);
+      return Number.isSafeInteger(currentUserId) && currentUserId > 0;
     } catch (error) {
-      logger.debug(
-        `[SystemConfigurationManager] Failed to list Android users for ${appId}: ${error}`,
+      // Unreadable current user is the same absence of multi-user evidence the caller already
+      // has; the fallback still carries a warning, so proceeding is safe.
+      logger.warn(
+        `[SystemConfigurationManager] Could not read the current Android user: ${errorMessage(error)}`,
+        error,
       );
-      return 0;
+      return false;
     }
   }
 

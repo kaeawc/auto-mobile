@@ -31,7 +31,11 @@ import {
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
-import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
+import {
+  createJSONToolResponse,
+  createStructuredToolResponse,
+  withIsErrorOnFailure,
+} from "../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { BootedDevice, Platform } from "../models";
@@ -609,6 +613,7 @@ interface LocalizationLocaleMetadata {
   localeScope?: "app" | "system";
   localeAppId?: string;
   localeMethod?: string;
+  warning?: string;
 }
 
 async function applyLocaleChange(
@@ -636,6 +641,7 @@ async function applyLocaleChange(
       localeScope,
       ...(args.appId && device.platform === "android" ? { localeAppId: args.appId } : {}),
       ...(result.method ? { localeMethod: result.method } : {}),
+      ...(result.warning ? { warning: result.warning } : {}),
     };
   } else {
     errors.push(result.error ?? "Failed to set locale");
@@ -725,14 +731,17 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
     }
   }
 
-  return createJSONToolResponse({
+  return withIsErrorOnFailure(
+    createJSONToolResponse({
+      success,
+      changes,
+      intentBroadcast,
+      ...localeMetadata,
+      ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
+      ...(success ? {} : { error: errors.join("; ") }),
+    }),
     success,
-    changes,
-    intentBroadcast,
-    ...localeMetadata,
-    ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
-    ...(success ? {} : { error: errors.join("; ") }),
-  });
+  );
 };
 
 const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArgs) => {

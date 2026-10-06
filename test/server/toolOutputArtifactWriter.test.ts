@@ -3,6 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  buildToolOutputArtifactFilename,
+  hasWriterIssuedFilenameShape,
+} from "../../src/server/toolOutputArtifactLedger";
+import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactDirectoryEntry,
   type ToolOutputArtifactFileSystem,
@@ -13,7 +17,13 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import { createHash } from "node:crypto";
+import { NodeIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
+
+// Names the writer itself would issue: its naming function with a randomUUID-shaped id.
+const uuidOf = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const issuedName = (epochMs: number, tool: string, n: number) =>
+  buildToolOutputArtifactFilename(epochMs, tool, uuidOf(n));
 
 class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   ensureCalls: string[] = [];
@@ -23,6 +33,8 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   listCalls: string[] = [];
   deleteCalls: string[] = [];
   writeError: Error | undefined;
+  /** Errors thrown by the next writes, one each, before `writeError` applies. */
+  writeErrorQueue: Error[] = [];
 
   ensureDirectory(dirPath: string): void {
     this.ensureCalls.push(dirPath);
@@ -33,6 +45,10 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   }
 
   writeFileExclusive(filePath: string, content: string, mode: number): void {
+    const queued = this.writeErrorQueue.shift();
+    if (queued) {
+      throw queued;
+    }
     if (this.writeError) {
       throw this.writeError;
     }
@@ -213,10 +229,15 @@ describe("JsonToolOutputArtifactWriter", () => {
     const fileSystem = new FakeArtifactFileSystem();
     const ledger = new ToolOutputArtifactLedger();
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
-    const stalePath = path.join(outputDirectory, "1000000000000-observe-old.json");
+    const stalePath = path.join(outputDirectory, issuedName(1000000000000, "observe", 1));
     ledger.record(stalePath);
     fileSystem.entries = [
-      { path: stalePath, name: "1000000000000-observe-old.json", isFile: true, mtimeMs: 1_000 },
+      {
+        path: stalePath,
+        name: issuedName(1000000000000, "observe", 1),
+        isFile: true,
+        mtimeMs: 1_000,
+      },
     ];
     const timer = new FakeTimer();
     timer.setCurrentTime(10_000);
@@ -229,13 +250,13 @@ describe("JsonToolOutputArtifactWriter", () => {
       retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
     });
 
-    expect(ledger.resolve("1000000000000-observe-old.json")?.path).toBe(stalePath);
+    expect(ledger.resolve(issuedName(1000000000000, "observe", 1))?.path).toBe(stalePath);
 
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: { updatedAt: 1 } });
 
     expect(fileSystem.deleteCalls).toEqual([stalePath]);
     // A pruned file is no longer resolvable through the ledger.
-    expect(ledger.resolve("1000000000000-observe-old.json")).toBeUndefined();
+    expect(ledger.resolve(issuedName(1000000000000, "observe", 1))).toBeUndefined();
   });
 
   test("prunes expired files again after the timer interval", () => {
@@ -243,7 +264,7 @@ describe("JsonToolOutputArtifactWriter", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(10_000);
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
-    const stalePath = path.join(outputDirectory, "1000000000000-observe-old.json");
+    const stalePath = path.join(outputDirectory, issuedName(1000000000000, "observe", 1));
     const writer = new JsonToolOutputArtifactWriter({
       outputDirectory,
       fileSystem,
@@ -253,7 +274,12 @@ describe("JsonToolOutputArtifactWriter", () => {
     });
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
     fileSystem.entries = [
-      { path: stalePath, name: "1000000000000-observe-old.json", isFile: true, mtimeMs: 1_000 },
+      {
+        path: stalePath,
+        name: issuedName(1000000000000, "observe", 1),
+        isFile: true,
+        mtimeMs: 1_000,
+      },
     ];
     timer.advanceTime(60_000);
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
@@ -265,7 +291,7 @@ describe("JsonToolOutputArtifactWriter", () => {
     const fileSystem = new FakeArtifactFileSystem();
     const stalePath = "/tmp/artifacts/1000000000004-observe-stale.json";
     fileSystem.entries = [
-      { path: stalePath, name: "1000000000004-observe-stale.json", isFile: true, mtimeMs: 0 },
+      { path: stalePath, name: issuedName(1000000000004, "observe", 2), isFile: true, mtimeMs: 0 },
     ];
     fileSystem.deleteFile = () => {
       throw Object.assign(new Error("gone"), { code: "ENOENT" });
@@ -296,14 +322,14 @@ describe("JsonToolOutputArtifactWriter", () => {
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
     fileSystem.entries = [
       {
-        path: path.join(outputDirectory, "1000000000000-observe-old.json"),
-        name: "1000000000000-observe-old.json",
+        path: path.join(outputDirectory, issuedName(1000000000000, "observe", 1)),
+        name: issuedName(1000000000000, "observe", 1),
         isFile: true,
         mtimeMs: 1_000,
       },
       {
-        path: path.join(outputDirectory, "1000000000001-observe-recent.json"),
-        name: "1000000000001-observe-recent.json",
+        path: path.join(outputDirectory, issuedName(1000000000001, "observe", 3)),
+        name: issuedName(1000000000001, "observe", 3),
         isFile: true,
         mtimeMs: 9_500,
       },
@@ -338,7 +364,7 @@ describe("JsonToolOutputArtifactWriter", () => {
 
     expect(fileSystem.listCalls).toEqual([outputDirectory]);
     expect(fileSystem.deleteCalls).toEqual([
-      path.join(outputDirectory, "1000000000000-observe-old.json"),
+      path.join(outputDirectory, issuedName(1000000000000, "observe", 1)),
     ]);
     expect(fileSystem.writes).toHaveLength(1);
   });
@@ -379,13 +405,13 @@ describe("JsonToolOutputArtifactWriter", () => {
         expiredEntry("2024-01-15-report.json"),
         expiredEntry("1-note.json"),
         expiredEntry("1700000000000-fixture.json"),
-        expiredEntry("1700000000000-observe-abc.json"),
+        expiredEntry(issuedName(1700000000000, "observe", 4)),
       ];
 
       write(writerFor(fileSystem));
 
       expect(fileSystem.deleteCalls).toEqual([
-        path.join(outputDirectory, "1700000000000-observe-abc.json"),
+        path.join(outputDirectory, issuedName(1700000000000, "observe", 4)),
       ]);
     });
 
@@ -398,8 +424,8 @@ describe("JsonToolOutputArtifactWriter", () => {
         fresh("a.json", 9_100),
         fresh("b.json", 9_100),
         fresh("c.json", 9_100),
-        fresh("1700000000001-observe-one.json", 9_200),
-        fresh("1700000000002-observe-two.json", 9_300),
+        fresh(issuedName(1700000000001, "observe", 5), 9_200),
+        fresh(issuedName(1700000000002, "observe", 6), 9_300),
       ];
 
       // Two issued files with maxFiles 1: exactly one overflows. The three
@@ -407,7 +433,7 @@ describe("JsonToolOutputArtifactWriter", () => {
       write(writerFor(fileSystem, { maxFiles: 1 }));
 
       expect(fileSystem.deleteCalls).toEqual([
-        path.join(outputDirectory, "1700000000001-observe-one.json"),
+        path.join(outputDirectory, issuedName(1700000000001, "observe", 5)),
       ]);
     });
 
@@ -435,7 +461,7 @@ describe("JsonToolOutputArtifactWriter", () => {
           return filePath;
         };
         const foreign = ["package.json", "old-observe.json", "2024-01-15-report.json"].map(seed);
-        const issued = seed("1700000000000-observe-abc.json");
+        const issued = seed(issuedName(1700000000000, "observe", 4));
         const timer = new FakeTimer();
         timer.setCurrentTime(Date.now());
         const writer = new JsonToolOutputArtifactWriter({
@@ -463,14 +489,14 @@ describe("JsonToolOutputArtifactWriter", () => {
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
     fileSystem.entries = [
       {
-        path: path.join(outputDirectory, "1000000000002-observe-older.json"),
-        name: "1000000000002-observe-older.json",
+        path: path.join(outputDirectory, issuedName(1000000000002, "observe", 7)),
+        name: issuedName(1000000000002, "observe", 7),
         isFile: true,
         mtimeMs: 1_000,
       },
       {
-        path: path.join(outputDirectory, "1000000000003-observe-fresh.json"),
-        name: "1000000000003-observe-fresh.json",
+        path: path.join(outputDirectory, issuedName(1000000000003, "observe", 8)),
+        name: issuedName(1000000000003, "observe", 8),
         isFile: true,
         mtimeMs: 9_900,
       },
@@ -492,7 +518,7 @@ describe("JsonToolOutputArtifactWriter", () => {
     });
 
     expect(fileSystem.deleteCalls).toEqual([
-      path.join(outputDirectory, "1000000000002-observe-older.json"),
+      path.join(outputDirectory, issuedName(1000000000002, "observe", 7)),
     ]);
   });
 
@@ -544,5 +570,161 @@ describe("JsonToolOutputArtifactWriter", () => {
         data: { updatedAt: 1 },
       }),
     ).toThrow("Failed to write ObserveResult artifact for observe: disk full");
+  });
+
+  describe("a removed output directory is recreated on the next write", () => {
+    const enoent = () => Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    const writerFor = (fileSystem: FakeArtifactFileSystem) =>
+      new JsonToolOutputArtifactWriter({
+        outputDirectory: "/tmp/artifacts",
+        fileSystem,
+        idGenerator: new FakeIdGenerator(["id"]),
+        timer: new FakeTimer(),
+      });
+    const write = (writer: JsonToolOutputArtifactWriter) =>
+      writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: { a: 1 } });
+
+    test("ENOENT on write re-validates the directory and retries once", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      const writer = writerFor(fileSystem);
+      write(writer);
+      expect(fileSystem.ensureCalls).toHaveLength(1);
+
+      fileSystem.writeErrorQueue = [enoent()];
+      const result = write(writer);
+
+      expect(fileSystem.ensureCalls).toHaveLength(2);
+      expect(fileSystem.assertWritableCalls).toHaveLength(2);
+      expect(fileSystem.writes).toHaveLength(2);
+      expect(result.artifact.path).toBe(fileSystem.writes[1].path);
+    });
+
+    test("a second ENOENT is reported, not retried again", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      const writer = writerFor(fileSystem);
+      fileSystem.writeErrorQueue = [enoent(), enoent()];
+
+      expect(() => write(writer)).toThrow("Failed to write ObserveResult artifact for observe");
+      expect(fileSystem.writes).toHaveLength(0);
+    });
+
+    test("a non-ENOENT failure is not retried and keeps the validation cache invalidated", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      const writer = writerFor(fileSystem);
+      write(writer);
+      fileSystem.writeErrorQueue = [new Error("disk full")];
+
+      expect(() => write(writer)).toThrow("disk full");
+      expect(fileSystem.writes).toHaveLength(1);
+      write(writer);
+      expect(fileSystem.ensureCalls).toHaveLength(2);
+    });
+
+    test("the validation cache still skips re-validation on ordinary writes", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      const writer = writerFor(fileSystem);
+      write(writer);
+      write(writer);
+      expect(fileSystem.ensureCalls).toHaveLength(1);
+    });
+
+    test("on a real directory removed between writes, the next write succeeds", () => {
+      const parent = fs.mkdtempSync(path.join(os.tmpdir(), "am-artifact-removed-"));
+      const dir = path.join(parent, "outputs");
+      try {
+        const writer = new JsonToolOutputArtifactWriter({
+          outputDirectory: dir,
+          idGenerator: new NodeIdGenerator(),
+          timer: new FakeTimer(),
+          ledger: new ToolOutputArtifactLedger(),
+        });
+        const first = write(writer);
+        fs.rmSync(dir, { recursive: true, force: true });
+
+        const second = write(writer);
+
+        expect(fs.existsSync(first.artifact.path)).toBe(false);
+        expect(fs.existsSync(second.artifact.path)).toBe(true);
+      } finally {
+        fs.rmSync(parent, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("issued filename shape", () => {
+    const AT = 1_728_144_000_000;
+
+    test("matches names produced by the writer's own naming function", () => {
+      const ids = new NodeIdGenerator();
+      const tools = ["observe", "getNetworkGraph", "tapOn", "my tool", "tool.v2", "a_b"];
+      for (const tool of tools) {
+        const name = buildToolOutputArtifactFilename(AT, tool, ids.next());
+        expect(hasWriterIssuedFilenameShape(name), name).toBe(true);
+      }
+    });
+
+    test("matches the file a real writer instance writes with the default id generator", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      const timer = new FakeTimer();
+      timer.setCurrentTime(AT);
+      const writer = new JsonToolOutputArtifactWriter({
+        outputDirectory: "/tmp/artifacts",
+        fileSystem,
+        timer,
+        ledger: new ToolOutputArtifactLedger(),
+      });
+      writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
+
+      expect(hasWriterIssuedFilenameShape(path.basename(fileSystem.writes[0].path))).toBe(true);
+    });
+
+    test("does not match near-miss foreign names a user may keep in a shared directory", () => {
+      const uuid = "0b7d6f0e-5a52-4d0c-9c1e-3f1d2a4b5c6d";
+      const foreign = [
+        `${AT}-export-1.json`,
+        `${AT}-x-y.json`,
+        `${AT}-report-final.json`,
+        `${AT}-observe-abc123.json`,
+        `${AT}-observe-${uuid}.txt`,
+        `${AT}-observe-${uuid}.json.bak`,
+        `${AT}-observe-${uuid.toUpperCase()}.json`,
+        `${AT}-observe-${uuid}-extra.json`,
+        `${AT}-observe-${uuid.slice(0, -1)}.json`,
+        `${AT}0-observe-${uuid}.json`,
+        `${AT / 10}-observe-${uuid}.json`,
+        `${AT}-${uuid}.json`,
+        `${AT}--${uuid}.json`,
+      ];
+      for (const name of foreign) {
+        expect(hasWriterIssuedFilenameShape(name), name).toBe(false);
+      }
+    });
+
+    test("the prune leaves near-miss foreign files alone while deleting a real issued one", () => {
+      const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+      const fileSystem = new FakeArtifactFileSystem();
+      const entry = (name: string): ToolOutputArtifactDirectoryEntry => ({
+        path: path.join(outputDirectory, name),
+        name,
+        isFile: true,
+        mtimeMs: 1_000,
+      });
+      const issued = buildToolOutputArtifactFilename(AT, "observe", new NodeIdGenerator().next());
+      fileSystem.entries = [entry(`${AT}-export-1.json`), entry(`${AT}-x-y.json`), entry(issued)];
+      const timer = new FakeTimer();
+      timer.setCurrentTime(10_000);
+      const writer = new JsonToolOutputArtifactWriter({
+        outputDirectory,
+        fileSystem,
+        idGenerator: new FakeIdGenerator(["id"]),
+        timer,
+        ledger: new ToolOutputArtifactLedger(),
+        retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
+      });
+
+      writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
+
+      expect(fileSystem.deleteCalls).toEqual([path.join(outputDirectory, issued)]);
+    });
   });
 });

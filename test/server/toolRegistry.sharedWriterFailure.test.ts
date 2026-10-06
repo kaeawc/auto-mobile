@@ -4,7 +4,10 @@ import {
   JsonToolOutputArtifactWriter,
   type ToolOutputArtifactFileSystem,
 } from "../../src/server/toolOutputArtifactWriter";
-import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
+import {
+  buildToolOutputArtifactFilename,
+  ToolOutputArtifactLedger,
+} from "../../src/server/toolOutputArtifactLedger";
 import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -136,7 +139,11 @@ describe("shared artifact writer after a failed write (#10079 + #10080)", () => 
 
   test("the prune after a failed write deletes only issued artifacts, never a shared sibling", async () => {
     const old = NOW - 30 * 24 * 60 * 60 * 1000;
-    const issued = `${NOW - 1}-tapOn-prev.json`;
+    const issued = buildToolOutputArtifactFilename(
+      NOW - 1,
+      "tapOn",
+      "00000000-0000-4000-8000-000000000001",
+    );
     listed = [
       { path: `${DIR}/package.json`, name: "package.json", isFile: true, mtimeMs: old },
       { path: `${DIR}/${issued}`, name: issued, isFile: true, mtimeMs: old },

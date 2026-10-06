@@ -4,6 +4,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -128,5 +129,62 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
 
     expect(baselines.get(SESSION)).toBe(delivered);
     expect(snapshots.get(SESSION)).toBe(deliveredSnapshot);
+  });
+
+  describe("client cancellation vs daemon-side abort of the combined request signal", () => {
+    test("a client cancel does not advance the baseline or snapshot", async () => {
+      const daemon = new AbortController();
+      const client = new AbortController();
+      const requestSignal = combineRequestAbortSignals(daemon.signal, client.signal);
+      client.abort();
+      await call(requestSignal);
+
+      expect(baselines.size).toBe(0);
+      expect(snapshots.size).toBe(0);
+    });
+
+    test("a daemon-side abort of a returned success advances the baseline and snapshot", async () => {
+      const daemon = new AbortController();
+      const client = new AbortController();
+      const requestSignal = combineRequestAbortSignals(daemon.signal, client.signal);
+      daemon.abort();
+      await call(requestSignal);
+
+      expect(baselines.size).toBe(1);
+      expect(snapshots.size).toBe(1);
+
+      const next = await call(new AbortController().signal);
+      expect(next.observationDiff).toMatchObject({ mode: "diff" });
+    });
+
+    test("a daemon-side abort with no client signal still delivers a success", async () => {
+      const daemon = new AbortController();
+      const requestSignal = combineRequestAbortSignals(daemon.signal, undefined);
+      daemon.abort();
+      await call(requestSignal);
+
+      expect(baselines.size).toBe(1);
+    });
+
+    test("a failure under a daemon-side abort stays undelivered", async () => {
+      const daemon = new AbortController();
+      const requestSignal = combineRequestAbortSignals(daemon.signal, new AbortController().signal);
+      daemon.abort();
+      const handler = new DefaultAfterToolCallHandler();
+      await handler.handle({
+        name: "tapOn",
+        args: {},
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse({ success: false, observation: screen() }),
+        sessionUuid: SESSION,
+        shouldResolveDevice: false,
+        signal: requestSignal,
+        timer: new FakeTimer(),
+        toolStartMs: 0,
+      });
+
+      expect(baselines.size).toBe(0);
+    });
   });
 });

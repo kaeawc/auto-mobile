@@ -36,18 +36,40 @@ export interface IssuedArtifact {
 }
 
 /**
- * The filename shape the writer produces: `<epoch-ms>-<tool>-<id>.json`.
+ * Replace every character the writer does not allow in a filename segment.
+ * The writer's tool segment and id segment both go through this.
+ */
+export function safeFilenameSegment(value: string): string {
+  const safe = value.replace(/[^A-Za-z0-9._-]/g, "_");
+  return safe.length > 0 ? safe : "artifact";
+}
+
+/**
+ * The filename the writer gives an artifact: `<epoch-ms>-<tool>-<id>.json`.
+ * The single source of the shape {@link hasWriterIssuedFilenameShape} matches.
+ */
+export function buildToolOutputArtifactFilename(epochMs: number, tool: string, id: string): string {
+  return `${Math.trunc(epochMs)}-${safeFilenameSegment(tool)}-${safeFilenameSegment(id)}.json`;
+}
+
+/**
+ * The filename shape the writer produces for its own files (the daemon's, a
+ * previous daemon's and the CLI's, all of which use the default `IdGenerator`):
+ * `<epoch-ms>-<tool>-<uuid>.json`.
  *
  * The leading epoch-ms is `Math.trunc(timer.now())`, which is 13 digits for any
- * real wall-clock time between 2001 and 2286, and the tool segment never
- * contains `-` for the camelCase tool names the server registers. This is
- * deliberately narrower than the read-side `SAFE_ARTIFACT_ID`: that check only
- * has to reject path traversal, while the retention prune uses this to decide
- * which files in a possibly shared `--tool-outputs-dir` are safe to DELETE, so a
- * `package.json`, `2024-01-15-report.json` or `1-note.json` must not match
- * (issue #10078).
+ * real wall-clock time between 2001 and 2286. The tool segment never contains
+ * `-` for the camelCase tool names the server registers (it may contain `.`/`_`
+ * after sanitizing). The id is `randomUUID()`, so it is pinned to the lowercase
+ * 8-4-4-4-12 hex shape: a user file such as `1728144000000-export-1.json` in a
+ * shared `--tool-outputs-dir` must survive the prune. This is deliberately
+ * narrower than the read-side `SAFE_ARTIFACT_ID`: that check only has to reject
+ * path traversal, while the retention prune uses this to decide which files in a
+ * possibly shared directory are safe to DELETE, so a `package.json`,
+ * `2024-01-15-report.json` or `1-note.json` must not match (issue #10078).
  */
-const WRITER_ISSUED_FILENAME = /^\d{13}-[A-Za-z0-9_.]+-[A-Za-z0-9._-]+\.json$/;
+const WRITER_ISSUED_FILENAME =
+  /^\d{13}-[A-Za-z0-9_.]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/;
 
 /** True when `filename` has the shape the artifact writer gives the files it issues. */
 export function hasWriterIssuedFilenameShape(filename: string): boolean {

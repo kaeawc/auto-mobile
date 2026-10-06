@@ -94,7 +94,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-import { getAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, isClientCancelled } from "../utils/AbortContext";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -1408,9 +1408,12 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       internal: internalCall,
       artifactWriter,
       artifactMode,
-      // A cancelled or timed-out call's response is discarded by the transport, so it
-      // must not advance the diff baseline or metadata snapshot (#10081).
-      delivered: !signal?.aborted,
+      // A call the client cancelled or timed out has its response discarded by the
+      // transport, so it must not advance the diff baseline or metadata snapshot
+      // (#10081). A daemon-side abort (device loss, session release) does not
+      // discard a completed success, which is still returned to the client, so only
+      // a failure is treated as undelivered when the combined signal aborted.
+      delivered: !isClientCancelled(signal) && (toolSuccess || !signal?.aborted),
     });
 
     const telemetryArgs = { ...args };

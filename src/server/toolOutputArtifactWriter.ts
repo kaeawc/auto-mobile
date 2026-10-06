@@ -9,6 +9,7 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDir
 import { logger } from "../utils/logger";
 import { buildToolOutputResourceUri } from "./toolOutputResources";
 import {
+  buildToolOutputArtifactFilename,
   hasWriterIssuedFilenameShape,
   toolOutputArtifactLedger,
   type ToolOutputArtifactLedger,
@@ -118,9 +119,13 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       this.pruneOldArtifactsIfDue();
 
       const content = serializeArtifactContent(input);
-      const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
+      const filename = buildToolOutputArtifactFilename(
+        this.timer.now(),
+        input.tool,
+        this.idGenerator.next(),
+      );
       const artifactPath = path.join(this.outputDirectory, filename);
-      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+      this.writeArtifactFile(artifactPath, content);
       // Record provenance (path + content hash) so the resource serves only the
       // exact bytes we wrote: it re-hashes what it reads and rejects any later
       // replacement at that path — symlink, regular-file swap, or inode-reuse
@@ -144,6 +149,28 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       // Re-check directory state on the next write after any failed filesystem operation.
       this.directoryValidated = false;
       throw toActionableError(error, `Failed to write ${input.payload} artifact for ${input.tool}`);
+    }
+  }
+
+  /**
+   * The validation cache lives for the daemon's lifetime, so the output directory
+   * can be removed underneath it (a cleaned build/scratch dir). A write that fails
+   * with ENOENT re-validates (recreates) the directory and retries once; any other
+   * failure, or a second ENOENT, is reported as before.
+   */
+  private writeArtifactFile(artifactPath: string, content: string): void {
+    try {
+      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+    } catch (error) {
+      if (!isEnoent(error)) {
+        throw error;
+      }
+      logger.warn(`Tool output directory missing, recreating: ${this.outputDirectory}`);
+      this.directoryValidated = false;
+      this.fileSystem.ensureDirectory(this.outputDirectory);
+      this.fileSystem.assertWritableDirectory(this.outputDirectory);
+      this.directoryValidated = true;
+      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
     }
   }
 
@@ -241,9 +268,4 @@ function isEnoent(error: unknown): boolean {
  */
 function serializeArtifactContent(input: ObservationArtifactWriteInput): string {
   return input.serialized ?? JSON.stringify(input.data);
-}
-
-function safeFilenameSegment(value: string): string {
-  const safe = value.replace(/[^A-Za-z0-9._-]/g, "_");
-  return safe.length > 0 ? safe : "artifact";
 }

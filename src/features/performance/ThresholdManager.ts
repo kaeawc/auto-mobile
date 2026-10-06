@@ -124,28 +124,37 @@ export class ThresholdManager {
     touchLatencyThresholdMs: number;
   }> {
     const db = this.db;
-    const run = async (executor: Kysely<Database>) => {
-      // Get existing valid thresholds
+    // Reads only. A transaction is BEGIN IMMEDIATE (#10042) and takes the writer
+    // lock, so the common "thresholds already exist" path stays outside one.
+    const readExisting = async (executor: Kysely<Database>) => {
       const existingThresholds = await this.getValidThresholdsWith(executor, deviceId);
-
-      // If we have existing thresholds, calculate weighted average
-      if (existingThresholds.length > 0) {
-        const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
-        if (weighted) {
-          logger.info(
-            `[ThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for device ${deviceId}`,
-          );
-          return {
-            frameTimeThresholdMs: weighted.frame_time_threshold_ms,
-            p50ThresholdMs: weighted.p50_threshold_ms,
-            p90ThresholdMs: weighted.p90_threshold_ms,
-            p95ThresholdMs: weighted.p95_threshold_ms,
-            p99ThresholdMs: weighted.p99_threshold_ms,
-            jankCountThreshold: weighted.jank_count_threshold,
-            cpuUsageThresholdPercent: weighted.cpu_usage_threshold_percent,
-            touchLatencyThresholdMs: weighted.touch_latency_threshold_ms,
-          };
-        }
+      if (existingThresholds.length === 0) {
+        return null;
+      }
+      const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
+      if (!weighted) {
+        return null;
+      }
+      logger.info(
+        `[ThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for device ${deviceId}`,
+      );
+      return {
+        frameTimeThresholdMs: weighted.frame_time_threshold_ms,
+        p50ThresholdMs: weighted.p50_threshold_ms,
+        p90ThresholdMs: weighted.p90_threshold_ms,
+        p95ThresholdMs: weighted.p95_threshold_ms,
+        p99ThresholdMs: weighted.p99_threshold_ms,
+        jankCountThreshold: weighted.jank_count_threshold,
+        cpuUsageThresholdPercent: weighted.cpu_usage_threshold_percent,
+        touchLatencyThresholdMs: weighted.touch_latency_threshold_ms,
+      };
+    };
+    // Re-checks under the writer lock: a peer may have created thresholds since the
+    // unlocked read, and creating a second set would skew the weighted average.
+    const createIfMissing = async (executor: Kysely<Database>) => {
+      const existing = await readExisting(executor);
+      if (existing) {
+        return existing;
       }
 
       // No existing thresholds, create new ones based on device capabilities
@@ -159,9 +168,10 @@ export class ThresholdManager {
     };
 
     if (db.isTransaction) {
-      return run(db);
+      return createIfMissing(db);
     }
-    return db.transaction().execute(run);
+    const existing = await readExisting(db);
+    return existing ?? db.transaction().execute(createIfMissing);
   }
 
   /**

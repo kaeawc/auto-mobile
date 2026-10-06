@@ -264,11 +264,12 @@ describe("ContrastChecker", function () {
 
     it("should correctly evaluate AAA compliance for borderline contrast", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-large-text.png");
-      // Use full image bounds - height 50 makes it "large text"
+      // Use full image bounds; the 50px reported text size makes it "large text"
       // Large text requires 4.5:1 for AAA, but this image only has 3.0:1
       const element: Element = {
-        bounds: { left: 0, top: 0, right: 100, bottom: 50 }, // Height >= 24 = large text
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Large Text",
+        textSize: 50, // >= 24dp at density 160 = large text
       };
 
       const result = await checker.checkContrast(screenshotPath, element, "AAA", 160);
@@ -521,7 +522,7 @@ describe("ContrastChecker", function () {
       expect(result!.requiredRatio).toBe(expected as number);
     });
 
-    // #10039: bounds are physical px. A 50px-tall label is large text at mdpi
+    // #10039: sizes are physical px. A 50px text size is large text at mdpi
     // (50dp) but only ~16.7dp on xxhdpi (480), where it must get the strict ratio.
     // The 71/72 rows straddle the cutoff: 24dp * 480/160 = 72px.
     it.each([
@@ -536,11 +537,12 @@ describe("ContrastChecker", function () {
       [50, 0, "AA", 4.5],
       [500, undefined, "AAA", 7.0],
     ])(
-      "height %ipx at density %s, level %s requires %f:1",
-      async function (height, density, level, expected) {
+      "text size %ipx at density %s, level %s requires %f:1",
+      async function (textSize, density, level, expected) {
         const element: Element = {
-          bounds: { left: 0, top: 0, right: 100, bottom: height as number },
+          bounds: { left: 0, top: 0, right: 100, bottom: 20 },
           text: "Sample",
+          textSize: textSize as number,
         };
         const result = await ratioChecker().checkContrast(
           syntheticScreenshotPath,
@@ -554,10 +556,58 @@ describe("ContrastChecker", function () {
       },
     );
 
+    // Without a reported text size the box height only counts when it fits a single
+    // line: at mdpi (1px == 1dp) that is [24dp, 40dp). A 48dp button or a taller
+    // (multi-line) box is normal text, the conservative ratio.
+    it.each([
+      [23, 4.5],
+      [24, 3.0],
+      [39, 3.0],
+      [40, 4.5],
+      [48, 4.5],
+      [50, 4.5],
+      [96, 4.5],
+    ])("box-only height %ipx at mdpi requires %f:1", async function (height, expected) {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: height as number },
+        text: "Sample",
+      };
+      const result = await ratioChecker().checkContrast(
+        syntheticScreenshotPath,
+        element,
+        "AA",
+        160,
+      );
+
+      expect(result!.requiredRatio).toBe(expected as number);
+    });
+
+    it("trusts the reported text size over the box in both directions", async function () {
+      const small: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 48 },
+        text: "Sample",
+        textSize: 16,
+      };
+      const large: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 24 },
+        text: "Sample",
+        textSize: 30,
+      };
+      const checker = ratioChecker();
+
+      expect(
+        (await checker.checkContrast(syntheticScreenshotPath, small, "AA", 160))!.requiredRatio,
+      ).toBe(4.5);
+      expect(
+        (await checker.checkContrast(syntheticScreenshotPath, large, "AA", 160))!.requiredRatio,
+      ).toBe(3.0);
+    });
+
     it("does not reuse a cached result across different densities", async function () {
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Sample",
+        textSize: 50,
       };
       const sharedChecker = ratioChecker();
       const mdpi = await sharedChecker.checkContrastBatch(

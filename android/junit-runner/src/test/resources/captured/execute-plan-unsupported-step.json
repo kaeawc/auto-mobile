@@ -1,0 +1,59 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"success\":false,\"executedSteps\":1,\"totalSteps\":3,\"failedStep\":{\"stepIndex\":1,\"tool\":\"setPosture\",\"error\":\"Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed.\"},\"error\":\"Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed.\",\"platform\":\"android\",\"deviceId\":\"emulator-5554\",\"toolResults\":[{\"stepIndex\":0,\"tool\":\"tapOn\",\"result\":{\"message\":\"Tapped on element (matched id=com.example:id/item text=\\\"Row 7\\\"; 12 matches (index 6))\",\"success\":true,\"action\":\"tap\",\"element\":{\"text\":\"Item\",\"bounds\":{\"left\":0,\"top\":200,\"right\":1080,\"bottom\":320}},\"selectedElement\":{\"text\":\"Row 7\",\"resourceId\":\"com.example:id/item\",\"bounds\":{\"left\":0,\"top\":200,\"right\":1080,\"bottom\":320,\"centerX\":540,\"centerY\":260},\"indexInMatches\":6,\"totalMatches\":12,\"selectionStrategy\":\"first\"}}}]}"
+    }
+  ],
+  "structuredContent": {
+    "success": false,
+    "executedSteps": 1,
+    "totalSteps": 3,
+    "failedStep": {
+      "stepIndex": 1,
+      "tool": "setPosture",
+      "error": "Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed."
+    },
+    "error": "Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed.",
+    "platform": "android",
+    "deviceId": "emulator-5554",
+    "toolResults": [
+      {
+        "stepIndex": 0,
+        "tool": "tapOn",
+        "result": {
+          "message": "Tapped on element (matched id=com.example:id/item text=\"Row 7\"; 12 matches (index 6))",
+          "success": true,
+          "action": "tap",
+          "element": {
+            "text": "Item",
+            "bounds": {
+              "left": 0,
+              "top": 200,
+              "right": 1080,
+              "bottom": 320
+            }
+          },
+          "selectedElement": {
+            "text": "Row 7",
+            "resourceId": "com.example:id/item",
+            "bounds": {
+              "left": 0,
+              "top": 200,
+              "right": 1080,
+              "bottom": 320,
+              "centerX": 540,
+              "centerY": 260
+            },
+            "indexInMatches": 6,
+            "totalMatches": 12,
+            "selectionStrategy": "first"
+          }
+        }
+      }
+    ]
+  },
+  "success": false,
+  "error": "Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed.",
+  "isError": true
+}

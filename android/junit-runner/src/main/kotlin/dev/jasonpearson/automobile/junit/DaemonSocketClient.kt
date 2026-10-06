@@ -26,11 +26,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.serializer
 
 internal object DaemonSocketClientManager {
@@ -306,6 +308,8 @@ internal object DefaultDaemonLaunchEnvironment : DaemonLaunchEnvironment {
       buildId = DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
       entryScript = DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
       assetVersion = DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFilePath),
+      startedAtMs = DaemonSocketPaths.readDaemonStartedAtFromPidFile(pidFilePath),
+      launchFlags = DaemonSocketPaths.readDaemonLaunchFlagsFromPidFile(pidFilePath),
     )
   }
 
@@ -315,7 +319,11 @@ internal object DefaultDaemonLaunchEnvironment : DaemonLaunchEnvironment {
       buildId = DaemonSocketPaths.resolveClientBuildId(),
       entryScript = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
       assetVersion = DaemonSocketPaths.resolveCallerAssetVersionPin(),
+      launchFlags = DaemonSocketPaths.resolveRunnerLaunchFlags(),
     )
+
+  override val runStartedAtMs: Long?
+    get() = DaemonSocketPaths.resolveRunStartedAtMs()
 
   override fun runLaunchCommand(restart: Boolean, skewDetected: Boolean) {
     val startCommand =
@@ -538,10 +546,12 @@ internal object DaemonSocketPaths {
   /**
    * Resolve how this runner treats a daemon it did not start. Explicit configuration wins (JVM
    * property `automobile.daemon.force.restart` or env `AUTOMOBILE_DAEMON_FORCE_RESTART`): `true` is
-   * the unconditional-restart opt-in. Otherwise CI runs default to [DaemonRestartMode.IF_NEEDED] so
-   * a stale daemon left by a previous job is replaced, but a healthy matching daemon started by
-   * another fork of the same run is not (#2744 interim, #10170). See [resolveRestartMode] for the
-   * decision.
+   * the unconditional-restart opt-in. Otherwise CI runs default to [DaemonRestartMode.IF_NEEDED]: a
+   * daemon left by an earlier job or retry attempt (started before this run's marker, or launched
+   * with different flags; see [isDaemonStaleForRun]) is replaced once by the first fork, but a
+   * healthy matching daemon started during this run by another fork is not (#2744 interim, #10170).
+   * Without a run marker (e.g. an IDE launch) a healthy matching daemon is always reused. See
+   * [resolveRestartMode] for the decision.
    */
   fun resolveRestartMode(): DaemonRestartMode {
     val property = SystemPropertyCache.get("automobile.daemon.force.restart", "").ifBlank { null }
@@ -629,6 +639,50 @@ internal object DaemonSocketPaths {
   /** Read the daemon's recorded entry-script path from its PID file, or null. */
   internal fun readDaemonEntryScriptFromPidFile(path: String): String? =
     readPidFileString(path, "entryScript")
+
+  /** Read the daemon's recorded start time (`startedAt`, epoch ms) from its PID file, or null. */
+  internal fun readDaemonStartedAtFromPidFile(path: String): Long? =
+    parsePidFileObject(path)?.get("startedAt")?.let { (it as? JsonPrimitive)?.longOrNull }
+
+  /**
+   * The [DAEMON_LAUNCH_FLAGS] option keys the daemon's PID file records as on, or null when the
+   * record has no `options` object (an older daemon: its launch flags are unknown, not "none").
+   */
+  internal fun readDaemonLaunchFlagsFromPidFile(path: String): Set<String>? {
+    val options = parsePidFileObject(path)?.get("options") as? JsonObject ?: return null
+    return DAEMON_LAUNCH_FLAGS.values
+      .filter { key -> (options[key] as? JsonPrimitive)?.booleanOrNull == true }
+      .toSet()
+  }
+
+  /** The [DAEMON_LAUNCH_FLAGS] option keys this runner's daemon command would pass. */
+  internal fun resolveRunnerLaunchFlags(): Set<String> {
+    val command = buildDaemonCommand("start")
+    return DAEMON_LAUNCH_FLAGS.filterKeys { it in command }.values.toSet()
+  }
+
+  /**
+   * When this test run began (epoch ms), shared by every fork of one run: the Gradle test task sets
+   * `automobile.test.run.started.at.ms` once at execution time and passes it to all its forks (see
+   * `build.gradle.kts`); `AUTOMOBILE_TEST_RUN_STARTED_AT_MS` is the env equivalent for other
+   * launchers. Null without a marker, e.g. a test launched from an IDE.
+   */
+  internal fun resolveRunStartedAtMs(): Long? {
+    val property = SystemPropertyCache.get("automobile.test.run.started.at.ms", "").trim()
+    val env = System.getenv("AUTOMOBILE_TEST_RUN_STARTED_AT_MS")?.trim().orEmpty()
+    return property.ifEmpty { env }.toLongOrNull()?.takeIf { it > 0 }
+  }
+
+  private fun parsePidFileObject(path: String): JsonObject? {
+    return try {
+      val file = File(path)
+      if (!file.exists()) return null
+      Json { ignoreUnknownKeys = true }.parseToJsonElement(file.readText()) as? JsonObject
+    } catch (e: Exception) {
+      // An unreadable or half-written PID file is "unknown", never proof of a stale daemon.
+      null
+    }
+  }
 
   private fun readPidFileString(path: String, field: String): String? {
     return try {

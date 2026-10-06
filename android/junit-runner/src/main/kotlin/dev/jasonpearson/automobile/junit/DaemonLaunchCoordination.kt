@@ -10,10 +10,14 @@ import java.nio.file.StandardOpenOption
 /**
  * How a runner JVM treats a daemon it did not start.
  * - [NEVER]: reuse a healthy, matching daemon; start one if absent; restart on build/version skew.
- * - [IF_NEEDED]: the `CI` default. Replace the daemon only when it is absent, unhealthy or of a
- *   different version/build than this runner expects. A healthy, matching daemon is reused even if
- *   this JVM is new, so parallel Gradle forks never stop the daemon under each other's plans
- *   (#10170).
+ * - [IF_NEEDED]: the `CI` default. Replace the daemon when it is absent, unhealthy, of a different
+ *   version/build than this runner expects, or STALE FOR THE RUN: started before this test run
+ *   began (a leftover from an earlier job or retry attempt) or launched with different flags than
+ *   this runner would pass (see [isDaemonStaleForRun]). Every fork of one run shares the run's
+ *   start marker, so the first fork replaces a leftover daemon exactly once and the others reuse
+ *   it; they never stop it under each other's plans (#10170). Without a run marker (an IDE
+ *   launching a test directly) only the absent/unhealthy/skew checks apply and a healthy matching
+ *   daemon is reused.
  * - [ALWAYS]: the explicit `automobile.daemon.force.restart=true` opt-in. Unconditionally restarts.
  */
 internal enum class DaemonRestartMode {
@@ -30,32 +34,88 @@ internal enum class DaemonLaunchAction {
 
 /**
  * Pure launch decision. [skew] is true only for a running daemon whose version, build or asset
- * version differs from this runner's.
+ * version differs from this runner's. [staleForRun] (see [isDaemonStaleForRun]) restarts a healthy,
+ * matching daemon only under [DaemonRestartMode.IF_NEEDED]; [DaemonRestartMode.NEVER] keeps reusing
+ * it.
  */
 internal fun decideDaemonLaunch(
   mode: DaemonRestartMode,
   daemonAvailable: Boolean,
   skew: Boolean,
+  staleForRun: Boolean = false,
 ): DaemonLaunchAction =
   when {
     mode == DaemonRestartMode.ALWAYS -> DaemonLaunchAction.RESTART
-    daemonAvailable && !skew -> DaemonLaunchAction.REUSE
+    daemonAvailable && !skew && !(staleForRun && mode == DaemonRestartMode.IF_NEEDED) ->
+      DaemonLaunchAction.REUSE
     skew || mode == DaemonRestartMode.IF_NEEDED -> DaemonLaunchAction.RESTART
     else -> DaemonLaunchAction.START
   }
 
-/** Version/build facts that identify a daemon, from its PID file or from this runner. */
+/**
+ * Facts that identify a daemon, from its PID file or from this runner. [startedAtMs] is the PID
+ * record's `startedAt` (epoch ms; null when absent). [launchFlags] are the [DAEMON_LAUNCH_FLAGS]
+ * option keys that are on: for a daemon, those its PID record's `options` has set (null when the
+ * record carries no `options`, i.e. unknown); for the runner, those it would pass when launching.
+ */
 internal data class DaemonIdentity(
   val version: String? = null,
   val buildId: String? = null,
   val entryScript: String? = null,
   val assetVersion: String? = null,
+  val startedAtMs: Long? = null,
+  val launchFlags: Set<String>? = null,
 )
+
+/**
+ * The launch flags the runner may append (`DaemonSocketPaths.buildDaemonCommand`) mapped to the
+ * `DaemonOptions` key the daemon records them under in its PID file (`options`). Only these are
+ * compared; `AUTOMOBILE_CTRL_PROXY_APK_PATH` is NOT recorded by the daemon, so a different APK path
+ * is covered only by the once-per-run restart ([isDaemonStaleForRun] rule 1).
+ */
+internal val DAEMON_LAUNCH_FLAGS: Map<String, String> =
+  mapOf(
+    "--dismiss-keyboard-after-input" to "dismissKeyboardAfterInput",
+    "--no-ui-perf-mode" to "noUiPerfMode",
+    "--no-navigation-screenshots" to "noNavigationScreenshots",
+    "--no-waitfor-polling-overhead" to "noWaitForPollingOverhead",
+    "--no-include-not-important-views" to "noA11yIncludeNotImportantViews",
+    "--no-report-view-ids" to "noA11yReportViewIds",
+    "--no-retrieve-interactive-windows" to "noA11yRetrieveInteractiveWindows",
+  )
+
+/**
+ * Whether a healthy, version-matching [daemon] must still be replaced for this run (#10170):
+ * 1. it started before the run began (`startedAtMs < runStartedAtMs`): a leftover from an earlier
+ *    job or retry attempt, replaced once because the restart itself starts after the run marker;
+ * 2. it was launched with different flags than the [runner] would pass. Both rules need the run
+ *    marker: without [runStartedAtMs] (an IDE launching a test directly) a developer's resident
+ *    daemon is never replaced for being old or differently configured. Other unknown facts never
+ *    prove staleness either: no recorded start time or no recorded options leaves that rule out.
+ */
+internal fun isDaemonStaleForRun(
+  daemon: DaemonIdentity,
+  runner: DaemonIdentity,
+  runStartedAtMs: Long?,
+): Boolean {
+  if (runStartedAtMs == null) return false
+  val startedAt = daemon.startedAtMs
+  val startedBeforeRun = startedAt != null && startedAt < runStartedAtMs
+  val daemonFlags = daemon.launchFlags
+  val flagsDiffer = daemonFlags != null && daemonFlags != (runner.launchFlags ?: emptySet<String>())
+  return startedBeforeRun || flagsDiffer
+}
 
 /** Everything [DaemonLauncher] needs from the outside world, so tests need no socket or process. */
 internal interface DaemonLaunchEnvironment {
   val restartMode: DaemonRestartMode
   val startTimeoutMs: Long
+
+  /**
+   * When this test run began (epoch ms), shared by every fork of one Gradle test task; null when
+   * the run has no marker (see [isDaemonStaleForRun]).
+   */
+  val runStartedAtMs: Long?
 
   fun isDaemonAvailable(): Boolean
 
@@ -91,7 +151,8 @@ internal class DaemonLauncher(
     val mode = env.restartMode
     val available = env.isDaemonAvailable()
     val skew = detectSkew(available, mode)
-    val action = decideDaemonLaunch(mode, available, skew)
+    val stale = available && !skew && mode == DaemonRestartMode.IF_NEEDED && isStaleForRun()
+    val action = decideDaemonLaunch(mode, available, skew, stale)
     if (action == DaemonLaunchAction.REUSE) return
 
     env.runLaunchCommand(restart = action == DaemonLaunchAction.RESTART, skewDetected = skew)
@@ -136,6 +197,9 @@ internal class DaemonLauncher(
     return versionSkew || buildSkew || assetVersionSkew
   }
 
+  private fun isStaleForRun(): Boolean =
+    isDaemonStaleForRun(env.daemonIdentity(), env.runnerIdentity(), env.runStartedAtMs)
+
   private fun hasBuildSkew(daemon: DaemonIdentity, runner: DaemonIdentity): Boolean =
     DaemonSocketPaths.requiresBuildSkewRestart(
       daemon.buildId,
@@ -174,7 +238,11 @@ internal class DaemonLauncher(
  * state directory, next to its socket and PID file). Polls `tryLock` so the wait is bounded by
  * [timeoutMs] on the injected clock rather than blocking forever behind a wedged peer. If the lock
  * file cannot be opened at all (read-only state directory) the critical section still runs, without
- * cross-process protection, rather than failing the test run.
+ * cross-process protection, rather than failing the test run; that degraded mode is reported
+ * through [warn] (the module has no logging framework, so a warning on stderr by default) naming
+ * the lock path, because two forks that both find no daemon can then each restart it (#10170). A
+ * lock that opens but cannot be taken (`tryLock` throws [IOException]) fails with a
+ * [DaemonUnavailableException], the same typed failure as a timeout.
  */
 internal class FileCrossProcessLock(
   private val lockFile: Path,
@@ -182,13 +250,18 @@ internal class FileCrossProcessLock(
   private val nowMs: () -> Long = System::currentTimeMillis,
   private val sleep: (Long) -> Unit = { Thread.sleep(it) },
   private val pollMs: Long = LOCK_POLL_MS,
+  private val warn: (String) -> Unit = { System.err.println(it) },
+  private val tryLock: (FileChannel) -> FileLock? = { it.tryLock() },
 ) : CrossProcessLock {
   override fun <T> withLock(block: () -> T): T {
     val channel =
       try {
         FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
       } catch (e: IOException) {
-        println("Cannot open daemon restart lock $lockFile (${e.message}); continuing without it")
+        warn(
+          "WARN: cannot open the daemon restart lock $lockFile (${e.message}); continuing " +
+            "WITHOUT cross-process locking, so parallel runners may restart the daemon twice"
+        )
         return block()
       }
     return channel.use {
@@ -206,10 +279,15 @@ internal class FileCrossProcessLock(
     while (true) {
       val lock =
         try {
-          channel.tryLock()
+          tryLock(channel)
         } catch (e: OverlappingFileLockException) {
           // This JVM already holds the lock through another channel; treat it as contended.
           null
+        } catch (e: IOException) {
+          throw DaemonUnavailableException(
+            "Cannot take the daemon restart lock $lockFile: ${e.message}",
+            e,
+          )
         }
       if (lock != null) return lock
       if (nowMs() >= deadline) {
@@ -226,6 +304,12 @@ internal class FileCrossProcessLock(
     private const val LOCK_POLL_MS = 100L
   }
 }
+
+/**
+ * Tail of the [DaemonUnavailableException] message [connectWithDaemonRecovery] raises. The plan
+ * executor reads it back as "never reached the daemon" (safe to retry), so both sides share it.
+ */
+internal const val DAEMON_UNREACHABLE_AFTER_RESTART = "even after attempting to restart it"
 
 private const val POST_RECOVERY_CONNECT_ATTEMPTS = 3
 private const val POST_RECOVERY_BACKOFF_MS = 100L
@@ -259,7 +343,7 @@ internal fun <T : Any> connectWithDaemonRecovery(
     if (attempt < POST_RECOVERY_CONNECT_ATTEMPTS) sleep(POST_RECOVERY_BACKOFF_MS * attempt)
   }
   throw DaemonUnavailableException(
-    "AutoMobile daemon is not reachable at $socketPath even after attempting to restart it: " +
+    "AutoMobile daemon is not reachable at $socketPath $DAEMON_UNREACHABLE_AFTER_RESTART: " +
       "${lastFailure?.message}",
     lastFailure,
   )

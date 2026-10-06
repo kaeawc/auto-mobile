@@ -141,6 +141,11 @@ tasks.withType<Test> {
     systemProperty("automobile.daemon.force.restart", it)
   }
   systemProperty("automobile.daemon.local.project.path", repoRootPath)
+  // Run marker shared by every fork of this task execution: a daemon that started before it is a
+  // leftover from an earlier job or retry attempt, which the first fork replaces once under CI
+  // (#10170). Set in doFirst, not at configuration time, so a reused configuration cache entry
+  // cannot freeze an old timestamp.
+  doFirst { systemProperty("automobile.test.run.started.at.ms", System.currentTimeMillis()) }
 
   testLogging {
     // Show standard output and error for tests

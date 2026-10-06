@@ -1018,7 +1018,12 @@ internal object AutoMobilePlanExecutor {
     val normalized = errorMessage.lowercase()
     return normalized.contains("request timed out") ||
       normalized.contains("plan execution in progress") ||
-      normalized.contains("daemon request timeout")
+      normalized.contains("daemon request timeout") ||
+      // Raised by connectWithDaemonRecovery (#10169) while connecting, i.e. before the attempt's
+      // executePlan request is written, so a retry cannot re-run a step that attempt applied. A
+      // connection lost AFTER the request was sent surfaces as "Daemon request failed: ..." and
+      // stays non-transient. Another fork restarting the daemon is what this lets a retry ride out.
+      normalized.contains(DAEMON_UNREACHABLE_AFTER_RESTART)
   }
 
   // ── Internal types ────────────────────────────────────────────────────────

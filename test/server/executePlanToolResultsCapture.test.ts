@@ -18,12 +18,15 @@ import {
 } from "../../src/server/planExecutionOrchestrator";
 import {
   registerInteractionTools,
+  resetSetPostureFactory,
   resetTapOnElementFactory,
+  setSetPostureFactory,
   setTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../../src/utils/toolUtils";
+import { z } from "zod/v4";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
@@ -40,6 +43,13 @@ const CAPTURED_DIR = path.join(
 const FIXTURE = path.join(CAPTURED_DIR, "execute-plan-tool-results.json");
 // A plan whose third step fails, so the runner's recovery context is built from a real failure.
 const FAILED_FIXTURE = path.join(CAPTURED_DIR, "execute-plan-failed-step.json");
+// A plan whose second step is a nested `executePlan` that fails (#10172), and one whose second step
+// is a `setPosture` that answers `status: "unsupported"` (#10175). The JUnit runner's
+// PlanFailureShapesCaptureTest parses both.
+const NESTED_FAILED_FIXTURE = path.join(CAPTURED_DIR, "execute-plan-nested-failed-step.json");
+const UNSUPPORTED_FIXTURE = path.join(CAPTURED_DIR, "execute-plan-unsupported-step.json");
+const UNSUPPORTED_MESSAGE =
+  "Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed.";
 
 const device: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "Fake" };
 
@@ -82,6 +92,49 @@ steps:
       action: tap
       selector:
         text: Missing
+`;
+
+const TAP_THEN_UNSUPPORTED_POSTURE_PLAN = `name: tap-then-fold
+steps:
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Item
+  - tool: setPosture
+    params:
+      hingeAngle: 90
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Confirm
+`;
+
+// The nested plan is carried as a YAML block scalar by the outer step.
+const OUTER_PLAN_WITH_NESTED_PLAN = `name: outer-with-shared-login
+steps:
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Item
+  - tool: executePlan
+    params:
+      platform: android
+      planContent: |
+        name: shared-login
+        steps:
+          - tool: tapOn
+            params:
+              action: tap
+              selector:
+                text: Missing
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Confirm
 `;
 
 function selectedElement(text: string, totalMatches: number, strategy: string) {
@@ -135,6 +188,22 @@ describe("executePlan toolResults capture (#10090)", () => {
         internal: true,
       }),
     );
+    // The real setPosture wrapper over a fake action that refuses, as on a physical device.
+    setSetPostureFactory(() => ({
+      execute: async () => ({ status: "unsupported" as const, message: UNSUPPORTED_MESSAGE }),
+      executeHingeAngle: async () => ({
+        status: "unsupported" as const,
+        message: UNSUPPORTED_MESSAGE,
+      }),
+    }));
+    const posture = ToolRegistry.getToolForPlan("setPosture")!;
+    const postureHandler = spyOn(posture, "handler").mockImplementation(
+      async (params, progress, signal) =>
+        finalizeToolResponse(await posture.deviceAwareHandler!(device, params, progress, signal), {
+          name: posture.name,
+          internal: true,
+        }),
+    );
     // The plan declares no video, but the auto-video session would otherwise resolve the real DB.
     const start = spyOn(
       AndroidSegmentedPlanVideoSession.prototype,
@@ -146,6 +215,7 @@ describe("executePlan toolResults capture (#10090)", () => {
     ).mockResolvedValue({ filePaths: [], recordingIds: [], metadata: [] });
     restoreHandler = () => {
       handler.mockRestore();
+      postureHandler.mockRestore();
       start.mockRestore();
       finalize.mockRestore();
     };
@@ -153,6 +223,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   afterEach(() => {
     restoreHandler();
+    resetSetPostureFactory();
     resetTapOnElementFactory();
     restoreTools();
   });
@@ -222,5 +293,54 @@ describe("executePlan toolResults capture (#10090)", () => {
       writeFileSync(FAILED_FIXTURE, captured);
     }
     expect(captured).toBe(readFileSync(FAILED_FIXTURE, "utf8"));
+  });
+
+  test("a setPosture step that answers unsupported fails the plan with the tool's own text (#10175)", async () => {
+    const result = await runOrchestrator(TAP_THEN_UNSUPPORTED_POSTURE_PLAN);
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep).toEqual({
+      stepIndex: 1,
+      tool: "setPosture",
+      error: UNSUPPORTED_MESSAGE,
+    });
+    expect(result.toolResults?.map((entry) => entry.stepIndex)).toEqual([0]);
+
+    const envelope = withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+    const captured = `${JSON.stringify(envelope, null, 2)}\n`;
+    if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+      writeFileSync(UNSUPPORTED_FIXTURE, captured);
+    }
+    expect(captured).toBe(readFileSync(UNSUPPORTED_FIXTURE, "utf8"));
+  });
+
+  test("a failing nested executePlan step is the outer plan's failed step, in the same envelope (#10172)", async () => {
+    // Stand-in for the executePlan tool body: the real orchestrator and executor over the nested
+    // plan, wrapped exactly as executePlanTool wraps its result.
+    ToolRegistry.register(
+      "executePlan",
+      "executePlan stand-in running the real orchestrator for the nested plan",
+      z.object({}).passthrough(),
+      async (args) => {
+        const inner = await runOrchestrator(String(args.planContent));
+        return withIsErrorOnFailure(createStructuredToolResponse(inner), inner.success);
+      },
+    );
+
+    const result = await runOrchestrator(OUTER_PLAN_WITH_NESTED_PLAN);
+
+    expect(result.success).toBe(false);
+    expect(result.executedSteps).toBe(1);
+    expect(result.failedStep).toMatchObject({ stepIndex: 1, tool: "executePlan" });
+    expect(result.failedStep?.error).toContain("Element not found");
+    // Only the completed step is reported; the failed nested step carries its failure in failedStep.
+    expect(result.toolResults?.map((entry) => entry.stepIndex)).toEqual([0]);
+
+    const envelope = withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+    const captured = `${JSON.stringify(envelope, null, 2)}\n`;
+    if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+      writeFileSync(NESTED_FAILED_FIXTURE, captured);
+    }
+    expect(captured).toBe(readFileSync(NESTED_FAILED_FIXTURE, "utf8"));
   });
 });

@@ -23,27 +23,165 @@ class DaemonLaunchCoordinationTest {
     val reuse = DaemonLaunchAction.REUSE
     val start = DaemonLaunchAction.START
     val restart = DaemonLaunchAction.RESTART
-    // mode, daemonAvailable, skew -> action
+    // mode, daemonAvailable, skew, staleForRun -> action
+    data class Row(
+      val mode: DaemonRestartMode,
+      val available: Boolean,
+      val skew: Boolean,
+      val stale: Boolean,
+    )
     val table =
       listOf(
-        Triple(never, true, false) to reuse,
-        Triple(never, true, true) to restart,
-        Triple(never, false, false) to start,
-        Triple(ifNeeded, true, false) to reuse,
-        Triple(ifNeeded, true, true) to restart,
-        Triple(ifNeeded, false, false) to restart,
-        Triple(always, true, false) to restart,
-        Triple(always, true, true) to restart,
-        Triple(always, false, false) to restart,
+        Row(never, true, false, false) to reuse,
+        Row(never, true, true, false) to restart,
+        Row(never, false, false, false) to start,
+        // NEVER keeps reusing a healthy matching daemon however old it is.
+        Row(never, true, false, true) to reuse,
+        Row(never, false, false, true) to start,
+        Row(ifNeeded, true, false, false) to reuse,
+        Row(ifNeeded, true, true, false) to restart,
+        Row(ifNeeded, false, false, false) to restart,
+        // IF_NEEDED replaces a daemon that is stale for this run, and only then.
+        Row(ifNeeded, true, false, true) to restart,
+        Row(ifNeeded, true, true, true) to restart,
+        Row(ifNeeded, false, false, true) to restart,
+        Row(always, true, false, false) to restart,
+        Row(always, true, true, false) to restart,
+        Row(always, false, false, false) to restart,
+        Row(always, true, false, true) to restart,
       )
-    for ((input, expected) in table) {
-      val (mode, available, skew) = input
+    for ((row, expected) in table) {
       assertEquals(
         expected,
-        decideDaemonLaunch(mode, available, skew),
-        "mode=$mode available=$available skew=$skew",
+        decideDaemonLaunch(row.mode, row.available, row.skew, row.stale),
+        "$row",
       )
     }
+  }
+
+  @Test
+  fun staleForRunTable() {
+    val runner = DaemonIdentity(launchFlags = setOf("noUiPerfMode"))
+    val sameFlags = setOf("noUiPerfMode")
+    // daemon, runStartedAtMs -> stale
+    val table =
+      listOf(
+        // Started before the run: leftover from an earlier job or retry attempt.
+        Triple(DaemonIdentity(startedAtMs = 999L, launchFlags = sameFlags), 1_000L, true),
+        // Started at or after the run began: another fork of this run brought it up.
+        Triple(DaemonIdentity(startedAtMs = 1_000L, launchFlags = sameFlags), 1_000L, false),
+        Triple(DaemonIdentity(startedAtMs = 5_000L, launchFlags = sameFlags), 1_000L, false),
+        // Launched with different flags (extra, missing or swapped).
+        Triple(DaemonIdentity(startedAtMs = 5_000L, launchFlags = emptySet()), 1_000L, true),
+        Triple(
+          DaemonIdentity(startedAtMs = 5_000L, launchFlags = sameFlags + "noNavigationScreenshots"),
+          1_000L,
+          true,
+        ),
+        // Unknown facts never prove staleness.
+        Triple(DaemonIdentity(startedAtMs = null, launchFlags = sameFlags), 1_000L, false),
+        Triple(DaemonIdentity(startedAtMs = 5_000L, launchFlags = null), 1_000L, false),
+        // No run marker (an IDE launch): a developer's daemon is never replaced for age or flags.
+        Triple(DaemonIdentity(startedAtMs = 1L, launchFlags = emptySet()), null, false),
+      )
+    for ((daemon, runStartedAtMs, expected) in table) {
+      assertEquals(
+        expected,
+        isDaemonStaleForRun(daemon, runner, runStartedAtMs),
+        "daemon=$daemon run=$runStartedAtMs",
+      )
+    }
+  }
+
+  @Test
+  fun leftoverDaemonFromBeforeTheRunIsReplacedOnceAcrossForks() {
+    val env =
+      FakeLaunchEnvironment(
+        DaemonRestartMode.IF_NEEDED,
+        available = true,
+        daemon = DaemonIdentity(version = "0.0.40", startedAtMs = 500L),
+        runStartedAtMs = 1_000L,
+      )
+    val lock = RecordingLock()
+
+    // Fork A finds the leftover and replaces it; fork B re-reads the state under the lock, sees a
+    // daemon that started after the run marker and reuses it.
+    DaemonLauncher(env, lock).ensureRunning()
+    DaemonLauncher(env, lock).ensureRunning()
+    DaemonLauncher(env, lock).ensureRunning()
+
+    assertEquals(listOf("restart"), env.commands)
+  }
+
+  @Test
+  fun daemonLaunchedWithDifferentFlagsIsReplacedUnderCi() {
+    val env =
+      FakeLaunchEnvironment(
+        DaemonRestartMode.IF_NEEDED,
+        available = true,
+        daemon = DaemonIdentity(version = "0.0.40", startedAtMs = 5_000L, launchFlags = emptySet()),
+        runner = DaemonIdentity(version = "0.0.40", launchFlags = setOf("noUiPerfMode")),
+        runStartedAtMs = 1_000L,
+      )
+
+    DaemonLauncher(env, RecordingLock()).ensureRunning()
+
+    assertEquals(listOf("restart"), env.commands)
+  }
+
+  @Test
+  fun leftoverDaemonIsReusedWithoutARunMarkerOrOutsideCi() {
+    val leftover = DaemonIdentity(version = "0.0.40", startedAtMs = 1L, launchFlags = emptySet())
+    val runner = DaemonIdentity(version = "0.0.40", launchFlags = setOf("noUiPerfMode"))
+    val noMarker =
+      FakeLaunchEnvironment(
+        DaemonRestartMode.IF_NEEDED,
+        available = true,
+        daemon = leftover,
+        runner = runner,
+        runStartedAtMs = null,
+      )
+    val local =
+      FakeLaunchEnvironment(
+        DaemonRestartMode.NEVER,
+        available = true,
+        daemon = leftover,
+        runner = runner,
+        runStartedAtMs = 1_000L,
+      )
+
+    DaemonLauncher(noMarker, RecordingLock()).ensureRunning()
+    DaemonLauncher(local, RecordingLock()).ensureRunning()
+
+    assertEquals(emptyList(), noMarker.commands)
+    assertEquals(emptyList(), local.commands)
+  }
+
+  @Test
+  fun pidFileRecordsStartTimeAndLaunchFlags() {
+    val pidFile = temporaryFolder.newFile("daemon.pid")
+    pidFile.writeText(
+      """{"pid":1,"startedAt":1700000000123,"version":"0.0.40",
+        "options":{"noUiPerfMode":true,"dismissKeyboardAfterInput":false,"debug":true}}"""
+    )
+
+    assertEquals(1700000000123L, DaemonSocketPaths.readDaemonStartedAtFromPidFile(pidFile.path))
+    assertEquals(
+      setOf("noUiPerfMode"),
+      DaemonSocketPaths.readDaemonLaunchFlagsFromPidFile(pidFile.path),
+    )
+  }
+
+  @Test
+  fun pidFileWithoutOptionsOrStartTimeReportsUnknownNotEmpty() {
+    val pidFile = temporaryFolder.newFile("old.pid")
+    pidFile.writeText("""{"pid":1,"version":"0.0.30"}""")
+
+    assertEquals(null, DaemonSocketPaths.readDaemonStartedAtFromPidFile(pidFile.path))
+    assertEquals(null, DaemonSocketPaths.readDaemonLaunchFlagsFromPidFile(pidFile.path))
+    val missing = temporaryFolder.root.resolve("absent.pid").path
+    assertEquals(null, DaemonSocketPaths.readDaemonStartedAtFromPidFile(missing))
+    assertEquals(null, DaemonSocketPaths.readDaemonLaunchFlagsFromPidFile(missing))
   }
 
   @Test
@@ -217,9 +355,37 @@ class DaemonLaunchCoordinationTest {
   fun unopenableLockFileStillRunsTheSection() {
     val missingDirectory: Path = temporaryFolder.root.toPath().resolve("no/such/dir/restart.lock")
 
-    val result = FileCrossProcessLock(missingDirectory, timeoutMs = 1L).withLock { "ran" }
+    val warnings = mutableListOf<String>()
+
+    val result =
+      FileCrossProcessLock(missingDirectory, timeoutMs = 1L, warn = { warnings.add(it) }).withLock {
+        "ran"
+      }
 
     assertEquals("ran", result)
+    // The degraded, unlocked mode is announced and names the lock path.
+    val warning = warnings.single()
+    assertTrue(warning.startsWith("WARN"), warning)
+    assertTrue(warning.contains(missingDirectory.toString()), warning)
+  }
+
+  @Test
+  fun ioFailureTakingTheLockIsTheTypedUnavailableFailure() {
+    val lockFile = temporaryFolder.root.toPath().resolve("restart.lock")
+    var entered = false
+    val lock =
+      FileCrossProcessLock(
+        lockFile,
+        timeoutMs = 250L,
+        tryLock = { throw java.io.IOException("lock not supported on this filesystem") },
+      )
+
+    val error = assertFailsWith<DaemonUnavailableException> { lock.withLock { entered = true } }
+
+    assertTrue(error.message.orEmpty().contains("restart.lock"))
+    assertTrue(error.message.orEmpty().contains("lock not supported"))
+    assertTrue(error.cause is java.io.IOException)
+    assertEquals(false, entered)
   }
 
   private class RecordingLock : CrossProcessLock {
@@ -245,6 +411,7 @@ class DaemonLaunchCoordinationTest {
     private val runner: DaemonIdentity = DaemonIdentity(version = "0.0.40"),
     private val launchSucceeds: Boolean = true,
     private val launchLeavesDaemonUnchanged: Boolean = false,
+    override val runStartedAtMs: Long? = null,
   ) : DaemonLaunchEnvironment {
     val commands = mutableListOf<String>()
     override val startTimeoutMs: Long = 30_000L
@@ -259,7 +426,10 @@ class DaemonLaunchCoordinationTest {
       commands.add(if (restart) "restart" else "start")
       if (launchSucceeds) {
         available = true
-        if (!launchLeavesDaemonUnchanged) daemon = runner
+        // A relaunch starts after the run marker and with the runner's own flags.
+        if (!launchLeavesDaemonUnchanged) {
+          daemon = runner.copy(startedAtMs = (runStartedAtMs ?: 0L) + 1)
+        }
       }
     }
 

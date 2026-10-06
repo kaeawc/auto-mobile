@@ -1,5 +1,11 @@
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
-import { terminateColdBootProcess } from "./coldBootProcessTermination";
+import {
+  awaitTerminationWithinRequest,
+  terminateColdBootProcess,
+  watchSurvivingProcess,
+  type OwnedTermination,
+  type OwnedTerminationWait,
+} from "./coldBootProcessTermination";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import type {
@@ -28,6 +34,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
@@ -44,6 +51,8 @@ import {
 } from "./DisplayInventoryProvider";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+/** Bound on the iOS post-lease "did a sibling already boot this simulator" re-check (#9920). */
+const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
 
 /** A boot deadline failure, kept distinct from platform command failures. */
 export class DeviceBootTimeoutError extends ActionableError {
@@ -382,6 +391,15 @@ export interface DeviceBootServiceDependencies {
    * (#9901). A lease this service reserves itself is held automatically.
    */
   retainLeaseUntil?: (settlement: Promise<void>) => void;
+  /**
+   * Set by a long-lived owner (the daemon): once the request is cancelled or out of budget, the
+   * emulator's termination may carry on in the background while the lease stays held (#9920).
+   * Left unset by a one-shot process (`--boot-device`) that exits as soon as `boot` returns,
+   * which would take the SIGKILL escalation's timer down with it: there `boot` waits in full.
+   */
+  cleanupMayOutliveRequest?: boolean;
+  /** Liveness probe for an emulator that survived SIGKILL; injected so tests never signal a real pid. */
+  isProcessRunning?: (pid: number) => boolean;
   /** Opts an injected daemon lease into post-bind re-checks; deviceTools' reservation races tolerate shared cold boots. */
   allowExternalLeaseAdoptionRecheck?: boolean;
 }
@@ -396,6 +414,11 @@ interface BootDeadlineContext {
   ownsLifecycleLease: boolean;
   /** Exit promises of owned emulators that could not be confirmed dead; the lease outlives them. */
   unconfirmedProcessExits: Promise<void>[];
+  /**
+   * Terminations the request stopped waiting for (it was cancelled or out of budget). Each
+   * settles only once its AVD is free, so the lease outlives them (#9920).
+   */
+  pendingTerminations: Promise<void>[];
   /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
   freshProvision?: boolean;
 }
@@ -432,6 +455,7 @@ export class DeviceBootService {
       lifecycleLease: this.dependencies.lifecycleLease,
       ownsLifecycleLease: false,
       unconfirmedProcessExits: [],
+      pendingTerminations: [],
       freshProvision: request.freshProvision === true,
     };
     if (!context.lifecycleLease && !this.dependencies.onIdentityResolved) {
@@ -479,13 +503,25 @@ export class DeviceBootService {
       return;
     }
     const lease = context.lifecycleLease;
-    if (context.unconfirmedProcessExits.length === 0) {
+    if (context.unconfirmedProcessExits.length === 0 && context.pendingTerminations.length === 0) {
       lease?.release();
       return;
     }
     // An emulator this boot started is still running and holding its AVD lock
-    // files: the stable key is not free until it actually exits (#9901).
-    void Promise.allSettled(context.unconfirmedProcessExits).then(() => lease?.release());
+    // files: the stable key is not free until it actually exits (#9901), or a
+    // liveness re-check finds its pid gone (#9920).
+    void this.releaseOnceProcessesSettle(context, lease);
+  }
+
+  private async releaseOnceProcessesSettle(
+    context: BootDeadlineContext,
+    lease: VirtualDeviceLifecycleLease | undefined,
+  ): Promise<void> {
+    // A pending termination records its survivor in `unconfirmedProcessExits`
+    // before it settles, so read that list only after the terminations are done.
+    await Promise.allSettled(context.pendingTerminations);
+    await Promise.allSettled(context.unconfirmedProcessExits);
+    lease?.release();
   }
 
   private async bindLifecycleIdentity(
@@ -1141,17 +1177,55 @@ export class DeviceBootService {
     }
     // Bypass the simulator-list cache: the cached list is what made this image
     // look stopped, and `startDevice` itself bypasses it before refusing a boot.
+    // The image is a simctl simulator, so devicectl discovery cannot answer for its UDID.
     const discovery = await this.runPhase(context, phase, (signal) =>
-      this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
-        bypassIosDeviceListCache: true,
-        signal,
-      }),
+      this.boundedIosRecheck(phase, signal, (recheckSignal) =>
+        this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
+          bypassIosDeviceListCache: true,
+          skipPhysicalIosDiscovery: true,
+          signal: recheckSignal,
+        }),
+      ),
     );
     // An unanswered inventory proves nothing; fall through to the boot path,
     // whose own running-state check reports an unreadable simulator list.
-    return discovery.succeededPlatforms.has("ios")
+    return discovery?.succeededPlatforms.has("ios")
       ? findBootedDeviceMatchingImage(image, discovery.devices)
       : undefined;
+  }
+
+  /**
+   * This optimization must never cost the boot its budget: a `simctl list` that
+   * never answers is abandoned after its own short timeout (#9920) and the
+   * caller falls through to the boot path, which reports the real state. Caller
+   * abort and the boot deadline still win through `signal`.
+   */
+  private async boundedIosRecheck<T>(
+    phase: string,
+    signal: AbortSignal,
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T | undefined> {
+    const recheck = new AbortController();
+    const timedOut = new Error(`${phase} timed out`);
+    try {
+      return await raceWithDeadline(operation(AbortSignal.any([signal, recheck.signal])), {
+        timer: this.timer,
+        timeoutMs: IOS_POST_LEASE_RECHECK_TIMEOUT_MS,
+        signal,
+        label: phase,
+        timeoutError: () => timedOut,
+        onTimeout: () => recheck.abort(timedOut),
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      logger.warn(
+        `[startDevice] Simulator re-check did not answer within ${IOS_POST_LEASE_RECHECK_TIMEOUT_MS}ms; ` +
+          "continuing to the boot path",
+      );
+      return undefined;
+    }
   }
 
   private async bootImage(
@@ -1261,15 +1335,20 @@ export class DeviceBootService {
       return started;
     });
     disposeStartHandleCancellation();
-    let termination: Promise<boolean> | undefined;
+    let termination: Promise<OwnedTermination> | undefined;
+    let cleanupWait: Promise<OwnedTerminationWait> | undefined;
     // Idempotent: the abort listener, the readiness failure path and the catch
-    // block share one termination. Resolves true when no owned process remains.
-    const cancelHandle = (): Promise<boolean> => {
+    // block share one termination, and the two that wait share one bounded wait.
+    const cancelHandle = (): Promise<OwnedTermination> => {
       if (!handle) {
-        return Promise.resolve(true);
+        return Promise.resolve({ state: "confirmed" });
       }
       termination ??= this.terminateOwnedHandle(handle, image, context);
       return termination;
+    };
+    const awaitCleanup = (): Promise<OwnedTerminationWait> => {
+      cleanupWait ??= this.awaitOwnedCleanup(cancelHandle(), context);
+      return cleanupWait;
     };
     const cancelOnAbort = () => {
       void cancelHandle();
@@ -1286,7 +1365,7 @@ export class DeviceBootService {
           context.signal,
           this.timer,
           async () => {
-            await cancelHandle();
+            await awaitCleanup();
           },
           () => this.timeoutError(context, "waiting for device boot readiness"),
           // A freshly-provisioned Android AVD's first boot is a genuine cold
@@ -1310,43 +1389,87 @@ export class DeviceBootService {
         provisioned,
       };
     } catch (error) {
-      const confirmed = await cancelHandle();
-      throw confirmed ? error : annotateUnconfirmedTermination(error, handle);
+      const wait = await awaitCleanup();
+      throw annotateTerminationOutcome(error, wait, handle);
     } finally {
       context.signal?.removeEventListener("abort", cancelOnAbort);
     }
   }
 
   /**
-   * Terminates the emulator this boot started (never an adopted one) and reports
-   * whether it is confirmed gone. A survivor's exit promise is retained so the
-   * AVD's lifecycle lease is not handed out while it still holds the AVD.
+   * Terminates the emulator this boot started (never an adopted one). A survivor
+   * is marked on the lease and watched until its pid is gone, and that watch is
+   * retained so the AVD's lifecycle lease is not handed out while it still holds
+   * the AVD (#9901); the watch's liveness re-check bounds how long (#9920).
    */
   private async terminateOwnedHandle(
     handle: ChildProcess,
     image: DeviceInfo,
     context: BootDeadlineContext,
-  ): Promise<boolean> {
+  ): Promise<OwnedTermination> {
     const { exited, confirmed } = terminateColdBootProcess(handle, image.name, this.timer);
     try {
       if (await confirmed) {
-        return true;
+        return { state: "confirmed" };
       }
     } catch (error) {
-      // The exit could not even be observed; the process state is unknown, so it is
-      // reported as unconfirmed, and the boot's own failure stays the one surfaced.
+      // The exit could not even be observed, so nothing can be held on: the lease is
+      // released at once and the boot's own failure stays the one surfaced.
       logger.warn(
         `[startDevice] Could not observe exit of emulator process ${handle.pid ?? "unknown"}: ${errorMessage(error)}`,
         error,
       );
+      return { state: "unobservable" };
     }
     logger.warn(
       `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${image.name} survived ` +
-        "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it exits",
+        "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it is gone",
     );
-    context.unconfirmedProcessExits.push(exited);
-    this.dependencies.retainLeaseUntil?.(exited);
-    return false;
+    const gone = watchSurvivingProcess(
+      handle,
+      exited,
+      image.name,
+      this.timer,
+      this.dependencies.isProcessRunning,
+    );
+    context.lifecycleLease?.markHeldByUnkillableProcess?.(handle.pid);
+    context.unconfirmedProcessExits.push(gone);
+    this.dependencies.retainLeaseUntil?.(gone);
+    return { state: "survived", gone };
+  }
+
+  /**
+   * Waits for the owned emulator's termination, but only while the request is
+   * live. When the request is cancelled or out of budget the cleanup carries on
+   * in the background and keeps the lease held (#9920), but only for a long-lived
+   * owner (`cleanupMayOutliveRequest`) with a lease it can hold. A one-shot CLI
+   * process, or a lease this service does not own and cannot hand the survivor
+   * to, is still waited on in full.
+   */
+  private async awaitOwnedCleanup(
+    termination: Promise<OwnedTermination>,
+    context: BootDeadlineContext,
+  ): Promise<OwnedTerminationWait> {
+    const canHold =
+      this.dependencies.cleanupMayOutliveRequest === true &&
+      (context.ownsLifecycleLease || this.dependencies.retainLeaseUntil !== undefined);
+    if (!canHold) {
+      return (await termination).state;
+    }
+    const wait = await awaitTerminationWithinRequest(termination, {
+      timer: this.timer,
+      deadlineMs: context.deadlineMs,
+      signal: context.signal,
+    });
+    if (wait === "pending") {
+      const settled = termination.then(
+        (outcome) => (outcome.state === "survived" ? outcome.gone : undefined),
+        () => undefined,
+      );
+      context.pendingTerminations.push(settled);
+      this.dependencies.retainLeaseUntil?.(settled);
+    }
+    return wait;
   }
 
   private async reportProgress(
@@ -1463,17 +1586,48 @@ export function enrichBootedDevicesFromImages(
 }
 
 /**
- * Reports the original boot failure with the cleanup failure added as context,
- * keeping the error's class so callers' type checks still classify it.
+ * Reports the original boot failure with the cleanup outcome added as context.
+ * The error is never mutated (it may be the caller's own abort reason, and a
+ * DOMException's message is read-only): an annotated copy keeps the class so
+ * callers' type checks still classify it, and anything that cannot be copied
+ * is wrapped with the original as `cause`.
  */
-function annotateUnconfirmedTermination(error: unknown, handle: ChildProcess | null): unknown {
-  const note =
-    `Cleanup also failed: emulator process ${handle?.pid ?? "unknown"} did not exit after ` +
-    "SIGTERM and SIGKILL, so its AVD stays reserved until it exits; terminate that process " +
-    "manually if it does not.";
-  if (error instanceof Error) {
-    error.message = `${error.message} ${note}`;
-    return error;
+function annotateTerminationOutcome(
+  error: unknown,
+  wait: OwnedTerminationWait,
+  handle: ChildProcess | null,
+): unknown {
+  const pid = handle?.pid ?? "unknown";
+  if (wait === "survived") {
+    return withCleanupNote(
+      error,
+      `Cleanup also failed: emulator process ${pid} did not exit after SIGTERM and SIGKILL, ` +
+        "so its AVD stays reserved until the process is gone (its liveness is re-checked " +
+        "periodically); terminate that process manually if it does not.",
+    );
   }
-  return new ActionableError(`${String(error)} ${note}`);
+  if (wait === "unobservable") {
+    return withCleanupNote(
+      error,
+      `Cleanup also failed: the exit of emulator process ${pid} could not be observed, so its ` +
+        "AVD was released; terminate that process manually if it is still running.",
+    );
+  }
+  return error;
+}
+
+function withCleanupNote(error: unknown, note: string): unknown {
+  if (error instanceof Error && !(error instanceof DOMException)) {
+    const copy: Error = Object.create(
+      Object.getPrototypeOf(error),
+      Object.getOwnPropertyDescriptors(error),
+    );
+    Object.defineProperty(copy, "message", {
+      value: `${error.message} ${note}`,
+      writable: true,
+      configurable: true,
+    });
+    return copy;
+  }
+  return new ActionableError(`${errorMessage(error)} ${note}`, { cause: error });
 }

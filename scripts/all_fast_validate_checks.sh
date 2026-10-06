@@ -41,6 +41,7 @@ add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,t
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"
 add_check "ctrl-proxy-project-sources" "\"$PROJECT_ROOT/scripts/check-ctrl-proxy-project-sources.sh\"" "config,ios" "Check CtrlProxy Swift sources are in its Xcode project"
 add_check "schema-copy-drift" "bun \"$PROJECT_ROOT/scripts/check-schema-copy-drift.ts\"" "config,schema" "Detect drift between the canonical and Android copies of test-plan.schema.json"
+add_check "tool-definitions" "bun \"$PROJECT_ROOT/scripts/generate-tool-definitions.ts\" --check" "config,typescript" "Keep schemas/tool-definitions.json in sync with the live tool registry"
 add_check "bun-version-coherence" "bun \"$PROJECT_ROOT/scripts/check-bun-version-coherence.ts\"" "config,dependencies" "Keep Bun versions aligned across package, workflows, Docker, and local development"
 add_check "xml" "\"$PROJECT_ROOT/scripts/xml/validate_xml.sh\"" "config,xml" "Validate XML files"
 add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_scripts.sh\"" "lint,shell" "Validate shell scripts with shellcheck"

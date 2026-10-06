@@ -9,7 +9,11 @@ import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayEr
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  INTERMEDIATE_OBSERVATION_OPTIONS,
+  ProgressCallback,
+} from "./BaseVisualChange";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   ActionableError,
@@ -694,7 +698,11 @@ export class PinchOn extends BaseVisualChange {
         throw new ActionableError("Selected display has no usable view hierarchy");
       }
       throwIfAborted(signal);
-      observeResult = await this.observeScreen.execute({ freshness: "cached-ok", signal });
+      observeResult = await this.observeScreen.execute({
+        ...INTERMEDIATE_OBSERVATION_OPTIONS,
+        freshness: "cached-ok",
+        signal,
+      });
     }
 
     throwIfAborted(signal);

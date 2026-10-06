@@ -255,6 +255,8 @@ export type A11ySwipeResult = GestureTimingResult;
 export interface A11yTapCoordinatesResult extends BaseResult {
   /** Required capability was not advertised; no gesture request was dispatched. */
   unsupportedCapability?: string;
+  /** The runner replied, including an explicit refusal. False after a lost reply (timeout). */
+  acknowledged?: boolean;
 }
 
 /** Drag result from accessibility service */

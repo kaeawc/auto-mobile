@@ -21,6 +21,8 @@ data class OverlayRuntimeSnapshot(
 }
 
 sealed interface OverlayInteraction {
+  data object HostDismiss : OverlayInteraction
+
   data class Tap(val actions: List<OverlayAction>) : OverlayInteraction
 
   data class PagerMotion(val pager: String, val page: Int, val scrolling: Boolean) :
@@ -71,6 +73,7 @@ class OverlayRuntime(
   suspend fun handle(interaction: OverlayInteraction) {
     if (!current.active) return
     when (interaction) {
+      OverlayInteraction.HostDismiss -> dismiss()
       is OverlayInteraction.Tap -> tap(interaction.actions)
       is OverlayInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
@@ -146,13 +149,19 @@ class OverlayRuntime(
     )
   }
 
-  suspend fun dismiss() =
+  suspend fun dismiss(reason: OverlayDismissReason = OverlayDismissReason.USER) =
     withContext(NonCancellable) {
       if (!current.active) return@withContext
       check(requestDismiss()) { "Overlay host failed to dismiss window" }
-      close()
-      emit(OverlayEventKind.DISMISSED)
+      finishDismissal(reason)
     }
+
+  /** Teardown is terminal even if the platform removal or event delivery fails. */
+  internal suspend fun finishDismissal(reason: OverlayDismissReason) {
+    if (!current.active) return
+    close()
+    emit(OverlayEventKind.DISMISSED, payload = buildJsonObject { put("reason", reason.wireValue) })
+  }
 
   private suspend fun emit(
     kind: OverlayEventKind,

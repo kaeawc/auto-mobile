@@ -214,6 +214,12 @@ interface ParallelPlanExecutionOptions {
   executionOptions?: PlanExecutionOptions;
 }
 
+/** Which derived session a failure observation targets and the plan signal that can cancel it. */
+interface FailureObservationScope {
+  deviceLabel?: string;
+  signal?: AbortSignal;
+}
+
 /**
  * Default plan execution implementation
  * Executes plan steps sequentially or in parallel (multi-device)
@@ -334,30 +340,80 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
   private static readonly FAILURE_OBSERVATION_TIMEOUT_MS = 3000;
 
+  /**
+   * Run the internal failure observe under its own deadline. The plan signal is forwarded so a
+   * cancellation that lands mid-capture aborts the observe and releases this wait instead of
+   * riding out the deadline (#9885).
+   */
+  private async callObserveWithDeadline(
+    observeTool: RegisteredTool,
+    parsedParams: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<unknown> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new AbortController();
+    const onPlanAbort = () => deadline.abort(signal?.reason);
+    try {
+      const operation = ToolRegistry.callInternal(observeTool, parsedParams, undefined, signal);
+      signal?.addEventListener("abort", onPlanAbort, { once: true });
+      timeoutHandle = this.timer.setTimeout(
+        () => deadline.abort(new Error("failure observation timed out")),
+        DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS,
+      );
+      return await raceWithDeadline(operation, {
+        timer: this.timer,
+        signal: deadline.signal,
+        label: "failure observation",
+      });
+    } finally {
+      signal?.removeEventListener("abort", onPlanAbort);
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  private buildFailureObservationParams(
+    platform: string,
+    deviceId: string | undefined,
+    sessionUuid: string | undefined,
+    deviceLabel: string | undefined,
+  ): Record<string, unknown> {
+    const enhancedParams: Record<string, unknown> = { platform };
+    const shouldSuppressDeviceId = !!(sessionUuid && DaemonState.getInstance().isInitialized());
+    if (deviceId && !shouldSuppressDeviceId) {
+      enhancedParams.deviceId = deviceId;
+    }
+    if (sessionUuid) {
+      enhancedParams.sessionUuid = sessionUuid;
+    }
+    // Use the failed step's label so ToolRegistry selects the same derived
+    // session, rather than observing the plan's base-session device (#9828).
+    if (deviceLabel) {
+      enhancedParams.device = deviceLabel;
+    }
+    return enhancedParams;
+  }
+
   private async captureFailureObservation(
     platform: string,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
-    deviceLabel?: string,
+    { deviceLabel, signal }: FailureObservationScope = {},
   ): Promise<FailureObservationSummary | undefined> {
     const observeTool = ToolRegistry.getTool("observe");
-    if (!observeTool) {
+    // A plan cancelled by a session release no longer owns the device, so a
+    // failure observation must not be issued against it (#9885).
+    if (!observeTool || signal?.aborted) {
       return undefined;
     }
     try {
-      const enhancedParams: Record<string, unknown> = { platform };
-      const shouldSuppressDeviceId = !!(sessionUuid && DaemonState.getInstance().isInitialized());
-      if (deviceId && !shouldSuppressDeviceId) {
-        enhancedParams.deviceId = deviceId;
-      }
-      if (sessionUuid) {
-        enhancedParams.sessionUuid = sessionUuid;
-      }
-      // Use the failed step's label so ToolRegistry selects the same derived
-      // session, rather than observing the plan's base-session device (#9828).
-      if (deviceLabel) {
-        enhancedParams.device = deviceLabel;
-      }
+      const enhancedParams = this.buildFailureObservationParams(
+        platform,
+        deviceId,
+        sessionUuid,
+        deviceLabel,
+      );
       // Internal failure-recovery observe (#3053): the callInternal seam (#3108)
       // marks it internal so it does not overwrite the agent-facing diff baseline
       // (`observe` always resets it). This capture is for the plan's failure
@@ -367,25 +423,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         stripUndeclaredSessionUuid(enhancedParams, observeTool.schema),
       ) as Record<string, unknown>;
 
-      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-      const deadline = new AbortController();
-      let response: unknown;
-      try {
-        const operation = ToolRegistry.callInternal(observeTool, parsedParams);
-        timeoutHandle = this.timer.setTimeout(
-          () => deadline.abort(new Error("failure observation timed out")),
-          DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS,
-        );
-        response = await raceWithDeadline(operation, {
-          timer: this.timer,
-          signal: deadline.signal,
-          label: "failure observation",
-        });
-      } finally {
-        if (timeoutHandle) {
-          this.timer.clearTimeout(timeoutHandle);
-        }
-      }
+      const response = await this.callObserveWithDeadline(observeTool, parsedParams, signal);
 
       const raw = this.parseStructuredToolPayload(response);
       if (!raw) {
@@ -393,6 +431,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
       return summarizeObserveResultForFailure(raw);
     } catch (error) {
+      if (signal?.aborted) {
+        // Cancelled mid-capture: there is no observation to report (#9885).
+        return undefined;
+      }
       // The observe schema parse above can throw a ZodError; render it the same
       // way the MCP boundary does rather than leaking the raw issue dump (#5854).
       return {
@@ -426,7 +468,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform: string | undefined,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
-    deviceLabel?: string,
+    scope: FailureObservationScope = {},
   ): Promise<FailureObservationSummary | undefined> {
     try {
       if (failedTool === "observe" && failureToolResponse !== undefined) {
@@ -442,7 +484,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (!platform) {
         return undefined;
       }
-      return await this.captureFailureObservation(platform, deviceId, sessionUuid, deviceLabel);
+      return await this.captureFailureObservation(platform, deviceId, sessionUuid, scope);
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
@@ -591,7 +633,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           context.platform,
           context.deviceId,
           context.sessionUuid,
-          deviceLabel,
+          { deviceLabel, signal: context.signal },
         );
         const details: Record<string, unknown> = {
           params: step.params,
@@ -683,7 +725,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             context.platform,
             context.deviceId,
             context.sessionUuid,
-            deviceLabel,
+            { deviceLabel, signal: context.signal },
           );
       this.logger.warn(
         `${context.logPrefix} step ${step.tool} threw; returning failed status`,

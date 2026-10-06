@@ -39,6 +39,7 @@ class OverlayControllerTest {
       onDismissed = { dismissed++ },
       eventSink = OverlayEventSink { if (connected) events += it },
       clock = { 42L },
+      lifecycle = OverlayLifecycle(FakeOverlayTimer()),
       render = { spec ->
         mapOverlaySpec(spec).also { models += it }.request()
       },
@@ -234,6 +235,7 @@ class OverlayControllerTest {
         OverlayResultSink { id, success, error ->
           results += OverlayResult(0, id, success, error)
         },
+        lifecycle = OverlayLifecycle(FakeOverlayTimer()),
         render = { error("render broke") },
       )
     failing.show("render", spec())
@@ -322,7 +324,7 @@ class OverlayControllerTest {
   }
 
   @Test
-  fun `destroy is silent terminal even when host removal fails and text fields control focusability`() =
+  fun `destroy emits teardown and is terminal even when host removal fails and text fields control focusability`() =
     runTest {
       controller.show(
         "show",
@@ -340,7 +342,8 @@ class OverlayControllerTest {
       controller.destroy()
       assertFalse(runtime.current.active)
       controller.interact(runtime, OverlayInteraction.TextChange("query", "late"))
-      assertEquals(1, events.size)
+      assertEquals(2, events.size)
+      assertEquals(Json.parseToJsonElement("""{"reason":"teardown"}"""), events.last().payload)
       assertEquals("typed", (runtime.current.state["query"] as OverlayScalar.Text).value)
     }
 

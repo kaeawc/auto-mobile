@@ -96,6 +96,7 @@ import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxy
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import { androidDisplayTapDispatch, dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { assertTouchscreenInputSucceeded } from "./touchscreenInput";
 import {
   requiresNodeSelector,
@@ -545,31 +546,54 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
 
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence.assertCurrent();
-    await dispatchAndroidCoordinateTap(
-      this.accessibilityService,
-      this.adb,
-      x,
-      y,
-      10,
-      undefined,
-      signal,
+    await this.executeAndroidCoordinateTap(
+      action,
+      { x, y },
+      {
+        signal,
+        fence,
+        onActivationWarnings: fenceOptions.onActivationWarnings,
+      },
     );
-    if (action === "doubleTap") {
-      await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
+  }
+
+  /** One tap, or a doubleTap whose touches are timed on the device when CtrlProxy supports it. */
+  private async executeAndroidCoordinateTap(
+    action: TapAnyElementOptions["action"],
+    point: { x: number; y: number },
+    context: {
+      signal?: AbortSignal;
+      fence: { assertCurrent(): void };
+      onActivationWarnings?: (warnings?: string[]) => void;
+    },
+  ): Promise<void> {
+    const { signal, fence } = context;
+    const tapOnce = async () => {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
       await dispatchAndroidCoordinateTap(
         this.accessibilityService,
         this.adb,
-        x,
-        y,
+        point.x,
+        point.y,
         10,
         undefined,
         signal,
       );
+    };
+    if (action !== "doubleTap") {
+      await tapOnce();
+      return;
     }
+    await dispatchAndroidDoubleTap({
+      client: this.accessibilityService,
+      point,
+      timer: this.timer,
+      signal,
+      assertCurrent: () => fence.assertCurrent(),
+      onWarning: (warning) => context.onActivationWarnings?.([warning]),
+      tap: tapOnce,
+    });
   }
 
   private async executeAndroidLongPress(
@@ -1754,7 +1778,13 @@ export class TapAnyElement extends BaseVisualChange {
               this.accessibilityService,
               this.adb,
               { action, duration: longPressDuration },
-              { target: targetDisplay, signal, onDispatched, timer: this.timer },
+              {
+                target: targetDisplay,
+                signal,
+                onDispatched,
+                timer: this.timer,
+                onWarning: (warning) => onActivationWarnings([warning]),
+              },
             )
           : undefined;
         if (dispatch) {

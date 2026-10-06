@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -13,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Point
@@ -31,6 +33,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
@@ -50,9 +53,11 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayResultSink
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -334,6 +339,54 @@ internal data class AccessibilityEventWork(
   companion object {
     /** Nothing to do — no interaction recording and no hierarchy refresh (the expensive work). */
     val NONE = AccessibilityEventWork(interaction = null, refreshesHierarchy = false)
+  }
+}
+
+/**
+ * True only for an event from CtrlProxy's own accessibility-overlay window (the highlight overlay
+ * or the interactive overlay). CtrlProxy's package also owns the CtrlProxy keyboard
+ * (`TYPE_INPUT_METHOD`) and `MainActivity` (`TYPE_APPLICATION`), whose events must still advance
+ * `frameContext` and refresh the hierarchy, so they are never skipped. Fails open: an unknown
+ * window type ([windowType] null) is processed, because handling one extra event is safe while
+ * dropping a keyboard event leaves stale key coordinates passing the staleness check.
+ */
+internal fun shouldSkipOwnOverlayEvent(
+  eventPackage: String?,
+  ownPackage: String,
+  windowType: Int?,
+): Boolean =
+  eventPackage == ownPackage && windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+
+/**
+ * Window type of the window [event] came from, or null when it cannot be determined (no source
+ * node, window not retrievable, or the node call throws). Reads the source node's window rather
+ * than enumerating `windows`, so no window list is allocated per event.
+ */
+private fun ownEventWindowType(event: AccessibilityEvent): Int? {
+  val source =
+    try {
+      event.source
+    } catch (_: Exception) {
+      // Fail open: a source that cannot be read leaves the type unknown, so the event is processed.
+      return null
+    }
+  if (source == null) return null
+  return try {
+    val window = source.window
+    try {
+      window?.type
+    } finally {
+      window?.recycle()
+    }
+  } catch (_: Exception) {
+    // Fail open: a window that cannot be read leaves the type unknown, so the event is processed.
+    null
+  } finally {
+    try {
+      source.recycle()
+    } catch (_: Exception) {
+      /* already recycled */
+    }
   }
 }
 
@@ -1379,6 +1432,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val screenStateReceiver =
     object : BroadcastReceiver() {
       override fun onReceive(context: Context?, intent: Intent?) {
+        refreshOverlayWindow()
         when (intent?.action) {
           Intent.ACTION_SCREEN_ON -> {
             Log.i(TAG, "Screen turned ON, triggering hierarchy extraction")
@@ -1514,6 +1568,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
           onTransition = { transition ->
             serviceScope.launch {
+              if (
+                ::overlayController.isInitialized && transition.displayId == Display.DEFAULT_DISPLAY
+              ) {
+                overlayController.onConfigurationChanged(transition.change != "removed")
+              }
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
                 webSocketServer.broadcast(displayTransitionFrame(transition))
               }
@@ -1535,6 +1594,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             DefaultInteractiveOverlayHost(
               context = this,
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
+              onWindowLost = ::refreshOverlayWindow,
+              isBlocked = ::isOverlayBlocked,
             ),
             OverlayResultSink { requestId, success, error ->
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
@@ -1550,6 +1611,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 overlayManager.setInteractiveOverlayAttached(false)
               }
             },
+            lifecycle =
+              OverlayLifecycle(
+                CoroutineOverlayScheduler(serviceScope),
+                isBlocked = ::isOverlayBlocked,
+                observerSession = {
+                  if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
+                  else 0
+                },
+                clientCount = {
+                  // Unknown (server not up yet) counts as connected: never drop an overlay on a
+                  // guess.
+                  if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 1
+                },
+              ),
             eventSink =
               OverlayEventSink { event ->
                 if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
@@ -1673,6 +1748,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         IntentFilter().apply {
           addAction(Intent.ACTION_SCREEN_ON)
           addAction(Intent.ACTION_SCREEN_OFF)
+          addAction(Intent.ACTION_USER_PRESENT)
         }
       registerReceiver(screenStateReceiver, screenStateFilter)
       Log.d(TAG, "Screen state receiver registered")
@@ -1769,6 +1845,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
         val queuedHandler = queuedMessageHandler()
+        val overlays = overlayController
         webSocketServer =
           WebSocketServer(
             port = 8765,
@@ -1777,6 +1854,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientDisconnected = { client ->
               queuedHandler.disconnect(client)
               gestureStreamRouter.cancelOwnedBy(client)
+            },
+            onClientCountChanged = { count, session ->
+              serviceScope.launch { overlays.onClientCountChanged(count, session) }
             },
             onPermanentStartFailure = { disableSelf() },
           )
@@ -1853,10 +1933,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Android can reconnect this service in the same process before onDestroy runs.
     webSocketLifecycle.stop()
     if (::overlayController.isInitialized) {
-      // Dismiss without terminal destruction so a same-process rebind can show overlays again.
-      CoroutineScope(Dispatchers.Main.immediate).launch {
-        overlayController.dismiss(requestId = null, id = null, all = true)
-      }
+      // Dismiss (reason teardown) without terminal destruction: a same-process rebind reuses this
+      // controller, and onServiceConnected has early-exit paths that would leave a destroyed one.
+      CoroutineScope(Dispatchers.Main.immediate).launch { overlayController.dismissForUnbind() }
     }
     return super.onUnbind(intent)
   }
@@ -3074,11 +3153,45 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  private fun isOverlayBlocked(): Boolean {
+    val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
+    // Missing safety services fail closed rather than allowing an overlay over an unknown lock
+    // state.
+    return keyguard?.isKeyguardLocked != false || power?.isInteractive != true
+  }
+
+  private fun refreshOverlayWindow() {
+    if (::overlayController.isInitialized) {
+      val controller = overlayController
+      serviceScope.launch { controller.onConfigurationChanged() }
+    }
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    refreshOverlayWindow()
+  }
+
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null) {
       Log.w(TAG, "onAccessibilityEvent: no event")
       return
     }
+
+    // Overlay animations must not feed the hierarchy debouncer or navigation tracking. Only the
+    // overlay's OWN accessibility-overlay windows are dropped: this package also owns the CtrlProxy
+    // keyboard (input-method window) and MainActivity, whose events must keep advancing
+    // frameContext
+    // and feeding the hierarchy push. The window type is resolved only for own-package events.
+    val eventPackage = event.packageName?.toString()
+    val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
+    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    if (
+      event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+        event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+    )
+      refreshOverlayWindow()
 
     try {
       when (event.eventType) {

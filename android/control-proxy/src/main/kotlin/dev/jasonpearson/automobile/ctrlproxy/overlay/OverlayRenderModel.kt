@@ -178,27 +178,64 @@ private fun mapOverlayNode(
   )
 }
 
-private val interpolationToken = Regex("\\{([A-Za-z_][A-Za-z0-9_]*)}")
-
 /**
  * Pager placeholders use one-based page labels in the nearest pager; outside it they stay literal.
+ *
+ * Tokens (`{key}` with an ASCII identifier key) are found by a plain string scan rather than a
+ * regex: Android's ICU regex engine rejects a lone `}` that the desktop JVM accepts, which broke
+ * every overlay `show` on a device (#9947) while the JVM unit tests stayed green.
  */
 fun interpolateOverlayText(
   text: String,
   state: Map<String, OverlayScalar>,
   inPager: Boolean = false,
-): String =
-  interpolationToken.replace(text) { match ->
-    val key = match.groupValues[1]
-    if (!inPager && (key == "page" || key == "pageCount")) match.value
-    else
-      when (val value = state[key]) {
-        is OverlayScalar.Text -> value.value
-        is OverlayScalar.BooleanValue -> value.value.toString()
-        is OverlayScalar.Numeric -> value.value.toString().removeSuffix(".0")
-        null -> match.value
-      }
+): String {
+  val out = StringBuilder(text.length)
+  var index = 0
+  while (index < text.length) {
+    val end = interpolationTokenEnd(text, index)
+    if (end < 0) {
+      out.append(text[index])
+      index++
+    } else {
+      out.append(resolveInterpolation(text.substring(index, end), state, inPager))
+      index = end
+    }
   }
+  return out.toString()
+}
+
+/**
+ * Returns the index just past the `{key}` token starting at [start], or -1 if none starts there.
+ */
+private fun interpolationTokenEnd(text: String, start: Int): Int {
+  var index = start + 1
+  val opensToken = text[start] == '{' && index < text.length && isInterpolationKeyStart(text[index])
+  if (opensToken) {
+    index++
+    while (index < text.length && isInterpolationKeyPart(text[index])) index++
+  }
+  return if (opensToken && index < text.length && text[index] == '}') index + 1 else -1
+}
+
+private fun isInterpolationKeyStart(c: Char): Boolean = c in 'A'..'Z' || c in 'a'..'z' || c == '_'
+
+private fun isInterpolationKeyPart(c: Char): Boolean = isInterpolationKeyStart(c) || c in '0'..'9'
+
+private fun resolveInterpolation(
+  token: String,
+  state: Map<String, OverlayScalar>,
+  inPager: Boolean,
+): String {
+  val key = token.substring(1, token.length - 1)
+  if (!inPager && (key == "page" || key == "pageCount")) return token
+  return when (val value = state[key]) {
+    is OverlayScalar.Text -> value.value
+    is OverlayScalar.BooleanValue -> value.value.toString()
+    is OverlayScalar.Numeric -> value.value.toString().removeSuffix(".0")
+    null -> token
+  }
+}
 
 /** The settled design specifies AARRGGBB (alpha first), not CSS RRGGBBAA. */
 fun overlayColor(value: String): Color {

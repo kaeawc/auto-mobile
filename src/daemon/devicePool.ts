@@ -3915,7 +3915,14 @@ export class DevicePool {
         }
         const matchingAvd = matchingAvds[0];
         if (!matchingAvd) {
-          return "stopped";
+          return await this.stopRecoveryTargetMissingFromOnlineList({
+            avdName,
+            deviceId: disconnectedDevice.id,
+            adoptOnly,
+            discover,
+            signal,
+            deadlineMs,
+          });
         }
         if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
           if (matchingAvd.deviceId === disconnectedDevice.id) {
@@ -3951,30 +3958,13 @@ export class DevicePool {
           signal,
         });
         signal.throwIfAborted();
-        for (;;) {
-          const devices = await discover();
-          // A same-AVD replacement still holds the image's locks; a different
-          // AVD reusing the old serial must be preserved without another kill.
-          const stillPresent = devices.some((device) => device.name === avdName);
-          // The online-only list also lacks an emulator that dropped to adb `offline`
-          // mid-kill while its process still runs (#10100).
-          if (
-            !stillPresent &&
-            !(await this.isAndroidSerialHeldOffline(
-              avdName,
-              matchingAvd.deviceId,
-              signal,
-              deadlineMs,
-            ))
-          ) {
-            logger.info(
-              `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
-            );
-            return "stopped";
-          }
-          await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
-          signal.throwIfAborted();
-        }
+        return await this.confirmRecoveryStop(
+          avdName,
+          matchingAvd.deviceId,
+          discover,
+          signal,
+          deadlineMs,
+        );
       }));
     try {
       return await raceWithDeadline(startShutdown, {
@@ -3994,6 +3984,68 @@ export class DevicePool {
         retainLeaseUntil(shutdown);
       }
       throw new UnconfirmedRecoveryShutdownError(avdName, error);
+    }
+  }
+
+  /**
+   * The AVD is absent from the online-only list before any kill. That is not proof
+   * its emulator stopped: a transport that dropped to adb `offline` leaves the
+   * process running and holding the AVD (#10074, #10100). When the recovery's own
+   * serial is still listed `offline`, send the console kill through the client's
+   * offline handling (`force` is what makes it dispatch to a serial that is attached
+   * but not online; the serial was just probed, so the only residual is a replacement
+   * taking it inside that window), then confirm the exit like any other kill. An
+   * adopt-only recovery never kills: its tracked process already exited. A serial
+   * absent from adb, or an unavailable probe, keeps the earlier answer.
+   */
+  private async stopRecoveryTargetMissingFromOnlineList(options: {
+    avdName: string;
+    deviceId: string;
+    adoptOnly: boolean;
+    discover: () => Promise<BootedDevice[]>;
+    signal: AbortSignal;
+    deadlineMs: number;
+  }): Promise<"stopped"> {
+    const { avdName, deviceId, adoptOnly, discover, signal, deadlineMs } = options;
+    if (
+      adoptOnly ||
+      !(await this.isAndroidSerialHeldOffline(avdName, deviceId, signal, deadlineMs))
+    ) {
+      return "stopped";
+    }
+    await this.deviceManager.killDevice(
+      { deviceId, name: avdName, platform: "android" },
+      { timeoutMs: Math.max(1, deadlineMs - this.timer.now()), signal, force: true },
+    );
+    signal.throwIfAborted();
+    return await this.confirmRecoveryStop(avdName, deviceId, discover, signal, deadlineMs);
+  }
+
+  private async confirmRecoveryStop(
+    avdName: string,
+    deviceId: string,
+    discover: () => Promise<BootedDevice[]>,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<"stopped"> {
+    for (;;) {
+      const devices = await discover();
+      // A same-AVD replacement still holds the image's locks; a different
+      // AVD reusing the old serial must be preserved without another kill.
+      const stillPresent = devices.some((device) => device.name === avdName);
+      // The online-only list also lacks an emulator that dropped to adb `offline`
+      // mid-kill while its process still runs (#10100).
+      if (
+        !stillPresent &&
+        !(await this.isAndroidSerialHeldOffline(avdName, deviceId, signal, deadlineMs))
+      ) {
+        logger.info(
+          `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
+        );
+        return "stopped";
+      }
+      await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
+      signal.throwIfAborted();
     }
   }
 

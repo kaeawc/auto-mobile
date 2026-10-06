@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import type { DeviceShutdownOptions } from "../../src/devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -35,12 +36,21 @@ class KillGoesOfflineManager extends FakeDeviceManager {
   offlineProbeFails = false;
   readonly offlineProbes: string[][] = [];
   readonly kills: string[] = [];
+  readonly killTargets: BootedDevice[] = [];
+  readonly killOptions: Array<DeviceShutdownOptions | undefined> = [];
+  /** Whether a kill ends the offline process (the console kill reached it). */
+  killClearsOffline = false;
   /** Called on each offline probe, before it answers. */
   onProbe: (probeCount: number) => void = () => {};
 
-  override async killDevice(device: BootedDevice): Promise<void> {
+  override async killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<void> {
     this.kills.push(device.deviceId);
+    this.killTargets.push(device);
+    this.killOptions.push(options);
     this.bootedDevices = this.bootedDevices.filter((d) => d.deviceId !== device.deviceId);
+    if (this.killClearsOffline) {
+      this.offlineSerials.delete(device.deviceId);
+    }
   }
 
   async getAndroidOfflineDeviceIds(candidateIds: Iterable<string>): Promise<Set<string>> {
@@ -148,6 +158,65 @@ describe("a recovery's stop confirmation after killing an untracked emulator (#1
       const outcome = await s.recover();
       expect(outcome).toEqual({ result: "recovered" });
       expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.offlineProbes).toEqual([[original.deviceId]]);
+      expect(s.manager.startedDevices).toHaveLength(1);
+    } finally {
+      s.sessions.stopCleanupTimer();
+    }
+  });
+});
+
+// The AVD is already missing from the online list BEFORE the recovery kills anything: an emulator
+// whose transport dropped to adb `offline` reads the same as a stopped one there.
+describe("a recovery's stop when the AVD is already absent from the online list (#10100)", () => {
+  /** The serial left the online list before recovery ran (it is offline or gone). */
+  async function setupAbsentBeforeKill() {
+    const s = await setup();
+    s.manager.bootedDevices = [];
+    return s;
+  }
+
+  test("an offline serial is killed through the console, then confirmed gone before the relaunch", async () => {
+    const s = await setupAbsentBeforeKill();
+    try {
+      s.manager.offlineSerials.add(original.deviceId);
+      s.manager.killClearsOffline = true;
+      const outcome = await s.recover();
+      expect(outcome).toEqual({ result: "recovered" });
+      expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.killTargets[0]).toEqual({
+        deviceId: original.deviceId,
+        name: original.name,
+        platform: "android",
+      });
+      // `force` is what makes the client's offline branch dispatch the console kill.
+      expect(s.manager.killOptions[0]?.force).toBe(true);
+      expect(s.manager.startedDevices).toHaveLength(1);
+    } finally {
+      s.sessions.stopCleanupTimer();
+    }
+  });
+
+  test("an offline serial that survives the kill is deferred and the AVD is not relaunched", async () => {
+    const s = await setupAbsentBeforeKill();
+    try {
+      s.manager.offlineSerials.add(original.deviceId);
+      const outcome = await s.recover();
+      expect(outcome).toEqual({ result: "deferred" });
+      expect(s.manager.kills).toEqual([original.deviceId]);
+      expect(s.manager.startedDevices).toHaveLength(0);
+      expect(s.pool.getRecoveringAndroidTargets().names).toEqual(new Set([original.name]));
+    } finally {
+      s.sessions.stopCleanupTimer();
+    }
+  });
+
+  test("a serial absent from adb altogether is stopped without any kill", async () => {
+    const s = await setupAbsentBeforeKill();
+    try {
+      const outcome = await s.recover();
+      expect(outcome).toEqual({ result: "recovered" });
+      expect(s.manager.kills).toEqual([]);
       expect(s.manager.offlineProbes).toEqual([[original.deviceId]]);
       expect(s.manager.startedDevices).toHaveLength(1);
     } finally {

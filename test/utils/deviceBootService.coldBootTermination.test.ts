@@ -639,6 +639,58 @@ describe("DeviceBootService cancelled-launch termination (#10075)", () => {
     expect(t.retained.length).toBeGreaterThan(0);
   });
 
+  it("confirms the exit before rejecting when it can neither own nor retain the lease", async () => {
+    // The provisionDevice and CLI wiring: an external lease, no `retainLeaseUntil`.
+    const t = setup();
+    const controller = new AbortController();
+    const lease = await t.coordinator.reserve(
+      { kind: "stable", platform: "android", stableId: image.name },
+      { operation: "start", deadlineMs: 60_000 },
+    );
+    cancelLaunchOnAbort(t, t.emulator.process);
+    const outcome = track(t.boot(lease, controller.signal, false));
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+
+    // The caller would release its lease on this rejection, so it must not come yet.
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    expect(outcome.settled()).toBe(false);
+
+    t.timer.advanceTime(GRACE_MS);
+    await settle();
+    expect(t.emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(outcome.settled()).toBe(false);
+
+    t.emulator.exit();
+    await settle();
+    expect(outcome.settled()).toBe(true);
+    expect(String((outcome.error() as Error).message)).toContain("request cancelled");
+    expect(t.retained).toHaveLength(0);
+  });
+
+  it("confirms the exit before rejecting for a one-shot owner whose cleanup cannot outlive it", async () => {
+    const t = setup();
+    const controller = new AbortController();
+    cancelLaunchOnAbort(t, t.emulator.process);
+    const outcome = track(
+      t.boot(undefined, controller.signal, true, { cleanupMayOutliveRequest: false }),
+    );
+    await settle();
+    controller.abort(new Error("request cancelled"));
+    await settle();
+
+    expect(t.emulator.signals).toEqual(["SIGTERM"]);
+    expect(outcome.settled()).toBe(false);
+
+    t.emulator.exit();
+    await settle();
+    expect(outcome.settled()).toBe(true);
+    const nextGranted = t.nextRequestForAvd();
+    await settle();
+    expect(nextGranted()).toBe(true);
+  });
+
   it("sends no signal when the launch was cancelled before anything spawned", async () => {
     const t = setup();
     const controller = new AbortController();

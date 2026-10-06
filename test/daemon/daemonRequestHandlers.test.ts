@@ -550,6 +550,137 @@ describe("handleDaemonRequest", () => {
     });
   });
 
+  describe("CLI heartbeat keeper on a proxy-owned session (#10054)", () => {
+    const sessionId = "keeper-vs-proxy";
+    const keeperRequest = (token: string | undefined, claim: boolean) =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "cli",
+        livenessOwnerKind: "cli-keeper",
+        idleTimeoutMs: 600_000,
+        ...(token ? { livenessOwnerToken: token } : {}),
+        ...(claim ? { claimLivenessOwnership: true } : {}),
+      });
+    const proxyClaim = (token: string, livenessPolicy: string) =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy,
+        livenessOwnerToken: token,
+        claimLivenessOwnership: true,
+      });
+
+    async function stateWithSession(): Promise<FakeDaemonState> {
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      return new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      );
+    }
+
+    function snapshotOf() {
+      const session = sessionManager.getSession(sessionId)!;
+      return {
+        livenessPolicy: session.livenessPolicy,
+        livenessOwnerToken: session.livenessOwnerToken,
+        lastUsedAt: session.lastUsedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        expiresAt: session.expiresAt,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      };
+    }
+
+    test.each([
+      { name: "a foreign-token claim", token: "keeper", claim: true },
+      { name: "a claim with the proxy's own token", token: "proxy-a", claim: true },
+      { name: "a foreign-token tick", token: "keeper", claim: false },
+      { name: "a tick with the proxy's own token", token: "proxy-a", claim: false },
+      { name: "a tokenless heartbeat", token: undefined, claim: false },
+    ])(
+      "refuses $name with liveness_owner_is_proxy and changes nothing",
+      async ({ token, claim }) => {
+        const state = await stateWithSession();
+        expect((await handleDaemonRequest(proxyClaim("proxy-a", "heartbeat"), state)).success).toBe(
+          true,
+        );
+        fakeTimer.advanceTime(3_000);
+        const before = snapshotOf();
+        fakeTimer.advanceTime(2_000);
+
+        expect(await handleDaemonRequest(keeperRequest(token, claim), state)).toEqual({
+          success: false,
+          code: "liveness_owner_is_proxy",
+          error: expect.stringContaining(`owned by an MCP proxy`),
+        });
+        expect(snapshotOf()).toEqual(before);
+      },
+    );
+
+    test("names the session, the proxy ownership and session-info in the error", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(proxyClaim("proxy-a", "heartbeat"), state);
+
+      const refusal = await handleDaemonRequest(keeperRequest("keeper", true), state);
+
+      expect(refusal.error).toContain(sessionId);
+      expect(refusal.error).toContain("only liveness owner");
+      expect(refusal.error).toContain(`--daemon session-info ${sessionId}`);
+    });
+
+    test("refuses even when the proxy's lease has expired, where the generic conflict would not fire", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(proxyClaim("proxy-a", "heartbeat"), state);
+      fakeTimer.advanceTime(sessionManager.getSession(sessionId)!.heartbeatTimeoutMs + 1);
+      const before = snapshotOf();
+
+      expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toMatchObject({
+        success: false,
+        code: "liveness_owner_is_proxy",
+      });
+      expect(snapshotOf()).toEqual(before);
+    });
+
+    test("keeps a one-shot CLI session on the keeper's claim and ticks as before", async () => {
+      const state = await stateWithSession();
+
+      expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toMatchObject({
+        success: true,
+        result: { sessionId, livenessPolicy: "cli-idle" },
+      });
+      expect(snapshotOf()).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "keeper",
+      });
+
+      fakeTimer.advanceTime(30_000);
+      expect(await handleDaemonRequest(keeperRequest("keeper", false), state)).toMatchObject({
+        success: true,
+      });
+      expect(snapshotOf()).toMatchObject({ lastHeartbeat: fakeTimer.now() });
+
+      // A later one-shot keeper with a new token claims the cli-idle session.
+      expect(await handleDaemonRequest(keeperRequest("keeper-2", true), state)).toMatchObject({
+        success: true,
+      });
+      expect(snapshotOf()).toMatchObject({ livenessOwnerToken: "keeper-2" });
+    });
+
+    test("does not refuse a one-shot --cli proxy's own declaration without the keeper marker", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(proxyClaim("cli-proxy", "heartbeat"), state);
+
+      expect(await handleDaemonRequest(proxyClaim("cli-proxy", "cli"), state)).toMatchObject({
+        success: true,
+        result: { livenessPolicy: "cli-idle" },
+      });
+      expect(snapshotOf()).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "cli-proxy",
+      });
+    });
+  });
+
   test("reports every displaced keeper tick while a stalled proxy times out", async () => {
     const sessionId = "stalled-proxy";
     const state = new FakeDaemonState(

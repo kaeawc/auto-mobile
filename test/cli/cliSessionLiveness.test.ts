@@ -10,6 +10,7 @@ import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_VERSION,
@@ -379,6 +380,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         params: {
           sessionId: "shared",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
         },
       },
@@ -461,6 +463,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         params: {
           sessionId: "shared",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
           livenessOwnerToken: "ios-video-keeper",
         },

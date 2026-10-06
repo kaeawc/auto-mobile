@@ -18,6 +18,12 @@ export interface PlanStep {
    * or may not be present).
    */
   optional?: boolean;
+  /**
+   * Step-level `expectations` as authored in the plan YAML (accepted by the plan schema). They are
+   * carried here, NOT in `params`, so a strict tool schema never rejects the step because of
+   * them. Nothing evaluates them yet (#9925): the executor reports a warning on the step instead.
+   */
+  expectations?: unknown[];
 }
 
 export interface PlanDeviceDefinition {

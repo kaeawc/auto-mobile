@@ -160,4 +160,24 @@ describe("SingleFlight", () => {
     pending.resolve("still running");
     await expect(late).resolves.toBe("still running");
   });
+
+  test("has() reports a joinable flight only until it settles or is abandoned", async () => {
+    const pending = Promise.withResolvers<string>();
+    const waiter = new AbortController();
+    const singleFlight = new SingleFlight<string, string>();
+    expect(singleFlight.has("inventory")).toBe(false);
+
+    const abandoned = singleFlight.run("inventory", () => pending.promise, waiter.signal, {
+      cancelWhenAllWaitersAbort: true,
+    });
+    expect(singleFlight.has("inventory")).toBe(true);
+    waiter.abort();
+    await expect(abandoned).rejects.toThrow(/abort/i);
+    expect(singleFlight.has("inventory")).toBe(false);
+
+    const settled = singleFlight.run("inventory", async () => "done");
+    expect(singleFlight.has("inventory")).toBe(true);
+    await settled;
+    expect(singleFlight.has("inventory")).toBe(false);
+  });
 });

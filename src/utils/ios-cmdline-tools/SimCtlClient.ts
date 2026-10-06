@@ -341,7 +341,11 @@ export interface SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise that resolves when termination is complete
    */
-  terminateApp(bundleId: string, deviceId?: string): Promise<void>;
+  terminateApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * Install an app on the simulator
@@ -2726,12 +2730,20 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise that resolves when termination is complete
    */
-  async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
+  async terminateApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Terminating app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
-      await this.executeCommandArgs(["terminate", targetDevice, bundleId]);
+      await this.executeCommandArgs(
+        ["terminate", targetDevice, bundleId],
+        options?.timeoutMs,
+        options?.signal,
+      );
     } catch (error) {
       logger.warn(`Failed to terminate iOS app ${bundleId}: ${error}`);
       throw error;

@@ -1,5 +1,6 @@
 import type { DeviceUrlLauncher } from "./DeviceAppManager";
 import { logger } from "../logger";
+import { combineWithAmbientAbort } from "../AbortContext";
 import { isIosPhysicalUdid } from "./iosDeviceType";
 import { resolveIosDeviceKind } from "./IosDeviceKind";
 import type { SimCtlClient } from "./SimCtlClient";
@@ -14,12 +15,25 @@ import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainer
 /** The iOS operation currently shared by simulator and physical-device actions. */
 export interface IosDeviceBackend {
   readonly kind: "simulator" | "physical";
-  uninstallApp(bundleId: string): Promise<void>;
+  /**
+   * `signal` is the request's cancellation signal; the ambient request signal is
+   * always honoured as well. A cancellation seen before the uninstall is
+   * dispatched rejects without removing the app.
+   */
+  uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export interface DeviceAppUninstaller {
-  uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
+  uninstallApp(
+    deviceUdid: string,
+    bundleId: string,
+    isSimulator?: boolean,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }
+
+/** The pre-uninstall terminate is best-effort, so it gets a short bound of its own. */
+const SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS = 15_000;
 
 export interface IosDeviceBackendDeps {
   simctl: Pick<SimCtlClient, "terminateApp">;
@@ -34,13 +48,29 @@ export class SimulatorIosDeviceBackend implements IosDeviceBackend {
     private readonly deps: IosDeviceBackendDeps,
   ) {}
 
-  async uninstallApp(bundleId: string): Promise<void> {
+  async uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void> {
+    const requestSignal = combineWithAmbientAbort(signal);
+    requestSignal?.throwIfAborted();
     try {
-      await this.deps.simctl.terminateApp(bundleId, this.deviceId);
+      await this.deps.simctl.terminateApp(bundleId, this.deviceId, {
+        timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
+        ...(requestSignal ? { signal: requestSignal } : {}),
+      });
     } catch (error) {
+      // A cancellation is not a terminate failure to shrug off: continuing would
+      // remove the app for a request the caller already abandoned (issue #10077).
+      requestSignal?.throwIfAborted();
       logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
     }
-    await this.deps.deviceAppUninstaller.uninstallApp(this.deviceId, bundleId, true);
+    // The terminate may have succeeded just as the request was cancelled; fence
+    // the destructive step so it is never dispatched for a cancelled request.
+    requestSignal?.throwIfAborted();
+    await this.deps.deviceAppUninstaller.uninstallApp(
+      this.deviceId,
+      bundleId,
+      true,
+      requestSignal ? { signal: requestSignal } : undefined,
+    );
   }
 }
 

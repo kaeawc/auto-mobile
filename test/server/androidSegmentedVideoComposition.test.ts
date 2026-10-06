@@ -52,10 +52,16 @@ function deferred<T>(): Deferred<T> {
 
 /**
  * The real manager touches the filesystem, which a microtask drain cannot wait out. Yield real
- * event-loop turns (no wall-clock sleep) until the condition holds.
+ * event-loop turns (no wall-clock sleep) until the condition holds. The turn cap is only a
+ * failure bound, not a delay: filesystem completions land on the poll phase, and a loaded
+ * runner can run many turns before the thread pool answers, so the cap is deliberately huge
+ * (a few hundred turns flaked under CPU contention). The happy path exits on the first turn
+ * the condition holds.
  */
+const MAX_SETTLE_TURNS = 5_000_000;
+
 async function settleUntil(condition: () => boolean, description: string): Promise<void> {
-  for (let turn = 0; turn < 500 && !condition(); turn++) {
+  for (let turn = 0; turn < MAX_SETTLE_TURNS && !condition(); turn++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
   if (!condition()) {

@@ -116,6 +116,12 @@ export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded"
 /** A claim from a different token was rejected because the owner's lease is live (#10050). */
 export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
 
+/**
+ * An external `--daemon heartbeat` keeper tried to heartbeat or claim a session a stdio/HTTP proxy
+ * owns. Liveness flows harness -> proxy -> daemon only, so the keeper is refused (#10054).
+ */
+export const DAEMON_LIVENESS_OWNER_IS_PROXY_CODE = "liveness_owner_is_proxy";
+
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
 export interface BoundSessionLoss {

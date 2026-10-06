@@ -13,6 +13,7 @@ import {
 } from "./observerSessionRegistry";
 import {
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   DaemonRequest,
@@ -28,6 +29,7 @@ import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } fr
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
 import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
@@ -132,7 +134,8 @@ export type DaemonMethodResult = {
   code?:
     | typeof DAEMON_SESSION_NOT_FOUND_CODE
     | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
-    | typeof DAEMON_LIVENESS_OWNER_CONFLICT_CODE;
+    | typeof DAEMON_LIVENESS_OWNER_CONFLICT_CODE
+    | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -257,6 +260,7 @@ async function handleHeartbeat(
         idleTimeoutMs?: number;
         livenessOwnerToken?: string;
         claimLivenessOwnership?: boolean;
+        livenessOwnerKind?: string;
       }
     | undefined;
   const sessionId = heartbeatParams?.sessionId;
@@ -280,6 +284,10 @@ async function handleHeartbeat(
       error: `Session not found: ${sessionId}`,
       code: DAEMON_SESSION_NOT_FOUND_CODE,
     };
+  }
+  const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
+  if (keeperRefusal) {
+    return keeperRefusal;
   }
   const livenessOwnerToken =
     typeof heartbeatParams?.livenessOwnerToken === "string" &&
@@ -350,6 +358,33 @@ async function handleHeartbeat(
   }
   manager.recordHeartbeat?.(sessionId);
   return { success: true, result: { sessionId } };
+}
+
+/**
+ * A proxy owns a session when a token has claimed it under the strict heartbeat policy: stdio/HTTP
+ * proxies claim with `heartbeat`, while one-shot `--cli` owners move the session to `cli-idle`.
+ */
+function isProxyOwnedSession(session: Session): boolean {
+  return session.livenessPolicy === "heartbeat" && session.livenessOwnerToken !== undefined;
+}
+
+/**
+ * The external CLI keeper is for one-shot CLI sessions only. Refuse it on a proxy-owned session
+ * whatever its token or lease state, before any ownership or policy logic runs, so the refusal
+ * changes nothing on the session (#10054). Requests without the keeper marker are unaffected.
+ */
+function refuseCliKeeperOnProxySession(
+  livenessOwnerKind: string | undefined,
+  session: Session,
+): DaemonMethodResult | undefined {
+  if (livenessOwnerKind !== CLI_KEEPER_LIVENESS_OWNER_KIND || !isProxyOwnedSession(session)) {
+    return undefined;
+  }
+  return {
+    success: false,
+    code: DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
+    error: `Session ${session.sessionId} is owned by an MCP proxy, which is the only liveness owner for its sessions, so this heartbeat was rejected and nothing changed. The external heartbeat keeper is for one-shot CLI sessions only. Let the harness's proxy keep the session alive and check its state with \`--daemon session-info ${session.sessionId}\`.`,
+  };
 }
 
 /**

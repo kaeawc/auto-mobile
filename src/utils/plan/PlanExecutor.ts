@@ -573,6 +573,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
       const parsedParams = parseStepParams(tool.schema, enhancedParams);
+      if (step.tool === "tapAt" && step.geometry) {
+        parsedParams.__tapAtPlanContext = { geometry: step.geometry };
+      }
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);

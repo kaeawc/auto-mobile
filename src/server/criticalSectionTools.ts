@@ -229,6 +229,9 @@ async function executeCriticalSectionSteps(
         tool.schema,
         stripUndeclaredDeviceLabel(step.params, tool.schema),
       );
+      if (step.tool === "tapAt" && step.geometry) {
+        params.__tapAtPlanContext = { geometry: step.geometry };
+      }
       const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,

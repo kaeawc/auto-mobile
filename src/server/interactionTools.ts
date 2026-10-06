@@ -2197,6 +2197,7 @@ export async function tapAtHandler(
     },
     progress,
     signal,
+    args.__tapAtPlanContext ?? args.__tapAtRecordingContext,
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`

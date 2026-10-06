@@ -268,19 +268,66 @@ class NetworkMockRuleStoreTest {
     )
   }
 
-  // Deterministic: every publication gets fresh counters, including unchanged rules.
+  // Issue #10060: the host re-sends its whole list on every change and reconnect; an exhausted
+  // rule must stay exhausted when the same rule (same mockId and definition) is re-sent.
   @Test
-  fun `setRules resets remaining counters for unchanged rules`() {
+  fun `setRules keeps the consumed counter for an unchanged rule when another rule is added`() {
     val store = createStore()
-    val dtos = listOf(rule(limit = 5, remaining = 2))
+    val first = rule(mockId = "mock-1", path = "/login", limit = 1, remaining = 1)
+    store.setRules(listOf(first))
+    assertNotNull(store.findMatchingRule("api.example.com", "/login", "POST"))
+    assertNull(store.findMatchingRule("api.example.com", "/login", "POST"))
+
+    store.setRules(listOf(first, rule(mockId = "mock-2", path = "/profile")))
+
+    assertNull(store.findMatchingRule("api.example.com", "/login", "POST"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/profile", "GET"))
+  }
+
+  @Test
+  fun `setRules keeps a partially consumed counter across an identical re-push`() {
+    val store = createStore()
+    val dtos = listOf(rule(limit = 3, remaining = 3))
     store.setRules(dtos)
-    repeat(2) { assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET")) }
-    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
 
     store.setRules(dtos)
 
-    repeat(2) { assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET")) }
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
     assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+  }
+
+  @Test
+  fun `setRules gives a fresh counter to a new mockId or a changed definition`() {
+    val store = createStore()
+    store.setRules(listOf(rule(mockId = "mock-1", limit = 1, remaining = 1)))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    // Same id, different limit: a different rule, so it starts fresh.
+    store.setRules(listOf(rule(mockId = "mock-1", limit = 2, remaining = 2)))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    // New id, same definition: also fresh.
+    store.setRules(listOf(rule(mockId = "mock-9", limit = 2, remaining = 2)))
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+  }
+
+  @Test
+  fun `setRules with an empty list drops counters so a later push starts fresh`() {
+    val store = createStore()
+    val dtos = listOf(rule(limit = 1, remaining = 1))
+    store.setRules(dtos)
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+    assertNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+
+    store.setRules(emptyList())
+    store.setRules(dtos)
+
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
   }
 
   // --- Error simulation tests ---

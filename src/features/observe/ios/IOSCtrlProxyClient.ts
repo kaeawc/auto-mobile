@@ -2025,7 +2025,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     try {
       // Always sync mock rules on reconnect. Sending an empty list clears
       // stale rules that may linger in the iOS SDK after a CtrlProxy restart.
-      const rules = buildNetworkMockRules(NetworkState.getInstance());
+      const rules = buildNetworkMockRules(NetworkState.getInstance(), this.device.deviceId);
       // sendMessage returns false (and logs) when the socket is not open.
       return this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }))
         ? "sent"
@@ -2050,7 +2050,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
     try {
-      const sim = NetworkState.getInstance().simulation;
+      const sim = NetworkState.getInstance().getSimulation(this.device.deviceId);
       if (sim === null) {
         this.sendMessage(
           JSON.stringify({
@@ -2303,6 +2303,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       logger.debug(`[IOSCtrlProxyClient] mock-rule sync skipped: ${error.message}`);
       return "superseded";
     }
+  }
+
+  /**
+   * Push THIS device's mock rules and error simulation from the host store.
+   * Used after a session release clears the store (issue #10061); the
+   * reconnect path runs the same two syncs.
+   */
+  public async syncNetworkStateFromHost(): Promise<void> {
+    await this.syncNetworkMockRulesIfAvailable();
+    this.syncNetworkErrorSimulationToDevice();
   }
 
   private syncHierarchyCadenceToDevice(): void {

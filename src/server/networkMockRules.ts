@@ -21,16 +21,21 @@ export interface NetworkMockRuleSync {
 }
 
 /**
- * Build the device-bound mock-rule payload from the current {@link NetworkState}.
+ * Build the device-bound mock-rule payload for ONE device from the current
+ * {@link NetworkState} (issue #10061: a device only ever receives its own rules).
  *
  * Single source of truth for the host → device mock-rule mapping shared by the
  * Android and iOS CtrlProxy clients (reconnect sync) and the `network` tool
- * (live sync). `remaining` is reinitialized from `limit` rather than copied from
- * the store: the server never tracks consumption, so the device-side
- * NetworkMockRuleStore must start each connection with fresh counts.
+ * (live sync). `remaining` is the install-time count (`limit`): the server never
+ * tracks consumption, and the device-side NetworkMockRuleStore keeps the live
+ * count per `mockId` across a re-push (issue #10060), so a rule it already holds
+ * is never re-armed by this value.
  */
-export function buildNetworkMockRules(state: NetworkState): NetworkMockRuleSync[] {
-  return Array.from(state.getMocks().values()).map((r: MockRule) => ({
+export function buildNetworkMockRules(
+  state: NetworkState,
+  deviceId: string,
+): NetworkMockRuleSync[] {
+  return Array.from(state.getMocks(deviceId).values()).map((r: MockRule) => ({
     mockId: r.mockId,
     host: r.host,
     path: r.path,

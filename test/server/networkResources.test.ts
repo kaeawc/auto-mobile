@@ -3,6 +3,7 @@ import { aggregateStatsByHost, bucketEvents } from "../../src/server/networkReso
 import { registerNetworkResources } from "../../src/server/networkResources";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { NetworkState } from "../../src/server/NetworkState";
 
 function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWithId {
   return {
@@ -292,6 +293,37 @@ describe("network resource registration", () => {
 
   afterEach(() => {
     ResourceRegistry.clearResources();
+    NetworkState.resetInstance();
+  });
+
+  it("lists every device's mock rules tagged with the device they apply to (#10061)", async () => {
+    registerNetworkResources();
+    const state = NetworkState.getInstance();
+    const rule = {
+      path: "/x",
+      method: "*",
+      limit: null,
+      statusCode: 500,
+      responseHeaders: {},
+      responseBody: "",
+      contentType: "application/json",
+    };
+    state.addMock("emulator-5554", { ...rule, host: "a.com" });
+    state.addMock("emulator-5556", { ...rule, host: "b.com" });
+
+    const content = await ResourceRegistry.getResource("automobile:network/mocks")!.handler();
+    const payload = JSON.parse(content.text!);
+
+    expect(payload.count).toBe(2);
+    expect(payload.mocks.map((mock: { deviceId: string }) => mock.deviceId)).toEqual([
+      "emulator-5554",
+      "emulator-5556",
+    ]);
+    state.clearAllMocks("emulator-5556");
+    const after = JSON.parse(
+      (await ResourceRegistry.getResource("automobile:network/mocks")!.handler()).text!,
+    );
+    expect(after.count).toBe(1);
   });
 
   it("uses the canonical automobile:path form for every network resource", () => {

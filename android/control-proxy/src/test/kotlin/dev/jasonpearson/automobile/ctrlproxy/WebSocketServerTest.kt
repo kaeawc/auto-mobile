@@ -1132,6 +1132,73 @@ class WebSocketServerTest {
     }
 
   @Test
+  fun `a syntax error next to asset bytes does not echo them in the error reply`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      // The parser fails right after the data, so its input snippet is made of the data. The
+      // frame is not valid JSON, so its type is unreadable and the reply is a generic error.
+      val raw =
+        """{"type":"put_overlay_asset","requestId":"put-adjacent","id":"hero","mimeType":"image/png","dataBase64":"$bytes" "x"}"""
+      server.handleClientMessage(raw, owner)
+      runCurrent()
+      assertEquals(1, transport.messages.size)
+      val reply = transport.messages.single()
+      assertFalse(reply, reply.contains("SECRETBYTES"))
+      assertTrue(reply, reply.contains("Malformed request:"))
+      assertTrue("diagnosis is kept: $reply", reply.contains("offset"))
+    }
+
+  @Test
+  fun `a well formed asset frame that fails decoding next to the data echoes no bytes`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      server.handleClientMessage(
+        """{"type":"put_overlay_asset","requestId":"adj","dataBase64":"$bytes","mimeType":["image/png"],"id":"hero"}""",
+        owner,
+      )
+      runCurrent()
+      assertEquals(1, transport.messages.size)
+      val reply = transport.messages.single()
+      assertFalse(reply, reply.contains("SECRETBYTES"))
+      assertTrue(Json.decodeFromString<WebSocketResponse>(reply) is OverlayResult)
+    }
+
+  @Test
+  fun `a truncated asset frame whose type cannot be parsed still echoes no bytes`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      server.handleClientMessage(
+        """{"type":"put_overlay_asset","requestId":"cut","id":"hero","dataBase64":"$bytes""",
+        owner,
+      )
+      runCurrent()
+      assertEquals(1, transport.messages.size)
+      assertFalse(transport.messages.single().contains("SECRETBYTES"))
+    }
+
+  @Test
+  fun `describeDecodeFailure drops the parser input snippet for asset frames only`() {
+    val snippet = "JSON input: ...SECRETBYTES..."
+    val failure = IllegalArgumentException("Unexpected JSON token at offset 40: bad\n$snippet")
+    val asset = """{"type":"put_overlay_asset","dataBase64":"SECRETBYTES"}"""
+    assertEquals(
+      "Malformed request: Unexpected JSON token at offset 40: bad",
+      WebSocketServer.describeDecodeFailure(asset, failure),
+    )
+    val other = """{"type":"show_overlay","x":"oops"}"""
+    assertTrue(WebSocketServer.describeDecodeFailure(other, failure).contains("SECRETBYTES"))
+  }
+
+  @Test
   fun `asset requests are advertised so older devices can be detected by absence`() {
     val commands = WebSocketServer(port = 0, scope = testScope).supportedCommands()
     assertTrue(commands.contains("put_overlay_asset"))

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import java.io.IOException
+import java.util.concurrent.Executor
 
 /** In-memory [OverlayAssetFiles] with failure injection; nothing touches the file system. */
 internal class FakeOverlayAssetFiles : OverlayAssetFiles {
@@ -9,8 +10,12 @@ internal class FakeOverlayAssetFiles : OverlayAssetFiles {
   var failReads = false
   var deleteAllCalls = 0
 
+  /** Runs inside every write, after the failure check and before the bytes land. */
+  var onWrite: (() -> Unit)? = null
+
   override fun write(name: String, bytes: ByteArray) {
     if (failWrites) throw IOException("fake write failure")
+    onWrite?.invoke()
     stored[name] = bytes
   }
 
@@ -26,6 +31,21 @@ internal class FakeOverlayAssetFiles : OverlayAssetFiles {
   override fun deleteAll() {
     deleteAllCalls++
     stored.clear()
+  }
+}
+
+/** Holds work until [runAll], standing in for the IO executor the store defers file deletes to. */
+internal class QueuedExecutor : Executor {
+  private val tasks = ArrayDeque<Runnable>()
+  val pending: Int
+    get() = tasks.size
+
+  override fun execute(command: Runnable) {
+    tasks.addLast(command)
+  }
+
+  fun runAll() {
+    while (tasks.isNotEmpty()) tasks.removeFirst().run()
   }
 }
 

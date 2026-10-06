@@ -1,10 +1,13 @@
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { isProcessRunning } from "../utils/processLiveness";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 
 export const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
+/** Cadence of the liveness re-check on an emulator that survived SIGTERM and SIGKILL (#9920). */
+export const SURVIVING_PROCESS_RECHECK_INTERVAL_MS = 5_000;
 
 type TerminationTimer = Pick<Timer, "setTimeout" | "clearTimeout">;
 
@@ -113,6 +116,114 @@ async function raceColdBootExit(
   } catch (error) {
     if (error === deadline) {
       return false;
+    }
+    throw error;
+  }
+}
+
+function unrefTimer(handle: NodeJS.Timeout): void {
+  if (typeof handle === "object" && handle !== null && typeof handle.unref === "function") {
+    handle.unref();
+  }
+}
+
+/**
+ * Resolves once a process that survived SIGTERM and SIGKILL is gone: either its
+ * `exit` event fires, or a periodic liveness probe by pid finds it absent (an
+ * unkillable process, or one whose exit event was missed, would otherwise keep
+ * the AVD's lifecycle lease forever, #9920). The re-check timer is unref'd and
+ * cleared as soon as the watch settles, so it can never hold the daemon open.
+ * Without a pid only the `exit` event can settle the watch.
+ */
+export function watchSurvivingProcess(
+  processHandle: Pick<ChildProcess, "pid">,
+  exited: Promise<void>,
+  label: string,
+  timer: TerminationTimer,
+  isRunning: (pid: number) => boolean = isProcessRunning,
+): Promise<void> {
+  const pid = processHandle.pid;
+  return new Promise<void>((resolve) => {
+    let pending: NodeJS.Timeout | undefined;
+    let settled = false;
+    const finish = () => {
+      settled = true;
+      if (pending !== undefined) {
+        timer.clearTimeout(pending);
+        pending = undefined;
+      }
+      resolve();
+    };
+    void exited.then(finish, finish);
+    if (pid === undefined) {
+      return;
+    }
+    const recheck = () => {
+      pending = undefined;
+      if (settled) {
+        return;
+      }
+      if (!isRunning(pid)) {
+        logger.warn(`[ColdBoot] Cold boot ${label} process ${pid} is gone; releasing its AVD`);
+        finish();
+        return;
+      }
+      pending = timer.setTimeout(recheck, SURVIVING_PROCESS_RECHECK_INTERVAL_MS);
+      unrefTimer(pending);
+    };
+    pending = timer.setTimeout(recheck, SURVIVING_PROCESS_RECHECK_INTERVAL_MS);
+    unrefTimer(pending);
+  });
+}
+
+/**
+ * Outcome of terminating an emulator this boot started. `survived` carries a
+ * `gone` promise that settles once the process is finally absent; the AVD's
+ * lifecycle lease must be held until then. `unobservable` means the exit could
+ * not even be observed, so nothing can be held on.
+ */
+export type OwnedTermination =
+  | { state: "confirmed" }
+  | { state: "survived"; gone: Promise<void> }
+  | { state: "unobservable" };
+
+/** What the request saw of a termination: `pending` when it stopped waiting for it. */
+export type OwnedTerminationWait = OwnedTermination["state"] | "pending";
+
+interface TerminationRequestBounds {
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  deadlineMs: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Waits for `termination`, but never past the caller's abort or deadline: a
+ * cancelled or expired request must not be held up to 2 s for cleanup the
+ * daemon can finish in the background (#9920). Resolves `pending` when the
+ * request ended first; the termination keeps running and its owner must keep
+ * the lease held for it.
+ */
+export async function awaitTerminationWithinRequest(
+  termination: Promise<OwnedTermination>,
+  request: TerminationRequestBounds,
+): Promise<OwnedTerminationWait> {
+  const remainingMs = request.deadlineMs - request.timer.now();
+  if (request.signal?.aborted || remainingMs <= 0) {
+    return "pending";
+  }
+  const requestEnded = new Error("Request ended before the emulator termination settled");
+  try {
+    const outcome = await raceWithDeadline(termination, {
+      timer: request.timer,
+      timeoutMs: remainingMs,
+      signal: request.signal,
+      label: "Cold boot termination",
+      timeoutError: () => requestEnded,
+    });
+    return outcome.state;
+  } catch (error) {
+    if (error === requestEnded || request.signal?.aborted) {
+      return "pending";
     }
     throw error;
   }

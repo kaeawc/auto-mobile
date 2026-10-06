@@ -176,6 +176,52 @@ class OverlayRenderModelTest {
   }
 
   @Test
+  fun `interpolation substitutes only well formed identifier tokens`() {
+    val state =
+      mapOf(
+        "a" to OverlayScalar.Text("A"),
+        "b_2" to OverlayScalar.Text("B"),
+        "_x" to OverlayScalar.Text("X"),
+        "n" to OverlayScalar.Numeric(3.0),
+        "f" to OverlayScalar.Numeric(1.5),
+        "t" to OverlayScalar.BooleanValue(true),
+        "nest" to OverlayScalar.Text("{a}"),
+      )
+    val cases =
+      mapOf(
+        "" to "",
+        "plain } text ] {" to "plain } text ] {",
+        "{a}" to "A",
+        "{a}{b_2}{_x}" to "ABX",
+        "}{a}{" to "}A{",
+        "{{a}}" to "{A}",
+        "{a" to "{a",
+        "{}" to "{}",
+        "{1a}" to "{1a}",
+        "{a-b}" to "{a-b}",
+        "{ a }" to "{ a }",
+        "{missing}" to "{missing}",
+        "{n} {f} {t}" to "3 1.5 true",
+        "{nest}" to "{a}",
+        "{page}/{pageCount}" to "{page}/{pageCount}",
+      )
+    cases.forEach { (input, expected) ->
+      assertEquals(input, expected, interpolateOverlayText(input, state))
+    }
+  }
+
+  @Test
+  fun `interpolation resolves page tokens only inside a pager`() {
+    val state =
+      mapOf("page" to OverlayScalar.Numeric(2.0), "pageCount" to OverlayScalar.Numeric(5.0))
+    assertEquals("2/5", interpolateOverlayText("{page}/{pageCount}", state, inPager = true))
+    assertEquals(
+      "{page}/{pageCount}",
+      interpolateOverlayText("{page}/{pageCount}", state, inPager = false),
+    )
+  }
+
+  @Test
   fun `placement opacity and alpha first colors map without a display`() {
     assertEquals(100, mapOverlaySpec(spec(OverlaySpacerNode())).opacityPercent)
     val window = OverlayWindow(OverlayFullscreenPlacement("#80123456"), 37)

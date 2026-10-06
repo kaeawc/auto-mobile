@@ -21,6 +21,18 @@ interface SameAvdRecoveryContext {
   handoffOwner: symbol;
 }
 
+function trackLateShutdowns(retainLeaseUntil: (settlement: Promise<unknown>) => void) {
+  const settlements: Promise<unknown>[] = [];
+  return {
+    retainLeaseUntil: (settlement: Promise<unknown>): void => {
+      settlements.push(settlement);
+      retainLeaseUntil(settlement);
+    },
+    settledWhen: (retained: boolean): Promise<unknown> | undefined =>
+      retained ? Promise.allSettled(settlements) : undefined,
+  };
+}
+
 export class UnconfirmedRecoveryShutdownError extends ActionableError {
   constructor(avdName: string, cause: unknown) {
     super(
@@ -65,6 +77,7 @@ export interface AndroidRebootCoordinatorPoolPort {
     recoveryDeviceIds: ReadonlySet<string>,
     retainRecoveryImage: boolean,
     replacementHandoffOwner: symbol,
+    lateShutdownSettled?: Promise<unknown>,
   ): void;
   stopAndroidEmulatorForRecovery(
     device: PooledDevice,
@@ -183,13 +196,17 @@ export class AndroidRebootCoordinator {
     const replacementHandoffOwner = Symbol("same-avd-recovery-handoff");
     let recoveryAttempt = 0;
     let retainRecoveryImage = false;
+    // Late kills this attempt fenced via the lifecycle lease. When the image is
+    // retained, the pool lifts it only after these settle and a fresh
+    // observation proves the AVD's state (see finishAndroidRecoveryAttempt).
+    const lateShutdowns = trackLateShutdowns(retainLeaseUntil);
     try {
       let replacementState: "stopped" | "same-avd" | "declined";
       try {
         replacementState = await this.pool.stopAndroidEmulatorForRecovery(
           device,
           avdName,
-          retainLeaseUntil,
+          lateShutdowns.retainLeaseUntil,
           allowActiveStop,
           replacementHandoffOwner,
           preservedSessionId,
@@ -265,6 +282,7 @@ export class AndroidRebootCoordinator {
         recoveryDeviceIds,
         retainRecoveryImage,
         replacementHandoffOwner,
+        lateShutdowns.settledWhen(retainRecoveryImage),
       );
     }
   }

@@ -6,6 +6,13 @@ import {
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { PooledDevice } from "../../src/daemon/devicePool";
+import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
+
+const flushMicrotasks = async (): Promise<void> => {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+};
 
 function harness() {
   const timer = new FakeTimer();
@@ -16,7 +23,9 @@ function harness() {
   const records = ledger.recoveringSessionLosses;
   const quarantined = new Set<string>();
   const settlements = new Map<string, Promise<void>>();
+  let refreshGeneration = 0;
   const port: DeviceRecoveryPoolPort = {
+    getRefreshGeneration: () => refreshGeneration,
     getPooledDevice: () => undefined,
     getSessionForDevice: () => undefined,
     waitForReleasingSession: () => undefined,
@@ -50,6 +59,9 @@ function harness() {
     ledger,
     quarantined,
     timer,
+    setRefreshGeneration: (generation: number) => {
+      refreshGeneration = generation;
+    },
   };
 }
 
@@ -201,6 +213,128 @@ describe("DeviceRecoveryCoordinator", () => {
     records.clear();
     coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), false, other);
     expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+  });
+
+  describe("an unconfirmed sessionless recovery reservation", () => {
+    const owner = Symbol("owner");
+    const discovery = (
+      devices: { deviceId: string; name: string }[],
+      succeeded = true,
+    ): BootedDeviceDiscovery => ({
+      devices: devices.map((device) => ({ ...device, platform: "android" as const })),
+      succeededPlatforms: new Set(succeeded ? ["android" as const] : []),
+    });
+    const retained = (lateShutdown?: Promise<unknown>, generation = 3) => {
+      const h = harness();
+      h.setRefreshGeneration(generation);
+      h.coordinator.setRecoveringAndroidImage("Pixel", image);
+      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, owner, lateShutdown);
+      return h;
+    };
+
+    test("keeps the image, wakes waiters, and is reported to startup", async () => {
+      const { coordinator } = retained();
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+      expect(coordinator.findUnconfirmedRecoveringAndroidImage(["Other", "Pixel"])).toBe("Pixel");
+      expect(coordinator.findUnconfirmedRecoveringAndroidImage(["Other"])).toBeUndefined();
+    });
+
+    test("a waiter blocked on the attempt is released when it ends unconfirmed", async () => {
+      const h = harness();
+      h.coordinator.setRecoveringAndroidImage("Pixel", image);
+      const waiting = h.coordinator.waitForRecoveringAndroidImages(["Pixel"]);
+      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, owner);
+      await waiting;
+      expect(h.coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBe("Pixel");
+    });
+
+    test("a later newer fresh observation without the AVD lifts it", () => {
+      const { coordinator } = retained();
+      coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 4);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+      expect(coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBeUndefined();
+    });
+
+    test("a later newer fresh observation with the AVD running lifts it", () => {
+      const { coordinator } = retained();
+      coordinator.liftUnconfirmedRecoveringAndroidImages(
+        discovery([{ deviceId: "emulator-5554", name: "Pixel" }]),
+        4,
+      );
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+    });
+
+    test.each([
+      ["a refresh that started before the attempt ended", discovery([]), 3],
+      ["failed Android discovery", discovery([], false), 4],
+      [
+        "an unresolved emulator identity",
+        discovery([{ deviceId: "emulator-5556", name: "Unknown (emulator-5556)" }]),
+        4,
+      ],
+      [
+        "two emulators reporting the AVD name",
+        discovery([
+          { deviceId: "emulator-5554", name: "Pixel" },
+          { deviceId: "emulator-5556", name: "Pixel" },
+        ]),
+        4,
+      ],
+    ])("%s keeps it", (_label, observation, generation) => {
+      const { coordinator } = retained();
+      coordinator.liftUnconfirmedRecoveringAndroidImages(observation, generation);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+    });
+
+    test("waits for the late kill to settle, then needs an observation newer than that", async () => {
+      const lateKill = Promise.withResolvers<void>();
+      const { coordinator, setRefreshGeneration } = retained(lateKill.promise);
+      coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 4);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+      setRefreshGeneration(5);
+      lateKill.resolve();
+      await flushMicrotasks();
+      // Observed after the attempt but before the kill settled: not authoritative.
+      coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 5);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+      coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 6);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+    });
+
+    test("a rejected late kill still counts as settled", async () => {
+      const lateKill = Promise.withResolvers<void>();
+      const { coordinator } = retained(lateKill.promise);
+      lateKill.reject(new Error("kill failed"));
+      await flushMicrotasks();
+      coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 4);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+    });
+
+    test("an image owned by a recovery record is never marked unconfirmed", () => {
+      const h = harness();
+      h.coordinator.setRecoveringAndroidImage("Pixel", image);
+      h.records.set("session", {
+        sessionId: "session",
+        generation: 1,
+        deviceId: "emulator-5554",
+        avdName: "Pixel",
+        deferredShutdowns: 0,
+        state: "pending",
+        reservations: new Set(["image"]),
+      });
+      h.coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), true, owner);
+      expect(h.coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBeUndefined();
+      h.coordinator.liftUnconfirmedRecoveringAndroidImages(discovery([]), 4);
+      expect(h.coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+    });
+
+    test("a new attempt takes the reservation back", () => {
+      const { coordinator } = retained();
+      coordinator.setRecoveringAndroidImage("Pixel", image);
+      expect(coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBeUndefined();
+      coordinator.finishAndroidRecoveryAttempt("Pixel", new Set(), false, owner);
+      expect(coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+    });
   });
 
   test("aborted settlement wait preserves its rejection reason and removes its listener", async () => {

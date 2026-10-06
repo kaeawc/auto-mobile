@@ -3,6 +3,27 @@ import { logger } from "../../../src/utils/logger";
 import { PlanNormalizer } from "../../../src/utils/plan/PlanNormalizer";
 
 describe("PlanNormalizer", () => {
+  test("keeps step-level expectations out of params and on the step (#9925)", () => {
+    const expectations = [{ type: "elementVisible", selector: { testTag: "x" } }];
+
+    const normalized = PlanNormalizer.normalizeStep({ tool: "observe", expectations }, 0);
+
+    expect(normalized).toEqual({ tool: "observe", params: {}, expectations });
+    expect(PlanNormalizer.toolAndParams({ tool: "observe", expectations })).toEqual({
+      tool: "observe",
+      params: {},
+    });
+  });
+
+  test("an explicit params.expectations is still a tool param (#9925)", () => {
+    const normalized = PlanNormalizer.normalizeStep(
+      { tool: "someTool", params: { expectations: [1] } },
+      0,
+    );
+
+    expect(normalized).toEqual({ tool: "someTool", params: { expectations: [1] } });
+  });
+
   test("logs only the tool name and index once at info", () => {
     const info = spyOn(logger, "info").mockImplementation(() => {});
     const debug = spyOn(logger, "debug").mockImplementation(() => {});

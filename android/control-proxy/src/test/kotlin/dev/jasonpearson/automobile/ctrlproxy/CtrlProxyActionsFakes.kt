@@ -162,6 +162,15 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {}
 
+  override fun putOverlayAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  ) {}
+
+  override fun removeOverlayAsset(requestId: String?, id: String) {}
+
   override fun listPreferenceFiles(requestId: String?, packageName: String) {}
 
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) {}
@@ -499,6 +508,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
     record("dismissOverlay", requestId, id, all)
+
+  override fun putOverlayAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  ) = record("putOverlayAsset", requestId, id, mimeType, dataBase64)
+
+  override fun removeOverlayAsset(requestId: String?, id: String) =
+    record("removeOverlayAsset", requestId, id)
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
     record("listPreferenceFiles", requestId, packageName)

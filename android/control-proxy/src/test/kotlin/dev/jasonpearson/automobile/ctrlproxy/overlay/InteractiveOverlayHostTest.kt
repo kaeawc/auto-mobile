@@ -1,13 +1,17 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import android.view.KeyEvent
 import android.view.WindowManager.LayoutParams
+import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.findViewTreeViewModelStoreOwner
 import androidx.savedstate.findViewTreeSavedStateRegistryOwner
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -71,6 +75,7 @@ class InteractiveOverlayHostTest {
         isBlocked = { blocked },
         onWindowAttached = { history += "hook" },
         onWindowLost = { lost++ },
+        backScope = CoroutineScope(Dispatchers.Unconfined),
       )
     // Warm platform/Compose constructors outside test bodies; no window attaches or composition
     // runs.
@@ -123,7 +128,9 @@ class InteractiveOverlayHostTest {
   fun `show supplies all tree owners and attachment hook follows single add`() = runTest {
     assertTrue(host.show())
     val view = manager.view!!
-    assertTrue(view is ComposeView)
+    // ComposeView is final; the window root mirrors it to see Back, and keeps its class name.
+    assertTrue(view is AbstractComposeView)
+    assertEquals(ComposeView::class.java.name, view.accessibilityClassName)
     assertEquals(listOf("add", "hook"), history)
     assertEquals(
       Lifecycle.State.RESUMED,
@@ -691,5 +698,96 @@ class InteractiveOverlayHostTest {
     gesture.join()
     assertFalse(host.isTouchThroughActive)
     assertEquals("touchable", history.last())
+  }
+
+  private fun key(action: Int, code: Int = KeyEvent.KEYCODE_BACK, canceled: Boolean = false) =
+    KeyEvent(
+      0L,
+      0L,
+      action,
+      code,
+      0,
+      0,
+      0,
+      0,
+      if (canceled) KeyEvent.FLAG_CANCELED else 0,
+    )
+
+  @Test
+  fun `back on a focusable overlay dismisses once on key up and swallows the key`() = runTest {
+    var dismissals = 0
+    host.show(InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
+    val view = manager.view!!
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_DOWN)))
+    assertEquals(0, dismissals)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP, canceled = true)))
+    assertEquals(0, dismissals)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertEquals(1, dismissals)
+  }
+
+  @Test
+  fun `back is not taken without a visible text field and other keys always pass through`() =
+    runTest {
+      var dismissals = 0
+      host.show(InteractiveOverlayRequest(hasTextField = false, onHostDismiss = { dismissals++ }))
+      val view = manager.view!!
+      assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+      host.setTextFieldVisible(true)
+      assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_A)))
+      assertEquals(0, dismissals)
+      assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+      assertEquals(1, dismissals)
+    }
+
+  @Test
+  fun `back follows the live text field setting after the field is hidden again`() = runTest {
+    var dismissals = 0
+    host.show(InteractiveOverlayRequest(hasTextField = true, onHostDismiss = { dismissals++ }))
+    host.setTextFieldVisible(false)
+    assertFalse(manager.view!!.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertEquals(0, dismissals)
+  }
+
+  @Test
+  fun `setTextFieldVisible flips only focusability keeping the view and touch through`() = runTest {
+    host.show(InteractiveOverlayRequest(hasTextField = false))
+    val view = manager.view
+    assertTrue(manager.added.single().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+    host.withTouchThrough {
+      assertTrue(host.setTextFieldVisible(true))
+      assertEquals(0, manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE)
+      assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+    }
+    assertTrue(host.setTextFieldVisible(false))
+    assertTrue(manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+    assertSame(view, manager.view)
+    assertEquals(1, manager.added.size)
+    val updates = manager.updated.size
+    assertTrue(host.setTextFieldVisible(false)) // Unchanged: no platform call.
+    assertEquals(updates, manager.updated.size)
+  }
+
+  @Test
+  fun `setTextFieldVisible without a window is a no-op and a failed update keeps the old flag`() =
+    runTest {
+      assertTrue(host.setTextFieldVisible(true))
+      host.show(InteractiveOverlayRequest(hasTextField = false))
+      manager.failUpdate = true
+      assertFalse(host.setTextFieldVisible(true))
+      assertTrue(host.isShowing)
+      manager.failUpdate = false
+      assertTrue(host.setTextFieldVisible(true))
+      assertEquals(0, manager.updated.last().flags and LayoutParams.FLAG_NOT_FOCUSABLE)
+    }
+
+  @Test
+  fun `setTextFieldVisible on a detached window clears it and reports the loss`() = runTest {
+    host.show(InteractiveOverlayRequest(hasTextField = false))
+    manager.failUpdate = true
+    manager.updateFailure = IllegalArgumentException("View not attached to window manager")
+    assertFalse(host.setTextFieldVisible(true))
+    assertFalse(host.isShowing)
+    assertEquals(1, lost)
   }
 }

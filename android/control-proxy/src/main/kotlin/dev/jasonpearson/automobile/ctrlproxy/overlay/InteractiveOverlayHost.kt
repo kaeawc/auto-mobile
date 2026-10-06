@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -10,19 +11,24 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
@@ -36,6 +42,7 @@ const val DEFAULT_TOUCH_THROUGH_SETTLE_MILLIS = MIN_TOUCH_THROUGH_SETTLE_MILLIS
 /** Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException. */
 data class InteractiveOverlayRequest(
   val placement: OverlayPlacement = OverlayPlacement.Floating(),
+  /** True only while a text field is visible: the window is focusable (takes keys) just then. */
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
   val onHostDismiss: suspend () -> Unit = {},
@@ -66,6 +73,13 @@ interface InteractiveOverlayHost {
    * retryable failure).
    */
   suspend fun relayout(): Boolean
+
+  /**
+   * Flips whether the window may take input focus (a text field became visible or hidden) without
+   * touching the composition. True when applied or when there is no window; a failure leaves the
+   * previous setting, so the caller can retry. A detached window is reported like [relayout].
+   */
+  suspend fun setTextFieldVisible(visible: Boolean): Boolean
 
   /**
    * Removes immediately, allowing the app to regain focus. A window already detached counts as
@@ -109,6 +123,11 @@ interface InteractiveOverlayHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
+ * While a text field is visible the window is focusable, and Back (delivered to the focused window
+ * as a key event) dismisses the overlay through the request's `onHostDismiss` on [backScope], the
+ * same `user`-reason path as the fullscreen dismiss row. Without a visible text field the window is
+ * not focusable and never sees Back at all.
+ *
  * [context] must be the service/display context used for this window; [densityProvider] defaults to
  * its resources. All other platform access is constructor-injected. No permission probe occurs.
  */
@@ -123,9 +142,11 @@ class DefaultInteractiveOverlayHost(
   private val onWindowAttached: () -> Unit = {},
   private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
+  private val backScope: CoroutineScope =
+    CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) : InteractiveOverlayHost {
   private class Window(
-    val view: ComposeView,
+    val view: OverlayComposeView,
     val owner: OverlayWindowOwner,
     var params: WindowManager.LayoutParams,
     var request: InteractiveOverlayRequest,
@@ -174,7 +195,7 @@ class DefaultInteractiveOverlayHost(
     }
     val owner = OverlayWindowOwner()
     val view =
-      ComposeView(context).apply {
+      OverlayComposeView(context, ::backDecision, ::dismissFromBack).apply {
         setViewTreeLifecycleOwner(owner)
         setViewTreeSavedStateRegistryOwner(owner)
         setViewTreeViewModelStoreOwner(owner)
@@ -207,6 +228,10 @@ class DefaultInteractiveOverlayHost(
   override suspend fun relayout(): Boolean = mainThread.onMain {
     val current = window ?: return@onMain true
     if (isBlocked()) return@onMain dismissOnMain()
+    relayoutOnMain(current)
+  }
+
+  private fun relayoutOnMain(current: Window): Boolean {
     val params =
       interactiveOverlayLayoutParams(
         current.request.placement,
@@ -216,7 +241,30 @@ class DefaultInteractiveOverlayHost(
       )
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-    update(current, params)
+    return update(current, params)
+  }
+
+  override suspend fun setTextFieldVisible(visible: Boolean): Boolean = mainThread.onMain {
+    val current = window ?: return@onMain true
+    val previous = current.request
+    if (previous.hasTextField == visible) return@onMain true
+    current.request = previous.copy(hasTextField = visible)
+    val applied = relayoutOnMain(current)
+    if (!applied) current.request = previous
+    applied
+  }
+
+  private fun backDecision(event: KeyEvent): OverlayBackDecision =
+    overlayBackDecision(
+      window?.request?.hasTextField == true,
+      event.keyCode,
+      event.action,
+      event.isCanceled,
+    )
+
+  private fun dismissFromBack() {
+    val request = window?.request ?: return
+    backScope.launch { request.onHostDismiss() }
   }
 
   override suspend fun setOpacity(percent: Int) {
@@ -325,6 +373,72 @@ class DefaultInteractiveOverlayHost(
   companion object {
     private const val TAG = "InteractiveOverlayHost"
   }
+}
+
+enum class OverlayBackDecision {
+  /** Not ours: let the view tree and the platform handle the key. */
+  PASS,
+
+  /** Swallow the key without acting (the down half of a Back press, or a canceled up). */
+  CONSUME,
+
+  /** Back completed on a focusable overlay: dismiss it as the user. */
+  DISMISS,
+}
+
+/**
+ * Back reaches the overlay only while its window is focusable, which is exactly while a text field
+ * is visible. Dismissal fires once, on the up half of an uncanceled press.
+ */
+fun overlayBackDecision(
+  focusable: Boolean,
+  keyCode: Int,
+  action: Int,
+  canceled: Boolean,
+): OverlayBackDecision =
+  when {
+    !focusable || keyCode != KeyEvent.KEYCODE_BACK -> OverlayBackDecision.PASS
+    action == KeyEvent.ACTION_UP && !canceled -> OverlayBackDecision.DISMISS
+    else -> OverlayBackDecision.CONSUME
+  }
+
+/**
+ * The window's root view: the only place a non-activity window sees its Back key event. ComposeView
+ * is final, so this mirrors its content hosting (state-held content, composition on attach) on
+ * AbstractComposeView and keeps ComposeView's accessibility class name for hierarchy consumers.
+ */
+internal class OverlayComposeView(
+  context: Context,
+  private val decide: (KeyEvent) -> OverlayBackDecision,
+  private val onBack: () -> Unit,
+) : AbstractComposeView(context) {
+  private val content = mutableStateOf<(@Composable () -> Unit)?>(null)
+
+  override var shouldCreateCompositionOnAttachedToWindow: Boolean = false
+    private set
+
+  @Composable
+  override fun Content() {
+    content.value?.invoke()
+  }
+
+  fun setContent(content: @Composable () -> Unit) {
+    shouldCreateCompositionOnAttachedToWindow = true
+    this.content.value = content
+    if (isAttachedToWindow) createComposition()
+  }
+
+  override fun getAccessibilityClassName(): CharSequence = ComposeView::class.java.name
+
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+    when (decide(event)) {
+      OverlayBackDecision.PASS -> super.dispatchKeyEvent(event)
+      OverlayBackDecision.CONSUME -> true
+      OverlayBackDecision.DISMISS -> {
+        onBack()
+        true
+      }
+    }
 }
 
 /** Temporary hard-coded content until the spec renderer supplies the request slot. */

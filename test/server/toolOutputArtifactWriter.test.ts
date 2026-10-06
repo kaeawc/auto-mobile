@@ -1,4 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   JsonToolOutputArtifactWriter,
@@ -211,10 +213,10 @@ describe("JsonToolOutputArtifactWriter", () => {
     const fileSystem = new FakeArtifactFileSystem();
     const ledger = new ToolOutputArtifactLedger();
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
-    const stalePath = path.join(outputDirectory, "old-observe.json");
+    const stalePath = path.join(outputDirectory, "1000000000000-observe-old.json");
     ledger.record(stalePath);
     fileSystem.entries = [
-      { path: stalePath, name: "old-observe.json", isFile: true, mtimeMs: 1_000 },
+      { path: stalePath, name: "1000000000000-observe-old.json", isFile: true, mtimeMs: 1_000 },
     ];
     const timer = new FakeTimer();
     timer.setCurrentTime(10_000);
@@ -227,13 +229,13 @@ describe("JsonToolOutputArtifactWriter", () => {
       retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
     });
 
-    expect(ledger.resolve("old-observe.json")?.path).toBe(stalePath);
+    expect(ledger.resolve("1000000000000-observe-old.json")?.path).toBe(stalePath);
 
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: { updatedAt: 1 } });
 
     expect(fileSystem.deleteCalls).toEqual([stalePath]);
     // A pruned file is no longer resolvable through the ledger.
-    expect(ledger.resolve("old-observe.json")).toBeUndefined();
+    expect(ledger.resolve("1000000000000-observe-old.json")).toBeUndefined();
   });
 
   test("prunes expired files again after the timer interval", () => {
@@ -241,7 +243,7 @@ describe("JsonToolOutputArtifactWriter", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(10_000);
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
-    const stalePath = path.join(outputDirectory, "old-observe.json");
+    const stalePath = path.join(outputDirectory, "1000000000000-observe-old.json");
     const writer = new JsonToolOutputArtifactWriter({
       outputDirectory,
       fileSystem,
@@ -251,7 +253,7 @@ describe("JsonToolOutputArtifactWriter", () => {
     });
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
     fileSystem.entries = [
-      { path: stalePath, name: "old-observe.json", isFile: true, mtimeMs: 1_000 },
+      { path: stalePath, name: "1000000000000-observe-old.json", isFile: true, mtimeMs: 1_000 },
     ];
     timer.advanceTime(60_000);
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
@@ -261,8 +263,10 @@ describe("JsonToolOutputArtifactWriter", () => {
 
   test("logs a concurrent ENOENT prune race at debug", () => {
     const fileSystem = new FakeArtifactFileSystem();
-    const stalePath = "/tmp/artifacts/stale.json";
-    fileSystem.entries = [{ path: stalePath, name: "stale.json", isFile: true, mtimeMs: 0 }];
+    const stalePath = "/tmp/artifacts/1000000000004-observe-stale.json";
+    fileSystem.entries = [
+      { path: stalePath, name: "1000000000004-observe-stale.json", isFile: true, mtimeMs: 0 },
+    ];
     fileSystem.deleteFile = () => {
       throw Object.assign(new Error("gone"), { code: "ENOENT" });
     };
@@ -292,14 +296,14 @@ describe("JsonToolOutputArtifactWriter", () => {
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
     fileSystem.entries = [
       {
-        path: path.join(outputDirectory, "old-observe.json"),
-        name: "old-observe.json",
+        path: path.join(outputDirectory, "1000000000000-observe-old.json"),
+        name: "1000000000000-observe-old.json",
         isFile: true,
         mtimeMs: 1_000,
       },
       {
-        path: path.join(outputDirectory, "recent-observe.json"),
-        name: "recent-observe.json",
+        path: path.join(outputDirectory, "1000000000001-observe-recent.json"),
+        name: "1000000000001-observe-recent.json",
         isFile: true,
         mtimeMs: 9_500,
       },
@@ -333,8 +337,125 @@ describe("JsonToolOutputArtifactWriter", () => {
     });
 
     expect(fileSystem.listCalls).toEqual([outputDirectory]);
-    expect(fileSystem.deleteCalls).toEqual([path.join(outputDirectory, "old-observe.json")]);
+    expect(fileSystem.deleteCalls).toEqual([
+      path.join(outputDirectory, "1000000000000-observe-old.json"),
+    ]);
     expect(fileSystem.writes).toHaveLength(1);
+  });
+
+  // #10078: the output directory may be a user-chosen directory with unrelated
+  // content, so the prune may only delete files shaped like the writer's own.
+  describe("retention prune is limited to files the writer issued (#10078)", () => {
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+    const expiredEntry = (name: string): ToolOutputArtifactDirectoryEntry => ({
+      path: path.join(outputDirectory, name),
+      name,
+      isFile: true,
+      mtimeMs: 1_000,
+    });
+    const writerFor = (
+      fileSystem: ToolOutputArtifactFileSystem,
+      options: { ledger?: ToolOutputArtifactLedger; maxFiles?: number } = {},
+    ) => {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(10_000);
+      return new JsonToolOutputArtifactWriter({
+        outputDirectory,
+        fileSystem,
+        idGenerator: new FakeIdGenerator(["id"]),
+        timer,
+        ledger: options.ledger ?? new ToolOutputArtifactLedger(),
+        retention: { maxAgeMs: 1_000, maxFiles: options.maxFiles ?? 500, overflowMinAgeMs: 500 },
+      });
+    };
+    const write = (writer: JsonToolOutputArtifactWriter) =>
+      writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: {} });
+
+    test("leaves expired foreign JSON files alone and deletes only the writer-shaped one", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      fileSystem.entries = [
+        expiredEntry("package.json"),
+        expiredEntry("old-observe.json"),
+        expiredEntry("2024-01-15-report.json"),
+        expiredEntry("1-note.json"),
+        expiredEntry("1700000000000-fixture.json"),
+        expiredEntry("1700000000000-observe-abc.json"),
+      ];
+
+      write(writerFor(fileSystem));
+
+      expect(fileSystem.deleteCalls).toEqual([
+        path.join(outputDirectory, "1700000000000-observe-abc.json"),
+      ]);
+    });
+
+    test("counts only writer-shaped files toward the maxFiles overflow", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      // Fresh enough to dodge the age rule (maxAge 1000 at now 10000) but older
+      // than the overflow gate (500).
+      const fresh = (name: string, mtimeMs: number) => ({ ...expiredEntry(name), mtimeMs });
+      fileSystem.entries = [
+        fresh("a.json", 9_100),
+        fresh("b.json", 9_100),
+        fresh("c.json", 9_100),
+        fresh("1700000000001-observe-one.json", 9_200),
+        fresh("1700000000002-observe-two.json", 9_300),
+      ];
+
+      // Two issued files with maxFiles 1: exactly one overflows. The three
+      // foreign files must not inflate the count or be deleted.
+      write(writerFor(fileSystem, { maxFiles: 1 }));
+
+      expect(fileSystem.deleteCalls).toEqual([
+        path.join(outputDirectory, "1700000000001-observe-one.json"),
+      ]);
+    });
+
+    test("prunes a file this process recorded in the ledger even if its name is off-shape", () => {
+      const fileSystem = new FakeArtifactFileSystem();
+      const ledger = new ToolOutputArtifactLedger();
+      const issued = expiredEntry("1234-my-tool-id.json");
+      const lookalike = expiredEntry("5678-my-tool-id.json");
+      ledger.record(issued.path);
+      fileSystem.entries = [issued, lookalike];
+
+      write(writerFor(fileSystem, { ledger }));
+
+      expect(fileSystem.deleteCalls).toEqual([issued.path]);
+    });
+
+    test("on a real directory, foreign files survive and issued files are pruned", () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "am-artifact-prune-"));
+      try {
+        const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const seed = (name: string) => {
+          const filePath = path.join(dir, name);
+          fs.writeFileSync(filePath, "{}");
+          fs.utimesSync(filePath, old, old);
+          return filePath;
+        };
+        const foreign = ["package.json", "old-observe.json", "2024-01-15-report.json"].map(seed);
+        const issued = seed("1700000000000-observe-abc.json");
+        const timer = new FakeTimer();
+        timer.setCurrentTime(Date.now());
+        const writer = new JsonToolOutputArtifactWriter({
+          outputDirectory: dir,
+          idGenerator: new FakeIdGenerator(["id"]),
+          timer,
+          ledger: new ToolOutputArtifactLedger(),
+          retention: { maxAgeMs: 24 * 60 * 60 * 1000, maxFiles: 500, overflowMinAgeMs: 1000 },
+        });
+
+        write(writer);
+
+        for (const filePath of foreign) {
+          expect(fs.existsSync(filePath), filePath).toBe(true);
+        }
+        expect(fs.existsSync(issued)).toBe(false);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   test("prunes file-count overflow only after the overflow age gate", () => {
@@ -342,14 +463,14 @@ describe("JsonToolOutputArtifactWriter", () => {
     const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
     fileSystem.entries = [
       {
-        path: path.join(outputDirectory, "older-observe.json"),
-        name: "older-observe.json",
+        path: path.join(outputDirectory, "1000000000002-observe-older.json"),
+        name: "1000000000002-observe-older.json",
         isFile: true,
         mtimeMs: 1_000,
       },
       {
-        path: path.join(outputDirectory, "fresh-observe.json"),
-        name: "fresh-observe.json",
+        path: path.join(outputDirectory, "1000000000003-observe-fresh.json"),
+        name: "1000000000003-observe-fresh.json",
         isFile: true,
         mtimeMs: 9_900,
       },
@@ -370,7 +491,9 @@ describe("JsonToolOutputArtifactWriter", () => {
       data: { updatedAt: 1 },
     });
 
-    expect(fileSystem.deleteCalls).toEqual([path.join(outputDirectory, "older-observe.json")]);
+    expect(fileSystem.deleteCalls).toEqual([
+      path.join(outputDirectory, "1000000000002-observe-older.json"),
+    ]);
   });
 
   test("resolves relative artifact directories from the daemon launch cwd", () => {

@@ -208,6 +208,13 @@ async function flushMicrotasks(): Promise<void> {
   }
 }
 
+/** Let the auto-advancing fake timer run, firing supervisor monitor ticks. */
+async function letTimersRun(): Promise<void> {
+  for (let turn = 0; turn < 20; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
 describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
   let fakeTimer: FakeTimer;
   let world: DeviceWorld;
@@ -335,6 +342,82 @@ describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
       await expect(manager.start()).rejects.toThrow(/iproxy tunnel forwards localhost:\d+ but/);
 
       expect(world.all("xcodebuild")).toHaveLength(0);
+    });
+  });
+
+  describe("a single runner per device (#10234)", function () {
+    test("a healthy runner whose tunnel is down is resumed, not duplicated", async function () {
+      const manager = createManager();
+      await manager.start();
+      const runner = world.alive("xcodebuild")[0];
+
+      world.loseTunnel(world.alive("iproxy")[0]);
+      await flushMicrotasks();
+      await manager.start();
+
+      expect(world.all("xcodebuild")).toHaveLength(1);
+      expect(runner.alive).toBe(true);
+      expect(world.all("iproxy")).toHaveLength(2);
+      expect(world.alive("iproxy").map((tunnel) => tunnel.port)).toEqual([runner.port]);
+    });
+
+    test("a runner that is alive but unhealthy is awaited, then terminated before the single replacement", async function () {
+      const manager = createManager();
+      world.runnersAnswerHealth = false;
+      await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
+      const first = world.alive("xcodebuild")[0];
+
+      // A retry while the first launch is still coming up must not spawn a second one.
+      await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
+      expect(world.all("xcodebuild")).toHaveLength(1);
+      // It gave up on the hung runner by terminating it, so nothing is left behind.
+      expect(first.alive).toBe(false);
+
+      world.runnersAnswerHealth = true;
+      await manager.start();
+
+      const runners = world.all("xcodebuild");
+      expect(runners).toHaveLength(2);
+      expect(world.events).toEqual([
+        `spawn:${runners[0].pid}`,
+        `terminate:${runners[0].pid}`,
+        `spawn:${runners[1].pid}`,
+      ]);
+      expect(world.alive("xcodebuild")).toEqual([runners[1]]);
+    });
+
+    test("the supervisor reporting an unhealthy but live runner does not hide it from the next start", async function () {
+      const manager = createManager();
+      await manager.start();
+      world.runnersAnswerHealth = false;
+
+      // The 30 s liveness monitor finds the runner alive but not answering.
+      await letTimersRun();
+      await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
+
+      expect(world.all("xcodebuild")).toHaveLength(1);
+    });
+
+    test("stop() after two launches leaves no runner or tunnel behind", async function () {
+      const manager = createManager();
+      const launch = (manager as unknown as { startOnDevice(): Promise<void> }).startOnDevice.bind(
+        manager,
+      );
+      await launch();
+      const first = world.alive("xcodebuild")[0];
+      await launch();
+
+      // The second launch terminated the first before spawning, so exactly one is alive.
+      expect(first.alive).toBe(false);
+      expect(world.alive("xcodebuild")).toHaveLength(1);
+      expect(world.events.indexOf(`terminate:${first.pid}`)).toBeLessThan(
+        world.events.indexOf(`spawn:${world.all("xcodebuild")[1].pid}`),
+      );
+
+      await manager.stop();
+
+      expect(world.alive("xcodebuild")).toHaveLength(0);
+      expect(world.alive("iproxy")).toHaveLength(0);
     });
   });
 });

@@ -3654,14 +3654,35 @@ describe("IOSCtrlProxyManager", function () {
         "idevice_id -l",
         createExecResult(`${physicalDevice.deviceId}\n`, ""),
       );
-      // Health endpoint responds → confirms the tracked PID really is CtrlProxy
-      fakeExecutor.setCommandResponse(
-        "curl -s",
-        createExecResult(JSON.stringify({ status: "ok", deviceId: physicalDevice.deviceId }), ""),
+      // On a local physical device /health is only reachable through iproxy, so the
+      // runner answers only once an iproxy spawn has been recorded. Stubbing a healthy
+      // answer with no tunnel modelled a state that cannot exist and hid the second
+      // xcodebuild the old code launched here (#10234).
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          fakeExecutor.getSpawnedProcesses().some((spawned) => spawned.command === "iproxy")
+            ? JSON.stringify({ status: "ok", deviceId: physicalDevice.deviceId })
+            : "",
+          "",
+        ),
       );
-
       const fakeProcess = new FakeChildProcess();
       fakeExecutor.setNextSpawnProcess(fakeProcess);
+      // The tracked PID is our still-running device runner; the respawned iproxy is alive too.
+      installListeningProcessFakes(fakeExecutor, [
+        {
+          pid: 12345,
+          port: 8765,
+          command:
+            `xcodebuild test-without-building ` +
+            `-xctestrun /tmp/automobile-ctrl-proxy/automobile-runner-${physicalDevice.deviceId}.xctestrun ` +
+            `-destination id=${physicalDevice.deviceId} ` +
+            `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+          environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${physicalDevice.deviceId}`,
+          alive: true,
+        },
+        { pid: fakeProcess.pid!, port: 0, command: "iproxy", alive: true },
+      ]);
 
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         physicalDevice,
@@ -3677,7 +3698,7 @@ describe("IOSCtrlProxyManager", function () {
       fakeTimer.enableAutoAdvance();
       await manager.start();
 
-      // iproxy should have been (re-)spawned even though CtrlProxy was alive
+      // iproxy is (re-)spawned for the live runner, and no second xcodebuild is launched
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(1);
       expect(fakeExecutor.getSpawnedProcesses()[0].command).toBe("iproxy");
     });

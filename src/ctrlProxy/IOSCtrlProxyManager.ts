@@ -375,6 +375,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // can never leave the tunnel and `servicePort` pointing at different ports (#10232).
   private iproxyLocalPort: number | null = null;
   private isStopping: boolean = false;
+  // Set when the runner supervisor finds the tracked runner process alive but
+  // unhealthy, so its onExit keeps the tracking: clearing it would hide a live
+  // xcodebuild from the next start, which would then spawn a second one (#10234).
+  private retainRunnerTrackingOnSupervisorExit = false;
 
   // Shared process startup prevents concurrent callers from launching duplicate runners.
   private sharedStart: SharedCtrlProxyStart | null = null;
@@ -485,8 +489,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         ) {
           sharedStart.controller.abort(new CtrlProxyRunnerExitedDuringStartupError());
         }
-        this.xcTestProcessId = null;
-        this.xcTestProcess = null;
+        const retainRunner = this.retainRunnerTrackingOnSupervisorExit;
+        this.retainRunnerTrackingOnSupervisorExit = false;
+        if (!retainRunner) {
+          this.xcTestProcessId = null;
+          this.xcTestProcess = null;
+        }
         this.clearCaches();
       },
       onRestartSuccess: () => {
@@ -1473,9 +1481,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (this.isSimulator()) {
         waitedForStartingRunner = await this.prepareSimulatorRunner(perf);
       } else {
-        perf.startOperation("spawnRunner");
-        await this.startOnDevice();
-        perf.endOperation("spawnRunner");
+        waitedForStartingRunner = await this.prepareDeviceRunner(perf);
       }
     }
 
@@ -1504,7 +1510,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // the health poll above only checks servicePort, so a runner that bound the default
       // port would look "hung" here. Adopt it instead of killing a healthy runner
       // (#2834 review).
+      // Simulators only: a device runner is reachable solely through its tunnel on
+      // servicePort, so adopting the default port would leave nothing forwarding it.
       if (
+        this.isSimulator() &&
         this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
         (await this.checkHealthEndpointOnPortForDevice(
           IOSCtrlProxyManager.DEFAULT_PORT,
@@ -1621,6 +1630,40 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await this.iproxySupervisor.start();
     }
     return restartedAliveProcess;
+  }
+
+  /**
+   * Physical-device counterpart of {@link prepareSimulatorRunner}: a runner THIS
+   * manager launched that is still alive is waited for instead of respawned (#10234).
+   * `isCtrlProxyProcessAlive()` needs a health answer, and on a local device that
+   * only reaches the runner through `iproxy`, so a missing tunnel hides a live
+   * runner from it. Repair the tunnel here, then let the health wait (and, if it
+   * never answers, the hung-runner termination) take over. Returns true when an own
+   * runner was deferred to; false after spawning one.
+   */
+  private async prepareDeviceRunner(perf: PerformanceTracker): Promise<boolean> {
+    if (
+      !this.useRemoteRunner() &&
+      this.xcTestProcessId !== null &&
+      (await this.isOwnRunnerProcessAlive())
+    ) {
+      logger.info(
+        `[IOSCtrlProxy] Own CtrlProxy runner (PID ${this.xcTestProcessId}) is still alive on ` +
+          `device ${this.device.deviceId}; ensuring its tunnel and waiting for its health ` +
+          `endpoint instead of respawning`,
+      );
+      perf.startOperation("iproxyTunnel");
+      try {
+        await this.startIproxyTunnel();
+      } finally {
+        perf.endOperation("iproxyTunnel");
+      }
+      return true;
+    }
+    perf.startOperation("spawnRunner");
+    await this.startOnDevice();
+    perf.endOperation("spawnRunner");
+    return false;
   }
 
   private async prepareSimulatorRunner(perf: PerformanceTracker): Promise<boolean> {
@@ -2502,6 +2545,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.warn(
         "[IOSCtrlProxy] XCTest process is alive but its health endpoint is unavailable; treating the runner as unhealthy",
       );
+      // The supervisor's onExit would otherwise untrack this still-alive runner, and
+      // the restart it schedules would then launch a second one beside it (#10234).
+      this.retainRunnerTrackingOnSupervisorExit = true;
     } else {
       logger.warn("[IOSCtrlProxy] XCTest process crashed, health endpoint not responding");
     }
@@ -3646,6 +3692,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // existing terminateProcessTree() ownership semantics remain intact.
     // The signal is THIS manager's own runnerAbortController, never the ambient
     // per-request signal (issue #6410) — see the simulator call site for why.
+    await this.retireTrackedDeviceRunnerBeforeSpawn();
     this.runnerAbortController = new AbortController();
     this.assertDeviceNotRetired();
     const child = await this.xcodebuild.startStreaming(args, {
@@ -3699,6 +3746,49 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         `runner port is ${this.servicePort}; refusing to launch a runner nothing can reach. ` +
         `Retry the call, or restart the daemon if this persists.`,
     );
+  }
+
+  /**
+   * A physical-device start must never overwrite the handles to a runner that may
+   * still be alive: the first `xcodebuild` is `detached`, so once the tracked child
+   * and abort controller are replaced nothing, not `stop()` and not shutdown, can
+   * terminate it (#10234). Terminate and await any live tracked runner first, and
+   * abort its controller. When termination fails the tracking is restored and the
+   * start fails, so no second runner is spawned and `stop()` can retry.
+   */
+  private async retireTrackedDeviceRunnerBeforeSpawn(): Promise<void> {
+    const retiringPid = this.xcTestProcessId;
+    const retiringChild = this.xcTestProcess;
+    const retiringController = this.runnerAbortController;
+    if (retiringPid !== null && (await this.isOwnRunnerProcessAlive(retiringPid))) {
+      logger.warn(
+        `[IOSCtrlProxy] Tracked CtrlProxy runner PID ${retiringPid} is still alive; ` +
+          `terminating it before launching a replacement`,
+      );
+      // Untrack first so the child's exit event is ignored as stale instead of
+      // aborting this very startup or scheduling an auto-restart.
+      this.xcTestProcessId = null;
+      this.xcTestProcess = null;
+      try {
+        await this.processClient.terminateProcessTree(retiringPid);
+      } catch (error) {
+        this.xcTestProcessId = retiringPid;
+        this.xcTestProcess = retiringChild;
+        throw toActionableError(
+          error,
+          `Failed to terminate CtrlProxy runner PID ${retiringPid} before starting a replacement`,
+        );
+      }
+    } else if (retiringPid !== null && this.xcTestProcessId === retiringPid) {
+      this.xcTestProcessId = null;
+      this.xcTestProcess = null;
+    }
+    if (retiringController) {
+      retiringController.abort(new Error("iOS CtrlProxy runner replaced"));
+      if (this.runnerAbortController === retiringController) {
+        this.runnerAbortController = null;
+      }
+    }
   }
 
   private async verifyInstalledAppBundle(): Promise<void> {

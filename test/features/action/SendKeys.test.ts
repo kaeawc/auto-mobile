@@ -4601,6 +4601,51 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.stateReads()).toBe(2);
     });
 
+    // The empty Playground "Basic Text Field" (Compose, API 36) observes with no text and no
+    // set_selection action (scratch/mt36 i3b observe); CtrlProxy reports it as no text, -1/-1.
+    describe("#9948 an empty Compose field with no text and an unset selection", () => {
+      const emptyCompose = (text: string | null | undefined) => ({
+        text,
+        isShowingHintText: false,
+        selectionStart: -1,
+        selectionEnd: -1,
+      });
+
+      test.each([
+        ["null text", null],
+        ["absent text", undefined],
+        ["empty text", ""],
+      ])("sends the tail key event after the prefix with %s", async (_name, text) => {
+        const h = harness([""], [emptyCompose(text), state("Hello W", 7)]);
+        placedFalse(h.client);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Hello Wz",
+          mode: "eventLast",
+        });
+        expect(result).toMatchObject({ success: true, resolvedMode: "eventLast" });
+        expect(result.warning).toBeUndefined();
+        expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_Z"]);
+        expect(h.stateReads()).toBe(2);
+      });
+
+      test("still fails when the field was not left with the caret after the prefix", async () => {
+        const h = harness([""], [emptyCompose(null), state("Hello W", -1)]);
+        placedFalse(h.client);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Hello Wz",
+          mode: "eventLast",
+        });
+        expect(result).toMatchObject({
+          success: false,
+          partialApplication: true,
+          error: expect.stringContaining("prefix insert could not place the caret"),
+        });
+        expect(keyCommands(h.adb)).toEqual([]);
+      });
+    });
+
     test("an empty field showing a hint counts as empty before the insert", async () => {
       const h = harness([""], [state("Type here", 0, 0, true), state("abc de", 6)]);
       placedFalse(h.client);
@@ -4696,8 +4741,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test.each([
       ["an unreadable pre-insert state", [undefined]],
-      ["a null pre-insert text", [{ ...empty, text: null }]],
       ["an out-of-range pre-insert selection", [state("ab", 0, 9)]],
+      ["an unset selection on a non-empty field", [state("ab", -1)]],
     ])("does not attempt the proof with %s", async (_name, states) => {
       const h = harness([""], states);
       placedFalse(h.client);

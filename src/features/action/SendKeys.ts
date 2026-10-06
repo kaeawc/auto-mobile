@@ -1693,7 +1693,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     try {
       const before = await this.readInsertTextStateWhileLive(signal);
-      return before && expectedStateAfterInsert(before, prefix);
+      const expected = before && expectedStateAfterInsert(before, prefix);
+      if (!expected) {
+        logger.warn(
+          `[SendKeys] eventLast cannot prove the caret: pre-insert state is ${describeInsertState(before)}`,
+        );
+      }
+      return expected;
     } catch (error) {
       this.checkAbort(signal, error);
       logger.warn(
@@ -3019,14 +3025,23 @@ function expectedStateAfterInsert(
   before: InsertTextState,
   prefix: string,
 ): EventLastCaretExpectation | undefined {
-  // A hint is placeholder text, not content: the field is empty with the caret at 0.
-  const text = before.isShowingHintText ? "" : before.text;
-  const start = before.isShowingHintText ? 0 : Math.min(before.selectionStart, before.selectionEnd);
-  const end = before.isShowingHintText ? 0 : Math.max(before.selectionStart, before.selectionEnd);
-  if (typeof text !== "string" || start < 0 || end > text.length) {
+  // A hint is placeholder text, not content, and an empty Compose field reports no text and an
+  // unset (-1/-1) selection: either way the field is empty with the caret at 0 (#9948). Any
+  // selection on empty text is meaningless; the insert lands at 0.
+  const text = before.isShowingHintText ? "" : (before.text ?? "");
+  const emptyField = text.length === 0;
+  const start = emptyField ? 0 : Math.min(before.selectionStart, before.selectionEnd);
+  const end = emptyField ? 0 : Math.max(before.selectionStart, before.selectionEnd);
+  if (start < 0 || end > text.length) {
     return undefined;
   }
   return { text: text.slice(0, start) + prefix + text.slice(end), caret: start + prefix.length };
+}
+
+function describeInsertState(state: InsertTextState | undefined): string {
+  return state
+    ? `text length ${state.text?.length ?? "none"}, hint ${state.isShowingHintText}, selection ${state.selectionStart}/${state.selectionEnd}`
+    : "unreadable";
 }
 
 function stateMatchesExpectation(

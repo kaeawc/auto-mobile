@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,12 +43,14 @@ data class DesktopDaemonSessionState(
 fun rememberDesktopDaemonSession(
   socketPath: String?,
   binding: MutableState<DesktopDaemonSessionBinding?>,
+  sessionFactory: (String) -> DesktopDaemonSession = { DesktopDaemonSession.create(it) },
+  ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   onDaemonRecovered: suspend () -> Boolean = { true },
 ): DesktopDaemonSessionState {
   val session =
     remember(socketPath) {
       socketPath?.let {
-        runCatching { DesktopDaemonSession.create(it) }
+        runCatching { sessionFactory(it) }
           .onFailure { error ->
             LOG.warn("Could not create desktop daemon session: ${error.message}")
           }
@@ -86,15 +89,20 @@ fun rememberDesktopDaemonSession(
 
     var refreshAfterRecovery = false
     var failureLogged = false
+    // The daemon acknowledged this effect's binding (#10237). A healthy heartbeat cycle sends only
+    // `daemon/heartbeat`; the binding is re-sent when a send failed or the heartbeat lapsed (a
+    // daemon restart loses it). A changed binding restarts this effect, so it starts unbound.
+    var bindingAcknowledged = false
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
           if (bindingGeneration.get() != generation) return@LaunchedEffect
-          withContext(Dispatchers.IO) {
+          withContext(ioDispatcher) {
             if (target == null) {
               session.ensureRegistered()
-            } else {
-              session.client.setActiveDevice(target.deviceId, target.platform)
+            } else if (!bindingAcknowledged) {
+              bindingAcknowledged =
+                session.client.setActiveDevice(target.deviceId, target.platform).success
               session.deviceBound()
             }
           }
@@ -126,7 +134,7 @@ fun rememberDesktopDaemonSession(
       }
       val alive = runCatching {
         delay(HEARTBEAT_INTERVAL_MS)
-        withContext(Dispatchers.IO) { session.heartbeat() }
+        withContext(ioDispatcher) { session.heartbeat() }
       }
         .onFailure { error ->
           if (error is CancellationException) throw error
@@ -135,6 +143,7 @@ fun rememberDesktopDaemonSession(
         .isSuccess
       if (!alive) {
         refreshAfterRecovery = true
+        bindingAcknowledged = false
         boundDeviceId = null
       }
     }

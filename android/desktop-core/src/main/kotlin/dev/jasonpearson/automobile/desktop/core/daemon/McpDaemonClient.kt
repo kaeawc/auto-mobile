@@ -81,7 +81,13 @@ class McpDaemonClient(
   internal constructor(
     requestTransport: DaemonRequestTransport,
     json: Json = DaemonJson,
-  ) : this(socketPathValue = "in-memory-daemon", json = json, clientVersion = null) {
+    sessionUuid: String? = null,
+  ) : this(
+    socketPathValue = "in-memory-daemon",
+    json = json,
+    clientVersion = null,
+    sessionUuid = sessionUuid,
+  ) {
     this.daemonLifecycle = null
     this.requestTransport = requestTransport
   }

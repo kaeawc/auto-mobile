@@ -5,6 +5,7 @@ import type { ElementGeometry } from "../../../../src/utils/interfaces/ElementGe
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
@@ -920,6 +921,67 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     });
     expect(talkBackExecutor.getDirections()).toEqual(["up"]);
     expect(terminalEvidence).toEqual([observation]);
+  });
+
+  test("indeterminate iOS swipe stops the lookFor loop instead of reporting found false (#9972)", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const error =
+      "Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (Swipe timed out after 5000ms). The swipe may have been applied. Do not retry automatically.";
+    talkBackExecutor.setFailureResult({ success: false, outcomeIndeterminate: true, error });
+    const terminalEvidence: ObserveResult[] = [];
+    const cacheInvalidations: string[] = [];
+    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      invalidateCache: () => cacheInvalidations.push("ios"),
+    } as unknown as IOSCtrlProxyClient);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      device: { ...DEVICE, platform: "ios" },
+      terminalEvidence,
+    });
+
+    try {
+      await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
+        `${error} The scroll may have happened. Observe before retrying.`,
+      );
+    } finally {
+      existing.mockRestore();
+    }
+
+    // One swipe only: no retry, no terminal found:false evidence, and a post-swipe cache read.
+    expect(talkBackExecutor.getDirections()).toEqual(["up"]);
+    expect(terminalEvidence).toEqual([]);
+    expect(cacheInvalidations).toEqual(["ios"]);
+  });
+
+  test("a definite iOS swipe failure does not invalidate the hierarchy cache", async () => {
+    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
+    const cacheInvalidations: string[] = [];
+    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      invalidateCache: () => cacheInvalidations.push("ios"),
+    } as unknown as IOSCtrlProxyClient);
+    const suv = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      device: { ...DEVICE, platform: "ios" },
+    });
+
+    try {
+      const result = await suv.execute(BASE_OPTIONS);
+      expect(result).toMatchObject({ success: false, found: false, error: "gesture rejected" });
+    } finally {
+      existing.mockRestore();
+    }
+    expect(cacheInvalidations).toEqual([]);
   });
 
   test("scroll proceeds past a failed swipe if observation is still returned", async () => {

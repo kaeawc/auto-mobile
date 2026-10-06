@@ -81,6 +81,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -3646,6 +3647,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ...context,
       onWarning: (warning) => displayWarnings.push(warning),
     });
+    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
+    // earliest moment the gesture can take effect: reporting once it returns could put the
+    // dispatch after the navigation event it caused (#10196).
+    reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -4452,8 +4457,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
-          // Platform-specific tap execution
+          // Platform-specific tap execution. Everything that waits for the target (search,
+          // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
           await perf.track("executeTap", async () => {
+            reportToolDispatched();
             switch (this.device.platform) {
               case "android":
                 screenReaderNavigation = await this.executeAndroidTap(

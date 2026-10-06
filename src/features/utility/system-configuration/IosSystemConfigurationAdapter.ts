@@ -15,12 +15,22 @@ import type {
   BroadcastOptions,
   SystemConfigurationAdapter,
 } from "../../../utils/interfaces/SystemConfigurationAdapter";
-import { extractCalendarFromLocale, normalizeSettingValue, normalizeTimeFormat } from "./parsing";
+import {
+  extractCalendarFromLocale,
+  normalizeSettingValue,
+  normalizeTimeFormat,
+  parseBooleanSetting,
+  timeZoneIdsEquivalent,
+} from "./parsing";
 import { buildAppleLanguages, isIosSimulator, parseAppleTimeFormatRaw } from "./iosHelpers";
 
 const IOS_PHYSICAL_CONFIGURATION_ERROR =
   "System configuration is not supported on physical iOS devices.";
 const DEFAULT_CALENDAR_SYSTEM = "gregory";
+const AUTO_TIME_ZONE_DOMAIN = "com.apple.mobiletimerd";
+const AUTO_TIME_ZONE_KEY = "AutomaticTimeZoneSetting";
+const IOS_TIME_ZONE_STORED_WARNING =
+  "AppleTimeZone was stored and read back, which does not confirm that running apps observe the new zone. Automatic time zone is now off so the zone stays pinned.";
 
 /**
  * iOS implementation of {@link SystemConfigurationAdapter}. Simulators use
@@ -91,40 +101,158 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       return { success: false, zoneId, error: IOS_PHYSICAL_CONFIGURATION_ERROR };
     }
 
+    const previous = {
+      zoneId: await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone"),
+      automatic: await this.iosDefaultsRead(AUTO_TIME_ZONE_DOMAIN, AUTO_TIME_ZONE_KEY),
+    };
+
     try {
-      const previousZoneId = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
-
-      // Disable auto-timezone before setting
-      await this.iosDefaultsWrite("com.apple.mobiletimerd", "AutomaticTimeZoneSetting", [
-        "-bool",
-        "NO",
-      ]);
-
-      await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", [zoneId]);
-
-      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
-      if (!readBack || readBack !== zoneId) {
-        return {
-          success: false,
-          zoneId,
-          previousZoneId,
-          error: `Read-back verification failed: expected "${zoneId}" but got "${readBack ?? "null"}"`,
-        };
-      }
-
-      return {
-        success: true,
-        zoneId,
-        previousZoneId,
-      };
+      // Automatic time zone is switched off on purpose: it would otherwise
+      // overwrite the manual zone, so a successful change leaves it off. It is
+      // the one setting changed besides the zone, so every failure after this
+      // write puts it back (issue #10190).
+      await this.iosDefaultsWrite(AUTO_TIME_ZONE_DOMAIN, AUTO_TIME_ZONE_KEY, ["-bool", "NO"]);
     } catch (error) {
-      const errorMsg = errorMessage(error);
-      logger.warn(`Failed to set time zone: ${errorMessage(error)}`, error);
+      return this.timeZoneWriteFailure(zoneId, error, "");
+    }
+
+    let readBack: string | null;
+    try {
+      await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", [zoneId]);
+      readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
+    } catch (error) {
+      const restoreNote = await this.restoreTimeZoneSettings(previous, null);
+      return this.timeZoneWriteFailure(zoneId, error, restoreNote);
+    }
+
+    // `defaults read` is the only read of the zone the adapter has on the
+    // simulator, so this confirms the value was stored, not that running apps
+    // observe it.
+    if (readBack === null) {
+      // An unreadable read-back proves nothing about the simulator, so nothing is
+      // restored on a guess (same contract as the Android path).
       return {
         success: false,
         zoneId,
-        error: `Failed to set time zone: ${errorMsg}`,
+        previousZoneId: previous.zoneId,
+        error: `Time zone change outcome is indeterminate: "${zoneId}" was sent but no result was confirmed (AppleTimeZone could not be read back). The simulator's time zone and its automatic time zone setting were not restored: automatic time zone is off and the zone may have changed${previous.zoneId === null ? "" : ` (previously "${previous.zoneId}")`}. Do not retry automatically. Check the current time zone before retrying.`,
       };
+    }
+    if (!timeZoneIdsEquivalent(readBack, zoneId)) {
+      const restoreNote = await this.restoreTimeZoneSettings(previous, readBack);
+      return {
+        success: false,
+        zoneId,
+        previousZoneId: previous.zoneId,
+        error: `Read-back verification failed: expected "${zoneId}" but got "${readBack}"${restoreNote}`,
+      };
+    }
+
+    return {
+      success: true,
+      zoneId,
+      previousZoneId: previous.zoneId,
+      warning: IOS_TIME_ZONE_STORED_WARNING,
+    };
+  }
+
+  private timeZoneWriteFailure(zoneId: string, error: unknown, restoreNote: string) {
+    const errorMsg = errorMessage(error);
+    logger.warn(`Failed to set time zone: ${errorMsg}`, error);
+    return {
+      success: false,
+      zoneId,
+      error: `Failed to set time zone: ${errorMsg}${restoreNote}`,
+    };
+  }
+
+  /**
+   * Put the simulator's time zone and its automatic-time-zone switch back after
+   * a change that did not take. Returns a sentence (with a leading ". ") for the
+   * caller's error naming what was restored or what is left behind.
+   */
+  private async restoreTimeZoneSettings(
+    previous: { zoneId: string | null; automatic: string | null },
+    current: string | null,
+  ): Promise<string> {
+    const failures: string[] = [];
+    const zoneUnchanged =
+      previous.zoneId === null ? current === null : timeZoneIdsEquivalent(current, previous.zoneId);
+    if (!zoneUnchanged) {
+      await this.restoreDefault(
+        ".GlobalPreferences",
+        "AppleTimeZone",
+        previous.zoneId === null ? null : [previous.zoneId],
+        failures,
+      );
+    }
+
+    const automatic = parseBooleanSetting(previous.automatic);
+    if (previous.automatic !== null && automatic === null) {
+      failures.push(
+        `the earlier automatic time zone value "${previous.automatic}" is not a boolean`,
+      );
+    } else {
+      await this.restoreDefault(
+        AUTO_TIME_ZONE_DOMAIN,
+        AUTO_TIME_ZONE_KEY,
+        automatic === null ? null : ["-bool", automatic ? "YES" : "NO"],
+        failures,
+      );
+    }
+
+    failures.push(...(await this.timeZoneRestoreMismatches(previous)));
+
+    const zoneLabel = previous.zoneId === null ? "unset" : `"${previous.zoneId}"`;
+    const automaticLabel = previous.automatic === null ? "unset" : `"${previous.automatic}"`;
+    return failures.length === 0
+      ? `. Restored automatic time zone (${automaticLabel}) and the previous time zone (${zoneLabel}).`
+      : `. Restoring the previous automatic time zone (${automaticLabel}) and time zone (${zoneLabel}) failed: ${failures.join("; ")}.`;
+  }
+
+  /** Read both settings back and name each one that is not what it was before. */
+  private async timeZoneRestoreMismatches(previous: {
+    zoneId: string | null;
+    automatic: string | null;
+  }): Promise<string[]> {
+    const zone = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
+    const automatic = await this.iosDefaultsRead(AUTO_TIME_ZONE_DOMAIN, AUTO_TIME_ZONE_KEY);
+    const mismatches: string[] = [];
+    const zoneRestored =
+      previous.zoneId === null ? zone === null : timeZoneIdsEquivalent(zone, previous.zoneId);
+    if (!zoneRestored) {
+      mismatches.push(`AppleTimeZone is left as "${zone ?? "null"}"`);
+    }
+    if (parseBooleanSetting(automatic) !== parseBooleanSetting(previous.automatic)) {
+      mismatches.push(`${AUTO_TIME_ZONE_KEY} is left as "${automatic ?? "null"}"`);
+    }
+    return mismatches;
+  }
+
+  /** Write `valueArgs`, or delete the key when there was no earlier value. */
+  private async restoreDefault(
+    domain: string,
+    key: string,
+    valueArgs: string[] | null,
+    failures: string[],
+  ): Promise<void> {
+    try {
+      if (valueArgs === null) {
+        await this.processExecutor.executeCommand("xcrun", [
+          "simctl",
+          "spawn",
+          this.device.deviceId,
+          "defaults",
+          "delete",
+          domain,
+          key,
+        ]);
+      } else {
+        await this.iosDefaultsWrite(domain, key, valueArgs);
+      }
+    } catch (error) {
+      logger.warn(`Failed to restore ${domain} ${key}: ${errorMessage(error)}`, error);
+      failures.push(`${key}: ${errorMessage(error)}`);
     }
   }
 

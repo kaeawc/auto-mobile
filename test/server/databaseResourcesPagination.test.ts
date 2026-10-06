@@ -116,6 +116,33 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     );
   });
 
+  test("table-data resource carries bigIntegerColumns only when the reader reports them (#10063)", async () => {
+    const getTableDataForIos = mock(async () => ({
+      columns: ["id", "n"],
+      rows: [["9007199254740993", 1]],
+      total: 1,
+      bigIntegerColumns: [0],
+    }));
+    setupDevice(getTableDataForIos);
+    registerDatabaseResources();
+    const match = ResourceRegistry.matchTemplate(`${base}?appId=com.example.app`);
+
+    const payload = JSON.parse((await match!.template.handler(match!.params)).text!);
+
+    expect(payload.rows).toEqual([["9007199254740993", 1]]);
+    expect(payload.bigIntegerColumns).toEqual([0]);
+  });
+
+  test("table-data resource omits bigIntegerColumns when none were reported (#10063)", async () => {
+    setupDevice(async () => ({ columns: ["id"], rows: [[1]], total: 1 }));
+    registerDatabaseResources();
+    const match = ResourceRegistry.matchTemplate(`${base}?appId=com.example.app`);
+
+    const payload = JSON.parse((await match!.template.handler(match!.params)).text!);
+
+    expect("bigIntegerColumns" in payload).toBe(false);
+  });
+
   test("rejects a non-numeric limit with an actionable error instead of NaN", async () => {
     const getTableDataForIos = mock(async () => ({ columns: [], rows: [], total: 0 }));
     setupDevice(getTableDataForIos);

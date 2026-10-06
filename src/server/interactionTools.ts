@@ -197,7 +197,7 @@ import {
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   expandAndRematchIfCollapsed,
-  countNotificationMatches,
+  captureNotificationDismissBaseline,
   verifyNotificationDismissed,
   resolveNotificationGroupExpansionState,
   isSwipeTargetIsolatedFromGroup,
@@ -3061,14 +3061,12 @@ export function registerInteractionTools() {
           device.platform === "android" && swipeObservation.viewHierarchy
             ? await verifyNotificationDismissed(
                 device,
-                {
+                captureNotificationDismissBaseline(
+                  swipeObservation.viewHierarchy,
                   match,
-                  matchCountBefore: countNotificationMatches(
-                    swipeObservation.viewHierarchy,
-                    notification,
-                    appMatchTexts,
-                  ),
-                },
+                  notification,
+                  appMatchTexts,
+                ),
                 notification,
                 appMatchTexts,
                 nextObservation,

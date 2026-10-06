@@ -73,6 +73,11 @@ export interface DevicePoolRefreshPort {
     succeededSources?: Set<DiscoverySource>,
   ): Promise<number | undefined>;
   notifyDeviceReady(deviceId: string): void;
+  /** Lift recovery reservations a fresh observation of this generation decides. */
+  liftUnconfirmedRecoveringAndroidImages(
+    discovery: BootedDeviceDiscovery,
+    refreshGeneration: number,
+  ): Promise<void>;
 }
 
 /** Owns discovery scheduling, fresh observations, and generation fences. */
@@ -219,6 +224,9 @@ export class DevicePoolRefresh {
         this.notifyRefreshedDeviceReady(device.deviceId, added);
       }
       perf.endOperation("poolUpdate");
+      // After the pool update, so a still-running AVD is already pooled when its
+      // unconfirmed recovery reservation lifts.
+      await this.pool.liftUnconfirmedRecoveringAndroidImages(discovery, refreshGeneration);
 
       if (addedCount > 0 || removedCount > 0) {
         logger.info(

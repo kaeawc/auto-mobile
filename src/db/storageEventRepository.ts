@@ -98,9 +98,14 @@ async function insertStorageEventWithPreviousValue(
   // override that intent. Omitting the field (undefined) is the only auto-lookup
   // trigger.
   //
-  // The lookup predicate (device_id=? AND file_name=? AND key=? ORDER BY
-  // timestamp DESC LIMIT 1) is served by idx_storage_events_key_lookup as a
-  // prefix seek (#2798). `file_name` is a non-null column on both the table and
+  // "Previous" means the most recently STORED row, so the lookup orders by the
+  // insertion id, never by `timestamp`: that column is the DEVICE's clock, and a
+  // device whose clock lags or was reset (emulator snapshot restore, time change)
+  // would otherwise make an older row win and record a wrong previousValue.
+  //
+  // The lookup predicate (device_id=? AND file_name=? AND key=? ORDER BY id DESC
+  // LIMIT 1) is served by idx_storage_events_key_lookup_id as a prefix seek with
+  // no sort (SQLite appends the rowid to each index entry). `file_name` is a non-null column on both the table and
   // RecordStorageEventInput, so it never binds NULL here (a NULL bind would make
   // `file_name = ?` match nothing regardless of the index).
   let previousValue: string | null = input.previousValue ?? null;
@@ -112,7 +117,7 @@ async function insertStorageEventWithPreviousValue(
         .where("device_id", "=", input.deviceId)
         .where("file_name", "=", input.fileName)
         .where("key", "=", input.key)
-        .orderBy("timestamp", "desc")
+        .orderBy("id", "desc")
         .limit(1);
       const prev = await q.executeTakeFirst();
       if (prev) {

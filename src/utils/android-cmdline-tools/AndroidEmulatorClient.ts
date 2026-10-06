@@ -11,6 +11,8 @@ import {
   type SpawnFn,
 } from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
+import { toActionableError } from "../../models/ActionableError";
+import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
 import {
@@ -696,6 +698,17 @@ function emulatorDeviceIdForConsolePort(consolePort: number): string {
  */
 function isLaunchChildAlive(child: ChildProcess): boolean {
   return (child.exitCode ?? null) === null && (child.signalCode ?? null) === null;
+}
+
+/** Any failure of a launch the caller cancelled is reported as that cancellation, with the spawned child. */
+function asLaunchCancellation(
+  avdName: string,
+  error: unknown,
+  process: ChildProcess | null,
+): EmulatorLaunchCancelledError {
+  return error instanceof EmulatorLaunchCancelledError
+    ? error
+    : new EmulatorLaunchCancelledError(avdName, process);
 }
 
 function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
@@ -2598,7 +2611,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     request: AndroidEmulatorLaunchRequest,
   ): Promise<AndroidEmulatorLaunchHandle> {
     if (request.signal?.aborted) {
-      throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+      throw new EmulatorLaunchCancelledError(request.avdName, null);
     }
 
     let process: ChildProcess | null = null;
@@ -2619,33 +2632,38 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // validation). It ends when `startEmulatorProcess` resolves — never the
       // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
       // leaf (see PerfContext).
-      process = await trackAmbient(`emulator launch ${request.avdName}`, () =>
-        this.startEmulatorProcess(request.avdName, {
-          requestedExtraArgs: request.extraArgs,
-          onSpawn: (spawnedProcess) => {
-            process = spawnedProcess;
-            if (disposed && !spawnedProcess.killed) {
-              spawnedProcess.kill();
-            }
-          },
-          isCancelled: () => disposed,
-          capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
-          expectedDeviceId: request.deviceId,
-          signal: request.signal,
-        }),
+      // Raced against the request's abort so a cancel does not outwait the
+      // startup validation: that can run its full 5 s fallback against an
+      // emulator that ignores SIGTERM, and the owner needs the child handle
+      // inside its abort grace to confirm the exit (#10075).
+      process = await raceWithDeadline(
+        () =>
+          trackAmbient(`emulator launch ${request.avdName}`, () =>
+            this.startEmulatorProcess(request.avdName, {
+              requestedExtraArgs: request.extraArgs,
+              onSpawn: (spawnedProcess) => {
+                process = spawnedProcess;
+                if (disposed && !spawnedProcess.killed) {
+                  spawnedProcess.kill();
+                }
+              },
+              isCancelled: () => disposed,
+              capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
+              expectedDeviceId: request.deviceId,
+              signal: request.signal,
+            }),
+          ),
+        { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
       );
       if (disposed) {
-        if (process && !process.killed) {
-          process.kill();
-        }
-        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+        // `dispose` already sent the SIGTERM to this child.
+        throw new EmulatorLaunchCancelledError(request.avdName, process);
       }
     } catch (error) {
       request.signal?.removeEventListener("abort", dispose);
-      if (disposed) {
-        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
-      }
-      throw error;
+      // Hand the spawned child to the owner: one SIGTERM is only a request, and
+      // the owner must confirm the exit before freeing the AVD (#10075).
+      throw disposed ? asLaunchCancellation(request.avdName, error, process) : error;
     }
     if (process && request.deviceId) {
       this.launchTargetDeviceIds.set(process, request.deviceId);
@@ -2730,7 +2748,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
     if (isCancelled?.()) {
-      throw new ActionableError(`Android emulator launch for '${avdName}' was cancelled`);
+      throw new EmulatorLaunchCancelledError(avdName, null);
     }
   }
 
@@ -2761,7 +2779,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
     // Check if the AVD exists
     perf.startOperation("validateAvd");
-    const availableAvds = await this.listAvds();
+    const availableAvds = await this.listAvds({ signal: options.signal });
     perf.endOperation("validateAvd");
     if (!availableAvds.find((emu) => emu.name === avdName)) {
       throw new ActionableError(
@@ -3637,7 +3655,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
-      throw new ActionableError(`Emulator '${device.name}' is not running`);
+      return await this.killEmulatorMissingFromOnlineList(device, options);
     }
 
     if (emulator.platform !== device.platform) {
@@ -3708,16 +3726,91 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // termination at all: the serial is the kill's identity, the discovery-time
     // check above refuses a replacement AVD found on that serial, and callers
     // confirm disappearance and incarnation afterwards.
-    const adb = this.adbFactory.create(emulator);
-    await adb.execute(["emu", "kill"], {
+    await this.dispatchEmulatorConsoleKill(emulator, options);
+    logger.info(`Requested termination of emulator '${device.name}'`);
+    return emulator;
+  }
+
+  private async dispatchEmulatorConsoleKill(
+    target: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
+    await this.adbFactory.create(target).execute(["emu", "kill"], {
       timeoutMs: options.timeoutMs,
       noRetry: true,
       signal: options.signal,
       waitForProcessSettlementAfterAbort: true,
     });
+  }
 
-    logger.info(`Requested termination of emulator '${device.name}'`);
-    return emulator;
+  /**
+   * The serial is not among the `device`-state rows `killDevice` rediscovered.
+   * That is not proof the emulator stopped: `adb devices` also lists an
+   * emulator whose transport dropped (host sleep/wake, a boot that never
+   * finished) as `offline` while its process keeps running and keeps holding
+   * its AVD (#10074). Read the raw states before answering "not running", so a
+   * caller never retires session/pool ownership of an emulator that is alive.
+   *
+   * - absent from `adb devices` altogether: the one case that is "not running";
+   * - attached in another state, without `force`: a distinct error that the
+   *   already-stopped classifier does not match, so ownership stays intact;
+   * - attached in another state, under `force`: the serial-scoped console kill.
+   *   `adb emu` talks to the emulator console port rather than the adb
+   *   transport, so it still reaches an `offline` emulator. Disappearance is
+   *   confirmed by the caller, which must also see the serial leave `adb devices`.
+   */
+  private async killEmulatorMissingFromOnlineList(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal; force?: boolean },
+  ): Promise<BootedDevice> {
+    const attachedState = await this.readAttachedStateForKill(device, options);
+    if (attachedState === undefined) {
+      throw new ActionableError(`Emulator '${device.name}' is not running`);
+    }
+    if (!options.force) {
+      throw new ActionableError(
+        `Emulator '${device.name}' (${device.deviceId}) is attached to adb but reported in state ` +
+          `'${attachedState}', so the daemon cannot tell whether it has stopped and has left its ` +
+          `session and pool entry untouched. Retry killDevice with force: true to send the ` +
+          `emulator console kill to ${device.deviceId} anyway.`,
+      );
+    }
+    logger.warn(
+      `[AndroidEmulatorClient] force=true: '${device.deviceId}' is attached in adb state ` +
+        `'${attachedState}'; dispatching the console kill without a booted-device match.`,
+    );
+    await this.dispatchEmulatorConsoleKill(device, options);
+    logger.info(
+      `Requested termination of emulator '${device.name}' (adb state '${attachedState}')`,
+    );
+    return device;
+  }
+
+  private async readAttachedStateForKill(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const adb = this.adbFactory.create(null);
+    if (!adb.getDeviceStates) {
+      return undefined;
+    }
+    try {
+      const states = await adb.getDeviceStates({
+        timeoutMs: options.timeoutMs,
+        signal: options.signal,
+      });
+      return states.find((state) => state.deviceId === device.deviceId)?.state;
+    } catch (error) {
+      if (options.signal?.aborted) {
+        throw error;
+      }
+      // An unreadable state list cannot prove the serial is gone, so fail the kill
+      // rather than let the caller classify the emulator as already stopped.
+      throw toActionableError(
+        error,
+        `Could not read adb device states to confirm '${device.deviceId}' is stopped`,
+      );
+    }
   }
 
   private getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined {

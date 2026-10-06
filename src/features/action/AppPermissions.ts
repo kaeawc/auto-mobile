@@ -10,7 +10,7 @@ import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/And
 import type { BootedDevice, AndroidDeviceShellToolResult } from "../../models";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationsEnabled } from "./SetAndroidNotificationsEnabled";
-import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
+import { NotificationPolicy, type NotificationPolicyResult } from "../utility/NotificationPolicy";
 import {
   SetAndroidScheduleExactAlarmAppOp,
   type ScheduleExactAlarmAppOpMode,
@@ -61,6 +61,13 @@ export function mapAndroidPermissionStates(
   });
 }
 
+function operationWarnings(operations: AppPermissionOperationResult[]): { warnings?: string[] } {
+  const warnings = operations.flatMap((operation) =>
+    operation.warning ? [operation.warning] : [],
+  );
+  return warnings.length > 0 ? { warnings } : {};
+}
+
 export type AppPermissionAction = IosSimulatorPermissionAction;
 
 export interface SetAppPermissionsInput {
@@ -95,6 +102,8 @@ export interface AppPermissionOperationResult {
   skipped?: boolean;
   result?: unknown;
   error?: string;
+  /** Set when the operation succeeded but its outcome could not be verified. */
+  warning?: string;
 }
 
 export interface SetAppPermissionsResult {
@@ -107,6 +116,8 @@ export interface SetAppPermissionsResult {
   failedCount: number;
   operations: AppPermissionOperationResult[];
   error?: string;
+  /** Operation warnings (e.g. an unverified outcome); present only on Android when any exist. */
+  warnings?: string[];
 }
 
 export interface GetAppPermissionsResult {
@@ -306,7 +317,6 @@ export class AppPermissions {
     }
 
     const failedOperations = operations.filter((operation) => !operation.success);
-
     return {
       success: failedOperations.length === 0,
       appId,
@@ -316,6 +326,7 @@ export class AppPermissions {
       changedCount: operations.reduce((sum, operation) => sum + operation.changedCount, 0),
       failedCount: operations.reduce((sum, operation) => sum + operation.failedCount, 0),
       operations,
+      ...operationWarnings(operations),
       ...(failedOperations.length > 0
         ? {
             error: failedOperations
@@ -349,20 +360,14 @@ export class AppPermissions {
     }
 
     if (input.notificationPolicyAccess !== undefined) {
-      const result = await new SetAndroidNotificationPolicyAccess(
-        this.device,
-        this.adbFactory,
-      ).execute(appId, {
-        allowed: input.notificationPolicyAccess,
-      });
-      operations.push({
-        operationId: "android_notification_policy_access",
-        success: result.success,
-        changedCount: result.success ? 1 : 0,
-        failedCount: result.success ? 0 : 1,
-        result,
-        ...(result.error ? { error: result.error } : {}),
-      });
+      // Set, then read the grant back (one extra `shell dumpsys notification`) so the
+      // operation reports the observed state rather than the request.
+      const result = await new NotificationPolicy(this.device, {
+        adbFactory: this.adbFactory,
+      }).setPolicy(appId, { policyAccess: input.notificationPolicyAccess });
+      operations.push(
+        this.androidNotificationPolicyOperation(result, input.notificationPolicyAccess),
+      );
     }
 
     if (input.scheduleExactAlarm !== undefined) {
@@ -374,6 +379,23 @@ export class AppPermissions {
       });
       operations.push(this.androidScheduleExactAlarmOperation(result));
     }
+  }
+
+  /** A change counts only when the read-back shows the requested state (#9710 semantics). */
+  private androidNotificationPolicyOperation(
+    result: NotificationPolicyResult,
+    requested: boolean,
+  ): AppPermissionOperationResult {
+    const observedRequested = result.success && result.policyAccess.allowed === requested;
+    return {
+      operationId: "android_notification_policy_access",
+      success: result.success,
+      changedCount: observedRequested ? 1 : 0,
+      failedCount: result.success ? 0 : 1,
+      result,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.policyAccess.warning ? { warning: result.policyAccess.warning } : {}),
+    };
   }
 
   private androidScheduleExactAlarmOperation(

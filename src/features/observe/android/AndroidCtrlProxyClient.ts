@@ -5017,15 +5017,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
     const orphanedPorts = new Set<number>();
     for (const line of stdout.split(/\r?\n/)) {
-      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
-      if (
-        extra.length !== 0 ||
-        serial !== this.device.deviceId ||
-        remote !== `tcp:${PortManager.DEVICE_PORT}`
-      ) {
+      const forward = this.parseOwnPortForward(line);
+      if (!forward || forward.remote !== `tcp:${PortManager.DEVICE_PORT}`) {
         continue;
       }
-      const port = this.localPortFromForward(local);
+      const port = this.localPortFromForward(forward.local);
       if (port !== null && !livePorts.has(port)) {
         orphanedPorts.add(port);
       }
@@ -5093,14 +5089,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const expectedLocal = `tcp:${port}`;
     const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
     return result.stdout.split(/\r?\n/).some((line) => {
-      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
-      return (
-        extra.length === 0 &&
-        serial === this.device.deviceId &&
-        local === expectedLocal &&
-        remote === expectedRemote
-      );
+      const forward = this.parseOwnPortForward(line);
+      return forward?.local === expectedLocal && forward.remote === expectedRemote;
     });
+  }
+
+  private parseOwnPortForward(line: string): { local: string; remote: string } | null {
+    const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+    if (serial !== this.device.deviceId) {
+      return null;
+    }
+    if (extra.length !== 0) {
+      // Ignore ambiguous rows so cleanup cannot remove an unrelated service's forward.
+      logger.debug(
+        `[CTRL_PROXY] Skipping adb forward row with extra columns for ${serial}: ${line.trim()}`,
+      );
+      return null;
+    }
+    return local && remote ? { local, remote } : null;
   }
 
   private localPortFromForward(value: string | undefined): number | null {
@@ -5151,12 +5157,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // the serial prevents another device's same-number forward from being
       // mistaken for this client's forward.
       const isActive = result.stdout.split(/\r?\n/).some((line) => {
-        const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+        const forward = this.parseOwnPortForward(line);
         return (
-          extra.length === 0 &&
-          serial === this.device.deviceId &&
-          local === `tcp:${this.localPort}` &&
-          remote === `tcp:${PortManager.DEVICE_PORT}`
+          forward?.local === `tcp:${this.localPort}` &&
+          forward.remote === `tcp:${PortManager.DEVICE_PORT}`
         );
       });
       if (!isActive) {

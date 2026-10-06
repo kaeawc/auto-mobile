@@ -29,7 +29,7 @@ interface Harness {
   /** Number of `request_hierarchy*` messages that reached the socket. */
   fetchCount: () => number;
   requestTypes: () => string[];
-  requests: () => Array<{ type: string; disableAllFiltering: boolean }>;
+  requests: () => Array<{ type: string; disableAllFiltering: boolean; sinceTimestamp?: number }>;
   getCached: () => CtrlProxyCachedHierarchy | null;
   setCached: (entry: CtrlProxyCachedHierarchy | null) => void;
   /** Simulate a disconnected/reconnecting runner, so no fetch can succeed. */
@@ -50,7 +50,8 @@ function createHarness(): Harness {
   let cached: CtrlProxyCachedHierarchy | null = null;
   let fetches = 0;
   const requestTypes: string[] = [];
-  const requests: Array<{ type: string; disableAllFiltering: boolean }> = [];
+  const requests: Array<{ type: string; disableAllFiltering: boolean; sinceTimestamp?: number }> =
+    [];
   let connected = true;
 
   const context: HierarchyDelegateContext = {
@@ -62,10 +63,16 @@ function createHarness(): Harness {
             requestId: string;
             type: string;
             disableAllFiltering: boolean;
+            sinceTimestamp?: number;
           };
           fetches += 1;
           requestTypes.push(message.type);
-          requests.push({ type: message.type, disableAllFiltering: message.disableAllFiltering });
+          const request = { type: message.type, disableAllFiltering: message.disableAllFiltering };
+          requests.push(
+            message.sinceTimestamp === undefined
+              ? request
+              : { ...request, sinceTimestamp: message.sinceTimestamp },
+          );
           // Respond immediately with a hierarchy stamped at the current fake time,
           // so each fetch is distinguishable from the previously cached one.
           requestManager.resolve(message.requestId, {
@@ -112,6 +119,44 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     expect(h.fetchCount()).toBe(1);
     expect(h.getCached()).not.toBeNull();
   }
+
+  test("an expired cache forwards minTimestamp to the stale check", async () => {
+    h.setCached({
+      hierarchy: makeHierarchy(40, "cached"),
+      receivedAt: h.timer.now(),
+      captureReceivedAt: h.timer.now(),
+      fresh: true,
+    });
+    h.timer.advanceTime(CACHE_TTL_MS);
+
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 30);
+
+    expect(h.requests()).toEqual([
+      { type: "request_hierarchy_if_stale", disableAllFiltering: false, sinceTimestamp: 30 },
+    ]);
+  });
+
+  test("a stale check without minTimestamp retains the legacy payload", async () => {
+    await primeCache();
+    h.timer.advanceTime(CACHE_TTL_MS);
+
+    await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true);
+
+    expect(h.requests()[1]).toEqual({
+      type: "request_hierarchy_if_stale",
+      disableAllFiltering: false,
+    });
+  });
+
+  test("a synchronous stale check forwards an explicitly supplied zero timestamp", async () => {
+    await h.hierarchy.requestHierarchySync(undefined, false, undefined, 1000, false, {
+      sinceTimestamp: 0,
+    });
+
+    expect(h.requests()).toEqual([
+      { type: "request_hierarchy_if_stale", disableAllFiltering: false, sinceTimestamp: 0 },
+    ]);
+  });
 
   test("invalidateCache forces a refetch well inside the TTL", async () => {
     await primeCache();

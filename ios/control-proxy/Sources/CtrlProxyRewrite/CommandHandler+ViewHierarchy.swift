@@ -43,14 +43,43 @@ extension CommandHandler {
     )
         async throws -> HierarchyUpdateResponse
     {
+        try await hierarchyResponse(request, sinceTimestamp: nil)
+    }
+
+    func handleRequestHierarchyIfStale(
+        _ request: RequestHierarchy,
+        startTime _: Date
+    )
+        async throws -> HierarchyUpdateResponse
+    {
+        try await hierarchyResponse(request, sinceTimestamp: request.sinceTimestamp)
+    }
+
+    /// Read, compare and (when stale) capture in one main-actor turn.
+    @MainActor
+    private func hierarchyForRequest(_ request: RequestHierarchy, sinceTimestamp: Int64?) throws -> ViewHierarchy {
+        let disableAllFiltering = request.disableAllFiltering ?? false
+        if !disableAllFiltering, let sinceTimestamp,
+           let cached = hierarchyDebouncer?.getLastHierarchy(), cached.updatedAt > sinceTimestamp
+        {
+            return cached
+        }
+        return try captureAndRecordHierarchy(disableAllFiltering: disableAllFiltering)
+    }
+
+    private func hierarchyResponse(
+        _ request: RequestHierarchy,
+        sinceTimestamp: Int64?
+    )
+        async throws -> HierarchyUpdateResponse
+    {
         perf.serial("handleRequestHierarchy")
         defer { perf.end() }
 
-        let disableAllFiltering = request.disableAllFiltering ?? false
         let hierarchy: ViewHierarchy
         do {
             hierarchy = try await trackedAsync("extraction") {
-                try await self.captureHierarchy(disableAllFiltering: disableAllFiltering)
+                try await self.hierarchyForRequest(request, sinceTimestamp: sinceTimestamp)
             }
         } catch {
             print("[CommandHandler] Hierarchy extraction failed: \(error)")

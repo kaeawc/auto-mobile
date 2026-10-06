@@ -4,6 +4,94 @@ import XCTest
 
 @MainActor
 final class CommandHierarchyCaptureTests: XCTestCase {
+    func testStaleHierarchyRequestUsesStrictlyNewerCacheWithoutCapture() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+        let request = RequestHierarchy(requestId: "fresh", sinceTimestamp: 0)
+
+        let payload = await fixture.handler.handle(.requestHierarchyIfStale(request))
+        let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+
+        XCTAssertEqual(response.requestId, "fresh")
+        XCTAssertEqual(response.data?.updatedAt, fixture.raw.updatedAt)
+        XCTAssertEqual(response.data?.insets.source, "ios-sdk-safe-area")
+        XCTAssertNotNil(response.frameContext)
+        XCTAssertTrue(fixture.locator.filteringRequests.isEmpty)
+        XCTAssertTrue(fixture.debouncer.recordedCaptures.isEmpty)
+    }
+
+    func testStaleHierarchyRequestCapturesWhenCacheIsOlderOrEqual() async throws {
+        for sinceTimestamp: Int64 in [1, 2] {
+            let fixture = CaptureFixture()
+            fixture.debouncer.cachedHierarchy = fixture.raw
+            let request = RequestHierarchy(requestId: "stale", sinceTimestamp: sinceTimestamp)
+
+            let payload = await fixture.handler.handle(.requestHierarchyIfStale(request))
+            let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+
+            XCTAssertEqual(response.type, "hierarchy_update")
+            try fixture.assertRawCaptures(count: 1)
+        }
+    }
+
+    func testStaleHierarchyRequestWithoutTimestampAlwaysCaptures() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+
+        _ = await fixture.handler.handle(.requestHierarchyIfStale(RequestHierarchy(requestId: "legacy")))
+
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testUnconditionalHierarchyRequestAlwaysCapturesWithNewerCache() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+
+        _ = await fixture.handler.handle(.requestHierarchy(RequestHierarchy(requestId: "force", sinceTimestamp: 0)))
+
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testStaleHierarchyRequestWithoutCacheCaptures() async throws {
+        let fixture = CaptureFixture()
+
+        _ = await fixture.handler.handle(.requestHierarchyIfStale(RequestHierarchy(
+            requestId: "empty",
+            sinceTimestamp: 0
+        )))
+
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testUnfilteredStaleHierarchyRequestAlwaysCaptures() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+        let request = RequestHierarchy(requestId: "raw", disableAllFiltering: true, sinceTimestamp: 0)
+
+        _ = await fixture.handler.handle(.requestHierarchyIfStale(request))
+
+        XCTAssertEqual(fixture.locator.filteringRequests, [true])
+        XCTAssertTrue(fixture.debouncer.recordedCaptures.isEmpty)
+    }
+
+    func testStaleHierarchyRequestWithoutDebouncerCaptures() async throws {
+        let locator = RewriteFakeElementLocator()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"no-cache","sinceTimestamp":0}"#.utf8)
+        )
+
+        let payload = await handler.handle(request)
+        let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+
+        XCTAssertEqual(response.requestId, "no-cache")
+        XCTAssertEqual(locator.filteringRequests, [false])
+    }
+
     func testCaptureRecordsIntoRealDebouncerWhenWallClockStepsBack() async throws {
         let initial = ViewHierarchy(updatedAt: 20, hierarchy: UIElementInfo(text: "initial"))
         let captured = ViewHierarchy(updatedAt: 10, hierarchy: UIElementInfo(text: "command"))

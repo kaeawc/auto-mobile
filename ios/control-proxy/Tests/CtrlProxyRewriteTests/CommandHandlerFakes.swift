@@ -49,9 +49,12 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
 
 @MainActor
 final class RewriteFakeHierarchyDebouncer: HierarchyDebouncing {
+    var cachedHierarchy: ViewHierarchy?
     private(set) var recordedCaptures: [ViewHierarchy] = []
     private(set) var pollIntervals: [Int64] = []
     private var captureSequence: UInt64 = 0
+
+    func getLastHierarchy() -> ViewHierarchy? { cachedHierarchy }
 
     func beginCapture() -> UInt64 {
         captureSequence += 1
@@ -60,6 +63,7 @@ final class RewriteFakeHierarchyDebouncer: HierarchyDebouncing {
 
     func recordCommandCapture(_ hierarchy: ViewHierarchy, captureSequence _: UInt64) {
         recordedCaptures.append(hierarchy)
+        cachedHierarchy = hierarchy
     }
 
     func updatePollIntervalMs(_ pollIntervalMs: Int64) {

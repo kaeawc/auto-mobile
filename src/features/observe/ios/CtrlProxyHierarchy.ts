@@ -239,15 +239,16 @@ export class CtrlProxyHierarchy {
       // a hierarchy update. `request_hierarchy_if_stale` trusts the runner cache
       // in both cases and can return the same pre-dialog tree. Force a real
       // capture so normal observe sees the same current window as raw observe.
-      const forceCapture = this.needsForcedCapture(
+      const captureOptions = this.hierarchyCaptureOptions(
         cacheMissing,
         cacheInvalidated,
         cachedIsSpringboard,
         cacheMissesMinTimestamp,
+        minTimestamp,
       );
       const result = await this.requestHierarchySync(perf, false, signal, timeout, false, {
         failureSink: requestFailure,
-        forceCapture,
+        ...captureOptions,
       });
       if (result) {
         if (result.hierarchy.packageName) {
@@ -541,6 +542,7 @@ export class CtrlProxyHierarchy {
       failureSink?: { value?: HierarchyRequestFailure };
       forceCapture?: boolean;
       observerMode?: boolean;
+      sinceTimestamp?: number;
     },
   ): Promise<CtrlProxySyncedHierarchy | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
@@ -665,13 +667,18 @@ export class CtrlProxyHierarchy {
     }
   }
 
-  private needsForcedCapture(
+  private hierarchyCaptureOptions(
     cacheMissing: boolean,
     cacheInvalidated: boolean,
     cachedIsSpringboard: boolean,
     cacheMissesMinTimestamp: boolean,
-  ): boolean {
-    return cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp;
+    minTimestamp: number,
+  ): { forceCapture: boolean; sinceTimestamp?: number } {
+    return {
+      forceCapture:
+        cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp,
+      sinceTimestamp: minTimestamp === 0 ? undefined : minTimestamp,
+    };
   }
 
   private observerConnectionStatus() {
@@ -701,7 +708,7 @@ export class CtrlProxyHierarchy {
   private hierarchyRequestMessage(
     requestId: string,
     disableAllFiltering: boolean | undefined,
-    requestOptions: { forceCapture?: boolean } | undefined,
+    requestOptions: { forceCapture?: boolean; sinceTimestamp?: number } | undefined,
   ): string {
     // Keep the literal discriminator at the serialization sink for the wire-parity scanner.
     return JSON.stringify({
@@ -711,6 +718,10 @@ export class CtrlProxyHierarchy {
           : "request_hierarchy_if_stale",
       requestId,
       disableAllFiltering: disableAllFiltering ?? false,
+      sinceTimestamp:
+        requestOptions?.forceCapture || disableAllFiltering
+          ? undefined
+          : requestOptions?.sinceTimestamp,
     });
   }
 

@@ -138,8 +138,11 @@ final class CommandHandler: CommandHandling {
         do {
             switch request {
             // View hierarchy commands
-            case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
+            case let .requestHierarchy(payload):
                 return try await handleRequestHierarchy(payload, startTime: startTime)
+
+            case let .requestHierarchyIfStale(payload):
+                return try await handleRequestHierarchyIfStale(payload, startTime: startTime)
 
             case let .setHierarchyPollInterval(payload):
                 return try await handleSetHierarchyPollInterval(payload, startTime: startTime)

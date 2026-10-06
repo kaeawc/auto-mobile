@@ -182,23 +182,83 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
     });
   }
 
-  test("a tap aborted before dispatch is never dispatched", async () => {
-    const proxy = new FakeIOSCtrlProxy();
-    let dispatches = 0;
+  describe("a request aborted before dispatch throws the abort reason, as sendIOSPressCommand does", () => {
+    const reason = new Error("deadline expired");
+    const aborted = () => {
+      const controller = new AbortController();
+      controller.abort(reason);
+      return controller.signal;
+    };
 
-    const result = await proxy.requestTapCoordinates(
-      1,
-      2,
-      0,
-      5000,
-      undefined,
-      undefined,
-      AbortSignal.abort(),
-      () => dispatches++,
-    );
+    test("tap", async () => {
+      const proxy = new FakeIOSCtrlProxy();
+      let dispatches = 0;
 
-    expect(result).toMatchObject({ success: false, dispatched: false, acknowledged: false });
-    expect(dispatches).toBe(0);
-    expect(proxy.getTapHistory()).toEqual([]);
+      await expect(
+        proxy.requestTapCoordinates(1, 2, 0, 5000, undefined, undefined, aborted(), () => {
+          dispatches++;
+        }),
+      ).rejects.toBe(reason);
+
+      expect(dispatches).toBe(0);
+      expect(proxy.getTapHistory()).toEqual([]);
+    });
+
+    test("swipe", async () => {
+      const proxy = new FakeIOSCtrlProxy();
+      let dispatches = 0;
+
+      await expect(
+        proxy.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, aborted(), () => {
+          dispatches++;
+        }),
+      ).rejects.toBe(reason);
+
+      expect(dispatches).toBe(0);
+      expect(proxy.getSwipeHistory()).toEqual([]);
+    });
+
+    test("pinch", async () => {
+      const proxy = new FakeIOSCtrlProxy();
+      let dispatches = 0;
+
+      await expect(
+        proxy.requestPinch(1, 2, 10, 20, 0, 300, 5000, undefined, aborted(), () => {
+          dispatches++;
+        }),
+      ).rejects.toBe(reason);
+
+      expect(dispatches).toBe(0);
+      expect(proxy.getPinchHistory()).toEqual([]);
+    });
+
+    test("a never-sent result under an aborted signal also throws the reason", async () => {
+      const proxy = new FakeIOSCtrlProxy();
+      const controller = new AbortController();
+      proxy.setSwipeResult({ success: false, error: "not connected", dispatched: false });
+      const pending = proxy.requestSwipe(
+        1,
+        2,
+        3,
+        4,
+        300,
+        5000,
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      controller.abort(reason);
+
+      await expect(pending).rejects.toBe(reason);
+    });
+
+    test("a live signal leaves the dispatch contract unchanged", async () => {
+      const proxy = new FakeIOSCtrlProxy();
+      const signal = new AbortController().signal;
+
+      const result = await proxy.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, signal);
+
+      expect(result).toMatchObject({ success: true, dispatched: true, acknowledged: true });
+    });
   });
 });

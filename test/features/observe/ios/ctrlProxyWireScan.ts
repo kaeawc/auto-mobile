@@ -63,6 +63,67 @@ export interface FileScanResult {
   readonly unresolved: UnresolvedEmit[];
 }
 
+/** Delegate transport seams that take the request options as their sole argument. */
+const SEAM_SINKS: ReadonlySet<string> = new Set(["sendSwipeCommand", "sendTextCommand"]);
+
+/**
+ * Request-options builders a sink receives as a call expression. The call-site scan cannot follow
+ * the call, so each entry says why its `return { messageType, ... }` is still scanned: the
+ * return-statement scan covers every builder body in the scanned files.
+ */
+export const SCANNED_BUILDER_CALLEES: ReadonlyMap<string, string> = new Map([
+  ["tapCommandOptions", "builder body `return { messageType, ... }` is covered by the return scan"],
+  [
+    "pinchCommandOptions",
+    "builder body `return { messageType, ... }` is covered by the return scan",
+  ],
+]);
+
+function isScannedBuilderCall(expr: ts.Expression): boolean {
+  if (!ts.isCallExpression(expr)) {
+    return false;
+  }
+  const callee = expr.expression;
+  const name = ts.isIdentifier(callee)
+    ? callee.text
+    : ts.isPropertyAccessExpression(callee)
+      ? callee.name.text
+      : undefined;
+  return name !== undefined && SCANNED_BUILDER_CALLEES.has(name);
+}
+
+/**
+ * An identifier naming a parameter typed `SendCommandOptions<...>` is a forwarded request: the
+ * wrapper that holds it (`sendSwipeCommand`, `sendTextCommand`, the dispatch helper) emits nothing
+ * of its own, and every caller passes its own literal to a scanned sink.
+ */
+function isForwardedSendOptions(expr: ts.Expression): boolean {
+  if (!ts.isIdentifier(expr)) {
+    return false;
+  }
+  for (let node: ts.Node | undefined = expr.parent; node; node = node.parent) {
+    if (ts.isFunctionLike(node)) {
+      const param = node.parameters.find(
+        (candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === expr.text,
+      );
+      if (param) {
+        return (
+          param.type !== undefined &&
+          ts.isTypeReferenceNode(param.type) &&
+          ts.isIdentifier(param.type.typeName) &&
+          param.type.typeName.text === "SendCommandOptions"
+        );
+      }
+    }
+  }
+  return false;
+}
+
+/** A sink value whose emit site is scanned elsewhere (builder return or caller literal). */
+function isCoveredElsewhere(expr: ts.Expression): boolean {
+  return isScannedBuilderCall(expr) || isForwardedSendOptions(expr);
+}
+
 const COMMAND_TOKEN = /^[a-z][a-z0-9_]*$/;
 
 function isCommandLike(value: string): boolean {
@@ -303,6 +364,61 @@ export function scanFile(file: string, source: string): FileScanResult {
     return undefined;
   };
 
+  const reportUnresolvedSink = (arg: ts.Expression): void => {
+    const { line } = sourceFile.getLineAndCharacterOfPosition(arg.getStart(sourceFile));
+    unresolved.push({ file, line: line + 1, text: arg.getText(sourceFile).trim() });
+  };
+
+  /** True when the literal sets the discriminator itself (not only through a spread). */
+  const setsDiscriminator = (obj: ts.ObjectLiteralExpression, key: string): boolean =>
+    obj.properties.some(
+      (prop) =>
+        (ts.isPropertyAssignment(prop) &&
+          (ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name)) &&
+          prop.name.text === key) ||
+        (ts.isShorthandPropertyAssignment(prop) && prop.name.text === key),
+    );
+
+  /** A literal whose discriminator can only come from spreads this scan cannot follow. */
+  const hasUncoveredSpread = (obj: ts.ObjectLiteralExpression, key: string): boolean => {
+    const spreads = obj.properties.filter(ts.isSpreadAssignment);
+    return (
+      spreads.length > 0 &&
+      !setsDiscriminator(obj, key) &&
+      !spreads.every((spread) => isCoveredElsewhere(spread.expression))
+    );
+  };
+
+  /**
+   * Record a sink's request argument. An object literal (direct or const-bound) is scanned for
+   * its discriminator. With `strict` (the command sinks, whose argument IS the request), any other
+   * present argument is reported as unresolved instead of being skipped: a call expression, an
+   * unknown identifier, or a literal whose discriminator arrives only through a spread. The
+   * exceptions are values whose emit site is scanned elsewhere, see `isCoveredElsewhere`.
+   * `JSON.stringify` is not strict: it serializes arbitrary data, so only a literal that spreads
+   * its discriminator in is reported.
+   */
+  const recordSinkArgument = (
+    arg: ts.Expression | undefined,
+    key: string,
+    strict: boolean,
+  ): void => {
+    if (!arg) {
+      return;
+    }
+    const obj = resolveSinkObject(arg);
+    if (obj) {
+      recordEmitObject(obj, key);
+      if (hasUncoveredSpread(obj, key)) {
+        reportUnresolvedSink(arg);
+      }
+      return;
+    }
+    if (strict && !isCoveredElsewhere(arg)) {
+      reportUnresolvedSink(arg);
+    }
+  };
+
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
@@ -312,18 +428,12 @@ export function scanFile(file: string, source: string): FileScanResult {
         ts.isIdentifier(callee) &&
         (callee.text === "sendCommand" || callee.text === "sendIOSPressCommand")
       ) {
-        const obj = resolveSinkObject(node.arguments[1]);
-        if (obj) {
-          recordEmitObject(obj, SINK_DISCRIMINATOR.sendCommand);
-        }
+        recordSinkArgument(node.arguments[1], SINK_DISCRIMINATOR.sendCommand, true);
       }
-      // `this.sendSwipeCommand({ messageType, ... })` — the delegate's swipe transport seam takes
-      // the request options as its sole argument.
-      if (ts.isPropertyAccessExpression(callee) && callee.name.text === "sendSwipeCommand") {
-        const obj = resolveSinkObject(node.arguments[0]);
-        if (obj) {
-          recordEmitObject(obj, SINK_DISCRIMINATOR.sendCommand);
-        }
+      // `this.sendSwipeCommand({ messageType, ... })` / `this.sendTextCommand(...)` — the delegates'
+      // transport seams take the request options as their sole argument.
+      if (ts.isPropertyAccessExpression(callee) && SEAM_SINKS.has(callee.name.text)) {
+        recordSinkArgument(node.arguments[0], SINK_DISCRIMINATOR.sendCommand, true);
       }
       // `JSON.stringify({ type, ... })` — discriminator in the sole arg.
       if (
@@ -332,10 +442,7 @@ export function scanFile(file: string, source: string): FileScanResult {
         callee.expression.text === "JSON" &&
         callee.name.text === "stringify"
       ) {
-        const obj = resolveSinkObject(node.arguments[0]);
-        if (obj) {
-          recordEmitObject(obj, SINK_DISCRIMINATOR.jsonStringify);
-        }
+        recordSinkArgument(node.arguments[0], SINK_DISCRIMINATOR.jsonStringify, false);
       }
     }
     // `return { messageType, ... }` from a request-options builder (`tapCommandOptions`,

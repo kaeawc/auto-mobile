@@ -28,9 +28,30 @@ export function withForwardDeliveredNote(error: unknown): unknown {
   if (isDeviceLostError(error) || error instanceof StaleDisplayError) {
     return error;
   }
-  return new ActionableError(`${errorMessage(error)}. ${FORWARD_DELIVERED_NOTE}`, {
+  const noted = new ActionableError(`${errorMessage(error)}. ${FORWARD_DELIVERED_NOTE}`, {
     cause: error,
   });
+  forwardDeliveredErrors.add(noted);
+  return noted;
+}
+
+/** Errors produced by {@link withForwardDeliveredNote}, so callers can recognise the note. */
+const forwardDeliveredErrors = new WeakSet<object>();
+
+/**
+ * Replacement for a catch block's `throwIfAborted(signal)`. A cancelled request normally replaces
+ * whatever was caught with the plain cancellation, which would drop the "forward swipe was
+ * delivered" note carried by `error` (issue #9973 follow-up). When `error` carries that note, the
+ * cancellation the caller sees carries it too; device-loss carriers stay typed and unchanged.
+ */
+export function throwIfAbortedKeepingForwardNote(signal: AbortSignal | undefined, error: unknown) {
+  try {
+    throwIfAborted(signal);
+  } catch (abort) {
+    const carriesNote =
+      typeof error === "object" && error !== null && forwardDeliveredErrors.has(error);
+    throw carriesNote ? withForwardDeliveredNote(abort) : abort;
+  }
 }
 
 /**

@@ -8,6 +8,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { Window } from "./Window";
 import { logger } from "../../utils/logger";
+import { ActionableError } from "../../models/ActionableError";
 import { ScreenshotResult } from "../../models/ScreenshotResult";
 import { Image } from "../../utils/image-utils";
 import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
@@ -57,6 +58,7 @@ import {
 import { shellQuote } from "../../utils/shellQuote";
 import {
   AndroidPhysicalDisplayIdResolver,
+  type PhysicalDisplayIdResolver,
   assertValidPng,
   decodePngBase64Output,
   withAndroidScreenshotCaptureLock,
@@ -261,7 +263,7 @@ export class TakeScreenshot implements ScreenshotService {
   private fileSystem: FileSystem;
   private cacheDirResolver: () => string;
   private readonly pathProtection: ScreenshotPathProtection;
-  private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
+  private readonly physicalDisplayIdResolver: PhysicalDisplayIdResolver;
   private static cacheDir: string | null = null;
 
   /**
@@ -288,11 +290,9 @@ export class TakeScreenshot implements ScreenshotService {
     fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
     fileSystem: FileSystem = new DefaultFileSystem(),
     cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
-    physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(
-      {
-        timer,
-      },
-    ),
+    physicalDisplayIdResolver: PhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({
+      timer,
+    }),
     cleanupOnCreate = true,
     options: { pathProtection?: ScreenshotPathProtection } = {},
   ) {
@@ -513,7 +513,24 @@ export class TakeScreenshot implements ScreenshotService {
       if (!Number.isSafeInteger(options.displayId) || options.displayId < 0) {
         throw new Error(`Invalid Android display id: ${options.displayId}`);
       }
-      return `-d ${options.displayId} `;
+      // screencap -d takes the SurfaceFlinger physical id; the logical id is rejected.
+      const physicalId = await this.physicalDisplayIdResolver.resolveLogical(
+        this.adb,
+        this.device.deviceId,
+        options.displayId,
+        signal,
+      );
+      if (physicalId !== null) {
+        return `-d ${physicalId} `;
+      }
+      if (options.displayId === 0) {
+        // Plain screencap captures the default display, which is logical display 0.
+        logger.warn("[SCREENSHOT] No physical id for default display 0; capturing without -d");
+        return "";
+      }
+      throw new ActionableError(
+        `Cannot screenshot Android display ${options.displayId}: no physical display id could be resolved from "cmd display get-displays". The display may have been disconnected; re-run observe to refresh the display list.`,
+      );
     }
     const displayId = await this.physicalDisplayIdResolver.resolve(
       this.adb,

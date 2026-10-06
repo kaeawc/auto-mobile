@@ -6,8 +6,11 @@ import { type Kysely, sql } from "kysely";
  *
  * `device_locks` is keyed by adb serial, and emulator serials are port-based, so
  * a different AVD on the same port inherited the previous device's PIN. The new
- * nullable column holds the AVD name (or serial for non-emulators); a credential
- * is replayed only when it matches. Existing rows keep `NULL`: their provenance
+ * nullable column holds a digest binding the AVD name (or serial for
+ * non-emulators) to the credential it was learned with, so an older daemon's
+ * upsert (which rewrites the credential but not this column) invalidates the tag;
+ * a credential is replayed only when the digest matches. Existing rows keep
+ * `NULL`: their provenance
  * is unknown, so they are never replayed and the next successful `pin` unlock
  * re-records them with an identity.
  */

@@ -1,10 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { Database as BunDatabase } from "bun:sqlite";
-import { Kysely, sql } from "kysely";
-import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
-import { runMigrations } from "../../src/db/migrator";
+import { sql, type Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
-import { createTestDatabase } from "./testDbHelper";
+import { createTestBunDatabase, createTestDatabase } from "./testDbHelper";
 import { recordStorageEvent } from "../../src/db/storageEventRepository";
 import { pruneEventTableByCount } from "../../src/db/eventRetention";
 import { createAmortizedRetentionState } from "../../src/db/retentionGate";
@@ -162,10 +159,9 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
 
 describe("storage previous-value lookup plan on the full migration chain", () => {
   test("with both key-lookup indexes present the ORDER BY id lookup seeks the id index with no sort", async () => {
-    const bunDb = new BunDatabase(":memory:");
-    const db = new Kysely<Database>({ dialect: new BunSqliteDialect({ database: bunDb }) });
+    // The cloned template IS the full migration chain; re-running it per test cost ~27 ms.
+    const bunDb = await createTestBunDatabase();
     try {
-      await runMigrations(db as Kysely<unknown>);
       // Raw handle: kysely's `sql` execute returns no rows for EXPLAIN QUERY PLAN.
       const detail = bunDb
         .query<{ detail: string }, []>(
@@ -179,7 +175,7 @@ describe("storage previous-value lookup plan on the full migration chain", () =>
       expect(detail).toContain("idx_storage_events_key_lookup_id");
       expect(detail).not.toContain("USE TEMP B-TREE FOR ORDER BY");
     } finally {
-      await db.destroy();
+      bunDb.close();
     }
   });
 });

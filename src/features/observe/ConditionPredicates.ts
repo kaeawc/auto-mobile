@@ -127,6 +127,52 @@ export function waitResolutionFailure(
   return resolutionFailureDiagnostic(result, selector);
 }
 
+function ownsSelectorText(
+  selected: ElementResolution["chosen"] | undefined,
+  text: string | undefined,
+): boolean {
+  if (text === undefined) {
+    return true;
+  }
+  if (!selected) {
+    return false;
+  }
+  const query = normalizeQuotes(text).toLowerCase();
+  return Object.values(selected.textSources).some((value) =>
+    normalizeQuotes(value).toLowerCase().includes(query),
+  );
+}
+
+/**
+ * The one place a wait selector's criteria are all applied. The resolver returns the
+ * id match as soon as `elementId` is set, so a `text` given beside it would otherwise be
+ * dropped (#10096); keep only the id-located sources that also carry that text, for
+ * every predicate that reads the result.
+ */
+function narrowToSelectorText(
+  result: ElementResolution,
+  selector: ConditionSelector,
+): ElementResolution {
+  if (selector.elementId === undefined || selector.text === undefined) {
+    return result;
+  }
+  const matches = result.matches.flatMap((match) => {
+    const sourceNodes = (match.sourceNodes ?? [match.node]).filter((source) =>
+      ownsSelectorText(source, selector.text),
+    );
+    return sourceNodes.length > 0 ? [{ ...match, sourceNodes }] : [];
+  });
+  const nodes = new Set(matches.map(({ node }) => node));
+  const chosen = result.chosen && nodes.has(result.chosen) ? result.chosen : matches[0]?.node;
+  return {
+    ...result,
+    matches,
+    candidates: result.candidates.filter((node) => nodes.has(node)),
+    chosen: chosen ?? null,
+    indexInMatches: undefined,
+  };
+}
+
 /** One resolver and one match-mode lock per wait, never shared across waits. */
 function searchForWait(
   resolver: ConditionResolver,
@@ -157,7 +203,7 @@ function searchForWait(
       throw new ActionableError(result.error);
     }
     matchMode ??= result.matchMode;
-    return result;
+    return narrowToSelectorText(result, selector);
   };
 }
 
@@ -222,22 +268,6 @@ function textWaitCandidates(
       match: "contains",
       caseSensitive: true,
     }) ?? fallback
-  );
-}
-
-function ownsSelectorText(
-  selected: ElementResolution["chosen"] | undefined,
-  text: string | undefined,
-): boolean {
-  if (text === undefined) {
-    return true;
-  }
-  if (!selected) {
-    return false;
-  }
-  const query = normalizeQuotes(text).toLowerCase();
-  return Object.values(selected.textSources).some((value) =>
-    normalizeQuotes(value).toLowerCase().includes(query),
   );
 }
 
@@ -388,8 +418,8 @@ export function textEquals(
         ? result.chosen
         : result.matches
             .flatMap(({ node, sourceNodes }) => sourceNodes ?? [node])
-            .find((node) => exactText(node.textSources.text));
-    const matched = Boolean(located && exactText(located.textSources.text));
+            .find((node) => exactText(node.shownText));
+    const matched = Boolean(located && exactText(located.shownText));
     return {
       matched,
       matchedElement: matched ? located?.element : undefined,

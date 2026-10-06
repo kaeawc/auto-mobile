@@ -63,6 +63,24 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
     expect(result.path[0].interaction?.args).toEqual({ text: "New Settings" });
   });
 
+  test("recency compares the row id before a device timestamp that moved backwards (#10031)", async () => {
+    const now = Date.now();
+    await manager.recordNavigationEvent(createEvent("Home", now));
+
+    manager.recordToolCall("tapOn", { text: "Recorded first" });
+    await manager.recordNavigationEvent(createEvent("Settings", now + 5000));
+    await manager.recordNavigationEvent(createEvent("Home", now + 5100));
+
+    // The device clock stepped back, so the later row carries an earlier timestamp.
+    manager.recordToolCall("tapOn", { text: "Recorded second" });
+    await manager.recordNavigationEvent(createEvent("Settings", now + 100));
+    await manager.recordNavigationEvent(createEvent("Home", now + 200));
+
+    const result = await manager.findPath("Settings");
+
+    expect(result.path[0].interaction?.args).toEqual({ text: "Recorded second" });
+  });
+
   test("uses a tool edge as the predecessor on a multi-hop path (#9990)", async () => {
     const now = Date.now();
     await manager.recordNavigationEvent(createEvent("Home", now));

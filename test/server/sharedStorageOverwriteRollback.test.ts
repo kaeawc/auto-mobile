@@ -71,6 +71,12 @@ function rollbackScript(created: string[], restores: string[]): string {
 }
 
 const q = (name: string) => shellQuote(`${DIR}/${name}`);
+/** Commands that move a saved copy; the backup probe itself also renames its `.part`, so it is excluded. */
+const savedCopyMoves = (commands: string[]) =>
+  commands.filter(
+    (command) =>
+      !command.includes(MARKER) && command.includes(" mv -f ") && command.includes(".bak"),
+  );
 const mutating = (commands: string[]) =>
   commands.filter((command) => / (rm|mv) /.test(command) || command.includes("sh -c"));
 
@@ -138,9 +144,7 @@ describe("stageSharedStorage rollback of overwritten files", () => {
 
     const commands = executor.getExecutedCommands();
     // b.txt was never renamed over, so there is nothing to restore: no mv at all.
-    expect(
-      commands.filter((command) => command.includes(" mv -f ") && command.includes(".bak")),
-    ).toEqual([]);
+    expect(savedCopyMoves(commands)).toEqual([]);
     expect(commands.slice(-3)).toEqual([
       `shell rm -f ${shellQuote(`${DIR}/.automobile-t-4.part`)}`,
       `shell rm -f ${q("a.txt")}`,
@@ -176,14 +180,22 @@ describe("stageSharedStorage rollback of overwritten files", () => {
     );
 
     const commands = executor.getExecutedCommands();
-    expect(commands.filter((command) => command.includes(" mv "))).toEqual([]);
+    expect(savedCopyMoves(commands)).toEqual([]);
     expect(commands.at(-1)).toBe(`shell rm -f ${shellQuote(`${DIR}/.automobile-t-2.bak`)}`);
   });
 
   test("keeps the saved copy when its restore fails", async () => {
     const { executor, stage } = setup([0]);
     executor.setCommandError("push /fixtures/second.txt", new Error("push failed"));
-    executor.setCommandError("mv -f", new Error("device unavailable"));
+    // Only the restore of first.txt fails; its push-temp rename and the backup probe succeed.
+    executor.setCommandError(
+      // The restore is nested inside `sh -c '...'`, so its quotes appear escaped.
+      shellQuote(`mv -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${q("first.txt")}`).slice(
+        1,
+        -1,
+      ),
+      new Error("device unavailable"),
+    );
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       await expect(stage({ files: [fileAt("first.txt"), fileAt("second.txt")] })).rejects.toThrow(
@@ -213,10 +225,8 @@ describe("stageSharedStorage rollback of overwritten files", () => {
       "third.png",
     ]);
     const commands = executor.getExecutedCommands();
-    // The saved copies are only ever removed, never moved back: every mv is a staged copy.
-    expect(
-      commands.filter((command) => command.includes(" mv ") && command.includes(".bak")),
-    ).toEqual([]);
+    // The saved copies are only ever removed, never moved back.
+    expect(savedCopyMoves(commands)).toEqual([]);
     expect(commands.at(-1)).toBe(
       `shell rm -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${shellQuote(`${DIR}/.automobile-t-3.bak`)}`,
     );
@@ -248,7 +258,10 @@ describe("stageSharedStorage rollback of overwritten files", () => {
     const commands = executor.getExecutedCommands();
     expect(commands.filter((command) => command.startsWith("push "))).toEqual([]);
     expect(commands.at(-1)).toBe(
-      `shell rm -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${shellQuote(`${DIR}/.automobile-t-2.bak`)}`,
+      `shell rm -f ${[1, 2]
+        .flatMap((n) => [`${DIR}/.automobile-t-${n}.bak`, `${DIR}/.automobile-t-${n}.bak.part`])
+        .map(shellQuote)
+        .join(" ")}`,
     );
   });
 

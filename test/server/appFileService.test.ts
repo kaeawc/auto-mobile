@@ -537,6 +537,33 @@ describe("AppFileService", () => {
         expect(commands.filter((command) => command.includes("rc=0"))).toEqual([]);
       });
 
+      test("file 1 committed, then file 2's backup copy fails: file 1 is restored and file 2's original is never touched", async () => {
+        // Matches only the backup `cp` of b.txt (its `.bak.part` target), not its staging copy.
+        const adb = createOverwriteAdb({
+          existing: ["a.txt", "b.txt"],
+          failing: ".automobile-tmp-2.bak.part",
+        });
+        const error = await serviceFor(adb)
+          .putFile({ device, userId: 0, target, files: files("a.txt", "b.txt") })
+          .then(
+            () => undefined,
+            (caught: unknown) => caught,
+          );
+        expect((error as Error).message).toEndWith("Rolled back: a.txt. Rollback failures: none.");
+        const commands = adb.getExecutedCommands();
+        expect(commands).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(
+            `rc=0; mv -f 'files/.automobile-tmp-1.bak' 'files/a.txt' || rc=1; exit $rc`,
+          )}`,
+        );
+        // b.txt's own cleanup drops the partial copy and only restores a complete saved copy.
+        expect(commands).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(restoreOrDrop("tmp-2", "b.txt"))}`,
+        );
+        expect(commands.filter((command) => command.includes("rm -f 'files/b.txt'"))).toEqual([]);
+        expect(commands.filter((command) => command.includes("rm -f 'files/a.txt'"))).toEqual([]);
+      });
+
       test("a cancelled backup copy still removes the partial copy with a detached cleanup", async () => {
         const controller = new AbortController();
         const cleanupSignals: Array<AbortSignal | undefined> = [];

@@ -705,6 +705,43 @@ describe("network tool schema", () => {
     expect(JSON.parse(androidMessages[0]).type).toBe("set_network_mock_rules");
   });
 
+  test("mockNetwork rejects an unescaped brace the device engine cannot compile (#10059)", async () => {
+    const tool = ToolRegistry.getTool("mockNetwork");
+
+    await expect(
+      tool!.deviceAwareHandler!(androidDevice, {
+        host: "api\\.example\\.com",
+        path: "/users/{id}/profile",
+      }),
+    ).rejects.toThrow("Invalid path regex: /users/{id}/profile (unescaped '{' at index 7");
+
+    expect(NetworkState.getInstance().getMockSummary()).toEqual({});
+    expect(androidMessages).toHaveLength(0);
+  });
+
+  test("mockNetwork accepts a leading inline flag the device engine supports (#10059)", async () => {
+    const tool = ToolRegistry.getTool("mockNetwork");
+
+    await tool!.deviceAwareHandler!(androidDevice, {
+      host: "(?i)api\\.example\\.com",
+      path: ".*",
+    });
+
+    expect(Object.keys(NetworkState.getInstance().getMockSummary())).toEqual([
+      "* (?i)api\\.example\\.com.*",
+    ]);
+    expect(androidMessages).toHaveLength(1);
+  });
+
+  test("mockNetwork still rejects a host JavaScript cannot compile", async () => {
+    const tool = ToolRegistry.getTool("mockNetwork");
+
+    await expect(
+      tool!.deviceAwareHandler!(androidDevice, { host: "[invalid", path: "/ok" }),
+    ).rejects.toThrow("Invalid host regex: [invalid");
+    expect(NetworkState.getInstance().getMockSummary()).toEqual({});
+  });
+
   test("mockNetwork rejects invalid response header values before changing state", async () => {
     const tool = ToolRegistry.getTool("mockNetwork");
 

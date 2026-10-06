@@ -168,6 +168,26 @@ class NetworkMockRuleStoreTest {
   }
 
   @Test
+  fun `skips a rule whose path has an unescaped brace that JavaScript accepts`() {
+    // `/users/{id}` is a valid JavaScript RegExp (the brace is a literal) but the JVM/ICU engine
+    // throws "Illegal repetition"; the host rejects it up front (#10059).
+    val store = createStore()
+    store.setRules(listOf(rule(mockId = "braced", path = "/users/{id}/profile")))
+
+    assertEquals(0, store.getRuleCount())
+    assertNull(store.findMatchingRule("api.example.com", "/users/{id}/profile", "GET"))
+  }
+
+  @Test
+  fun `accepts a leading inline flag that JavaScript rejects`() {
+    val store = createStore()
+    store.setRules(listOf(rule(mockId = "flagged", host = "(?i)API\\.example\\.com")))
+
+    assertEquals(1, store.getRuleCount())
+    assertNotNull(store.findMatchingRule("api.example.com", "/users", "GET"))
+  }
+
+  @Test
   fun `matched rule includes response data`() {
     val store = createStore()
     store.setRules(listOf(rule()))

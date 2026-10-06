@@ -1,3 +1,4 @@
+import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
@@ -5,6 +6,14 @@ import { PortManager } from "../../src/utils/PortManager";
 import { logger } from "../../src/utils/logger";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+function getTunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
+  const client = manager["tunnelClient"];
+  if (!(client instanceof DefaultIosTunnelClient)) {
+    throw new Error("Expected default tunnel");
+  }
+  return client;
+}
 
 type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
 const simulator = {
@@ -191,10 +200,10 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     async (supervise) => {
       const remote = remoteRunner();
       const manager = makeManager(physical, remote);
-      manager["iproxyProcessId"] = 99;
+      getTunnel(manager)["iproxyProcessId"] = 99;
       const stop = spyOn(remote, "stopIproxy");
       const spawn = spyOn(remote, "startIproxy");
-      const supervisor = spyOn(manager["iproxySupervisor"], "start").mockResolvedValue();
+      const supervisor = spyOn(getTunnel(manager)["iproxySupervisor"], "start").mockResolvedValue();
       restores.push(...[stop, spawn, supervisor].map((mock) => () => mock.mockRestore()));
       await manager["startIproxyTunnel"]({ supervise });
       expect(stop).not.toHaveBeenCalled();
@@ -208,19 +217,19 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     async (branch) => {
       const remote = remoteRunner();
       const manager = makeManager(physical, remote);
-      manager["iproxyProcessId"] = 98;
-      manager["iproxyDevicePort"] = 9100;
+      getTunnel(manager)["iproxyProcessId"] = 98;
+      getTunnel(manager)["iproxyDevicePort"] = 9100;
       const events: string[] = [];
       const failure = new Error("spawn unavailable");
       const status = spyOn(remote, "getIproxyStatus").mockImplementation(async () => {
         events.push("status");
         return { success: false };
       });
-      const stop = spyOn(manager, "stopIproxyTunnel").mockImplementation(async (options) => {
+      const stop = spyOn(getTunnel(manager), "stop").mockImplementation(async (options) => {
         expect(options).toEqual({ stopSupervisor: true });
         events.push("stop");
-        manager["iproxyProcessId"] = null;
-        manager["iproxyDevicePort"] = null;
+        getTunnel(manager)["iproxyProcessId"] = null;
+        getTunnel(manager)["iproxyDevicePort"] = null;
       });
       const port = spyOn(manager, "ensureRemoteServicePortAvailable").mockImplementation(
         async (options) => {
@@ -239,13 +248,13 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
         }
         return branch === "missing data" ? { success: true } : { success: true, data: { pid: 99 } };
       });
-      const poll = spyOn(manager, "waitForIproxyStartup").mockImplementation(async () => {
-        expect(manager["iproxyProcessId"]).toBe(99);
-        expect(manager["iproxyDevicePort"]).toBe(9100);
-        expect(manager["iproxyProcess"]).toBeNull();
+      const poll = spyOn(getTunnel(manager), "waitForStartup").mockImplementation(async () => {
+        expect(getTunnel(manager)["iproxyProcessId"]).toBe(99);
+        expect(getTunnel(manager)["iproxyDevicePort"]).toBe(9100);
+        expect(getTunnel(manager)["iproxyProcess"]).toBeNull();
         events.push("poll");
       });
-      const supervisor = spyOn(manager["iproxySupervisor"], "start").mockImplementation(
+      const supervisor = spyOn(getTunnel(manager)["iproxySupervisor"], "start").mockImplementation(
         async () => {
           events.push("supervision");
         },
@@ -259,12 +268,12 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       } else {
         await expect(starting).rejects.toThrow(
           branch === "throws"
-            ? failure
+            ? failure.message
             : branch === "failed"
               ? "remote refused"
               : "Failed to start iproxy tunnel via remote runner",
         );
-        expect(manager["iproxyProcessId"]).toBeNull();
+        expect(getTunnel(manager)["iproxyProcessId"]).toBeNull();
       }
       expect(events).toEqual(
         branch === "success"
@@ -277,7 +286,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
   test("remote iproxy polls false/missing status before success without sleeping after success", async () => {
     const remote = remoteRunner();
     const manager = makeManager(physical, remote);
-    manager["iproxyProcessId"] = 99;
+    getTunnel(manager)["iproxyProcessId"] = 99;
     const events: string[] = [];
     let calls = 0;
     const status = spyOn(remote, "getIproxyStatus").mockImplementation(async ({ pid }) => {
@@ -299,7 +308,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       () => status.mockRestore(),
       () => sleep.mockRestore(),
     );
-    await manager["waitForIproxyStartup"]();
+    await getTunnel(manager).waitForStartup();
     expect(events).toEqual(["status:99", "sleep:100", "status:99", "sleep:100", "status:99"]);
   });
 
@@ -307,7 +316,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     const remote = remoteRunner();
     const manager = makeManager(physical, remote);
     if (branch !== "missing pid") {
-      manager["iproxyProcessId"] = 99;
+      getTunnel(manager)["iproxyProcessId"] = 99;
     }
     const failure = new Error("status unavailable");
     const status = spyOn(remote, "getIproxyStatus").mockImplementation(async () => {
@@ -319,9 +328,9 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     const sleep = spyOn(timer, "sleep").mockImplementation(async (ms) => {
       timer.advanceTime(ms);
     });
-    const timeout = spyOn(manager, "getIproxyStartTimeoutMs").mockReturnValue(200);
+    const timeout = spyOn(getTunnel(manager), "getStartTimeoutMs").mockReturnValue(200);
     restores.push(...[status, sleep, timeout].map((mock) => () => mock.mockRestore()));
-    await expect(manager["waitForIproxyStartup"]()).rejects.toThrow(
+    await expect(getTunnel(manager).waitForStartup()).rejects.toThrow(
       branch === "throws" ? failure : "iproxy failed to stay running within 200ms",
     );
     expect(sleep).toHaveBeenCalledTimes(branch === "throws" ? 0 : 2);
@@ -444,9 +453,11 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       ).mockImplementation(async () => {
         events.push("restart");
       });
-      const iproxy = spyOn(manager["iproxySupervisor"], "start").mockImplementation(async () => {
-        events.push("iproxy supervision");
-      });
+      const iproxy = spyOn(getTunnel(manager)["iproxySupervisor"], "start").mockImplementation(
+        async () => {
+          events.push("iproxy supervision");
+        },
+      );
       const supervision = spyOn(manager, "startProcessSupervision").mockImplementation(async () => {
         events.push("supervision");
       });

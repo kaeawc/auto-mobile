@@ -1,3 +1,4 @@
+import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import {
@@ -25,6 +26,14 @@ import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/Xcod
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
+
+function tunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
+  const client = manager["tunnelClient"];
+  if (!(client instanceof DefaultIosTunnelClient)) {
+    throw new Error("Expected default tunnel");
+  }
+  return client;
+}
 
 interface FakeListeningProcess {
   pid: number;
@@ -2357,15 +2366,14 @@ describe("IOSCtrlProxyManager", function () {
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { iproxyProcessId: number }).iproxyProcessId = fakeProcess.pid;
-      (manager as unknown as { iproxyProcess: ChildProcess }).iproxyProcess =
-        fakeProcess as unknown as ChildProcess;
+      tunnel(manager)["iproxyProcessId"] = fakeProcess.pid;
+      tunnel(manager)["iproxyProcess"] = fakeProcess as unknown as ChildProcess;
 
       fakeTimer.enableAutoAdvance();
       await (manager as unknown as { stopIproxyTunnel: () => Promise<void> }).stopIproxyTunnel();
 
       expect(signals).toEqual([undefined, "SIGKILL"]);
-      expect((manager as unknown as { iproxyProcessId: number | null }).iproxyProcessId).toBeNull();
+      expect(tunnel(manager)["iproxyProcessId"]).toBeNull();
     });
 
     test("restarts iproxy after unexpected exit", async function () {
@@ -2427,12 +2435,8 @@ describe("IOSCtrlProxyManager", function () {
           await Promise.resolve();
         }
 
-        expect((manager as unknown as { iproxyProcessId: number | null }).iproxyProcessId).toBe(
-          2222,
-        );
-        expect(
-          (manager as unknown as { iproxyProcess: FakeChildProcess | null }).iproxyProcess,
-        ).toBe(newProcess);
+        expect(tunnel(manager)["iproxyProcessId"]).toBe(2222);
+        expect(tunnel(manager)["iproxyProcess"]).toBe(newProcess);
         expect(eventTimer.getPendingTimeoutCount()).toBe(0);
         expect(eventExecutor.getSpawnedProcesses().length).toBe(2);
       }
@@ -3329,8 +3333,6 @@ describe("IOSCtrlProxyManager", function () {
       const internal = manager as unknown as {
         xcTestProcessId: number | null;
         xcTestProcess: FakeChildProcess | null;
-        iproxyProcessId: number | null;
-        iproxyProcess: FakeChildProcess | null;
         awaitStartupOrphanRunnerReap: () => Promise<void>;
         isCtrlProxyProcessAlive: () => Promise<boolean>;
         isRunning: () => Promise<boolean>;
@@ -3343,8 +3345,9 @@ describe("IOSCtrlProxyManager", function () {
       internal.startOnDevice = async () => {
         internal.xcTestProcessId = runnerPid;
         internal.xcTestProcess = new FakeChildProcess(fakeTimer);
-        internal.iproxyProcessId = iproxy.pid!;
-        internal.iproxyProcess = iproxy;
+        fakeExecutor.setNextSpawnProcess(iproxy);
+        tunnel(manager)["iproxyProcessId"] = iproxy.pid!;
+        tunnel(manager)["iproxyProcess"] = fakeExecutor.spawn("iproxy", []);
       };
       internal.waitForHealthEndpoint = async (start) => {
         healthPollingEntered.resolve();
@@ -3925,8 +3928,8 @@ describe("IOSCtrlProxyManager", function () {
         ).startIproxyTunnel();
 
         // Simulate iproxy process dying between monitor ticks (clears tracking state)
-        (manager as unknown as { iproxyProcessId: null }).iproxyProcessId = null;
-        (manager as unknown as { iproxyProcess: null }).iproxyProcess = null;
+        tunnel(manager)["iproxyProcessId"] = null;
+        tunnel(manager)["iproxyProcess"] = null;
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
 
@@ -3998,7 +4001,7 @@ describe("IOSCtrlProxyManager", function () {
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
         fakeTimer.advanceTime(1000);
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 30; i++) {
           await Promise.resolve();
         }
 

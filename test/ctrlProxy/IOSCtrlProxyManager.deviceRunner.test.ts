@@ -270,6 +270,11 @@ describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
       const manager = createManager();
       await manager.start();
       const firstPort = manager.getServicePort();
+      expect(world.executor.getSpawnedProcesses()[0].args).toEqual([
+        String(firstPort),
+        String(firstPort),
+        DEVICE.deviceId,
+      ]);
       expect(world.alive("iproxy").map((tunnel) => tunnel.port)).toEqual([firstPort]);
 
       // The xcodebuild child exits while the tunnel stays up (runner timeout/crash).
@@ -342,6 +347,8 @@ describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
       await expect(manager.start()).rejects.toThrow(/iproxy tunnel forwards localhost:\d+ but/);
 
       expect(world.all("xcodebuild")).toHaveLength(0);
+      await manager.stop();
+      expect(world.alive("iproxy")).toHaveLength(0);
     });
   });
 

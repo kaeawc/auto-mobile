@@ -1,7 +1,8 @@
+import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { DoctorProbeOptions } from "../doctor/types";
 import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "../doctor/deadline";
 import { errorMessage } from "../utils/describeUnknownError";
-import { runDetachedFromPerf, trackAmbient } from "../utils/PerfContext";
+import { trackAmbient } from "../utils/PerfContext";
 import { logger } from "../utils/logger";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "../devices/requireBootedDevice";
@@ -54,7 +55,6 @@ const FORCE_STOP_OWNERSHIP_CHECK_TIMEOUT_MS = 100;
 // Keep this budget exclusively for descendant-free SIGKILL commands after both
 // ownership checks. Do not signal a tracked PID unless it could be inspected first.
 const FORCE_STOP_KILL_RESERVE_MS = 50;
-const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1_000;
 // `stop()` tears the runner's process tree down, but its HTTP listener can keep
 // answering /health for a moment while the process drains. A single probe fired
 // the instant stop() returns races that drain and rejects a perfectly restartable
@@ -256,6 +256,7 @@ interface IosCtrlProxyManagerOptions {
   hostPortAvailabilityChecker?: HostPortAvailabilityChecker;
   xcodebuild?: Xcodebuild;
   processClient?: IosCtrlProxyProcessClient;
+  tunnelClient?: IosTunnelClient;
 }
 
 /**
@@ -357,7 +358,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Process supervision
   private readonly processSupervisor: ProcessSupervisor;
-  private readonly iproxySupervisor: ProcessSupervisor;
+  private readonly tunnelClient: IosTunnelClient;
   private isProcessSupervisorRestarting = false;
   private static readonly MAX_RESTART_ATTEMPTS = 5;
   private static readonly RESTART_BASE_DELAY_MS = 2000;
@@ -365,15 +366,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private static readonly PORT_RELEASE_GRACE_MS = 250;
   private static readonly PORT_RELEASE_ATTEMPTS = 4;
 
-  // iproxy tunnel state (physical devices)
-  private iproxyProcessId: number | null = null;
-  private iproxyProcess: ChildProcess | null = null;
-  private iproxyDevicePort: number | null = null;
-  // Host port the tracked tunnel forwards (`iproxy <local> <device> <udid>`). Recorded
-  // where the tunnel is spawned and cleared wherever tracking is dropped, so the
-  // manager can tell "our own tunnel holds this port" from a genuine collision and
-  // can never leave the tunnel and `servicePort` pointing at different ports (#10232).
-  private iproxyLocalPort: number | null = null;
   private isStopping: boolean = false;
   // Set when the runner supervisor finds the tracked runner process alive but
   // unhealthy, so its onExit keeps the tracking: clearing it would hide a live
@@ -410,10 +402,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static readonly APP_BUNDLE_ID = "dev.jasonpearson.automobile.ctrlproxy";
   /** Bundle ID used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
   private static readonly LEGACY_APP_BUNDLE_ID = "dev.jasonpearson.automobile.XCTestServiceApp";
-  private static readonly IPROXY_MONITOR_INTERVAL_MS = 5000;
-  private static readonly IPROXY_RESTART_BASE_DELAY_MS = 1000;
-  private static readonly IPROXY_RESTART_MAX_DELAY_MS = 15000;
-  private static readonly DEFAULT_IPROXY_START_TIMEOUT_MS = 5000;
 
   private constructor(options: IosCtrlProxyManagerOptions) {
     const {
@@ -504,25 +492,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         logger.warn(`[IOSCtrlProxy] Auto-restart failed: ${errorMessage(error)}`);
       },
     });
-    this.iproxySupervisor = new DefaultProcessSupervisor({
-      name: "iOS iproxy tunnel",
-      timer: this.timer,
-      monitorIntervalMs: IOSCtrlProxyManager.IPROXY_MONITOR_INTERVAL_MS,
-      restartBackoff: exponentialBackoff({
-        initialDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_BASE_DELAY_MS,
-        maxDelayMs: IOSCtrlProxyManager.IPROXY_RESTART_MAX_DELAY_MS,
-      }),
-      restart: () => this.restartIproxyTunnel(),
-      isAlive: () => this.isSupervisedIproxyTunnelAlive(),
-      onExit: () => {
-        this.iproxyProcessId = null;
-        this.iproxyProcess = null;
-        this.iproxyLocalPort = null;
-      },
-      onRestartFailure: (error) => {
-        logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`);
-      },
-    });
+    this.tunnelClient =
+      options.tunnelClient ??
+      new DefaultIosTunnelClient({
+        processExecutor: this.processExecutor,
+        timer: this.timer,
+        remoteRunner: this.remoteRunner,
+        useRemoteRunner: () => this.useRemoteRunner(),
+        isRunning: (pid) => this.processClient.isRunning(pid),
+        isConnected: () => this.isDeviceDetected(),
+        restart: () => this.restartIproxyTunnel(),
+        prepareRemoteStart: async (start) => {
+          await this.ensureRemoteServicePortAvailable({
+            allowReallocation: start.allowServicePortReallocation ?? true,
+          });
+          return this.servicePort;
+        },
+      });
   }
 
   /**
@@ -610,8 +596,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     device: BootedDevice,
     timer: Timer,
     builder?: IosCtrlProxyBuilder,
+    tunnelClient?: IosTunnelClient,
   ): IOSCtrlProxyManager {
-    return new IOSCtrlProxyManager({ device, timer, builder });
+    return new IOSCtrlProxyManager({ device, timer, builder, tunnelClient });
   }
 
   /**
@@ -846,17 +833,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async forceStopForShutdown(deadline: number): Promise<void> {
     this.isStopping = true;
     this.processSupervisor.stop();
-    this.iproxySupervisor.stop();
 
     const runnerPid = this.xcTestProcessId;
-    const iproxyPid = this.iproxyProcessId;
-    const iproxyProcess = this.iproxyProcess;
     this.xcTestProcessId = null;
     this.xcTestProcess = null;
-    this.iproxyProcessId = null;
-    this.iproxyProcess = null;
-    this.iproxyDevicePort = null;
-    this.iproxyLocalPort = null;
     this.clearCaches();
     PortManager.release(this.device.deviceId);
 
@@ -865,21 +845,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         runnerPid
           ? this.remoteRunner.stop({ deviceId: this.device.deviceId, pid: runnerPid })
           : undefined,
-        iproxyPid ? this.remoteRunner.stopIproxy({ pid: iproxyPid }) : undefined,
+        this.tunnelClient.stop({ force: true, clearDevicePort: true }),
       ]);
       return;
     }
 
-    try {
-      if (iproxyProcess && typeof iproxyProcess.kill === "function") {
-        iproxyProcess.kill("SIGKILL");
-      } else if (iproxyPid) {
-        process.kill(iproxyPid, "SIGKILL");
-      }
-    } catch (error) {
-      // A child can exit between tracking and shutdown.
-      logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
-    }
+    await this.tunnelClient.stop({ force: true, clearDevicePort: true });
     if (runnerPid) {
       const preKillDeadlineMs = deadline - FORCE_STOP_KILL_RESERVE_MS;
       if (preKillDeadlineMs <= this.timer.now()) {
@@ -1627,7 +1598,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     if (!restartedAliveProcess) {
       perf.endOperation("iproxyTunnel");
-      await this.iproxySupervisor.start();
+      await this.tunnelClient.supervise();
     }
     return restartedAliveProcess;
   }
@@ -2209,10 +2180,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * (#10232).
    */
   private async isPortHeldByOwnLiveTunnel(port: number): Promise<boolean> {
-    if (this.useRemoteRunner() || this.iproxyProcessId === null || this.iproxyLocalPort !== port) {
+    if (this.useRemoteRunner() || this.tunnelClient.localPort !== port) {
       return false;
     }
-    return this.isProcessRunning(this.iproxyProcessId);
+    return this.tunnelClient.isAlive();
   }
 
   private async ensureLocalServicePortAllocatedAndAvailable(): Promise<void> {
@@ -2956,7 +2927,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     perf.endOperation("websocketInit");
 
     if (!this.isSimulator()) {
-      await this.iproxySupervisor.start();
+      await this.tunnelClient.supervise();
     }
   }
 
@@ -3552,29 +3523,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // (#6372 follow-up); callers in this file delegate to `this.processClient` /
   // `IosCtrlProxyProcessClient` instead.
 
-  /**
-   * Check if the tracked iproxy process is alive.
-   * Used by the iproxy supervisor so it only restarts the tunnel when the
-   * process actually died, not when CtrlProxy is temporarily slow.
-   */
-  private async isIproxyProcessAlive(): Promise<boolean> {
-    if (!this.iproxyProcessId) {
-      return false;
-    }
-    if (this.useRemoteRunner()) {
-      try {
-        const status = await this.remoteRunner.getIproxyStatus({ pid: this.iproxyProcessId });
-        return status.success && (status.data?.running ?? false);
-      } catch (error) {
-        // Remote status call failed; the supervisor should treat iproxy as down
-        // and attempt a restart rather than assume the tunnel is still healthy.
-        logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
-        return false;
-      }
-    }
-    return this.isProcessRunning(this.iproxyProcessId);
-  }
-
   private async startOnDevice(): Promise<void> {
     logger.info("[IOSCtrlProxy] Starting CtrlProxy on physical device");
 
@@ -3738,11 +3686,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * is owned by the macOS host.
    */
   private assertTunnelForwardsServicePort(): void {
-    if (this.iproxyProcessId !== null && this.iproxyLocalPort === this.servicePort) {
+    if (this.tunnelClient.localPort === this.servicePort) {
       return;
     }
     throw new ActionableError(
-      `iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "none"} but the CtrlProxy ` +
+      `iproxy tunnel forwards localhost:${this.tunnelClient.localPort ?? "none"} but the CtrlProxy ` +
         `runner port is ${this.servicePort}; refusing to launch a runner nothing can reach. ` +
         `Retry the call, or restart the daemon if this persists.`,
     );
@@ -3955,259 +3903,31 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.healthClient.checkHealthEndpointOnPortForDevice(port, deviceId, timeoutMs, options);
   }
 
-  private getIproxyStartTimeoutMs(): number {
-    const envValue =
-      process.env.AUTOMOBILE_IPROXY_START_TIMEOUT_MS ??
-      process.env.AUTO_MOBILE_IPROXY_START_TIMEOUT_MS;
-    if (!envValue) {
-      return IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS;
-    }
-    const parsed = Number.parseInt(envValue, 10);
-    if (Number.isNaN(parsed) || parsed <= 0) {
-      logger.warn(
-        `[IOSCtrlProxy] Invalid iproxy timeout '${envValue}', using default ${IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS}ms`,
-      );
-      return IOSCtrlProxyManager.DEFAULT_IPROXY_START_TIMEOUT_MS;
-    }
-    return parsed;
-  }
-
   private async startIproxyTunnel(options: IproxyTunnelStartOptions = {}): Promise<void> {
     if (this.isSimulator()) {
       return;
     }
-
-    if (this.useRemoteRunner()) {
-      await this.startRemoteIproxyTunnel(options);
-      return;
-    }
-
-    if (this.iproxyProcessId && (await this.isProcessRunning(this.iproxyProcessId))) {
-      if (this.iproxyLocalPort === this.servicePort) {
-        if (options.supervise !== false) {
-          await this.iproxySupervisor.start();
-        }
-        return;
-      }
-      // The live tunnel forwards a different host port than the runner will use
-      // (#10232). Reusing it would leave health polling and the WebSocket client
-      // dialling a port nothing forwards, so replace it, stopping it by its
-      // recorded handle before the new one is spawned.
-      logger.warn(
-        `[IOSCtrlProxy] Live iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "unknown"} ` +
-          `but the runner port is ${this.servicePort}; restarting the tunnel`,
-      );
-    }
-
-    await this.stopIproxyTunnel({ stopSupervisor: options.supervise !== false });
-
-    logger.info(
-      `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.servicePort} -> device:${this.servicePort})`,
-    );
-    // Spawn the resident iproxy tunnel detached from any request perf tracker,
-    // so its `exit`/`error` callbacks (which drive supervisor restarts) do not
-    // capture a completed readiness request's tracker via AsyncLocalStorage
-    // (see PerfContext). The startup wait below stays timed under the scope.
-    const child = runDetachedFromPerf(() =>
-      this.processExecutor.spawn(
-        "iproxy",
-        [String(this.servicePort), String(this.servicePort), this.device.deviceId],
-        { stdio: ["ignore", "pipe", "pipe"] },
-      ),
-    );
-
-    if (!child.pid) {
-      throw new Error("Failed to start iproxy tunnel (no PID)");
-    }
-
-    this.iproxyProcessId = child.pid;
-    this.iproxyProcess = child;
-    this.iproxyLocalPort = this.servicePort;
-    this.captureIproxyOutput(child);
-
-    child.on("exit", () => {
-      if (this.iproxyProcess !== child) {
-        return;
-      }
-      if (!this.isStopping) {
-        logger.warn("[IOSCtrlProxy] iproxy exited unexpectedly");
-        this.iproxySupervisor.processExited();
-      }
-    });
-
-    child.on("error", (error) => {
-      if (this.iproxyProcess !== child) {
-        return;
-      }
-      if (!this.isStopping) {
-        logger.warn(`[IOSCtrlProxy] iproxy error: ${error.message}`);
-        this.iproxySupervisor.processExited();
-      }
-    });
-
-    // Span the iproxy tunnel STARTUP only (spawn + readiness wait), not the
-    // resident tunnel's lifetime; the physical-device spawn bypasses any
-    // instrumented client funnel (see PerfContext).
-    await trackAmbient("iproxy startup", () => this.waitForIproxyStartup());
-    if (options.supervise !== false) {
-      await this.iproxySupervisor.start();
-    }
-  }
-
-  private async startRemoteIproxyTunnel(options: IproxyTunnelStartOptions): Promise<void> {
-    if (this.iproxyProcessId) {
-      const status = await this.remoteRunner.getIproxyStatus({ pid: this.iproxyProcessId });
-      if (status.success && status.data?.running) {
-        if (options.supervise !== false) {
-          await this.iproxySupervisor.start();
-        }
-        return;
-      }
-    }
-
-    await this.launchRemoteIproxyTunnel(options);
-  }
-
-  private async launchRemoteIproxyTunnel(options: IproxyTunnelStartOptions): Promise<void> {
-    const fixedDevicePort = options.devicePort ?? this.iproxyDevicePort;
-    await this.stopIproxyTunnel({ stopSupervisor: options.supervise !== false });
-    await this.ensureRemoteServicePortAvailable({
-      allowReallocation: options.allowServicePortReallocation ?? true,
-    });
-    const devicePort = fixedDevicePort ?? this.servicePort;
-
-    const result = await this.remoteRunner.startIproxy({
-      deviceId: this.device.deviceId,
+    await this.tunnelClient.start({
       localPort: this.servicePort,
-      devicePort,
+      devicePort: this.useRemoteRunner()
+        ? (options.devicePort ?? this.tunnelClient.devicePort ?? undefined)
+        : this.servicePort,
+      udid: this.device.deviceId,
+      ...options,
     });
-    if (!result.success || !result.data) {
-      throw new Error(result.error || "Failed to start iproxy tunnel via remote runner");
-    }
-
-    this.iproxyProcessId = result.data.pid;
-    this.iproxyProcess = null;
-    this.iproxyLocalPort = this.servicePort;
-    this.iproxyDevicePort = devicePort;
-    await this.waitForIproxyStartup();
-    if (options.supervise !== false) {
-      await this.iproxySupervisor.start();
-    }
-    return;
   }
 
   private async stopIproxyTunnel(
     options: { clearDevicePort?: boolean; stopSupervisor?: boolean } = {},
   ): Promise<void> {
-    if (options.stopSupervisor !== false) {
-      this.iproxySupervisor.stop();
-    }
-
-    if (this.useRemoteRunner()) {
-      if (this.iproxyProcessId) {
-        const result = await this.remoteRunner.stopIproxy({ pid: this.iproxyProcessId });
-        if (!result.success) {
-          logger.warn(
-            `[IOSCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`,
-          );
-        }
-      }
-    } else if (this.iproxyProcess && typeof this.iproxyProcess.kill === "function") {
-      await this.stopLocalIproxyProcess(this.iproxyProcess);
-    } else if (this.iproxyProcessId) {
-      try {
-        process.kill(this.iproxyProcessId);
-      } catch (error) {
-        // iproxy may have exited before cleanup; forgetting its retired PID remains safe.
-        logger.debug(`[IOSCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
-      }
-    }
-
-    this.iproxyProcessId = null;
-    this.iproxyProcess = null;
-    this.iproxyLocalPort = null;
-    if (options.clearDevicePort) {
-      this.iproxyDevicePort = null;
-    }
-  }
-
-  /**
-   * Do not discard a local iproxy handle until its child has exited. A SIGTERM
-   * request only means Node delivered the signal; it does not mean an iproxy
-   * child stopped. Escalate before the owning shutdown path accepts the stop.
-   */
-  private async stopLocalIproxyProcess(iproxyProcess: ChildProcess): Promise<void> {
-    if (iproxyProcess.exitCode !== null) {
-      return;
-    }
-    try {
-      iproxyProcess.kill();
-    } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Local iproxy exited before graceful shutdown: ${error}`);
-      return;
-    }
-
-    if (await this.waitForLocalIproxyExit(iproxyProcess)) {
-      return;
-    }
-
-    try {
-      iproxyProcess.kill("SIGKILL");
-    } catch (error) {
-      // Ignore errors if the process exited while escalating.
-      logger.debug(`[IOSCtrlProxy] Local iproxy exited before forced shutdown: ${error}`);
-    }
-    await this.waitForLocalIproxyExit(iproxyProcess);
-  }
-
-  private async waitForLocalIproxyExit(iproxyProcess: ChildProcess): Promise<boolean> {
-    if (iproxyProcess.exitCode !== null) {
-      return true;
-    }
-    let timeout: NodeJS.Timeout | undefined;
-    const exited = new Promise<boolean>((resolve) => {
-      const complete = () => resolve(true);
-      iproxyProcess.once("exit", complete);
-      iproxyProcess.once("error", complete);
-      timeout = this.timer.setTimeout(() => resolve(false), IPROXY_GRACEFUL_STOP_TIMEOUT_MS);
-    });
-    try {
-      return await exited;
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
-    }
-  }
-
-  private async waitForIproxyStartup(): Promise<void> {
-    const timeoutMs = this.getIproxyStartTimeoutMs();
-    const deadline = this.timer.now() + timeoutMs;
-
-    while (this.timer.now() < deadline) {
-      if (!this.iproxyProcessId) {
-        await this.timer.sleep(100);
-        continue;
-      }
-      if (this.useRemoteRunner()) {
-        const status = await this.remoteRunner.getIproxyStatus({ pid: this.iproxyProcessId });
-        if (status.success && status.data?.running) {
-          return;
-        }
-      } else if (await this.isProcessRunning(this.iproxyProcessId)) {
-        return;
-      }
-      await this.timer.sleep(100);
-    }
-
-    throw new Error(`iproxy failed to stay running within ${timeoutMs}ms`);
+    await this.tunnelClient.stop(options);
   }
 
   private async restartIproxyTunnel(): Promise<void> {
     try {
       await this.startIproxyTunnel({
         allowServicePortReallocation: false,
-        devicePort: this.iproxyDevicePort ?? undefined,
+        devicePort: this.tunnelClient.devicePort ?? undefined,
         supervise: false,
       });
     } catch (error) {
@@ -4220,32 +3940,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       await this.restartDeviceProcessAfterHostPortCollision();
       await this.processSupervisor.start();
     }
-  }
-
-  private async isSupervisedIproxyTunnelAlive(): Promise<boolean> {
-    if (this.isSimulator()) {
-      return true;
-    }
-
-    const isConnected = await this.isDeviceDetected();
-    if (!isConnected) {
-      logger.warn(
-        `[IOSCtrlProxy] Device ${this.device.deviceId} not detected, stopping iproxy monitoring`,
-      );
-      await this.stopIproxyTunnel({ clearDevicePort: true });
-      return true;
-    }
-
-    // Check iproxy process liveness — not CtrlProxy health. A temporarily slow
-    // CtrlProxy would fail a health check even though the tunnel is fine; restarting
-    // the tunnel in that case is harmful. CtrlProxy's own health is covered by the
-    // separate process supervisor.
-    const iproxyAlive = await this.isIproxyProcessAlive();
-    if (!iproxyAlive) {
-      logger.warn("[IOSCtrlProxy] iproxy process is no longer running, scheduling restart");
-      await this.stopIproxyTunnel({ stopSupervisor: false });
-    }
-    return iproxyAlive;
   }
 
   private async isDeviceDetected(): Promise<boolean> {
@@ -4293,26 +3987,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // means we can't confirm the simulator is present; treat it as undetected.
       logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
-    }
-  }
-
-  private captureIproxyOutput(child: ChildProcess): void {
-    if (child.stdout) {
-      child.stdout.on("data", (data: Buffer | string) => {
-        const output = data.toString().trim();
-        if (output) {
-          logger.info(`[iproxy stdout] ${output.slice(0, 500)}`);
-        }
-      });
-    }
-
-    if (child.stderr) {
-      child.stderr.on("data", (data: Buffer | string) => {
-        const output = data.toString().trim();
-        if (output) {
-          logger.warn(`[iproxy stderr] ${output.slice(0, 500)}`);
-        }
-      });
     }
   }
 

@@ -11,6 +11,7 @@ import {
   type SpawnFn,
 } from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
+import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
 import {
@@ -696,6 +697,17 @@ function emulatorDeviceIdForConsolePort(consolePort: number): string {
  */
 function isLaunchChildAlive(child: ChildProcess): boolean {
   return (child.exitCode ?? null) === null && (child.signalCode ?? null) === null;
+}
+
+/** Any failure of a launch the caller cancelled is reported as that cancellation, with the spawned child. */
+function asLaunchCancellation(
+  avdName: string,
+  error: unknown,
+  process: ChildProcess | null,
+): EmulatorLaunchCancelledError {
+  return error instanceof EmulatorLaunchCancelledError
+    ? error
+    : new EmulatorLaunchCancelledError(avdName, process);
 }
 
 function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
@@ -2598,7 +2610,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     request: AndroidEmulatorLaunchRequest,
   ): Promise<AndroidEmulatorLaunchHandle> {
     if (request.signal?.aborted) {
-      throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+      throw new EmulatorLaunchCancelledError(request.avdName, null);
     }
 
     let process: ChildProcess | null = null;
@@ -2619,33 +2631,38 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // validation). It ends when `startEmulatorProcess` resolves — never the
       // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
       // leaf (see PerfContext).
-      process = await trackAmbient(`emulator launch ${request.avdName}`, () =>
-        this.startEmulatorProcess(request.avdName, {
-          requestedExtraArgs: request.extraArgs,
-          onSpawn: (spawnedProcess) => {
-            process = spawnedProcess;
-            if (disposed && !spawnedProcess.killed) {
-              spawnedProcess.kill();
-            }
-          },
-          isCancelled: () => disposed,
-          capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
-          expectedDeviceId: request.deviceId,
-          signal: request.signal,
-        }),
+      // Raced against the request's abort so a cancel does not outwait the
+      // startup validation: that can run its full 5 s fallback against an
+      // emulator that ignores SIGTERM, and the owner needs the child handle
+      // inside its abort grace to confirm the exit (#10075).
+      process = await raceWithDeadline(
+        () =>
+          trackAmbient(`emulator launch ${request.avdName}`, () =>
+            this.startEmulatorProcess(request.avdName, {
+              requestedExtraArgs: request.extraArgs,
+              onSpawn: (spawnedProcess) => {
+                process = spawnedProcess;
+                if (disposed && !spawnedProcess.killed) {
+                  spawnedProcess.kill();
+                }
+              },
+              isCancelled: () => disposed,
+              capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
+              expectedDeviceId: request.deviceId,
+              signal: request.signal,
+            }),
+          ),
+        { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
       );
       if (disposed) {
-        if (process && !process.killed) {
-          process.kill();
-        }
-        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+        // `dispose` already sent the SIGTERM to this child.
+        throw new EmulatorLaunchCancelledError(request.avdName, process);
       }
     } catch (error) {
       request.signal?.removeEventListener("abort", dispose);
-      if (disposed) {
-        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
-      }
-      throw error;
+      // Hand the spawned child to the owner: one SIGTERM is only a request, and
+      // the owner must confirm the exit before freeing the AVD (#10075).
+      throw disposed ? asLaunchCancellation(request.avdName, error, process) : error;
     }
     if (process && request.deviceId) {
       this.launchTargetDeviceIds.set(process, request.deviceId);
@@ -2730,7 +2747,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
     if (isCancelled?.()) {
-      throw new ActionableError(`Android emulator launch for '${avdName}' was cancelled`);
+      throw new EmulatorLaunchCancelledError(avdName, null);
     }
   }
 
@@ -2761,7 +2778,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
     // Check if the AVD exists
     perf.startOperation("validateAvd");
-    const availableAvds = await this.listAvds();
+    const availableAvds = await this.listAvds({ signal: options.signal });
     perf.endOperation("validateAvd");
     if (!availableAvds.find((emu) => emu.name === avdName)) {
       throw new ActionableError(

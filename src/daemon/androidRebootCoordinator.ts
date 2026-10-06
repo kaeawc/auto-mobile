@@ -1,4 +1,5 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -384,6 +385,11 @@ export class AndroidRebootCoordinator {
           outcome: "succeeded",
         });
       } catch (error) {
+        if (isEmulatorLaunchCancelledError(error) && error.process) {
+          // A launch cancelled after the spawn throws instead of returning its child
+          // (#10075); adopt it so the stop step below confirms its exit.
+          childProcess = error.process;
+        }
         if (
           signal.aborted ||
           this.pool.consumeAndroidRecoveryCancellation(device, recoveryDeviceIds)

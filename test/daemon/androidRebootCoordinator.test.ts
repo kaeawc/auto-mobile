@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import type { BootedDevice } from "../../src/models";
+import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
 import {
   AndroidRebootCoordinator,
   type AndroidRebootCoordinatorPoolPort,
@@ -115,7 +116,9 @@ class FakePoolPort implements AndroidRebootCoordinatorPoolPort {
     // This represents the pool-owned bind operation, which may self-lock internally.
     this.calls.push(`bind:${sessionId ?? "none"}`);
   }
-  async stopEmulatorProcess(_child?: ChildProcess | null): Promise<void> {
+  readonly stoppedProcesses: Array<ChildProcess | null | undefined> = [];
+  async stopEmulatorProcess(child?: ChildProcess | null): Promise<void> {
+    this.stoppedProcesses.push(child);
     this.calls.push("stop-process");
   }
   consumeAndroidRecoveryCancellation(): boolean {
@@ -215,6 +218,25 @@ describe("AndroidRebootCoordinator", () => {
     expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
     expect(outcomes).toEqual(["not-attempted"]);
     expect(attempts).toEqual([]);
+  });
+  test("stops the child a cancelled launch carries on its error (#10075)", async () => {
+    const controller = new AbortController();
+    const spawned = { pid: 4242 } as ChildProcess;
+    const { coordinator, port } = setup(async () => {
+      controller.abort(new Error("cancel launch"));
+      throw new EmulatorLaunchCancelledError("Pixel", spawned);
+    });
+    expect(
+      await coordinator.rebootDisconnectedAndroidDeviceCoordinated(
+        oldDevice,
+        "incident",
+        {},
+        controller.signal,
+        () => {},
+      ),
+    ).toBe(false);
+    expect(port.stoppedProcesses).toEqual([spawned]);
+    expect(port.calls.slice(-2)).toEqual(["stop-process", "finish"]);
   });
   test.each([1, 3])("cancels at checkpoint %i in handoff order", async (checkpoint) => {
     const { coordinator, port, outcomes, attempts, timer } = setup();

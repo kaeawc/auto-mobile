@@ -4,6 +4,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 /**
  * Sealed class hierarchy for all outbound WebSocket messages from Android to MCP server.
@@ -699,6 +700,48 @@ data class HighlightResponse(
   val requestId: String? = null,
   val success: Boolean,
   val error: String? = null,
+) : WebSocketResponse()
+
+/**
+ * [missingAssets] is a warning, not a failure: after a successful `show_overlay` or
+ * `update_overlay` it lists the asset ids the spec references that the device has no copy of (never
+ * uploaded, or cleared since), so the host can re-upload them. It is omitted from the frame when
+ * empty or absent, so peers that predate it see exactly the frame they always did.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("overlay_result")
+data class OverlayResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val missingAssets: List<String>? = null,
+) : WebSocketResponse()
+
+@Serializable
+enum class OverlayEventKind {
+  @SerialName("emit") EMIT,
+  @SerialName("page_changed") PAGE_CHANGED,
+  @SerialName("dismissed") DISMISSED,
+}
+
+/** Unsolicited frame. Pager selection is separate from authored scalar state. */
+@Serializable
+@SerialName("overlay_event")
+data class OverlayEvent(
+  override val timestamp: Long,
+  val id: String,
+  /**
+   * Future emitter contract: per overlay id, monotonic starting at 1. Reconnects must not reset it;
+   * hosts should treat lower-or-equal sequences for the same id as duplicates.
+   */
+  val sequence: Long,
+  val kind: OverlayEventKind,
+  val name: String?,
+  val payload: JsonElement?,
+  val state: Map<String, OverlayScalar>,
+  val pages: Map<String, Int> = emptyMap(),
 ) : WebSocketResponse()
 
 // =============================================================================

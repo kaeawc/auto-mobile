@@ -3,8 +3,8 @@ import { validateHeaderName } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { NetworkState, type SimulatedErrorType } from "./NetworkState";
-import { buildNetworkMockRules } from "./networkMockRules";
+import { NetworkState, type SimulatedErrorType, type SimulationConfig } from "./NetworkState";
+import { buildNetworkMockRules, describeInvalidMockPattern } from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -12,7 +12,7 @@ import { isIosCtrlProxyOverrideUsableSync } from "../utils/iosCtrlProxyOverride"
 import { ActionableError } from "../models";
 import { defaultTimer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { IOSCtrlProxyClient, type IosMockRuleSyncOutcome } from "../features/observe/ios";
 import type { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -220,24 +220,62 @@ async function syncMockRulesToDevice(
   state: NetworkState,
 ): Promise<DeviceSyncResult> {
   if (device.platform === "android") {
-    // Use limit (not remaining): device-side stores track consumption and
-    // reconnect restores all retained rules from NetworkState.
+    // This device's rules only (#10061). Device-side stores keep consumption per
+    // mockId across a re-push (#10060), so resending the full list is safe.
     return syncAndroidNetworkMessage(device, {
       type: "set_network_mock_rules",
-      rules: buildNetworkMockRules(state),
+      rules: buildNetworkMockRules(state, device.deviceId),
     });
   }
+  if (device.platform !== "ios") {
+    return { synced: true };
+  }
+  return syncIosMockRules(device);
+}
+
+const IOS_MOCK_SYNC_PENDING = "will be applied when the device connection is restored";
+
+const IOS_MOCK_SYNC_WARNINGS: Record<Exclude<IosMockRuleSyncOutcome, "sent">, string> = {
+  noCapability:
+    "Mock rules are stored but were not synced to the device: the foreground app does not " +
+    "expose the AutoMobile SDK network_mocking capability. They " +
+    IOS_MOCK_SYNC_PENDING +
+    " or the app exposes the capability.",
+  disabled: "Mock rules are stored but were not synced to the device: network mocking is disabled.",
+  failed:
+    "Mock rules are stored but were not synced to the device; they " + IOS_MOCK_SYNC_PENDING + ".",
+  superseded:
+    "Mock rules are stored but were not synced to the device: the sync was superseded by a " +
+    "newer foreground-app capability probe. They " +
+    IOS_MOCK_SYNC_PENDING +
+    ".",
+};
+
+async function syncIosMockRules(device: BootedDevice): Promise<DeviceSyncResult> {
   try {
-    if (device.platform === "ios") {
-      await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+    const outcome = await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+    if (outcome === "sent") {
+      return { synced: true };
     }
+    const warning = IOS_MOCK_SYNC_WARNINGS[outcome];
+    logger.warn(`[networkTools] ${warning}`);
+    return { synced: false, warning };
   } catch (error) {
     logger.warn(
       `[networkTools] Failed to sync mock rules to device: ${errorMessage(error)}`,
       error,
     );
+    return { synced: false, warning: IOS_MOCK_SYNC_WARNINGS.failed };
   }
-  return { synced: true };
+}
+
+function errorSimulationMessageFields(sim: SimulationConfig | null) {
+  return {
+    enabled: sim !== null,
+    errorType: sim?.errorType ?? null,
+    limit: sim?.limit ?? null,
+    expiresAtEpochMs: sim?.expiresAt ?? null,
+  };
 }
 
 async function syncErrorSimulationToDevice(
@@ -247,14 +285,11 @@ async function syncErrorSimulationToDevice(
   if (device.platform !== "android" && device.platform !== "ios") {
     return { synced: true };
   }
-  const sim = state.simulation;
+  const sim = state.getSimulation(device.deviceId);
   if (device.platform === "ios") {
-    const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation({
-      enabled: sim !== null,
-      errorType: sim?.errorType ?? null,
-      limit: sim?.limit ?? null,
-      expiresAtEpochMs: sim?.expiresAt ?? null,
-    });
+    const result = await IOSCtrlProxyClient.getInstance(device).setNetworkErrorSimulation(
+      errorSimulationMessageFields(sim),
+    );
     if (!result.success) {
       throw new ActionableError(result.error ?? "Failed to sync iOS network error simulation.");
     }
@@ -263,10 +298,7 @@ async function syncErrorSimulationToDevice(
 
   return syncAndroidNetworkMessage(device, {
     type: "set_network_error_simulation",
-    enabled: sim !== null,
-    errorType: sim?.errorType ?? null,
-    limit: sim?.limit ?? null,
-    expiresAtEpochMs: sim?.expiresAt ?? null,
+    ...errorSimulationMessageFields(sim),
   });
 }
 
@@ -274,9 +306,10 @@ async function setIosErrorSimulation(
   device: BootedDevice,
   state: NetworkState,
   config: { errorType: SimulatedErrorType; durationSeconds: number; limit: number | null } | null,
+  sessionUuid: string | undefined,
 ): Promise<void> {
   if (config === null) {
-    state.cancelSimulation();
+    state.cancelSimulation(device.deviceId);
   }
 
   const expiresAtEpochMs = config
@@ -295,7 +328,115 @@ async function setIosErrorSimulation(
   if (config === null) {
     return;
   }
-  state.startSimulationUntil(config.errorType, expiresAtEpochMs!, config.limit);
+  state.startSimulationUntil(
+    device.deviceId,
+    config.errorType,
+    expiresAtEpochMs!,
+    config.limit,
+    sessionUuid,
+  );
+}
+
+function iosSimulationConfig(
+  state: NetworkState,
+  device: BootedDevice,
+  simulation: NonNullable<NetworkArgs["simulateErrors"]>,
+) {
+  if (simulation.cancel) {
+    if (isIosNetworkErrorSimulationAvailable()) {
+      return null;
+    }
+    state.cancelSimulation(device.deviceId);
+    return undefined;
+  }
+  assertIosNetworkErrorSimulationAvailable();
+  if (!simulation.durationSeconds) {
+    throw new ActionableError("durationSeconds is required unless cancel is true");
+  }
+  return {
+    errorType: simulation.errorType ?? "http500",
+    durationSeconds: simulation.durationSeconds,
+    limit: simulation.limit ?? null,
+  };
+}
+
+function updateSimulation(
+  state: NetworkState,
+  device: BootedDevice,
+  simulation: NonNullable<NetworkArgs["simulateErrors"]>,
+  sessionUuid: string | undefined,
+): void {
+  if (simulation.cancel) {
+    state.cancelSimulation(device.deviceId);
+  } else {
+    if (!simulation.durationSeconds) {
+      throw new ActionableError("durationSeconds is required unless cancel is true");
+    }
+    const errorType: SimulatedErrorType = simulation.errorType ?? "http500";
+    state.startSimulation(
+      device.deviceId,
+      errorType,
+      simulation.durationSeconds,
+      simulation.limit ?? null,
+      sessionUuid,
+    );
+  }
+}
+
+function createNetworkHandler(state: NetworkState) {
+  return async (device: BootedDevice, args: NetworkArgs) => {
+    let syncResult: DeviceSyncResult = { synced: true };
+    if (args.capture !== undefined) {
+      state.setCapture(args.capture);
+    }
+
+    if (args.simulateErrors !== undefined) {
+      if (device.platform === "ios") {
+        const config = iosSimulationConfig(state, device, args.simulateErrors);
+        if (config !== undefined) {
+          await setIosErrorSimulation(device, state, config, args.sessionUuid);
+        }
+      } else {
+        updateSimulation(state, device, args.simulateErrors, args.sessionUuid);
+        syncResult = await syncErrorSimulationToDevice(device, state);
+      }
+    }
+
+    if (args.notifFilter !== undefined) {
+      state.setNotifFilter(args.notifFilter);
+    }
+    if (args.notifDebounceMs !== undefined) {
+      state.setNotifDebounceMs(args.notifDebounceMs);
+    }
+    if (args.slowThresholdMs !== undefined) {
+      state.setSlowThresholdMs(args.slowThresholdMs);
+    }
+
+    return createJSONToolResponse({
+      ...state.getSnapshot(device.deviceId),
+      ...deviceSyncFields(syncResult),
+    });
+  };
+}
+
+function assertValidMockPattern(field: "host" | "path", pattern: string): void {
+  const reason = describeInvalidMockPattern(pattern);
+  if (reason !== null) {
+    throw new ActionableError(`Invalid ${field} regex: ${pattern} (${reason})`);
+  }
+}
+
+function mockRuleFields(args: MockNetworkArgs) {
+  return {
+    host: args.host,
+    path: args.path,
+    method: args.method ?? "*",
+    limit: args.limit ?? null,
+    statusCode: args.statusCode ?? 200,
+    responseHeaders: args.responseHeaders ?? {},
+    responseBody: args.responseBody ?? "",
+    contentType: args.contentType ?? "application/json",
+  };
 }
 
 export function registerNetworkTools(): void {
@@ -306,61 +447,7 @@ export function registerNetworkTools(): void {
     "network",
     "Control network capture and error simulation.",
     networkSchema,
-    async (device, args: NetworkArgs) => {
-      let syncResult: DeviceSyncResult = { synced: true };
-      if (args.capture !== undefined) {
-        state.setCapture(args.capture);
-      }
-
-      if (args.simulateErrors !== undefined) {
-        if (device.platform === "ios") {
-          if (args.simulateErrors.cancel) {
-            if (isIosNetworkErrorSimulationAvailable()) {
-              await setIosErrorSimulation(device, state, null);
-            } else {
-              state.cancelSimulation();
-            }
-          } else {
-            assertIosNetworkErrorSimulationAvailable();
-            if (!args.simulateErrors.durationSeconds) {
-              throw new ActionableError("durationSeconds is required unless cancel is true");
-            }
-            await setIosErrorSimulation(device, state, {
-              errorType: args.simulateErrors.errorType ?? "http500",
-              durationSeconds: args.simulateErrors.durationSeconds,
-              limit: args.simulateErrors.limit ?? null,
-            });
-          }
-        } else {
-          if (args.simulateErrors.cancel) {
-            state.cancelSimulation();
-          } else {
-            if (!args.simulateErrors.durationSeconds) {
-              throw new ActionableError("durationSeconds is required unless cancel is true");
-            }
-            const errorType: SimulatedErrorType = args.simulateErrors.errorType ?? "http500";
-            state.startSimulation(
-              errorType,
-              args.simulateErrors.durationSeconds,
-              args.simulateErrors.limit ?? null,
-            );
-          }
-          syncResult = await syncErrorSimulationToDevice(device, state);
-        }
-      }
-
-      if (args.notifFilter !== undefined) {
-        state.setNotifFilter(args.notifFilter);
-      }
-      if (args.notifDebounceMs !== undefined) {
-        state.setNotifDebounceMs(args.notifDebounceMs);
-      }
-      if (args.slowThresholdMs !== undefined) {
-        state.setSlowThresholdMs(args.slowThresholdMs);
-      }
-
-      return createJSONToolResponse({ ...state.getSnapshot(), ...deviceSyncFields(syncResult) });
-    },
+    createNetworkHandler(state),
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
 
@@ -379,36 +466,18 @@ export function registerNetworkTools(): void {
         throw new ActionableError("Network mocking is only supported on Android and iOS devices.");
       }
 
-      // Validate regex patterns before creating the mock rule
-      try {
-        new RegExp(args.host);
-      } catch {
-        throw new ActionableError(`Invalid host regex: ${args.host}`);
-      }
-      try {
-        new RegExp(args.path);
-      } catch {
-        throw new ActionableError(`Invalid path regex: ${args.path}`);
-      }
+      // The device compiles these with its own regex engine; reject only what is certainly invalid.
+      assertValidMockPattern("host", args.host);
+      assertValidMockPattern("path", args.path);
       assertValidResponseHeaders(args.responseHeaders);
 
-      const mock = state.addMock({
-        host: args.host,
-        path: args.path,
-        method: args.method ?? "*",
-        limit: args.limit ?? null,
-        remaining: args.limit ?? null,
-        statusCode: args.statusCode ?? 200,
-        responseHeaders: args.responseHeaders ?? {},
-        responseBody: args.responseBody ?? "",
-        contentType: args.contentType ?? "application/json",
-      });
+      const mock = state.addMock(device.deviceId, mockRuleFields(args), args.sessionUuid);
 
       const syncResult = await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         mockId: mock.mockId,
-        mocked: state.getMockSummary(),
+        mocked: state.getMockSummary(device.deviceId),
         ...deviceSyncFields(syncResult),
       });
     },
@@ -432,19 +501,19 @@ export function registerNetworkTools(): void {
 
       let cleared: number;
       if (args.mockId) {
-        cleared = state.removeMock(args.mockId) ? 1 : 0;
+        cleared = state.removeMock(device.deviceId, args.mockId) ? 1 : 0;
         if (cleared === 0) {
           throw new ActionableError(`Mock '${args.mockId}' not found`);
         }
       } else {
-        cleared = state.clearAllMocks();
+        cleared = state.clearAllMocks(device.deviceId);
       }
 
       const syncResult = await syncMockRulesToDevice(device, state);
 
       return createJSONToolResponse({
         cleared,
-        remaining: state.getMockSummary(),
+        remaining: state.getMockSummary(device.deviceId),
         ...deviceSyncFields(syncResult),
       });
     },

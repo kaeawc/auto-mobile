@@ -9,26 +9,33 @@ import type { ObservationInsets } from "./ObservationInsets";
 export type HierarchySource = "control-proxy" | "uiautomator";
 
 /**
- * Why CtrlProxy marked a capture incomplete (`ctrlProxyIncomplete`). The single
- * boolean flag is emitted for several distinct causes (issue #6184), and the
- * recovery advice differs by cause — only a genuinely null (withheld) focused
- * root is recoverable by an `isAccessibilityTool` build:
+ * Why CtrlProxy marked a capture incomplete (`ctrlProxyIncomplete`).
  *
- * - `null_root` — the focused application window's root node was null: the
- *   framework withheld it (transient, app-restricted, or — on Android 14+ —
- *   accessibility-data-sensitive). This is the ONLY case the "no root /
- *   isAccessibilityTool" diagnosis applies to.
- * - `discarded_windows` — the window(s) had a non-null root, but every extracted
- *   node was discarded as zero-area or entirely offscreen, leaving the capture
- *   empty. Not a withheld root; an `isAccessibilityTool` build does not recover it.
- * - `extraction_error` — extraction threw before any window could be assembled.
- *   Not a withheld root; retrying is the recovery, not an `isAccessibilityTool` build.
+ * - `active_window_null_root` — the active window's root was null.
+ * - `app_window_null_root` — the selected application window's root was null.
+ * - `no_app_window_root` — no accessible application window root existed and
+ *   SystemUI was not in the foreground.
+ * When causes overlap, Android emits the active-window cause first, then the
+ * selected-app cause, then the no-app-window cause. These three retain the
+ * historical null-root recovery guidance (transient or restricted accessibility,
+ * including Android 14+ accessibility-data-sensitive content).
+ * - `null_root` — the legacy generic withheld-root reason.
+ * - `discarded_windows` — non-null roots were discarded as zero-area or entirely
+ *   offscreen. An `isAccessibilityTool` build does not recover these nodes.
+ * - `extraction_error` — extraction threw before any window could be assembled;
+ *   retrying is the recovery, not an `isAccessibilityTool` build.
  *
- * Additive and optional: pre-#6172 runners send only `ctrlProxyIncomplete` with
- * no reason, so consumers must treat an absent reason as the historical
- * (`null_root`) default to preserve behavior.
+ * Additive and optional: older runners send only `ctrlProxyIncomplete` with no
+ * reason. Consumers treat an absent reason as the historical (`null_root`)
+ * default to preserve behavior.
  */
-export type CtrlProxyIncompleteReason = "null_root" | "discarded_windows" | "extraction_error";
+export type CtrlProxyIncompleteReason =
+  | "null_root"
+  | "discarded_windows"
+  | "extraction_error"
+  | "active_window_null_root"
+  | "app_window_null_root"
+  | "no_app_window_root";
 
 /**
  * Represents the ViewHierarchy dump result from a device.
@@ -193,6 +200,11 @@ export interface ViewHierarchyWindowInfo {
   isFocused?: boolean;
   bounds?: ElementBounds;
   windowLayer?: number;
+  /**
+   * Package of the window's own root node (Android CtrlProxy). Omitted by older
+   * APKs and when the root reports none, so consumers must fall back to the
+   * capture-level `packageName`.
+   */
   packageName?: string;
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */

@@ -48,6 +48,7 @@ class ServerConfig {
   private _toolResultsNoStructuredContent: boolean = false;
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
+  private _actionsCompactMetadata: boolean = false;
   private _toolOutputsDir: string | undefined;
   private _runnerReadinessTimeoutMs = DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
 
@@ -317,6 +318,14 @@ class ServerConfig {
 
   isActionsDiffObserveEnabled(): boolean {
     return this._actionsDiffObserve;
+  }
+
+  setActionsCompactMetadataEnabled(enabled: boolean): void {
+    this._actionsCompactMetadata = enabled;
+  }
+
+  isActionsCompactMetadataEnabled(): boolean {
+    return this._actionsCompactMetadata;
   }
 
   setActionsNoObserveEnabled(enabled: boolean): void {

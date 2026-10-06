@@ -1,3 +1,18 @@
+import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
+import { iosHierarchyAcquisition } from "../observe/ios/types";
+import {
+  withObservationReadScope,
+  wasHierarchyReadDuringCall,
+} from "../observe/observationReadScope";
+import {
+  freshTapHierarchy,
+  ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS,
+  ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
+} from "./freshTapHierarchy";
+import {
+  isSemanticActionRejected,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
@@ -67,6 +82,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -97,6 +113,11 @@ import {
 } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
+import {
+  isOwnOverlayNode,
+  resolveOverlayTapUnderSystemBar,
+  type OverlayBarTapDecision,
+} from "./overlayTapUnderSystemBars";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
   getToggleContentDescription,
@@ -116,6 +137,7 @@ import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
+import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
@@ -135,15 +157,20 @@ import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
+  dispatchIosSecondTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { executeTouchscreenInput } from "./touchscreenInput";
 import {
   refreshTargetDisplayHierarchy,
   prepareTargetDisplayAction,
   type RenderedObservationReader,
 } from "./TargetDisplayAction";
-import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import {
+  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+  createDeviceHierarchyCapture,
+} from "../observe/DeviceHierarchyCapture";
 import {
   checkAndroidTapHierarchyChange,
   POST_TAP_REFRESH_TIMEOUT_MS,
@@ -190,8 +217,17 @@ const IOS_STATUS_BAR_CLASSES = new Set([
 ]);
 
 /** Internal action context; never part of the public tapOn schema. */
+type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
+
 type ResolvedAndroidTapOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
+  /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
+  onActivationWarning?: (warning: string) => void;
+  onResolvedElement?: (
+    element: Element,
+    selection?: ElementSelectionResult,
+    hierarchy?: ViewHierarchyResult,
+  ) => void;
 };
 
 /** Internal I/O seam: decisions and timing remain shared with the default tap path. */
@@ -211,6 +247,8 @@ interface TapPointContext {
   screenSize?: ObserveResult["screenSize"];
 }
 
+/** TalkBack state resolved once for an explicit-display tap, with any unknown-state warnings. */
+type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
 
@@ -352,6 +390,14 @@ function appendDisabledElementWarning(
 /**
  * Command to tap on UI element containing specified text
  */
+function warningsField(warnings: string[]): { warnings?: string[] } {
+  return warnings.length ? { warnings } : {};
+}
+
+function withActivationWarning(warnings: string[], warning: string | undefined): string[] {
+  return warning ? [...warnings, warning] : warnings;
+}
+
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
   private readonly refreshedDisplayTransitions: Pick<
     DisplayTransitionTracker,
@@ -434,11 +480,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * Longer backoff when ctrl-proxy returns no hierarchy — gives the WebSocket
    * time to recover rather than hammering it every 150ms.
    */
-  private static readonly ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS = 500;
+  private static readonly ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS =
+    ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS;
 
   private static readonly ANDROID_PRE_TAP_REFIND_DELAY_MS = 150;
 
-  private static readonly ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = 800;
+  private static readonly ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS;
 
   private static readonly ANDROID_PRE_TAP_BOUNDS_EPSILON_PX = 3;
 
@@ -488,6 +535,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               request.timeoutMs ?? TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
               undefined,
               request.signal,
+              request.requireFreshExtraction,
             );
             if (!result) {
               throw new ActionableError("Unable to retrieve a fresh tap hierarchy");
@@ -675,6 +723,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
   }
 
+  /** Judge an Android tap on one of CtrlProxy's own overlay controls against the system bars (#10086). */
+  private overlayBarTapDecision(
+    hierarchy: ViewHierarchyResult,
+    element: Element,
+    point: { x: number; y: number },
+  ): OverlayBarTapDecision {
+    if (this.device.platform !== "android") {
+      return { kind: "proceed", point };
+    }
+    const owner = findTapTargetNode(new SearchableHierarchy().project(hierarchy), element)?.source;
+    return resolveOverlayTapUnderSystemBar({
+      hierarchy,
+      ownedByOverlay: isOwnOverlayNode(hierarchy, owner),
+      bounds: element.bounds,
+      point,
+    });
+  }
+
   private resolveImeSafeTapPoint(
     element: Element,
     hierarchy: ViewHierarchyResult,
@@ -718,7 +784,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     occurrence: number,
     owner?: Element,
     viewHierarchy?: ViewHierarchyResult,
-  ): Promise<{ success: boolean; error?: string }> {
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string; warning?: string }> {
+    const confirmActivation = (result: CtrlProxyActionResult, invalidate: () => void): void => {
+      if (result.dispatched && result.acknowledged !== true) {
+        // A lost reply may mean the screen navigated; discard the pre-activation tree.
+        invalidate();
+        throw indeterminateTapError(result.error);
+      }
+    };
     if (owner && !this.hasUniqueSemanticLinkOwner(owner, viewHierarchy)) {
       return {
         success: false,
@@ -739,7 +813,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         text,
         occurrence,
         selector,
+        undefined,
+        undefined,
+        signal,
       );
+      confirmActivation(result, () => {
+        AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+      });
       return { success: result.success, error: result.error };
     }
     if (this.device.platform === "ios") {
@@ -753,9 +833,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       const result = await IOSCtrlProxyClient.getInstance(
         this.device,
-      ).requestActivateAccessibilityLink(text, occurrence, ownerResourceId as string | undefined);
+      ).requestActivateAccessibilityLink(
+        text,
+        occurrence,
+        ownerResourceId as string | undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      confirmActivation(result, () => this.invalidateIosCacheOnSuccess({ success: true }));
       this.invalidateIosCacheOnSuccess(result);
-      return { success: result.success, error: result.error };
+      // The runner's "first of N candidate owners" note must reach the caller (#10082).
+      return {
+        success: result.success,
+        error: result.error,
+        warning: result.warning,
+      };
     }
     return {
       success: false,
@@ -1673,9 +1766,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
-        (options.selectionStrategy !== "unique" &&
-          options.index === undefined &&
-          !options.container?.container) ||
+        (!isStrictlyScoped(options) && options.index === undefined) ||
         !this.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
@@ -1738,7 +1829,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           : "tap";
     const lookupAction = options.subtext
       ? "inspect"
-      : options.selectionStrategy === "unique" || options.container?.container
+      : isStrictlyScoped(options)
         ? intentAction
         : options.action === "focus"
           ? "focus-input"
@@ -2453,6 +2544,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     if (timeoutMs <= 0) {
@@ -2466,6 +2558,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       captured = (
         await this.hierarchyCapture.capture({
           freshness: "fresh",
+          ...(forceCapture ? { requireFreshExtraction: true } : {}),
           searchRaw: serverConfig.isRawElementSearchEnabled(),
           timeoutMs,
           signal,
@@ -2554,6 +2647,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
@@ -2575,12 +2669,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         // Match the observe projection exactly. Going through CtrlProxy's
         // alternate conversion here lets a selector observed from one tree be
         // resolved against a differently-pruned tree on refresh.
-        const synced = await IOSCtrlProxyClient.getInstance(this.device).requestHierarchySync(
-          undefined,
-          false,
-          signal,
-          effectiveTimeoutMs,
-        );
+        const client = IOSCtrlProxyClient.getInstance(this.device);
+        const synced = forceCapture
+          ? await client.requestHierarchySyncForTapRevalidation(
+              undefined,
+              false,
+              signal,
+              effectiveTimeoutMs,
+            )
+          : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
         if (!synced?.hierarchy) {
           return null;
         }
@@ -2589,6 +2686,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             synced.hierarchy,
           ),
         );
+        const acquisition = synced[iosHierarchyAcquisition];
+        if (acquisition === "device" || acquisition === "client-cache") {
+          Object.assign(rawHierarchy, { [iosHierarchyAcquisition]: acquisition });
+        }
         return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
       }
       default:
@@ -3167,8 +3268,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const scopedOptions = {
       container: container.container,
       index: container.index,
-      strategy:
-        options.selectionStrategy === "unique" ? ("unique" as const) : container.selectionStrategy,
+      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
     };
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
@@ -3484,6 +3584,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       selection: ElementSelectionResult;
       signal?: AbortSignal;
       onDispatched: () => void;
+      talkBack: AndroidDisplayTalkBackState;
     },
   ): Promise<TapOnElementResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
     const { target, signal } = context;
@@ -3539,7 +3640,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     }
     const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
-    const dispatchAction = await this.androidDisplayDispatch(options, context);
+    const displayWarnings: string[] = [...context.talkBack.warnings];
+    const dispatchAction = await this.androidDisplayDispatch(options, {
+      ...context,
+      onWarning: (warning) => displayWarnings.push(warning),
+    });
+    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
+    // earliest moment the gesture can take effect: reporting once it returns could put the
+    // dispatch after the navigation event it caused (#10196).
+    reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -3563,7 +3672,27 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       action: options.action,
       element,
       selectedElement,
+      ...warningsField(displayWarnings),
     };
+  }
+
+  /**
+   * Detect TalkBack once, before any element search, so a refusal (a non-default display)
+   * is not masked by a "not found" result or an already-satisfied ensureChecked. Unknown
+   * state keeps the raw gesture and carries the default route's warning.
+   */
+  private async resolveAndroidDisplayTalkBack(
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+  ): Promise<AndroidDisplayTalkBackState> {
+    const warnings: string[] = [];
+    const enabled = await this.strategy.isAccessibilityServiceEnabled((warning) =>
+      warnings.push(warning),
+    );
+    const refusal = enabled ? talkBackDisplayRefusal(target.displayId) : undefined;
+    if (refusal) {
+      throw refusal;
+    }
+    return { enabled, warnings };
   }
 
   private async androidDisplayDispatch(
@@ -3572,6 +3701,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
       signal?: AbortSignal;
       onDispatched: () => void;
+      onWarning?: (warning: string) => void;
+      talkBack: AndroidDisplayTalkBackState;
     },
   ): Promise<(point: { x: number; y: number }) => Promise<void>> {
     return androidDisplayTapDispatch(
@@ -3581,7 +3712,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         action: options.action === "focus" ? "tap" : options.action,
         duration: options.duration,
       },
-      context,
+      {
+        target: context.target,
+        signal: context.signal,
+        onDispatched: context.onDispatched,
+        timer: this.timer,
+        onWarning: context.onWarning,
+        talkBack: context.talkBack.enabled
+          ? {
+              strategy: this.talkBackStrategy,
+              driver: this.talkBackDriverFactory.createDriver(this.device),
+            }
+          : undefined,
+      },
     );
   }
 
@@ -3667,6 +3810,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     },
   ): Promise<TapOnElementResult> {
     const { target, signal } = context;
+    const talkBack = await this.resolveAndroidDisplayTalkBack(target);
     const refresh: AndroidTapVerification["refresh"] = (timeoutMs) =>
       refreshTargetDisplayHierarchy(
         target,
@@ -3697,6 +3841,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             target,
             selection,
             signal,
+            talkBack,
             onDispatched: () => {
               tapTimestamp = this.timer.now();
             },
@@ -3712,7 +3857,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           previousObservation: target.observation,
           signal,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => tapTimestamp }
+            ? { observationHostTimestampProvider: () => tapTimestamp }
             : {}),
         },
       );
@@ -3877,6 +4022,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    recovery?: { throwOnKeyboardOcclusion?: boolean },
+    request?: { requestDeadlineMs?: number },
+  ): Promise<TapOnFocusResult> {
+    return withObservationReadScope(() =>
+      this.executeWithReadScope(options, progress, signal, recovery, request),
+    );
+  }
+
+  private async executeWithReadScope(
+    options: TapOnElementOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
     // Internal orchestration policy; never part of TapOnElementOptions or tool schemas.
     recovery?: { throwOnKeyboardOcclusion?: boolean },
     request?: { requestDeadlineMs?: number },
@@ -3937,6 +4094,30 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
           }
 
+          // Resolve TalkBack selectors from a capture for this call, just as the
+          // existing search/stability refreshes do. Cache age cannot detect an
+          // external same-app BACK (#9785).
+          const activationWarnings: string[] = [];
+          let isAccessibilityServiceEnabled =
+            this.device.platform === "android"
+              ? await this.strategy.isAccessibilityServiceEnabled((warning) =>
+                  activationWarnings.push(warning),
+                )
+              : undefined;
+          if (this.device.platform === "android" && isAccessibilityServiceEnabled) {
+            const freshHierarchy = await freshTapHierarchy(
+              this.tapVerificationRefresh({
+                screenSize: observeResult.screenSize,
+                signal,
+              }),
+              this.timer,
+              signal,
+            );
+            preTapHierarchy = freshHierarchy;
+            this.replaceObservationHierarchy(observeResult, freshHierarchy, true);
+            viewHierarchy = freshHierarchy;
+          }
+
           if (options.accessibilityLink) {
             const occurrence = options.index ?? 0;
             const owner = this.resolveContainerElement(
@@ -3951,6 +4132,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               occurrence,
               owner,
               viewHierarchy,
+              signal,
             );
             if (!activation.success) {
               return { success: false, error: activation.error };
@@ -3963,12 +4145,50 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 bounds: { left: 0, top: 0, right: 0, bottom: 0 },
               } as Element,
               activatedSubtext: { text: options.accessibilityLink, occurrence },
+              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
             };
           }
 
-          const searchOutcome = await perf.track("findElement", () =>
+          let searchOutcome = await perf.track("findElement", () =>
             this.searchForElement(options, observeResult, signal),
           );
+          // Search polling, ensureChecked, and opt-in stability already acquire a
+          // current tree. Only a visible cache hit still needs revalidation.
+          if (
+            (this.device.platform === "android" || this.device.platform === "ios") &&
+            !isAccessibilityServiceEnabled &&
+            searchOutcome.selection.element &&
+            !wasHierarchyReadDuringCall(viewHierarchy) &&
+            searchOutcome.stats.requestCount === 0 &&
+            options.ensureChecked === undefined &&
+            !this.strategy.shouldRunPreTapStability(options) &&
+            (this.device.platform !== "ios" ||
+              !(isAccessibilityServiceEnabled ??=
+                await this.strategy.isAccessibilityServiceEnabled()))
+          ) {
+            const freshHierarchy = await freshTapHierarchy(
+              this.device.platform === "ios"
+                ? (timeout) =>
+                    this.refreshViewHierarchy(timeout, observeResult.screenSize, signal, true)
+                : this.tapVerificationRefresh({ screenSize: observeResult.screenSize, signal }),
+              this.timer,
+              signal,
+              {
+                timeoutMs: Math.min(
+                  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+                  request?.requestDeadlineMs === undefined
+                    ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
+                    : request.requestDeadlineMs - this.timer.now(),
+                ),
+                context: "while revalidating a cached observation",
+                platform: this.device.platform,
+              },
+            );
+            this.replaceObservationHierarchy(observeResult, freshHierarchy, true);
+            // Discard cached coordinates and use the ordinary search-until loop
+            // when the current screen is still transitioning.
+            searchOutcome = await this.searchForElement(options, observeResult, signal);
+          }
           searchUntilStats = searchOutcome.stats;
           this.replaceObservationHierarchy(
             observeResult,
@@ -3994,6 +4214,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             signal,
           );
           viewHierarchy = liveSelection.viewHierarchy;
+          preTapHierarchy = viewHierarchy;
           const selection = liveSelection.selection;
           let finalSelection = selection;
           const element = selection.element as Element;
@@ -4015,6 +4236,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               occurrence,
               element,
               viewHierarchy,
+              signal,
             );
             if (!activation.success) {
               return { success: false, error: activation.error };
@@ -4026,6 +4248,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               selectedElement: selectedElementMetadata,
               searchUntil: searchOutcome.stats,
               activatedSubtext: { text: options.subtext.text, occurrence },
+              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
             };
           }
           const initialTapPoint = this.geometry.getElementCenter(element);
@@ -4076,11 +4299,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             options.action = "tap";
           }
 
-          // Strategy returns the platform-relevant boolean: TalkBack on
-          // Android, VoiceOver on iOS. Downstream call paths are split by
-          // the platform switch below, so a single flag suffices.
-          const activationWarnings: string[] = [];
-          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled(
+          // Preserve iOS detection at the original activation boundary.
+          isAccessibilityServiceEnabled ??= await this.strategy.isAccessibilityServiceEnabled(
             (warning) => activationWarnings.push(warning),
           );
           const requireResourceId = isAccessibilityServiceEnabled;
@@ -4114,6 +4334,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               observeResult.observationId = stable.selection.captureId;
             }
             viewHierarchy = stable.viewHierarchy;
+            preTapHierarchy = viewHierarchy;
             tapElement = stable.tapElement;
             finalSelection = stable.selection;
             usedParent = stable.usedParent;
@@ -4174,19 +4395,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
-          const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
-            options,
-            screenSize,
-            chromeElements: [
-              this.matchedTapElement(
-                finalSelection,
+          const visibleTapPoint = this.resolveVisibleTapPoint(
+            tapElement,
+            viewHierarchy,
+            visibleBounds,
+            {
+              options,
+              screenSize,
+              chromeElements: [
+                this.matchedTapElement(
+                  finalSelection,
+                  tapElement,
+                  requestedAction === "focus" ? { ...options, action: "focus" } : options,
+                ),
                 tapElement,
-                requestedAction === "focus" ? { ...options, action: "focus" } : options,
-              ),
-              tapElement,
-            ],
-          });
-          if (!tapPoint) {
+              ],
+            },
+          );
+          if (!visibleTapPoint) {
             throw this.invisibleMatchFailure(
               finalSelection,
               options,
@@ -4195,6 +4421,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               "Matched element has no unobstructed visible tap area. " +
                 "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
+          }
+          const barDecision = this.overlayBarTapDecision(
+            viewHierarchy,
+            tapElement,
+            visibleTapPoint,
+          );
+          if (barDecision.kind === "refuse") {
+            throw new ActionableError(
+              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile overlay control is under the ${barDecision.bar} and the touch would not reach it. ` +
+                "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
+            );
+          }
+          const tapPoint = barDecision.point;
+          if (barDecision.warning) {
+            activationWarnings.push(barDecision.warning);
           }
           const tapBounds = tapElement.bounds;
           logger.info(
@@ -4214,8 +4455,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
-          // Platform-specific tap execution
+          // Platform-specific tap execution. Everything that waits for the target (search,
+          // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
           await perf.track("executeTap", async () => {
+            reportToolDispatched();
             switch (this.device.platform) {
               case "android":
                 screenReaderNavigation = await this.executeAndroidTap(
@@ -4229,6 +4472,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                     ...options,
                     displayFence: fence,
                     resolvedHierarchy: viewHierarchy,
+                    onResolvedElement: (current, selection, hierarchy) => {
+                      tapElement = current;
+                      finalSelection = selection ?? {
+                        ...finalSelection,
+                        element: current,
+                        matchedElement: current,
+                      };
+                      if (hierarchy) {
+                        viewHierarchy = hierarchy;
+                        preTapHierarchy = hierarchy;
+                        this.replaceObservationHierarchy(observeResult, hierarchy, true);
+                      }
+                      selectedElementMetadata = this.buildSelectedElementMetadata(finalSelection);
+                      Object.assign(tapPoint, this.geometry.getElementCenter(current));
+                    },
                     onActivationWarning: (warning) => activationWarnings.push(warning),
                   },
                   isAccessibilityServiceEnabled,
@@ -4242,7 +4500,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   isAccessibilityServiceEnabled,
-                  { displayFence: fence },
+                  { displayFence: fence, signal },
                 );
                 break;
               default:
@@ -4294,7 +4552,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
           ...(options.ensureChecked !== undefined
-            ? { observationTimestampProvider: () => ensureCheckedTapTimestamp }
+            ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),
           predictionContext: {
             toolName: "tapOn",
@@ -4341,6 +4599,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           currentObservation: result.observation,
           previousObservation: previousObserveResult,
           element: result.element,
+          effect: postTap.effect,
           signal,
         });
         if (selectedElements.length > 0) {
@@ -4433,7 +4692,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ResolvedAndroidTapOptions & { onActivationWarning?: (warning: string) => void },
     isTalkBackEnabled?: boolean,
   ): Promise<ScreenReaderNavigationResult | undefined> {
-    const { displayFence: fence, resolvedHierarchy } = options ?? {};
+    const { displayFence: fence, resolvedHierarchy, onActivationWarning } = options ?? {};
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled =
       typeof isTalkBackEnabled === "boolean"
@@ -4445,11 +4704,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (element["hierarchy-source"] === "uiautomator") {
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
         displayFence: fence,
+        onActivationWarning,
       });
       return undefined;
     }
 
-    if (options?.container?.container || options?.selectionStrategy === "unique") {
+    if (isStrictlyScoped(options)) {
       await this.executeScopedAndroidTap({
         action,
         x,
@@ -4481,6 +4741,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, false, {
       displayFence: fence,
       resolvedHierarchy,
+      onActivationWarning,
     });
     return undefined;
   }
@@ -4518,12 +4779,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
       await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
         displayFence: fence,
+        onActivationWarning: context.onActivationWarning,
       });
       this.reportTalkBackActivationWarning(result, context, action);
       return;
     }
     await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
       displayFence: fence,
+      onActivationWarning: context.onActivationWarning,
     });
   }
 
@@ -4562,9 +4825,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         fenceOptions,
       );
     } else if (action === "doubleTap") {
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
-      await this.timer.sleep(200);
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
+      await dispatchAndroidDoubleTap({
+        // DocumentsUI rows use ADB input recovery, which has no single-gesture form.
+        client: isAndroidDocumentsUiRow(element) ? undefined : this.accessibilityService,
+        point: { x, y },
+        timer: this.timer,
+        signal,
+        assertCurrent: () => fence?.assertCurrent(),
+        onWarning: fenceOptions.onActivationWarning,
+        tap: () =>
+          this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence }),
+      });
     }
   }
 
@@ -4833,7 +5104,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * Default (#3936): directly activate the target via ACTION_CLICK — deterministic,
    * no cursor stepping — then fall back to a coordinate gesture, then ADB.
    * When `options.screenReaderNavigation` is set (opt-in fidelity mode, #3937),
-   * drive the TalkBack cursor by swipe navigation to the target before activating.
+   * move the TalkBack cursor onto the target with ACTION_ACCESSIBILITY_FOCUS (never a swipe, #10209)
+   * before activating.
    * For longPress, tries ACTION_LONG_CLICK first, then coordinate gesture, then ADB.
    */
   /**
@@ -4870,6 +5142,35 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
   }
 
+  private talkBackTargetContext(
+    options: (TapOnElementOptions & ResolvedAndroidTapOptions) | undefined,
+    action: string,
+    onResolvedElement: NonNullable<ResolvedAndroidTapOptions["onResolvedElement"]>,
+  ): TalkBackTargetContext {
+    let resolvedSelection: ElementSelectionResult | undefined;
+    let resolvedHierarchy: ViewHierarchyResult | undefined;
+    const hasSelector =
+      options && [options.text, options.textAny, options.elementId, options.testTag].some(Boolean);
+    return {
+      hierarchy: resolveViewHierarchyForSearch(options?.resolvedHierarchy),
+      reResolve: hasSelector
+        ? (hierarchy) => {
+            const selection = this.selectElementInHierarchy(options, hierarchy).selection;
+            resolvedSelection = selection;
+            resolvedHierarchy = hierarchy;
+            return selection.element
+              ? this.resolveTapTargetElement(selection.element, hierarchy, action, {
+                  requireResourceId: true,
+                  scoped: options.container !== undefined,
+                }).element
+              : null;
+          }
+        : undefined,
+      onResolvedElement: (element) =>
+        onResolvedElement(element, resolvedSelection, resolvedHierarchy),
+    };
+  }
+
   private async executeAndroidTapWithAccessibility(
     action: string,
     x: number,
@@ -4877,12 +5178,23 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     durationMs: number,
     options?: TapOnElementOptions &
-      DisplayFenceOption & { onActivationWarning?: (warning: string) => void },
+      ResolvedAndroidTapOptions & { onActivationWarning?: (warning: string) => void },
     signal?: AbortSignal,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const fence = this.readOptionalDisplayFence(options);
     const driver = this.talkBackDriverFactory.createDriver(this.device);
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
+    const targetContext = this.talkBackTargetContext(
+      options,
+      action,
+      (current, selection, hierarchy) => {
+        element = current;
+        const center = this.geometry.getElementCenter(current);
+        x = center.x;
+        y = center.y;
+        options?.onResolvedElement?.(current, selection, hierarchy);
+      },
+    );
 
     if (action === "longPress") {
       // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback
@@ -4892,12 +5204,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         durationMs,
         element,
         driver,
-        { displayFence: fence },
+        { displayFence: fence, ...targetContext },
       );
 
       if (!longPressResult.success) {
         if (longPressResult.semanticActionFailure) {
-          throw new Error(
+          throw new ActionableError(
             `Semantic long press failed for the selected element: ${longPressResult.error ?? "unknown error"}`,
           );
         }
@@ -4923,21 +5235,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     // Long press returned above; the remaining actions are tap and doubleTap.
     if (this.isScreenReaderNavigationEnabled(options)) {
-      // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
-      // navigation to the target, then activate.
+      // Opt-in fidelity mode (#3937): move the TalkBack cursor onto the target with
+      // ACTION_ACCESSIBILITY_FOCUS, then activate. A failure after the focus request was sent
+      // throws; only a failure before anything was dispatched returns here and may fall back.
       const result = await this.talkBackStrategy.executeTap(
         this.device.deviceId,
         element,
         driver,
         fence,
+        signal,
       );
 
       if (result.success) {
+        // A focus-navigation gesture is acknowledged, not confirmed as an activation.
+        this.reportTalkBackActivationWarning(result, options, action);
         return result.screenReaderNavigation;
       }
 
       logger.warn(
-        `[TapOnElement] Focus navigation failed (${result.error}), ` +
+        `[TapOnElement] Focus navigation unavailable (${result.error}); nothing was dispatched, ` +
           `falling back to coordinate-based tap at (${x}, ${y})`,
       );
       screenReaderNavigation = result.screenReaderNavigation;
@@ -4945,7 +5261,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Default (#3936): directly activate the target node via ACTION_CLICK,
       // without moving the cursor. doubleTap has no single accessibility action,
       // so it drops straight to the coordinate fallback below.
-      const result = await this.talkBackStrategy.executeDirectActivation(element, driver);
+      const result = await this.talkBackStrategy.executeDirectActivation(
+        element,
+        driver,
+        targetContext,
+      );
 
       if (result.success) {
         return undefined;
@@ -5024,17 +5344,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element?: Element,
     isVoiceOverEnabled?: boolean,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: IosTapOptions = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
     if (isVoiceOverEnabled && element) {
-      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, {
-        displayFence: fence,
-      });
+      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fenceOptions);
       return;
     }
 
-    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fenceOptions);
   }
 
   /**
@@ -5045,9 +5362,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: IosTapOptions = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
+    const { displayFence: fence, signal } = fenceOptions;
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
     const tapDuration = action === "longPress" ? durationMs : 50;
 
@@ -5057,20 +5374,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Double tap - perform two taps
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
       await this.timer.sleep(200);
 
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, "second tap");
+      await dispatchIosSecondTap(client, { x, y }, tapDuration, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     }
   }
@@ -5097,9 +5414,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fenceOptions?: DisplayFenceOption,
+    fenceOptions?: IosTapOptions,
   ): Promise<void> {
-    const fence = this.readOptionalDisplayFence(fenceOptions);
+    const { displayFence: fence, signal } = this.readIosTapOptions(fenceOptions);
     // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
     const label =
       (element["ios-accessibility-label"] as string | undefined) ??
@@ -5110,7 +5427,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (!label) {
       logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
+        displayFence: fence,
+        signal,
+      });
       return;
     }
 
@@ -5137,7 +5457,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
           `falling back to coordinate tap at (${x}, ${y})`,
       );
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
+        displayFence: fence,
+        signal,
+      });
     }
   }
 
@@ -5146,6 +5469,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throw indeterminateTapError(result.error);
     }
     this.invalidateIosCacheOnSuccess(result);
+  }
+
+  private readIosTapOptions(options?: IosTapOptions): IosTapOptions {
+    return options ?? {};
   }
 
   private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {
@@ -5250,9 +5577,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): Promise<string | undefined> {
     // Raw search resolves against a filtered projection that may omit duplicate IDs.
     // Default extraction matches the cached tree already accepted by this guard.
-    const resolvedHierarchy = serverConfig.isRawElementSearchEnabled()
-      ? undefined
-      : options.resolvedHierarchy;
+    const resolvedHierarchy = resolveViewHierarchyForSearch(options.resolvedHierarchy);
     return nodeActionTargetError(selector, {
       supportsNodeActionSelectors: () => this.accessibilityService.supportsNodeActionSelectors(),
       getAccessibilityHierarchy: () =>
@@ -5291,7 +5616,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      const rejected = await isSemanticActionRejected({
+        advertised: hasAccessibilityAction(element.actions, "long_click"),
+        error: result.error,
+        needsNodeSelector,
+        selected: element,
+        // Fresh and unfiltered, like the target guard: the cached tree may predate the miss.
+        readHierarchy: () =>
+          this.accessibilityService.getAccessibilityHierarchy(
+            undefined,
+            undefined,
+            true,
+            undefined,
+            true,
+            signal,
+          ),
+      });
+      // The hierarchy reader turns cancellation into null; never degrade it to a press.
+      throwIfAborted(signal);
+      if (rejected) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );

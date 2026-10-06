@@ -3,6 +3,10 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.OverlayTextNode
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.RequestDrag
 import dev.jasonpearson.automobile.protocol.RequestPinch
@@ -962,14 +966,14 @@ class CtrlProxyMessageHandlerTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  fun `dispatches start_recording`() = runTest {
-    dispatch("""{"type":"start_recording"}""")
+  fun `accepts start_recording without a response`() = runTest {
+    assertNull(dispatchForResponse("""{"type":"start_recording"}"""))
     assertEquals("startRecording" to emptyList<Any?>(), lastCall)
   }
 
   @Test
-  fun `dispatches stop_recording`() = runTest {
-    dispatch("""{"type":"stop_recording"}""")
+  fun `accepts stop_recording without a response`() = runTest {
+    assertNull(dispatchForResponse("""{"type":"stop_recording"}"""))
     assertEquals("stopRecording" to emptyList<Any?>(), lastCall)
   }
 
@@ -1054,5 +1058,143 @@ class CtrlProxyMessageHandlerTest {
       assertEquals(null, response)
     }
     assertTrue("recording fake must be untouched by the no-op handler", calls.isEmpty())
+  }
+
+  @Test
+  fun `dispatch typed overlay requests`() = runTest {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec}""")
+    assertEquals("showOverlay", lastCall.first)
+    assertEquals("s", lastCall.second[0])
+    assertEquals("panel", (lastCall.second[1] as OverlaySpec).id)
+    assertEquals(OverlayTextNode(text = "Hello"), (lastCall.second[1] as OverlaySpec).root)
+    dispatch("""{"type":"update_overlay","requestId":"u","id":"panel","spec":$spec}""")
+    assertEquals("updateOverlay", lastCall.first)
+    assertEquals(
+      listOf("u", "panel", json.decodeFromString<OverlaySpec>(spec), null),
+      lastCall.second,
+    )
+    dispatch(
+      """{"type":"update_overlay","requestId":"p","id":"panel","state":{"enabled":true,"count":2.5}}"""
+    )
+    assertEquals("updateOverlay", lastCall.first)
+    assertEquals(
+      listOf(
+        "p",
+        "panel",
+        null,
+        mapOf("enabled" to OverlayScalar.BooleanValue(true), "count" to OverlayScalar.Numeric(2.5)),
+      ),
+      lastCall.second,
+    )
+    dispatch("""{"type":"dismiss_overlay","requestId":"d","id":"panel"}""")
+    assertEquals("dismissOverlay", lastCall.first)
+    assertEquals(listOf("d", "panel", null), lastCall.second)
+    dispatch("""{"type":"dismiss_overlay","requestId":"a","all":true}""")
+    assertEquals(listOf("a", null, true), lastCall.second)
+  }
+
+  @Test
+  fun `show_overlay carries an absent or explicit displayId to the action`() = runTest {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
+    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec}""")
+    assertNull(lastCall.second[2])
+    dispatch("""{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":null}""")
+    assertNull(lastCall.second[2])
+    // The handler's default SDK is Build.VERSION.SDK_INT (0 off-device); API 30+ may route.
+    val api30 = CtrlProxyMessageHandler(actions, sdkInt = { 30 })
+    api30.handleMessage(
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":2}"""
+      )
+    )
+    assertEquals("showOverlay", lastCall.first)
+    assertEquals(2, lastCall.second[2])
+  }
+
+  @Test
+  fun `show_overlay rejects an unroutable displayId with a correlated result and no action`() =
+    runTest {
+      val spec =
+        """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}"""
+      for ((sdk, displayId) in listOf(29 to 7, 29 to -1, 30 to -1)) {
+        val before = calls.size
+        val response =
+          CtrlProxyMessageHandler(actions, sdkInt = { sdk })
+            .handleMessage(
+              json.decodeFromString<WebSocketRequest>(
+                """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":$displayId}"""
+              )
+            )
+        assertTrue(response is OverlayResult)
+        response as OverlayResult
+        assertFalse(response.success)
+        assertEquals("s", response.requestId)
+        assertTrue(response.error.orEmpty().contains("display", ignoreCase = true))
+        assertEquals("No action on API $sdk displayId $displayId", before, calls.size)
+      }
+      // Display 0 is the default display on every API level.
+      CtrlProxyMessageHandler(actions, sdkInt = { 29 })
+        .handleMessage(
+          json.decodeFromString<WebSocketRequest>(
+            """{"type":"show_overlay","requestId":"s","spec":$spec,"displayId":0}"""
+          )
+        )
+      assertEquals("showOverlay", lastCall.first)
+      assertEquals(0, lastCall.second[2])
+    }
+
+  @Test
+  fun `dispatch typed overlay asset requests`() = runTest {
+    dispatch(
+      """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""
+    )
+    assertEquals("putOverlayAsset", lastCall.first)
+    assertEquals(listOf("p", "hero", "image/png", "iVBORw0KGgo="), lastCall.second)
+    dispatch("""{"type":"remove_overlay_asset","requestId":"r","id":"hero"}""")
+    assertEquals("removeOverlayAsset", lastCall.first)
+    assertEquals(listOf("r", "hero"), lastCall.second)
+  }
+
+  @Test
+  fun `invalid overlay combinations return precise correlated failures without actions`() =
+    runTest {
+      val spec =
+        """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
+      val updateError = "update_overlay requires exactly one of spec or state"
+      val dismissError = "dismiss_overlay requires exactly one of id or all:true"
+      val cases =
+        listOf(
+          """{"type":"update_overlay","requestId":"bad","id":"panel"}""" to updateError,
+          """{"type":"update_overlay","requestId":"bad","id":"panel","spec":$spec,"state":{}}""" to
+            updateError,
+          """{"type":"dismiss_overlay","requestId":"bad"}""" to dismissError,
+          """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":true}""" to
+            dismissError,
+          """{"type":"dismiss_overlay","requestId":"bad","all":false}""" to dismissError,
+          """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":false}""" to
+            dismissError,
+        )
+      for ((literal, error) in cases) {
+        val result = dispatchForResponse(literal) as OverlayResult
+        assertEquals("bad", result.requestId)
+        assertFalse(result.success)
+        assertEquals(error, result.error)
+      }
+      assertTrue(calls.isEmpty())
+    }
+
+  @Test
+  fun `overlay result frame carries failure and escaped echoed request id`() {
+    val requestId = "quoted" + '"'
+    val result =
+      json.decodeFromString<WebSocketResponse>(
+        overlayResultFrame(requestId, false, "render failed")
+      ) as OverlayResult
+    assertEquals(requestId, result.requestId)
+    assertFalse(result.success)
+    assertEquals("render failed", result.error)
   }
 }

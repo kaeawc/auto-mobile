@@ -1,3 +1,8 @@
+import { isDeepStrictEqual } from "node:util";
+import {
+  terminalScreenshotUnavailable,
+  isTerminalScreenshotUnavailable,
+} from "../utils/PostActionCaptureContext";
 import type { ObserveResult, DisplayObservation } from "../models/ObserveResult";
 import {
   sanitizeObserveResult,
@@ -33,7 +38,7 @@ import { buildObservationScreenshotUri } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
 /**
- * Read/write access to the per-session diff baseline and the display revision
+ * Read/write access to per-session diff/metadata baselines and the display revision
  * of the last observation output to the agent. Injected (interface + fake) so `finalizeToolResponse`
  * stays free of a direct `sessionManager`/`DaemonState` dependency; the call site
  * backs it with `SessionManager.setLastRenderedObservation` /
@@ -42,6 +47,13 @@ import { stripInternalObservationFields } from "./observationInternalFields";
 export interface ObservationBaselineStore {
   get(sessionUuid: string): ObserveResult | undefined;
   set(sessionUuid: string, observation: ObserveResult, displayRevision?: number): void;
+  /** Last inline-sent blocks for the current device; a different device returns undefined. */
+  getActionMetadata?(
+    sessionUuid: string,
+    deviceId: string,
+  ): Readonly<Record<string, unknown>> | undefined;
+  /** Replaces the current device snapshot, including an empty device-switch invalidation. */
+  setActionMetadata?(sessionUuid: string, deviceId: string, blocks: Record<string, unknown>): void;
   setDisplayRevision?(
     sessionUuid: string,
     revision: number,
@@ -232,10 +244,13 @@ function attachObservationScreenshotUri(
     observationId?: string;
     observationScreenshotResourceUri?: string;
     screenshotCaptureAttempted?: boolean;
+    [terminalScreenshotUnavailable]?: boolean;
   },
   captureAttempted = observation.screenshotCaptureAttempted,
+  unavailable = isTerminalScreenshotUnavailable(observation as ObserveResult),
 ): void {
   if (
+    !unavailable &&
     captureAttempted !== false &&
     typeof observation.deviceId === "string" &&
     observation.deviceId.length > 0 &&
@@ -334,6 +349,15 @@ export interface FinalizeToolResponseContext {
    * is large enough to risk client-side truncation.
    */
   artifactMode?: ObservationArtifactMode;
+  /**
+   * Whether this response will actually be handed to the client (issue #10081).
+   * `false` when the request was already cancelled or timed out, so the response
+   * is thrown away. A discarded response must not advance the diff baseline, the
+   * display revision or the "last inline-sent" action-metadata snapshot: the next
+   * delivered response would otherwise be reduced against blocks the client never
+   * received. Reads are unaffected. Defaults to `true`.
+   */
+  delivered?: boolean;
 }
 
 type ObservationDiffMode = "diff" | "full";
@@ -341,7 +365,7 @@ type ObservationDiffReason =
   | "diff_emitted"
   | "missing_baseline"
   | "screen_changed"
-  | "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations"
+  | "missing_session"
   | "unrenderable_hierarchy"
   | "disabled"
   | "stripped_by_actions_no_observe";
@@ -355,6 +379,7 @@ interface ObservationDiffScreenIdentity {
 interface ObservationDiffMetadata {
   mode: ObservationDiffMode;
   reason: ObservationDiffReason;
+  hint?: string;
   fromScreen?: ObservationDiffScreenIdentity;
   toScreen?: ObservationDiffScreenIdentity;
 }
@@ -580,7 +605,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         }),
       };
     }
-    attachObservationScreenshotUri(served);
+    attachObservationScreenshotUri(
+      served,
+      observeResult.screenshotCaptureAttempted,
+      isTerminalScreenshotUnavailable(observeResult),
+    );
     sanitizedPayload = served;
     hasArtifactableObservation = true;
   } else if (!isObserveTool && payload.observation !== undefined) {
@@ -619,12 +648,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         // Internal envelopes are consumed by in-process tool callers, not agents.
         // Keep them on the pre-diff/pre-strip shape without agent-facing metadata.
       } else if (!diffActive) {
-        observationDiff = { mode: "full", reason: "disabled" };
+        observationDiff = {
+          mode: "full",
+          reason: "disabled",
+          hint: "Set --actions-diff-observe to receive diffs.",
+        };
       } else if (!ctx.sessionUuid || !ctx.baselineStore) {
         observationDiff = {
           mode: "full",
-          reason:
-            "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+          reason: "missing_session",
+          hint: "pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
           toScreen: observationScreenIdentity(sanitized),
         };
       } else if (!hasRenderableHierarchy(sanitized)) {
@@ -731,6 +764,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             screenshotCaptureAttempted?: boolean;
           },
           (payload.observation as ObserveResult).screenshotCaptureAttempted,
+          isTerminalScreenshotUnavailable(payload.observation as ObserveResult),
         );
       }
       sanitizedPayload = {
@@ -759,19 +793,30 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         ...writeObservationArtifact(ctx, sanitizedPayload),
       };
     } else {
-      const observation = sanitizedPayload.observation;
-      sanitizedPayload = {
-        ...sanitizedPayload,
-        observation:
-          isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
-            ? writeObserveDiffBodyArtifact(ctx, observation)
-            : writeObservationArtifact(ctx, observation),
-      };
+      const inlinePayload = sanitizedPayload;
+      const observation = inlinePayload.observation;
+      sanitizedPayload = artifactWriteOrInline(
+        ctx,
+        "observation",
+        () => ({
+          ...inlinePayload,
+          observation:
+            isObserveDiff(observation) && resolveObserveProjection(ctx.args) !== "full"
+              ? writeObserveDiffBodyArtifact(ctx, observation)
+              : writeObservationArtifact(ctx, observation),
+        }),
+        inlinePayload,
+      );
     }
   }
 
   if (artifactMode(ctx) === "always") {
-    sanitizedPayload ??= artifactNonObservationPayload(ctx, payload);
+    sanitizedPayload ??= artifactWriteOrInline(
+      ctx,
+      "response",
+      () => artifactNonObservationPayload(ctx, payload),
+      undefined,
+    );
   }
 
   // Hard ceiling (issue #6870). Spilling `observation` bounds only the
@@ -804,7 +849,18 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     }
   }
 
+  // Artifacts retain complete metadata. Compact only the residue delivered inline,
+  // and preserve the original envelope when compaction has nothing to remove.
+  if (canCompactActionMetadata(ctx, payload, envelopeView.envelope)) {
+    const inlinePayload = sanitizedPayload ?? payload;
+    const compacted = compactActionMetadata(inlinePayload, ctx);
+    if (compacted !== inlinePayload) {
+      sanitizedPayload = compacted;
+    }
+  }
+
   if (!sanitizedPayload) {
+    commitDeliveredActionMetadata(ctx, payload, payload);
     return response;
   }
 
@@ -814,22 +870,281 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     sanitizedPayload,
     envelopeView.textPart ? serialization.text(sanitizedPayload) : undefined,
   );
-  if (pendingBaselineUpdate) {
-    ctx.baselineStore!.set(
-      pendingBaselineUpdate.sessionUuid,
-      pendingBaselineUpdate.observation,
-      renderedDisplayRevision,
-    );
-  } else if (ctx.sessionUuid && renderedDisplayRevision !== undefined) {
-    ctx.baselineStore?.setDisplayRevision?.(
-      ctx.sessionUuid,
-      renderedDisplayRevision,
-      renderedDisplayKey,
-      renderedDisplayGeneration,
-    );
-  }
+  commitDeliveredActionMetadata(ctx, payload, sanitizedPayload);
+  commitDeliveredBaseline(ctx, pendingBaselineUpdate, {
+    revision: renderedDisplayRevision,
+    key: renderedDisplayKey,
+    generation: renderedDisplayGeneration,
+  });
 
   return response;
+}
+
+/**
+ * Tools whose artifact write failure stays loud. They are read-only: nothing has
+ * happened on the device, so an error result invites at most a harmless re-read.
+ */
+const READ_ONLY_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["observe", "getNetworkGraph"]);
+
+/**
+ * Run an artifact write whose failure must not erase a completed action (#10080).
+ *
+ * For a tool that can mutate the device the action has already run, so throwing
+ * here would return `isError` for work that happened and invite a duplicate retry
+ * (the same rule the hard-ceiling spill follows, #6870). On failure warn and serve
+ * `inline` instead. Read-only tools keep the loud failure.
+ */
+function artifactWriteOrInline<T>(
+  ctx: FinalizeToolResponseContext,
+  what: string,
+  write: () => T,
+  inline: T,
+): T {
+  if (READ_ONLY_ARTIFACT_TOOLS.has(ctx.name)) {
+    return write();
+  }
+  try {
+    return write();
+  } catch (error) {
+    logger.warn(
+      `finalizeToolResponse: could not write the ${what} artifact for ${ctx.name}; serving it inline: ${errorMessage(error)}`,
+      error,
+    );
+    return inline;
+  }
+}
+
+/** Skipped for a response the client will never receive (#10081). */
+function commitDeliveredActionMetadata(
+  ctx: FinalizeToolResponseContext,
+  originalPayload: Record<string, unknown>,
+  servedPayload: Record<string, unknown>,
+): void {
+  if (ctx.delivered !== false && canRecordActionMetadata(ctx)) {
+    recordInlineActionMetadata(
+      servedPayload,
+      ctx,
+      actionMetadataDeviceId(originalPayload, ctx.name),
+    );
+  }
+}
+
+/** Skipped for a response the client will never receive (#10081). */
+function commitDeliveredBaseline(
+  ctx: FinalizeToolResponseContext,
+  pending: { sessionUuid: string; observation: ObserveResult } | undefined,
+  display: {
+    revision: number | undefined;
+    key: string | undefined;
+    generation: number | undefined;
+  },
+): void {
+  if (ctx.delivered === false) {
+    return;
+  }
+  if (pending) {
+    ctx.baselineStore!.set(pending.sessionUuid, pending.observation, display.revision);
+  } else if (ctx.sessionUuid && display.revision !== undefined) {
+    ctx.baselineStore?.setDisplayRevision?.(
+      ctx.sessionUuid,
+      display.revision,
+      display.key,
+      display.generation,
+    );
+  }
+}
+
+/** Only these independently compared blocks are omitted; join keys and screen identity stay inline. */
+const ACTION_METADATA_FIELDS = [
+  "insets",
+  "systemInsets",
+  "backStack",
+  "gfxMetrics",
+  "displayedTimeMetrics",
+  "deviceLock",
+  "accessibilityState",
+  "freshness",
+] as const;
+const HIERARCHY_METADATA_FIELDS = ["insets", "systemInsets"] as const;
+
+function canRecordActionMetadata(ctx: FinalizeToolResponseContext): boolean {
+  return (
+    serverConfig.isActionsCompactMetadataEnabled() &&
+    !ctx.internal &&
+    !!ctx.sessionUuid &&
+    !!ctx.baselineStore?.getActionMetadata &&
+    !!ctx.baselineStore.setActionMetadata
+  );
+}
+
+function canCompactActionMetadata(
+  ctx: FinalizeToolResponseContext,
+  payload: Record<string, unknown>,
+  envelope: object,
+): boolean {
+  return (
+    canRecordActionMetadata(ctx) &&
+    ctx.name !== "observe" &&
+    payload.success !== false &&
+    payload.error === undefined &&
+    (envelope as { isError?: boolean }).isError !== true
+  );
+}
+
+function actionMetadataBlocks(
+  payload: Record<string, unknown>,
+  name: string,
+): Record<string, unknown> {
+  const observation = name === "observe" ? payload : payload.observation;
+  if (!isRecord(observation)) {
+    return {};
+  }
+  const blocks: Record<string, unknown> = {};
+  for (const field of ACTION_METADATA_FIELDS) {
+    if (observation[field] !== undefined) {
+      blocks[field] = observation[field];
+    }
+  }
+  if (isRecord(observation.viewHierarchy)) {
+    for (const field of HIERARCHY_METADATA_FIELDS) {
+      if (observation.viewHierarchy[field] !== undefined) {
+        blocks[`viewHierarchy.${field}`] = observation.viewHierarchy[field];
+      }
+    }
+  }
+  return blocks;
+}
+
+function actionMetadataDeviceId(
+  payload: Record<string, unknown>,
+  name: string,
+): string | undefined {
+  const observation = name === "observe" ? payload : payload.observation;
+  const deviceId = isRecord(observation) ? observation.deviceId : undefined;
+  return typeof deviceId === "string" && deviceId.length > 0 ? deviceId : undefined;
+}
+
+function hasDuplicateActionElement(
+  payload: Record<string, unknown>,
+  outputSchema: unknown,
+): boolean {
+  return (
+    payload.element !== undefined &&
+    isRecord(payload.selectedElement) &&
+    isDeepStrictEqual(payload.element, payload.selectedElement.matchedElement) &&
+    !requiredOutputSchemaKeys(outputSchema).includes("element")
+  );
+}
+
+/**
+ * Per-capture stamps inside an otherwise static block. They change on every call
+ * and nothing reads them, so they must not keep an unchanged block inline.
+ * `freshness` is deliberately absent: its `ageMs` is documented for a consumer
+ * working to a tighter budget, so any change there is a real change.
+ */
+const ACTION_METADATA_VOLATILE_FIELDS: Partial<
+  Record<(typeof ACTION_METADATA_FIELDS)[number], readonly string[]>
+> = { backStack: ["capturedAt"] };
+
+/** Blocks whose per-call warning shape must stay visible even when unchanged. */
+function isAlwaysSentActionBlock(field: string, block: unknown): boolean {
+  if (field === "freshness") {
+    return !isRecord(block) || block.isFresh !== true;
+  }
+  if (field === "gfxMetrics") {
+    return isRecord(block) && block.isStable === false;
+  }
+  // The error-fallback shape (partial) is otherwise identical call to call once capturedAt is ignored.
+  return field === "backStack" && isRecord(block) && block.partial === true;
+}
+
+/** Wire form of a block with its volatile keys removed, so in-memory `undefined` keys cannot differ from the recorded JSON round-trip. */
+function comparableActionBlock(field: string, block: unknown): unknown {
+  const wire: unknown = JSON.parse(stringifyToolResponse(block));
+  const volatile =
+    ACTION_METADATA_VOLATILE_FIELDS[field as keyof typeof ACTION_METADATA_VOLATILE_FIELDS];
+  if (!isRecord(wire) || !volatile) {
+    return wire;
+  }
+  return Object.fromEntries(Object.entries(wire).filter(([key]) => !volatile.includes(key)));
+}
+
+function isUnchangedActionBlock(field: string, block: unknown, previous: unknown): boolean {
+  if (block === undefined || previous === undefined || isAlwaysSentActionBlock(field, block)) {
+    return false;
+  }
+  return isDeepStrictEqual(
+    comparableActionBlock(field, block),
+    comparableActionBlock(field, previous),
+  );
+}
+
+function compactActionMetadata(
+  payload: Record<string, unknown>,
+  ctx: FinalizeToolResponseContext,
+): Record<string, unknown> {
+  let next = payload;
+  if (hasDuplicateActionElement(payload, ctx.outputSchema)) {
+    next = { ...payload };
+    delete next.element;
+  }
+  const deviceId = actionMetadataDeviceId(payload, ctx.name);
+  if (!deviceId || !isRecord(payload.observation)) {
+    return next;
+  }
+  const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
+  if (!previous) {
+    return next;
+  }
+  const observation = payload.observation;
+  const omittedFields = ACTION_METADATA_FIELDS.filter((field) =>
+    isUnchangedActionBlock(field, observation[field], previous[field]),
+  );
+  const sourceHierarchy = isRecord(observation.viewHierarchy)
+    ? observation.viewHierarchy
+    : undefined;
+  const omittedHierarchyFields = HIERARCHY_METADATA_FIELDS.filter(
+    (field) =>
+      sourceHierarchy?.[field] !== undefined &&
+      isDeepStrictEqual(sourceHierarchy[field], previous[`viewHierarchy.${field}`]),
+  );
+  if (omittedFields.length === 0 && omittedHierarchyFields.length === 0) {
+    return next;
+  }
+
+  const compactedObservation = { ...observation };
+  for (const field of omittedFields) {
+    delete compactedObservation[field];
+  }
+  if (omittedHierarchyFields.length > 0) {
+    const hierarchy = { ...sourceHierarchy };
+    for (const field of omittedHierarchyFields) {
+      delete hierarchy[field];
+    }
+    compactedObservation.viewHierarchy = hierarchy;
+  }
+  return { ...next, observation: compactedObservation };
+}
+
+/** Record only final inline blocks, including observe and errors; artifacts do not count. */
+function recordInlineActionMetadata(
+  payload: Record<string, unknown>,
+  ctx: FinalizeToolResponseContext,
+  deviceId: string | undefined,
+): void {
+  if (!deviceId) {
+    return;
+  }
+  const blocks = actionMetadataBlocks(payload, ctx.name);
+  const previous = ctx.baselineStore!.getActionMetadata!(ctx.sessionUuid!, deviceId);
+  if (Object.keys(blocks).length === 0 && previous) {
+    return;
+  }
+  // An empty snapshot on a device switch invalidates the old device without
+  // claiming delivery of any artifacted/stripped block.
+  // Detach values from the response and use the text serializer's wire representation.
+  const snapshot: Record<string, unknown> = JSON.parse(stringifyToolResponse(blocks));
+  ctx.baselineStore!.setActionMetadata!(ctx.sessionUuid!, deviceId, { ...previous, ...snapshot });
 }
 
 function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<string, unknown> {
@@ -1181,6 +1496,24 @@ function artifactExecutePlanPayload(
       nextPayload.failedStep = { ...payload.failedStep, failureObservation };
       changed = true;
     }
+  }
+
+  if (Array.isArray(payload.deviceFailures)) {
+    nextPayload.deviceFailures = payload.deviceFailures.map((failure) => {
+      if (!isRecord(failure)) {
+        return failure;
+      }
+      const failureObservation = artifactPlanObservation(
+        ctx,
+        failure.failureObservation,
+        "ExecutePlanFailureObservation",
+      );
+      if (!failureObservation) {
+        return failure;
+      }
+      changed = true;
+      return { ...failure, failureObservation };
+    });
   }
 
   if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {

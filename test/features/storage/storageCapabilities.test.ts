@@ -210,18 +210,35 @@ describe("AC2: platform-qualified domains", () => {
     expect(isStorageOperationAvailable(report, "app_containers", "read")).toBe(true);
   });
 
+  it("non-debuggable physical Android retains externalFiles for every app-container operation", () => {
+    const report = computeStorageCapabilities(
+      ctx({ platform: "android", deviceType: "physical", debuggableBuild: false }),
+    );
+    for (const operation of ["list", "read", "write"] as const) {
+      const capability = findOperationCapability(report, "app_containers", operation)!;
+      expect(capability.state).toBe("partial");
+      expect(capability.reason).toBe(
+        "Private containers require a debuggable app build; externalFiles remains available.",
+      );
+      expect(capability.prerequisites).toEqual(["debuggable app build"]);
+    }
+  });
+
   it("app_containers on physical Android is gated on a debuggable build", () => {
     const unknown = computeStorageCapabilities(
       ctx({ platform: "android", deviceType: "physical", debuggableBuild: undefined }),
     );
-    expect(findOperationCapability(unknown, "app_containers", "read")?.state).toBe("partial");
+    expect(findOperationCapability(unknown, "app_containers", "read")).toEqual({
+      operation: "read",
+      state: "partial",
+      reason: "Available pending verification of: debuggable app build.",
+      prerequisites: ["debuggable app build"],
+    });
 
     const nonDebuggable = computeStorageCapabilities(
       ctx({ platform: "android", deviceType: "physical", debuggableBuild: false }),
     );
-    expect(findOperationCapability(nonDebuggable, "app_containers", "read")?.state).toBe(
-      "unavailable",
-    );
+    expect(findOperationCapability(nonDebuggable, "app_containers", "read")?.state).toBe("partial");
 
     const debuggable = computeStorageCapabilities(
       ctx({ platform: "android", deviceType: "physical", debuggableBuild: true }),

@@ -21,6 +21,7 @@ class RequestIdEchoContractTest {
     setOf(
       "connected",
       "interaction_event",
+      "overlay_event",
       "package_event",
       "navigation_event",
       "handled_exception_event",
@@ -33,6 +34,7 @@ class RequestIdEchoContractTest {
       "storage_changed",
       "crash_event",
       "anr_event",
+      "overlay_event",
     )
 
   @Test

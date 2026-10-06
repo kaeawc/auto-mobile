@@ -90,6 +90,11 @@ function harness(platform: "android" | "ios", mode: Mode) {
   };
   const observe = Object.assign(new FakeObserveScreen(), { captureCacheGeneration: () => 0 });
   observe.setObserveResult(screen);
+  // Start these dispatch-fence tests with this call's observer read.
+  watch(observe, "getMostRecentCachedObserveResult").mockResolvedValue({
+    ...screen,
+    freshness: { isFresh: false },
+  });
   const android = new FakeCtrlProxy();
   const ios = new FakeIOSCtrlProxy(timer);
   watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(
@@ -316,7 +321,7 @@ describe("default-display dispatch fences", () => {
             await h.bump();
             return "unknown";
           });
-          watch(h.voiceOver, "isVoiceOverEnabled").mockImplementation(async () => {
+          watch(h.voiceOver, "resolveState").mockImplementation(async () => {
             await h.bump();
             return false;
           });
@@ -442,7 +447,15 @@ describe("TalkBack waits retain the action fence", () => {
         if (site === "longPress-fallback") {
           Object.assign(driver, {
             getAccessibilityHierarchy: async () => ({
-              hierarchy: { node: { $: { "resource-id": "target-id" } } },
+              hierarchy: {
+                node: {
+                  $: {
+                    "resource-id": "target-id",
+                    text: "Target",
+                    bounds: { left: 40, top: 60, right: 80, bottom: 100 },
+                  },
+                },
+              },
             }),
           });
           watch(driver, "requestAction").mockImplementation(async () => {
@@ -474,13 +487,18 @@ describe("TalkBack waits retain the action fence", () => {
               : "tap";
         const tapStrategy = new FakeTapStrategy();
         tapStrategy.setAccessibilityServiceEnabled(true);
-        const selector = new FakeElementSelector({
+        const targetElement: Element = {
           text: "Target",
           "resource-id": site === "longPress-fallback" ? "target-id" : undefined,
           clickable: true,
           "long-clickable": true,
           bounds: { left: 40, top: 60, right: 80, bottom: 100 },
-        } as Element);
+        };
+        const selector = new FakeElementSelector(targetElement);
+        h.screen.viewHierarchy = {
+          ...h.screen.viewHierarchy,
+          hierarchy: { node: { $: targetElement } },
+        };
         const result =
           tool === "tapOn"
             ? await h
@@ -488,6 +506,7 @@ describe("TalkBack waits retain the action fence", () => {
                   new TapOnElement(h.device, h.adb, {
                     ...h.deps,
                     tapStrategy,
+                    hierarchyCapture: new FakeHierarchyCapture(() => h.screen.viewHierarchy!),
                     talkBackStrategy: strategy,
                     talkBackDriverFactory: factory,
                     elementSelector: selector,
@@ -514,7 +533,10 @@ describe("TalkBack waits retain the action fence", () => {
                     elementSelector: selector,
                   }),
                 );
-                action.setRefreshViewHierarchyForTesting(async () => null);
+                let captures = 0;
+                action.setRefreshViewHierarchyForTesting(async () =>
+                  ++captures === 1 ? h.screen.viewHierarchy! : null,
+                );
                 return action.execute({ action: actionName });
               })();
         if (mode === "transition") {
@@ -845,7 +867,7 @@ describe("default-display recovery dispatches", () => {
           }
           return "unknown";
         });
-        watch(h.voiceOver, "isVoiceOverEnabled").mockImplementation(async () => {
+        watch(h.voiceOver, "resolveState").mockImplementation(async () => {
           await h.bump();
           return false;
         });
@@ -1083,3 +1105,54 @@ test("review: explicit adb search preserves the default-display dispatch fence",
   expect(h.android.getDragHistory()).toEqual([]);
   expect(checks).toBeGreaterThan(0);
 });
+
+for (const tool of ["tapOn", "tapAny"] as const) {
+  test.each(["unchanged", "transition"] as const)(
+    `review cache-hit ${tool} revalidation preserves default-display fence: %s`,
+    async (mode) => {
+      const h = harness("android", mode);
+      watch(h.observe, "getMostRecentCachedObserveResult").mockResolvedValue({
+        ...h.screen,
+        freshness: { isFresh: true },
+      });
+      const timeouts: number[] = [];
+      const refresh = async (timeout: number) => {
+        timeouts.push(timeout);
+        h.timer.advanceTime(1200);
+        await h.bump();
+        return h.screen.viewHierarchy!;
+      };
+      const on = h.attach(
+        new TapOnElement(h.device, h.adb, {
+          ...h.deps,
+          tapStrategy: new FakeTapStrategy(),
+          selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
+        }),
+      );
+      on.refreshViewHierarchy = refresh;
+      const any = h.attach(new TapAnyElement(h.device, h.adb, h.deps));
+      any.setRefreshViewHierarchyForTesting(async (_defaultRefresh, timeout) => refresh(timeout));
+      const options = {
+        text: "Target",
+        action: "longPress" as const,
+        duration: 100,
+        retryIfNoChange: false,
+        selectionStrategy: "first" as const,
+      };
+      const result = tool === "tapOn" ? await on.execute(options) : await any.execute(options);
+      expect(timeouts).toEqual([15000]);
+      if (mode === "transition") {
+        assertResult(result);
+        expect(h.inputs()).toEqual([]);
+      } else {
+        expect(result.success).toBe(true);
+        expect(h.inputs()).toEqual([
+          tool === "tapOn"
+            ? "shell input touchscreen swipe 60 80 60 80 100"
+            : "shell input touchscreen swipe 20 30 20 30 100",
+        ]);
+      }
+      expect(h.taps()).toEqual([]);
+    },
+  );
+}

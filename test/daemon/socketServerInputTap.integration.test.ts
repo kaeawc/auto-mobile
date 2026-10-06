@@ -93,7 +93,16 @@ describe("UnixSocketServer input/tap", () => {
       success: true,
       coordinates: { x: 12.5, y: 34.25 },
     });
-    expect(requestTapCoordinates).toHaveBeenCalledWith(12.5, 34.25, 80, 1234);
+    expect(requestTapCoordinates).toHaveBeenCalledWith(
+      12.5,
+      34.25,
+      80,
+      1234,
+      undefined,
+      undefined,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -609,7 +618,16 @@ describe("UnixSocketServer input/tap", () => {
       deviceId: "emulator-5554",
       coordinates: { x: 1, y: 2 },
     });
-    expect(requestTapCoordinates).toHaveBeenCalledWith(1, 2, undefined, 30_000);
+    expect(requestTapCoordinates).toHaveBeenCalledWith(
+      1,
+      2,
+      undefined,
+      30_000,
+      undefined,
+      undefined,
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
   });
 
   test("serializes concurrent taps for the same device across socket clients", async () => {

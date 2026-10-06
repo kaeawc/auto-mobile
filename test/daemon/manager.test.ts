@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -64,6 +64,7 @@ import {
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "../../src/daemon/constants";
@@ -88,6 +89,31 @@ function writeStopPidFile(
     }),
   );
 }
+
+// Default for every test: a manager that reaches start() opens a daemon launch log
+// under the resolved AutoMobile data dir, which must never be the developer's real
+// ~/.auto-mobile (a resident daemon lives there). Tests that need their own data
+// dir overwrite this; the per-test cleanup below removes whichever is left.
+let defaultIsolatedDataDir: string | undefined;
+let originalDefaultDataDir: string | undefined;
+
+beforeEach(() => {
+  originalDefaultDataDir = process.env.AUTOMOBILE_DATA_DIR;
+  defaultIsolatedDataDir = mkdtempSync(join(tmpdir(), "daemon-manager-default-data-"));
+  process.env.AUTOMOBILE_DATA_DIR = defaultIsolatedDataDir;
+});
+
+afterEach(() => {
+  if (originalDefaultDataDir === undefined) {
+    delete process.env.AUTOMOBILE_DATA_DIR;
+  } else {
+    process.env.AUTOMOBILE_DATA_DIR = originalDefaultDataDir;
+  }
+  if (defaultIsolatedDataDir !== undefined) {
+    rmSync(defaultIsolatedDataDir, { recursive: true, force: true });
+    defaultIsolatedDataDir = undefined;
+  }
+});
 
 describe("daemonBuildIdentityStatusLines", () => {
   const client: BuildIdentity = {
@@ -6754,6 +6780,7 @@ describe("Daemon manager heartbeat", () => {
         params: {
           sessionId: "session-1",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
         },
       },
@@ -6847,6 +6874,7 @@ describe("Daemon manager heartbeat", () => {
         params: {
           sessionId: "session-1",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
           livenessOwnerToken: "ios-video-keeper",
           claimLivenessOwnership: true,

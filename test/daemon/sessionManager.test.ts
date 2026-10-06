@@ -1,11 +1,13 @@
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import {
   SessionManager,
+  getDefaultSessionHeartbeatTimeoutMs,
   TerminalSessionError,
   PLAN_AUTO_RELEASE_REASON,
   SessionActivityPersistenceError,
@@ -2366,6 +2368,8 @@ describe("SessionManager", () => {
       try {
         await manager.createSession("session-1", "emulator-old", "android");
         await manager.claimLivenessOwnership("session-1", "owner-a");
+        // owner-a's lease must lapse or the daemon rejects owner-b's claim (#10050).
+        fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + 1);
         repository.deferUpsert = true;
 
         const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
@@ -2381,7 +2385,7 @@ describe("SessionManager", () => {
         repository.finishUpsert.resolve();
 
         await expect(rebinding).resolves.toMatchObject({ assignedDevice: "emulator-new" });
-        await expect(claim).resolves.toBe(true);
+        await expect(claim).resolves.toBe("claimed");
         expect(manager.hasLivenessOwnership("session-1", "owner-b")).toBe(true);
         expect(repository.persistedOwnerToken).toBe("owner-b");
       } finally {
@@ -3074,7 +3078,12 @@ describe("SessionManager", () => {
       fakeTimer.advanceTime(4000);
       expect(sessionManager.getSession("session-1")).not.toBeNull();
 
+      // A heartbeating session past its deadline is held for the suspect grace
+      // window (#10051) before the sweep releases it.
       fakeTimer.advanceTime(1500);
+      expect(sessionManager.getSession("session-1")).not.toBeNull();
+
+      fakeTimer.advanceTime(SUSPECT_GRACE_MS);
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
   });
@@ -3594,10 +3603,63 @@ describe("SessionManager", () => {
       expect(acknowledged).toBe(false);
       finishPersistence.resolve();
 
-      await expect(claim).resolves.toBe(true);
+      await expect(claim).resolves.toBe("claimed");
       expect(manager.hasLivenessOwnership("session-1", "owner-token")).toBe(true);
     } finally {
       finishPersistence.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("rejects a foreign claim on a live owner without persisting or touching deadlines", async () => {
+    const persistedTokens: Array<string | null> = [];
+    const manager = new SessionManager(fakeTimer, {
+      async upsertActiveSession() {},
+      async recordActivity() {},
+      async recordLivenessOwnership(_sessionUuid, ownerToken) {
+        persistedTokens.push(ownerToken);
+      },
+      async markReleased() {},
+    });
+    try {
+      await manager.createSession("session-1", "emulator-5554", "android");
+      await expect(manager.claimLivenessOwnership("session-1", "owner-a")).resolves.toBe("claimed");
+      manager.recordHeartbeat("session-1");
+      const owned = manager.getSession("session-1")!;
+      const before = {
+        lastUsedAt: owned.lastUsedAt,
+        lastHeartbeat: owned.lastHeartbeat,
+        expiresAt: owned.expiresAt,
+        heartbeatTimeoutMs: owned.heartbeatTimeoutMs,
+        livenessPolicy: owned.livenessPolicy,
+      };
+      fakeTimer.advanceTime(owned.heartbeatTimeoutMs);
+
+      await expect(manager.claimLivenessOwnership("session-1", "owner-b")).resolves.toBe(
+        "conflict",
+      );
+
+      expect(manager.hasLivenessOwnership("session-1", "owner-a")).toBe(true);
+      expect(manager.hasLivenessOwnership("session-1", "owner-b")).toBe(false);
+      expect(manager.getSession("session-1")).toMatchObject(before);
+      expect(persistedTokens).toEqual(["owner-a"]);
+
+      // The suspect grace window (#10051) still holds the session for owner-a.
+      fakeTimer.advanceTime(1);
+      await expect(manager.claimLivenessOwnership("session-1", "owner-b")).resolves.toBe(
+        "conflict",
+      );
+      expect(persistedTokens).toEqual(["owner-a"]);
+
+      // The rejection is not remembered: owner-b can claim once the grace window ends.
+      fakeTimer.advanceTime(SUSPECT_GRACE_MS);
+      await expect(manager.claimLivenessOwnership("session-1", "owner-b")).resolves.toBe("claimed");
+      expect(persistedTokens).toEqual(["owner-a", "owner-b"]);
+      await expect(manager.claimLivenessOwnership("session-1", "owner-a")).resolves.toBe(
+        "superseded",
+      );
+      expect(persistedTokens).toEqual(["owner-a", "owner-b"]);
+    } finally {
       manager.stopCleanupTimer();
     }
   });
@@ -3624,6 +3686,8 @@ describe("SessionManager", () => {
     try {
       const session = await manager.createSession("session-1", "emulator-5554", "android");
       session.livenessOwnerToken = "original-owner";
+      // The original owner's lease must lapse or owner-a's claim is rejected (#10050).
+      fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + 1);
       const firstClaim = manager.claimLivenessOwnership("session-1", "owner-a");
       await firstPersistenceStarted.promise;
       let secondSettled = false;
@@ -3636,7 +3700,7 @@ describe("SessionManager", () => {
       finishFirstPersistence.resolve();
 
       await expect(firstClaim).rejects.toThrow("owner-a persistence failed");
-      await expect(secondClaim).resolves.toBe(true);
+      await expect(secondClaim).resolves.toBe("claimed");
       expect(manager.hasLivenessOwnership("session-1", "owner-b")).toBe(true);
       expect(persistedTokens).toEqual(["owner-b"]);
     } finally {
@@ -4778,6 +4842,36 @@ describe("SessionManager", () => {
   // recordSessionActivity) + set (updateSessionCache → recordSessionActivity)
   // = two fire-and-forget activity UPDATEs per diffed action. A dedicated
   // read-only reader halves that: the read must NOT record activity.
+  describe("compact action metadata session cache", () => {
+    test("cache is session/device scoped and clears on session release", async () => {
+      await sessionManager.createSession("compact-s1", "phone-a", "android");
+      await sessionManager.createSession("compact-s2", "phone-b", "android");
+      const blocks = { systemInsets: { top: 24, bottom: 0, left: 0, right: 0 } };
+      sessionManager.setLastActionMetadata("compact-s1", "phone-a", blocks);
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-a")).toEqual(blocks);
+      expect(sessionManager.getLastActionMetadata("compact-s2", "phone-a")).toBeUndefined();
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-b")).toBeUndefined();
+      sessionManager.setLastActionMetadata("compact-s1", "phone-b", {});
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-a")).toBeUndefined();
+      await sessionManager.releaseSession("compact-s1");
+      expect(sessionManager.getLastActionMetadata("compact-s1", "phone-b")).toBeUndefined();
+    });
+    test("metadata reader records no activity", async () => {
+      const repo = new FakeDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repo);
+      try {
+        await manager.createSession("compact-s1", "phone-a", "android");
+        manager.setLastActionMetadata("compact-s1", "phone-a", { freshness: { verified: true } });
+        const activity = spyOn(repo, "recordActivity");
+        manager.getLastActionMetadata("compact-s1", "phone-a");
+        expect(activity).not.toHaveBeenCalled();
+        activity.mockRestore();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   describe("getLastRenderedObservation (issue #3053)", () => {
     function makeObservation(id: string): any {
       return {
@@ -5658,14 +5752,28 @@ describe("SessionManager", () => {
         assignedDevice: "simulator-uuid",
         stableDeviceId: "simulator-uuid",
       });
-      await expect(
-        restarted.claimLivenessOwnership("restarted-ios-session", "replacement-owner-token"),
-      ).resolves.toBe(true);
       expect(recoveryTarget).toMatchObject({
         platform: "ios",
         stableDeviceId: "simulator-uuid",
         deviceId: "simulator-uuid",
       });
+      // A restarted proxy resumes with its stable token without a conflict.
+      await expect(
+        restarted.claimLivenessOwnership("restarted-ios-session", "current-owner-token"),
+      ).resolves.toBe("claimed");
+      expect(persistedOwnerTokens).toEqual([]);
+      // The restored owner's lease is live, so a replacement token is rejected (#10050).
+      await expect(
+        restarted.claimLivenessOwnership("restarted-ios-session", "replacement-owner-token"),
+      ).resolves.toBe("conflict");
+      expect(restarted.hasLivenessOwnership("restarted-ios-session", "current-owner-token")).toBe(
+        true,
+      );
+      expect(persistedOwnerTokens).toEqual([]);
+      fakeTimer.advanceTime(getDefaultSessionHeartbeatTimeoutMs() + 1);
+      await expect(
+        restarted.claimLivenessOwnership("restarted-ios-session", "replacement-owner-token"),
+      ).resolves.toBe("claimed");
       expect(
         restarted.hasLivenessOwnership("restarted-ios-session", "replacement-owner-token"),
       ).toBe(true);
@@ -6086,9 +6194,11 @@ describe("SessionManager", () => {
         true,
       );
       await sessionCreated.promise;
+      // The persisted owner's lease must lapse or the reconnect claim is rejected (#10050).
+      fakeTimer.advanceTime(persisted.heartbeat_timeout_ms + SUSPECT_GRACE_MS + 1);
       await expect(
         restarted.claimLivenessOwnership("slow-owner-recovery", "reconnected-owner"),
-      ).resolves.toBe(true);
+      ).resolves.toBe("claimed");
       finishRecovery.resolve();
       await recovery;
       expect(restarted.hasLivenessOwnership("slow-owner-recovery", "reconnected-owner")).toBe(true);

@@ -13,6 +13,8 @@ export interface HierarchyCaptureRequest {
   /** Aggregate observer replies must not seed an owner's active hierarchy or push stream. */
   preserveDisplayState?: boolean;
   freshness: "cached-ok" | "fresh" | "settled";
+  /** Force iOS extraction rather than accepting the runner cache; pre-tap revalidation only. */
+  requireFreshExtraction?: boolean;
   searchRaw?: boolean;
   minTimestamp?: number;
   timeoutMs?: number;

@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
+import dev.jasonpearson.automobile.protocol.OverlayScalar
+import dev.jasonpearson.automobile.protocol.OverlaySpec
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
@@ -148,6 +150,26 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
   override fun getTraversalOrder(requestId: String?) {}
 
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) {}
+
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {}
+
+  override fun updateOverlay(
+    requestId: String?,
+    id: String,
+    spec: OverlaySpec?,
+    state: Map<String, OverlayScalar>?,
+  ) {}
+
+  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {}
+
+  override fun putOverlayAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  ) {}
+
+  override fun removeOverlayAsset(requestId: String?, id: String) {}
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) {}
 
@@ -473,6 +495,29 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     record("addHighlight", requestId, highlightId, shape)
+
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) =
+    record("showOverlay", requestId, spec, displayId)
+
+  override fun updateOverlay(
+    requestId: String?,
+    id: String,
+    spec: OverlaySpec?,
+    state: Map<String, OverlayScalar>?,
+  ) = record("updateOverlay", requestId, id, spec, state)
+
+  override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
+    record("dismissOverlay", requestId, id, all)
+
+  override fun putOverlayAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  ) = record("putOverlayAsset", requestId, id, mimeType, dataBase64)
+
+  override fun removeOverlayAsset(requestId: String?, id: String) =
+    record("removeOverlayAsset", requestId, id)
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
     record("listPreferenceFiles", requestId, packageName)

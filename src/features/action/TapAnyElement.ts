@@ -1,3 +1,15 @@
+import { isStrictlyScoped } from "../utility/ScopedSelection";
+import { iosHierarchyAcquisition } from "../observe/ios/types";
+import {
+  withObservationReadScope,
+  wasHierarchyReadDuringCall,
+} from "../observe/observationReadScope";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
+import { freshTapHierarchy } from "./freshTapHierarchy";
+import {
+  isSemanticActionRejected,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
@@ -9,7 +21,10 @@ import {
   sessionRenderedObservation,
   type RenderedObservationReader,
 } from "./TargetDisplayAction";
-import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
+import {
+  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+  createDeviceHierarchyCapture,
+} from "../observe/DeviceHierarchyCapture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   resolveDisplayFence,
@@ -84,7 +99,14 @@ import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierar
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
-import { androidDisplayTapDispatch, dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
+import {
+  androidDisplayTapDispatch,
+  dispatchAndroidCoordinateTap,
+  dispatchIosCoordinateTap,
+  dispatchIosSecondTap,
+  indeterminateTapError,
+} from "./coordinateTapDispatch";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { assertTouchscreenInputSucceeded } from "./touchscreenInput";
 import {
   requiresNodeSelector,
@@ -127,10 +149,12 @@ type RefreshViewHierarchy = (
   timeoutMs: number,
   screenSize?: ObserveResult["screenSize"],
   signal?: AbortSignal,
+  forceCapture?: boolean,
 ) => Promise<ViewHierarchyResult | null>;
 
 interface CapturedTapTarget {
   scoped?: boolean;
+  talkBackState?: boolean | null;
   element: Element;
   capture: HierarchySnapshot;
 }
@@ -443,6 +467,7 @@ export class TapAnyElement extends BaseVisualChange {
               request.timeoutMs ?? TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
               undefined,
               request.signal,
+              request.requireFreshExtraction,
             );
             if (!hierarchy) {
               throw new ActionableError("Unable to retrieve a fresh tapAny hierarchy");
@@ -498,12 +523,15 @@ export class TapAnyElement extends BaseVisualChange {
     this.assertSelectedCapture(capture);
     // UiAutomator captures keep their existing coordinate route, but unavailable
     // TalkBack evidence must still be retried and reported to the caller.
-    const { talkBack: talkBackState, unconfirmed } = await resolveTalkBackStateConfirmation(
-      this.accessibilityDetector,
-      this.device.deviceId,
-      this.adb,
-      this.featureFlags,
-    );
+    const { talkBack: talkBackState, unconfirmed } =
+      target.talkBackState === undefined
+        ? await resolveTalkBackStateConfirmation(
+            this.accessibilityDetector,
+            this.device.deviceId,
+            this.adb,
+            this.featureFlags,
+          )
+        : { talkBack: target.talkBackState, unconfirmed: false };
     if (unconfirmed) {
       fenceOptions.onActivationWarnings?.([TALKBACK_STATE_UNKNOWN_WARNING]);
     }
@@ -513,6 +541,7 @@ export class TapAnyElement extends BaseVisualChange {
       (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
         displayFence: fence,
         scoped: target.scoped,
+        hierarchy: resolveViewHierarchyForSearch(capture.hierarchy),
         onActivationWarnings: fenceOptions.onActivationWarnings,
       }))
     ) {
@@ -527,31 +556,54 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
 
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence.assertCurrent();
-    await dispatchAndroidCoordinateTap(
-      this.accessibilityService,
-      this.adb,
-      x,
-      y,
-      10,
-      undefined,
-      signal,
+    await this.executeAndroidCoordinateTap(
+      action,
+      { x, y },
+      {
+        signal,
+        fence,
+        onActivationWarnings: fenceOptions.onActivationWarnings,
+      },
     );
-    if (action === "doubleTap") {
-      await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
+  }
+
+  /** One tap, or a doubleTap whose touches are timed on the device when CtrlProxy supports it. */
+  private async executeAndroidCoordinateTap(
+    action: TapAnyElementOptions["action"],
+    point: { x: number; y: number },
+    context: {
+      signal?: AbortSignal;
+      fence: { assertCurrent(): void };
+      onActivationWarnings?: (warnings?: string[]) => void;
+    },
+  ): Promise<void> {
+    const { signal, fence } = context;
+    const tapOnce = async () => {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
       await dispatchAndroidCoordinateTap(
         this.accessibilityService,
         this.adb,
-        x,
-        y,
+        point.x,
+        point.y,
         10,
         undefined,
         signal,
       );
+    };
+    if (action !== "doubleTap") {
+      await tapOnce();
+      return;
     }
+    await dispatchAndroidDoubleTap({
+      client: this.accessibilityService,
+      point,
+      timer: this.timer,
+      signal,
+      assertCurrent: () => fence.assertCurrent(),
+      onWarning: (warning) => context.onActivationWarnings?.([warning]),
+      tap: tapOnce,
+    });
   }
 
   private async executeAndroidLongPress(
@@ -647,7 +699,17 @@ export class TapAnyElement extends BaseVisualChange {
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      const rejected = await isSemanticActionRejected({
+        advertised: hasAccessibilityAction(element.actions, "long_click"),
+        error: result.error,
+        needsNodeSelector,
+        selected: element,
+        // A forced fresh capture: the tree the element came from may predate the lookup miss.
+        readHierarchy: () =>
+          this.refreshViewHierarchy(DEFAULT_HIERARCHY_READ_TIMEOUT_MS, undefined, signal, true),
+      });
+      throwIfAborted(signal);
+      if (rejected) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );
@@ -669,10 +731,11 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    fenceOptions: DisplayFenceOption & {
-      scoped?: boolean;
-      onActivationWarnings?: (warnings?: string[]) => void;
-    } = {},
+    fenceOptions: DisplayFenceOption &
+      TalkBackTargetContext & {
+        scoped?: boolean;
+        onActivationWarnings?: (warnings?: string[]) => void;
+      } = {},
   ): Promise<boolean> {
     const fence = fenceOptions.displayFence;
     const driver = this.talkBackDriverFactory.createDriver(this.device);
@@ -683,7 +746,7 @@ export class TapAnyElement extends BaseVisualChange {
         durationMs,
         element,
         driver,
-        { displayFence: fence },
+        { ...fenceOptions, displayFence: fence },
       );
       if (!result.success && result.semanticActionFailure) {
         throw new ActionableError(
@@ -693,7 +756,11 @@ export class TapAnyElement extends BaseVisualChange {
       return result.success;
     }
     if (action === "tap" && !fenceOptions.scoped) {
-      const direct = await this.talkBackStrategy.executeDirectActivation(element, driver);
+      const direct = await this.talkBackStrategy.executeDirectActivation(
+        element,
+        driver,
+        fenceOptions,
+      );
       if (direct.success) {
         return true;
       }
@@ -727,6 +794,7 @@ export class TapAnyElement extends BaseVisualChange {
     } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
+    const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
       return;
     }
@@ -752,7 +820,7 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
     const options = fenceOptions.selectionOptions;
-    if (options && (options.container || options.selectionStrategy === "unique")) {
+    if (options && isStrictlyScoped(options, "any-container")) {
       const capture = identifyObservedHierarchy(
         this.device.platform,
         probe.hierarchy,
@@ -765,14 +833,25 @@ export class TapAnyElement extends BaseVisualChange {
       if (!refound.element) {
         return;
       }
-      target = { element: refound.element, capture, scoped: target.scoped };
+      target = { ...target, element: refound.element, capture };
     }
     // The first tap was unobserved. Retry the captured or re-resolved target once after debounce.
-    const retryPoint = this.geometry.getElementCenter(target.element);
+    let retryPoint = this.geometry.getElementCenter(target.element);
     logger.warn(
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
+    await this.refreshTalkBackRetryTarget(
+      target,
+      options,
+      fenceOptions.refresh,
+      screenSize,
+      signal,
+    );
+    if (target.talkBackState) {
+      Object.assign(reportedTarget, target);
+    }
+    retryPoint = this.geometry.getElementCenter(target.element);
     if (fenceOptions.dispatch) {
       this.assertSelectedCapture(target.capture);
       await fenceOptions.dispatch(retryPoint);
@@ -782,6 +861,35 @@ export class TapAnyElement extends BaseVisualChange {
       displayFence: fence,
       onActivationWarnings: fenceOptions.onActivationWarnings,
     });
+  }
+
+  private async refreshTalkBackRetryTarget(
+    target: CapturedTapTarget,
+    options: TapAnyElementOptions | undefined,
+    refresh: RefreshViewHierarchy | undefined,
+    screenSize: ObserveResult["screenSize"] | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!target.talkBackState || !options) {
+      return;
+    }
+    // The debounce wait follows the post-tap probe. Capture after that wait,
+    // then use tapAny's existing selector rather than the earlier coordinates.
+    const hierarchy = await freshTapHierarchy(
+      (timeout) => (refresh ?? this.refreshViewHierarchy.bind(this))(timeout, screenSize, signal),
+      this.timer,
+      signal,
+    );
+    const capture = identifyObservedHierarchy(this.device.platform, hierarchy, "fresh", this.timer);
+    const found = this.findClickableElement(options, capture.hierarchy, {
+      observationScreenSize: screenSize,
+    });
+    if (!found.element) {
+      throw new ActionableError(
+        "Selected element moved or is gone and no clickable target remains. Observe again before tapping.",
+      );
+    }
+    Object.assign(target, { element: found.element, capture });
   }
 
   private assertSelectedCapture(selectedCapture: HierarchySnapshot): void {
@@ -926,23 +1034,30 @@ export class TapAnyElement extends BaseVisualChange {
     timeoutMs: number,
     _screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     if (this.refreshViewHierarchyOverrideForTesting) {
       return this.refreshViewHierarchyOverrideForTesting(
         (defaultTimeoutMs, screenSize, defaultSignal) =>
-          this.refreshViewHierarchyDefault(defaultTimeoutMs, screenSize, defaultSignal),
+          this.refreshViewHierarchyDefault(
+            defaultTimeoutMs,
+            screenSize,
+            defaultSignal,
+            forceCapture,
+          ),
         timeoutMs,
         _screenSize,
         signal,
       );
     }
-    return this.refreshViewHierarchyDefault(timeoutMs, _screenSize, signal);
+    return this.refreshViewHierarchyDefault(timeoutMs, _screenSize, signal, forceCapture);
   }
 
   private async refreshViewHierarchyDefault(
     timeoutMs: number,
     _screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     if (timeoutMs <= 0) {
@@ -951,6 +1066,7 @@ export class TapAnyElement extends BaseVisualChange {
     try {
       const snapshot = await this.hierarchyCapture.capture({
         freshness: "fresh",
+        ...(forceCapture ? { requireFreshExtraction: true } : {}),
         searchRaw: serverConfig.isRawElementSearchEnabled(),
         timeoutMs,
         signal,
@@ -975,6 +1091,7 @@ export class TapAnyElement extends BaseVisualChange {
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
+    forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
     switch (this.device.platform) {
@@ -989,12 +1106,15 @@ export class TapAnyElement extends BaseVisualChange {
       }
       case "ios": {
         // Direct sync bypasses the client TTL while retaining the search deadline.
-        const synced = await IOSCtrlProxyClient.getInstance(this.device).requestHierarchySync(
-          undefined,
-          false,
-          signal,
-          effectiveTimeoutMs,
-        );
+        const client = IOSCtrlProxyClient.getInstance(this.device);
+        const synced = forceCapture
+          ? await client.requestHierarchySyncForTapRevalidation(
+              undefined,
+              false,
+              signal,
+              effectiveTimeoutMs,
+            )
+          : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
         if (!synced?.hierarchy) {
           return null;
         }
@@ -1003,6 +1123,10 @@ export class TapAnyElement extends BaseVisualChange {
             synced.hierarchy,
           ),
         );
+        const acquisition = synced[iosHierarchyAcquisition];
+        if (acquisition === "device" || acquisition === "client-cache") {
+          Object.assign(hierarchy, { [iosHierarchyAcquisition]: acquisition });
+        }
         return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
       }
       default:
@@ -1068,7 +1192,7 @@ export class TapAnyElement extends BaseVisualChange {
     longPressDuration: number,
     element?: Element,
     signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption & { scoped?: boolean } = {},
+    fenceOptions: DisplayFenceOption & { scoped?: boolean; voiceOverEnabled?: boolean } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
@@ -1079,18 +1203,21 @@ export class TapAnyElement extends BaseVisualChange {
     // while `ensureConnected()`/auto-setup was resolving aborts this probe
     // before dispatch, rather than after the caller has given up (issue
     // #6306 review).
-    const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
-      this.device.deviceId,
-      xcTestClient,
-      this.featureFlags,
-      undefined,
-      signal,
-    );
+    const isVoiceOverEnabled =
+      fenceOptions.voiceOverEnabled ??
+      (await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
+        this.device.deviceId,
+        xcTestClient,
+        this.featureFlags,
+        undefined,
+        signal,
+      ));
 
     if (isVoiceOverEnabled && element) {
       await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, {
         durationMs: longPressDuration,
         scoped: fenceOptions.scoped,
+        signal,
       });
       return;
     }
@@ -1141,33 +1268,14 @@ export class TapAnyElement extends BaseVisualChange {
     if (action === "doubleTap") {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      const firstResult = await xcTestClient.requestTapCoordinates(
-        x,
-        y,
-        tapDuration,
-        timeoutMs,
-        undefined,
-        undefined,
+      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
         signal,
-      );
-      if (!firstResult.success) {
-        throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
-      }
+        timeoutMs,
+      });
       await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      const secondResult = await xcTestClient.requestTapCoordinates(
-        x,
-        y,
-        tapDuration,
-        timeoutMs,
-        undefined,
-        undefined,
-        signal,
-      );
-      if (!secondResult.success) {
-        throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
-      }
+      await dispatchIosSecondTap(xcTestClient, { x, y }, tapDuration, { signal, timeoutMs });
       return;
     }
 
@@ -1175,18 +1283,10 @@ export class TapAnyElement extends BaseVisualChange {
     fence.assertCurrent();
     throwIfAborted(signal);
     try {
-      const result = await xcTestClient.requestTapCoordinates(
-        x,
-        y,
-        tapDuration,
-        timeoutMs,
-        undefined,
-        undefined,
+      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
         signal,
-      );
-      if (!result.success) {
-        throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
-      }
+        timeoutMs,
+      });
     } catch (error) {
       logger.warn(`[TapAnyElement] CtrlProxy iOS tap failed: ${errorMessage(error)}`, error);
       if (action === "longPress") {
@@ -1249,19 +1349,48 @@ export class TapAnyElement extends BaseVisualChange {
     voiceOverAction: "activate" | "long_press",
     timeoutMs: number | undefined,
     duration?: number,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const result = await xcTestClient.requestAction(
-      voiceOverAction,
-      resourceId,
-      undefined,
-      timeoutMs,
-      undefined,
-      duration === undefined ? undefined : { duration },
-    );
+    let dispatched = false;
+    let result: Awaited<ReturnType<IOSCtrlProxyClient["requestAction"]>>;
+    try {
+      result = await xcTestClient.requestAction(
+        voiceOverAction,
+        resourceId,
+        undefined,
+        timeoutMs,
+        undefined,
+        {
+          ...(duration === undefined ? {} : { duration }),
+          abortSignal: signal,
+          onDispatch: () => {
+            dispatched = true;
+          },
+        },
+      );
+    } catch (error) {
+      // A socket failure after the write is unconfirmed; a refusal or the caller's abort is not.
+      if (dispatched && !(error instanceof ActionableError) && error !== signal?.reason) {
+        throw indeterminateTapError(errorMessage(error));
+      }
+      throw error;
+    }
+    this.confirmIosVoiceOverDispatch(result);
     if (!result.success) {
       throw new ActionableError(
         `VoiceOver action failed for resource-id "${resourceId}": ${result.error ?? "unknown error"}`,
       );
+    }
+  }
+
+  /** A VoiceOver activation that was written but never answered may have landed. */
+  private confirmIosVoiceOverDispatch(result: {
+    error?: string;
+    dispatched?: boolean;
+    acknowledged?: boolean;
+  }): void {
+    if (result.dispatched && result.acknowledged !== true) {
+      throw indeterminateTapError(result.error);
     }
   }
 
@@ -1271,7 +1400,7 @@ export class TapAnyElement extends BaseVisualChange {
     element: Element,
     x: number,
     y: number,
-    pressOptions: { durationMs: number; scoped?: boolean },
+    pressOptions: { durationMs: number; scoped?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     const longPressDuration = pressOptions.durationMs;
     const label = this.resolveIosVoiceOverLabel(element);
@@ -1304,6 +1433,7 @@ export class TapAnyElement extends BaseVisualChange {
         voiceOverAction,
         timeoutMs,
         action === "longPress" ? longPressDuration : undefined,
+        pressOptions.signal,
       );
       return;
     }
@@ -1319,6 +1449,7 @@ export class TapAnyElement extends BaseVisualChange {
       },
     );
 
+    this.confirmIosVoiceOverDispatch(result);
     if (!result.success) {
       throw new ActionableError(
         `VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}`,
@@ -1428,8 +1559,10 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay,
     refresh,
     onActivationWarnings,
+    onDispatched,
     perf,
     signal,
+    requestDeadlineMs,
   }: {
     options: TapAnyElementOptions;
     observeResult: ObserveResult;
@@ -1437,17 +1570,40 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     refresh: RefreshViewHierarchy;
     onActivationWarnings: (messages?: string[]) => void;
+    onDispatched: () => void;
     perf: PerformanceTracker;
     signal?: AbortSignal;
+    requestDeadlineMs?: number;
   }) {
     throwIfAborted(signal);
 
-    const viewHierarchy = observeResult.viewHierarchy;
+    let viewHierarchy = observeResult.viewHierarchy;
     if (!viewHierarchy) {
       perf.end();
       return { success: false, error: "Unable to get view hierarchy, cannot tap on element" };
     }
 
+    let talkBackState: boolean | null | undefined;
+    if (this.device.platform === "android") {
+      const confirmation = await resolveTalkBackStateConfirmation(
+        this.accessibilityDetector,
+        this.device.deviceId,
+        this.adb,
+        this.featureFlags,
+      );
+      talkBackState = confirmation.talkBack;
+      if (confirmation.unconfirmed) {
+        onActivationWarnings([TALKBACK_STATE_UNKNOWN_WARNING]);
+      }
+      if (talkBackState) {
+        viewHierarchy = await freshTapHierarchy(
+          (timeout) => refresh(timeout, observeResult.screenSize, signal),
+          this.timer,
+          signal,
+        );
+        observeResult.viewHierarchy = viewHierarchy;
+      }
+    }
     let selectedCapture = identifyObservedHierarchy(
       this.device.platform,
       viewHierarchy,
@@ -1457,7 +1613,7 @@ export class TapAnyElement extends BaseVisualChange {
       { captureId: observeResult.observationId, iosMultiPanel: this.iosMultiPanel },
     );
     const searchDurationMs = this.getSearchUntilDuration(options);
-    const startTime = this.timer.now();
+    let startTime = this.timer.now();
     let requestCount = 0;
     let changeCount = 0;
     const lastHash = this.hashViewHierarchy(viewHierarchy);
@@ -1482,11 +1638,54 @@ export class TapAnyElement extends BaseVisualChange {
         containerFoundEver,
       }));
     }
+    const cachedRefresh = await this.refreshCachedHierarchy(
+      viewHierarchy,
+      talkBackState,
+      requestCount,
+      {
+        refresh,
+        screenSize: observeResult.screenSize,
+        signal,
+        requestDeadlineMs,
+      },
+    );
+    talkBackState = cachedRefresh.accessibilityEnabled;
+    if (cachedRefresh.hierarchy) {
+      viewHierarchy = cachedRefresh.hierarchy;
+      observeResult.viewHierarchy = viewHierarchy;
+      startTime = this.timer.now();
+      selectedCapture = identifyObservedHierarchy(
+        this.device.platform,
+        viewHierarchy,
+        "fresh",
+        this.timer,
+      );
+      const current = this.findClickableElement(options, selectedCapture.hierarchy, {
+        observationScreenSize: observeResult.screenSize,
+        display: viewHierarchy,
+      });
+      element = current.element;
+      if (!element) {
+        // Start the same search window as a cache miss, from the fresh tree.
+        ({ element, selectedCapture, requestCount, changeCount } = await this.pollClickableTarget({
+          options,
+          observeResult,
+          refresh,
+          signal,
+          selectedCapture,
+          searchDurationMs,
+          startTime,
+          lastHash: this.hashViewHierarchy(viewHierarchy),
+          containerFoundEver: current.containerFound,
+        }));
+      }
+    }
     const tapPoint = this.geometry.getElementCenter(element);
     const target = {
       element,
       capture: selectedCapture,
-      scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+      scoped: isStrictlyScoped(options),
+      talkBackState,
     };
     const action = options.action;
     await this.dispatchTapTarget({
@@ -1496,6 +1695,7 @@ export class TapAnyElement extends BaseVisualChange {
       targetDisplay,
       refresh,
       onActivationWarnings,
+      onDispatched,
       signal,
       tapPoint,
       target,
@@ -1505,6 +1705,61 @@ export class TapAnyElement extends BaseVisualChange {
     return this.createSuccessResult(action, target, startTime, requestCount, changeCount);
   }
 
+  private async refreshCachedHierarchy(
+    hierarchy: ViewHierarchyResult,
+    accessibilityEnabled: boolean | null | undefined,
+    requestCount: number,
+    context: {
+      refresh: RefreshViewHierarchy;
+      screenSize: ObserveResult["screenSize"];
+      signal?: AbortSignal;
+      requestDeadlineMs?: number;
+    },
+  ): Promise<{
+    hierarchy?: ViewHierarchyResult;
+    accessibilityEnabled: boolean | null | undefined;
+  }> {
+    if (
+      (this.device.platform !== "android" && this.device.platform !== "ios") ||
+      accessibilityEnabled ||
+      requestCount !== 0 ||
+      wasHierarchyReadDuringCall(hierarchy)
+    ) {
+      return { accessibilityEnabled };
+    }
+    if (this.device.platform === "ios") {
+      accessibilityEnabled = await this.iosVoiceOverDetector.isVoiceOverActiveOrUnknown(
+        this.device.deviceId,
+        IOSCtrlProxyClient.getInstance(this.device),
+        this.featureFlags,
+        undefined,
+        context.signal,
+      );
+      if (accessibilityEnabled) {
+        return { accessibilityEnabled };
+      }
+    }
+    const refreshed = await freshTapHierarchy(
+      (timeout) =>
+        this.device.platform === "ios"
+          ? context.refresh(timeout, context.screenSize, context.signal, true)
+          : context.refresh(timeout, context.screenSize, context.signal),
+      this.timer,
+      context.signal,
+      {
+        timeoutMs: Math.min(
+          DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+          context.requestDeadlineMs === undefined
+            ? DEFAULT_HIERARCHY_READ_TIMEOUT_MS
+            : context.requestDeadlineMs - this.timer.now(),
+        ),
+        context: "while revalidating a cached observation",
+        platform: this.device.platform,
+      },
+    );
+    return { hierarchy: refreshed, accessibilityEnabled };
+  }
+
   private async dispatchTapTarget({
     options,
     observeResult,
@@ -1512,6 +1767,7 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay,
     refresh,
     onActivationWarnings,
+    onDispatched,
     signal,
     tapPoint,
     target,
@@ -1523,6 +1779,7 @@ export class TapAnyElement extends BaseVisualChange {
     targetDisplay: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     refresh: RefreshViewHierarchy;
     onActivationWarnings: (messages?: string[]) => void;
+    onDispatched: () => void;
     signal?: AbortSignal;
     tapPoint: { x: number; y: number };
     target: CapturedTapTarget;
@@ -1546,7 +1803,21 @@ export class TapAnyElement extends BaseVisualChange {
               this.accessibilityService,
               this.adb,
               { action, duration: longPressDuration },
-              { target: targetDisplay, signal, onDispatched: () => {} },
+              {
+                target: targetDisplay,
+                signal,
+                onDispatched,
+                timer: this.timer,
+                onWarning: (warning) => onActivationWarnings([warning]),
+                // Same TalkBack state the default route uses; unknown/off keeps the raw gesture.
+                talkBack:
+                  target.talkBackState === true
+                    ? {
+                        strategy: this.talkBackStrategy,
+                        driver: this.talkBackDriverFactory.createDriver(this.device),
+                      }
+                    : undefined,
+              },
             )
           : undefined;
         if (dispatch) {
@@ -1584,7 +1855,11 @@ export class TapAnyElement extends BaseVisualChange {
           longPressDuration,
           element,
           signal,
-          { displayFence: fence, scoped: target.scoped },
+          {
+            displayFence: fence,
+            scoped: target.scoped,
+            voiceOverEnabled: target.talkBackState ?? undefined,
+          },
         );
         break;
       default:
@@ -1593,6 +1868,17 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   async execute(
+    options: TapAnyElementOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    request?: { requestDeadlineMs?: number },
+  ): Promise<TapAnyElementResult> {
+    return withObservationReadScope(() =>
+      this.executeWithReadScope(options, progress, signal, request),
+    );
+  }
+
+  private async executeWithReadScope(
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
@@ -1611,6 +1897,8 @@ export class TapAnyElement extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapAnyElement");
 
+    let tapsDelivered = 0;
+    let rethrowAbort = options.display !== undefined;
     try {
       // Reject before display resolution/observation can issue device commands.
       this.getLongPressDuration(options, request);
@@ -1658,8 +1946,13 @@ export class TapAnyElement extends BaseVisualChange {
             targetDisplay,
             refresh,
             onActivationWarnings,
+            onDispatched: () => {
+              tapsDelivered++;
+              rethrowAbort = options.action !== "doubleTap" || tapsDelivered !== 1;
+            },
             perf,
             signal,
+            requestDeadlineMs: request?.requestDeadlineMs,
           }),
         {
           changeExpected: false,
@@ -1687,7 +1980,7 @@ export class TapAnyElement extends BaseVisualChange {
       return { ...result, ...(warnings.size > 0 ? { warnings: [...warnings] } : {}) };
     } catch (error) {
       perf.end();
-      this.rethrowObservationAbort(error, signal, options.display !== undefined);
+      this.rethrowObservationAbort(error, signal, rethrowAbort);
       const errorMsg = errorMessage(error);
       logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
       if (error instanceof StaleDisplayError) {

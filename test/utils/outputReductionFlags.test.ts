@@ -12,6 +12,7 @@ describe("parseOutputReductionFlags", () => {
       toolResultsNoStructuredContent: false,
       actionsDiffObserve: false,
       actionsNoObserve: false,
+      actionsCompactMetadata: false,
     });
   });
 
@@ -65,4 +66,14 @@ describe("parseOutputReductionFlags", () => {
     expect(flags.toolResultsNoStructuredContent).toBe(false);
     expect(flags.actionsDiffObserve).toBe(false);
   });
+});
+
+test("compact metadata CLI/env flag is registered", () => {
+  expect(parseOutputReductionFlags(["--actions-compact-metadata"], {}).actionsCompactMetadata).toBe(
+    true,
+  );
+  expect(
+    parseOutputReductionFlags([], { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "1" })
+      .actionsCompactMetadata,
+  ).toBe(true);
 });

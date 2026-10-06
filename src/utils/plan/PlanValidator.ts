@@ -17,6 +17,7 @@ interface BarrierLockUsage {
 }
 
 interface DeviceLabelErrors {
+  mismatchedInCriticalSection: string[];
   missingLabels: Array<{ index: number; tool: string }>;
   invalidLabels: Array<{ index: number; tool: string; device: string }>;
   missingInCriticalSection: Array<{ parentIndex: number; subIndex: number; tool: string }>;
@@ -150,6 +151,7 @@ export class PlanValidator {
 
     const deviceSet = new Set(normalizePlanDevices(plan.devices).labels);
     const labelErrors: DeviceLabelErrors = {
+      mismatchedInCriticalSection: [],
       missingLabels: [],
       invalidLabels: [],
       missingInCriticalSection: [],
@@ -182,7 +184,7 @@ export class PlanValidator {
       labelErrors;
 
     // Report all validation errors
-    const errors: string[] = [];
+    const errors: string[] = [...labelErrors.mismatchedInCriticalSection];
 
     if (missingLabels.length > 0) {
       const steps = missingLabels.map((m) => `step ${m.index} (${m.tool})`).join(", ");
@@ -247,8 +249,20 @@ export class PlanValidator {
     if (!Array.isArray(subSteps)) {
       return;
     }
+    const effectiveOwner = this.effectiveField(step, "device");
+    const ownerDevice =
+      typeof effectiveOwner === "string" && deviceSet.has(effectiveOwner)
+        ? effectiveOwner
+        : undefined;
     for (let j = 0; j < subSteps.length; j++) {
-      this.recordCriticalSectionSubstepLabel(subSteps[j], i, j, deviceSet, labelErrors);
+      this.recordCriticalSectionSubstepLabel(
+        subSteps[j],
+        i,
+        j,
+        deviceSet,
+        labelErrors,
+        ownerDevice,
+      );
     }
   }
 
@@ -258,6 +272,7 @@ export class PlanValidator {
     j: number,
     deviceSet: Set<string>,
     labelErrors: DeviceLabelErrors,
+    ownerDevice: string | undefined,
   ): void {
     if (!sub || typeof sub !== "object") {
       return;
@@ -279,6 +294,10 @@ export class PlanValidator {
         tool: subTool,
         device: String(subDevice),
       });
+    } else if (ownerDevice !== undefined && subDevice !== ownerDevice) {
+      labelErrors.mismatchedInCriticalSection.push(
+        `step ${i}.steps[${j}] (${subTool}): device="${subDevice}" differs from criticalSection owner device="${ownerDevice}". Put it in its own step for that device or use a separate criticalSection step.`,
+      );
     }
   }
 

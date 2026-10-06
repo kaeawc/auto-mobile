@@ -355,7 +355,30 @@ async function cleanUpFailedSystemUiAnrRecovery(
     operations.shouldClearIntentionalShutdownAfterFailure("android", signal)
   ) {
     devicePool?.clearIntentionalShutdown(boot.device.deviceId);
+    return;
   }
+  noteSettledRejectedKillCommand(devicePool, shutdownReservation.device, shutdown.command);
+}
+
+/**
+ * The retained marker fences a late exit of an accepted kill. A kill command that
+ * itself rejected (for example a request abort during its device discovery, before
+ * `emu kill` was sent) never stopped the emulator, so once it settles a later fresh
+ * observation of the same incarnation may lift the fence, exactly as `killDevice`
+ * does for a late command failure. A kill that resolved was accepted, so the
+ * emulator is dying and stays fenced until its disconnect.
+ */
+function noteSettledRejectedKillCommand(
+  devicePool: DevicePool | undefined,
+  device: PooledDevice,
+  command: Promise<BootedDevice | void>,
+): void {
+  if (!devicePool) {
+    return;
+  }
+  // `.then(undefined, ...)` also observes the rejection; a command that resolved
+  // leaves the marker in place, so there is nothing else to do for it.
+  void command.then(undefined, () => devicePool.noteLatePlatformShutdownSettled(device));
 }
 
 async function retireSystemUiAnrReplacement(

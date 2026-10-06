@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, it, spyOn } from "bun:test";
 import fc from "fast-check";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
@@ -181,7 +182,8 @@ function buildTap(scenario: Scenario) {
     elementSelector: new ResolverElementSelector(new ElementResolver(() => 0)),
     tapStrategy: new FakeTapStrategy(),
   });
-  action.observedInteraction = (run) => run(observation(hierarchy(scenario)));
+  action.observedInteraction = (run) =>
+    run(recordObservationRead(observation(hierarchy(scenario))));
   return action;
 }
 async function tapOn(scenario: Scenario): Promise<Outcome> {
@@ -200,7 +202,8 @@ async function tapAny(scenario: Scenario): Promise<Outcome> {
     accessibilityService: service,
   });
   action.setRefreshViewHierarchyForTesting(async () => null);
-  action.observedInteraction = (run) => run(observation(hierarchy(scenario)));
+  action.observedInteraction = (run) =>
+    run(recordObservationRead(observation(hierarchy(scenario))));
   const result = await action.execute({
     container: scope(scenario),
     selectionStrategy: "unique",

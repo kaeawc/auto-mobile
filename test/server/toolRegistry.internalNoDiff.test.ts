@@ -10,7 +10,7 @@ import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -51,6 +51,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let originalNoObserve: boolean;
+  let originalCompact: boolean;
   let restorePipelineOverrides: (() => void) | undefined;
 
   /** Same-screen observation so `isSameObservationScreen` holds between calls. */
@@ -169,6 +170,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     );
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
     originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+    originalCompact = serverConfig.isActionsCompactMetadataEnabled();
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     // #6227: `setupAutolockedSession` creates its session directly via
     // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
@@ -188,8 +190,32 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     daemonSessionManager?.stopCleanupTimer();
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
     serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+    serverConfig.setActionsCompactMetadataEnabled(originalCompact);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+  });
+
+  test("compact metadata uses the actual session cache through the wrapped handler", async () => {
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    serverConfig.setActionsDiffObserveEnabled(false);
+    serverConfig.setActionsNoObserveEnabled(false);
+    const uuid = await setupAutolockedSession();
+    ToolRegistry.registerDeviceAware("tapOn", "tapOn", baseSchema, async () =>
+      createStructuredToolResponse({
+        success: true,
+        observation: { ...sameScreenObserve(), deviceId: androidA.deviceId },
+      }),
+    );
+    const handler = ToolRegistry.getTool("tapOn")!.handler;
+    const args = { platform: "android", __mcpSessionId: "mcp-session-1" };
+    const output = z.object({ observation: z.record(z.string(), z.unknown()) });
+    const first = output.parse(getStructuredPayload(await handler(args))).observation;
+    expect(first).toHaveProperty("systemInsets");
+    expect(daemonSessionManager?.getLastActionMetadata(uuid, androidA.deviceId)).toHaveProperty(
+      "systemInsets",
+    );
+    const second = output.parse(getStructuredPayload(await handler(args))).observation;
+    expect(second).not.toHaveProperty("systemInsets");
   });
 
   test("EC2.3: an internal tapOn keeps the full observation; a normal tapOn diffs it", async () => {

@@ -549,8 +549,7 @@ describe("LaunchApp", () => {
       0,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.success).toBe(false);
@@ -572,8 +571,7 @@ describe("LaunchApp", () => {
       0,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.success).toBe(true);
@@ -616,8 +614,7 @@ describe("LaunchApp", () => {
       0,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.success).toBe(false);
@@ -639,8 +636,7 @@ describe("LaunchApp", () => {
       1000,
       100,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.verifiedBy).toBeUndefined();
@@ -665,8 +661,7 @@ describe("LaunchApp", () => {
       1000,
       100,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(result.verifiedBy).toBe("task-root");
@@ -685,8 +680,7 @@ describe("LaunchApp", () => {
       1,
       1,
       undefined,
-      false,
-      0,
+      { coldBoot: false, expectedUserId: 0 },
     );
 
     expect(fakeTimer.getSleepHistory()).toEqual([1]);
@@ -944,6 +938,7 @@ describe("LaunchApp", () => {
         layoutSeqSum: 1,
         systemOverlay: true,
       },
+      deviceLock: { locked: false, keyguardShowing: false, secure: false },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -956,7 +951,7 @@ describe("LaunchApp", () => {
       .filter((command) => command === "shell cmd statusbar collapse").length;
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("notification shade");
+    expect(result.error).toContain("(notification shade) is covering the app");
     expect(fakeTimer.now()).toBeGreaterThanOrEqual(15_000);
     expect(collapseCount).toBeGreaterThan(1);
     expect(collapseCount).toBeLessThan(20);
@@ -972,6 +967,7 @@ describe("LaunchApp", () => {
         layoutSeqSum: 1,
         systemOverlay: true,
       },
+      deviceLock: { locked: false, keyguardShowing: false, secure: false },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -981,7 +977,7 @@ describe("LaunchApp", () => {
     const result = await launchApp.execute(packageName, false, true);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("notification shade");
+    expect(result.error).toContain("(notification shade) is covering the app");
     expect(result.error).not.toContain("coldBoot: true");
   });
 
@@ -1008,6 +1004,111 @@ describe("LaunchApp", () => {
     expect(result.error).toContain("device is locked");
     expect(result.error).toContain("wakeAndUnlock");
     expect(result.error).not.toContain("notification shade");
+  });
+
+  describe("system UI launch blocker wording (#10182)", () => {
+    const systemUiObservation = (extra: Partial<ObserveResult> = {}): ObserveResult => ({
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+      ...extra,
+    });
+
+    const launchWith = async (observation: ObserveResult) => {
+      fakeTimer.enableAutoAdvance();
+      fakeAdb.setForegroundApp({ packageName, userId: 0 });
+      fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+      fakeObserveScreen.setObserveResult(() => observation);
+      return launchApp.execute(packageName, false, true);
+    };
+
+    test("a lock sample of locked=false identifies the shade", async () => {
+      const result = await launchWith(
+        systemUiObservation({
+          deviceLock: { locked: false, keyguardShowing: false, secure: false },
+        }),
+      );
+
+      expect(result.error).toContain("(notification shade) is covering the app");
+      expect(result.error).not.toContain("could not be determined");
+    });
+
+    test("no lock sample says the lock state is unknown and names both remedies", async () => {
+      fakeAdb.setDeviceLock(null);
+      const result = await launchWith(systemUiObservation());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("lock state could not be determined");
+      expect(result.error).toContain("wakeAndUnlock");
+      expect(result.error).toContain("collapse the shade");
+      expect(result.error).not.toContain("(notification shade) is covering the app");
+    });
+
+    test("a failed lock re-read stays unknown instead of failing the launch result", async () => {
+      const reread = spyOn(fakeAdb, "getDeviceLock").mockRejectedValue(new Error("dumpsys died"));
+      const result = await launchWith(systemUiObservation());
+
+      expect(reread).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("lock state could not be determined");
+    });
+
+    test("a fresh lock read that finds the keyguard overrides a missing sample", async () => {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: false });
+      const result = await launchWith(systemUiObservation());
+
+      expect(result.error).toContain("device is locked");
+      expect(result.error).toContain("wakeAndUnlock");
+      expect(result.error).not.toContain("notification shade");
+    });
+
+    test("a fresh lock read that finds the keyguard overrides a stale unlocked sample", async () => {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      const result = await launchWith(
+        systemUiObservation({
+          deviceLock: { locked: false, keyguardShowing: false, secure: false },
+        }),
+      );
+
+      expect(result.error).toContain("device is locked");
+      expect(result.error).not.toContain("notification shade");
+    });
+
+    test("a fresh unlocked read identifies the shade when the observation had no sample", async () => {
+      fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
+      const result = await launchWith(systemUiObservation());
+
+      expect(result.error).toContain("(notification shade) is covering the app");
+    });
+
+    test("the hierarchy naming the keyguard says lock screen without a lock sample", async () => {
+      fakeAdb.setDeviceLock(null);
+      const result = await launchWith(
+        systemUiObservation({
+          viewHierarchy: {
+            hierarchy: { error: "Device is locked; ...", unavailableReason: "device_locked" },
+          },
+        }),
+      );
+
+      expect(result.error).toContain("lock screen");
+      expect(result.error).toContain("wakeAndUnlock");
+      expect(result.error).not.toContain("notification shade");
+    });
+
+    test("an already-locked observation sample skips the re-read", async () => {
+      const reread = spyOn(fakeAdb, "getDeviceLock");
+      const result = await launchWith(
+        systemUiObservation({ deviceLock: { locked: true, keyguardShowing: true, secure: true } }),
+      );
+
+      expect(reread).not.toHaveBeenCalled();
+      expect(result.error).toContain("device is locked");
+    });
   });
 
   test("reports the actual foreground blocker after cold boot launch verification times out", async () => {
@@ -1733,6 +1834,16 @@ describe("LaunchApp", () => {
         stdout: "Error: no launcher activity",
         stderr: "",
       });
+      // An am error after the cache said installed triggers one live install check (#10192);
+      // these packages are installed (they have launcher dumps), just without a launcher.
+      const listing = {
+        stdout: [packageName, playgroundPackage, "com.android.egg"]
+          .map((name) => `package:${name}`)
+          .join("\n"),
+        stderr: "",
+      };
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", listing);
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", listing);
     });
 
     afterEach(() => ctrlProxySpy.mockRestore());
@@ -1824,6 +1935,114 @@ describe("LaunchApp", () => {
         stderr: "",
       },
     );
+
+  test("resolved launcher component starts directly without package listing or monkey", async () => {
+    const playground = "dev.jasonpearson.automobile.playground";
+    fakeAdb.setCommandResponse(
+      `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER '${playground}'`,
+      {
+        stdout:
+          "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false\ndev.jasonpearson.automobile.playground/.MainActivity",
+        stderr: "",
+      },
+    );
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.jasonpearson.automobile.playground/.MainActivity }",
+      stderr: "",
+    });
+
+    const result = await performFallbackLaunch(playground);
+    const commands = fakeAdb.getExecutedCommands();
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(
+      commands.some((command) =>
+        command.includes("-n 'dev.jasonpearson.automobile.playground/.MainActivity'"),
+      ),
+    ).toBe(true);
+    expect(commands.some((command) => command.includes("shell monkey"))).toBe(false);
+    expect(commands.some((command) => command.includes("pm list packages"))).toBe(false);
+  });
+
+  test("unresolved launcher keeps bare intent and preserves fail-fast then monkey", async () => {
+    const playground = "dev.jasonpearson.automobile.playground";
+    fakeAdb.setCommandResponse("shell cmd package resolve-activity --brief", {
+      stdout: "No activity found",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] pkg=dev.jasonpearson.automobile.playground }",
+      stderr:
+        "Error: Activity not started, unable to resolve Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 pkg=dev.jasonpearson.automobile.playground }",
+    });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${playground}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse(`shell monkey -p '${playground}'`, {
+      stdout: "Monkey finished",
+      stderr: "",
+    });
+
+    const result = await performFallbackLaunch(playground);
+    const commands = fakeAdb.getExecutedCommands();
+    expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
+    expect(
+      commands.some(
+        (command) =>
+          command.startsWith("shell am start --user 0") && command.endsWith(`'${playground}'`),
+      ),
+    ).toBe(true);
+    expect(commands.some((command) => command.includes("shell monkey"))).toBe(true);
+  });
+
+  test("resolver failure falls back to the bare package intent", async () => {
+    fakeAdb.setCommandError(
+      "shell cmd package resolve-activity",
+      new Error("resolver unavailable"),
+    );
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] }",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch();
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(
+      fakeAdb.getExecutedCommands().some((command) => command.endsWith(`'${packageName}'`)),
+    ).toBe(true);
+  });
+
+  test("resolver and am start both target the requested nonzero user", async () => {
+    const userPackage = "dev.jasonpearson.automobile.playground";
+    fakeAdb.setCommandResponse("shell cmd package resolve-activity --brief --user 10", {
+      stdout:
+        "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false\ndev.jasonpearson.automobile.playground/.MainActivity",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 10 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.jasonpearson.automobile.playground/.MainActivity }",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch(userPackage, 10);
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .some((command) => command.includes("resolve-activity --brief --user 10")),
+    ).toBe(true);
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .some(
+          (command) =>
+            command.includes("am start --user 10") &&
+            command.includes("-n 'dev.jasonpearson.automobile.playground/.MainActivity'"),
+        ),
+    ).toBe(true);
+  });
 
   test("monkey accepted and verified launches without trying later fallbacks", async () => {
     fakeTimer.enableAutoAdvance();
@@ -2346,7 +2565,7 @@ describe("LaunchApp", () => {
 
     const resultPromise = launchApp.execute(packageName, false, false);
 
-    for (let i = 0; i < 50 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
+    for (let i = 0; i < 500 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
       await Promise.resolve();
     }
 

@@ -2,6 +2,7 @@ import { promises as fsPromises, type Stats } from "node:fs";
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import path from "node:path";
 import type {
+  VideoContainerFormat,
   VideoFormat,
   VideoRecordingConfig,
   VideoRecordingConfigInput,
@@ -68,6 +69,14 @@ export interface RecordingHandle {
   effectiveConfig?: VideoRecordingConfig;
   warning?: string;
   physicalDisplayId?: string;
+  /**
+   * File the capture is writing while it runs, when that is not `outputPath`.
+   * The in-progress size cap (issue #4762) stats this path, so a backend that
+   * captures to a raw file and only produces `outputPath` at stop (iOS Simulator:
+   * `<id>-raw.mov`, then ffmpeg post-process) must report it. Absent means the
+   * capture writes `outputPath` directly (or its host file only appears at stop).
+   */
+  liveCapturePath?: string;
   backendHandle?: unknown;
 }
 
@@ -142,14 +151,27 @@ function applyBackendDisplayOutcome(active: ActiveVideoRecording, handle: Record
   }
 }
 
-function recordingWarnings(active: ActiveVideoRecording): string[] | undefined {
-  return active.warning ? [active.warning] : undefined;
+function recordingWarnings(
+  active: ActiveVideoRecording,
+  stopResult?: RecordingResult,
+): string[] | undefined {
+  const warnings = [...(active.warning ? [active.warning] : []), ...(stopResult?.warnings ?? [])];
+  return warnings.length > 0 ? warnings : undefined;
+}
+
+export interface ForceStopOptions {
+  /**
+   * `false` forbids any command that signals processes the recording does not
+   * exclusively own on the device (the device may now belong to another session).
+   * Defaults to `true`, the historical device-wide cleanup.
+   */
+  deviceWide?: boolean;
 }
 
 export interface VideoCaptureBackend {
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;
-  forceStop?(handle: RecordingHandle): Promise<void>;
+  forceStop?(handle: RecordingHandle, options?: ForceStopOptions): Promise<void>;
 }
 
 export interface StartVideoRecordingOptions {
@@ -173,6 +195,8 @@ export interface ActiveVideoRecording {
   recordedPanel?: VideoRecordingPanel;
   physicalDisplayId?: string;
   warning?: string;
+  /** See {@link RecordingHandle.liveCapturePath}. */
+  liveCapturePath?: string;
 }
 
 export interface VideoRecorderServiceDependencies {
@@ -325,6 +349,7 @@ export class VideoRecorderService {
       active.handle = handle;
       active.outputPath = handle.outputPath || outputPath;
       active.fileName = path.basename(active.outputPath);
+      active.liveCapturePath = handle.liveCapturePath;
       active.startedAt = handle.startedAt || startedAt;
       active.config = toPublicRecordingConfig(handle.effectiveConfig ?? config);
       applyBackendDisplayOutcome(active, handle);
@@ -342,6 +367,7 @@ export class VideoRecorderService {
         recordedPanel: active.recordedPanel,
         physicalDisplayId: active.physicalDisplayId,
         warning: active.warning,
+        liveCapturePath: active.liveCapturePath,
       };
     } catch (error) {
       return await this.handleStartFailure(error, active);
@@ -355,6 +381,11 @@ export class VideoRecorderService {
    */
   listActiveRecordingIds(): string[] {
     return Array.from(this.activeRecordings.keys());
+  }
+
+  /** The file an active capture is writing, when it differs from its output path. */
+  getLiveCapturePath(recordingId: string): string | undefined {
+    return this.activeRecordings.get(recordingId)?.liveCapturePath;
   }
 
   hasActiveRecordingForDevice(deviceId: string): boolean {
@@ -411,7 +442,7 @@ export class VideoRecorderService {
       recordingId: active.recordingId,
       fileName,
       filePath: outputPath,
-      format: active.config.format,
+      format: containerFormatOf(outputPath, active.config.format),
       sizeBytes,
       durationMs,
       codec: stopResult.codec,
@@ -423,7 +454,7 @@ export class VideoRecorderService {
       config: active.config,
       recordedPanel: stopResult.recordedPanel ?? active.recordedPanel,
       transitions: recordingTransitions(stopResult, active.recordedPanel),
-      warnings: recordingWarnings(active),
+      warnings: recordingWarnings(active, stopResult),
     };
 
     this.activeRecordings.delete(recordingId);
@@ -483,13 +514,14 @@ export class VideoRecorderService {
     await this.forceStopOrDiscardRecording(recordingId, false);
   }
 
-  async discardRecording(recordingId: string): Promise<void> {
-    await this.forceStopOrDiscardRecording(recordingId, true);
+  async discardRecording(recordingId: string, options?: ForceStopOptions): Promise<void> {
+    await this.forceStopOrDiscardRecording(recordingId, true, options);
   }
 
   private async forceStopOrDiscardRecording(
     recordingId: string,
     discardArtifacts: boolean,
+    options?: ForceStopOptions,
   ): Promise<void> {
     const activeOutputPath = this.activeRecordings.get(recordingId)?.outputPath;
     const forceStopping = this.forceStoppingRecordings.get(recordingId);
@@ -512,7 +544,12 @@ export class VideoRecorderService {
     // Set this before awaiting the backend: the graceful stop may resolve while
     // a device-side force-stop command is still in flight.
     active.forceStopRequested = true;
-    const forceStop = this.forceStopActiveRecording(active, backendForceStop, discardArtifacts);
+    const forceStop = this.forceStopActiveRecording(
+      active,
+      backendForceStop,
+      discardArtifacts,
+      options,
+    );
     this.forceStoppingRecordings.set(recordingId, forceStop);
     try {
       await forceStop;
@@ -525,6 +562,7 @@ export class VideoRecorderService {
     active: ActiveRecordingState,
     backendForceStop: VideoCaptureBackend["forceStop"],
     discardArtifacts: boolean,
+    options?: ForceStopOptions,
   ): Promise<void> {
     active.startAbortController.abort();
     const handle = await this.resolveForceStopHandle(active, discardArtifacts);
@@ -538,7 +576,7 @@ export class VideoRecorderService {
     }
 
     try {
-      await backendForceStop.call(this.backend, handle);
+      await backendForceStop.call(this.backend, handle, options);
       this.activeRecordings.delete(active.recordingId);
       if (discardArtifacts) {
         await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
@@ -712,6 +750,17 @@ function parsePositiveNumber(
   }
 
   return allowFloat ? parsed : Math.round(parsed);
+}
+
+/**
+ * The container of the file a backend actually returned. It normally is the requested
+ * format, but a backend that keeps its raw capture instead of the processed output (iOS
+ * post-processing that did not finish, #10188) returns a `.mov`, and metadata must describe
+ * that file, not the one that was asked for.
+ */
+function containerFormatOf(filePath: string, requested: VideoFormat): VideoContainerFormat {
+  const extension = path.extname(filePath).slice(1).toLowerCase();
+  return extension === "mp4" || extension === "mov" ? extension : requested;
 }
 
 function buildRecordingFileName(name: string, startedAt: string, format: VideoFormat): string {

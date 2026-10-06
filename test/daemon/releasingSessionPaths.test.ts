@@ -173,6 +173,8 @@ describe("remaining paths during session release", () => {
         lastUsedAt: session.lastUsedAt,
         expiresAt: session.expiresAt,
         cacheSize: JSON.stringify(session.cacheData).length,
+        // Additive liveness state (#10051); a fresh session is live with its full lease.
+        liveness: { state: "live", remainingMs: session.heartbeatTimeoutMs },
       },
     };
     expect(JSON.stringify(await h.request("daemon/sessionInfo"))).toBe(JSON.stringify(healthy));

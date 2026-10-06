@@ -1,7 +1,14 @@
+import type { TimingData } from "../utils/PerformanceTracker";
+import { isDeviceLossCancellationReason } from "./emulatorLossIncident";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
+import {
+  restoreScreenReaderState,
+  SCREEN_READER_RESTORE_TIMEOUT_MS,
+  type ScreenReaderRestoreState,
+} from "../features/accessibility/ScreenReaderRestore";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
@@ -43,7 +50,17 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
+import {
+  effectiveLastHeartbeat,
+  isLivenessOwnerLeaseLive,
+  livenessLeaseState,
+  sessionLeaseSnapshot,
+  sessionOwnerLeaseSnapshot,
+  suspectGraceMsFor,
+  type LivenessLeaseState,
+} from "./livenessOwnerLease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -76,6 +93,12 @@ export interface BiometricEnrollmentSessionState {
 }
 
 /** What a pending restore must write, resolved before any await (see below). */
+/** One restore a release started; `abandon` records it when the teardown cap expires first. */
+interface ReleaseTeardownStage {
+  pending: Promise<void> | null;
+  abandon?: () => void;
+}
+
 interface BiometricRestoreTarget {
   incarnation?: number;
   sessionId: string;
@@ -131,10 +154,48 @@ interface PendingRotationRestore {
 export interface RotationRestorer {
   restore(state: RotationSessionState, signal?: AbortSignal): Promise<void>;
 }
+/** TalkBack/VoiceOver state recorded before the first `accessibility` toggle in a session (#10146). */
+export type ScreenReaderSessionState = ScreenReaderRestoreState;
+interface PendingScreenReaderRestore {
+  state: ScreenReaderSessionState;
+  removed: boolean;
+  controller: AbortController;
+  clear: () => void;
+  result: Promise<{ pending: Promise<void> | null }>;
+}
+
+export interface ScreenReaderRestorer {
+  restore(state: ScreenReaderSessionState, signal?: AbortSignal): Promise<void>;
+}
 export interface DeviceStateRestorerFactories {
   networkCondition: (device: BootedDevice) => NetworkConditionRestorer;
   clock: (device: BootedDevice) => ClockRestorer;
   rotation?: (device: BootedDevice) => RotationRestorer;
+  screenReader?: (device: BootedDevice) => ScreenReaderRestorer;
+  /** Delay before each screen-reader restore retry; defaults to a short exponential backoff. */
+  screenReaderBackoff?: BackoffPolicy;
+}
+
+/** The injected screen-reader restorer, else the real TalkBack/VoiceOver one. */
+function screenReaderRestorerFactoryFrom(
+  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
+): (device: BootedDevice) => ScreenReaderRestorer {
+  const injected = typeof factories === "function" ? undefined : factories.screenReader;
+  return (
+    injected ??
+    ((device) => ({
+      restore: (state, signal) => restoreScreenReaderState(device, state, signal),
+    }))
+  );
+}
+
+function screenReaderBackoffFrom(
+  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
+): BackoffPolicy {
+  return (
+    (typeof factories === "function" ? undefined : factories.screenReaderBackoff) ??
+    DEFAULT_SCREEN_READER_RESTORE_BACKOFF
+  );
 }
 
 /** Narrow seam for restoring the device-wide network condition on release. */
@@ -160,8 +221,10 @@ export interface NetworkConditionRestorer {
  * cross-tool session state gets its own typed slot here, not an untyped bag.
  */
 export interface SessionCacheData {
+  pendingSetupTiming?: TimingData; // Consumed once by this session; discarded with its cache.
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastObserveTime?: number; // Timestamp of last hierarchy observation
+  lastActionMetadata?: { deviceId: string; blocks: Record<string, unknown> };
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   lastRenderedDisplayGeneration?: number; // Last caller-visible display.generation; survives invalidation
   lastRenderedDisplayRevision?: number; // Caller-visible display revision; survives panel cache invalidation
@@ -172,6 +235,7 @@ export interface SessionCacheData {
   networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
   clock?: ClockSessionState;
   rotation?: RotationSessionState;
+  screenReader?: ScreenReaderSessionState; // Screen-reader state before the session's first toggle, restored on release (#10146)
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
   /**
    * Highest {@link DeviceReadinessLevel} actually achieved by
@@ -202,6 +266,20 @@ export interface Session {
   expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number; // Timestamp of last heartbeat
+  /**
+   * The last time the session's liveness OWNER was alive: its own heartbeats, a recorded
+   * ownership claim, or the restore of a persisted owner. Unlike `lastHeartbeat` it is not advanced
+   * by tool activity, so a non-owner that merely uses the session cannot keep the owner's lease live
+   * (#10050). Unset until an owner exists; the lease then falls back to `lastHeartbeat`.
+   */
+  lastOwnerHeartbeat?: number;
+  /**
+   * The daemon's own resume point after it detected a stall of its event loop
+   * (#10051). Not persisted: the daemon cannot have received heartbeats while it
+   * was stalled, so the lease is judged from this point when it is later than
+   * `lastHeartbeat`.
+   */
+  stallForgivenAt?: number;
   sessionTimeoutMs: number; // Idle timeout used when extending this session
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
@@ -275,6 +353,16 @@ export interface PreCliLivenessSnapshot {
  *   period measured in minutes, and never for a missing first heartbeat.
  */
 export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
+
+/**
+ * Result of an explicit liveness-ownership claim (#10050).
+ *
+ * - `claimed`: the token now owns (or already owned) the session.
+ * - `conflict`: a different token owns it and that owner's lease is live; nothing changed.
+ * - `superseded`: this token already claimed and was displaced; it can never reclaim.
+ * - `not-found`: the session is unknown or was replaced while the claim waited.
+ */
+export type LivenessClaimOutcome = "claimed" | "conflict" | "superseded" | "not-found";
 
 function persistedHeartbeatTimeoutSource(value: string | null | undefined): "default" | "custom" {
   return value === "custom" ? "custom" : "default";
@@ -374,6 +462,28 @@ export class TerminalSessionError extends Error {
   }
 }
 
+/**
+ * A tool call reached a session whose owner's lease expired and that is held
+ * inside its suspect window (#10051). Nothing runs against it until its owner
+ * restores it with a heartbeat from the owner token.
+ */
+export class SessionSuspectError extends ActionableError {
+  /** Travels on the socket response so a proxy can tell "restorable" from "gone" (#10053). */
+  readonly code = DAEMON_SESSION_SUSPECT_CODE;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly remainingMs: number,
+  ) {
+    super(
+      `Session ${sessionUuid} is suspect: its owner's heartbeat lapsed and the session is held ` +
+        `for ${Math.ceil(remainingMs / 1000)}s more with its device reserved. Resume heartbeats ` +
+        `from the owner to restore it, or retry after the window if the owner is gone.`,
+    );
+    this.name = "SessionSuspectError";
+  }
+}
+
 /** A new session cannot be published after the daemon has begun shutdown. */
 export class DaemonSessionCreationRejectedError extends ActionableError {
   constructor(
@@ -385,11 +495,19 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
   }
 }
 
+/** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
+export interface SessionReleaseOptions {
+  expiryOrigin?: "lazy-expiry" | "cleanup-expired";
+  /** Set by the expiry handler when it owns the ordered device return after release. */
+  deviceReleaseManaged?: boolean;
+}
+
 export type SessionReleaseCallback = (
   sessionId: string,
   deviceId: string,
   releaseReason: string,
   snapshot: SessionReleaseSnapshot,
+  options: SessionReleaseOptions,
 ) => void;
 export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
@@ -616,7 +734,27 @@ const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
  */
 const NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS = 2;
 const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
+/**
+ * Each screen-reader restore attempt is a full TalkBack/VoiceOver toggle (it can
+ * fall back to a `uiautomator dump`), so unlike the settings writes above it is
+ * retried a small bounded number of times, with `Backoff` delays, never forever.
+ */
+const SCREEN_READER_RESTORE_RETRY_ATTEMPTS = 2;
+const DEFAULT_SCREEN_READER_RESTORE_BACKOFF = exponentialBackoff({
+  initialDelayMs: 250,
+  maxDelayMs: 2_000,
+});
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
+/**
+ * Overall budget for the restores one release runs through the ambient signal
+ * (keep-awake, biometric, network), measured from the start of the drain with the
+ * injected Timer. Release teardown runs under its own signal, not the caller's, so
+ * this bound is what stops a wedged device command from holding the device
+ * quarantined; the screen-reader, clock and rotation restores keep their own budgets
+ * and abandon mechanisms. Sized well above the three 1 s attempts plus their 250 ms
+ * retries, below the screen-reader budget (#10198).
+ */
+export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
 const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 const EXPIRY_RELEASE_REASONS = new Set([
@@ -642,6 +780,7 @@ export interface RecoveryExpiryReleaseHandler {
     sessionId: string,
     releaseReason: string,
     attempt: () => Promise<string | null>,
+    options: SessionReleaseOptions,
   ): Promise<string | null> | undefined;
 }
 
@@ -666,7 +805,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("identity-recovery-") ||
-    releaseReason.startsWith("device-disconnected:")
+    isDeviceLossCancellationReason(releaseReason)
   );
 }
 
@@ -845,6 +984,17 @@ export class SessionManager {
   >();
   private readonly rotationRemovalGenerations = new Map<string, number>();
   private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
+  private readonly screenReaderRestorerFactory: (device: BootedDevice) => ScreenReaderRestorer;
+  private readonly pendingScreenReaderRestores = new Map<
+    string,
+    Map<ScreenReaderSessionState, PendingScreenReaderRestore>
+  >();
+  private readonly screenReaderRestoreBackoff: BackoffPolicy;
+  /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
+  private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
+  private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
+  private readonly screenReaderRemovalGenerations = new Map<string, number>();
+  private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release">;
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
@@ -911,7 +1061,10 @@ export class SessionManager {
     if (this.healthRecoveries.has(key)) {
       return;
     }
-    const recovery = (async () => {
+    // Own context, never the caller's: this is started from a release that may be
+    // running under an aborted request signal or an expired teardown shield, and a
+    // recovery attempt that inherited it would fail before reaching the device (#10198).
+    const recovery = runWithAbortSignal(undefined, async () => {
       for (let attempt = 1; attempt <= 3; attempt++) {
         await this.timer.sleep(health.backoff.delayForAttempt(attempt));
         if (!this.restoreIncarnationIsCurrent(target)) {
@@ -947,7 +1100,7 @@ export class SessionManager {
           }
         }
       }
-    })();
+    });
     this.healthRecoveries.set(key, recovery);
     void recovery
       .catch((error: unknown) => {
@@ -1068,6 +1221,10 @@ export class SessionManager {
         restore: (state, signal) =>
           new Rotate(device, null, this.timer).restoreRotationSettings(state, signal),
       }));
+    this.screenReaderRestorerFactory = screenReaderRestorerFactoryFrom(
+      networkConditionRestorerFactory,
+    );
+    this.screenReaderRestoreBackoff = screenReaderBackoffFrom(networkConditionRestorerFactory);
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -1270,7 +1427,10 @@ export class SessionManager {
     const creation: PendingSessionCreation = { promise: this.persistAndPublishSession(session) };
     this.pendingSessionCreations.set(sessionId, creation);
     try {
-      return await creation.promise;
+      const created = await creation.promise;
+      // Natural point to retry a screen reader an earlier release could not restore.
+      await this.retryAbandonedScreenReaderRestore(created.assignedDevice);
+      return created;
     } finally {
       if (this.pendingSessionCreations.get(sessionId) === creation) {
         this.pendingSessionCreations.delete(sessionId);
@@ -1481,7 +1641,13 @@ export class SessionManager {
         return null;
       }
       logger.info(`Session ${sessionId} has expired, releasing`);
-      const release = this.releaseSession(sessionId, "lazy-expiry", true);
+      const release = this.releaseSession(
+        sessionId,
+        this.expiredSessionReleaseReason(session, "lazy-expiry"),
+        true,
+        undefined,
+        { expiryOrigin: "lazy-expiry" },
+      );
       void this.getBarrier()
         .trackExisting(release)
         .catch((error) =>
@@ -1605,6 +1771,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
+      this.assertSessionNotSuspect(existing);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -1823,6 +1990,7 @@ export class SessionManager {
         // acquisition semantics promote awaiting-owner to owned.
         const observed = this.getSessionInternal(sessionId, true, execution, false);
         if (observed) {
+          this.assertSessionNotSuspect(observed);
           return observed;
         }
         if (this.sessions.has(sessionId)) {
@@ -2092,7 +2260,10 @@ export class SessionManager {
 
   private recoverySessionFields(
     persisted: DeviceSession | undefined,
-  ): Pick<Session, "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims"> {
+  ): Pick<
+    Session,
+    "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims" | "lastOwnerHeartbeat"
+  > {
     if (!persisted) {
       return {};
     }
@@ -2107,6 +2278,7 @@ export class SessionManager {
         ? {
             livenessOwnerToken: persisted.liveness_owner_token,
             livenessOwnershipClaims: new Set([persisted.liveness_owner_token]),
+            lastOwnerHeartbeat: this.timer.now(),
           }
         : {}),
     };
@@ -2305,6 +2477,9 @@ export class SessionManager {
     const pendingRotationRestoration = existing.cacheData.rotation
       ? (await this.getPendingRotationRestoration(existing, null)).pending
       : null;
+    const pendingScreenReaderRestoration = existing.cacheData.screenReader
+      ? (await this.getPendingScreenReaderRestoration(existing, null)).pending
+      : null;
     const previousDevice = existing.assignedDevice;
     const pendingRebindCleanup = [
       pendingKeepScreenAwakeRestoration,
@@ -2312,6 +2487,7 @@ export class SessionManager {
       pendingNetworkRestoration,
       pendingClockRestoration,
       pendingRotationRestoration,
+      pendingScreenReaderRestoration,
     ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
     if (pendingRebindCleanup.length > 0) {
       this.trackPendingDeviceCleanup(previousDevice, pendingRebindCleanup);
@@ -2493,14 +2669,23 @@ export class SessionManager {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
     shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> {
+    const releaseOptions = { ...options };
     const attempt = () =>
-      this.releaseSessionAttempt(sessionId, releaseReason, allowExpired, shouldCommit);
+      this.releaseSessionAttempt(
+        sessionId,
+        releaseReason,
+        allowExpired,
+        shouldCommit,
+        releaseOptions,
+      );
     if (EXPIRY_RELEASE_REASONS.has(releaseReason)) {
       const recoveryRelease = this.recoveryExpiryReleaseHandler?.release(
         sessionId,
         releaseReason,
         attempt,
+        releaseOptions,
       );
       if (recoveryRelease) {
         return await recoveryRelease;
@@ -2514,6 +2699,7 @@ export class SessionManager {
     releaseReason: string,
     allowExpired: boolean,
     shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> {
     const session =
       allowExpired || this.terminalReleaseSnapshots.has(sessionId)
@@ -2535,10 +2721,10 @@ export class SessionManager {
     const promise =
       pendingRebind?.session === session
         ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
           )
-        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit);
+        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options);
     const release = { session, promise, reason };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
@@ -2872,7 +3058,8 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     reason: ReleaseReasonState,
-    shouldCommit?: ReleaseCommitFence,
+    shouldCommit: ReleaseCommitFence | undefined,
+    options: SessionReleaseOptions,
   ): Promise<string | null> {
     try {
       // Release restores the device to `none` itself, so a standalone TTL is now
@@ -2950,7 +3137,7 @@ export class SessionManager {
         this.terminalReleaseReasonStates.delete(sessionId);
       }
 
-      this.notifySessionRelease(releaseSnapshot);
+      this.notifySessionRelease(releaseSnapshot, options);
       let persistedSnapshot: SessionReleaseSnapshot;
       try {
         persistedSnapshot = await this.completeReleasePersistence(releaseSnapshot, reason, session);
@@ -2963,7 +3150,7 @@ export class SessionManager {
       }
       this.recordFinalizedSessionRelease(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
-        this.notifySessionRelease(persistedSnapshot);
+        this.notifySessionRelease(persistedSnapshot, options);
       }
       logger.info(
         pendingCleanup.length > 0
@@ -2980,11 +3167,107 @@ export class SessionManager {
    * Await tracked setup and start best-effort restoration for a releasing
    * session, returning the teardown that must still finish before the device
    * is handed out again.
+   *
+   * Teardown is cleanup that must run to completion whether or not the request
+   * that triggered the release was cancelled or hit its deadline, so it never runs
+   * under the caller's signal: that signal is already aborted for a cancelled plan,
+   * and every adb/simctl call that resolves `signal ?? getAbortSignal()` would fail
+   * before dispatch, leaving the device shaped and marked unhealthy (#10198). The
+   * restores that go through the ambient signal run under a teardown-owned shield
+   * bounded by {@link SESSION_RELEASE_TEARDOWN_CAP_MS}; at the cap the shield aborts
+   * and whatever has not finished is recorded as abandoned. The first attempts are
+   * awaited here as before; only their retries are handed back as pending cleanup.
    */
   private async drainReleaseTeardown(
     sessionId: string,
     session: Session,
   ): Promise<readonly Promise<void>[]> {
+    if (!this.releaseNeedsTeardown(session)) {
+      return [];
+    }
+    const shield = new AbortController();
+    const startedAtMs = this.timer.now();
+    const capHandle = this.timer.setTimeout(() => {
+      shield.abort(new ActionableError("Session release teardown exceeded its budget"));
+    }, SESSION_RELEASE_TEARDOWN_CAP_MS);
+    try {
+      const stages = await runWithAbortSignal(shield.signal, () =>
+        this.startReleaseTeardown(sessionId, session),
+      );
+      const cleanups = stages.flatMap((stage) => {
+        const bounded = this.boundTeardownStage(stage, startedAtMs);
+        return bounded ? [bounded] : [];
+      });
+      void Promise.allSettled(cleanups).then(() => this.timer.clearTimeout(capHandle));
+      return cleanups;
+    } catch (error) {
+      this.timer.clearTimeout(capHandle);
+      throw error;
+    }
+  }
+
+  /** A release with nothing to restore skips the shield and cap timer entirely. */
+  private releaseNeedsTeardown(session: Session): boolean {
+    const {
+      keepScreenAwake,
+      biometricEnrollment,
+      networkCondition,
+      clock,
+      rotation,
+      screenReader,
+    } = session.cacheData;
+    return (
+      keepScreenAwake?.applied === true ||
+      Boolean(biometricEnrollment || networkCondition || clock || rotation || screenReader) ||
+      this.abandonedScreenReaders.has(session.assignedDevice) ||
+      Array.from(this.sessionSetupPromises).some((setup) => setup.session === session)
+    );
+  }
+
+  /**
+   * Settle a capped stage at the teardown cap so the device stops being quarantined,
+   * recording the restore it left undone. Stages without `abandon` (setup, screen
+   * reader, clock, rotation) keep their own budgets and run to their own end.
+   */
+  private boundTeardownStage(
+    stage: ReleaseTeardownStage,
+    startedAtMs: number,
+  ): Promise<void> | null {
+    const { pending, abandon } = stage;
+    if (!pending || !abandon) {
+      return pending;
+    }
+    let settled = false;
+    const tracked = pending.finally(() => {
+      settled = true;
+    });
+    const capError = new Error("Session release teardown cap reached");
+    return raceWithDeadline(tracked, {
+      timer: this.timer,
+      timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.timer.now() - startedAtMs)),
+      label: "Session release teardown",
+      timeoutError: () => capError,
+      onTimeout: () => {
+        if (!settled) {
+          abandon();
+        }
+      },
+    }).catch((error: unknown) => {
+      // Reaching the cap is the recorded outcome (`abandon` ran), not a failure to surface.
+      if (error !== capError) {
+        throw error;
+      }
+    });
+  }
+
+  private async startReleaseTeardown(
+    sessionId: string,
+    session: Session,
+  ): Promise<readonly ReleaseTeardownStage[]> {
+    // Captured before any await: a rebind reassigns `session.assignedDevice`.
+    const deviceId = session.assignedDevice;
+    const biometricTarget = this.biometricRestoreTarget(session);
+    const networkTarget = this.networkConditionRestoreTarget(session);
     const setups = Array.from(this.sessionSetupPromises, (setup) =>
       setup.session === session ? setup.promise : null,
     ).filter((setup): setup is Promise<void> => setup !== null);
@@ -2997,20 +3280,66 @@ export class SessionManager {
     const pendingNetworkRestoration = session.cacheData.networkCondition
       ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
       : null;
+    // The remaining restorers carry their own budgets and abandon mechanisms and are
+    // not bound to the teardown cap, so they must not inherit its shield either; the
+    // toggles they drive resolve the ambient signal themselves (#10159).
+    const ownBudget = <T>(start: () => Promise<T>) => runWithAbortSignal(undefined, start);
     const pendingClockRestoration = session.cacheData.clock
-      ? (await this.getPendingClockRestoration(session, pendingSetups)).pending
+      ? (await ownBudget(() => this.getPendingClockRestoration(session, pendingSetups))).pending
       : null;
     const pendingRotationRestoration = session.cacheData.rotation
-      ? (await this.getPendingRotationRestoration(session, pendingSetups)).pending
+      ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups))).pending
       : null;
+    const ownScreenReaderRestoration = session.cacheData.screenReader
+      ? (await ownBudget(() => this.getPendingScreenReaderRestoration(session, pendingSetups)))
+          .pending
+      : null;
+    const pendingScreenReaderRestoration = this.abandonedScreenReaders.has(session.assignedDevice)
+      ? ownBudget(() =>
+          this.retryAbandonedScreenReaderAfter(session.assignedDevice, ownScreenReaderRestoration),
+        )
+      : ownScreenReaderRestoration;
     return [
-      pendingSetups,
-      pendingRestoration,
-      pendingBiometricRestoration,
-      pendingNetworkRestoration,
-      pendingClockRestoration,
-      pendingRotationRestoration,
-    ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
+      { pending: pendingSetups },
+      {
+        pending: pendingRestoration,
+        abandon: () =>
+          logger.warn(
+            `Gave up restoring keep-awake state on ${deviceId} after ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms; ` +
+              `the screen may stay awake until the next session changes it`,
+          ),
+      },
+      {
+        pending: pendingBiometricRestoration,
+        abandon: () => this.abandonCappedRestore(biometricTarget, "biometric-enrollment"),
+      },
+      {
+        pending: pendingNetworkRestoration,
+        abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
+      },
+      { pending: pendingClockRestoration },
+      { pending: pendingRotationRestoration },
+      { pending: pendingScreenReaderRestoration },
+    ];
+  }
+
+  /** The teardown budget ran out with this restore unfinished: record it like an exhausted retry. */
+  private abandonCappedRestore(
+    target: BiometricRestoreTarget | NetworkConditionRestoreTarget | null,
+    reason: "biometric-enrollment" | "network-condition",
+  ): void {
+    if (!target) {
+      return;
+    }
+    logger.warn(
+      `Session release teardown exceeded ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms before the ${reason} ` +
+        `restore finished on ${target.deviceId}; the device may hold session-modified state`,
+    );
+    this.abandonRestore(target, reason, () =>
+      "enrollment" in target
+        ? this.restoreBiometricEnrollment(target)
+        : this.restoreNetworkCondition(target),
+    );
   }
 
   private async persistTerminalReleaseWithUpgrade(
@@ -3198,10 +3527,13 @@ export class SessionManager {
     this.latestFinalizedSessionIdentities.delete(sessionId);
   }
 
-  private notifySessionRelease(snapshot: SessionReleaseSnapshot): void {
+  private notifySessionRelease(
+    snapshot: SessionReleaseSnapshot,
+    options: SessionReleaseOptions = {},
+  ): void {
     for (const callback of this.releaseCallbacks) {
       try {
-        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot);
+        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
       } catch (error) {
         logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
       }
@@ -3871,6 +4203,244 @@ export class SessionManager {
     this.pendingRotationRestores.delete(deviceId);
   }
 
+  /** Sequence restoration after any still-draining setup; deduplicate by owned slot (#10146). */
+  private async getPendingScreenReaderRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups) {
+      const deviceId = session.assignedDevice;
+      const generation = this.screenReaderRemovalGenerations.get(deviceId) ?? 0;
+      return {
+        pending: pendingSetups.then(async () => {
+          if ((this.screenReaderRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            delete session.cacheData.screenReader;
+            return;
+          }
+          const result = await this.getPendingScreenReaderRestoration(session, null);
+          await result.pending;
+        }),
+      };
+    }
+    const state = session.cacheData.screenReader;
+    if (!state) {
+      return { pending: null };
+    }
+    const deviceId = session.assignedDevice;
+    let targets = this.pendingScreenReaderRestores.get(deviceId);
+    const existing = targets?.get(state);
+    if (existing) {
+      return existing.result;
+    }
+    if (!targets) {
+      targets = new Map();
+      this.pendingScreenReaderRestores.set(deviceId, targets);
+    }
+    const result = Promise.withResolvers<{ pending: Promise<void> | null }>();
+    const target: PendingScreenReaderRestore = {
+      state,
+      removed: false,
+      controller: new AbortController(),
+      result: result.promise,
+      clear: () => {
+        if (session.cacheData.screenReader === state) {
+          delete session.cacheData.screenReader;
+        }
+      },
+    };
+    // Publish the join point before starting any asynchronous restore work.
+    targets.set(state, target);
+    void this.startScreenReaderRestoration(deviceId, target).then(result.resolve, result.reject);
+    return target.result;
+  }
+
+  private async startScreenReaderRestoration(
+    deviceId: string,
+    target: PendingScreenReaderRestore,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const device: BootedDevice = { name: deviceId, deviceId, platform: target.state.platform };
+    const restore = async () => {
+      target.controller.signal.throwIfAborted();
+      await this.screenReaderRestorerFactory(device).restore(
+        target.state,
+        target.controller.signal,
+      );
+      target.controller.signal.throwIfAborted();
+      target.clear();
+      const targets = this.pendingScreenReaderRestores.get(deviceId);
+      if (targets?.get(target.state) === target) {
+        targets.delete(target.state);
+        if (targets.size === 0) {
+          this.pendingScreenReaderRestores.delete(deviceId);
+        }
+      }
+    };
+    const restoration = restore().then(
+      () => ({ outcome: "restored" as const }),
+      (error: unknown) => ({ outcome: "failed" as const, error }),
+    );
+    const timeout = new Error("Screen reader restoration timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
+      label: "Screen reader restoration",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw toActionableError(error, "Screen reader restoration failed");
+    });
+    if (result.outcome === "restored") {
+      return { pending: null };
+    }
+    logger.warn(
+      `Screen reader restore ${result.outcome}; quarantining ${device.deviceId}`,
+      result.outcome === "failed" ? result.error : timeout,
+    );
+    const pending = raceWithDeadline(
+      this.retryScreenReaderRestore(device.deviceId, target, restoration, restore),
+      {
+        timer: this.timer,
+        signal: target.controller.signal,
+        label: "Pending screen reader restoration",
+      },
+    ).catch((error: unknown) => {
+      if (!target.removed) {
+        throw toActionableError(error, "Screen reader restoration failed");
+      }
+      // Proven removal retires ownership; no restoration may reach a replacement.
+      logger.debug(`Retired screen reader restoration on removed device ${device.deviceId}`);
+    });
+    return { pending };
+  }
+
+  /**
+   * Bounded retries with the injected `Backoff`. Each attempt is a full screen-reader
+   * toggle, so after the cap the device is released from quarantine and the state it
+   * still holds is remembered for one more attempt at its next natural point.
+   */
+  private async retryScreenReaderRestore(
+    deviceId: string,
+    target: PendingScreenReaderRestore,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    restore: () => Promise<void>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(`Failed to restore screen reader on ${deviceId}`, result.error);
+    for (let attempt = 1; attempt <= SCREEN_READER_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      await this.timer.sleep(this.screenReaderRestoreBackoff.delayForAttempt(attempt));
+      if (target.removed) {
+        return;
+      }
+      try {
+        await restore();
+        return;
+      } catch (error) {
+        logger.warn(
+          `Screen reader restore retry ${attempt}/${SCREEN_READER_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}`,
+          error,
+        );
+      }
+    }
+    this.abandonScreenReaderRestore(deviceId, target);
+  }
+
+  private abandonScreenReaderRestore(deviceId: string, target: PendingScreenReaderRestore): void {
+    if (target.removed) {
+      return;
+    }
+    const { platform, previousEnabled } = target.state;
+    logger.warn(
+      `Gave up restoring the screen reader on ${deviceId} after ` +
+        `${SCREEN_READER_RESTORE_RETRY_ATTEMPTS} retries; ${platform === "ios" ? "VoiceOver" : "TalkBack"} ` +
+        `should be ${previousEnabled ? "enabled" : "disabled"} but was not confirmed. ` +
+        `Will try once more at the next session start or release on this device.`,
+    );
+    this.abandonedScreenReaders.set(deviceId, target.state);
+    target.clear();
+    const targets = this.pendingScreenReaderRestores.get(deviceId);
+    if (targets?.get(target.state) === target) {
+      targets.delete(target.state);
+      if (targets.size === 0) {
+        this.pendingScreenReaderRestores.delete(deviceId);
+      }
+    }
+  }
+
+  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
+  private async retryAbandonedScreenReaderAfter(
+    deviceId: string,
+    own: Promise<void> | null,
+  ): Promise<void> {
+    try {
+      await own;
+    } finally {
+      await this.retryAbandonedScreenReaderRestore(deviceId);
+    }
+  }
+
+  /** One bounded attempt at a state an earlier release gave up on; never on a timer. */
+  private retryAbandonedScreenReaderRestore(deviceId: string): Promise<void> {
+    const state = this.abandonedScreenReaders.get(deviceId);
+    if (!state) {
+      return Promise.resolve();
+    }
+    const inFlight = this.abandonedScreenReaderRetries.get(deviceId);
+    if (inFlight) {
+      return inFlight;
+    }
+    const controller = new AbortController();
+    const device: BootedDevice = { name: deviceId, deviceId, platform: state.platform };
+    const attempt = (async () => {
+      try {
+        await raceWithDeadline(
+          this.screenReaderRestorerFactory(device).restore(state, controller.signal),
+          {
+            timer: this.timer,
+            timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
+            label: "Screen reader restoration",
+          },
+        );
+        if (this.abandonedScreenReaders.get(deviceId) === state) {
+          this.abandonedScreenReaders.delete(deviceId);
+        }
+        logger.info(`Restored the screen reader on ${deviceId} on its next natural attempt`);
+      } catch (error) {
+        controller.abort();
+        logger.warn(
+          `Screen reader on ${deviceId} is still not restored to ${state.previousEnabled ? "enabled" : "disabled"}`,
+          error,
+        );
+      }
+    })().finally(() => {
+      if (this.abandonedScreenReaderRetries.get(deviceId) === attempt) {
+        this.abandonedScreenReaderRetries.delete(deviceId);
+      }
+    });
+    this.abandonedScreenReaderRetries.set(deviceId, attempt);
+    return attempt;
+  }
+
+  /** Removal retires in-memory ownership; no retries may target a replacement device. */
+  retireScreenReaderRestoration(deviceId: string): void {
+    const targets = this.pendingScreenReaderRestores.get(deviceId);
+    this.screenReaderRemovalGenerations.set(
+      deviceId,
+      (this.screenReaderRemovalGenerations.get(deviceId) ?? 0) + 1,
+    );
+    for (const target of targets?.values() ?? []) {
+      target.removed = true;
+      target.controller.abort();
+      target.clear();
+    }
+    this.pendingScreenReaderRestores.delete(deviceId);
+    this.abandonedScreenReaders.delete(deviceId);
+  }
+
   /**
    * Returned wrapped, never bare (see `getPendingBiometricRestoration`): sequence
    * the network restore after any still-draining setup so it never restores
@@ -4394,6 +4964,23 @@ export class SessionManager {
     });
   }
 
+  /** Session cache owns this output-only state, so release/rebind clears it with the session. */
+  getLastActionMetadata(
+    sessionId: string,
+    deviceId: string,
+  ): Readonly<Record<string, unknown>> | undefined {
+    const record = this.getSession(sessionId)?.cacheData.lastActionMetadata;
+    return record?.deviceId === deviceId ? record.blocks : undefined;
+  }
+
+  setLastActionMetadata(
+    sessionId: string,
+    deviceId: string,
+    blocks: Record<string, unknown>,
+  ): void {
+    this.updateSessionCache(sessionId, { lastActionMetadata: { deviceId, blocks } });
+  }
+
   /**
    * Read the diff baseline (`lastRenderedObservation`) without recording session
    * activity (issue #3053). The `--actions-diff-observe` baseline store reads the
@@ -4614,6 +5201,53 @@ export class SessionManager {
     return this.runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
   }
 
+  /** Tracked setup retains this exact session even after a bounded release times out (#10146). */
+  trackScreenReaderSessionSetup(
+    session: Session,
+    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
+  ): Promise<void> {
+    const deviceId = session.assignedDevice;
+    const generation = this.screenReaderRemovalGenerations.get(deviceId) ?? 0;
+    return this.trackSessionSetup(session, async () => {
+      try {
+        await createSetup(() => {
+          if ((this.screenReaderRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            throw new ActionableError(
+              "Cannot change the screen reader: device was removed during session setup.",
+            );
+          }
+        });
+      } finally {
+        if ((this.screenReaderRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+          delete session.cacheData.screenReader;
+        } else if (
+          this.sessions.get(session.sessionId) !== session &&
+          session.cacheData.screenReader
+        ) {
+          // The toggle can finish after a bounded release gave up on this session.
+          // Hand the restore to device quarantine so the tool request can settle.
+          const restoration = this.getPendingScreenReaderRestoration(session, null).then(
+            async ({ pending }) => {
+              await pending;
+            },
+          );
+          this.trackPendingDeviceCleanup(deviceId, [restoration]);
+        }
+      }
+    });
+  }
+
+  /** Write-once: the first toggle's pre-change state is the one release restores. */
+  setScreenReader(session: Session, state: ScreenReaderSessionState): void {
+    session.cacheData.screenReader ??= state;
+  }
+  getScreenReader(sessionId: string): ScreenReaderSessionState | undefined {
+    return this.getSession(sessionId)?.cacheData.screenReader;
+  }
+  runScreenReaderMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return this.runDeviceStateMutationExclusive(this.screenReaderMutationQueues, sessionId, fn);
+  }
+
   /**
    * Preserve the pre-session iOS Simulator enrollment state. This setter is
    * intentionally write-once per session: every later enrollment change must
@@ -4771,12 +5405,15 @@ export class SessionManager {
     const previousActivity = {
       lastUsedAt: session.lastUsedAt,
       lastHeartbeat: session.lastHeartbeat,
+      lastOwnerHeartbeat: session.lastOwnerHeartbeat,
       expiresAt: session.expiresAt,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
       ownership: session.ownership,
       awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
+    // Only a heartbeat advances the owner lease; the handler admits one only from the owner.
+    session.lastOwnerHeartbeat = now;
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.activityGeneration++;
@@ -4800,22 +5437,27 @@ export class SessionManager {
   }
 
   /**
-   * Make `ownerToken` the current liveness owner for a session.
+   * Make `ownerToken` the current liveness owner for a session, unless another
+   * token owns it with a live lease (#10050).
    *
    * This intentionally does not record activity. The request handler claims
    * ownership before applying the requested policy and recording its heartbeat,
-   * so a stale token can be rejected without changing any liveness deadline.
+   * so a rejected or stale token can be refused without changing any liveness
+   * deadline, and a rejected claim leaves the session's owner and policy intact.
    */
-  async claimLivenessOwnership(sessionId: string, ownerToken: string): Promise<boolean> {
+  async claimLivenessOwnership(
+    sessionId: string,
+    ownerToken: string,
+  ): Promise<LivenessClaimOutcome> {
     const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
-      return false;
+      return "not-found";
     }
     const mutex = this.livenessOwnershipClaimMutexFor(session);
     return await mutex.runExclusive(async () => {
       if (this.getSession(sessionId) !== session) {
-        return false;
+        return "not-found";
       }
       return await this.claimLivenessOwnershipForSession(session, ownerToken);
     });
@@ -4834,39 +5476,120 @@ export class SessionManager {
   private async claimLivenessOwnershipForSession(
     session: Session,
     ownerToken: string,
-  ): Promise<boolean> {
+  ): Promise<LivenessClaimOutcome> {
     const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
     session.livenessOwnershipClaims = processedClaims;
     if (processedClaims.has(ownerToken)) {
-      return session.livenessOwnerToken === ownerToken;
+      // A retried claim whose token has since been displaced must never take
+      // the session back, whatever the new owner's lease says.
+      return session.livenessOwnerToken === ownerToken ? "claimed" : "superseded";
     }
-    processedClaims.add(ownerToken);
     const previousOwnerToken = session.livenessOwnerToken;
+    if (this.isForeignLiveOwner(session, ownerToken)) {
+      logger.warn(
+        `Rejected liveness ownership claim for session ${session.sessionId}: another owner holds a live lease`,
+      );
+      return "conflict";
+    }
+    const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+    processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
-    return await this.persistNewLivenessOwnershipClaim(
+    // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
+    // request handler records the claimant's heartbeat several awaits later; until then a second
+    // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
+    session.lastOwnerHeartbeat = this.timer.now();
+    await this.persistNewLivenessOwnershipClaim(
       session,
       ownerToken,
-      previousOwnerToken,
+      { previousOwnerToken, previousOwnerHeartbeat },
       processedClaims,
     );
+    return "claimed";
+  }
+
+  /** Whether a different token owns `session` and its lease is still live. */
+  private isForeignLiveOwner(session: Session, ownerToken: string): boolean {
+    if (session.livenessOwnerToken === undefined || session.livenessOwnerToken === ownerToken) {
+      return false;
+    }
+    // The owner's own heartbeats decide this, not tool activity by whoever else names the session.
+    return isLivenessOwnerLeaseLive(sessionOwnerLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /**
+   * Whether the session's owner lease is live or inside its suspect window, and
+   * how long until that phase ends. Undefined for an unknown session and for a
+   * `cli-idle` session, which has no lease.
+   */
+  getSessionLeaseState(sessionId: string): LivenessLeaseState | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.livenessPolicy === "cli-idle") {
+      return undefined;
+    }
+    return livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /** Whether the session is inside its suspect window (lease expired, grace running). */
+  private isSessionSuspect(session: Session): boolean {
+    return (
+      session.livenessPolicy === "heartbeat" &&
+      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "suspect"
+    );
+  }
+
+  /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
+  private assertSessionNotSuspect(session: Session): void {
+    if (this.isSessionSuspect(session)) {
+      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+      throw new SessionSuspectError(session.sessionId, remainingMs);
+    }
+  }
+
+  /**
+   * Do not hold the daemon's own stall against any session (#10051).
+   *
+   * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
+   * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
+   * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
+   * time is not counted against the owner while time the owner genuinely missed before the stall
+   * still is. Returns how many sessions were extended.
+   */
+  forgiveDaemonStall(resumedAt: number, lostMs: number): number {
+    let forgiven = 0;
+    for (const session of this.sessions.values()) {
+      if (session.livenessPolicy === "cli-idle") {
+        continue;
+      }
+      const leaseStart = effectiveLastHeartbeat(session);
+      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
+      session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
+      if (session.awaitingOwnerSince !== undefined) {
+        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, resumedAt);
+      }
+      forgiven++;
+    }
+    return forgiven;
   }
 
   private async persistNewLivenessOwnershipClaim(
     session: Session,
     ownerToken: string,
-    previousOwnerToken: string | undefined,
+    previous: {
+      previousOwnerToken: string | undefined;
+      previousOwnerHeartbeat: number | undefined;
+    },
     processedClaims: Set<string>,
-  ): Promise<boolean> {
+  ): Promise<void> {
     try {
       if (this.deviceSessionRepository.recordLivenessOwnership) {
         await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
       } else {
         await this.recordSessionActivity(session);
       }
-      return true;
     } catch (error) {
       processedClaims.delete(ownerToken);
-      session.livenessOwnerToken = previousOwnerToken;
+      session.livenessOwnerToken = previous.previousOwnerToken;
+      session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
       throw error;
     }
   }
@@ -4886,6 +5609,7 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
+    session.lastOwnerHeartbeat = this.timer.now();
     return true;
   }
 
@@ -5063,16 +5787,34 @@ export class SessionManager {
     if (session.livenessPolicy === "cli-idle") {
       return false;
     }
+    // A session whose owner has been heartbeating is held a further suspect
+    // window past its deadline (#10051), so an owner that missed a beat can
+    // still restore it.
     return (
-      !this.activeSessionExecutionChecker(session.sessionId) && this.timer.now() > session.expiresAt
+      !this.activeSessionExecutionChecker(session.sessionId) &&
+      this.timer.now() > session.expiresAt + suspectGraceMsFor(session)
     );
+  }
+
+  /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
+  private expiredSessionReleaseReason(
+    session: Session,
+    idleReason: "lazy-expiry" | "cleanup-expired",
+  ): string {
+    if (
+      suspectGraceMsFor(session) > 0 &&
+      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "lapsed"
+    ) {
+      return "heartbeat-timeout";
+    }
+    return idleReason;
   }
 
   private isSessionExpiredForNewExecution(
     session: Session,
     execution?: SessionExecutionMetadata,
   ): boolean {
-    if (this.timer.now() <= session.expiresAt) {
+    if (this.timer.now() <= session.expiresAt + suspectGraceMsFor(session)) {
       return false;
     }
     return execution?.startTime === undefined || execution.startTime > session.expiresAt;
@@ -5164,7 +5906,13 @@ export class SessionManager {
       if (!session) {
         continue;
       }
-      const release = this.releaseSession(sessionId, "cleanup-expired", true);
+      const release = this.releaseSession(
+        sessionId,
+        this.expiredSessionReleaseReason(session, "cleanup-expired"),
+        true,
+        undefined,
+        { expiryOrigin: "cleanup-expired" },
+      );
       void this.getBarrier()
         .trackExisting(release)
         .catch((error) =>

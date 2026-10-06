@@ -3,6 +3,9 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
+import dev.jasonpearson.automobile.protocol.OverlayEvent
+import dev.jasonpearson.automobile.protocol.OverlayEventKind
+import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
@@ -21,6 +24,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -68,6 +72,32 @@ class WebSocketServerTest {
     }
     testScope.cancel()
   }
+
+  @Test
+  fun `disconnect count captures zero edge before reconnect and carries old observer generation`() =
+    runTest {
+      val changes = mutableListOf<Pair<Int, Int>>()
+      var reconnected: WebSocketServer.ConnectedClient? = null
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = this,
+          onClientDisconnected = { client ->
+            if (client.id == 2) reconnected = server.registerClient(3, RecordingTransport())
+          },
+          onClientCountChanged = { count, session -> changes += count to session },
+        )
+      val first = server.registerClient(1, RecordingTransport())
+      val second = server.registerClient(2, RecordingTransport())
+      server.unregisterClient(first)
+      server.unregisterClient(second)
+      server.unregisterClient(second)
+      assertEquals(listOf(1 to 1, 0 to 1), changes)
+      assertEquals(1, server.getConnectionCount())
+      assertEquals(2, server.observerSessionGeneration())
+      server.unregisterClient(checkNotNull(reconnected))
+      assertEquals(listOf(1 to 1, 0 to 1, 0 to 2), changes)
+    }
 
   @Test
   fun `display gestures are advertised only on supported Android versions`() {
@@ -1032,4 +1062,203 @@ class WebSocketServerTest {
       // Cleanup
       customServer.stop()
     }
+
+  @Test
+  fun `known overlay nested decode failures return correlated overlay results`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val cases =
+        listOf(
+          "root" to
+            """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"unknown_node"}}""",
+          "onTap" to
+            """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi","onTap":[{"type":"unknown_action"}]}}""",
+          "placement" to
+            """{"id":"panel","window":{"placement":{"type":"unknown_placement"}},"root":{"type":"text","text":"Hi"}}""",
+          "root" to
+            """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"text":"Missing type"}}""",
+        )
+      for (command in listOf("show_overlay", "update_overlay")) {
+        for ((index, case) in cases.withIndex()) {
+          val (field, spec) = case
+          val requestId = "$command-$index"
+          val raw = """{"type":"$command","requestId":"$requestId","id":"panel","spec":$spec}"""
+          server.handleClientMessage(raw, owner)
+          runCurrent()
+          val response = Json.decodeFromString<WebSocketResponse>(transport.messages.last())
+          assertTrue("Expected overlay_result: $response", response is OverlayResult)
+          val result = response as OverlayResult
+          assertEquals(requestId, result.requestId)
+          assertFalse(result.success)
+          assertTrue(
+            "Expected field $field: ${result.error}",
+            result.error?.contains(field) == true,
+          )
+          assertTrue(result.error?.startsWith("Malformed request:") == true)
+        }
+      }
+    }
+
+  @Test
+  fun `malformed overlay asset requests get one correlated overlay result and no echoed bytes`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      val cases =
+        listOf(
+          """{"type":"put_overlay_asset","requestId":"put-bad","id":"hero","mimeType":"image/png","dataBase64":{}}""",
+          """{"type":"put_overlay_asset","requestId":"put-missing","mimeType":"image/png","dataBase64":"$bytes"}""",
+          """{"type":"remove_overlay_asset","requestId":"remove-bad","id":7}""",
+        )
+      for (raw in cases) {
+        val before = transport.messages.size
+        server.handleClientMessage(raw, owner)
+        runCurrent()
+        assertEquals(before + 1, transport.messages.size)
+        val result =
+          Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as OverlayResult
+        assertEquals(
+          Regex("\"requestId\":\"([^\"]+)\"").find(raw)!!.groupValues[1],
+          result.requestId,
+        )
+        assertFalse(result.success)
+        assertTrue(result.error.orEmpty().startsWith("Malformed request:"))
+        assertFalse(result.error.orEmpty().contains("SECRETBYTES"))
+      }
+    }
+
+  @Test
+  fun `a syntax error next to asset bytes does not echo them in the error reply`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      // The parser fails right after the data, so its input snippet is made of the data. The
+      // frame is not valid JSON, so its type is unreadable and the reply is a generic error.
+      val raw =
+        """{"type":"put_overlay_asset","requestId":"put-adjacent","id":"hero","mimeType":"image/png","dataBase64":"$bytes" "x"}"""
+      server.handleClientMessage(raw, owner)
+      runCurrent()
+      assertEquals(1, transport.messages.size)
+      val reply = transport.messages.single()
+      assertFalse(reply, reply.contains("SECRETBYTES"))
+      assertTrue(reply, reply.contains("Malformed request:"))
+      assertTrue("diagnosis is kept: $reply", reply.contains("offset"))
+    }
+
+  @Test
+  fun `a well formed asset frame that fails decoding next to the data echoes no bytes`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      server.handleClientMessage(
+        """{"type":"put_overlay_asset","requestId":"adj","dataBase64":"$bytes","mimeType":["image/png"],"id":"hero"}""",
+        owner,
+      )
+      runCurrent()
+      assertEquals(1, transport.messages.size)
+      val reply = transport.messages.single()
+      assertFalse(reply, reply.contains("SECRETBYTES"))
+      assertTrue(Json.decodeFromString<WebSocketResponse>(reply) is OverlayResult)
+    }
+
+  @Test
+  fun `a truncated asset frame whose type cannot be parsed still echoes no bytes`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      val bytes = "SECRETBYTES".repeat(8)
+      server.handleClientMessage(
+        """{"type":"put_overlay_asset","requestId":"cut","id":"hero","dataBase64":"$bytes""",
+        owner,
+      )
+      runCurrent()
+      assertEquals(1, transport.messages.size)
+      assertFalse(transport.messages.single().contains("SECRETBYTES"))
+    }
+
+  @Test
+  fun `describeDecodeFailure drops the parser input snippet for asset frames only`() {
+    val snippet = "JSON input: ...SECRETBYTES..."
+    val failure = IllegalArgumentException("Unexpected JSON token at offset 40: bad\n$snippet")
+    val asset = """{"type":"put_overlay_asset","dataBase64":"SECRETBYTES"}"""
+    assertEquals(
+      "Malformed request: Unexpected JSON token at offset 40: bad",
+      WebSocketServer.describeDecodeFailure(asset, failure),
+    )
+    val other = """{"type":"show_overlay","x":"oops"}"""
+    assertTrue(WebSocketServer.describeDecodeFailure(other, failure).contains("SECRETBYTES"))
+  }
+
+  @Test
+  fun `asset requests are advertised so older devices can be detected by absence`() {
+    val commands = WebSocketServer(port = 0, scope = testScope).supportedCommands()
+    assertTrue(commands.contains("put_overlay_asset"))
+    assertTrue(commands.contains("remove_overlay_asset"))
+    assertTrue(commands.contains("full_command_set_v1"))
+  }
+
+  @Test
+  fun `dismiss payload failure is an overlay result while other known commands keep error frames`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { error("Malformed payload must never dispatch") }
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      server.handleClientMessage(
+        """{"type":"dismiss_overlay","requestId":"dismiss-bad","all":{}}""",
+        owner,
+      )
+      runCurrent()
+      val overlay =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as OverlayResult
+      assertEquals("dismiss-bad", overlay.requestId)
+      assertFalse(overlay.success)
+      assertTrue(overlay.error?.contains("all") == true)
+      server.handleClientMessage(
+        """{"type":"request_screenshot","requestId":"known-bad","displayId":{}}""",
+        owner,
+      )
+      runCurrent()
+      val known =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as ErrorResponse
+      assertEquals("known-bad", known.requestId)
+      assertTrue(known.error.startsWith("Malformed request:"))
+      server.handleClientMessage("""{"type":"truly_unknown","requestId":"unknown"}""", owner)
+      runCurrent()
+      val unknown =
+        Json.decodeFromString<WebSocketResponse>(transport.messages.last()) as ErrorResponse
+      assertEquals("unknown", unknown.requestId)
+      assertEquals("Unknown command type: truly_unknown", unknown.error)
+    }
+
+  @Test
+  fun `overlay results correlate while overlay events do not`() {
+    assertEquals(
+      "overlay-r",
+      WebSocketServer.correlationRequestId(
+        OverlayResult(timestamp = 0L, requestId = "overlay-r", success = false)
+      ),
+    )
+    assertNull(
+      WebSocketServer.correlationRequestId(
+        OverlayEvent(
+          timestamp = 0L,
+          id = "panel",
+          sequence = 1L,
+          kind = OverlayEventKind.DISMISSED,
+          name = null,
+          payload = null,
+          state = emptyMap(),
+        )
+      )
+    )
+  }
 }

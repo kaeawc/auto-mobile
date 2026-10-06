@@ -938,3 +938,93 @@ describe("Clipboard Android", () => {
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
   });
 });
+
+describe("Clipboard iOS dispatch outcomes", () => {
+  const device: BootedDevice = { platform: "ios", deviceId: "clipboard-ios", name: "iPhone" };
+
+  test.each(["timeout", "socket closed", "abort", "refusal", "success", "before dispatch"])(
+    "paste: %s",
+    async (outcome) => {
+      const controller = new AbortController();
+      const reason = outcome === "timeout" ? "Clipboard operation timed out after 5000ms" : outcome;
+      const clipboard = new Clipboard(
+        device,
+        new FakeAdbClientFactory(),
+        () => ({
+          requestClipboard: async (action, _text, _timeout, _perf, signal, onDispatch) => {
+            if (action === "get") {
+              return { success: true, text: "", totalTimeMs: 0 };
+            }
+            expect(signal).toBe(controller.signal);
+            if (outcome !== "before dispatch") {
+              onDispatch?.();
+            }
+            if (outcome === "abort") {
+              await Promise.resolve();
+              controller.abort(new Error(reason));
+              throw controller.signal.reason;
+            }
+            if (outcome === "socket closed") {
+              throw new Error(reason);
+            }
+            return {
+              success: outcome === "success",
+              acknowledged: outcome === "refusal" || outcome === "success",
+              error: reason,
+              totalTimeMs: 0,
+            };
+          },
+        }),
+        new FakeKeyboardHierarchyProvider(),
+        new FakeTimer(),
+      );
+      const result = await clipboard.execute("paste", undefined, controller.signal);
+      if (["timeout", "socket closed", "abort"].includes(outcome)) {
+        expect(result).toEqual({
+          success: false,
+          action: "paste",
+          method: "a11y",
+          error: `Paste outcome is indeterminate: the request was dispatched but no result was confirmed (${outcome === "abort" ? "Operation cancelled" : reason}). The paste may have been applied. Do not retry automatically. Observe before retrying.`,
+        });
+      } else if (outcome === "success") {
+        expect(result).toEqual({ success: true, action: "paste", method: "a11y", text: undefined });
+      } else {
+        expect(result).toEqual({ success: false, action: "paste", error: reason });
+      }
+    },
+  );
+
+  test("already aborted paste does not invoke the client", async () => {
+    let requests = 0;
+    const controller = new AbortController();
+    const reason = new Error("cancelled");
+    controller.abort(reason);
+    const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
+      requestClipboard: async () => {
+        requests++;
+        return { success: true, totalTimeMs: 0 };
+      },
+    }));
+    await expect(clipboard.execute("paste", undefined, controller.signal)).rejects.toThrow(
+      "Operation cancelled",
+    );
+    expect(requests).toBe(0);
+  });
+
+  test.each(["copy", "clear", "get"] as const)(
+    "%s remains a plain failure after dispatch without acknowledgement",
+    async (action) => {
+      const clipboard = new Clipboard(device, new FakeAdbClientFactory(), () => ({
+        requestClipboard: async (_action, _text, _timeout, _perf, _signal, onDispatch) => {
+          onDispatch?.();
+          return { success: false, acknowledged: false, error: "timeout", totalTimeMs: 0 };
+        },
+      }));
+      expect(await clipboard.execute(action, "hello")).toEqual({
+        success: false,
+        action,
+        error: "timeout",
+      });
+    },
+  );
+});

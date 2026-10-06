@@ -6,6 +6,7 @@ import {
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriver,
@@ -50,11 +51,17 @@ import {
 } from "./BaseVisualChange";
 import {
   type CoordinateTapClient,
+  type IosCoordinateTapClient,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
   isStaleFrameContextRejection,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
+import {
+  awaitSecondTapSlot,
+  dispatchAndroidDoubleTap,
+  tryAtomicAndroidDoubleTap,
+} from "./androidDoubleTap";
 
 import {
   DOUBLE_TAP_GAP_MS,
@@ -77,6 +84,8 @@ const VOLATILE_TAP_LAYOUT_FIELDS = new Set([
 ]);
 
 type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
+/** Outcome of the first Android tap: whether a single-gesture double tap already finished. */
+type AndroidFirstTap = { doubleTapDelivered: boolean; startedAt: number };
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
 
 function partialDoubleTapNote(action: TapAtResult["action"], tapsDelivered: number): string {
@@ -330,7 +339,7 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   talkBackStrategy?: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   androidClient?: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> };
-  iosClient?: CoordinateTapClient;
+  iosClient?: IosCoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   invalidateIosCache?: () => void;
@@ -360,7 +369,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidClient: CoordinateTapClient<() => void> & {
     supportsCommand?: (name: string) => Promise<boolean>;
   };
-  private readonly iosClient: CoordinateTapClient;
+  private readonly iosClient: IosCoordinateTapClient;
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
@@ -450,26 +459,21 @@ export class TapAtCoordinate extends BaseVisualChange {
           (await this.resolveTalkBackState(signal, onActivationWarnings));
         if (talkBackEnabled) {
           // The shared TalkBack driver has no display-addressed activation capability.
-          if (displayId !== undefined && displayId !== 0) {
-            throw new ActionableError(
-              `TalkBack coordinate activation cannot target display ${displayId}; no gesture was dispatched.`,
-            );
+          const refusal = talkBackDisplayRefusal(displayId);
+          if (refusal) {
+            throw refusal;
           }
-          await this.dispatchAndroidTalkBackTap(
-            options,
-            resolved,
-            observation.viewHierarchy?.frameContext,
+          await this.dispatchDisplayTalkBackTapWithOneFreshRetry(options, resolved, observation, {
             signal,
-            {
-              assertCurrent,
-              onTapDelivered: () => onTapDelivered(true),
-              onActivationWarnings,
-            },
-          );
+            assertCurrent,
+            onTapDelivered: () => onTapDelivered(true),
+            onActivationWarnings,
+          });
         } else {
           await this.dispatchGesture(options, resolved, observation, signal, displayId, {
             assertCurrent,
             onTapDelivered,
+            onWarning: (warning) => onActivationWarnings?.([warning]),
           });
         }
         onDispatchCompleted?.();
@@ -582,7 +586,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             case "android": {
               const talkBackEnabled = await this.resolveTalkBackState(signal, onActivationWarnings);
               delivery.talkBack = talkBackEnabled;
-              await this.dispatchAndroidTapWithOneFreshRetry(
+              await this.dispatchAndroidTaps(
                 options,
                 resolved,
                 observeResult,
@@ -590,12 +594,6 @@ export class TapAtCoordinate extends BaseVisualChange {
                 perf,
                 { signal, onTapDelivered, talkBackEnabled, onActivationWarnings },
               );
-              if (!talkBackEnabled) {
-                await this.dispatchSecondAndroidTap(options, resolved, transitionRevision, {
-                  signal,
-                  onTapDelivered,
-                });
-              }
               break;
             }
             case "ios":
@@ -692,6 +690,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       point.y,
       tapDurationMs(options, "ios"),
       frameContext,
+      { signal },
     );
     onTapDelivered();
     try {
@@ -715,7 +714,82 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
   }
 
-  private async dispatchAndroidTapWithOneFreshRetry(
+  private async dispatchDisplayTalkBackTapWithOneFreshRetry(
+    options: TapAtOptions,
+    resolved: { x: number; y: number },
+    observation: ObserveResult,
+    context: {
+      signal?: AbortSignal;
+      assertCurrent: () => void;
+      onTapDelivered: () => void;
+      onActivationWarnings?: (warnings?: string[]) => void;
+    },
+  ): Promise<void> {
+    const { signal, assertCurrent } = context;
+    const frameContext = observation.viewHierarchy?.frameContext;
+    let delivered = false;
+    let talkBackDispatched = false;
+    const dispatchContext = {
+      assertCurrent,
+      onTapDelivered: () => {
+        delivered = true;
+        context.onTapDelivered();
+      },
+      onDispatched: () => {
+        talkBackDispatched = true;
+      },
+      onActivationWarnings: context.onActivationWarnings,
+    };
+    try {
+      await this.dispatchAndroidTalkBackTap(
+        options,
+        resolved,
+        frameContext,
+        signal,
+        dispatchContext,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
+      if (
+        delivered ||
+        talkBackDispatched ||
+        frameContext === undefined ||
+        !isStaleFrameContextRejection(actionable.message)
+      ) {
+        throw actionable;
+      }
+
+      // Pin the prepared panel instead of resolving an active-display alias again.
+      const refreshedObservation = await this.observeScreen.execute({
+        display: observation.display.key,
+        freshness: this.retryFreshness(options),
+        signal,
+      });
+      assertCurrent();
+      this.assertSnapshotCurrent(options, refreshedObservation);
+      const retry = this.resolveFreshAndroidRetry(
+        options,
+        resolved,
+        observation,
+        refreshedObservation,
+      );
+      if (refreshedObservation.display.key !== observation.display.key || !retry) {
+        throw actionable;
+      }
+      // No loop: a second stale rejection surfaces to the caller.
+      await this.dispatchAndroidTalkBackTap(
+        options,
+        retry.point,
+        retry.frameContext,
+        signal,
+        dispatchContext,
+      );
+    }
+  }
+
+  /** The first Android tap (with its fresh-frame retry), then the second tap of a doubleTap. */
+  private async dispatchAndroidTaps(
     options: TapAtOptions,
     resolved: { x: number; y: number },
     observeResult: ObserveResult,
@@ -728,6 +802,35 @@ export class TapAtCoordinate extends BaseVisualChange {
       onActivationWarnings: (warnings?: string[]) => void;
     },
   ): Promise<void> {
+    const firstTap = await this.dispatchAndroidTapWithOneFreshRetry(
+      options,
+      resolved,
+      observeResult,
+      transitionRevision,
+      perf,
+      context,
+    );
+    if (!context.talkBackEnabled) {
+      await this.dispatchSecondAndroidTap(options, resolved, transitionRevision, {
+        ...context,
+        firstTap,
+      });
+    }
+  }
+
+  private async dispatchAndroidTapWithOneFreshRetry(
+    options: TapAtOptions,
+    resolved: { x: number; y: number },
+    observeResult: ObserveResult,
+    transitionRevision: { revision: number; observedGeneration: number },
+    perf: PerformanceTracker,
+    context: {
+      signal?: AbortSignal;
+      onTapDelivered: () => void;
+      talkBackEnabled: boolean;
+      onActivationWarnings: (warnings?: string[]) => void;
+    },
+  ): Promise<AndroidFirstTap> {
     const { signal } = context;
     const frameContext = observeResult.viewHierarchy?.frameContext;
     let delivered = false;
@@ -746,19 +849,12 @@ export class TapAtCoordinate extends BaseVisualChange {
           },
           onActivationWarnings: context.onActivationWarnings,
         });
-        return;
+        return { doubleTapDelivered: false, startedAt: this.timer.now() };
       }
-      await this.dispatchAndroidTap(
-        resolved,
-        tapDurationMs(options, "android"),
-        frameContext,
-        signal,
-        {
-          assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
-          onTapDelivered: context.onTapDelivered,
-        },
-      );
-      return;
+      return await this.dispatchAndroidFirstTap(options, resolved, frameContext, signal, {
+        assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+        onTapDelivered: context.onTapDelivered,
+      });
     } catch (error) {
       // Cancellation must escape before stale-frame classification or retry.
       throwIfAborted(signal);
@@ -803,19 +899,48 @@ export class TapAtCoordinate extends BaseVisualChange {
           },
           onActivationWarnings: context.onActivationWarnings,
         });
-        return;
+        return { doubleTapDelivered: false, startedAt: this.timer.now() };
       }
-      await this.dispatchAndroidTap(
-        retry.point,
-        tapDurationMs(options, "android"),
-        retry.frameContext,
-        signal,
-        {
-          assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
-          onTapDelivered: context.onTapDelivered,
-        },
-      );
+      return await this.dispatchAndroidFirstTap(options, retry.point, retry.frameContext, signal, {
+        assertCurrent: () => this.assertDisplayRevisionCurrent(transitionRevision),
+        onTapDelivered: context.onTapDelivered,
+      });
     }
+  }
+
+  /**
+   * First Android tap of the action. A doubleTap is sent as one device-timed gesture when the
+   * runner supports it; otherwise only the first tap is sent and the caller schedules the second
+   * from the returned start time.
+   */
+  private async dispatchAndroidFirstTap(
+    options: TapAtOptions,
+    point: { x: number; y: number },
+    frameContext: string | undefined,
+    signal: AbortSignal | undefined,
+    context: { assertCurrent: () => void; onTapDelivered: () => void },
+  ): Promise<AndroidFirstTap> {
+    const startedAt = this.timer.now();
+    if (
+      options.action === "doubleTap" &&
+      (await tryAtomicAndroidDoubleTap(this.androidClient, {
+        ...point,
+        frameContext,
+        signal,
+        assertCurrent: context.assertCurrent,
+        onTapDelivered: context.onTapDelivered,
+      }))
+    ) {
+      return { doubleTapDelivered: true, startedAt };
+    }
+    await this.dispatchAndroidTap(
+      point,
+      tapDurationMs(options, "android"),
+      frameContext,
+      signal,
+      context,
+    );
+    return { doubleTapDelivered: false, startedAt };
   }
 
   private resolveFreshAndroidRetry(
@@ -896,14 +1021,22 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     revision: { revision: number; observedGeneration: number },
-    context: { signal?: AbortSignal; onTapDelivered: () => void },
+    context: {
+      signal?: AbortSignal;
+      onTapDelivered: () => void;
+      firstTap: AndroidFirstTap;
+      onActivationWarnings: (warnings?: string[]) => void;
+    },
   ): Promise<void> {
     const { signal } = context;
-    if (options.action !== "doubleTap") {
+    if (options.action !== "doubleTap" || context.firstTap.doubleTapDelivered) {
       return;
     }
-    await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-    throwIfAborted(signal);
+    // The gap is measured from the first tap's start, not its (slow) reply.
+    await awaitSecondTapSlot(this.timer, context.firstTap.startedAt, {
+      signal,
+      onWarning: (warning) => context.onActivationWarnings([warning]),
+    });
     this.assertDisplayRevisionCurrent(revision);
     await this.dispatchAndroidTap(
       point,
@@ -988,8 +1121,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     const guardedDriver: TalkBackNavigationDriver = {
       requestTraversalOrder: driver.requestTraversalOrder.bind(driver),
       requestCurrentFocus: driver.requestCurrentFocus.bind(driver),
-      requestSwipe: driver.requestSwipe.bind(driver),
-      getScreenSize: driver.getScreenSize.bind(driver),
       requestAction: driver.requestAction.bind(driver),
       requestNodeAction: driver.requestNodeAction.bind(driver),
       supportsNodeActionSelectors: driver.supportsNodeActionSelectors.bind(driver),
@@ -1108,14 +1239,10 @@ export class TapAtCoordinate extends BaseVisualChange {
     await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
     throwIfAborted(signal);
     this.assertDisplayRevisionCurrent(revision);
-    await this.iosCoordinateTap(
-      this.iosClient,
-      point.x,
-      point.y,
-      IOS_TAP_DURATION_MS,
-      undefined,
-      "second tap",
-    );
+    await this.iosCoordinateTap(this.iosClient, point.x, point.y, IOS_TAP_DURATION_MS, undefined, {
+      failureLabel: "second tap",
+      signal,
+    });
   }
 
   private resolveCoordinates(
@@ -1160,22 +1287,27 @@ export class TapAtCoordinate extends BaseVisualChange {
         context.onTapDelivered();
       }
       throwIfAborted(signal);
-      if (!result.success) {
-        if (dispatched) {
-          throw indeterminateTapError(result.error);
-        }
-        throw new ActionableError(result.error ?? "Android tap failed");
+      if (result.success) {
+        return;
       }
-    } else {
-      throwIfAborted(signal);
-      context.assertCurrent();
-      await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
-        timeoutMs:
-          duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
-      });
-      context.onTapDelivered();
-      throwIfAborted(signal);
+      if (dispatched) {
+        throw indeterminateTapError(result.error);
+      }
+      if (isStaleFrameContextRejection(result.error)) {
+        throw new ActionableError(result.error ?? "Stale frame context");
+      }
+      logger.warn(
+        `[TapAtCoordinate] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
+      );
     }
+    throwIfAborted(signal);
+    context.assertCurrent();
+    await executeTouchscreenInput(this.adb, command, displayId, signal, context.assertCurrent, {
+      timeoutMs:
+        duration >= LONG_PRESS_MIN_MS ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
+    });
+    context.onTapDelivered();
+    throwIfAborted(signal);
   }
 
   private async dispatchGesture(
@@ -1184,7 +1316,11 @@ export class TapAtCoordinate extends BaseVisualChange {
     observation: ObserveResult,
     signal: AbortSignal | undefined,
     displayId: number | undefined,
-    context: { assertCurrent: () => void; onTapDelivered: () => void },
+    context: {
+      assertCurrent: () => void;
+      onTapDelivered: () => void;
+      onWarning?: (warning: string) => void;
+    },
   ): Promise<void> {
     const action = options.action ?? "tap";
     const duration = tapDurationMs(options, this.device.platform);
@@ -1211,13 +1347,30 @@ export class TapAtCoordinate extends BaseVisualChange {
           point.y,
           duration,
           second ? undefined : observation.viewHierarchy?.frameContext,
-          second ? "second tap" : "tap",
+          { failureLabel: second ? "second tap" : "tap", signal },
         );
         context.onTapDelivered();
       } else {
         throw unsupportedPlatformError(this.device.platform, "tapAt gesture");
       }
     };
+    if (this.device.platform === "android" && action === "doubleTap") {
+      await dispatchAndroidDoubleTap({
+        // A non-default panel must be routable before one gesture may target it.
+        client: (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId))
+          ? this.androidClient
+          : undefined,
+        point,
+        displayId: displayId === 0 ? undefined : displayId,
+        timer: this.timer,
+        signal,
+        assertCurrent: context.assertCurrent,
+        onTapDelivered: context.onTapDelivered,
+        onWarning: context.onWarning,
+        tap: () => dispatch(false),
+      });
+      return;
+    }
     await dispatch(false);
     if (this.device.platform === "ios") {
       try {
@@ -1231,10 +1384,6 @@ export class TapAtCoordinate extends BaseVisualChange {
         this.invalidateIosCacheSafely();
       }
       return;
-    }
-    if (action === "doubleTap") {
-      await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
-      await dispatch(true);
     }
   }
 }

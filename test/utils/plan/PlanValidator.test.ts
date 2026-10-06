@@ -1253,3 +1253,49 @@ describe("PlanValidator validation ordering", () => {
     );
   });
 });
+
+describe("criticalSection owner labels", () => {
+  const sectionPlan = (subDevice: string | undefined, owner = "A"): Plan => ({
+    name: "owner labels",
+    devices: ["A", "B"],
+    steps: [
+      {
+        tool: "criticalSection",
+        params: {
+          device: owner,
+          lock: "owner",
+          deviceCount: 1,
+          steps: [{ tool: "tapOn", params: { device: subDevice, text: "Inbox" } }],
+        },
+      },
+    ],
+  });
+
+  test("rejects another declared label with an actionable sub-step error", () => {
+    expect(() => PlanValidator.validate(sectionPlan("B"))).toThrow(ActionableError);
+    expect(() => PlanValidator.validate(sectionPlan("B"))).toThrow(
+      'step 0.steps[0] (tapOn): device="B" differs from criticalSection owner device="A"',
+    );
+    expect(() => PlanValidator.validate(sectionPlan("B"))).toThrow(
+      "use a separate criticalSection step",
+    );
+  });
+  test("accepts the owner label", () => {
+    expect(() => PlanValidator.validate(sectionPlan("A"))).not.toThrow();
+  });
+  test("preserves missing and undeclared sub-step errors", () => {
+    expect(() => PlanValidator.validate(sectionPlan(undefined))).toThrow(
+      "sub-steps are missing it",
+    );
+    expect(() => PlanValidator.validate(sectionPlan("C"))).toThrow(
+      "criticalSection sub-steps use invalid device labels",
+    );
+  });
+  test("uses params-wins precedence for the owner", () => {
+    const plan = sectionPlan("B", "B");
+    Object.assign(plan.steps[0], { device: "A" });
+    expect(() => PlanValidator.validate(plan)).not.toThrow();
+    plan.steps[0].params!.steps = [{ tool: "tapOn", params: { device: "A" } }];
+    expect(() => PlanValidator.validate(plan)).toThrow('owner device="B"');
+  });
+});

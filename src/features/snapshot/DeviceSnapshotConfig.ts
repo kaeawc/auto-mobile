@@ -1,3 +1,4 @@
+import { DEFAULT_VM_SNAPSHOT_TIMEOUT_MS } from "./deviceSnapshotTimeout";
 import type { DeviceSnapshotConfig, DeviceSnapshotConfigInput } from "../../models";
 
 export const DEFAULT_DEVICE_SNAPSHOT_CONFIG: DeviceSnapshotConfig = {
@@ -5,7 +6,7 @@ export const DEFAULT_DEVICE_SNAPSHOT_CONFIG: DeviceSnapshotConfig = {
   includeSettings: true,
   useVmSnapshot: true,
   strictBackupMode: false,
-  vmSnapshotTimeoutMs: 30000,
+  vmSnapshotTimeoutMs: DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
   maxVmSnapshotsPerAvd: 3,
   // Real Android VM snapshots routinely measure around 2 GB. A MB-scale
   // default would reject every capture, while a huge one would not guard

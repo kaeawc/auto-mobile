@@ -206,6 +206,40 @@ function advertiseStorageNameRequirement<T extends z.ZodTypeAny>(schema: T): T {
   });
 }
 
+const userIdSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .optional()
+  .describe(
+    "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+  );
+
+/** Android-only input: a `userId` on an iOS device would be silently ignored, so reject it. */
+function assertUserIdSupported(device: BootedDevice, userId: number | undefined): void {
+  if (userId !== undefined && device.platform !== "android") {
+    throw new ActionableError("userId is only supported for Android devices.");
+  }
+}
+
+/**
+ * `userId` only steers the direct-file (run-as) fallback. When the SDK route handled the call
+ * it edited the connected app process's copy, so say that instead of reporting a plain success
+ * that looks like it honoured the requested user.
+ */
+function sdkRouteIgnoredUserIdWarning(
+  device: BootedDevice,
+  userId: number | undefined,
+): string | undefined {
+  return device.platform === "android" && userId !== undefined
+    ? `userId ${userId} was not applied: the SDK route is not user-scoped and edited the connected app process's copy. Only the direct-file fallback (SDK route disabled) targets a specific user.`
+    : undefined;
+}
+
+function optionalWarning(warning: string | undefined): { warning?: string } {
+  return warning === undefined ? {} : { warning };
+}
+
 function resolveStorageName(args: { name?: string; fileName?: string }): string {
   return args.name ?? args.fileName!;
 }
@@ -226,6 +260,7 @@ const setKeyValueSchema = advertiseStorageNameRequirement(
               .nullable()
               .describe("Value; null clears"),
             type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
+            userId: userIdSchema,
           })
           .strict(),
       ),
@@ -244,6 +279,7 @@ const removeKeyValueSchema = advertiseStorageNameRequirement(
             name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
             fileName: z.string().optional().describe(legacyFileNameDescription),
             key: z.string().describe("Key"),
+            userId: userIdSchema,
           })
           .strict(),
       ),
@@ -261,6 +297,7 @@ const clearKeyValueFileSchema = advertiseStorageNameRequirement(
             appId: z.string(),
             name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
             fileName: z.string().optional().describe(legacyFileNameDescription),
+            userId: userIdSchema,
           })
           .strict(),
       ),
@@ -275,6 +312,7 @@ interface SetKeyValueArgs {
   key: string;
   value: string | number | boolean | null;
   type: KeyValueType;
+  userId?: number;
 }
 
 interface RemoveKeyValueArgs {
@@ -282,12 +320,14 @@ interface RemoveKeyValueArgs {
   name?: string;
   fileName?: string;
   key: string;
+  userId?: number;
 }
 
 interface ClearKeyValueFileArgs {
   appId: string;
   name?: string;
   fileName?: string;
+  userId?: number;
 }
 
 /**
@@ -377,6 +417,7 @@ export function preferenceSetWarning(
 async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
   try {
     const storageName = resolveStorageName(args);
+    assertUserIdSupported(device, args.userId);
     const value = args.value === null ? null : String(args.value);
     if (value !== null) {
       validateTypeForPlatform(device.platform, args.type);
@@ -397,7 +438,14 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
             : client.setPreference(args.appId, storageName, args.key, value, args.type),
         (adb) =>
           value === null
-            ? removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key)
+            ? removeAndroidKeyValueDirect(
+                adb,
+                device.deviceId,
+                args.appId,
+                storageName,
+                args.key,
+                args.userId,
+              )
             : setAndroidKeyValueDirect(
                 adb,
                 device.deviceId,
@@ -406,6 +454,7 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
                 args.key,
                 value,
                 args.type,
+                args.userId,
               ),
       ));
     } else if (device.platform === "ios") {
@@ -436,7 +485,7 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
     const warning = preferenceSetWarning(
       usedDirectFileFallback
         ? directFileFallbackRelaunchWarning(args.appId, storageName)
-        : undefined,
+        : sdkRouteIgnoredUserIdWarning(device, args.userId),
       effectiveValueDiffers,
     );
     return createJSONToolResponse({
@@ -461,6 +510,7 @@ async function setKeyValueHandler(device: BootedDevice, args: SetKeyValueArgs) {
 async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueArgs) {
   try {
     const storageName = resolveStorageName(args);
+    assertUserIdSupported(device, args.userId);
     let usedDirectFileFallback = false;
     let resolvedStore: string | undefined;
     if (device.platform === "android") {
@@ -471,7 +521,14 @@ async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueA
         storageName,
         () => client.removePreference(args.appId, storageName, args.key),
         (adb) =>
-          removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key),
+          removeAndroidKeyValueDirect(
+            adb,
+            device.deviceId,
+            args.appId,
+            storageName,
+            args.key,
+            args.userId,
+          ),
       ));
     } else if (device.platform === "ios") {
       const client = getStorageToolsDependencies().iosClientFactory(device);
@@ -491,9 +548,11 @@ async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueA
       name: storageName,
       ...(resolvedStore ? { resolvedStore } : {}),
       key: args.key,
-      ...(usedDirectFileFallback
-        ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-        : {}),
+      ...optionalWarning(
+        usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(args.appId, storageName)
+          : sdkRouteIgnoredUserIdWarning(device, args.userId),
+      ),
     });
   } catch (error) {
     if (error instanceof ActionableError) {
@@ -507,6 +566,7 @@ async function removeKeyValueHandler(device: BootedDevice, args: RemoveKeyValueA
 async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValueFileArgs) {
   try {
     const storageName = resolveStorageName(args);
+    assertUserIdSupported(device, args.userId);
     let usedDirectFileFallback = false;
     let resolvedStore: string | undefined;
     if (device.platform === "android") {
@@ -516,7 +576,14 @@ async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValu
         args.appId,
         storageName,
         () => client.clearPreferenceStore(args.appId, storageName),
-        (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, args.appId, storageName),
+        (adb) =>
+          clearAndroidKeyValueFileDirect(
+            adb,
+            device.deviceId,
+            args.appId,
+            storageName,
+            args.userId,
+          ),
       ));
     } else if (device.platform === "ios") {
       const client = getStorageToolsDependencies().iosClientFactory(device);
@@ -534,9 +601,11 @@ async function clearKeyValueFileHandler(device: BootedDevice, args: ClearKeyValu
       appId: args.appId,
       name: storageName,
       ...(resolvedStore ? { resolvedStore } : {}),
-      ...(usedDirectFileFallback
-        ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-        : {}),
+      ...optionalWarning(
+        usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(args.appId, storageName)
+          : sdkRouteIgnoredUserIdWarning(device, args.userId),
+      ),
     });
   } catch (error) {
     if (error instanceof ActionableError) {

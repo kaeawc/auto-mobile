@@ -201,6 +201,65 @@ use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
 renders a visible placeholder and reports a result under #9301; image bytes,
 MIME types, URLs, cache paths, and screenshot handles are not spec properties.
 
+### Asset transport (#9301, first slice)
+
+`put_overlay_asset {id, mimeType, dataBase64}` uploads one asset and
+`remove_overlay_asset {id}` deletes one; each gets one `overlay_result` carrying the
+request ID. Bytes travel as base64 in the single JSON text frame, like screenshots.
+Heap, not the 64 MiB frame limit, is the binding constraint, so caps are
+conservative and shared with the host through `schemas/overlay-asset-contract.json`:
+4 MiB per asset, 32 assets, 16 MiB total, ids of 1 to 256 characters, and
+`image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start
+with the matching signature. Putting an existing ID replaces it; a full store rejects
+the put with a clear error and never evicts. Removing an unknown ID succeeds. Assets
+sit in the CtrlProxy cache directory and are cleared when the overlay session ends:
+on any dismissal, on service start, unbind or teardown, on `dismiss_overlay` with
+`all`, and when the last client disconnects (even with no overlay showing). A show
+replacement and a temporary lock-screen hide keep them.
+
+### Rendering assets (#9301, second slice)
+
+An `image` node draws its asset with `contentScale`: `fit` letterboxes, `crop` fills the
+box and clips, `fill` stretches. Bytes are decoded off the main thread with
+`BitmapFactory` and `inSampleSize`, downsampled to the node's laid-out size (the screen
+size when an axis wraps content) and never above 4 Mi pixels (16 MiB as ARGB_8888). The
+decoded-bitmap cache keys on asset id and a power-of-two size bucket, evicts least
+recently used first, and holds at most 32 MiB of decoded pixels; a single bitmap larger
+than that is drawn but not retained. A replaced, removed or cleared asset drops its
+decoded copies immediately and the nodes showing it reload; uploading an id that was
+missing makes the placeholder load it.
+
+A nav item draws its `image` when it is ready, then its built-in `icon`, then a gray
+square. While an image decodes the node shows a plain gray box. An unknown asset id, a
+file the OS evicted from the cache directory (the store still lists it but `read`
+returns null) or undecodable bytes renders a gray box with a broken-image glyph.
+
+`show_overlay` and `update_overlay` list the referenced ids the device has no copy of in
+`overlay_result.missingAssets`, in first-use order. It is a warning: `success` stays true
+and the overlay is shown with placeholders, so the host can upload the assets and the
+nodes fill in without another `show`. The field is omitted when nothing is missing and
+from every other result, so older hosts see the frame they always did. An id the store
+lists but whose file was evicted is not reported at `show` time; it renders the
+placeholder. Dismissal clearing is unchanged.
+
+Host surface: the `overlay` tool's `show` and `update` (with `spec`) take
+`assets: [{id, path}]`, an absolute daemon-readable file path per asset. The host
+reads and validates every file first (signature-detected MIME type, the contract
+limits, unique ids), then uploads sequentially before the overlay request; any
+failure fails the call before the overlay changes and names the assets already
+stored. An entry may instead be `{id, observation}`, an
+`automobile:observation/{deviceId}/{observationId}/screenshot` URI; the host reads it
+through the same handler as that resource (current-observation check, pending-capture
+wait, retention lease), which is readable by any client, so no access is widened.
+
+When `overlay_result.missingAssets` lists an id the same call uploaded (the device
+cleared its store between the upload and the show), the host re-uploads those assets
+once from the bytes it already holds and re-sends the show or update once. It never
+loops: if they are still missing, or the retry fails or is cancelled, the first
+successful result is returned with `missingAssets` and a `warning` on the tool output.
+Ids the call did not supply are only reported. See `docs/tools.md` for the result and
+deadline model.
+
 ## Actions and state
 
 | Action `type` | Properties                                                                                                                                        |
@@ -214,6 +273,38 @@ No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;
 renderer enforcement is part of #9300. Event sequence and transmission are
 #9298/#9303. Dismissal does not remove the host's safety responsibilities.
+
+### Host helper: showVariants
+
+The `overlay` tool's `showVariants` action composes public nodes and actions:
+one helper pager named `variants`, with one page per alternative. Fullscreen
+pages stack their content and control row in a box. Floating pages contain only
+the control row, leaving the app live underneath; applying alternatives through
+an SDK is outside this MVP. Controls sit inside each page so `{page}` and
+`{pageCount}` resolve against their enclosing pager. Arrows use `setPage`;
+pick uses only `emit("selected", {index, label?})`, with a static zero-based
+page index and optional label. It does not dismiss on pick.
+
+Variants supply exactly one existing asset-image reference or public node
+fragment, plus an optional label of at most 256 characters. The helper accepts
+1–12 variants and validates all supplied content in carousel context against
+contract limits, including before floating content is omitted.
+Image variants reference asset ids; `display` and `assets` (file paths, screenshot
+observations) are accepted exactly as for `show` and go through the same display
+resolution, upload-before-show staging and single missing-asset re-send of the
+composed spec.
+`opacity` passes through; floating placement defaults to `bottomCenter` with
+zero offset. The composed spec goes through the ordinary `show` path, so the
+event subscription, fresh sequence epoch, replacement of another shown overlay
+and host status are exactly those of `show`. `waitForSelection` then waits on
+the coordinator's `awaitEvent` wait (default 30000 ms; the tool's `timeoutMs`
+bounds only the show request), so timeout, request cancellation, session
+release, device removal and a device-side dismissal all settle it. The MCP
+request deadline for such a call is the show stage (with `assets`, the upload-and-send
+budget of `show`) plus the 30 s wait plus 30 s of headroom. Whether
+the Kotlin renderer resolves `{page}`/`{pageCount}` inside a pager and emits the
+static payload is not verified without a device. See
+[tool inputs and results](../../../tools.md#overlay) for the complete helper surface.
 
 ## Anchors
 
@@ -283,6 +374,55 @@ Bottom navigation, bottom sheets, and text-field-bearing content normally opt
 into bottom/systemBars, plus ime when the keyboard should move content. Cutout
 padding is normally useful at top/start/end. Anchors stay in screen coordinates;
 inset padding does not reinterpret their coordinate origin.
+
+## Lifecycle and safety
+
+Fullscreen windows reserve an opaque host row above clipped authored content, with
+“Dismiss AutoMobile overlay”. Its visibility, style and opacity are independent of
+the spec, including modal sheets and `window.opacity: 0`. The authored content
+viewport excludes the host row; relative sheet detents use that remaining height.
+Spec opacity continues
+to apply to authored content and scrims; it cannot fade the safety control.
+
+Every dismissal emits one `overlay_event` with `kind: "dismissed"`, null `name`,
+and `payload: {"reason": "user|agent|disconnect|ttl|teardown"}` (one reason string).
+Host and authored dismiss controls use `user`; `dismiss_overlay` uses `agent`;
+last-client disconnect uses `disconnect`; idle expiry uses `ttl`; service teardown,
+unbind/restart and owning-display removal use `teardown`. Sequence allocation
+precedes delivery even if no socket remains. A show replacement closes the old
+runtime silently and cancels its timer. Disconnect counts are captured at removal
+with the existing observer-session generation so rapid reconnects cannot erase the
+zero edge or dismiss a replacement from a new observer session. No state is
+persisted across process restart.
+
+Idle means no interaction or accepted update. The device fallback TTL is five
+minutes (300,000 ms), positive and settable locally on the controller. Show,
+accepted state/spec updates, and user interactions restart it (initial/restored
+unchanged pager reports are rendering and do not count); configuration
+changes and safety hide/restore do not. Hidden overlays still expire. The current
+strict protocol has no TTL or device-session-release message: no wire field is
+added here. Session release is covered only when it closes the last WebSocket;
+a release that retains sockets requires a future daemon/device contract.
+
+Rotation, density/size changes and fold posture callbacks refresh layout params
+without recreating runtime or composition: authored state and settled pager pages
+survive with no event or sequence allocation. If the owning display disappears,
+dismiss rather than moving content onto another display; it never revives on return.
+V1 uses the service's default display; display selection remains #9308.
+
+Show-time keyguard/screen checks fail closed. Screen and window signals hide the
+window while locked or noninteractive and restore the same runtime on unlock;
+no dismissal event is emitted for temporary hiding. Own-package accessibility
+events are dropped before hierarchy debouncing and navigation tracking.
+
+Deferred: foreground-package scoping needs a reliable application-window policy;
+`package_event` reports package installation/removal, while window-state events
+also include IME, dialogs and System UI. Secure app-window detection has no trusted
+existing signal. Automatic bottom-sheet IME movement/yield is also deferred:
+node-level inset selection exists, but smaller edge-to-edge sheet windows do not
+yet have verified keyboard geometry. Existing explicit `safeAreaPadding` behavior
+is preserved. Device checks must cover keyguard timing, daemon death, pager page 3
+across rotation, fold/display removal, and API 30/34/36 keyboard/cutout geometry.
 
 ## Rejection paths and deterministic first error
 

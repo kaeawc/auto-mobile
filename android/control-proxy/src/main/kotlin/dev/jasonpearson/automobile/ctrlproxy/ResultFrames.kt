@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.OverlayEvent
+import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -129,3 +132,22 @@ internal fun traversalOrderErrorFrame(
     put("totalTimeMs", totalTimeMs)
     put("error", error ?: "Unknown error")
   }
+
+internal fun overlayResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  missingAssets: List<String> = emptyList(),
+): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    OverlayResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = success,
+      error = error,
+      missingAssets = missingAssets.ifEmpty { null },
+    )
+  )
+
+internal fun overlayEventFrame(event: OverlayEvent): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(event)

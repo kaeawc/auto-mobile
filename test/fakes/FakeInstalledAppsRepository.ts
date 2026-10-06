@@ -45,6 +45,35 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
     }
   }
 
+  /**
+   * Test seeding that, unlike {@link upsertInstalledApp}, may create the first
+   * row of a device — stands in for a snapshot the rebuild already wrote.
+   */
+  async seedInstalledApp(
+    deviceId: string,
+    userId: number,
+    packageName: string,
+    isSystem: boolean,
+    timestampMs: number,
+  ): Promise<void> {
+    this.rows = this.rows.filter(
+      (row) =>
+        !(row.device_id === deviceId && row.user_id === userId && row.package_name === packageName),
+    );
+    this.rows.push({
+      device_id: deviceId,
+      user_id: userId,
+      package_name: packageName,
+      is_system: isSystem ? 1 : 0,
+      installed_at: timestampMs,
+      last_verified_at: timestampMs,
+      daemon_session_id: null,
+      device_session_start: null,
+    });
+  }
+
+  // Mirrors the repository: a patch of an existing snapshot, never the first
+  // row of one (#10041).
   async upsertInstalledApp(
     deviceId: string,
     userId: number,
@@ -52,6 +81,9 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
     isSystem: boolean,
     timestampMs: number,
   ): Promise<void> {
+    if (!this.rows.some((row) => row.device_id === deviceId)) {
+      return;
+    }
     const existing = this.rows.find(
       (row) =>
         row.device_id === deviceId && row.user_id === userId && row.package_name === packageName,

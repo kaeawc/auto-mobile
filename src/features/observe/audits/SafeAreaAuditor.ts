@@ -91,16 +91,15 @@ export class SafeAreaAuditor {
     const warnings: WarningCandidate[] = [];
     this.contentOverlapMemo = new WeakMap();
     for (const root of asNodes(result.viewHierarchy.hierarchy.node)) {
-      this.inspectNode(
-        root,
-        screen,
-        contentInsets,
-        insets.systemGestures,
-        insets.mandatorySystemGestures,
-        foregroundPackage,
-        [],
-        warnings,
-      );
+      this.inspectNode(root, {
+        screen: screen,
+        content: contentInsets,
+        systemGestures: insets.systemGestures,
+        mandatorySystemGestures: insets.mandatorySystemGestures,
+        foregroundPackage: foregroundPackage,
+        ancestors: [],
+        warnings: warnings,
+      });
     }
     return dedupeWarnings(warnings);
   }
@@ -126,43 +125,49 @@ export class SafeAreaAuditor {
 
   private inspectNode(
     node: Node,
-    screen: { width: number; height: number },
-    content: ContentInsets | null,
-    systemGestures: ObservationEdgeInsets | undefined,
-    mandatorySystemGestures: ObservationEdgeInsets | undefined,
-    foregroundPackage: string | undefined,
-    ancestors: Node[],
-    warnings: WarningCandidate[],
+    {
+      screen,
+      content,
+      systemGestures,
+      mandatorySystemGestures,
+      foregroundPackage,
+      ancestors,
+      warnings,
+    }: {
+      screen: { width: number; height: number };
+      content: ContentInsets | null;
+      systemGestures: ObservationEdgeInsets | undefined;
+      mandatorySystemGestures: ObservationEdgeInsets | undefined;
+      foregroundPackage: string | undefined;
+      ancestors: Node[];
+      warnings: WarningCandidate[];
+    },
   ): void {
     const inspectedNode = withHierarchyAttributes(node);
     if (!isForeignNode(inspectedNode, foregroundPackage)) {
-      this.inspectElement(
-        inspectedNode,
-        node,
-        ancestors,
-        screen,
-        content,
-        systemGestures,
-        mandatorySystemGestures,
-        foregroundPackage,
-        warnings,
-      );
+      this.inspectElement(inspectedNode, node, ancestors, {
+        screen: screen,
+        content: content,
+        systemGestures: systemGestures,
+        mandatorySystemGestures: mandatorySystemGestures,
+        foregroundPackage: foregroundPackage,
+        warnings: warnings,
+      });
     }
     // `ancestors` is a mutable stack shared across the traversal: push self, recurse,
     // pop. A warning candidate snapshots it (`[...ancestors]`) at creation, so only
     // the few warning sites pay the copy — not every node, which would be O(n·depth).
     ancestors.push(node);
     for (const child of asNodes(node.node)) {
-      this.inspectNode(
-        child,
-        screen,
-        content,
-        systemGestures,
-        mandatorySystemGestures,
-        foregroundPackage,
-        ancestors,
-        warnings,
-      );
+      this.inspectNode(child, {
+        screen: screen,
+        content: content,
+        systemGestures: systemGestures,
+        mandatorySystemGestures: mandatorySystemGestures,
+        foregroundPackage: foregroundPackage,
+        ancestors: ancestors,
+        warnings: warnings,
+      });
     }
     ancestors.pop();
   }
@@ -171,12 +176,21 @@ export class SafeAreaAuditor {
     node: Node,
     sourceNode: Node,
     ancestors: Node[],
-    screen: { width: number; height: number },
-    content: ContentInsets | null,
-    systemGestures: ObservationEdgeInsets | undefined,
-    mandatorySystemGestures: ObservationEdgeInsets | undefined,
-    foregroundPackage: string | undefined,
-    warnings: WarningCandidate[],
+    {
+      screen,
+      content,
+      systemGestures,
+      mandatorySystemGestures,
+      foregroundPackage,
+      warnings,
+    }: {
+      screen: { width: number; height: number };
+      content: ContentInsets | null;
+      systemGestures: ObservationEdgeInsets | undefined;
+      mandatorySystemGestures: ObservationEdgeInsets | undefined;
+      foregroundPackage: string | undefined;
+      warnings: WarningCandidate[];
+    },
   ): void {
     const bounds = readBounds(node);
     const categories = categoriesFor(node);
@@ -189,28 +203,18 @@ export class SafeAreaAuditor {
     ) {
       return;
     }
-    this.inspectContent(
-      node,
-      sourceNode,
-      ancestors,
-      bounds,
-      categories,
-      screen,
-      content,
-      foregroundPackage,
-      warnings,
-    );
-    this.inspectGestureRegion(
-      node,
-      sourceNode,
-      ancestors,
-      bounds,
-      categories,
-      screen,
-      systemGestures,
-      mandatorySystemGestures,
-      warnings,
-    );
+    this.inspectContent(node, sourceNode, ancestors, bounds, categories, {
+      screen: screen,
+      content: content,
+      foregroundPackage: foregroundPackage,
+      warnings: warnings,
+    });
+    this.inspectGestureRegion(node, sourceNode, ancestors, bounds, categories, {
+      screen: screen,
+      systemGestures: systemGestures,
+      mandatorySystemGestures: mandatorySystemGestures,
+      warnings: warnings,
+    });
   }
 
   private inspectContent(
@@ -219,10 +223,17 @@ export class SafeAreaAuditor {
     ancestors: Node[],
     bounds: ObservationEdgeInsets,
     categories: LayoutWarning["categories"],
-    screen: { width: number; height: number },
-    content: ContentInsets | null,
-    foregroundPackage: string | undefined,
-    warnings: WarningCandidate[],
+    {
+      screen,
+      content,
+      foregroundPackage,
+      warnings,
+    }: {
+      screen: { width: number; height: number };
+      content: ContentInsets | null;
+      foregroundPackage: string | undefined;
+      warnings: WarningCandidate[];
+    },
   ): void {
     if (!content) {
       return;
@@ -234,17 +245,18 @@ export class SafeAreaAuditor {
       return;
     }
     warnings.push({
-      warning: this.warning(
-        node,
-        bounds,
-        categories,
-        content.typesForSides(sides),
-        sides,
-        "important-content-under-inset",
-        this.contentSeverity(sourceNode, bounds, screen, content.edges, foregroundPackage),
-        screen,
-        content.edges,
-      ),
+      warning: this.warning(node, bounds, categories, content.typesForSides(sides), sides, {
+        type: "important-content-under-inset",
+        severity: this.contentSeverity(
+          sourceNode,
+          bounds,
+          screen,
+          content.edges,
+          foregroundPackage,
+        ),
+        screen: screen,
+        insets: content.edges,
+      }),
       node: sourceNode,
       ancestors: [...ancestors],
     });
@@ -304,10 +316,17 @@ export class SafeAreaAuditor {
     ancestors: Node[],
     bounds: ObservationEdgeInsets,
     categories: LayoutWarning["categories"],
-    screen: { width: number; height: number },
-    systemGestures: ObservationEdgeInsets | undefined,
-    mandatorySystemGestures: ObservationEdgeInsets | undefined,
-    warnings: WarningCandidate[],
+    {
+      screen,
+      systemGestures,
+      mandatorySystemGestures,
+      warnings,
+    }: {
+      screen: { width: number; height: number };
+      systemGestures: ObservationEdgeInsets | undefined;
+      mandatorySystemGestures: ObservationEdgeInsets | undefined;
+      warnings: WarningCandidate[];
+    },
   ): void {
     if (!categories.includes("interaction")) {
       return;
@@ -331,10 +350,12 @@ export class SafeAreaAuditor {
             sides,
           ),
           sides,
-          "interaction-in-system-gesture-region",
-          "info",
-          screen,
-          gesture,
+          {
+            type: "interaction-in-system-gesture-region",
+            severity: "info",
+            screen: screen,
+            insets: gesture,
+          },
         ),
         node: sourceNode,
         ancestors: [...ancestors],
@@ -348,10 +369,17 @@ export class SafeAreaAuditor {
     categories: LayoutWarning["categories"],
     insetTypes: LayoutWarning["insetTypes"],
     sides: Side[],
-    type: LayoutWarning["type"],
-    severity: LayoutWarning["severity"],
-    screen: { width: number; height: number },
-    insets: ObservationEdgeInsets,
+    {
+      type,
+      severity,
+      screen,
+      insets,
+    }: {
+      type: LayoutWarning["type"];
+      severity: LayoutWarning["severity"];
+      screen: { width: number; height: number };
+      insets: ObservationEdgeInsets;
+    },
   ): LayoutWarning {
     return {
       type,
@@ -679,7 +707,7 @@ function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
   return candidates
     .filter((candidate) => !containerWarnings.has(candidate))
     .filter(({ warning }) => {
-      const key = `${warning.type}:${warning.element.viewId ?? warning.element.resourceId ?? warning.element.text ?? "unknown"}:${warning.sides.join(",")}`;
+      const key = `${warning.type}:${warningIdentity(warning.element)}:${warning.sides.join(",")}`;
       if (seen.has(key)) {
         return false;
       }
@@ -687,6 +715,23 @@ function dedupeWarnings(candidates: WarningCandidate[]): LayoutWarning[] {
       return true;
     })
     .map((candidate) => candidate.warning);
+}
+
+/**
+ * Stable identity for deduping warnings (#10040). Identified elements keep the
+ * historical id-or-text key. An element with only a content description, or with
+ * no label at all, is keyed by its bounds as well so two different unlabeled
+ * nodes (e.g. icon buttons) never merge; true duplicates of one node share
+ * bounds and still collapse.
+ */
+function warningIdentity(element: LayoutWarning["element"]): string {
+  const id = element.viewId ?? element.resourceId ?? element.text;
+  if (id !== undefined) {
+    return id;
+  }
+  const { left, top, right, bottom } = element.bounds;
+  const bounds = `[${left},${top},${right},${bottom}]`;
+  return element.contentDesc !== undefined ? `desc:${element.contentDesc}${bounds}` : bounds;
 }
 
 function coversSides(required: Side[], candidate: Side[]): boolean {

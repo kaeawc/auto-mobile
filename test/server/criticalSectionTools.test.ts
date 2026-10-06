@@ -1,3 +1,4 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -6,8 +7,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, mock, spyOn, test }
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerCriticalSectionTools } from "../../src/server/criticalSectionTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
-import type { BootedDevice } from "../../src/models";
-import { DeviceLostError, isDeviceLostError } from "../../src/models/DeviceLostError";
+import { ActionableError, type BootedDevice } from "../../src/models";
+import {
+  DeviceLostError,
+  isDeviceLostError,
+  rememberDeviceLossAbort,
+} from "../../src/models/DeviceLostError";
 import { z } from "zod/v4";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { logger } from "../../src/utils/logger";
@@ -31,6 +36,227 @@ describe("criticalSection tool", () => {
     CriticalSectionCoordinator.getInstance().reset();
     setDebugModeEnabled(false);
     serverConfig.setEmbeddedSdkEnabled(false);
+  });
+
+  test("rejects every mismatched sub-step up front before any sub-step runs", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const step = mock(async () => ({ success: true }));
+    ToolRegistry.register("ownerLabelProbe", "Owner probe", z.object({ device: z.string() }), step);
+    const device: BootedDevice = { platform: "android", deviceId: "serial-for-A", name: "A" };
+    try {
+      const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+      await expect(
+        tool.deviceAwareHandler!(device, {
+          lock: "owner",
+          device: "A",
+          deviceCount: 1,
+          steps: [
+            { tool: "ownerLabelProbe", params: { device: "A" } },
+            { tool: "ownerLabelProbe", params: { device: "B" } },
+          ],
+        }),
+      ).rejects.toThrow(ActionableError);
+      expect(step).not.toHaveBeenCalled();
+      expect(timer.getPendingTimeouts()).toEqual([]);
+      await expect(
+        tool.deviceAwareHandler!(device, {
+          lock: "owner",
+          device: "A",
+          deviceCount: 1,
+          steps: [{ tool: "ownerLabelProbe", params: { device: "B" } }],
+        }),
+      ).rejects.toThrow(
+        'steps[0] (ownerLabelProbe): device="B" differs from criticalSection owner device="A"',
+      );
+      expect(step).not.toHaveBeenCalled();
+    } finally {
+      coordinator.forceCleanup("owner");
+      restore();
+    }
+  });
+
+  test("owner mismatch immediately rejects a parked peer in the same namespace", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    let peerError: unknown;
+    const peer = coordinator.awaitBarrier("mismatch", "peer", 2, 120000, "plan").then(
+      () => "unexpected success",
+      (error: unknown) => {
+        peerError = error;
+      },
+    );
+    try {
+      await expect(
+        ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+          { platform: "android", deviceId: "A", name: "A" },
+          {
+            lock: "mismatch",
+            device: "A",
+            deviceCount: 2,
+            __lockNamespace: "plan",
+            steps: [{ tool: "tapOn", params: { device: "B" } }],
+          },
+        ),
+      ).rejects.toThrow('differs from criticalSection owner device="A"');
+      await drainMicrotasks(40);
+      expect(peerError).toBeInstanceOf(ActionableError);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      coordinator.forceCleanup("mismatch", "plan");
+      await peer;
+      restore();
+    }
+  });
+
+  for (const owner of ["A", undefined]) {
+    test(`runs owner-labeled sub-steps when owner is ${owner ?? "unknown"}`, async () => {
+      const coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+      const step = mock(async () => ({ success: true }));
+      ToolRegistry.register(
+        "sameOwnerProbe",
+        "Owner probe",
+        z.object({ device: z.string() }),
+        step,
+      );
+      try {
+        const tool = ToolRegistry.getToolForPlan("criticalSection")!;
+        await tool.deviceAwareHandler!(
+          { platform: "android", deviceId: "serial-for-A", name: "A" },
+          {
+            lock: "owner",
+            device: owner,
+            deviceCount: 1,
+            steps: [{ tool: "sameOwnerProbe", params: { device: "A" } }],
+          },
+        );
+        expect(step).toHaveBeenCalledTimes(1);
+      } finally {
+        coordinator.forceCleanup("owner");
+        restore();
+      }
+    });
+  }
+
+  for (const recoverLoss of [true, false]) {
+    for (const alreadyAborted of [false, true]) {
+      test(`hidden ${recoverLoss ? "device loss" : "cancellation"} is an Error (${alreadyAborted ? "before arrival" : "parked handler"})`, async () => {
+        const timer = new FakeTimer();
+        const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+        const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+        const controller = new AbortController();
+        const loss = new DeviceLostError("A", "disconnected");
+        Object.defineProperty(controller.signal, "reason", { get: () => undefined });
+        if (recoverLoss) {
+          rememberDeviceLossAbort(controller.signal, loss);
+        }
+        if (alreadyAborted) {
+          controller.abort(loss);
+        }
+        try {
+          const pending = ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+            { platform: "android", deviceId: "A", name: "A" },
+            {
+              lock: "hidden-abort",
+              device: "A",
+              deviceCount: 2,
+              steps: [{ tool: "tapOn", params: { device: "A" } }],
+            },
+            undefined,
+            controller.signal,
+          ).then(
+            () => "unexpected success",
+            (error: unknown) => error,
+          );
+          if (!alreadyAborted) {
+            controller.abort(loss);
+          }
+          const error = await pending;
+          expect(error).toBeInstanceOf(Error);
+          if (recoverLoss) {
+            expect(error).toBe(loss);
+          } else {
+            expect(error).toEqual(new Error("Operation cancelled"));
+          }
+          expect(timer.getPendingTimeouts()).toEqual([]);
+        } finally {
+          coordinator.forceCleanup("hidden-abort");
+          restore();
+        }
+      });
+    }
+  }
+
+  test("preserves an already-aborted handler reason without creating timers", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const controller = new AbortController();
+    const reason = new Error("client cancelled");
+    controller.abort(reason);
+    try {
+      const error = await ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+        { platform: "android", deviceId: "A", name: "A" },
+        {
+          lock: "already-aborted",
+          device: "A",
+          deviceCount: 2,
+          steps: [{ tool: "tapOn", params: { device: "A" } }],
+        },
+        undefined,
+        controller.signal,
+      ).then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+      expect(error).toBe(reason);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
+  test("abort rejects a parked section with the device loss reason before running steps", async () => {
+    const timer = new FakeTimer();
+    const coordinator = CriticalSectionCoordinator.createForTesting(timer);
+    const restore = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    const controller = new AbortController();
+    const loss = new DeviceLostError("A", "disconnected");
+    const step = mock(async () => ({ success: true }));
+    ToolRegistry.register(
+      "abortSectionProbe",
+      "Abort probe",
+      z.object({ device: z.string() }),
+      step,
+    );
+    let error: unknown;
+    const pending = ToolRegistry.getToolForPlan("criticalSection")!.deviceAwareHandler!(
+      { platform: "android", deviceId: "A", name: "A" },
+      {
+        lock: "abort",
+        device: "A",
+        deviceCount: 2,
+        steps: [{ tool: "abortSectionProbe", params: { device: "A" } }],
+      },
+      undefined,
+      controller.signal,
+    ).then(undefined, (rejection: unknown) => {
+      error = rejection;
+    });
+    controller.abort(loss);
+    await drainMicrotasks(40);
+    try {
+      expect(error).toBe(loss);
+      expect(step).not.toHaveBeenCalled();
+      expect(timer.getPendingTimeouts()).toEqual([]);
+    } finally {
+      coordinator.forceCleanup("abort");
+      await pending;
+      restore();
+    }
   });
 
   const envelopeCases: Array<{
@@ -1156,7 +1382,7 @@ describe("criticalSection tool", () => {
         throw validation.error;
       });
       await expect(runSteps(true)).rejects.toThrow(
-        `Critical section "optional-lock" failed for device optional-device: ${validation.error.message}`,
+        `Critical section "optional-lock" failed for device optional-device: Invalid parameters for tool mockOptionalStep: required expected string, received undefined`,
       );
       expect(nextStep).not.toHaveBeenCalled();
     });
@@ -1187,50 +1413,127 @@ describe("criticalSection tool", () => {
     );
   });
 
+  describe("warnings before a required sub-step failure", () => {
+    let restoreTools: () => void;
+    let restoreCoordinator: () => void;
+    let coordinator: CriticalSectionCoordinator;
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "warning-failure-device",
+      name: "Warning Failure Device",
+    };
+
+    beforeEach(() => {
+      restoreTools = preserveToolRegistry();
+      coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    });
+
+    afterEach(() => {
+      coordinator.reset();
+      restoreCoordinator();
+      restoreTools();
+    });
+
+    test.each([false, true])("keeps earlier warnings with optional skip=%s", async (optional) => {
+      ToolRegistry.register("warningFirst", "warns", z.object({}), async () => ({
+        success: true,
+        warnings: ["keyboard dismissal failed"],
+      }));
+      ToolRegistry.register("warningSecond", "warns or skips", z.object({}), async () =>
+        optional
+          ? { success: false, error: "optional failure" }
+          : { success: true, warnings: ["epilogue failed"] },
+      );
+      ToolRegistry.register("warningThird", "fails", z.object({}), async () => {
+        throw new ActionableError("required failure");
+      });
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      const error: unknown = await section.deviceAwareHandler!(
+        device,
+        section.schema.parse({
+          lock: "warning-failure-lock",
+          deviceCount: 1,
+          steps: [
+            { tool: "warningFirst", params: { device: "A" } },
+            { tool: "warningSecond", params: { device: "A" }, optional },
+            { tool: "warningThird", params: { device: "A" } },
+          ],
+        }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toMatchObject({
+        message:
+          'Critical section "warning-failure-lock" failed for device warning-failure-device: Failed at step 3/3 (warningThird): required failure',
+        warnings: [
+          "step 1 (warningFirst): keyboard dismissal failed",
+          optional
+            ? "step 2 (warningSecond): optional step failed; skipped: optional failure"
+            : "step 2 (warningSecond): epilogue failed",
+        ],
+      });
+    });
+  });
+
   // A best-effort epilogue failure (issue #6868) keeps its step successful and
   // reports itself through `warnings`. The critical section retained only the
   // tool name and a success bit, so that outcome — previously the step's whole
   // `success:false` — vanished and the section reported an entirely clean
   // success while later steps ran against a screen the caller did not expect.
-  test("surfaces a successful step's warnings on the critical-section result", async () => {
-    const tool = ToolRegistry.getToolForPlan("criticalSection");
-    expect(tool).toBeDefined();
+  test.each(["direct", "structured", "text", "structured and hoisted"] as const)(
+    "surfaces a successful step's %s warnings exactly once",
+    async (shape) => {
+      const tool = ToolRegistry.getToolForPlan("criticalSection");
+      expect(tool).toBeDefined();
 
-    const fakeDevice: BootedDevice = {
-      platform: "android",
-      deviceId: "warn-device",
-      name: "Warn Device",
-    };
+      const fakeDevice: BootedDevice = {
+        platform: "android",
+        deviceId: "warn-device",
+        name: "Warn Device",
+      };
 
-    ToolRegistry.register("mockWarnStep", "warns", z.object({}), async () => ({
-      success: true,
-      keyboardDismissed: false,
-      warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
-    }));
-    ToolRegistry.register("mockCleanStep", "clean", z.object({}), async () => ({
-      success: true,
-    }));
+      const payload = {
+        success: true,
+        keyboardDismissed: false,
+        warnings: ["keyboard dismissal failed: Keyboard state unavailable"],
+      };
+      const structured = createStructuredToolResponse(payload);
+      const responses = {
+        direct: payload,
+        structured,
+        text: { success: true, content: structured.content },
+        "structured and hoisted": { ...structured, warnings: payload.warnings },
+      };
+      ToolRegistry.register("mockWarnStep", "warns", z.object({}), async () => responses[shape]);
+      ToolRegistry.register("mockCleanStep", "clean", z.object({}), async () => ({
+        success: true,
+      }));
 
-    CriticalSectionCoordinator.getInstance().registerExpectedDevices("warn-lock", 1);
+      CriticalSectionCoordinator.getInstance().registerExpectedDevices("warn-lock", 1);
 
-    const params = {
-      lock: "warn-lock",
-      deviceCount: 1,
-      steps: [
-        { tool: "mockCleanStep", params: {} },
-        { tool: "mockWarnStep", params: {} },
-      ],
-    };
+      const params = {
+        lock: "warn-lock",
+        deviceCount: 1,
+        steps: [
+          { tool: "mockCleanStep", params: {} },
+          { tool: "mockWarnStep", params: {} },
+        ],
+      };
 
-    const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
-    const result = JSON.parse(response.content[0].text);
+      const response = await tool!.deviceAwareHandler!(fakeDevice, params, undefined, undefined);
+      const result = JSON.parse(response.content[0].text);
 
-    expect(result.success).toBe(true);
-    expect(result.executedSteps).toBe(2);
-    expect(result.warnings).toEqual([
-      "step 2 (mockWarnStep): keyboard dismissal failed: Keyboard state unavailable",
-    ]);
-  });
+      expect(result.success).toBe(true);
+      expect(result.executedSteps).toBe(2);
+      expect(result.warnings).toEqual([
+        "step 2 (mockWarnStep): keyboard dismissal failed: Keyboard state unavailable",
+      ]);
+    },
+  );
 
   test("omits warnings entirely when every step is clean", async () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");

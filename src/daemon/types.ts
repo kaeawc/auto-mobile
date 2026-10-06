@@ -113,6 +113,39 @@ export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded";
 
+/**
+ * A tool call reached a session whose owner's lease expired and that is held inside its suspect
+ * window (#10051). Its owner can still restore it with a heartbeat, so a proxy treats this as
+ * "recovery is still possible" rather than as a loss (#10053).
+ */
+export const DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect";
+
+/** A claim from a different token was rejected because the owner's lease is live (#10050). */
+export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
+
+/**
+ * An external `--daemon heartbeat` keeper tried to heartbeat or claim a session a stdio/HTTP proxy
+ * owns. Liveness flows harness -> proxy -> daemon only, so the keeper is refused (#10054).
+ */
+export const DAEMON_LIVENESS_OWNER_IS_PROXY_CODE = "liveness_owner_is_proxy";
+/**
+ * The daemon registers the requested tool but its availability gate (debug-only,
+ * embedded-SDK-only, plan-only) rejects the call. Carried as the response `code`
+ * so the proxy never mistakes a gated tool for a stale daemon (issue #10177); a
+ * reconnect cannot change a gate. Daemons that predate it send no code.
+ */
+export const DAEMON_TOOL_UNAVAILABLE_CODE = "daemon_tool_unavailable";
+
+/** True for an error carrying the gate marker (a daemon response `code`, or the proxy's own error). */
+export function isGatedToolErrorCode(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_TOOL_UNAVAILABLE_CODE
+  );
+}
+
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
 export interface BoundSessionLoss {
@@ -498,6 +531,7 @@ export interface DaemonOptions {
   actionsDiffObserve?: boolean;
   /** Output reduction: skip the post-action observation entirely (issue #2756) */
   actionsNoObserve?: boolean;
+  actionsCompactMetadata?: boolean;
 }
 
 /**

@@ -4,6 +4,7 @@ import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
@@ -110,6 +111,12 @@ export interface BootedDeviceDiscoveryOptions {
   bypassAndroidDeviceListCache?: boolean;
   /** Bypass iOS's short simulator-list cache to verify simulator identity. */
   bypassIosDeviceListCache?: boolean;
+  /**
+   * Skip devicectl physical-device discovery. For a caller that already holds a
+   * simulator UDID, a physical sweep can neither find nor prove anything and only
+   * adds latency (#9920). The result then reports no physical source as succeeded.
+   */
+  skipPhysicalIosDiscovery?: boolean;
   /** Cancels short-lived platform discovery work. */
   signal?: AbortSignal;
   /**
@@ -235,6 +242,18 @@ export interface PlatformDeviceManager {
   killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<BootedDevice | void>;
 
   /**
+   * Among the given Android serials, which `adb devices` still lists as
+   * `offline` rather than absent. An offline emulator is invisible to
+   * {@link getBootedDevices} yet its process may still be running, so the
+   * shutdown wait uses this to avoid confirming disappearance too early
+   * (#10074). Optional: managers without an ADB transport omit it.
+   */
+  getAndroidOfflineDeviceIds?(
+    candidateIds: Iterable<string>,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<Set<string>>;
+
+  /**
    * Delete an already-resolved platform device representation.
    *
    * Android destruction is keyed by the exact AVD name resolved from a booted
@@ -333,6 +352,15 @@ export async function waitForDeviceReadyOrCancel(
     }
     throw failure;
   }
+}
+
+function skippedPhysicalIosDiscovery(): {
+  devices: BootedDevice[];
+  complete: false;
+  error?: undefined;
+} {
+  // Nothing was asked of devicectl: no devices, not authoritative, and no failure to report.
+  return { devices: [], complete: false };
 }
 
 /**
@@ -830,6 +858,26 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
+  private async discoverPhysicalIosDevices(
+    signal: AbortSignal | undefined,
+  ): Promise<PhysicalIosDeviceDiscovery> {
+    // Physical-device discovery runs regardless of the simulator outcome and
+    // cannot fail the sweep: it is best-effort by contract.
+    const physical = await raceWithDeadline(this.listPhysicalIosDevices(), {
+      timer: defaultTimer,
+      signal,
+      label: "iOS physical-device discovery",
+      relabelDefaultAbort: false,
+    });
+    if (!physical.complete) {
+      logger.debug(
+        "[DeviceManager] iOS physical-device discovery was incomplete; " +
+          "reporting last-known physical devices, which cannot prove one disconnected.",
+      );
+    }
+    return physical;
+  }
+
   private async discoverBootedIosDevices(options: BootedDeviceDiscoveryOptions): Promise<{
     devices: BootedDevice[];
     simulatorsSucceeded: boolean;
@@ -858,19 +906,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
     // Physical-device discovery runs regardless of the simulator outcome and
     // cannot fail the sweep: it is best-effort by contract.
-    const physicalPromise = this.listPhysicalIosDevices();
-    const physical = await raceWithDeadline(physicalPromise, {
-      timer: defaultTimer,
-      signal,
-      label: "iOS physical-device discovery",
-      relabelDefaultAbort: false,
-    });
-    if (!physical.complete) {
-      logger.debug(
-        "[DeviceManager] iOS physical-device discovery was incomplete; " +
-          "reporting last-known physical devices, which cannot prove one disconnected.",
-      );
-    }
+    const physical = options.skipPhysicalIosDiscovery
+      ? skippedPhysicalIosDiscovery()
+      : await this.discoverPhysicalIosDevices(signal);
     const freshPhysicalIds = physical.complete
       ? physical.devices.map((device) => device.deviceId)
       : [];
@@ -941,7 +979,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
     if (isRunning) {
-      throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
+      throw new DeviceAlreadyRunningError(
+        `${device.platform} device '${device.name}' is already running`,
+        device.platform,
+        device.deviceId,
+      );
     }
 
     switch (device.platform) {

@@ -1,3 +1,4 @@
+import { probeDebuggableBuild } from "../features/storage/debuggableBuildProbe";
 import {
   getAppFileService,
   describeDefaultAppFileProviderCoverage,
@@ -69,15 +70,17 @@ export interface StorageCapabilityDependencies {
   appFileCoverage?: AppFileProviderCoverageReader;
   sharedStorageReadCoverage?: (platform: Platform) => SharedStorageReadCoverage;
   adbFactory?: AdbClientFactory;
+  probeDebuggableBuild?: (adb: AdbExecutor, appId: string) => Promise<boolean | undefined>;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
   createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
 }
 
-/** Build the context from device configuration and the probed profile signal. */
+/** Build the context from device configuration and the probed prerequisite signals. */
 export function resolveStorageCapabilityContext(
   device: BootedDevice,
   appId?: string,
   activeUserProfile?: boolean,
+  debuggableBuild?: boolean,
 ): StorageCapabilityContext {
   return {
     platform: device.platform,
@@ -86,6 +89,7 @@ export function resolveStorageCapabilityContext(
     // A resolved booted device implies a live runner session for the SDK path.
     sessionActive: true,
     activeUserProfile,
+    ...(debuggableBuild === undefined ? {} : { debuggableBuild }),
     appId,
   };
 }
@@ -116,6 +120,23 @@ async function resolveActiveUserProfile(
     }
   }
   return activeUserProfile;
+}
+
+async function resolveDebuggableBuild(
+  device: BootedDevice,
+  appId: string | undefined,
+  dependencies: StorageCapabilityDependencies,
+): Promise<boolean | undefined> {
+  if (device.platform !== "android" || resolveDeviceType(device) !== "physical" || !appId) {
+    return undefined;
+  }
+  try {
+    const adb = (dependencies.adbFactory ?? defaultAdbClientFactory).create(device);
+    return await (dependencies.probeDebuggableBuild ?? probeDebuggableBuild)(adb, appId);
+  } catch (error) {
+    logger.warn("[StorageCapabilityResources] Debuggable Android build probe failed", error);
+    return undefined;
+  }
 }
 
 async function resolveKeystoreDiscovery(
@@ -196,8 +217,16 @@ export async function getStorageCapabilitiesResource(
       };
     }
 
-    const activeUserProfile = await resolveActiveUserProfile(device, dependencies);
-    const context = resolveStorageCapabilityContext(device, appId, activeUserProfile);
+    const [activeUserProfile, debuggableBuild] = await Promise.all([
+      resolveActiveUserProfile(device, dependencies),
+      resolveDebuggableBuild(device, appId, dependencies),
+    ]);
+    const context = resolveStorageCapabilityContext(
+      device,
+      appId,
+      activeUserProfile,
+      debuggableBuild,
+    );
     context.providerCoverage = resolveProviderCoverage(dependencies);
     context.sharedStorageReadCoverage = resolveSharedReadCoverage(dependencies, device.platform);
     if (device.platform === "android" && appId && context.embeddedSdk) {

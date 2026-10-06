@@ -178,11 +178,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "serial so the provided/current readiness paths key the Window cache on the runtime (#7031).",
     },
     "src/devices/deviceBootService.ts": {
-      calls: 2,
+      calls: 3,
       reason:
         "Boot-progress polling and fresh exact-name Android identity checks for a device being " +
-        "created; there is no pooled entry yet, and the caller (deviceTools) reconciles its own " +
-        "post-boot discovery.",
+        "created, plus the cache-bypassing iOS simulator re-check once its UDID lifecycle lease " +
+        "settles (#9902); there is no pooled entry yet, and the caller (deviceTools) reconciles " +
+        "its own post-boot discovery.",
     },
     "src/utils/android-cmdline-tools/AvdSnapshotService.ts": {
       calls: 1,

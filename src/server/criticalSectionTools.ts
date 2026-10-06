@@ -5,18 +5,29 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse, getStructuredPayload, throwIfAborted } from "../utils/toolUtils";
+import {
+  abortErrorFromSignal,
+  createJSONToolResponse,
+  getStructuredPayload,
+  throwIfAborted,
+} from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
+import { migratePlanStep } from "../utils/plan/PlanMigrator";
+import {
+  UNEVALUATED_EXPECTATIONS_WARNING,
+  formatStepError,
+  parseStepParams,
+  stripUndeclaredDeviceLabel,
+} from "../utils/plan/planStepParams";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import type { PlanStep } from "../models/Plan";
 
 // Schema for steps inside critical section.
-// Every sub-step MUST declare a target `device` — there is no routing
-// fallback inside a critical section, so an undefined device would silently
-// run on whichever device acquired the lock first.
+// Every sub-step MUST declare a `device` matching the section owner label.
+// Sub-steps execute on that owner device; they never route to another label.
 const criticalSectionStepSchema = z
   .object({
     tool: z.string().describe("Tool name"),
@@ -34,8 +45,6 @@ const criticalSectionStepSchema = z
       });
     }
   });
-
-type CriticalSectionStepInput = z.infer<typeof criticalSectionStepSchema>;
 
 // Critical section tool schema
 const criticalSectionSchema = addDeviceTargetingToSchema(
@@ -90,7 +99,9 @@ function collectStepWarnings(
   tool: string,
   result: Record<string, unknown> | undefined,
 ): string[] {
-  const warnings = result?.warnings;
+  // Structured action responses hoist success/error, but keep warnings in the
+  // payload. Read the same payload as PlanExecutor's diagnostic collector.
+  const warnings = (getStructuredPayload(result) ?? result)?.warnings;
   if (!Array.isArray(warnings)) {
     return [];
   }
@@ -126,9 +137,19 @@ function formatCriticalSectionError(result: Record<string, unknown>, tool: strin
 // PlanExecutor treats failed tool lookup as fatal even for optional steps.
 class CriticalSectionToolNotFoundError extends ActionableError {}
 
+/** Retain diagnostics from sub-steps that ran before a required failure. */
+class CriticalSectionStepError extends ActionableError {
+  readonly warnings: string[];
+
+  constructor(message: string, warnings: string[]) {
+    super(message);
+    this.warnings = [...warnings];
+  }
+}
+
 function handleCriticalSectionStepFailure(
   error: unknown,
-  step: { tool: string; optional?: boolean },
+  step: { tool: string; optional?: boolean; params?: Record<string, unknown> },
   context: {
     deviceId: string;
     lock: string;
@@ -136,17 +157,25 @@ function handleCriticalSectionStepFailure(
     totalSteps: number;
     signal?: AbortSignal;
     warnings: string[];
+    schema?: z.ZodType;
   },
 ): void {
-  const { deviceId, lock, stepNumber, totalSteps, signal, warnings } = context;
-  if (
-    isDeviceLostError(error) ||
-    (step.optional && (signal?.aborted || error instanceof z.ZodError))
-  ) {
+  const { deviceId, lock, stepNumber, totalSteps, signal, warnings, schema } = context;
+  if (isDeviceLostError(error) || (step.optional && signal?.aborted)) {
     throw error;
   }
 
-  const errorMsg = errorMessage(error);
+  // A schema failure reads like the top-level plan step's (and the MCP boundary's)
+  // "Invalid parameters for tool ..." rather than a raw zod issue dump (#9927).
+  const errorMsg =
+    error instanceof z.ZodError
+      ? formatStepError(step.tool, error, step.params, schema)
+      : errorMessage(error);
+  // An optional step with invalid params is a plan authoring error, not a
+  // transient failure: it fails the section instead of being skipped.
+  if (step.optional && error instanceof z.ZodError) {
+    throw new ActionableError(errorMsg);
+  }
   if (step.optional && !(error instanceof CriticalSectionToolNotFoundError)) {
     warnings.push(`step ${stepNumber} (${step.tool}): optional step failed; skipped: ${errorMsg}`);
     logger.warn(
@@ -158,8 +187,9 @@ function handleCriticalSectionStepFailure(
   logger.error(
     `Device ${deviceId} failed at step ${stepNumber}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
   );
-  throw new ActionableError(
+  throw new CriticalSectionStepError(
     `Failed at step ${stepNumber}/${totalSteps} (${step.tool}): ${errorMsg}`,
+    warnings,
   );
 }
 
@@ -181,6 +211,7 @@ async function executeCriticalSectionSteps(
       `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`,
     );
 
+    let schema: z.ZodType | undefined;
     try {
       // Critical-section steps are plan steps, so use the same lookup rules
       // as executePlan for tools hidden from MCP discovery.
@@ -188,8 +219,17 @@ async function executeCriticalSectionSteps(
       if (!tool) {
         throw new CriticalSectionToolNotFoundError(`Tool "${step.tool}" not found in registry`);
       }
+      schema = tool.schema;
 
-      const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
+      // callInternal does not parse, so apply the same schema parse a top-level
+      // plan step gets: defaults, aliases and strict unknown-key rejection (#9927).
+      // The section requires the owner label on every sub-step; drop it for a tool
+      // whose schema has no `device` field (routing uses `targetDevice` below).
+      const params = parseStepParams(
+        tool.schema,
+        stripUndeclaredDeviceLabel(step.params, tool.schema),
+      );
+      const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,
       });
@@ -210,6 +250,11 @@ async function executeCriticalSectionSteps(
       }
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
+      // Nothing evaluates step-level `expectations` yet (#9925); say so rather than
+      // report a clean section, as PlanExecutor does for a top-level step.
+      if (step.expectations && step.expectations.length > 0) {
+        warnings.push(`step ${i + 1} (${step.tool}): ${UNEVALUATED_EXPECTATIONS_WARNING}`);
+      }
       executedSteps.push({ tool: step.tool, success: true });
     } catch (error) {
       executedSteps.push({ tool: step.tool, success: false });
@@ -221,11 +266,42 @@ async function executeCriticalSectionSteps(
         totalSteps,
         signal,
         warnings,
+        schema,
       });
     }
   }
 
   return { executedSteps, warnings };
+}
+
+function validateCriticalSectionSteps(
+  normalizedSteps: PlanStep[],
+  lock: string,
+  ownerLabel?: string,
+): void {
+  // Validate steps to prevent nesting. A nested criticalSection or barrier
+  // would deadlock: the device holding this section's mutex would wait for
+  // peers that cannot enter until it releases.
+  for (const [index, step] of normalizedSteps.entries()) {
+    // Plan routing retains the owner label in params.device. A direct call
+    // without that label keeps its existing pinned-device behavior.
+    if (
+      ownerLabel &&
+      step.params?.device !== undefined &&
+      step.params.device !== null &&
+      step.params.device !== "" &&
+      step.params.device !== ownerLabel
+    ) {
+      throw new ActionableError(
+        `steps[${index}] (${step.tool}): device="${step.params.device}" differs from criticalSection owner device="${ownerLabel}". Put it in its own step for that device or use a separate criticalSection step.`,
+      );
+    }
+    if (step.tool === "criticalSection" || step.tool === "barrier") {
+      throw new ActionableError(
+        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`,
+      );
+    }
+  }
 }
 
 /**
@@ -239,26 +315,21 @@ const criticalSectionHandler = async (
   signal?: AbortSignal,
 ): Promise<any> => {
   const { lock, steps, deviceCount, timeout, __lockNamespace: namespace } = params;
-  const normalizedSteps = PlanNormalizer.normalizeSteps(steps as CriticalSectionStepInput[]);
+  // Sub-steps are not in `plan.steps`, so migratePlan never saw them; apply the
+  // same legacy-shape migration here so `tapOn { text }` and friends behave as
+  // they do at the top level (#9927).
+  const migratedSteps = steps.map((step, index) =>
+    migratePlanStep(step, index, { platform: device.platform }),
+  );
+  const normalizedSteps = PlanNormalizer.normalizeSteps(migratedSteps);
   const coordinator = CriticalSectionCoordinator.getInstance();
 
   logger.info(
     `Device ${device.deviceId} entering critical section "${lock}" (expecting ${deviceCount} devices)`,
   );
 
-  // Check for abort before entering
-  throwIfAborted(signal);
-
-  // Validate steps to prevent nesting. A nested criticalSection or barrier
-  // would deadlock: the device holding this section's mutex would wait for
-  // peers that cannot enter until it releases.
-  for (const step of normalizedSteps) {
-    if (step.tool === "criticalSection" || step.tool === "barrier") {
-      throw new ActionableError(
-        `Nested critical sections are not supported. Found ${step.tool} step inside critical section "${lock}".`,
-      );
-    }
-  }
+  // Preserve the caller's abort reason before entering coordination.
+  throwIfAborted(signal, true);
 
   // Register expected device count
   try {
@@ -270,8 +341,16 @@ const criticalSectionHandler = async (
   let release: (() => void) | undefined;
 
   try {
+    validateCriticalSectionSteps(normalizedSteps, lock, params.device);
+
     // Wait at barrier and acquire lock
-    release = await coordinator.enterCriticalSection(lock, device.deviceId, timeout, namespace);
+    release = await coordinator.enterCriticalSection(
+      lock,
+      device.deviceId,
+      timeout,
+      namespace,
+      signal,
+    );
 
     logger.info(
       `Device ${device.deviceId} executing ${normalizedSteps.length} steps in critical section "${lock}"`,
@@ -302,12 +381,20 @@ const criticalSectionHandler = async (
     const errorMsg = errorMessage(error);
     logger.error(`Device ${device.deviceId} error in critical section "${lock}": ${errorMsg}`);
 
-    if (isDeviceLostError(error)) {
+    if (
+      isDeviceLostError(error) ||
+      (signal?.aborted &&
+        (signal.reason === undefined ||
+          signal.reason === null ||
+          error === abortErrorFromSignal(signal)))
+    ) {
       throw error;
     }
-    throw new ActionableError(
-      `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`,
-    );
+    const message = `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`;
+    if (error instanceof CriticalSectionStepError) {
+      throw new CriticalSectionStepError(message, error.warnings);
+    }
+    throw new ActionableError(message);
   } finally {
     // Release the lock if we acquired it
     if (release) {

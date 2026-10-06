@@ -1,3 +1,4 @@
+import generatedDefinitions from "../../schemas/tool-definitions.json";
 import {
   startDeviceOutputSchema,
   pressButtonResultSchema,
@@ -892,4 +893,100 @@ test("device-state output checks shared enums and field types", () => {
       connectivity: { supported: true, wifiEnabled: "off" },
     }).success,
   ).toBe(false);
+});
+
+test("observationDiff declares an optional string hint and preserves reason enum values", () => {
+  const metadataSchema = pressButtonResultSchema.shape.observationDiff.unwrap();
+  const reasons = [
+    "diff_emitted",
+    "missing_baseline",
+    "screen_changed",
+    "missing_session",
+    "unrenderable_hierarchy",
+    "disabled",
+    "stripped_by_actions_no_observe",
+  ];
+  for (const reason of reasons) {
+    const metadata = { mode: "full", reason, hint: "Pass sessionUuid to receive diffs" };
+    expect(metadataSchema.parse(metadata)).toEqual(metadata);
+    expect(metadataSchema.safeParse({ mode: "full", reason }).success).toBe(true);
+  }
+  expect(
+    metadataSchema.safeParse({
+      mode: "full",
+      reason:
+        "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+    }).success,
+  ).toBe(false);
+  expect(metadataSchema.safeParse({ mode: "full", reason: "disabled", hint: 123 }).success).toBe(
+    false,
+  );
+  const schema = toJSONSchema(metadataSchema);
+  expect(schema.properties?.hint).toEqual({ type: "string" });
+  expect(schema.required ?? []).not.toContain("hint");
+  expect(schema.properties?.reason).toEqual({ type: "string", enum: reasons });
+});
+
+// Walk every declared action output, including per-tool unions, without registry/DB setup.
+interface CompactMetadataJsonSchema {
+  properties?: Record<string, CompactMetadataJsonSchema>;
+  required?: string[];
+  anyOf?: CompactMetadataJsonSchema[];
+  oneOf?: CompactMetadataJsonSchema[];
+  allOf?: CompactMetadataJsonSchema[];
+  additionalProperties?: unknown;
+}
+function schemaArms(schema: CompactMetadataJsonSchema): CompactMetadataJsonSchema[] {
+  return [
+    schema,
+    ...[...(schema.anyOf ?? []), ...(schema.oneOf ?? []), ...(schema.allOf ?? [])].flatMap(
+      schemaArms,
+    ),
+  ];
+}
+test("all action schemas allow compact metadata and duplicate-element omissions", () => {
+  const fields = [
+    "insets",
+    "systemInsets",
+    "backStack",
+    "gfxMetrics",
+    "displayedTimeMetrics",
+    "deviceLock",
+    "accessibilityState",
+    "freshness",
+  ];
+  let observations = 0;
+  const definitions: readonly { name: string; outputSchema?: CompactMetadataJsonSchema }[] =
+    generatedDefinitions;
+  for (const definition of definitions) {
+    if (definition.name === "observe" || !definition.outputSchema) {
+      continue;
+    }
+    for (const arm of schemaArms(definition.outputSchema)) {
+      if (arm.properties?.element) {
+        expect(arm.required ?? []).not.toContain("element");
+      }
+      const observation = arm.properties?.observation;
+      if (!observation) {
+        continue;
+      }
+      observations++;
+      for (const observationArm of schemaArms(observation)) {
+        for (const field of fields) {
+          expect(observationArm.required ?? []).not.toContain(field);
+          if (observationArm.properties && !observationArm.properties[field]) {
+            expect(observationArm.additionalProperties).not.toBe(false);
+          }
+        }
+        const hierarchy = observationArm.properties?.viewHierarchy;
+        if (hierarchy) {
+          for (const hierarchyArm of schemaArms(hierarchy)) {
+            expect(hierarchyArm.required ?? []).not.toContain("insets");
+            expect(hierarchyArm.required ?? []).not.toContain("systemInsets");
+          }
+        }
+      }
+    }
+  }
+  expect(observations).toBeGreaterThan(0);
 });

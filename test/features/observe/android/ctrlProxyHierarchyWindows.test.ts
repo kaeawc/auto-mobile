@@ -1,3 +1,4 @@
+import capture from "../../../fixtures/android-enabled/playground-disabled-control-api36.json";
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
@@ -244,4 +245,24 @@ test("captured Android control preserves disabled state through conversion, norm
     expect(full.viewHierarchy?.hierarchy.node).toMatchObject({ enabled: "false" });
     expect(full.elements?.clickable[0].enabled).toBe("false");
   }
+});
+
+// Reuse a real capture; reason metadata is injected in code until a device capture exists.
+test.each([
+  "active_window_null_root",
+  "app_window_null_root",
+  "no_app_window_root",
+  undefined,
+] as const)("captured hierarchy conversion preserves optional incomplete reason: %s", (reason) => {
+  const wire: AccessibilityHierarchy = JSON.parse(capture.rawViewHierarchy.json);
+  wire.ctrlProxyIncomplete = true;
+  if (reason === undefined) {
+    delete wire.ctrlProxyIncompleteReason;
+  } else {
+    wire.ctrlProxyIncompleteReason = reason;
+  }
+  expect(converter().convertToViewHierarchyResult(wire).ctrlProxyIncompleteReason).toBe(reason);
+  // Both the readable and rootless conversion branches retain the wire metadata.
+  delete wire.hierarchy;
+  expect(converter().convertToViewHierarchyResult(wire).ctrlProxyIncompleteReason).toBe(reason);
 });

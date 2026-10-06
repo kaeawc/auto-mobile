@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
 import androidHome from "../../fixtures/observe/android-home.json";
 import type { BootedDevice, Element, ObserveResult } from "../../../src/models";
@@ -201,11 +202,12 @@ describe("gesture request sequences", () => {
       const tap = new TapAnyElement(device, new FakeAdbClient(), {
         timer,
         elementSelector: selector,
+        accessibilityDetector: new FakeAccessibilityDetector(),
       });
       const controller = new AbortController();
       tap.observedInteraction = async (action) => {
         calls.push("observe");
-        return action(observation);
+        return action(recordObservationRead(observation));
       };
       let refreshCount = 0;
       tap.setRefreshViewHierarchyForTesting(async (_refresh, timeout, screen, signal) => {
@@ -238,10 +240,10 @@ describe("gesture request sequences", () => {
         undefined,
         controller.signal,
       );
-      if (mode === "immediate") {
-        expect(calls).toEqual(["observe", "select", "tap:150:150:0"]);
-      }
       const result = await run;
+      if (mode === "immediate") {
+        expect(calls).toEqual(["observe", "select", "tap:150:150:0", "retry-check"]);
+      }
       const successful = mode === "immediate" || mode === "poll" || mode === "null";
       expect(result.success).toBe(successful);
       if (successful) {
@@ -298,7 +300,7 @@ describe("gesture request sequences", () => {
       };
       tap.observedInteraction = async (action) => {
         calls.push("observe");
-        return action(observation);
+        return action(recordObservationRead(observation));
       };
       const result = await tap.execute({
         action: "tap",

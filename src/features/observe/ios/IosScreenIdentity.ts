@@ -1,5 +1,6 @@
 import type { ScreenIdentity } from "../../../models/ObserveResult";
 import { nodeAttributes, type ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
+import { parseBounds } from "../../../utils/bounds";
 
 type NodeAttrs = Record<string, unknown>;
 type HierarchyNodeLike = {
@@ -18,6 +19,18 @@ const MODAL_CLASSES = new Set([
 ]);
 
 export const IOS_KEYBOARD_CONTAINER_CLASSES = new Set(["UIKeyboard", "XCUIElementTypeKeyboard"]);
+
+/** An individual iOS keycap; may appear without a container in a partial capture. */
+export const IOS_KEYBOARD_KEY_CLASS = "UIKeyboardKey";
+
+/**
+ * Whether a class name belongs to the iOS soft keyboard: its container or one
+ * of its keycaps. The single source of truth for the screen identity, the
+ * element collector (and so the skeleton `<ime>` row) and the diff flattening.
+ */
+export function isIosKeyboardClass(cls: string | undefined): boolean {
+  return IOS_KEYBOARD_CONTAINER_CLASSES.has(cls ?? "") || cls === IOS_KEYBOARD_KEY_CLASS;
+}
 
 interface CandidateSignals {
   bundleId?: string;
@@ -214,16 +227,90 @@ function findFocusedElementId(root: HierarchyNodeLike | undefined): string | und
   return focused;
 }
 
-function hasKeyboard(root: HierarchyNodeLike | undefined): boolean {
-  let keyboardVisible = false;
-  walk(root, (node) => {
-    if (keyboardVisible) {
+/** The screen's usable extent in points, or undefined when either side is not a positive finite number. */
+export function usableScreenExtent(
+  width: unknown,
+  height: unknown,
+): { width: number; height: number } | undefined {
+  return typeof width === "number" &&
+    typeof height === "number" &&
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width > 0 &&
+    height > 0
+    ? { width, height }
+    : undefined;
+}
+
+/** Clip `[left, top, right, bottom]` to the screen; undefined when nothing of it is on screen. */
+export function clipRectToScreen(
+  rect: readonly [number, number, number, number],
+  screen: { width: number; height: number },
+): [number, number, number, number] | undefined {
+  if (
+    ![...rect, screen.width, screen.height].every(Number.isFinite) ||
+    !usableScreenExtent(screen.width, screen.height)
+  ) {
+    return undefined;
+  }
+  const clipped: [number, number, number, number] = [
+    Math.max(0, rect[0]),
+    Math.max(0, rect[1]),
+    Math.min(screen.width, rect[2]),
+    Math.min(screen.height, rect[3]),
+  ];
+  return clipped[2] > clipped[0] && clipped[3] > clipped[1] ? clipped : undefined;
+}
+
+// Ignore sub-two-point animation slivers; they do not constitute a usable software keyboard.
+export const IOS_KEYBOARD_MIN_VISIBLE_HEIGHT = 2;
+
+/** Whether a (possibly off-screen) keyboard rectangle has a usable visible part on screen. */
+export function isVisibleIosKeyboardRect(
+  rect: readonly [number, number, number, number],
+  screen: { width: number; height: number },
+): boolean {
+  const clipped = clipRectToScreen(rect, screen);
+  return clipped !== undefined && clipped[3] - clipped[1] >= IOS_KEYBOARD_MIN_VISIBLE_HEIGHT;
+}
+
+function keyboardNodeIsOnScreen(
+  node: HierarchyNodeLike,
+  screen: { width: number; height: number },
+): boolean {
+  const bounds = parseBounds(node["bounds"] ?? attrsOf(node)["bounds"]);
+  // A keyboard node with no bounds cannot be shown parked, so it keeps the class-only reading.
+  return (
+    !bounds ||
+    isVisibleIosKeyboardRect([bounds.left, bounds.top, bounds.right, bounds.bottom], screen)
+  );
+}
+
+/**
+ * The one definition of "the iOS soft keyboard is visible": a keyboard
+ * container or keycap is present AND its frame has a non-empty part, at least
+ * {@link IOS_KEYBOARD_MIN_VISIBLE_HEIGHT} tall, within the screen. A keyboard
+ * parked below the bottom edge (a hardware-keyboard minimize) keeps its
+ * `UIKeyboard` node but is not visible. Without a usable screen size the
+ * class-only reading is kept. Shared by the screen identity, the skeleton
+ * `keyboard` / `<ime>` row (which applies the same clip to its measured union)
+ * and the diff's keyboard collapse so they cannot disagree.
+ */
+export function isIosKeyboardVisible(
+  viewHierarchy: ViewHierarchyResult | undefined,
+  fallbackScreen?: { width?: number; height?: number },
+): boolean {
+  const screen =
+    usableScreenExtent(viewHierarchy?.screenWidth, viewHierarchy?.screenHeight) ??
+    usableScreenExtent(fallbackScreen?.width, fallbackScreen?.height);
+  let visible = false;
+  walk(rootNode(viewHierarchy), (node) => {
+    if (visible || !isIosKeyboardClass(className(attrsOf(node)))) {
       return;
     }
-    const cls = className(attrsOf(node));
-    keyboardVisible = IOS_KEYBOARD_CONTAINER_CLASSES.has(cls ?? "") || cls === "UIKeyboardKey";
+    visible = !screen || keyboardNodeIsOnScreen(node, screen);
   });
-  return keyboardVisible;
+  return visible;
 }
 
 function makeKey(signals: CandidateSignals): string {
@@ -249,8 +336,14 @@ function confidence(signals: CandidateSignals): ScreenIdentity["confidence"] {
   return "low";
 }
 
+/**
+ * `fallbackScreen` is the observation's screen size, the same fallback the
+ * observe diff passes to {@link isIosKeyboardVisible} when the hierarchy carries
+ * no usable `screenWidth`/`screenHeight`, so the identity cannot disagree with it.
+ */
 export function deriveIosScreenIdentity(
   viewHierarchy: ViewHierarchyResult | undefined,
+  fallbackScreen?: { width?: number; height?: number },
 ): ScreenIdentity | undefined {
   const root = rootNode(viewHierarchy);
   if (!root) {
@@ -264,7 +357,7 @@ export function deriveIosScreenIdentity(
     selectedTab: findSelectedTab(root),
     ...modal,
     focusedElementId: findFocusedElementId(root),
-    keyboardVisible: hasKeyboard(root) || undefined,
+    keyboardVisible: isIosKeyboardVisible(viewHierarchy, fallbackScreen) || undefined,
   };
 
   const hasUsefulSignal = Boolean(

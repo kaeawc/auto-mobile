@@ -2,6 +2,7 @@ import { DEVICE_SESSION_RECOVERY_TOOLS } from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
+import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
@@ -92,6 +93,37 @@ export function getDeviceSessionIdFromResult(result: unknown): string | undefine
       : undefined;
   const minted = sessionUuid ?? payload?.sessionId;
   return typeof minted === "string" && minted.trim().length > 0 ? minted : undefined;
+}
+
+/**
+ * The device id a device-start tool result describes, from `runtime.deviceId` beside the session
+ * UUID. A proxy records it so a liveness handover can name the device (#10053).
+ */
+export function getDeviceIdFromResult(result: unknown): string | undefined {
+  const runtime = readToolEnvelopePayload(result)?.payload?.runtime;
+  if (!runtime || typeof runtime !== "object" || !("deviceId" in runtime)) {
+    return undefined;
+  }
+  const { deviceId } = runtime;
+  return typeof deviceId === "string" && deviceId.trim().length > 0 ? deviceId : undefined;
+}
+
+/**
+ * Whether a tool RESULT is the daemon's refusal of a session held inside its suspect window
+ * (#10051). The session still exists and its owner can restore it, so unlike
+ * {@link declaresDeviceSessionInvalid} this is evidence recovery is still possible.
+ */
+export function declaresDeviceSessionSuspect(result: unknown): boolean {
+  if (!result || typeof result !== "object" || !("isError" in result) || result.isError !== true) {
+    return false;
+  }
+  const error = readToolEnvelopePayload(result)?.payload?.error;
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_SESSION_SUSPECT_CODE
+  );
 }
 
 /**

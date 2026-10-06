@@ -1,0 +1,170 @@
+{
+  "first": {
+    "deviceId": "emulator-5600",
+    "backStack": {
+      "depth": 0,
+      "activities": [
+        {
+          "name": "dev.jasonpearson.automobile.playground.MainActivity",
+          "taskId": 398,
+          "userId": 0,
+          "taskAffinity": "10216:dev.jasonpearson.automobile.playground",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.settings.Settings",
+          "taskId": 397,
+          "userId": 0,
+          "taskAffinity": "1000:com.android.settings.root",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+          "taskId": 347,
+          "userId": 0,
+          "isTaskRoot": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": 398,
+          "userId": 0,
+          "affinity": "10216:dev.jasonpearson.automobile.playground",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.shell",
+          "rootActivity": "dev.jasonpearson.automobile.playground/.MainActivity",
+          "packageName": "dev.jasonpearson.automobile.playground"
+        },
+        {
+          "id": 397,
+          "userId": 0,
+          "affinity": "1000:com.android.settings.root",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.shell",
+          "rootActivity": "com.android.settings/.Settings",
+          "packageName": "com.android.settings"
+        },
+        {
+          "id": 347,
+          "userId": 0,
+          "rootActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+          "packageName": "com.google.android.apps.nexuslauncher",
+          "numActivities": 1
+        }
+      ],
+      "currentActivity": {
+        "name": "dev.jasonpearson.automobile.playground.MainActivity",
+        "taskId": 398,
+        "userId": 0
+      },
+      "displayCount": 1,
+      "currentTaskId": 398,
+      "capturedAt": 1791238750440,
+      "source": "adb"
+    },
+    "freshness": {
+      "requestedAfter": 1791238750258,
+      "actualTimestamp": 1791238750514,
+      "ageMs": 25,
+      "verified": true,
+      "isFresh": true
+    },
+    "gfxMetrics": {
+      "packageName": "dev.jasonpearson.automobile.playground",
+      "percentile50thMs": 17,
+      "percentile90thMs": 17,
+      "percentile95thMs": 17,
+      "percentile99thMs": 17,
+      "missedVsyncCount": 0,
+      "slowUiThreadCount": 0,
+      "frameDeadlineMissedCount": 0,
+      "pollCount": 1,
+      "stabilityWaitMs": 84,
+      "isStable": true
+    }
+  },
+  "second": {
+    "deviceId": "emulator-5600",
+    "backStack": {
+      "depth": 0,
+      "activities": [
+        {
+          "name": "dev.jasonpearson.automobile.playground.MainActivity",
+          "taskId": 398,
+          "userId": 0,
+          "taskAffinity": "10216:dev.jasonpearson.automobile.playground",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.android.settings.Settings",
+          "taskId": 397,
+          "userId": 0,
+          "taskAffinity": "1000:com.android.settings.root",
+          "isTaskRoot": true
+        },
+        {
+          "name": "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
+          "taskId": 347,
+          "userId": 0,
+          "isTaskRoot": true
+        }
+      ],
+      "tasks": [
+        {
+          "id": 398,
+          "userId": 0,
+          "affinity": "10216:dev.jasonpearson.automobile.playground",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.shell",
+          "rootActivity": "dev.jasonpearson.automobile.playground/.MainActivity",
+          "packageName": "dev.jasonpearson.automobile.playground"
+        },
+        {
+          "id": 397,
+          "userId": 0,
+          "affinity": "1000:com.android.settings.root",
+          "numActivities": 1,
+          "launchedFromPackage": "com.android.shell",
+          "rootActivity": "com.android.settings/.Settings",
+          "packageName": "com.android.settings"
+        },
+        {
+          "id": 347,
+          "userId": 0,
+          "rootActivity": "com.google.android.apps.nexuslauncher/.NexusLauncherActivity",
+          "packageName": "com.google.android.apps.nexuslauncher",
+          "numActivities": 1
+        }
+      ],
+      "currentActivity": {
+        "name": "dev.jasonpearson.automobile.playground.MainActivity",
+        "taskId": 398,
+        "userId": 0
+      },
+      "displayCount": 1,
+      "currentTaskId": 398,
+      "capturedAt": 1791238752412,
+      "source": "adb"
+    },
+    "freshness": {
+      "requestedAfter": 1791238752231,
+      "actualTimestamp": 1791238752488,
+      "ageMs": 24,
+      "verified": true,
+      "isFresh": true
+    },
+    "gfxMetrics": {
+      "packageName": "dev.jasonpearson.automobile.playground",
+      "percentile50thMs": 27,
+      "percentile90thMs": 27,
+      "percentile95thMs": 27,
+      "percentile99thMs": 27,
+      "missedVsyncCount": 0,
+      "slowUiThreadCount": 0,
+      "frameDeadlineMissedCount": 0,
+      "pollCount": 1,
+      "stabilityWaitMs": 107,
+      "isStable": true
+    }
+  }
+}

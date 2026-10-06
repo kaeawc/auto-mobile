@@ -77,6 +77,27 @@ dispatch-level `success: true`, sets `settled: false`, and omits the
 observation. Re-observe before continuing; do not interpret an unsettled
 result as proof that the tap failed or retry the tap automatically.
 
+## Dismiss outcome (Android)
+
+A `dismiss` swipe says nothing about whether the row left the shade: an ongoing
+(foreground-service, media) notification snaps back. After the swipe the tool
+compares the swiped row with the post-swipe observation it already takes. The
+row is identified by its non-volatile texts (title, body, app label); the count
+of rows reading exactly that way must drop. A row that survives with a changed
+body (download progress, a timer, a media position) still counts as present when
+a row with the same title and app label remains within one row height of the
+swiped position, because CtrlProxy exposes no notification key. A same-titled
+row with different text far from that position, or a differently titled row, is
+a different notification. If the row is still present the tool waits one
+swipe settle (400 ms), observes once more, and returns `success: false` with
+`isError: true` when the row is still there. The message names
+"ongoing/non-clearable" only when the matched row lists accessibility actions
+without `dismiss` (SystemUI adds that action only to swipeable rows); otherwise
+it says the notification is still present. When the post-swipe observation is
+not the shade the outcome is indeterminate and the existing success result is
+kept. A confirmed dismiss costs no extra device call; a stuck row costs one sleep
+and one observe. iOS is unchanged.
+
 ## Android implementation
 
 Open/close the tray (preferred, emulator):
@@ -157,9 +178,10 @@ swiping the group and clearing every notification in it.
 
 Collapsed notification groups mark child text nodes as
 `isVisibleToUser=false` in the accessibility tree, even though they are
-present in the shade. `ViewHierarchyExtractor.kt` bypasses this filter for
-all `com.android.systemui` nodes (not scoped to the notification shade
-specifically). The broader scope is safe because notification candidate
+present in the shade. The extractor does not filter on `isVisibleToUser`
+for any package (see
+`android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/ViewHierarchyExtractor.kt`),
+so collapsed notification-group children remain matchable. Notification candidate
 collection already filters nodes through resource ID hints and excludes —
 extra system UI nodes (status bar, quick settings) are not collected as
 notification candidates.

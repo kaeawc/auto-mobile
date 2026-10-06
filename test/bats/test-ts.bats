@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
 
 SCRIPT="scripts/test-ts.sh"
 TIMING_SCRIPT="scripts/validate-bun-test-timings.sh"
@@ -837,6 +838,37 @@ EOF
   [[ "$output" == *"\\*\\*/\\*.integration.test.ts"* ]]
 }
 
+@test "coverage prints one chunked invocation per default shard over an explicit file list" {
+  stub_chunk_discovery
+  run_lane coverage
+  [ "$status" -eq 0 ]
+  # Two shard processes by default, never the four of the failed #10213 attempt.
+  [ "$(wc -l <<< "$output" | tr -d ' ')" -eq 2 ]
+  # Chunker args: root, OS, chunk size (50), no JUnit dir (printed as ''), 1-based shard.
+  empty="''"
+  [[ "$(sed -n 1p <<< "$output")" == *" 50 ${empty} 1 "* ]]
+  [[ "$(sed -n 2p <<< "$output")" == *" 50 ${empty} 2 "* ]]
+  [[ "$output" == *"bun-unit-chunks.sh"* ]]
+  [[ "$output" == *" -- test/fixture00.test.ts test/fixture02.test.ts "* ]]
+  [[ "$output" == *" -- test/fixture01.test.ts test/fixture03.test.ts "* ]]
+}
+
+@test "coverage chunk and shard sizes are configurable and validated before Bun" {
+  stub_chunk_discovery
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 AUTOMOBILE_COVERAGE_SHARDS=3 \
+    AUTOMOBILE_COVERAGE_CHUNK_FILES=7 bash "$SCRIPT" coverage
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output" | tr -d ' ')" -eq 3 ]
+  empty="''"
+  [[ "$output" == *" 7 ${empty} 3 "* ]]
+
+  for value in '' abc 1.5 0 -1 05; do
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_COVERAGE_CHUNK_FILES="$value" bash "$SCRIPT" coverage
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_COVERAGE_CHUNK_FILES must be a positive integer"* ]]
+  done
+}
+
 @test "coverage wall timeout is 720 seconds" {
   cat > "$STUB_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash
@@ -1047,6 +1079,67 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(cat "$BATS_TEST_TMPDIR/timings.recheck.d/verdict.txt")" -eq 1 ]
   [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+}
+
+@test "timing gate ends failed output with verdicts and sample counts" {
+  seed_changed_offender_report
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES="src/example.ts\n$OFFENDER_FILE\n" \
+    STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
+    STUB_RECHECK_TIMES="0.150 0.150 0.150 0.010 0.010 0.010 0.010 0.010 0.010 0.010 0.010 0.010" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Recheck cleared suite0.case"*"Unit timing budget failures:"*"FAIL: testLaneClassification.case | FAIL (median over budget) | first sample: 150.00ms | re-run samples: 150.00ms / 150.00ms / 150.00ms | median: 150.00ms"*"Rechecked tests: 4"*"Cleared tests: 3"*"Failing tests: 1" ]]
+  [ "$(grep -n 'Unit timing budget failures:' <<< "$output" | cut -d: -f1)" -gt "$(grep -n 'Recheck cleared suite0.case' <<< "$output" | cut -d: -f1)" ]
+}
+
+@test "timing gate final block lists offenders it could not verify" {
+  seed_outlier_report
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=600 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: suite.slow | FAIL (could not verify within the recheck budget) | first sample: 200.00ms"* ]]
+}
+
+@test "timing gate emits GitHub annotations only under Actions" {
+  seed_outlier_report
+  export GITHUB_ACTIONS=true
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::FAIL: suite.slow | FAIL (median over budget)"* ]]
+  [[ "$output" != *"::error::FAIL: 1 test(s)"* ]]
+  unset GITHUB_ACTIONS
+  rm -f "$STUB_RECHECK_INDEX"
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::error::"* ]]
+}
+
+@test "timing gate adds the failing test list to the Markdown summary" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  grep -Fq 'FAIL: suite.slow | FAIL (median over budget) | first sample: 200.00ms' \
+    "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate passing run has no failure block" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Unit timing budget failures:"* ]]
+  [[ "$output" != *"FAIL: suite.slow"* ]]
+}
+
+@test "timing gate closed stdout still records failure list and fails" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160" closed
+  [ "$status" -eq 1 ]
+  grep -Fq 'FAIL: suite.slow | FAIL (median over budget)' \
+    "$BATS_TEST_TMPDIR/timings.recheck.d/failures.txt"
+  grep -Fq 'Failing tests: 1' "$BATS_TEST_TMPDIR/timings.recheck.d/failure-counts.txt"
 }
 
 @test "timing gate clears an outlier whose median recheck is within budget" {
@@ -1756,13 +1849,22 @@ EOF
 @test "one watchdog bounds the complete chunk sequence rather than each fresh invocation" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
-  # Each invocation fits 1s; their sequence cannot fit a single 1s deadline.
+  # Each invocation fits the 2s deadline (1.5s); their 4.5s sequence cannot. A
+  # per-invocation watchdog would let all three finish and exit 0, so the 124
+  # below proves the one deadline spans the whole sequence. The margins are
+  # wide so a loaded runner's slow startup or late watchdog wake-up does not
+  # change which side of the deadline each invocation lands on.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
-    STUB_BUN_SLEEP_SECONDS=0.7 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 \
+    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
     bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
-  [ "$(wc -l < "$record")" -lt 3 ]
+  # The fake chunk only creates the record once it starts. On a loaded runner
+  # the deadline can expire before the first chunk begins, and zero chunks
+  # still satisfies "the sequence was cut short", so a missing file counts as 0.
+  started=0
+  if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
+  [ "$started" -lt 3 ]
   [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
 }
 

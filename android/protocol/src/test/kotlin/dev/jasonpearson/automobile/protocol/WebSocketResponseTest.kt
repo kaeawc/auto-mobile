@@ -1,9 +1,13 @@
 package dev.jasonpearson.automobile.protocol
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 
@@ -68,6 +72,27 @@ class WebSocketResponseTest {
     assertEquals(
       """{"type":"anr_event","timestamp":1700000000500,"event":{"pid":12345,"processName":"com.example.app","importance":"FOREGROUND","trace":null,"reason":"Input dispatching timed out","packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34}}}""",
       json.encodeToString(WebSocketResponse.serializer(), anr),
+    )
+  }
+
+  @Test
+  fun `serialize handled exception message under the message key`() {
+    val handled: WebSocketResponse =
+      HandledExceptionEvent(
+        timestamp = 1700000001000L,
+        event =
+          HandledExceptionData(
+            exceptionClass = "java.lang.IllegalStateException",
+            message = "cart is empty",
+            stackTrace = "at com.example.Main.run(Main.java:42)",
+            packageName = "com.example.app",
+            deviceInfo = DeviceInfo("Pixel 7", "Google", "14", 34),
+          ),
+      )
+
+    assertEquals(
+      """{"type":"handled_exception_event","timestamp":1700000001000,"event":{"exceptionClass":"java.lang.IllegalStateException","message":"cart is empty","stackTrace":"at com.example.Main.run(Main.java:42)","customMessage":null,"currentScreen":null,"packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34},"applicationId":null}}""",
+      json.encodeToString(WebSocketResponse.serializer(), handled),
     )
   }
 
@@ -488,5 +513,47 @@ class WebSocketResponseTest {
     assertEquals(0, decoded.frameMetrics.totalFrames)
     assertEquals(null, decoded.frameMetrics.fps)
     assertEquals(null, decoded.frameMetrics.jankFrames)
+  }
+
+  @Test
+  fun `overlay result missing assets round trip and are omitted when absent`() {
+    val literal =
+      """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":true,"error":null,"missingAssets":["hero","logo"]}"""
+    val decoded = assertIs<OverlayResult>(json.decodeFromString<WebSocketResponse>(literal))
+    assertEquals(listOf("hero", "logo"), decoded.missingAssets)
+    assertEquals(literal, json.encodeToString<WebSocketResponse>(decoded))
+    // Peers that predate the field: it decodes as absent and is never written back as null.
+    val legacy = """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":true}"""
+    val legacyDecoded = assertIs<OverlayResult>(json.decodeFromString<WebSocketResponse>(legacy))
+    assertNull(legacyDecoded.missingAssets)
+    assertFalse(json.encodeToString<WebSocketResponse>(legacyDecoded).contains("missingAssets"))
+  }
+
+  @Test
+  fun `overlay result echoes request id and event has no request id`() {
+    val resultLiteral =
+      """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":false,"error":"overlay host not wired"}"""
+    val result = json.decodeFromString<WebSocketResponse>(resultLiteral)
+    assertEquals("r1", assertIs<OverlayResult>(result).requestId)
+    assertEquals(resultLiteral, json.encodeToString<WebSocketResponse>(result))
+    val eventLiteral =
+      """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":1,"kind":"emit","name":"next","payload":{"nested":[true,null]},"state":{"label":"Next","enabled":true},"pages":{"pager":0}}"""
+    val event = assertIs<OverlayEvent>(json.decodeFromString<WebSocketResponse>(eventLiteral))
+    assertEquals(OverlayEventKind.EMIT, event.kind)
+    assertEquals(1L, event.sequence)
+    assertEquals(mapOf("pager" to 0), event.pages)
+    assertEquals(eventLiteral, json.encodeToString<WebSocketResponse>(event))
+    assertFalse(json.encodeToString<WebSocketResponse>(event).contains("requestId"))
+    for (kind in listOf("page_changed", "dismissed")) {
+      val literal =
+        """{"type":"overlay_event","timestamp":42,"id":"panel","sequence":2,"kind":"$kind","name":null,"payload":null,"state":{},"pages":{}}"""
+      assertEquals(
+        literal,
+        json.encodeToString<WebSocketResponse>(json.decodeFromString<WebSocketResponse>(literal)),
+      )
+    }
+    assertFailsWith<SerializationException> {
+      json.decodeFromString<WebSocketResponse>(eventLiteral.replace("emit", "unknown"))
+    }
   }
 }

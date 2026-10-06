@@ -392,7 +392,11 @@ class GestureStreamSessionTest {
     h.router.cancelOwnedBy(client)
     h.drain()
     val expected =
-      listOf(Ack("start", true, null), Ack("other-end", false, "Gesture owner disconnected"))
+      listOf(
+        Ack("start", true, null),
+        Ack("other-end", false, "Gesture owner disconnected"),
+        Ack("unattributed-end", false, "Gesture owner disconnected"),
+      )
     assertEquals(expected, h.acks)
     assertEquals(0, h.pendingEndCount())
     // The already dispatched lift may still finish after disconnect and service teardown.
@@ -460,7 +464,7 @@ class GestureStreamSessionTest {
       h.drain()
       val dispatcher = h.dispatchers.single()
       dispatcher.completeLast()
-      h.router.end("end", "g", 3f, 4f, false)
+      h.router.end("end", "g", 3f, 4f, false, requester = owner)
       if (endDispatched) h.drain()
       h.router.cancelOwnedBy(owner)
       h.drain()
@@ -1167,6 +1171,39 @@ class GestureStreamSessionTest {
     assertEquals(false, h.acks.last { it.requestId == "end-2" }.success)
     assertEquals(1, h.dispatchers.size)
     assertFalse(h.acks.any { it.requestId?.startsWith("late-") == true })
+  }
+
+  @Test
+  fun `owner disconnect cancels only its own gestures and keeps another owner's pending end`() {
+    val h = RouterHarness()
+    val a = owner(1)
+    val b = owner(2)
+    val c = owner(3)
+    h.router.start("start-a", "ga", 1f, 2f, owner = a)
+    h.router.start("start-b", "gb", 3f, 4f, owner = b)
+    h.drain()
+    h.dispatchers.forEach { it.completeLast() }
+    // c ends b's gesture; a ends its own. Only a disconnects.
+    h.router.end("c-end-b", "gb", 5f, 6f, cancel = false, requester = c)
+    h.router.end("a-end-a", "ga", 5f, 6f, cancel = false, requester = a)
+    h.drain()
+    assertEquals(2, h.pendingEndCount())
+    a.isConnected = false
+
+    h.router.cancelOwnedBy(a)
+    h.drain()
+    val (dispatcherA, dispatcherB) = h.dispatchers
+    // a's gesture is lifted once and a's own end gets nothing; b's gesture is not cancelled.
+    assertEquals(1, dispatcherA.dispatched.count { !it.willContinue })
+    assertEquals(1, h.pendingEndCount())
+    assertEquals(listOf(Ack("start-a", true, null), Ack("start-b", true, null)), h.acks)
+
+    // b's gesture still completes normally and answers c exactly once.
+    dispatcherB.completeLast()
+    assertEquals(1, dispatcherB.dispatched.count { !it.willContinue })
+    assertEquals(Ack("c-end-b", true, null), h.acks.last())
+    assertEquals(1, h.acks.count { it.requestId == "c-end-b" })
+    assertEquals(0, h.pendingEndCount())
   }
 
   @Test

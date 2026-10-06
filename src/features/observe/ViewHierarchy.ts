@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "./ios/types";
 import { linkWindowRoots } from "./linkWindowRoots";
 import {
   AdbClientFactory,
@@ -392,12 +393,15 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       // `result.fresh` says whether the delegate verified this tree against the
       // device on this call or served a host-side cache entry unverified; carry
       // it so ObserveScreen can report freshness instead of assuming it.
-      return this.normalizeIosHierarchy(
-        result.hierarchy,
-        result.updatedAt,
-        result.reconnectStatus,
-        result.frameContext,
-        result.fresh,
+      return Object.assign(
+        this.normalizeIosHierarchy(
+          result.hierarchy,
+          result.updatedAt,
+          result.reconnectStatus,
+          result.frameContext,
+          result.fresh,
+        ),
+        { [iosHierarchyAcquisition]: result[iosHierarchyAcquisition] },
       );
     });
 
@@ -694,7 +698,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * - Have resourceId, text, or contentDesc
    * - OR have clickable, scrollable, focused, or selected set to true
    * - Include descendants that meet criteria even if parents don't
-   * - Omit boolean fields not set to true and class="android.view.View"
+   * - Omit false boolean fields except enabled and visible-to-user, and class="android.view.View"
    *
    * Each node's direct children are capped at {@link MAX_FILTERED_CHILDREN_PER_NODE};
    * every capped node contributes a `max_children[...]` entry to the returned
@@ -770,6 +774,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "contentDesc",
       "content-desc",
       "test-tag",
+      "unique-id",
+      "container-title",
       "role",
       "state-description",
       "error-message",
@@ -1075,7 +1081,11 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     if (key === "enabled" && (props[key] === true || props[key] === "true")) {
       return true;
     }
-    if (key !== "enabled" && (props[key] === false || props[key] === "false")) {
+    if (
+      key !== "enabled" &&
+      key !== "visible-to-user" &&
+      (props[key] === false || props[key] === "false")
+    ) {
       return true;
     }
     return false;

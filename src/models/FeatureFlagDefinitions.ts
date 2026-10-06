@@ -16,7 +16,8 @@ export type FeatureFlagKey =
   | "observe-result-include-elements"
   | "tool-results-no-structured-content"
   | "actions-diff-observe"
-  | "actions-no-observe";
+  | "actions-no-observe"
+  | "actions-compact-metadata";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -120,7 +121,7 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "screen-reader-navigation",
     label: "Screen-reader navigation (fidelity mode)",
     description:
-      "Opt-in: when a screen reader is active, drive the cursor by swipe traversal to the target before activating (reproduces the real user journey) instead of activating the node directly. For accessibility validation — reachability, traversal order, focus traps.",
+      "Opt-in: when a screen reader is active, move the accessibility cursor onto the target with an accessibility-focus action and confirm it landed before activating (instead of activating the node directly). A failure after the focus request fails the call without a coordinate tap. For accessibility validation — reachability and what the cursor lands on.",
     defaultValue: false,
   },
   {
@@ -177,6 +178,13 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     key: "actions-no-observe",
     label: "Actions: no observe",
     description: "Skip returning the post-action observation entirely to reduce output size.",
+    defaultValue: false,
+  },
+  {
+    key: "actions-compact-metadata",
+    label: "Actions: compact metadata",
+    description:
+      "Omit unchanged device metadata after its first inline action response in a session and omit identical duplicate matched elements.",
     defaultValue: false,
   },
 ];

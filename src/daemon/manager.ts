@@ -24,7 +24,11 @@ import {
   INCOMPLETE_EXTRACTION_CODE,
   INCOMPLETE_EXTRACTION_EXIT_CODE,
 } from "../db/migrationDependencyIntegrity";
-import { ensureSecureLogsDirSync, resolveAutoMobileLogsDir } from "../utils/tempDir";
+import {
+  assertUnitTestLogsDirIsolated,
+  ensureSecureLogsDirSync,
+  resolveAutoMobileLogsDir,
+} from "../utils/tempDir";
 import { outputReductionFlagsToArgs } from "../utils/outputReductionFlags";
 import { EVENT_ALL_MARKERS_FLAG } from "../utils/eventAllMarkers";
 import { ActionableError } from "../models";
@@ -834,6 +838,11 @@ export class DaemonManager implements DaemonManagerLike {
       },
       {
         maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
+        expectedFailure: {
+          reason:
+            "Startup handles scan timeouts with namespace ownership probes and a degradation warning",
+          matches: (error) => error.message.includes("ETIMEDOUT"),
+        },
         delays: (attempt) =>
           Math.min(scanBackoff.delayForAttempt(attempt), this.remainingTime(startDeadline)),
         shouldRetry: (error) =>
@@ -1380,6 +1389,7 @@ export class DaemonManager implements DaemonManagerLike {
     // launch logs in a shared directory.
     childEnv[DAEMON_LAUNCH_LOG_PATH_ENV] = capturesLaunchOutput ? logPath : "";
     if (capturesLaunchOutput) {
+      assertUnitTestLogsDirIsolated();
       ensureSecureLogsDirSync();
       // `openSync(..., "w")` below starts a new launch-log generation. A
       // same-PID manager reuse can otherwise leave a dead prior generation's

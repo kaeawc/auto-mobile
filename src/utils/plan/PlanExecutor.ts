@@ -20,6 +20,7 @@ import {
   type PlanExecutionOptions,
   type PlanStepWarnings,
   type PlanSkippedStep,
+  type PlanDeviceFailure,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted, getStructuredPayload } from "../toolUtils";
 import { ZodError } from "zod/v4";
@@ -35,8 +36,11 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "../../models/DeviceLostError";
-import { formatToolParamError } from "../toolParamError";
-import { stripUndeclaredSessionUuid } from "../toolParams";
+import {
+  UNEVALUATED_EXPECTATIONS_WARNING,
+  formatStepError,
+  parseStepParams,
+} from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -45,24 +49,6 @@ import {
 
 function formatToolError(error: unknown): string {
   return formatStructuredToolError(error) ?? String(error);
-}
-
-// The MCP boundary (`src/server/index.ts`) renders a schema `ZodError` through
-// `formatToolParamError` as "Invalid parameters for tool <name>: …". PlanExecutor
-// parses against the same tool schemas, so a validation failure on the plan path
-// must read identically instead of leaking the raw zod issue dump (#5854 §3).
-// Non-Zod errors fall through unchanged; the `instanceof ZodError` shape is left
-// intact for callers that branch on it (e.g. optional-step handling below).
-function formatStepError(
-  toolName: string,
-  error: unknown,
-  rawInput?: unknown,
-  schema?: unknown,
-): string {
-  if (error instanceof ZodError) {
-    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error, rawInput, schema)}`;
-  }
-  return `${error}`;
 }
 
 type StepExecutionStatus = "completed" | "failed" | "skipped";
@@ -77,12 +63,32 @@ interface StepExecutionContext {
   debugLog?: boolean;
 }
 
+export { UNEVALUATED_EXPECTATIONS_WARNING };
+
+function withUnevaluatedExpectationsWarning(
+  step: PlanStep,
+  toolWarnings: string[] | undefined,
+  details: Record<string, unknown>,
+): string[] | undefined {
+  if (!step.expectations || step.expectations.length === 0) {
+    return toolWarnings;
+  }
+  const warnings = [...(toolWarnings ?? []), UNEVALUATED_EXPECTATIONS_WARNING];
+  details.warnings = warnings;
+  return warnings;
+}
+
 /**
- * The string warnings a tool payload reported, or undefined when it reported
+ * The string warnings a tool payload or thrown error reported, or undefined when it reported
  * none (issue #6868).
  */
-function toolResultWarnings(payload: Record<string, unknown>): string[] | undefined {
-  if (!Array.isArray(payload.warnings)) {
+function toolResultWarnings(payload: unknown): string[] | undefined {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !("warnings" in payload) ||
+    !Array.isArray(payload.warnings)
+  ) {
     return undefined;
   }
   const warnings = payload.warnings.filter((entry): entry is string => typeof entry === "string");
@@ -95,8 +101,8 @@ interface StepExecutionResult {
   details: Record<string, unknown>;
   failureObservation?: FailureObservationSummary;
   /**
-   * Best-effort warnings the tool reported while still succeeding (issue
-   * #6868). Carried separately from `details` so the plan result can promote
+   * Best-effort warnings from the tool, including sub-steps preceding a failure.
+   * Carried separately from `details` so the plan result can promote
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
@@ -108,27 +114,48 @@ interface ParallelTrackFailure {
   abortConsequence: boolean;
 }
 
+/** Real causes first, then plan index (-1 last), then declared device order. */
+function compareParallelFailures(a: ParallelTrackFailure, b: ParallelTrackFailure): number {
+  if (a.abortConsequence !== b.abortConsequence) {
+    return a.abortConsequence ? 1 : -1;
+  }
+  const aIndex = a.failedStep.stepIndex === -1 ? Infinity : a.failedStep.stepIndex;
+  const bIndex = b.failedStep.stepIndex === -1 ? Infinity : b.failedStep.stepIndex;
+  if (aIndex !== bIndex) {
+    return aIndex < bIndex ? -1 : 1;
+  }
+  return a.deviceOrder - b.deviceOrder;
+}
+
+/** Omit the summary for successful plans and one-device partitions. */
+function parallelDeviceFailuresField(
+  failures: readonly ParallelTrackFailure[],
+  devices: readonly string[],
+): { deviceFailures?: PlanDeviceFailure[] } {
+  if (devices.length < 2 || failures.length === 0) {
+    return {};
+  }
+  return {
+    deviceFailures: [...failures]
+      .sort(compareParallelFailures)
+      .map(({ failedStep, deviceOrder, abortConsequence }, index) => {
+        const { failureObservation, ...failure } = failedStep;
+        return {
+          ...failure,
+          device: devices[deviceOrder],
+          ...(index > 0 && !abortConsequence && failureObservation ? { failureObservation } : {}),
+        };
+      }),
+  };
+}
+
 /** Choose a stable failure after all tracks settle, preserving the abort's cause. */
 export function selectParallelFailure(
   failures: readonly ParallelTrackFailure[],
 ): PlanExecutionResult["failedStep"] {
   let selected: ParallelTrackFailure | undefined;
   for (const candidate of failures) {
-    if (!selected || (selected.abortConsequence && !candidate.abortConsequence)) {
-      selected = candidate;
-      continue;
-    }
-    if (candidate.abortConsequence !== selected.abortConsequence) {
-      continue;
-    }
-    const candidateIndex =
-      candidate.failedStep.stepIndex === -1 ? Infinity : candidate.failedStep.stepIndex;
-    const selectedIndex =
-      selected.failedStep.stepIndex === -1 ? Infinity : selected.failedStep.stepIndex;
-    if (
-      candidateIndex < selectedIndex ||
-      (candidateIndex === selectedIndex && candidate.deviceOrder < selected.deviceOrder)
-    ) {
+    if (!selected || compareParallelFailures(candidate, selected) < 0) {
       selected = candidate;
     }
   }
@@ -185,6 +212,12 @@ interface ParallelPlanExecutionOptions {
   signal?: AbortSignal;
   abortStrategy?: AbortStrategy;
   executionOptions?: PlanExecutionOptions;
+}
+
+/** Which derived session a failure observation targets and the plan signal that can cancel it. */
+interface FailureObservationScope {
+  deviceLabel?: string;
+  signal?: AbortSignal;
 }
 
 /**
@@ -307,52 +340,88 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
   private static readonly FAILURE_OBSERVATION_TIMEOUT_MS = 3000;
 
+  /**
+   * Run the internal failure observe under its own deadline. The plan signal is forwarded so a
+   * cancellation that lands mid-capture aborts the observe and releases this wait instead of
+   * riding out the deadline (#9885).
+   */
+  private async callObserveWithDeadline(
+    observeTool: RegisteredTool,
+    parsedParams: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+  ): Promise<unknown> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new AbortController();
+    const onPlanAbort = () => deadline.abort(signal?.reason);
+    try {
+      const operation = ToolRegistry.callInternal(observeTool, parsedParams, undefined, signal);
+      signal?.addEventListener("abort", onPlanAbort, { once: true });
+      timeoutHandle = this.timer.setTimeout(
+        () => deadline.abort(new Error("failure observation timed out")),
+        DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS,
+      );
+      return await raceWithDeadline(operation, {
+        timer: this.timer,
+        signal: deadline.signal,
+        label: "failure observation",
+      });
+    } finally {
+      signal?.removeEventListener("abort", onPlanAbort);
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  private buildFailureObservationParams(
+    platform: string,
+    deviceId: string | undefined,
+    sessionUuid: string | undefined,
+    deviceLabel: string | undefined,
+  ): Record<string, unknown> {
+    const enhancedParams: Record<string, unknown> = { platform };
+    const shouldSuppressDeviceId = !!(sessionUuid && DaemonState.getInstance().isInitialized());
+    if (deviceId && !shouldSuppressDeviceId) {
+      enhancedParams.deviceId = deviceId;
+    }
+    if (sessionUuid) {
+      enhancedParams.sessionUuid = sessionUuid;
+    }
+    // Use the failed step's label so ToolRegistry selects the same derived
+    // session, rather than observing the plan's base-session device (#9828).
+    if (deviceLabel) {
+      enhancedParams.device = deviceLabel;
+    }
+    return enhancedParams;
+  }
+
   private async captureFailureObservation(
     platform: string,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
+    { deviceLabel, signal }: FailureObservationScope = {},
   ): Promise<FailureObservationSummary | undefined> {
     const observeTool = ToolRegistry.getTool("observe");
-    if (!observeTool) {
+    // A plan cancelled by a session release no longer owns the device, so a
+    // failure observation must not be issued against it (#9885).
+    if (!observeTool || signal?.aborted) {
       return undefined;
     }
     try {
-      const enhancedParams: Record<string, unknown> = { platform };
-      const shouldSuppressDeviceId = !!(sessionUuid && DaemonState.getInstance().isInitialized());
-      if (deviceId && !shouldSuppressDeviceId) {
-        enhancedParams.deviceId = deviceId;
-      }
-      if (sessionUuid) {
-        enhancedParams.sessionUuid = sessionUuid;
-      }
+      const enhancedParams = this.buildFailureObservationParams(
+        platform,
+        deviceId,
+        sessionUuid,
+        deviceLabel,
+      );
       // Internal failure-recovery observe (#3053): the callInternal seam (#3108)
       // marks it internal so it does not overwrite the agent-facing diff baseline
       // (`observe` always resets it). This capture is for the plan's failure
       // summary, not shown to the agent. Parse against the tool schema first, then
       // pass the resolved tool to the seam so the timeout race stays local.
-      const parsedParams = observeTool.schema.parse(
-        stripUndeclaredSessionUuid(enhancedParams, observeTool.schema),
-      ) as Record<string, unknown>;
+      const parsedParams = parseStepParams(observeTool.schema, enhancedParams);
 
-      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-      const deadline = new AbortController();
-      let response: unknown;
-      try {
-        const operation = ToolRegistry.callInternal(observeTool, parsedParams);
-        timeoutHandle = this.timer.setTimeout(
-          () => deadline.abort(new Error("failure observation timed out")),
-          DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS,
-        );
-        response = await raceWithDeadline(operation, {
-          timer: this.timer,
-          signal: deadline.signal,
-          label: "failure observation",
-        });
-      } finally {
-        if (timeoutHandle) {
-          this.timer.clearTimeout(timeoutHandle);
-        }
-      }
+      const response = await this.callObserveWithDeadline(observeTool, parsedParams, signal);
 
       const raw = this.parseStructuredToolPayload(response);
       if (!raw) {
@@ -360,6 +429,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
       return summarizeObserveResultForFailure(raw);
     } catch (error) {
+      if (signal?.aborted) {
+        // Cancelled mid-capture: there is no observation to report (#9885).
+        return undefined;
+      }
       // The observe schema parse above can throw a ZodError; render it the same
       // way the MCP boundary does rather than leaking the raw issue dump (#5854).
       return {
@@ -393,6 +466,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform: string | undefined,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
+    scope: FailureObservationScope = {},
   ): Promise<FailureObservationSummary | undefined> {
     try {
       if (failedTool === "observe" && failureToolResponse !== undefined) {
@@ -408,7 +482,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (!platform) {
         return undefined;
       }
-      return await this.captureFailureObservation(platform, deviceId, sessionUuid);
+      return await this.captureFailureObservation(platform, deviceId, sessionUuid, scope);
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
@@ -472,6 +546,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     step: PlanStep,
     context: StepExecutionContext,
   ): Promise<StepExecutionResult> {
+    const deviceLabel = typeof step.params?.device === "string" ? step.params.device : undefined;
     const tool = ToolRegistry.getToolForPlan(step.tool);
     if (!tool) {
       const error = `Unknown tool: ${step.tool}`;
@@ -497,9 +572,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // below so finalize emits the full observation on the step envelope - never
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
-      const parsedParams = tool.schema.parse(
-        stripUndeclaredSessionUuid(enhancedParams, tool.schema),
-      ) as Record<string, unknown>;
+      const parsedParams = parseStepParams(tool.schema, enhancedParams);
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -556,6 +629,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           context.platform,
           context.deviceId,
           context.sessionUuid,
+          { deviceLabel, signal: context.signal },
         );
         const details: Record<string, unknown> = {
           params: step.params,
@@ -609,7 +683,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           details.stepObservation = stepObservation;
         }
       }
-      const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+      const toolWarnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+      const warnings = withUnevaluatedExpectationsWarning(step, toolWarnings, details);
 
       return {
         status: "completed",
@@ -626,9 +701,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
           error,
         );
+        const warnings = toolResultWarnings(error);
         return {
           status: "skipped",
           error: errorMsg,
+          ...(warnings ? { warnings } : {}),
           details: {
             params: step.params,
             error: errorMsg,
@@ -645,11 +722,13 @@ export class DefaultPlanExecutor implements PlanExecutor {
             context.platform,
             context.deviceId,
             context.sessionUuid,
+            { deviceLabel, signal: context.signal },
           );
       this.logger.warn(
         `${context.logPrefix} step ${step.tool} threw; returning failed status`,
         error,
       );
+      const warnings = toolResultWarnings(error);
       return {
         status: "failed",
         error: errorMsg,
@@ -657,8 +736,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           params: step.params,
           error: errorMsg,
           ...(failureObservation ? { failureObservation } : {}),
+          ...(warnings ? { warnings } : {}),
         },
         failureObservation,
+        ...(warnings ? { warnings } : {}),
       };
     }
   }
@@ -786,6 +867,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
           logPrefix: `[PLAN_STEP_${i + 1}]`,
         });
 
+        if (stepResult.warnings) {
+          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
+        }
+
         if (stepResult.status === "skipped") {
           this.recordSkippedOptionalStep(
             { debugSteps, skippedSteps },
@@ -822,8 +907,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
               executionTimeMs: this.timer.now() - startTime,
               steps: debugSteps,
             },
-            // Warnings from the steps that DID succeed explain the state the
-            // failing step ran against, so a failed plan keeps them too.
+            // Include diagnostics from earlier steps and from sub-steps that
+            // ran inside the failing step.
             ...(warnings.length > 0 ? { warnings } : {}),
             ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
           };
@@ -835,10 +920,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
           durationMs: this.timer.now() - stepStartTime,
           details: stepResult.details,
         });
-        if (stepResult.warnings) {
-          warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
-        }
-
         executedSteps++;
         logger.info(
           `[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`,
@@ -1171,6 +1252,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       executedSteps: totalExecutedSteps,
       totalSteps,
       failedStep: selectParallelFailure(failures),
+      ...parallelDeviceFailuresField(failures, partitionedPlan.devices),
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
@@ -1268,6 +1350,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           debugLog: true,
         });
 
+        if (stepResult.warnings) {
+          warnings.push({
+            stepIndex: planIndex,
+            tool: step.tool,
+            device,
+            warnings: stepResult.warnings,
+          });
+        }
+
         if (stepResult.status === "skipped") {
           logger.warn(
             `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`,
@@ -1301,15 +1392,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             skippedSteps,
             warnings,
           };
-        }
-
-        if (stepResult.warnings) {
-          warnings.push({
-            stepIndex: planIndex,
-            tool: step.tool,
-            device,
-            warnings: stepResult.warnings,
-          });
         }
 
         executedSteps++;

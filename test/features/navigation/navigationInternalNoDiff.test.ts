@@ -88,6 +88,7 @@ describe("navigation internal no-diff marking (#3087)", () => {
           startScreen: "Home",
           targetScreen: "Detail",
         }),
+        recordEdgeReplayOutcome: () => {},
         getKnownScreens: async () => ["Home", "Detail"],
       } as unknown as NavigationGraphService;
       const uiStateSetup: UIStateSetup = {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { IOSCtrlProxyClient, type IosMockRuleSyncOutcome } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
 import { NetworkState } from "../../src/server/NetworkState";
 import {
@@ -33,6 +33,7 @@ describe("network tool schema", () => {
   let androidMessages: string[];
   let iosErrorSimulations: unknown[];
   let iosMockRuleSyncCalls: number;
+  let iosMockRuleSyncResult: IosMockRuleSyncOutcome | Error;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
   let androidGetInstanceSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
@@ -67,6 +68,7 @@ describe("network tool schema", () => {
     iosMessages = [];
     iosErrorSimulations = [];
     iosMockRuleSyncCalls = 0;
+    iosMockRuleSyncResult = "sent";
     androidMessages = [];
     androidSendResult = true;
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -81,6 +83,10 @@ describe("network tool schema", () => {
       },
       syncNetworkMockRulesIfAvailable: async () => {
         iosMockRuleSyncCalls++;
+        if (iosMockRuleSyncResult instanceof Error) {
+          throw iosMockRuleSyncResult;
+        }
+        return iosMockRuleSyncResult;
       },
     } as IOSCtrlProxyClient);
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
@@ -219,7 +225,7 @@ describe("network tool schema", () => {
           expiresAtEpochMs: 2_235,
         },
       ]);
-      expect(state.simulation?.expiresAt).toBe(2_235);
+      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(2_235);
     } finally {
       nowSpy.mockRestore();
     }
@@ -250,8 +256,8 @@ describe("network tool schema", () => {
 
       const sent = iosErrorSimulations[0] as { expiresAtEpochMs: number };
       expect(sent.expiresAtEpochMs).toBe(31_000);
-      expect(state.simulation?.expiresAt).toBe(sent.expiresAtEpochMs);
-      expect(state.getSnapshot().simulatingErrors?.remainingSeconds).toBe(25);
+      expect(state.getSimulation(iosDevice.deviceId)?.expiresAt).toBe(sent.expiresAtEpochMs);
+      expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors?.remainingSeconds).toBe(25);
     } finally {
       nowSpy.mockRestore();
     }
@@ -295,7 +301,7 @@ describe("network tool schema", () => {
         durationSeconds: 30,
       },
     });
-    expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toEqual({
+    expect(NetworkState.getInstance().getSnapshot(iosDevice.deviceId).simulatingErrors).toEqual({
       errorType: "http500",
       remainingSeconds: 30,
       limit: undefined,
@@ -317,7 +323,9 @@ describe("network tool schema", () => {
       }),
     ).rejects.toThrow("in-app server is unreachable");
 
-    expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
+    expect(
+      NetworkState.getInstance().getSnapshot(iosDevice.deviceId).simulatingErrors,
+    ).toBeUndefined();
   });
 
   test("network simulateErrors on iOS fails closed when CtrlProxy rejects the command", async () => {
@@ -341,7 +349,9 @@ describe("network tool schema", () => {
       }),
     ).rejects.toThrow("does not support set_network_error_simulation");
 
-    expect(NetworkState.getInstance().getSnapshot().simulatingErrors).toBeUndefined();
+    expect(
+      NetworkState.getInstance().getSnapshot(iosDevice.deviceId).simulatingErrors,
+    ).toBeUndefined();
   });
 
   test("network simulateErrors on iOS uses the bundled runner once a supporting release is pinned", async () => {
@@ -372,7 +382,7 @@ describe("network tool schema", () => {
 
   test("network simulateErrors cancel syncs bundled iOS runner once the supporting release is pinned", async () => {
     const state = NetworkState.getInstance();
-    state.startSimulation("timeout", 30, null);
+    state.startSimulation(iosDevice.deviceId, "timeout", 30, null);
     const tool = ToolRegistry.getTool("network");
 
     const response = await tool!.deviceAwareHandler!(iosDevice, {
@@ -391,7 +401,7 @@ describe("network tool schema", () => {
         expiresAtEpochMs: null,
       },
     ]);
-    expect(state.getSnapshot().simulatingErrors).toBeUndefined();
+    expect(state.getSnapshot(iosDevice.deviceId).simulatingErrors).toBeUndefined();
   });
 
   test("network simulateErrors on iOS remains available when CtrlProxy downloads are skipped after a supporting release ships", async () => {
@@ -547,7 +557,9 @@ describe("network tool schema", () => {
       expectSyncStatus(payload);
       expect(payload.mockId).toBe("mock-1");
       expect(payload.mocked).toEqual({ "* api.example.com/items": 2 });
-      expect(NetworkState.getInstance().getMocks().has(payload.mockId)).toBe(true);
+      expect(NetworkState.getInstance().getMocks(androidDevice.deviceId).has(payload.mockId)).toBe(
+        true,
+      );
     });
 
     test(`clearMockNetwork retains remaining rules and reports Android sync when sendMessage ${outcome}`, async () => {
@@ -563,7 +575,9 @@ describe("network tool schema", () => {
       expectSyncStatus(payload);
       expect(payload.cleared).toBe(1);
       expect(payload.remaining).toEqual({ "* api.example.com/two": -1 });
-      expect(NetworkState.getInstance().getMockSummary()).toEqual(payload.remaining);
+      expect(NetworkState.getInstance().getMockSummary(androidDevice.deviceId)).toEqual(
+        payload.remaining,
+      );
     });
 
     test(`network retains simulation and reports Android sync when sendMessage ${outcome}`, async () => {
@@ -574,7 +588,7 @@ describe("network tool schema", () => {
       const payload = parseToolJson(response);
       expectSyncStatus(payload);
       expect(payload.simulatingErrors).toMatchObject({ errorType: "timeout", limit: 2 });
-      expect(NetworkState.getInstance().simulation).toMatchObject({
+      expect(NetworkState.getInstance().getSimulation(androidDevice.deviceId)).toMatchObject({
         errorType: "timeout",
         limit: 2,
       });
@@ -594,7 +608,7 @@ describe("network tool schema", () => {
     );
     expect(payload.deviceSynced).toBe(false);
     expect(payload.simulatingErrors).toBeUndefined();
-    expect(NetworkState.getInstance().simulation).toBeNull();
+    expect(NetworkState.getInstance().getSimulation(androidDevice.deviceId)).toBeNull();
     expect(JSON.parse(androidMessages.at(-1)!)).toMatchObject({
       type: "set_network_error_simulation",
       enabled: false,
@@ -699,6 +713,173 @@ describe("network tool schema", () => {
     expect(JSON.parse(androidMessages[0]).type).toBe("set_network_mock_rules");
   });
 
+  test("mockNetwork rejects an unescaped brace the device engine cannot compile (#10059)", async () => {
+    const tool = ToolRegistry.getTool("mockNetwork");
+
+    await expect(
+      tool!.deviceAwareHandler!(androidDevice, {
+        host: "api\\.example\\.com",
+        path: "/users/{id}/profile",
+      }),
+    ).rejects.toThrow("Invalid path regex: /users/{id}/profile (unescaped '{' at index 7");
+
+    expect(NetworkState.getInstance().getMockSummary(androidDevice.deviceId)).toEqual({});
+    expect(NetworkState.getInstance().getMocks(androidDevice.deviceId).size).toBe(0);
+    expect(androidMessages).toHaveLength(0);
+  });
+
+  test("mockNetwork accepts a leading inline flag the device engine supports (#10059)", async () => {
+    const tool = ToolRegistry.getTool("mockNetwork");
+
+    await tool!.deviceAwareHandler!(androidDevice, {
+      host: "(?i)api\\.example\\.com",
+      path: ".*",
+    });
+
+    expect(Object.keys(NetworkState.getInstance().getMockSummary(androidDevice.deviceId))).toEqual([
+      "* (?i)api\\.example\\.com.*",
+    ]);
+    expect(androidMessages).toHaveLength(1);
+  });
+
+  test("mockNetwork still rejects a host JavaScript cannot compile", async () => {
+    const tool = ToolRegistry.getTool("mockNetwork");
+
+    await expect(
+      tool!.deviceAwareHandler!(androidDevice, { host: "[invalid", path: "/ok" }),
+    ).rejects.toThrow("Invalid host regex: [invalid");
+    expect(NetworkState.getInstance().getMockSummary(androidDevice.deviceId)).toEqual({});
+  });
+
+  test("mockNetwork validates the pattern before recording per-device state or session ownership (#10059/#10060)", async () => {
+    await expect(
+      ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(androidDevice, {
+        host: "api\\.example\\.com",
+        path: "/users/{id}",
+        sessionUuid: "session-1",
+      }),
+    ).rejects.toThrow("Invalid path regex");
+
+    const state = NetworkState.getInstance();
+    expect(state.getMocks(androidDevice.deviceId).size).toBe(0);
+    expect(state.clearDeviceOwnedBySession(androidDevice.deviceId, "session-1")).toBe(false);
+    expect(androidMessages).toHaveLength(0);
+  });
+
+  describe("per-device scope (#10061)", () => {
+    const otherAndroid: BootedDevice = {
+      deviceId: "emulator-5556",
+      name: "Pixel 2",
+      platform: "android",
+    };
+
+    function lastRuleIds(): string[] {
+      const message = JSON.parse(androidMessages.at(-1)!);
+      return message.rules.map((rule: { mockId: string }) => rule.mockId);
+    }
+
+    test("a rule set for one device is not part of another device's sync", async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      const first = parseToolJson(
+        await mockTool.deviceAwareHandler!(androidDevice, { host: "a.com", path: "/feed" }),
+      );
+      const second = parseToolJson(
+        await mockTool.deviceAwareHandler!(otherAndroid, { host: "b.com", path: "/other" }),
+      );
+
+      expect(lastRuleIds()).toEqual([second.mockId]);
+      expect(second.mocked).toEqual({ "* b.com/other": -1 });
+      const state = NetworkState.getInstance();
+      expect(Array.from(state.getMocks(androidDevice.deviceId).keys())).toEqual([first.mockId]);
+      expect(Array.from(state.getMocks(otherAndroid.deviceId).keys())).toEqual([second.mockId]);
+    });
+
+    test("clearMockNetwork on one device keeps the other device's rules", async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      await mockTool.deviceAwareHandler!(androidDevice, { host: "a.com", path: "/feed" });
+      await mockTool.deviceAwareHandler!(otherAndroid, { host: "b.com", path: "/other" });
+
+      const cleared = parseToolJson(
+        await ToolRegistry.getTool("clearMockNetwork")!.deviceAwareHandler!(otherAndroid, {}),
+      );
+
+      expect(cleared.cleared).toBe(1);
+      expect(lastRuleIds()).toEqual([]);
+      expect(NetworkState.getInstance().getMocks(androidDevice.deviceId).size).toBe(1);
+      expect(
+        NetworkState.getInstance()
+          .getAllMocks()
+          .map((mock) => mock.deviceId),
+      ).toEqual([androidDevice.deviceId]);
+    });
+
+    test("error simulation is scoped to the device it was started on", async () => {
+      const networkTool = ToolRegistry.getTool("network")!;
+      await networkTool.deviceAwareHandler!(androidDevice, {
+        simulateErrors: { errorType: "timeout", durationSeconds: 30 },
+      });
+
+      const other = parseToolJson(
+        await networkTool.deviceAwareHandler!(otherAndroid, { capture: true }),
+      );
+
+      expect(other.simulatingErrors).toBeUndefined();
+      expect(NetworkState.getInstance().getSimulation(otherAndroid.deviceId)).toBeNull();
+      expect(NetworkState.getInstance().getSimulation(androidDevice.deviceId)).not.toBeNull();
+    });
+
+    test("rules and simulation installed inside a session record that session as owner", async () => {
+      await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(androidDevice, {
+        host: "a.com",
+        path: "/feed",
+        sessionUuid: "session-1",
+      });
+      await ToolRegistry.getTool("network")!.deviceAwareHandler!(otherAndroid, {
+        simulateErrors: { errorType: "timeout", durationSeconds: 30 },
+        sessionUuid: "session-2",
+      });
+      const state = NetworkState.getInstance();
+
+      expect(state.clearDeviceOwnedBySession(androidDevice.deviceId, "session-2")).toBe(false);
+      expect(state.clearDeviceOwnedBySession(androidDevice.deviceId, "session-1")).toBe(true);
+      expect(state.clearDeviceOwnedBySession(otherAndroid.deviceId, "session-2")).toBe(true);
+    });
+
+    test("a session release leaves a sessionless rule on the same device in place", async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      const own = parseToolJson(
+        await mockTool.deviceAwareHandler!(androidDevice, {
+          host: "own.com",
+          path: "/feed",
+          sessionUuid: "session-1",
+        }),
+      );
+      const sessionless = parseToolJson(
+        await mockTool.deviceAwareHandler!(androidDevice, { host: "a.com", path: "/feed" }),
+      );
+      const state = NetworkState.getInstance();
+
+      expect(state.clearDeviceOwnedBySession(androidDevice.deviceId, "session-1")).toBe(true);
+
+      expect(Array.from(state.getMocks(androidDevice.deviceId).keys())).toEqual([
+        sessionless.mockId,
+      ]);
+      expect(state.getMocks(androidDevice.deviceId).has(own.mockId)).toBe(false);
+    });
+
+    test("sessionless rules are never claimed by a session release", async () => {
+      await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(androidDevice, {
+        host: "a.com",
+        path: "/feed",
+      });
+
+      expect(
+        NetworkState.getInstance().clearDeviceOwnedBySession(androidDevice.deviceId, "session-1"),
+      ).toBe(false);
+      expect(NetworkState.getInstance().getMocks(androidDevice.deviceId).size).toBe(1);
+    });
+  });
+
   test("mockNetwork rejects invalid response header values before changing state", async () => {
     const tool = ToolRegistry.getTool("mockNetwork");
 
@@ -714,8 +895,67 @@ describe("network tool schema", () => {
       }),
     );
 
-    expect(NetworkState.getInstance().getMockSummary()).toEqual({});
+    expect(NetworkState.getInstance().getMockSummary(androidDevice.deviceId)).toEqual({});
     expect(androidMessages).toHaveLength(0);
+  });
+
+  for (const outcome of ["noCapability", "disabled", "failed", "superseded", "throws"] as const) {
+    function setIosOutcome(): void {
+      iosMockRuleSyncResult = outcome === "throws" ? new Error("probe exploded") : outcome;
+    }
+
+    test(`mockNetwork reports iOS rules as not synced when sync outcome is ${outcome}`, async () => {
+      setIosOutcome();
+      const payload = parseToolJson(
+        await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(iosDevice, {
+          host: "api\\.example\\.com",
+          path: "/v1/.*",
+          statusCode: 500,
+        }),
+      );
+      expect(payload.deviceSynced).toBe(false);
+      expect(payload.warning).toEqual(expect.stringContaining("not synced to the device"));
+      expect(payload.mockId).toBe("mock-1");
+      expect(NetworkState.getInstance().getMocks(iosDevice.deviceId).has(payload.mockId)).toBe(
+        true,
+      );
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    test(`clearMockNetwork reports iOS rules as not synced when sync outcome is ${outcome}`, async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      await mockTool.deviceAwareHandler!(iosDevice, { host: "api.example.com", path: "/one" });
+      setIosOutcome();
+      const payload = parseToolJson(
+        await ToolRegistry.getTool("clearMockNetwork")!.deviceAwareHandler!(iosDevice, {
+          mockId: "mock-1",
+        }),
+      );
+      expect(payload.deviceSynced).toBe(false);
+      expect(payload.warning).toEqual(expect.stringContaining("not synced to the device"));
+      expect(payload.cleared).toBe(1);
+    });
+  }
+
+  test("mockNetwork logs the underlying error when the iOS sync throws", async () => {
+    const error = new Error("probe exploded");
+    iosMockRuleSyncResult = error;
+    await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(iosDevice, {
+      host: "api.example.com",
+      path: "/one",
+    });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("probe exploded"), error);
+  });
+
+  test("mockNetwork omits sync warning fields when the iOS sync is sent", async () => {
+    const payload = parseToolJson(
+      await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(iosDevice, {
+        host: "api.example.com",
+        path: "/one",
+      }),
+    );
+    expect(payload).not.toHaveProperty("deviceSynced");
+    expect(payload).not.toHaveProperty("warning");
   });
 
   test("clearMockNetwork supports iOS and re-syncs remaining rules", async () => {

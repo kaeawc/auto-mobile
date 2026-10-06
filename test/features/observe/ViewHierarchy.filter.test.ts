@@ -12,6 +12,48 @@ const device = {
 } as any;
 
 describe("ViewHierarchy filtering", () => {
+  test.each(["unique-id", "container-title"])("preserves nodes carrying only %s", (key) => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const props = { [key]: "stable identity" };
+
+    for (const node of [props, { $: props }]) {
+      const result = viewHierarchy.filterViewHierarchy({ hierarchy: { node } });
+
+      expect(result.hierarchy.node).toEqual(props);
+    }
+  });
+
+  test.each([false, "false"])("preserves visible-to-user: %j on retained nodes", (value) => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const props = { text: "Invisible label", "visible-to-user": value, clickable: value };
+
+    for (const node of [props, { $: props }]) {
+      const result = viewHierarchy.filterViewHierarchy({ hierarchy: { node } });
+
+      expect(result.hierarchy.node).toEqual({
+        text: "Invisible label",
+        "visible-to-user": value,
+      });
+    }
+  });
+
+  test("drops nodes with no meaningful properties", () => {
+    const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
+    const props = {
+      class: "android.view.View",
+      "unique-id": "",
+      "container-title": "",
+      "visible-to-user": false,
+      clickable: false,
+    };
+
+    for (const node of [props, { $: props }]) {
+      const result = viewHierarchy.filterViewHierarchy({ hierarchy: { node } });
+
+      expect(result.hierarchy.node).toEqual([]);
+    }
+  });
+
   test("preserves action-only interactive nodes", () => {
     const viewHierarchy = new ViewHierarchy(device, new FakeAdbClientFactory());
     const result = viewHierarchy.filterViewHierarchy({

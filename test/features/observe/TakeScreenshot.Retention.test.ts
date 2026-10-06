@@ -70,7 +70,7 @@ function capture(cleanupOnCreate = false) {
   );
 }
 async function sweep() {
-  await capture()["cleanupCache"]();
+  await protection.sweep("/screenshots", files);
 }
 beforeEach(() => {
   timer = new FakeTimer();
@@ -92,6 +92,54 @@ test("returned old-mtime path survives the next size sweep", async () => {
   await observationScreenshotEvidence(path, "cached", undefined, { files, timer, protection });
   await sweep();
   expect(files.existsSync(path)).toBe(true);
+});
+
+test("constructing multiple screenshot services sweeps a cache directory once", async () => {
+  const sweepSpy = spyOn(protection, "sweep").mockResolvedValue(undefined);
+  const cacheDir = "/screenshots";
+  const create = () =>
+    new TakeScreenshot(
+      androidDevice("retention"),
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      timer,
+      new CountingIdGenerator(),
+      new FakeScreenshotFileWriter(),
+      files,
+      () => cacheDir,
+      undefined,
+      true,
+      { pathProtection: protection },
+    );
+
+  create();
+  create();
+  await Promise.resolve();
+  expect(sweepSpy).toHaveBeenCalledTimes(1);
+});
+
+test("a fresh protection sweeps the same cache directory once again", async () => {
+  const firstSweep = spyOn(protection, "sweep").mockResolvedValue(undefined);
+  const create = (pathProtection: BoundedScreenshotPathProtection) =>
+    new TakeScreenshot(
+      androidDevice("retention"),
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      timer,
+      new CountingIdGenerator(),
+      new FakeScreenshotFileWriter(),
+      files,
+      () => "/screenshots",
+      undefined,
+      true,
+      { pathProtection },
+    );
+
+  create(protection);
+  const freshProtection = new BoundedScreenshotPathProtection(timer, undefined);
+  const freshSweep = spyOn(freshProtection, "sweep").mockResolvedValue(undefined);
+  create(freshProtection);
+  await Promise.resolve();
+  expect(firstSweep).toHaveBeenCalledTimes(1);
+  expect(freshSweep).toHaveBeenCalledTimes(1);
 });
 test("an equivalent protected spelling survives an over-budget sweep", async () => {
   timer.advanceTime(60_000);
@@ -434,16 +482,20 @@ test("two devices and sessions share the byte cap without evicting live paths", 
 });
 
 test("count capacity refuses a new file and never drops a live file", async () => {
-  for (let i = 0; i < 4096; i++) {
+  // A small injected cap exercises the same admission path as the production 4096 without
+  // building and sweeping 4096 fake files (~10 ms, the slowest test in this file).
+  const countCap = 16;
+  protection = new BoundedScreenshotPathProtection(timer, undefined, countCap);
+  for (let i = 0; i < countCap; i++) {
     files.add(`crop-count-${i}.png`, 1, 0);
   }
   await expect(writeFrame("crop-count-overflow.png", 1)).rejects.toMatchObject({
-    countCap: 4096,
-    liveCount: 4096,
+    countCap,
+    liveCount: countCap,
     earliestExpiresAt: 600_000,
   });
   expect(files.existsSync("/screenshots/crop-count-0.png")).toBe(true);
-  expect(files.existsSync("/screenshots/crop-count-4095.png")).toBe(true);
+  expect(files.existsSync(`/screenshots/crop-count-${countCap - 1}.png`)).toBe(true);
 });
 
 test("post-write overshoot rolls back only the new unpublished frame", async () => {

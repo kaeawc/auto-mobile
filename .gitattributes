@@ -5,16 +5,20 @@ test/fixtures/android-display-config/*.txt text eol=lf
 # break the byte-exact fixture premise.
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/android-dumpsys-package/*.txt text eol=lf
+test/fixtures/android-notification-policy/*.txt text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/release/*.md text eol=lf
 test/fixtures/android-launcher/*.txt text eol=lf
+test/fixtures/android-launcher/*.json text eol=lf
 test/fixtures/android-adb/*.txt text eol=lf
 test/fixtures/android-getevent/*.txt text eol=lf
+test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf
 test/fixtures/android-enabled/*.json text eol=lf
+test/fixtures/android-action-compact/*.json text eol=lf
 test/fixtures/swipeon-auto-target/foldable.json text eol=lf
 test/fixtures/swipeon-auto-target/landscape.json text eol=lf
 test/fixtures/swipeon-auto-target/portrait-element.json text eol=lf
@@ -26,6 +30,12 @@ test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
+# Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.
+test/fixtures/android-locale/*.txt text eol=lf
+# Real `am start` / `monkey` failure captures from two emulators (#10192).
+test/fixtures/android-am-start/*.txt text eol=lf
+# Real `adb install` downgrade failure capture from the mt36 emulator run (#10191).
+test/fixtures/android-install/*.txt text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling
@@ -89,3 +99,7 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 # Shared overlay specs: preserve byte limits and path parity on Windows.
 test/fixtures/overlay-spec/**/*.json text eol=lf
 schemas/overlay-spec-contract.json text eol=lf
+schemas/overlay-asset-contract.json text eol=lf
+
+# Real contrast-audit captures (PNG already uses the test/fixtures exemption above).
+test/fixtures/accessibility-contrast/*.json text eol=lf

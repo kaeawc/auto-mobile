@@ -289,6 +289,7 @@ const observationDiffMetadataSchema = z
       "disabled",
       "stripped_by_actions_no_observe",
     ]),
+    hint: z.string().optional(),
     fromScreen: observationDiffScreenIdentitySchema.optional(),
     toScreen: observationDiffScreenIdentitySchema.optional(),
   })
@@ -326,11 +327,13 @@ const tapOnSearchUntilSchema = z
 
 const screenReaderNavigationSchema = z
   .object({
-    reachable: z.boolean().describe("Whether swipe cursor navigation reached the target"),
+    reachable: z.boolean().describe("Whether the accessibility cursor was moved onto the target"),
     traversalOrder: z.array(elementSchema).describe("Focused nodes in cursor traversal order"),
     focusTrapDetected: z
       .boolean()
-      .describe("Whether cursor navigation got stuck or failed to converge"),
+      .describe(
+        "Always false: a cursor that cannot be moved onto the target fails the call instead",
+      ),
   })
   .passthrough();
 
@@ -560,7 +563,8 @@ export const freshnessSchema = z
   })
   .passthrough();
 
-// Unavailable Android status reads return service + reason without asserting enabled.
+// Unavailable status reads (TalkBack on Android, VoiceOver on iOS) return service + reason
+// without asserting enabled.
 export const accessibilityStateSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -571,6 +575,14 @@ export const accessibilityStateSchema = z
         kind: z.literal("runtime-permission"),
         package: z.string(),
         activity: z.string(),
+      })
+      .optional(),
+    // Present on the `accessibility` tool's state check only when a feature flag changes what
+    // the action tools assume. `enabled` stays the device's reading (#10222).
+    detectionOverride: z
+      .object({
+        mode: z.enum(["forced-on", "auto-detect-off"]),
+        effectiveEnabled: z.boolean(),
       })
       .optional(),
   })
@@ -1139,7 +1151,9 @@ export const skeletonElementSchema = z
     occluded: z
       .literal(true)
       .optional()
-      .describe("Fully covered by the Android IME window; this row has no actionable affordance."),
+      .describe(
+        "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
+      ),
     checked: z.boolean().optional(),
     enabled: z
       .literal(false)
@@ -1178,10 +1192,16 @@ export const observeDiffSelectorSchema = z
       .nonnegative()
       .optional()
       .describe(
-        "Disambiguator present only when elementId repeats elsewhere among the " +
-          "next observation's nodes (PR #6242 review PRRT_kwDOP-GF5M6fq3iI) — same " +
-          "hierarchy-order semantics as the skeleton's #6238 `index`. Pass verbatim " +
-          "as tapOn({ selector, index }) to hit this exact occurrence.",
+        "Replay disambiguator from the next observation's skeleton for a repeated elementId " +
+          "or id-less label. Omitted when the node is absent or its own group contains " +
+          "a promotable inert match. Unique selectors carry neither index nor ambiguous.",
+      ),
+    ambiguous: z
+      .boolean()
+      .optional()
+      .describe(
+        "True when this selector matches multiple candidates, including inert nodes, " +
+          "and a safe replay index cannot be emitted. Never present with index or on a unique selector.",
       ),
   })
   .describe(

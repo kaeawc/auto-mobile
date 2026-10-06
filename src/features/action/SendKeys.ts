@@ -1,4 +1,13 @@
-import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
+import {
+  resolveTextCtrlProxyTimeoutMs,
+  getTextRequestDeadlineMs,
+  TEXT_MCP_REQUEST_HEADROOM_MS,
+} from "./textTransportTimeout";
+import {
+  combineAbortSignals,
+  getRequestContext,
+  runOutsideRequestContext,
+} from "../../utils/AbortContext";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { selectablePanels } from "../../models/DisplayPanel";
@@ -14,6 +23,10 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  beginPostActionCaptureAction,
+  deferTerminalScreenshot,
+} from "../../utils/PostActionCaptureContext";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
@@ -21,6 +34,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
+import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import {
   imeCommitSegmentCount,
@@ -45,7 +59,11 @@ import { prepareTargetDisplayAction, type RenderedObservationReader } from "./Ta
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { toSearchable } from "../utility/SearchableNode";
-import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
+import {
+  quarantineAndroidIme,
+  withAndroidImeLock,
+  type AndroidImeRecoverySnapshot,
+} from "./androidImeLock";
 import {
   AndroidImeCatalog,
   AUTO_MOBILE_IME_ID,
@@ -60,8 +78,28 @@ const ANDROID_TYPE_FOCUSED_INPUT_ERROR = `${ANDROID_FOCUSED_INPUT_ERROR}. For pr
 
 // Give posted formatters/recomposition a bounded chance to finish after a mismatch.
 export const IME_COMMIT_READ_BACK_SETTLE_MS = 150;
+/** Bounded settled re-reads used by the clear, eventLast caret and eventAll case read-backs. */
+const ANDROID_READ_BACK_ATTEMPTS = 3;
+/** CtrlProxy's caret-unknown warning (InsertTextPlanner.kt), removed once the caret is proven. */
+export const CARET_UNKNOWN_WARNING =
+  /Text was inserted, but the caret could not be placed after it \([^)]*\); the caret position is unknown, so insert any further text with request_insert_text rather than key events/;
+
+/** The field still shows its pre-clear text after the full settle poll (#9943). */
+const CLEAR_UNCHANGED_WARNING =
+  "The field still shows its pre-clear text after the clear was acknowledged; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.";
 
 class ImeRestorationError extends Error {}
+class SendKeysBudgetError extends Error {
+  constructor() {
+    super(
+      "sendKeys request budget exhausted; stopping to allow cancellation and keyboard restoration",
+    );
+  }
+}
+
+function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
+  return signal?.aborted === true && signal.reason instanceof SendKeysBudgetError;
+}
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
@@ -99,6 +137,9 @@ export function segmentGraphemes(text: string): string[] {
     ({ segment }) => segment,
   );
 }
+
+/** Distinct undeliverable password characters named in the up-front refusal (#9941). */
+const PASSWORD_UNDELIVERABLE_LIST_LIMIT = 5;
 
 function graphemeCodePoints(graphemes: string[]): string {
   return graphemes
@@ -233,8 +274,12 @@ export interface SendKeysCommandExecutor {
     command: SendKeysKeyCommand,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    display?: string,
   ): Promise<SendKeysCommandResult>;
-  clear(signal?: AbortSignal): Promise<{ success: boolean; error?: string; retryable?: boolean }>;
+  clear(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -252,12 +297,14 @@ export interface SendKeysKeyboard {
   execute(action: "close", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
 }
 
-export interface SendKeysObserver {
+export interface SendKeysObserver extends Pick<ObserveScreen, "captureScreenshot"> {
   execute(options?: {
     display?: string;
     signal?: AbortSignal;
     freshness?: HierarchyCaptureRequest["freshness"];
     minTimestamp?: number;
+    skipScreenshot?: boolean;
+    skipAccessibilityAudit?: boolean;
   }): Promise<ObserveResult>;
 }
 
@@ -277,6 +324,7 @@ export interface SendKeysDependencies {
 }
 
 interface SendKeysRouting extends SendKeysFocusOptions {
+  onCommandStart?: () => void;
   onDispatch?: () => void;
   onCommandResult?: (result: SendKeysCommandResult) => void;
   display?: string;
@@ -311,6 +359,7 @@ export interface SendKeysTextClient {
       timeoutMs?: number;
       deadlineMs?: number;
       abortSignal?: AbortSignal;
+      onDispatch?: () => void;
     },
   ): Promise<TextActionResult>;
   clear(signal?: AbortSignal): Promise<TextActionResult>;
@@ -327,6 +376,14 @@ export interface SendKeysTextClient {
     signal?: AbortSignal,
     delivery?: "commit" | "keyEvents",
   ): Promise<TextActionResult>;
+}
+
+type AndroidClearState = { kind: "applied" } | { kind: "pending" } | { kind: "unreadable" };
+
+/** Field text and collapsed caret expected after the eventLast prefix insert (UTF-16 units). */
+interface EventLastCaretExpectation {
+  text: string;
+  caret: number;
 }
 
 interface AndroidEventAllProgress {
@@ -437,7 +494,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           error: validationError,
         };
       }
-      const routing = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
+      const routing = await this.resolveAutoPasswordMode(
+        requestedMode,
+        operation,
+        command.text,
+        signal,
+        display,
+      );
       resolvedMode = routing.mode;
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
       const autoImeFallback = getAutoImeFallback(
@@ -529,6 +592,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     command: SendKeysKeyCommand,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    display?: string,
   ): Promise<SendKeysCommandResult> {
     signal?.throwIfAborted();
     // Explicit keys can move the caret, mutate the selection, or change focus (including IME
@@ -537,7 +601,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
       if (this.device.platform === "android") {
-        const focusResult = await this.requireFocusedAndroidInput(signal);
+        const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
         if (!focusResult.success) {
           return {
             index: -1,
@@ -556,6 +620,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         key: command.key,
         modifiers,
         success: result.success,
+        ...(result.retryable === false ? { retryable: false } : {}),
         ...(result.error ? { error: result.error } : {}),
       };
     }
@@ -573,17 +638,21 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
   }
 
-  async clear(signal?: AbortSignal): Promise<TextActionResult> {
+  async clear(signal?: AbortSignal, display?: string): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
-    const clearResult = await this.textClient.clear(
-      this.device.platform === "ios" ? signal : undefined,
+    if (this.device.platform !== "android") {
+      return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
+    }
+    const { result: clearResult, unchangedWarning } = await this.clearAndVerifyAndroid(
+      signal,
+      display,
     );
-    if (clearResult.success || this.device.platform !== "android") {
-      return clearResult;
+    if (clearResult.success) {
+      return this.withTextWarnings(clearResult, [unchangedWarning]);
     }
     logger.warn(`[SendKeys] Android accessibility clear failed: ${clearResult.error}`);
-    const focusResult = await this.requireFocusedAndroidInput(signal);
+    const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
     if (!focusResult.success) {
       return focusResult;
     }
@@ -594,7 +663,141 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         error: "Cannot determine focused text length for ADB clear fallback",
       };
     }
-    return this.clearEventOnlyForReplace(textLength, signal);
+    return this.clearEventOnlyForReplace(textLength, signal, display);
+  }
+
+  /**
+   * set_text("") is acknowledged before the app applies it; a following a11y insert plans from a
+   * fresh node snapshot and would otherwise write old + new text (#9884). The text read before the
+   * clear is what an unapplied clear still shows. Shared by the `clear` command and the clear that
+   * precedes an eventAll/eventLast replace (#9940).
+   */
+  private async clearAndVerifyAndroid(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
+    const preClearText = await this.readTextBeforeClear(signal, display);
+    const result = await this.textClient.clear();
+    if (!result.success) {
+      return { result };
+    }
+    const unchangedWarning = await this.verifyAndroidClearApplied(preClearText, signal, display);
+    return { result, ...(unchangedWarning === undefined ? {} : { unchangedWarning }) };
+  }
+
+  /**
+   * Focused text before a clear, or undefined when there is nothing to verify (empty field, or an
+   * unreadable one, which is logged). Hint-aware: placeholder text counts as empty.
+   */
+  private async readTextBeforeClear(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<string | undefined> {
+    try {
+      const snapshot = this.readFocusedTextSnapshot(
+        await this.readFreshObservation(signal, display),
+      );
+      if (snapshot === undefined) {
+        logger.warn(
+          "[SendKeys] Focused text is unreadable before the clear; it will not be verified",
+        );
+      }
+      return snapshot && snapshot.length > 0 ? snapshot.text : undefined;
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] Pre-clear read unavailable: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Poll until the acknowledged clear is visible, i.e. the field no longer shows the pre-clear
+   * text. Any other content (empty, hint, a mask or permanent prefix) counts as applied. Text that
+   * is still unchanged after the full poll is a settled state (a mask or permanent prefix already
+   * at its cleared content, or a refused clear), so the clear stays successful with a warning
+   * rather than failing the call (#9943). An unreadable field is retried, then passes.
+   */
+  private async verifyAndroidClearApplied(
+    preClearText: string | undefined,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<string | undefined> {
+    if (preClearText === undefined) {
+      return undefined;
+    }
+    let state: AndroidClearState = { kind: "unreadable" };
+    for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+      }
+      state = await this.readClearState(preClearText, signal, display);
+      if (state.kind === "applied") {
+        return undefined;
+      }
+    }
+    if (state.kind === "pending") {
+      logger.warn(`[SendKeys] ${CLEAR_UNCHANGED_WARNING}`);
+      return CLEAR_UNCHANGED_WARNING;
+    }
+    logger.warn("[SendKeys] The clear could not be verified: the focused field stayed unreadable");
+    return undefined;
+  }
+
+  private async readClearState(
+    preClearText: string,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<AndroidClearState> {
+    try {
+      const snapshot = this.readFocusedTextSnapshot(
+        await this.readFreshObservation(signal, display),
+      );
+      if (snapshot === undefined) {
+        return { kind: "unreadable" };
+      }
+      return snapshot.length === 0 || snapshot.text !== preClearText
+        ? { kind: "applied" }
+        : { kind: "pending" };
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] Clear read-back unavailable: ${errorMessage(error)}`, error);
+      return { kind: "unreadable" };
+    }
+  }
+
+  private async readFreshObservation(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<ObserveResult> {
+    this.checkAbort(signal);
+    const observation = await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      skipScreenshot: true,
+      ...(display === undefined ? {} : { display }),
+    });
+    this.checkAbort(signal);
+    return observation;
+  }
+
+  /** Hint-aware length plus the text; undefined when the field cannot be read. */
+  private readFocusedTextSnapshot(
+    observation: ObserveResult,
+  ): { text: string; length: number } | undefined {
+    const hierarchy = observation.viewHierarchy;
+    if (observation.freshness?.isFresh === false || !hierarchy || hierarchy.hierarchy.error) {
+      return undefined;
+    }
+    // Hint-aware, like ClearText.verifyKeyEventClear: placeholder text counts as empty.
+    const length = getFocusedTextLength(hierarchy);
+    if (length === undefined) {
+      return undefined;
+    }
+    const text = this.readFocusedText(observation);
+    if (length === 0) {
+      return { text: text ?? "", length };
+    }
+    return text === undefined ? undefined : { text, length };
   }
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
@@ -608,8 +811,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async insertText(
     text: string,
     options?: Parameters<SendKeysTextClient["insert"]>[1],
+    signal?: AbortSignal,
   ): Promise<TextActionResult> {
-    const result = await this.textClient.insert(text, options);
+    const result = await this.textClient.insert(
+      text,
+      signal ? { ...options, abortSignal: signal } : options,
+    );
     this.recordCaretState(result);
     return result;
   }
@@ -628,6 +835,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
+    text: string,
     signal?: AbortSignal,
     display?: string,
   ): Promise<{ mode: AndroidSendKeysTypingMode; focusedInputVerified: boolean }> {
@@ -635,10 +843,41 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { mode: this.resolveMode(requestedMode), focusedInputVerified: false };
     }
     const password = await this.isFocusedAndroidPasswordField(operation, signal, display);
+    if (password && operation === "insert") {
+      await this.requirePasswordTextDeliverable(text, signal);
+    }
     return {
       mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
       focusedInputVerified: password !== undefined,
     };
+  }
+
+  /**
+   * Auto insert into a password field is delivered as key events, because CtrlProxy refuses
+   * `request_insert_text` on password fields. A character with no key event (non-ASCII, or an
+   * uppercase letter / shifted symbol below API 31) would be refused mid-run after the earlier
+   * characters were already typed (#9941). Decide up front so nothing is typed in that case.
+   */
+  private async requirePasswordTextDeliverable(text: string, signal?: AbortSignal): Promise<void> {
+    const undeliverable: string[] = [];
+    for (const grapheme of segmentGraphemes(text)) {
+      signal?.throwIfAborted();
+      if (!(await this.getEventAllKeyEventPlan(grapheme))) {
+        undeliverable.push(grapheme);
+      }
+    }
+    if (undeliverable.length === 0) {
+      return;
+    }
+    const distinct = [...new Set(undeliverable)];
+    const shown = graphemeCodePoints(distinct.slice(0, PASSWORD_UNDELIVERABLE_LIST_LIMIT));
+    const more =
+      distinct.length > PASSWORD_UNDELIVERABLE_LIST_LIMIT
+        ? ` and ${distinct.length - PASSWORD_UNDELIVERABLE_LIST_LIMIT} more`
+        : "";
+    throw new ActionableError(
+      `Nothing was typed: the text for the focused password field contains ${distinct.length} distinct character(s) that cannot be sent as key events on this device (${shown}${more}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Non-ASCII characters never have a key event; uppercase letters and shifted symbols need Android 12 (API 31) or newer. Use operation: "replace" to set the whole value at once.`,
+    );
   }
 
   private async isFocusedAndroidPasswordField(
@@ -649,6 +888,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const observation = await this.observer.execute({
       signal,
       freshness: "fresh",
+      skipScreenshot: true,
       ...(display === undefined ? {} : { display }),
     });
     const hierarchy = observation.viewHierarchy;
@@ -728,19 +968,21 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       routing = {},
       focusedInputVerified = false,
     } = options;
-    const { signal } = routing;
+    const { signal, display } = routing;
     if (operation === "replace") {
       this.resetCaretState();
     }
     switch (mode) {
       case "a11y":
-        return operation === "replace" ? this.textClient.replace(text) : this.insertText(text);
+        return operation === "replace"
+          ? this.textClient.replace(text)
+          : this.insertText(text, undefined, signal);
       case "eventLast":
-        return this.executeAndroidEventLast(text, operation, signal);
+        return this.executeAndroidEventLast(text, operation, signal, display);
       case "eventAll":
-        return this.executeAndroidEventAll(text, operation, signal, focusedInputVerified);
+        return this.executeAndroidEventAll(text, operation, signal, focusedInputVerified, display);
       case "eventOnly":
-        return this.executeAndroidEventOnly(text, operation, signal);
+        return this.executeAndroidEventOnly(text, operation, signal, display);
       case "ime":
         return this.executeAndroidImeOrFallback(
           text,
@@ -811,7 +1053,39 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       this.device.deviceId,
       () => this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode),
       signal,
+      { recoverQuarantined: (snapshot) => this.verifySafeImeRecovery(snapshot, signal) },
     );
+  }
+
+  private async verifySafeImeRecovery(
+    snapshot: AndroidImeRecoverySnapshot,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (snapshot.wasEnabled === undefined) {
+      return false;
+    }
+    if (snapshot.imeId === AUTO_MOBILE_IME_ID) {
+      return false;
+    }
+    const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
+    try {
+      const state = await catalog.list(signal);
+      const safe = state.installed.some(
+        (ime) => ime.id === snapshot.imeId && ime.enabled && ime.active,
+      );
+      const commitImeEnabled =
+        state.installed.find((ime) => ime.id === AUTO_MOBILE_IME_ID)?.enabled ?? false;
+      const commitImeStateMatches = snapshot.wasEnabled ? commitImeEnabled : !commitImeEnabled;
+      return (
+        commitImeStateMatches &&
+        safe &&
+        state.activeImeId === snapshot.imeId &&
+        (await catalog.readSubtype(snapshot.imeId, signal)).id === snapshot.subtypeId
+      );
+    } catch (error) {
+      logger.warn("[SendKeys] Quarantined keyboard recovery could not be verified", error);
+      return false;
+    }
   }
 
   private async runAndroidImeCommit(
@@ -932,6 +1206,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       prior,
       routing,
       mode,
+      { ...priorSubtype, wasEnabled },
     );
     if (safeToRestore) {
       await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
@@ -949,6 +1224,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     prior: string | null,
     routing: ImeCommitRouting,
     mode: "ime" | "imeKeyEvents",
+    priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
   ): Promise<{
     outcome?: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode };
     failure?: unknown;
@@ -956,6 +1232,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }> {
     const { signal } = routing;
     let safeToRestore = true;
+    let commitResult: TextActionResult = { success: false };
     try {
       this.checkAbort(signal);
       if (operation === "replace") {
@@ -972,7 +1249,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         signal,
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
-      safeToRestore = this.canRestoreAfterImeCommit(result);
+      safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
+      commitResult = result;
       if (result.success && mode === "ime" && text.length > 0) {
         const error = await this.verifyImeCommit(text, routing);
         if (error !== undefined) {
@@ -1000,6 +1278,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore,
       };
     } catch (error) {
+      if (commitResult.success && isSendKeysBudgetExhausted(signal)) {
+        logger.warn("[SendKeys] Budget expired after IME acknowledgement", error);
+        return {
+          outcome: {
+            ...commitResult,
+            resolvedMode: mode,
+            warning: [
+              commitResult.warning,
+              "Delivery was acknowledged but not verified before the request budget expired.",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          },
+          safeToRestore,
+        };
+      }
       return { failure: error, safeToRestore };
     }
   }
@@ -1020,6 +1314,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         const observation = await this.observer.execute({
           signal,
           freshness: "fresh",
+          skipScreenshot: true,
           ...(display === undefined ? {} : { display }),
         });
         this.checkAbort(signal);
@@ -1161,9 +1456,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private canRestoreAfterImeCommit(result: TextActionResult): boolean {
+  private canRestoreAfterImeCommit(
+    result: TextActionResult,
+    prior: string | null,
+    subtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
+  ): boolean {
     if (result.sessionUnsafe) {
-      quarantineAndroidIme(this.device.deviceId);
+      quarantineAndroidIme(
+        this.device.deviceId,
+        prior === null
+          ? undefined
+          : { imeId: prior, subtypeId: subtype.id, wasEnabled: subtype.wasEnabled },
+      );
       return false;
     }
     return true;
@@ -1204,7 +1508,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private async restoreKeyboardProfile(profileId: string): Promise<void> {
     try {
-      const result = await this.textClient.setKeyboardProfile(profileId);
+      const result = await runOutsideRequestContext(() =>
+        this.textClient.setKeyboardProfile(profileId),
+      );
       if (!result.success) {
         logger.warn(
           `[SendKeys] Failed to restore keyboard profile: ${result.error ?? "unknown error"}`,
@@ -1300,10 +1606,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ): Promise<void> {
     const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
     try {
-      await this.restoreComponentAndSubtype(catalog, priorImeId, subtype);
-      await this.verifyRestoredIme(catalog, priorImeId, wasEnabled);
+      // Cleanup must complete even when the ambient request signal has been cancelled.
+      await runOutsideRequestContext(async () => {
+        await this.restoreComponentAndSubtype(catalog, priorImeId, subtype);
+        await this.verifyRestoredIme(catalog, priorImeId, wasEnabled);
+      });
     } catch (error) {
-      quarantineAndroidIme(this.device.deviceId);
+      quarantineAndroidIme(
+        this.device.deviceId,
+        priorImeId === null ? undefined : { imeId: priorImeId, subtypeId: subtype.id, wasEnabled },
+      );
       logger.warn("[SendKeys] Original keyboard restoration failed", error);
       const recovery =
         priorImeId === null
@@ -1383,12 +1695,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const chars = Array.from(text);
     const split = await this.findLastKeyEvent(chars, signal);
     if (!split) {
       const result =
-        operation === "replace" ? await this.textClient.replace(text) : await this.insertText(text);
+        operation === "replace"
+          ? await this.textClient.replace(text)
+          : await this.insertText(text, undefined, signal);
       return { ...result, resolvedMode: "a11y" };
     }
 
@@ -1402,6 +1717,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const focusResult = await this.requireFocusedAndroidInput(
       signal,
       ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      display,
     );
     if (!focusResult.success) {
       return focusResult;
@@ -1409,18 +1725,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
     const prefix = chars.slice(0, split.index).join("");
     const suffix = chars.slice(split.index + 1).join("");
-    const initialResult = await this.prepareEventLastPrefix(prefix, operation);
+    const initialResult = await this.insertEventLastPrefix(prefix, operation, signal, display);
     if (!initialResult.success) {
       return initialResult;
-    }
-
-    if (initialResult.caretPlaced === false) {
-      return markPartialAfterMutation({
-        ...initialResult,
-        success: false,
-        error:
-          "eventLast requires a real tail key event, but the prefix insert could not place the caret; remaining text was not sent",
-      });
     }
     const precedingState = await this.readPrecedingState(suffix.length > 0);
     const eventFailure = await this.executeKeyEventPlanSafely(
@@ -1433,10 +1740,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     try {
       const suffixResult = suffix
-        ? await this.insertText(suffix, {
-            expectedSuffix: chars[split.index],
-            ...(precedingState ? { precedingState } : {}),
-          })
+        ? await this.insertText(
+            suffix,
+            {
+              expectedSuffix: chars[split.index],
+              ...(precedingState ? { precedingState } : {}),
+            },
+            signal,
+          )
         : { success: true };
       return this.withTextWarnings(markPartialAfterMutation(suffixResult), [initialResult.warning]);
     } catch (error) {
@@ -1446,6 +1757,114 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         [initialResult.warning],
       );
     }
+  }
+
+  private async insertEventLastPrefix(
+    prefix: string,
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    // The expectation needs the field as it was BEFORE the insert, so it is read up front.
+    const expected = await this.expectEventLastCaret(prefix, operation, signal);
+    return this.confirmEventLastCaret(
+      await this.prepareEventLastPrefix(prefix, operation, signal, display),
+      expected,
+      signal,
+    );
+  }
+
+  private async expectEventLastCaret(
+    prefix: string,
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+  ): Promise<EventLastCaretExpectation | undefined> {
+    if (operation === "replace") {
+      return { text: prefix, caret: prefix.length };
+    }
+    if (!prefix || !this.textClient.readInsertTextState) {
+      return undefined;
+    }
+    try {
+      const before = await this.readInsertTextStateWhileLive(signal);
+      const expected = before && expectedStateAfterInsert(before, prefix);
+      if (!expected) {
+        logger.warn(
+          `[SendKeys] eventLast cannot prove the caret: pre-insert state is ${describeInsertState(before)}`,
+        );
+      }
+      return expected;
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(
+        `[SendKeys] eventLast pre-insert read unavailable: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
+  /** The client read takes no signal; stop waiting on a cancelled call (the read may finish later). */
+  private async readInsertTextStateWhileLive(
+    signal?: AbortSignal,
+  ): Promise<InsertTextState | undefined> {
+    const read = this.textClient.readInsertTextState?.();
+    return read && (await awaitWhileRequestIsLive(read, signal));
+  }
+
+  /** Turn a `caretPlaced: false` prefix result into a failure unless the caret is proven (#9887). */
+  private async confirmEventLastCaret(
+    result: TextActionResult,
+    expected: EventLastCaretExpectation | undefined,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult> {
+    if (!result.success || result.caretPlaced !== false) {
+      return result;
+    }
+    // Compose fields report "not placed" even when the caret sits after the prefix.
+    if (!expected || !(await this.isCaretProvenAfterPrefix(expected, signal))) {
+      return markPartialAfterMutation({
+        ...result,
+        success: false,
+        error:
+          "eventLast requires a real tail key event, but the prefix insert could not place the caret; remaining text was not sent",
+      });
+    }
+    this.resetCaretState();
+    return this.withoutCaretUnknownWarning(result);
+  }
+
+  /** Read the insert state back (bounded) and require exactly the expected text and caret. */
+  private async isCaretProvenAfterPrefix(
+    expected: EventLastCaretExpectation,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+      }
+      this.checkAbort(signal);
+      try {
+        const state = await this.readInsertTextStateWhileLive(signal);
+        if (state && stateMatchesExpectation(state, expected)) {
+          return true;
+        }
+      } catch (error) {
+        this.checkAbort(signal, error);
+        logger.warn(
+          `[SendKeys] eventLast caret read-back unavailable: ${errorMessage(error)}`,
+          error,
+        );
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private withoutCaretUnknownWarning(result: TextActionResult): TextActionResult {
+    const { warning, ...rest } = result;
+    const remaining = warning?.replace(CARET_UNKNOWN_WARNING, "").trim();
+    return { ...rest, ...(remaining ? { warning: remaining } : {}) };
   }
 
   private async findLastKeyEvent(
@@ -1468,11 +1887,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async prepareEventLastPrefix(
     prefix: string,
     operation: SendKeysOperation,
+    signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     if (operation === "replace") {
-      return prefix ? await this.textClient.replace(prefix) : await this.textClient.clear();
+      // A bare tail key event follows an empty prefix, so the clear must be visible first (#9940).
+      if (prefix) {
+        return await this.textClient.replace(prefix);
+      }
+      const { result, unchangedWarning } = await this.clearForReplace(operation, signal, display);
+      return this.withTextWarnings(result, [unchangedWarning]);
     }
-    return prefix ? this.insertText(prefix) : { success: true };
+    return prefix ? this.insertText(prefix, undefined, signal) : { success: true };
   }
 
   private async executeAndroidEventAll(
@@ -1480,13 +1906,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     operation: SendKeysOperation,
     signal?: AbortSignal,
     focusedInputVerified = false,
+    display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const graphemes = segmentGraphemes(text);
     if (this.androidCaretUnsafe || !(await this.hasAndroidKeyEvent(graphemes))) {
       const result =
         operation === "replace"
           ? await this.textClient.replace(text)
-          : await this.insertGraphemeRun(graphemes, 0, false);
+          : await this.insertGraphemeRun(graphemes, 0, false, undefined, signal);
       return { ...result, resolvedMode: "a11y" };
     }
 
@@ -1494,22 +1921,105 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const focusResult = await this.requireFocusedAndroidInput(
         signal,
         ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+        display,
       );
       if (!focusResult.success) {
         return focusResult;
       }
     }
 
-    const clearResult = await this.clearForReplace(operation);
+    const { result: clearResult, unchangedWarning } = await this.clearForReplace(
+      operation,
+      signal,
+      display,
+    );
     if (!clearResult.success) {
       return clearResult;
     }
-    return this.executeAndroidEventAllCharacters(
+    const typed = await this.executeAndroidEventAllCharacters(
       graphemes,
       operation === "replace",
       operation === "replace",
       signal,
     );
+    if (!typed.success) {
+      return typed;
+    }
+    const confirmed = unchangedWarning
+      ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
+      : typed;
+    return this.verifyEventAllLetterCase(text, confirmed, signal, display);
+  }
+
+  /**
+   * The replace's clear left the pre-clear text showing, so the typed text may have landed after
+   * it: old text + new text. One read after typing: a field that now equals the requested text
+   * was just slow to apply the clear; anything else keeps the unchanged-clear warning, naming the
+   * field content. A permanent prefix or mask legitimately gives "prefix + text", which cannot be
+   * told from a refused clear by text alone, so this stays a warning rather than a failure.
+   */
+  private async confirmReplaceAfterUnchangedClear(
+    text: string,
+    unchangedWarning: string,
+    typed: TextActionResult,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    let field: string | undefined;
+    try {
+      field = this.readFocusedText(await this.readFreshObservation(signal, display));
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] Replace read-back unavailable: ${errorMessage(error)}`, error);
+    }
+    if (field === text) {
+      return typed;
+    }
+    const observed =
+      field === undefined
+        ? "The field could not be read after typing."
+        : `After typing, the field holds ${JSON.stringify(field)}, not just the requested text: it is either a permanent prefix or mask, or the field refused the clear and now contains both the old and the new text.`;
+    return this.withTextWarnings(typed, [`${unchangedWarning} ${observed}`]);
+  }
+
+  /**
+   * Some keyboards/fields change letter case after key events (#9888). Warn only on the
+   * case-insensitive match; any other mismatch or an unreadable field is left alone.
+   */
+  private async verifyEventAllLetterCase(
+    text: string,
+    typed: TextActionResult,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    if (text.toLowerCase() === text.toUpperCase()) {
+      return typed;
+    }
+    try {
+      for (let attempt = 0; attempt < ANDROID_READ_BACK_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
+        }
+        const field = this.readFocusedText(await this.readFreshObservation(signal, display));
+        if (field === undefined || field.includes(text)) {
+          return typed;
+        }
+        if (!field.toLowerCase().includes(text.toLowerCase())) {
+          return typed;
+        }
+        if (attempt === ANDROID_READ_BACK_ATTEMPTS - 1) {
+          // The app may intend the other case (all-caps, auto-capitalise). The text was typed,
+          // so stay successful: a failed result invites a retry that would duplicate it.
+          const warning = `eventAll typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case (possibly intended). Use mode "ime" or "a11y" for exact case.`;
+          logger.warn(`[SendKeys] ${warning}`);
+          return this.withTextWarnings(typed, [warning]);
+        }
+      }
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn(`[SendKeys] eventAll case read-back unavailable: ${errorMessage(error)}`, error);
+    }
+    return typed;
   }
 
   private withTextWarnings(
@@ -1564,6 +2074,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const insertResult = await this.insertEventAllRun(
         graphemes.slice(runStart, index + 1),
         progress,
+        signal,
       );
       if (!insertResult.success) {
         return insertResult;
@@ -1624,6 +2135,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async insertEventAllRun(
     run: string[],
     progress: AndroidEventAllProgress,
+    signal?: AbortSignal,
   ): Promise<TextActionResult> {
     const result = await this.insertGraphemeRun(
       run,
@@ -1635,6 +2147,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(progress.precedingState ? { precedingState: progress.precedingState } : {}),
           }
         : undefined,
+      signal,
     );
     if (result.success) {
       progress.mutated = true;
@@ -1660,7 +2173,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     signal?.throwIfAborted();
     // insertEventAllRun reset pendingKeyText; the service supplies the remembered caret.
-    return this.insertEventAllRun(rest, progress);
+    return this.insertEventAllRun(rest, progress, signal);
   }
 
   private finishEventAll(
@@ -1699,16 +2212,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     run: string[],
     committedGraphemes: number,
     previouslyMutated: boolean,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
+    options?: Parameters<SendKeysTextClient["insert"]>[1],
+    signal?: AbortSignal,
   ): Promise<TextActionResult> {
     const text = run.join("");
     const codePoints = graphemeCodePoints(run);
     try {
-      const result = await this.insertText(text, options);
+      const result = await this.insertText(text, options, signal);
       if (result.success) {
         return result;
       }
@@ -1748,8 +2258,20 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
   }
 
-  private clearForReplace(operation: SendKeysOperation): Promise<TextActionResult> {
-    return operation === "replace" ? this.textClient.clear() : Promise.resolve({ success: true });
+  /**
+   * Clear before a replace and wait until it is visible, so a following insert or the preceding-state
+   * baseline read does not plan from the pre-clear text (#9940). `unchangedWarning` is set when the
+   * field still shows its pre-clear text: a mask or prefix at its cleared content, or a refused clear.
+   */
+  private async clearForReplace(
+    operation: SendKeysOperation,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
+    if (operation !== "replace") {
+      return { result: { success: true } };
+    }
+    return this.clearAndVerifyAndroid(signal, display);
   }
 
   private async hasAndroidKeyEvent(graphemes: string[]): Promise<boolean> {
@@ -1765,6 +2287,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     const plans: KeyEventPlan[] = [];
     const chars = Array.from(text);
@@ -1783,6 +2306,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const focusResult = await this.requireFocusedAndroidInput(
       signal,
       ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      display,
     );
     if (!focusResult.success) {
       return focusResult;
@@ -1797,7 +2321,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             "eventOnly replacement requires a known focused text length; use a11y replacement instead",
         };
       }
-      const clearResult = await this.clearEventOnlyForReplace(textLength, signal);
+      const clearResult = await this.clearEventOnlyForReplace(textLength, signal, display);
       if (!clearResult.success) {
         return clearResult;
       }
@@ -1823,6 +2347,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async clearEventOnlyForReplace(
     count: number,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult> {
     let deleted = false;
     try {
@@ -1837,7 +2362,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         supportsKeyCombination,
       );
       const verification = await verifyKeyEventClear(
-        () => this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 }),
+        () =>
+          this.observer.execute({
+            signal,
+            freshness: "fresh",
+            minTimestamp: 0,
+            ...(display === undefined ? {} : { display }),
+            skipScreenshot: true,
+          }),
         signal,
       );
       return deleted ? markPartialAfterMutation(verification) : verification;
@@ -1852,11 +2384,17 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async requireFocusedAndroidInput(
     signal?: AbortSignal,
     error: string = ANDROID_FOCUSED_INPUT_ERROR,
+    display?: string,
   ): Promise<
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
     | { success: false; error: string }
   > {
-    const observation = await this.observer.execute({ signal, freshness: "fresh" });
+    const observation = await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      ...(display === undefined ? {} : { display }),
+      skipScreenshot: true,
+    });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return {
@@ -1903,12 +2441,23 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         },
         replace: async (text) => client.requestSetText(text),
         insert: async (text, options) =>
-          client.requestInsertText(text, undefined, undefined, {
-            ...options,
-            acceptsCaretNotPlaced: true,
-          }),
+          client.requestInsertText(
+            text,
+            options?.timeoutMs,
+            undefined,
+            {
+              ...options,
+              acceptsCaretNotPlaced: true,
+            },
+            {
+              abortSignal: options?.abortSignal,
+              onDispatch: options?.onDispatch,
+              deadlineMs: options?.deadlineMs,
+            },
+          ),
         clear: async () => client.requestClearText(),
-        ime: async (action) => client.requestImeAction(action),
+        ime: async (action, signal, onDispatch) =>
+          client.requestImeAction(action, 5000, undefined, signal, onDispatch),
         supportsImeCommit: async () =>
           (await client.supportsCommand("request_commit_text")) &&
           (await client.supportsCommand("request_cancel_ime_commit")),
@@ -2079,12 +2628,111 @@ export class SendKeys {
         assertCurrent,
       });
     }
-    return this.executeUnbounded(commands, selector, progress, signal, {
-      ...options,
-      display,
-      displayId,
-      assertCurrent,
-    });
+    const routing = { ...options, display, displayId, assertCurrent };
+    return this.executeWithRequestBudget(commands, { selector, progress, signal, routing });
+  }
+
+  private async executeWithRequestBudget(
+    commands: SendKeysCommand[],
+    options: {
+      selector?: SendKeysSelector;
+      progress?: ProgressCallback;
+      signal?: AbortSignal;
+      routing: SendKeysRouting;
+    },
+  ): Promise<SendKeysResult> {
+    const { selector, progress, signal, routing } = options;
+    // Capture the live accessor while request context is active; timers may run outside it.
+    const getDeadlineMs = getRequestContext()?.getDeadlineMs;
+    const deadlineMs = getTextRequestDeadlineMs(getDeadlineMs);
+    if (this.device.platform !== "android" || deadlineMs === undefined) {
+      return this.executeUnbounded(commands, selector, progress, signal, routing);
+    }
+    const controller = new AbortController();
+    const remainingMs = deadlineMs - this.timer.now() - TEXT_MCP_REQUEST_HEADROOM_MS;
+    let handle: NodeJS.Timeout | undefined;
+    const expireOrRearm = () => {
+      const liveRemainingMs =
+        (getTextRequestDeadlineMs(getDeadlineMs) ?? deadlineMs) -
+        this.timer.now() -
+        TEXT_MCP_REQUEST_HEADROOM_MS;
+      if (liveRemainingMs > 0) {
+        handle = this.timer.setTimeout(expireOrRearm, liveRemainingMs);
+      } else {
+        controller.abort(new SendKeysBudgetError());
+      }
+    };
+    expireOrRearm();
+    const combined = combineAbortSignals(signal, controller.signal);
+    const results: SendKeysCommandResult[] = [];
+    let pending = false;
+    try {
+      return await this.executeUnbounded(commands, selector, progress, combined, {
+        ...routing,
+        onCommandStart: () => {
+          pending = true;
+        },
+        onCommandResult: (result) => {
+          pending = false;
+          results.push(result);
+        },
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!isSendKeysBudgetExhausted(combined)) {
+        // Preserve the same error identity as the no-deadline path.
+        throw error;
+      }
+      logger.warn("[SendKeys] Request budget exhausted", error);
+      return this.budgetResult(commands.length, results, pending, remainingMs <= 0);
+    } finally {
+      if (handle !== undefined) {
+        this.timer.clearTimeout(handle);
+      }
+    }
+  }
+
+  private budgetResult(
+    commandCount: number,
+    results: SendKeysCommandResult[],
+    indeterminate: boolean,
+    refusedAtAdmission: boolean,
+  ): SendKeysResult {
+    const completedCommands = results.filter((result) => result.success).length;
+    const warnings = results.flatMap((result) => (result.warning ? [result.warning] : []));
+    if (completedCommands === commandCount) {
+      return {
+        success: true,
+        completedCommands,
+        commands: results,
+        warning: [
+          ...warnings,
+          "All commands were delivered; the request budget expired before final observation completed.",
+        ].join(" "),
+      };
+    }
+    const firstUnconfirmed = results.length;
+    const notSent = commandCount - firstUnconfirmed - (indeterminate ? 1 : 0);
+    const error =
+      `sendKeys request budget exhausted: ${completedCommands} command(s) delivered; ` +
+      `${notSent} command(s) not sent.` +
+      (indeterminate
+        ? ` Command ${firstUnconfirmed} outcome is indeterminate: it may have been sent but was not acknowledged. Do not retry automatically; observe before retrying.`
+        : refusedAtAdmission
+          ? " no request budget remained at admission; no commands were sent."
+          : " No further commands were dispatched.");
+    return {
+      success: false,
+      completedCommands,
+      failedIndex: firstUnconfirmed,
+      commands: results,
+      error,
+      warning: [
+        ...warnings,
+        "Partial application: already delivered commands are not rolled back.",
+      ].join(" "),
+      retryable: false,
+    };
   }
 
   private validateFocusOptions(
@@ -2127,7 +2775,7 @@ export class SendKeys {
     const target = await prepareTargetDisplayAction(
       this.device,
       display,
-      this.observer,
+      { execute: (options) => this.observer.execute({ ...options, skipScreenshot: true }) },
       this.adbFactory.create(this.device),
       this.lastRenderedObservation,
       signal,
@@ -2265,12 +2913,23 @@ export class SendKeys {
     const preflight = this.preflightCommands(commands);
     const observe = async (minTimestamp?: number) => {
       await progress?.(commands.length, commands.length, "Observing final keyboard input state");
-      return this.observer.execute({
-        display: routing.display,
+      const capture = this.observer.captureScreenshot?.bind(this.observer);
+      const observation = await this.observer.execute({
+        ...(routing.display === undefined ? {} : { display: routing.display }),
         signal,
         freshness: "fresh",
         minTimestamp,
+        ...(capture ? { skipScreenshot: true, skipAccessibilityAudit: true } : {}),
       });
+      if (
+        capture &&
+        !deferTerminalScreenshot(observation, (chosen, requestSignal) =>
+          capture(undefined, requestSignal ?? signal, chosen),
+        )
+      ) {
+        await capture(undefined, signal, observation);
+      }
+      return observation;
     };
     // Accept hierarchy updates emitted while focus or command delivery is completing.
     const actionStartTimestamp = preflight ? undefined : await this.timestampProvider.now();
@@ -2287,16 +2946,30 @@ export class SendKeys {
     }
     const execution =
       preflight ?? (await this.executeCommands(commands, progress, signal, routing));
-    if (
-      execution.results.some(
-        (result) => this.device.platform === "ios" && result.retryable === false,
-      )
-    ) {
-      return this.buildResult(execution.results, execution.failure);
+    const terminal = this.terminalCommandFailure(commands.length, execution, signal);
+    if (terminal) {
+      return terminal;
     }
     signal?.throwIfAborted();
     const observation = await observe(actionStartTimestamp);
     return this.buildResult(execution.results, execution.failure, observation);
+  }
+
+  private terminalCommandFailure(
+    commandCount: number,
+    execution: { results: SendKeysCommandResult[]; failure?: SendKeysFailure },
+    signal?: AbortSignal,
+  ): SendKeysResult | undefined {
+    if (execution.failure && isSendKeysBudgetExhausted(signal)) {
+      return {
+        ...this.buildResult(execution.results, execution.failure),
+        warning: `Request budget exhausted: ${commandCount - execution.results.length} command(s) not sent. Already delivered commands are not rolled back.`,
+      };
+    }
+    if (execution.results.some((result) => result.retryable === false)) {
+      return this.buildResult(execution.results, execution.failure);
+    }
+    return undefined;
   }
 
   private preflightCommands(
@@ -2434,7 +3107,12 @@ export class SendKeys {
     }
     // Mirror SetUIState's fresh observation and verified-focus requirement. Each
     // focus execution re-resolves the selector against the refreshed hierarchy.
-    await this.observer.execute({ signal, freshness: "fresh", minTimestamp: 0 });
+    await this.observer.execute({
+      signal,
+      freshness: "fresh",
+      minTimestamp: 0,
+      skipScreenshot: true,
+    });
     signal?.throwIfAborted();
     const retry = await this.focuser.focus(selector, signal, undefined, options);
     signal?.throwIfAborted();
@@ -2461,29 +3139,8 @@ export class SendKeys {
       if (!command) {
         continue;
       }
-      let result: SendKeysCommandResult;
-      try {
-        routing.assertCurrent?.();
-        result = await this.executeCommand(
-          command,
-          signal,
-          routing.onDispatch,
-          routing.displayId,
-          routing.display,
-        );
-      } catch (error) {
-        signal?.throwIfAborted();
-        logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
-        result = withStaleDisplay(
-          {
-            index,
-            action: command.action,
-            success: false,
-            error: errorMessage(error),
-          },
-          error,
-        );
-      }
+      const result = await this.executeCommandResult(command, index, signal, routing);
+      this.checkBudgetCommandResult(result, signal);
       result.index = index;
       this.addImeFailureGuidance(command, result, results);
       routing.onCommandResult?.(result);
@@ -2499,6 +3156,46 @@ export class SendKeys {
       }
     }
     return { results };
+  }
+
+  private checkBudgetCommandResult(result: SendKeysCommandResult, signal?: AbortSignal): void {
+    if (isSendKeysBudgetExhausted(signal) && result.partialApplication && !result.success) {
+      signal?.throwIfAborted();
+    }
+  }
+
+  private async executeCommandResult(
+    command: SendKeysCommand,
+    index: number,
+    signal: AbortSignal | undefined,
+    routing: SendKeysRouting,
+  ): Promise<SendKeysCommandResult> {
+    try {
+      routing.assertCurrent?.();
+      // Command dispatches below bypass BaseVisualChange's action boundary.
+      await beginPostActionCaptureAction();
+      signal?.throwIfAborted();
+      routing.onCommandStart?.();
+      return await this.executeCommand(
+        command,
+        signal,
+        routing.onDispatch,
+        routing.displayId,
+        routing.display,
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
+      return withStaleDisplay(
+        {
+          index,
+          action: command.action,
+          success: false,
+          error: errorMessage(error),
+        },
+        error,
+      );
+    }
   }
 
   private addImeFailureGuidance(
@@ -2576,13 +3273,14 @@ export class SendKeys {
             ...(result.error ? { error: result.error } : {}),
           };
         }
-        return this.executor.key(command, signal, onDispatch);
+        return this.executor.key(command, signal, onDispatch, display);
       case "clear":
-        return this.executor.clear(signal).then((result) => ({
+        return this.executor.clear(signal, display).then((result) => ({
           index: -1,
           action: "clear",
           success: result.success,
           ...(result.retryable === false ? { retryable: false } : {}),
+          ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),
         }));
     }
@@ -2591,6 +3289,42 @@ export class SendKeys {
 
 function isSemanticKey(key: SendKeysKey): key is SendKeysSemanticKey {
   return (SEND_KEYS_SEMANTIC_KEYS as readonly string[]).includes(key);
+}
+
+/** Where the prefix insert leaves the field, from the state read before it; undefined if unprovable. */
+function expectedStateAfterInsert(
+  before: InsertTextState,
+  prefix: string,
+): EventLastCaretExpectation | undefined {
+  // A hint is placeholder text, not content, and an empty Compose field reports no text and an
+  // unset (-1/-1) selection: either way the field is empty with the caret at 0 (#9948). Any
+  // selection on empty text is meaningless; the insert lands at 0.
+  const text = before.isShowingHintText ? "" : (before.text ?? "");
+  const emptyField = text.length === 0;
+  const start = emptyField ? 0 : Math.min(before.selectionStart, before.selectionEnd);
+  const end = emptyField ? 0 : Math.max(before.selectionStart, before.selectionEnd);
+  if (start < 0 || end > text.length) {
+    return undefined;
+  }
+  return { text: text.slice(0, start) + prefix + text.slice(end), caret: start + prefix.length };
+}
+
+function describeInsertState(state: InsertTextState | undefined): string {
+  return state
+    ? `text length ${state.text?.length ?? "none"}, hint ${state.isShowingHintText}, selection ${state.selectionStart}/${state.selectionEnd}`
+    : "unreadable";
+}
+
+function stateMatchesExpectation(
+  state: InsertTextState,
+  expected: EventLastCaretExpectation,
+): boolean {
+  return (
+    !state.isShowingHintText &&
+    state.text === expected.text &&
+    state.selectionStart === expected.caret &&
+    state.selectionEnd === expected.caret
+  );
 }
 
 function markPartialAfterMutation(result: TextActionResult): TextActionResult {

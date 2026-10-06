@@ -6,6 +6,7 @@ import {
 import { toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank } from "../../utility/selectionRank";
+import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
 import {
@@ -22,6 +23,11 @@ import {
   getUncollectedWrappers,
   isStrictAncestor,
 } from "./elementProvenance";
+import {
+  IOS_KEYBOARD_MIN_VISIBLE_HEIGHT,
+  clipRectToScreen,
+  usableScreenExtent,
+} from "../ios/IosScreenIdentity";
 
 /**
  * Interactable Skeleton Projection (issue #4388).
@@ -164,6 +170,11 @@ interface SkeletonAccumulator {
   elementId?: string;
   label?: string;
   editableHint?: string;
+  /**
+   * The hint is not already a searchable label source (Android: iOS puts it in the
+   * searchable text fields), so a labelled field must surface it itself (#9346).
+   */
+  hintBesideLabel?: true;
   sublabel?: string;
   testTag?: string;
   semanticLinks?: SkeletonElement["semanticLinks"];
@@ -210,6 +221,26 @@ function strictlyContains(
   );
 }
 
+/** Seed an accumulator from the first element seen for an identity. */
+function newAccumulator(
+  el: Element,
+  { elementId, label, affordances, textSources }: ReturnType<typeof toSkeletonSearchable>,
+  bounds: SkeletonElement["bounds"],
+): SkeletonAccumulator {
+  const acc: SkeletonAccumulator = {
+    elementId,
+    label,
+    editableHint: affordances.includes("input") ? nonEmptyString(el["hint-text"]) : undefined,
+    sublabel: deriveSublabel(el, label),
+    bounds,
+    affordances: new Set<Affordance>(),
+  };
+  if (textSources["hint-text"] === undefined) {
+    acc.hintBesideLabel = true;
+  }
+  return acc;
+}
+
 /**
  * Merge overlapping element categories into one accumulator per `(elementId, label,
  * bounds)` triple, unioning affordances. `text` overlaps `clickable`/`scrollable`
@@ -228,19 +259,13 @@ function accumulateByIdentity(
     if (!bounds) {
       continue;
     }
-    const { elementId, label, affordances } = toSkeletonSearchable(el);
+    const searchable = toSkeletonSearchable(el);
+    const { elementId, label, affordances } = searchable;
     const key = identityKey(elementId, label, bounds);
 
     let acc = byIdentity.get(key);
     if (!acc) {
-      acc = {
-        elementId,
-        label,
-        editableHint: affordances.includes("input") ? nonEmptyString(el["hint-text"]) : undefined,
-        sublabel: deriveSublabel(el, label),
-        bounds,
-        affordances: new Set<Affordance>(),
-      };
+      acc = newAccumulator(el, searchable, bounds);
       byIdentity.set(key, acc);
     }
     if (acc.provenance === undefined) {
@@ -338,11 +363,23 @@ function hoistContainerLabels(
   }
 }
 
-/** Use an editable field's placeholder only when it has no label after descendant hoisting. */
+/**
+ * Use an editable field's placeholder as its label only when it has none after
+ * descendant hoisting. A field that already has a label keeps it, and a distinct
+ * hint is carried in `sublabel` so a filled field can still be told apart by the
+ * placeholder it was addressed by before it had text (#9346). The hint is never
+ * emitted as the label of a labelled field, so it cannot read as the field's value.
+ */
 function applyEditableHintFallback(accumulators: SkeletonAccumulator[]): void {
   for (const acc of accumulators) {
-    if (acc.label === undefined && acc.affordances.has("input") && acc.editableHint !== undefined) {
-      acc.label = acc.editableHint;
+    const hint = acc.editableHint;
+    if (hint === undefined || !acc.affordances.has("input")) {
+      continue;
+    }
+    if (acc.label === undefined) {
+      acc.label = hint;
+    } else if (acc.hintBesideLabel && acc.label.trim() !== hint.trim()) {
+      acc.sublabel = [...new Set([acc.sublabel?.trim(), hint.trim()].filter(Boolean))].join(", ");
     }
   }
 }
@@ -526,7 +563,7 @@ function isSelectableForReplay(
   );
 }
 
-function assignDuplicateIndexes(
+export function assignDuplicateIndexes(
   entries: SkeletonAccumulator[],
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
 ): void {
@@ -816,9 +853,6 @@ export function getIosImeOccluder(
   return { ...occluder, bounds: [0, occluder.bounds[1], screenSize.width, screenSize.height] };
 }
 
-// Ignore sub-two-point animation slivers; they do not constitute a usable software keyboard.
-export const IOS_KEYBOARD_MIN_VISIBLE_HEIGHT = 2;
-
 /** Clip shared iOS action geometry to the screen; parked keyboards have no visible rectangle. */
 export function getVisibleIosImeBounds(
   occluder: ImeOccluder,
@@ -841,21 +875,7 @@ function clipImeBounds(
   bounds: Bounds,
   screenSize: NonNullable<ObserveResult["screenSize"]>,
 ): Bounds | undefined {
-  if (
-    ![...bounds, screenSize.width, screenSize.height].every(Number.isFinite) ||
-    screenSize.width <= 0 ||
-    screenSize.height <= 0
-  ) {
-    return undefined;
-  }
-  const [left, top, right, bottom] = bounds;
-  const clipped: Bounds = [
-    Math.max(0, left),
-    Math.max(0, top),
-    Math.min(screenSize.width, right),
-    Math.min(screenSize.height, bottom),
-  ];
-  return clipped[2] > clipped[0] && clipped[3] > clipped[1] ? clipped : undefined;
+  return clipRectToScreen(bounds, screenSize);
 }
 
 function isBelowImeWindow(provenance: ElementProvenance | undefined, ime: ImeOccluder): boolean {
@@ -1250,17 +1270,48 @@ export interface SkeletonProjectionResult {
   context: SkeletonElement[];
 }
 
+const IOS_KEYBOARD_PACKAGE = "com.apple.keyboard";
+
+/**
+ * Whether the iOS keyboard the capture identified is on screen. Absent when it
+ * cannot be judged (Android, no measured keyboard rectangle, or no usable
+ * screen size) — callers then keep the evidence-only reading.
+ */
+type IosImeState = { parked: true } | { parked: false; bounds: Bounds };
+
+function resolveIosImeState(
+  ime: ImeWindow | undefined,
+  occluder: ImeOccluder | undefined,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+): IosImeState | undefined {
+  if (ime?.package !== IOS_KEYBOARD_PACKAGE || !occluder || !viewport) {
+    return undefined;
+  }
+  const screen = usableScreenExtent(viewport.width, viewport.height);
+  if (!screen) {
+    return undefined;
+  }
+  // The same clip + minimum-height rule as isIosKeyboardVisible, on the measured union.
+  const bounds = getVisibleIosImeBounds(occluder, screen);
+  return bounds ? { parked: false, bounds } : { parked: true };
+}
+
+/** The rectangle that physically covers app rows; a parked iOS keyboard covers nothing. */
+function coveringImeOccluder(
+  ime: ImeWindow | undefined,
+  occluder: ImeOccluder | undefined,
+  iosIme: IosImeState | undefined,
+): ImeOccluder | undefined {
+  if (ime?.package !== IOS_KEYBOARD_PACKAGE) {
+    return occluder;
+  }
+  return occluder && iosIme && !iosIme.parked ? { ...occluder, bounds: iosIme.bounds } : undefined;
+}
+
 function markAppRowsCoveredByIme(
   kept: SkeletonAccumulator[],
-  elements: ObserveElements,
-  ime: ImeWindow | undefined,
+  occluder: ImeOccluder | undefined,
 ): void {
-  // The iOS collector uses this fixed identity. Its existing keyboard collapse
-  // remains unchanged; only Android app-window rows get occlusion treatment.
-  if (!ime || ime.package === "com.apple.keyboard") {
-    return;
-  }
-  const occluder = getImeOccluder(elements);
   if (!occluder) {
     return;
   }
@@ -1302,13 +1353,16 @@ export function projectSkeleton(
   attributeContainerLabels(accumulators);
 
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
-  markAppRowsCoveredByIme(kept, elements, ime);
+  const occluder = ime ? getImeOccluder(elements) : undefined;
+  // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
+  const iosIme = resolveIosImeState(ime, occluder, viewport);
+  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 
   // One row for the whole IME window, appended last: the keyboard is a mode, not
   // a list of targets, so it must never come before the app's own affordances.
-  const imeRow = imeAccumulator(elements, ime);
+  const imeRow = iosIme?.parked ? undefined : imeAccumulator(elements, ime);
   if (imeRow) {
     actionable.push(imeRow);
   }
@@ -1321,11 +1375,54 @@ export function projectSkeleton(
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.
-    keyboard:
-      getCapturedKeyboard(elements) ?? (ime ? { visible: true, package: ime.package } : undefined),
+    keyboard: iosIme?.parked
+      ? undefined
+      : (getCapturedKeyboard(elements) ??
+        (ime ? { visible: true, package: ime.package } : undefined)),
     skeleton: actionable.map(toSkeletonEntry),
     context: collapseSystemUiBlock(nonActionable).map(toSkeletonEntry),
   };
+}
+
+/**
+ * Associate the unchanged skeleton projection with captured source nodes for
+ * diff replay. Bounds and identity survive label hoisting; where several rows
+ * share them, the original label must select exactly one row. IME sources are
+ * returned separately so collapsed keycaps cannot create duplicate groups.
+ */
+export function projectSkeletonReplayRows(
+  elements: ObserveElements,
+  projection: SkeletonProjectionResult,
+): { rowsBySource: Map<ViewHierarchyNode, SkeletonElement>; imeSources: Set<ViewHierarchyNode> } {
+  const rowsBySource = new Map<ViewHierarchyNode, SkeletonElement>();
+  const imeSources = new Set<ViewHierarchyNode>();
+  const ime = detectImeWindow(elements);
+  for (const element of allElements(elements)) {
+    const source = getHierarchyNodeSource(element);
+    if (!source) {
+      continue;
+    }
+    if (isImeKeycap(element, ime)) {
+      imeSources.add(source);
+      continue;
+    }
+    const bounds = boundsTuple(element);
+    if (!bounds) {
+      continue;
+    }
+    const { elementId, displayedLabel, affordances } = toSkeletonSearchable(element);
+    const matches = projection.skeleton.filter(
+      (row) =>
+        row.elementId === elementId && row.bounds.every((edge, index) => edge === bounds[index]),
+    );
+    const row =
+      matches.find((row) => row.label === displayedLabel) ??
+      (matches.length === 1 && affordances.length > 0 ? matches[0] : undefined);
+    if (row) {
+      rowsBySource.set(source, row);
+    }
+  }
+  return { rowsBySource, imeSources };
 }
 
 /**

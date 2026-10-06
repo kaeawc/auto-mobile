@@ -1,3 +1,4 @@
+import { DEFAULT_WAIT_FOR_TIMEOUT_MS } from "./waitForTimeout";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import type {
   ConditionEvaluation,
@@ -9,7 +10,7 @@ import type {
 import { pollObserveUntil } from "./ObservePoll";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
-const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_TIMEOUT_MS = DEFAULT_WAIT_FOR_TIMEOUT_MS;
 const DEFAULT_POLL_MS = 150;
 
 /**

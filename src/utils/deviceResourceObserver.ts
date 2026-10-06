@@ -125,7 +125,7 @@ export class DefaultDeviceResourceObserver implements DeviceResourceObserver {
     ];
     let run: AndroidResourceReadRun;
     try {
-      run = this.android.createRun(request);
+      run = this.android.createRun(request, true);
       await this.android.identifyRun(run);
     } catch (error) {
       request.signal?.throwIfAborted();
@@ -187,6 +187,7 @@ export class DefaultDeviceResourceObserver implements DeviceResourceObserver {
       };
       return snapshot;
     }
+    request = this.ios.createObservationRequest(request);
     let paths: Map<string, string>;
     try {
       paths = await this.ios.readRuntimeInventory(request);

@@ -1,3 +1,5 @@
+import type { AndroidDeviceResource } from "./AndroidDeviceResource";
+import type { AppleDeviceResource } from "./AppleDeviceResource";
 import type { DeviceResourceStatus } from "./DeviceResource";
 import type { AndroidResourceRestoration } from "./AndroidResourceRestoration";
 import type { ConfigurableDeviceResource } from "./deviceResourceDescriptions";
@@ -13,6 +15,10 @@ export type DeviceResourceConfiguration = Partial<
 export interface DeviceResourceConfigurationResult {
   success: boolean;
   requested: DeviceResourceConfiguration;
+  /** Independent full-platform snapshot, when observation completed. */
+  observed?: AndroidDeviceResource | AppleDeviceResource;
+  /** Requested resources with explicitly opposite observed states. */
+  observationContradictions?: ConfigurableDeviceResource[];
   /** Only requested resources are reported; omission never implies enabled. */
   resources: Partial<Record<ConfigurableDeviceResource, DeviceResourceStatus>>;
   /** Native evidence; absent or runtime-disabled jobs are reported as unsupported. */

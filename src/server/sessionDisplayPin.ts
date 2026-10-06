@@ -130,10 +130,21 @@ interface SessionDisplayPinInput<T = unknown> {
   invoke: (args: Record<string, unknown>) => T;
 }
 
+/**
+ * Calls that must never receive a session pin. Stop must remain possible after a recording's panel
+ * is unplugged. An overlay is bound to the display it was shown on, so only show and showVariants take a
+ * display (and therefore a session pin).
+ */
+function pinExempt(name: string, args: Record<string, unknown>): boolean {
+  return (
+    (name === "videoRecording" && args.action === "stop") ||
+    (name === "overlay" && args.action !== "show" && args.action !== "showVariants")
+  );
+}
+
 export function runSessionDisplayPin<T>(input: SessionDisplayPinInput<T>): T | Promise<unknown> {
   const { name, device, args } = input;
-  // Stop must remain possible after a recording's panel is unplugged.
-  const eligible = input.acceptsDisplay && !(name === "videoRecording" && args.action === "stop");
+  const eligible = input.acceptsDisplay && !pinExempt(name, args);
   const session = input.sessionUuid;
   if (args.display !== undefined) {
     // An explicit selector overrides even an enclosing internal call's pin provenance.

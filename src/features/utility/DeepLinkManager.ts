@@ -645,38 +645,12 @@ export class DeepLinkManager implements DeepLinkManager {
 
       // Process schemes section
       if (inSchemesSection) {
-        if (
-          line === "" ||
-          line.startsWith("Non-Data Actions:") ||
-          line.startsWith("Receiver Resolver Table:")
-        ) {
+        if (this.isSchemesSectionEnd(line)) {
           inSchemesSection = false;
           continue;
         }
 
-        // Parse scheme entries (format: "scheme:")
-        const schemeMatch = line.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):$/);
-        if (schemeMatch) {
-          const scheme = schemeMatch[1];
-          schemes.add(scheme);
-
-          // Look ahead for authority information
-          if (i + 1 < lines.length) {
-            const nextLine = lines[i + 1].trim();
-            const authorityMatch = nextLine.match(/^([a-fA-F0-9]+)\s+.*filter\s+([a-fA-F0-9]+)$/);
-            if (authorityMatch) {
-              // Look for Authority line in the following lines
-              for (let j = i + 2; j < Math.min(i + 10, lines.length); j++) {
-                const authLine = lines[j].trim();
-                const hostMatch = authLine.match(/^Authority:\s+"([^"]+)":\s*-?\d+$/);
-                if (hostMatch) {
-                  hosts.add(hostMatch[1]);
-                  break;
-                }
-              }
-            }
-          }
-        }
+        this.parseSchemeEntry(line, lines, i, schemes, hosts);
       }
 
       // Process intent filter details
@@ -689,59 +663,18 @@ export class DeepLinkManager implements DeepLinkManager {
         };
       }
 
-      if (inIntentFilterSection) {
-        if (line.startsWith("Category:")) {
-          const category = line.replace("Category:", "").trim().replace(/"/g, "");
-          if (currentFilter.category) {
-            currentFilter.category.push(category);
-          }
-        }
-
-        if (line.startsWith("Scheme:")) {
-          const scheme = line.replace("Scheme:", "").trim().replace(/"/g, "");
-          schemes.add(scheme);
-          if (!currentFilter.data) {
-            currentFilter.data = [];
-          }
-          currentFilter.data.push({ scheme });
-        }
-
-        if (line.startsWith("Authority:")) {
-          const authorityMatch = line.match(/^Authority:\s+"([^"]+)":\s*-?\d+$/);
-          if (authorityMatch) {
-            const host = authorityMatch[1];
-            hosts.add(host);
-            if (!currentFilter.data) {
-              currentFilter.data = [];
-            }
-            // Find existing data entry with scheme or create new one
-            const lastDataEntry = currentFilter.data[currentFilter.data.length - 1];
-            if (lastDataEntry && !lastDataEntry.host) {
-              lastDataEntry.host = host;
-            } else {
-              currentFilter.data.push({ host });
-            }
-          }
-        }
-
-        if (line.startsWith("Type:")) {
-          const mimeType = line.replace("Type:", "").trim().replace(/"/g, "");
-          supportedMimeTypes.add(mimeType);
-          if (!currentFilter.data) {
-            currentFilter.data = [];
-          }
-          currentFilter.data.push({ mimeType });
-        }
-
-        // End of current intent filter
-        if (line === "" || (line.includes("filter") && line.includes("Action:"))) {
-          if (currentFilter.action) {
-            intentFilters.push(currentFilter as IntentFilter);
-            currentFilter = {};
-            inIntentFilterSection = false;
-          }
-        }
+      if (!inIntentFilterSection) {
+        continue;
       }
+      this.parseIntentFilterData(line, currentFilter, schemes, hosts, supportedMimeTypes);
+
+      // End of current intent filter
+      if (!this.isIntentFilterEnd(line) || !currentFilter.action) {
+        continue;
+      }
+      intentFilters.push(currentFilter as IntentFilter);
+      currentFilter = {};
+      inIntentFilterSection = false;
     }
 
     // Add the last filter if we were still processing one
@@ -755,6 +688,113 @@ export class DeepLinkManager implements DeepLinkManager {
       intentFilters,
       supportedMimeTypes: Array.from(supportedMimeTypes),
     };
+  }
+
+  private isSchemesSectionEnd(line: string): boolean {
+    return (
+      line === "" ||
+      line.startsWith("Non-Data Actions:") ||
+      line.startsWith("Receiver Resolver Table:")
+    );
+  }
+
+  private parseSchemeEntry(
+    line: string,
+    lines: string[],
+    index: number,
+    schemes: Set<string>,
+    hosts: Set<string>,
+  ): void {
+    const schemeMatch = line.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):$/);
+    if (!schemeMatch) {
+      return;
+    }
+    schemes.add(schemeMatch[1]);
+    this.parseSchemeAuthority(lines, index, hosts);
+  }
+
+  private parseSchemeAuthority(lines: string[], index: number, hosts: Set<string>): void {
+    // Look ahead for authority information.
+    if (index + 1 >= lines.length) {
+      return;
+    }
+    const nextLine = lines[index + 1].trim();
+    const authorityMatch = nextLine.match(/^([a-fA-F0-9]+)\s+.*filter\s+([a-fA-F0-9]+)$/);
+    if (!authorityMatch) {
+      return;
+    }
+    for (let j = index + 2; j < Math.min(index + 10, lines.length); j++) {
+      const authLine = lines[j].trim();
+      const hostMatch = authLine.match(/^Authority:\s+"([^"]+)":\s*-?\d+$/);
+      if (hostMatch) {
+        hosts.add(hostMatch[1]);
+        break;
+      }
+    }
+  }
+
+  private isIntentFilterEnd(line: string): boolean {
+    return line === "" || (line.includes("filter") && line.includes("Action:"));
+  }
+
+  private parseIntentFilterData(
+    line: string,
+    currentFilter: Partial<IntentFilter>,
+    schemes: Set<string>,
+    hosts: Set<string>,
+    supportedMimeTypes: Set<string>,
+  ): void {
+    if (line.startsWith("Category:")) {
+      const category = line.replace("Category:", "").trim().replace(/"/g, "");
+      if (currentFilter.category) {
+        currentFilter.category.push(category);
+      }
+    }
+
+    if (line.startsWith("Scheme:")) {
+      const scheme = line.replace("Scheme:", "").trim().replace(/"/g, "");
+      schemes.add(scheme);
+      if (!currentFilter.data) {
+        currentFilter.data = [];
+      }
+      currentFilter.data.push({ scheme });
+    }
+
+    if (line.startsWith("Authority:")) {
+      this.parseIntentFilterAuthority(line, currentFilter, hosts);
+    }
+
+    if (line.startsWith("Type:")) {
+      const mimeType = line.replace("Type:", "").trim().replace(/"/g, "");
+      supportedMimeTypes.add(mimeType);
+      if (!currentFilter.data) {
+        currentFilter.data = [];
+      }
+      currentFilter.data.push({ mimeType });
+    }
+  }
+
+  private parseIntentFilterAuthority(
+    line: string,
+    currentFilter: Partial<IntentFilter>,
+    hosts: Set<string>,
+  ): void {
+    const authorityMatch = line.match(/^Authority:\s+"([^"]+)":\s*-?\d+$/);
+    if (!authorityMatch) {
+      return;
+    }
+    const host = authorityMatch[1];
+    hosts.add(host);
+    if (!currentFilter.data) {
+      currentFilter.data = [];
+    }
+    // Find existing data entry with scheme or create new one.
+    const lastDataEntry = currentFilter.data[currentFilter.data.length - 1];
+    if (lastDataEntry && !lastDataEntry.host) {
+      lastDataEntry.host = host;
+      return;
+    }
+    currentFilter.data.push({ host });
   }
 
   /**
@@ -876,98 +916,27 @@ export class DeepLinkManager implements DeepLinkManager {
       let targetElement = null;
 
       if (preference === "always") {
-        // Look for "Always" button
-        for (const rootNode of rootNodes) {
-          targetElement = this.findButtonByText(rootNode, ["Always", "ALWAYS"]);
-          if (targetElement) {
-            break;
-          }
-        }
+        targetElement = this.findChooserButton(rootNodes, ["Always", "ALWAYS"]);
       } else if (preference === "just_once") {
-        // Look for "Just once" button
-        for (const rootNode of rootNodes) {
-          targetElement = this.findButtonByText(rootNode, ["Just once", "JUST ONCE", "Once"]);
-          if (targetElement) {
-            break;
-          }
-        }
+        targetElement = this.findChooserButton(rootNodes, ["Just once", "JUST ONCE", "Once"]);
       } else if (preference === "custom" && customAppPackage) {
         chooserMatch = await this.findAppInChooserAcrossPages(viewHierarchy, customAppPackage, url);
         targetElement = chooserMatch.element;
       }
 
-      if (targetElement) {
-        // Simulate tap on the target element
-        const center = this.geometry.getElementCenter(targetElement);
-        throwIfAborted(this.chooserSignal);
-        const tapResult = await awaitWhileRequestIsLive(
-          this.adbUtils.executeCommand(
-            `shell input tap ${center.x} ${center.y}`,
-            undefined,
-            undefined,
-            undefined,
-            this.chooserSignal,
-          ),
-          this.chooserSignal,
-        );
-
-        // Check if tap command failed
-        if (tapResult.stderr && tapResult.stderr.trim().length > 0) {
-          logger.error(
-            `[DeepLinkManager] Failed to tap on intent chooser option: ${tapResult.stderr}`,
-          );
-          return {
-            success: false,
-            detected: true,
-            error: tapResult.stderr,
-            packageVerified: chooserMatch?.packageVerified,
-          };
-        }
-
-        logger.info(
-          `[DeepLinkManager] Tapped on intent chooser option at (${center.x}, ${center.y})`,
-        );
-
-        const tapTimestamp =
-          chooserMatch && !chooserMatch.packageVerified
-            ? await this.getChooserTapFreshnessFloor()
-            : undefined;
-        // Callers compare against the device's raw capture timestamp; the
-        // next-second margin belongs only to this method's polling floor.
-        const tappedAt = tapTimestamp?.timestampMs;
-        if (chooserMatch && !chooserMatch.packageVerified) {
-          const verified =
-            tapTimestamp !== undefined &&
-            (await this.verifyPostTapChooserPackage(
-              customAppPackage!,
-              tapTimestamp.floor,
-              tapTimestamp.deviceSeconds,
-            ));
-          if (!verified) {
-            return {
-              success: false,
-              detected: true,
-              error: `Unverified chooser selection for ${customAppPackage}: a fresh post-tap hierarchy did not confirm the foreground package.`,
-              tappedAt,
-              packageVerified: false,
-            };
-          }
-        }
-        return {
-          success: true,
-          detected: true,
-          action: preference,
-          appSelected: customAppPackage,
-          tappedAt,
-          packageVerified: chooserMatch?.packageVerified,
-        };
-      } else {
+      if (!targetElement) {
         return {
           success: false,
           detected: true,
           error: `Could not find target element for preference: ${preference}`,
         };
       }
+      return await this.tapChooserElement(
+        targetElement,
+        preference,
+        customAppPackage,
+        chooserMatch,
+      );
     } catch (error) {
       throwIfAborted(this.chooserSignal);
       logger.warn(
@@ -981,6 +950,87 @@ export class DeepLinkManager implements DeepLinkManager {
         packageVerified: chooserMatch?.packageVerified,
       };
     }
+  }
+
+  private findChooserButton(
+    rootNodes: ReturnType<ElementParser["extractRootNodes"]>,
+    textOptions: string[],
+  ): Element | null {
+    for (const rootNode of rootNodes) {
+      const targetElement = this.findButtonByText(rootNode, textOptions);
+      if (targetElement) {
+        return targetElement;
+      }
+    }
+    return null;
+  }
+
+  private async tapChooserElement(
+    targetElement: Element,
+    preference: "always" | "just_once" | "custom",
+    customAppPackage: string | undefined,
+    chooserMatch: ChooserMatch | undefined,
+  ): Promise<IntentChooserResult> {
+    // Simulate tap on the target element
+    const center = this.geometry.getElementCenter(targetElement);
+    throwIfAborted(this.chooserSignal);
+    const tapResult = await awaitWhileRequestIsLive(
+      this.adbUtils.executeCommand(
+        `shell input tap ${center.x} ${center.y}`,
+        undefined,
+        undefined,
+        undefined,
+        this.chooserSignal,
+      ),
+      this.chooserSignal,
+    );
+
+    // Check if tap command failed
+    if (tapResult.stderr && tapResult.stderr.trim().length > 0) {
+      logger.error(`[DeepLinkManager] Failed to tap on intent chooser option: ${tapResult.stderr}`);
+      return {
+        success: false,
+        detected: true,
+        error: tapResult.stderr,
+        packageVerified: chooserMatch?.packageVerified,
+      };
+    }
+
+    logger.info(`[DeepLinkManager] Tapped on intent chooser option at (${center.x}, ${center.y})`);
+
+    const tapTimestamp =
+      chooserMatch && !chooserMatch.packageVerified
+        ? await this.getChooserTapFreshnessFloor()
+        : undefined;
+    // Callers compare against the device's raw capture timestamp; the
+    // next-second margin belongs only to this method's polling floor.
+    const tappedAt = tapTimestamp?.timestampMs;
+    if (chooserMatch && !chooserMatch.packageVerified) {
+      const verified =
+        tapTimestamp !== undefined &&
+        (await this.verifyPostTapChooserPackage(
+          customAppPackage!,
+          tapTimestamp.floor,
+          tapTimestamp.deviceSeconds,
+        ));
+      if (!verified) {
+        return {
+          success: false,
+          detected: true,
+          error: `Unverified chooser selection for ${customAppPackage}: a fresh post-tap hierarchy did not confirm the foreground package.`,
+          tappedAt,
+          packageVerified: false,
+        };
+      }
+    }
+    return {
+      success: true,
+      detected: true,
+      action: preference,
+      appSelected: customAppPackage,
+      tappedAt,
+      packageVerified: chooserMatch?.packageVerified,
+    };
   }
 
   private async getChooserTapFreshnessFloor(): Promise<

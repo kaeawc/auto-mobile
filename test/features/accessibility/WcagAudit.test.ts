@@ -5,6 +5,7 @@
 
 import { expect, describe, it, beforeEach } from "bun:test";
 import { WcagAudit, type WcagBaselineStore } from "../../../src/features/accessibility/WcagAudit";
+import path from "path";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
 import type {
@@ -315,6 +316,90 @@ describe("WcagAudit", function () {
         (v) => v.type === "insufficient-contrast",
       );
       expect(contrastViolations).toHaveLength(0);
+      // The skipped check is reported, not silently read as a pass (#10037).
+      expect(result.summary.byType["insufficient-contrast"]).toBe(0);
+      expect(result.summary.notEvaluated).toEqual([
+        { check: "insufficient-contrast", reason: "no screenshot for this observation" },
+      ]);
+    });
+
+    it("omits notEvaluated when a screenshot was supplied", async function () {
+      const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+      const config: AccessibilityAuditConfig = {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: false,
+      };
+      const screenshot = path.join(
+        import.meta.dir,
+        "../../fixtures/screenshots/wcag-aa-large-text.png",
+      );
+
+      const result = await audit.audit([], hierarchy, screenshot, "com.test", config, 480);
+
+      expect(result.summary.notEvaluated).toBeUndefined();
+    });
+  });
+
+  describe("Contrast large-text threshold (density)", function () {
+    // wcag-aa-large-text.png measures between 3.0:1 and 4.5:1: it passes as
+    // large text and fails as normal text. The element is 50px tall.
+    const screenshot = path.join(
+      import.meta.dir,
+      "../../fixtures/screenshots/wcag-aa-large-text.png",
+    );
+    const hierarchy: ViewHierarchyNode = { class: "View", children: [] };
+    const config: AccessibilityAuditConfig = {
+      level: "AA",
+      failureMode: "report",
+      useBaseline: false,
+    };
+    // The capture reports a 50px text size (`textSize`, px), so size is judged from the
+    // text, not from the box (#10039).
+    const elements: Element[] = [
+      { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Large Text", textSize: 50 },
+    ];
+
+    async function contrastViolations(density?: number, subject: Element[] = elements) {
+      const result = await audit.audit(subject, hierarchy, screenshot, "com.test", config, density);
+      return result.violations.filter((v) => v.type === "insufficient-contrast");
+    }
+
+    it("applies the strict 4.5:1 threshold to a 50px label at 480 dpi (about 17dp)", async function () {
+      const violations = await contrastViolations(480);
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0].details?.requiredRatio).toBe(4.5);
+    });
+
+    it("keeps the relaxed 3.0:1 threshold for the same 50px label at 160 dpi (50dp)", async function () {
+      expect(await contrastViolations(160)).toHaveLength(0);
+    });
+
+    it("uses the strict threshold when density is unknown or zero", async function () {
+      expect(await contrastViolations(undefined)).toHaveLength(1);
+      expect(await contrastViolations(0)).toHaveLength(1);
+    });
+
+    it("keeps the strict 4.5:1 threshold for a 48dp-tall box whose text size is small", async function () {
+      // A 14sp label in a 48dp button: the box is tall, the text is not large.
+      const smallTextInTapTarget: Element[] = [
+        { bounds: { left: 0, top: 0, right: 100, bottom: 48 }, text: "Label", textSize: 14 },
+      ];
+      const violations = await contrastViolations(160, smallTextInTapTarget);
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0].details?.requiredRatio).toBe(4.5);
+    });
+
+    it("does not infer large text from a tap-target-sized box when no text size is reported", async function () {
+      const boxOnly: Element[] = [
+        { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Large Text" },
+      ];
+      const violations = await contrastViolations(160, boxOnly);
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0].details?.requiredRatio).toBe(4.5);
     });
   });
 

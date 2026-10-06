@@ -1,6 +1,8 @@
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { SIMULATOR_UNINSTALL_TIMEOUT_MS } from "../../../src/utils/ios-cmdline-tools/simulatorUninstallBound";
 import { PlistClient } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
 import { DefaultAndroidBuildToolsLocator } from "../../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
@@ -16,10 +18,17 @@ import {
 } from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { getAndroidAppMetadataFromAdb } from "../../../src/features/observe/GetAppMetadata";
+import {
+  adbRejectionFromInstallCapture,
+  readAndroidInstallCapture,
+} from "../../helpers/androidInstallCapture";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import path from "path";
@@ -58,6 +67,9 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
 });
 
 class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
+  honourRequestAbort = false;
+  reinstallOperation?: () => Promise<ExecResult>;
+  private installAttempts = 0;
   private installSucceeded = false;
   postInstallListingError?: Error;
   reinstallError?: Error;
@@ -73,14 +85,25 @@ class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
     signal?: AbortSignal,
     waitForProcessSettlementAfterAbort?: boolean,
   ): Promise<ExecResult> {
-    const result = await super.executeCommand(
+    // Match AdbClient's explicit-or-ambient selection before dispatching.
+    const resolvedSignal = this.honourRequestAbort ? (signal ?? getAbortSignal()) : signal;
+    if (this.honourRequestAbort) {
+      resolvedSignal?.throwIfAborted();
+    }
+    let result = await super.executeCommand(
       command,
       timeoutMs,
       maxBuffer,
       noRetry,
-      signal,
+      resolvedSignal,
       waitForProcessSettlementAfterAbort,
     );
+    if (command.startsWith("install ") && ++this.installAttempts === 2 && this.reinstallOperation) {
+      result = await this.reinstallOperation();
+      if (this.honourRequestAbort) {
+        resolvedSignal?.throwIfAborted();
+      }
+    }
     if (this.otherUserRestoreCompleted && command === "shell pm list packages --user 0") {
       this.postRestoreAbortController?.abort();
     }
@@ -302,6 +325,66 @@ describe("InstallApp", () => {
     expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
   });
 
+  describe("install-aware user targeting with a running work profile", () => {
+    const apkPath = "/tmp/app-debug.apk";
+
+    const setup = (installed: { personal: boolean; work: boolean }) => {
+      fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+      fakeHost.setCommandResponse(
+        "aapt2",
+        createExecResult("package: name='com.example.app' versionCode='1'"),
+      );
+      fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
+      fakeAdb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x4c13, running: true },
+        { userId: 10, name: "Work profile", flags: 0x1030, running: true },
+      ]);
+      const listing = (isInstalled: boolean) =>
+        createExecResult(isInstalled ? "package:com.example.app" : "");
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", listing(installed.personal));
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", listing(installed.work));
+      fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+      fakeAdb.setCommandResponse(`install --user 10 -r "${apkPath}"`, createExecResult("Success"));
+      return new InstallApp(device, fakeAdbFactory, {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      });
+    };
+
+    test("reinstalls a personal-only app for the personal user instead of adding a work copy", async () => {
+      const result = await setup({ personal: true, work: false }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 0, upgrade: true });
+      expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${apkPath}"`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("install --user 10")).toBe(false);
+    });
+
+    test("reinstalls a work-only app for the work profile", async () => {
+      const result = await setup({ personal: false, work: true }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 10, upgrade: true });
+      expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("install --user 0")).toBe(false);
+    });
+
+    test("keeps the work-profile tie-break when the app is installed for both users", async () => {
+      const result = await setup({ personal: true, work: true }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 10, upgrade: true });
+      expect(fakeAdb.wasCommandExecuted("install --user 0")).toBe(false);
+    });
+
+    test("first install (installed nowhere) keeps the work-profile default", async () => {
+      const result = await setup({ personal: false, work: false }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 10, upgrade: false });
+      expect(fakeAdb.wasCommandExecuted("install --user 0")).toBe(false);
+    });
+
+    test("an explicit userId wins over where the app is installed", async () => {
+      const result = await setup({ personal: true, work: false }).execute(apkPath, 10);
+      expect(result).toMatchObject({ success: true, userId: 10 });
+      expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
+    });
+  });
+
   test("reports when aapt's package ID differs from the package installed on device", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const parsedPackageName = "dev.jasonpearson.automobile.playground";
@@ -379,7 +462,7 @@ describe("InstallApp", () => {
   test("marks the Android installed-apps cache stale after a successful install", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
 
     fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
     fakeHost.setCommandResponse(
@@ -468,7 +551,7 @@ describe("InstallApp", () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
 
     fakeLocator.setTool(null);
 
@@ -510,7 +593,7 @@ describe("InstallApp", () => {
     const apkPath = "/tmp/app-debug.apk";
     const repo = new FakeInstalledAppsRepository();
     const adb = new PackageDiscoveryFailureAdb();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.previous", false, 1_000);
     fakeLocator.setTool(null);
     adb.setCommandResponse(
       "shell pm list packages --user 0",
@@ -549,7 +632,7 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.unused\n"));
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(iosSimulatorDevice.deviceId, 0, "com.example.old", false, 1_000);
+    await repo.seedInstalledApp(iosSimulatorDevice.deviceId, 0, "com.example.old", false, 1_000);
 
     const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
       hostExecutor: fakeHost,
@@ -1268,7 +1351,7 @@ describe("InstallApp", () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(device.deviceId, 0, "com.example.app", false, 1_000);
+    await repo.seedInstalledApp(device.deviceId, 0, "com.example.app", false, 1_000);
 
     fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
     fakeHost.setCommandResponse(
@@ -1310,6 +1393,7 @@ describe("InstallApp", () => {
         hostExecutor: fakeHost,
         buildToolsLocator: fakeLocator,
         performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        timer: fakeTimer,
       });
     }
 
@@ -1330,6 +1414,18 @@ describe("InstallApp", () => {
         createExecResult("Package installed for user"),
       );
       return installCommand;
+    }
+
+    /** After the package-wide uninstall, the target user's listing no longer has the app. */
+    function emptyUserTenListingAfterUninstall(adb: InstallAppFakeAdbExecutor): void {
+      const execute = adb.executeCommand.bind(adb);
+      spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+        const result = await execute(...args);
+        if (args[0].startsWith("uninstall ")) {
+          adb.setCommandResponse("shell pm list packages --user 10", createExecResult(""));
+        }
+        return result;
+      });
     }
 
     test.each([false, true])(
@@ -1448,17 +1544,201 @@ describe("InstallApp", () => {
       ]);
     });
 
-    test("cancellation during reinstall still reports the completed uninstall", async () => {
-      configureDowngrade();
-      const controller = new AbortController();
-      fakeAdb.setThrowOnAbortedSignal();
-      fakeAdb.abortAfterCommand("uninstall ", controller);
-      const execution = androidAction().execute(apkPath, 10, controller.signal);
-      await expect(execution).rejects.toThrow("Operation cancelled");
-      await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
-      await expect(execution).rejects.toHaveProperty("cause");
-      expect(fakeAdb.wasCommandExecuted("install-existing")).toBe(false);
-    });
+    const cancellationSources = ["explicit", "ambient", "ambient with explicit"] as const;
+
+    function executeWithCancellation(
+      source: (typeof cancellationSources)[number],
+      controller: AbortController,
+    ) {
+      const signal =
+        source === "ambient"
+          ? undefined
+          : source === "explicit"
+            ? controller.signal
+            : new AbortController().signal;
+      return runWithAbortSignal(source === "explicit" ? undefined : controller.signal, () =>
+        androidAction().execute(apkPath, 10, signal),
+      );
+    }
+
+    test.each(
+      cancellationSources.flatMap(
+        (source) =>
+          [
+            [source, false],
+            [source, true],
+          ] as const,
+      ),
+    )(
+      "downgrade reinstall finishes before reporting cancellation: %s (during reinstall: %s)",
+      async (source, duringReinstall) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const controller = new AbortController();
+        const pending = Promise.withResolvers<ExecResult>();
+        const started = Promise.withResolvers<boolean>();
+        adb.reinstallOperation = () => {
+          if (duringReinstall) {
+            controller.abort(new DOMException("Client cancelled", "AbortError"));
+          }
+          started.resolve(true);
+          return pending.promise;
+        };
+        if (!duringReinstall) {
+          adb.abortAfterCommand("uninstall ", controller);
+        }
+        let settled = false;
+        const execution = executeWithCancellation(source, controller);
+        const outcome = execution.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        try {
+          expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
+          expect(settled).toBe(false);
+          expect(
+            adb
+              .getCommandCalls()
+              .filter((call) => call.command === command)
+              .at(-1)?.signal,
+          ).toBeUndefined();
+          pending.resolve(createExecResult("Success"));
+          await expect(execution).rejects.toThrow("reinstalled for target user 10");
+          await expect(execution).rejects.toHaveProperty("cause", controller.signal.reason);
+          expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(2);
+          expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          pending.resolve(createExecResult("Success"));
+          await outcome;
+        }
+      },
+    );
+
+    test.each(cancellationSources)(
+      "cancelled downgrade reinstall failure discloses missing app: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const failure = new Error("adb: device offline");
+        adb.reinstallError = failure;
+        const controller = new AbortController();
+        adb.abortAfterCommand("uninstall ", controller);
+        const execution = executeWithCancellation(source, controller);
+        await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
+        await expect(execution).rejects.toThrow("not installed");
+        await expect(execution).rejects.toThrow("adb: device offline");
+        await expect(execution).rejects.toHaveProperty("cause", failure);
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(2);
+        expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+      },
+    );
+
+    test.each(cancellationSources)(
+      "cancelled downgrade reinstall output failure discloses missing app: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        adb.setCommandResponseSequence(command, [
+          createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+          createExecResult("", "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]"),
+        ]);
+        const controller = new AbortController();
+        adb.abortAfterCommand("uninstall ", controller);
+        const result = await executeWithCancellation(source, controller);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("was uninstalled during downgrade recovery");
+        expect(result.error).toContain("not installed");
+        expect(result.error).toContain("INSTALL_FAILED_INSUFFICIENT_STORAGE");
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(2);
+        expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+      },
+    );
+
+    test.each(["explicit", "ambient"] as const)(
+      "cancellation before downgrade uninstall prevents removal and reinstall: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const controller = new AbortController();
+        adb.abortAfterCommand("shell am force-stop", controller);
+        const execution = executeWithCancellation(source, controller);
+        await expect(execution).rejects.toHaveProperty("name", "AbortError");
+        await expect(execution).rejects.toBe(controller.signal.reason);
+        expect(adb.wasCommandExecuted("uninstall ")).toBe(false);
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(1);
+      },
+    );
+
+    test.each(["explicit", "ambient"] as const)(
+      "cancellation during downgrade uninstall does not trigger reinstall: %s",
+      async (source) => {
+        const command = configureDowngrade();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        const controller = new AbortController();
+        const uninstall = adb.executeCommand.bind(adb);
+        spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+          if (args[0].startsWith("uninstall ")) {
+            controller.abort();
+            throw controller.signal.reason;
+          }
+          return uninstall(...args);
+        });
+        const execution = executeWithCancellation(source, controller);
+        await expect(execution).rejects.toHaveProperty("name", "AbortError");
+        await expect(execution).rejects.toBe(controller.signal.reason);
+        expect(adb.getExecutedCommands().filter((call) => call === command)).toHaveLength(1);
+        expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+      },
+    );
+
+    test.each(["explicit", "ambient"] as const)(
+      "cancelled downgrade reinstall retains its step deadline: %s",
+      async (source) => {
+        configureDowngrade();
+        fakeTimer = new FakeTimer();
+        const adb = fakeAdb as InstallAppFakeAdbExecutor;
+        adb.honourRequestAbort = true;
+        emptyUserTenListingAfterUninstall(adb);
+        const pending = Promise.withResolvers<ExecResult>();
+        const started = Promise.withResolvers<boolean>();
+        adb.reinstallOperation = () => {
+          started.resolve(true);
+          return pending.promise;
+        };
+        const controller = new AbortController();
+        adb.abortAfterCommand("uninstall ", controller);
+        const execution = executeWithCancellation(source, controller);
+        const outcome = execution.then(
+          () => undefined,
+          () => undefined,
+        );
+        try {
+          expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
+          expect(fakeTimer.getPendingTimeouts()).toEqual([120_000]);
+          fakeTimer.enableAutoAdvance();
+          fakeTimer.advanceTime(120_000);
+          await expect(execution).rejects.toThrow("timed out after 120000ms");
+          await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
+          await expect(execution).rejects.toThrow("indeterminate");
+          await expect(execution).rejects.toThrow("do not retry automatically");
+          expect(adb.wasCommandExecuted("install-existing")).toBe(false);
+          expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          pending.resolve(createExecResult("Success"));
+          await outcome;
+        }
+      },
+    );
 
     test("uninstall errors propagate unchanged without claiming removal", async () => {
       configureDowngrade();
@@ -1705,6 +1985,8 @@ describe("InstallApp", () => {
         expect(fakeAdb.getExecutedCommands()).toEqual([
           "shell pm list packages --user 0",
           "shell pm list packages --user 0",
+          // An upgrade snapshots the installed version so a timed-out install can be judged.
+          ...(upgrade ? [`shell dumpsys package '${packageName}'`] : []),
           `install --user 0 -r "${apkPath}"`,
           "shell pm list packages --user 0",
         ]);
@@ -1870,7 +2152,12 @@ describe("InstallApp", () => {
       expect(repository.markStaleCalls).toBe(0);
     } else {
       if (outcome === "reinstall failure") {
-        await expect(installApp.execute("/tmp/MyApp.app")).rejects.toBe(reinstallError);
+        const failure = await installApp.execute("/tmp/MyApp.app").catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(ActionableError);
+        expect((failure as ActionableError).cause).toBe(reinstallError);
+        expect((failure as ActionableError).message).toContain(
+          "was uninstalled during downgrade recovery",
+        );
       } else {
         expect((await installApp.execute("/tmp/MyApp.app")).success).toBe(true);
       }
@@ -2020,5 +2307,735 @@ describe("InstallApp", () => {
     await expect(installApp.execute(ipaPath)).rejects.toThrow(
       "Uninstall the app first with uninstallApp",
     );
+  });
+
+  // #10191: the adb install step budget only kills the host process; the device may finish.
+  describe("Android install that hits the adb timeout (#10191)", () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const packageName = "dev.jasonpearson.automobile.playground";
+    const installCommand = `install --user 0 -r "${apkPath}"`;
+    const listCommand = "shell pm list packages --user 0";
+    const dumpsysCommand = `shell dumpsys package '${packageName}'`;
+    const present = () => createExecResult(`package:${packageName}`);
+    const absent = () => createExecResult("");
+    // "Before" is a real capture (an API 36 `dumpsys package` of the playground app). "After" is
+    // DERIVED, not captured: no pair of captures taken either side of a committed upgrade exists,
+    // so it is the same text with only the lastUpdateTime line moved, which is the one field a
+    // committed upgrade of an unchanged versionCode changes. The sanity test below asserts on the
+    // parsed fields that the derivation changed exactly that and nothing else, so a fixture
+    // refresh that drops the line cannot turn this into a silent no-op.
+    const dumpsysBefore = readFileSync(
+      path.join(
+        import.meta.dir,
+        "../../fixtures/android-dumpsys-package/dumpsys-package-installed.txt",
+      ),
+      "utf8",
+    );
+    const dumpsysAfter = dumpsysBefore.replace(
+      /lastUpdateTime=.*/,
+      "lastUpdateTime=2099-01-01 00:00:00",
+    );
+    const parsedMetadata = async (dumpsys: string) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(dumpsysCommand, createExecResult(dumpsys));
+      return getAndroidAppMetadataFromAdb(adb, packageName);
+    };
+    const timeoutError = () =>
+      new AdbCommandTimeoutError(`Command timed out after 120000ms: adb -s x ${installCommand}`);
+
+    function setup(installTimesOut = true): {
+      repo: CountingInstalledAppsRepository;
+      installApp: InstallApp;
+    } {
+      fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/36.0.0/aapt2" });
+      fakeHost.setCommandResponse("aapt2", createExecResult(playgroundBadgingOutput));
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+      if (installTimesOut) {
+        fakeAdb.setCommandError(installCommand, timeoutError());
+      }
+      const repo = new CountingInstalledAppsRepository();
+      const installApp = new InstallApp(device, fakeAdbFactory, {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        timer: fakeTimer,
+        installedAppsRepository: repo,
+      });
+      return { repo, installApp };
+    }
+
+    test("first install the device finishes after the timeout reports success with a warning", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, "com.other", false, 1_000);
+      fakeAdb.setCommandResponseSequence(listCommand, [absent(), absent(), present()]);
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result).toMatchObject({ success: true, upgrade: false, userId: 0, packageName });
+      expect(result.warning).toContain("timed out but the device finished installing");
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        listCommand,
+        listCommand,
+        installCommand,
+        listCommand, // live re-read after the timeout
+        listCommand, // post-install verification
+      ]);
+      expect(repo.markStaleCalls).toBeGreaterThan(0);
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("first install absent from the device is indeterminate, never a flat failure", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, "com.other", false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, absent());
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install outcome is indeterminate");
+      expect(result.error).toContain("may still complete; do not retry automatically");
+      expect(result.error).toContain(`${packageName} is not listed for user 0`);
+      expect(result.error).not.toContain("Failed to install");
+      // Two pre-install reads, the install, then three bounded live re-reads.
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        listCommand,
+        listCommand,
+        installCommand,
+        listCommand,
+        listCommand,
+        listCommand,
+      ]);
+      expect(fakeTimer.getSleepHistory()).toEqual([2_000, 2_000]);
+      expect(repo.markStaleCalls).toBeGreaterThan(0);
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("the derived after-upgrade snapshot differs from the capture only in lastUpdateTime", async () => {
+      const before = await parsedMetadata(dumpsysBefore);
+      const after = await parsedMetadata(dumpsysAfter);
+
+      expect(before).not.toBeNull();
+      expect(after).not.toBeNull();
+      expect(before?.lastUpdateTime).toBeDefined();
+      expect(after?.lastUpdateTime).toBeDefined();
+      expect(after?.lastUpdateTime).not.toBe(before?.lastUpdateTime);
+      expect({ ...after, lastUpdateTime: undefined }).toEqual({
+        ...before,
+        lastUpdateTime: undefined,
+      });
+      expect(before?.buildNumber).toBe("1");
+    });
+
+    test("upgrade whose lastUpdateTime moved after the timeout is a success", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, packageName, false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, present());
+      fakeAdb.setCommandResponseSequence("shell dumpsys package", [
+        createExecResult(dumpsysBefore),
+        createExecResult(dumpsysAfter),
+      ]);
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result).toMatchObject({ success: true, upgrade: true, packageName });
+      expect(result.warning).toContain("timed out but the device finished installing");
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        listCommand,
+        listCommand,
+        dumpsysCommand,
+        installCommand,
+        listCommand,
+        dumpsysCommand,
+        listCommand,
+      ]);
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("upgrade still showing the pre-install copy is indeterminate", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, packageName, false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, present());
+      fakeAdb.setCommandResponse("shell dumpsys package", createExecResult(dumpsysBefore));
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install outcome is indeterminate");
+      expect(result.error).toContain("still the pre-install copy");
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("a failed live re-read is indeterminate and names the read failure", async () => {
+      const { installApp } = setup();
+      fakeAdb.setCommandResponseSequence(listCommand, [absent(), absent()]);
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installed = false;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (installed && args[0] === listCommand) {
+          throw new Error("adb: device offline");
+        }
+        installed ||= args[0] === installCommand;
+        return execute(...args);
+      });
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install outcome is indeterminate");
+      expect(result.error).toContain("the package-state check failed: adb: device offline");
+    });
+
+    test("downgrade reinstall that times out then appears is reported as installed", async () => {
+      const { repo, installApp } = setup(false);
+      await repo.seedInstalledApp(device.deviceId, 0, packageName, false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, present());
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installs = 0;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (args[0] === installCommand) {
+          if (++installs === 1) {
+            return createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]");
+          }
+          throw timeoutError();
+        }
+        return execute(...args);
+      });
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("timed out but the device finished installing");
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("downgrade reinstall that times out and is absent never claims the app is not installed", async () => {
+      const { installApp } = setup(false);
+      fakeAdb.setCommandResponse(listCommand, present());
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installs = 0;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (args[0] === installCommand) {
+          if (++installs === 1) {
+            return createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]");
+          }
+          throw timeoutError();
+        }
+        if (args[0].startsWith("uninstall ")) {
+          fakeAdb.setCommandResponse(listCommand, absent());
+        }
+        return execute(...args);
+      });
+
+      const rejection = installApp.execute(apkPath, 0);
+      await expect(rejection).rejects.toThrow("was uninstalled during downgrade recovery");
+      await expect(rejection).rejects.toThrow("Install outcome is indeterminate");
+      await expect(rejection).rejects.toThrow("do not retry automatically");
+      await expect(rejection).rejects.not.toThrow("the app is not installed");
+    });
+
+    // A real AdbClient rejection (#10191): wrapCommandError's Error with the raw execFile
+    // error, which carries the streams, on `cause`. The text is the daemon log's own record of
+    // `adb install` over a newer build (test/fixtures/android-install/downgrade-over-newer.txt).
+    const downgradeCapture = readAndroidInstallCapture("downgrade-over-newer.txt");
+    const capturedApkPath = downgradeCapture.args.at(-1) ?? "";
+
+    test("the captured downgrade rejection carries its streams on cause, not on the top-level error", () => {
+      const rejection = adbRejectionFromInstallCapture(downgradeCapture);
+      expect(rejection).toBeInstanceOf(Error);
+      expect((rejection as Error & { stderr?: unknown }).stderr).toBeUndefined();
+      expect((rejection.cause as Error & { stderr?: unknown }).stderr).toContain(
+        "Failure [INSTALL_FAILED_VERSION_DOWNGRADE",
+      );
+      expect(downgradeCapture.exitCode).toBe(1);
+    });
+
+    test("a real wrapped downgrade rejection runs the uninstall and reinstall recovery", async () => {
+      const { installApp } = setup(false);
+      fakeAdb.setCommandResponse(listCommand, present());
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installs = 0;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (args[0] === installCommand && ++installs === 1) {
+          throw adbRejectionFromInstallCapture(downgradeCapture);
+        }
+        if (args[0] === installCommand) {
+          return createExecResult("Success");
+        }
+        return execute(...args);
+      });
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("was newer than the artifact");
+      expect(fakeAdb.wasCommandExecuted(`uninstall ${packageName}`)).toBe(true);
+      expect(installs).toBe(2);
+    });
+
+    test("error classification ignores the echoed command line and APK path", async () => {
+      const { installApp } = setup(false);
+      const hostile = `/tmp/INSTALL_FAILED_VERSION_DOWNGRADE.apk`;
+      const command = `install --user 0 -r "${hostile}"`;
+      // The same wrapped shape as the real capture, for a different failure on a hostile path:
+      // adb echoes the APK path in its own stderr line, and the message echoes the command.
+      const stderr = downgradeCapture.stderr
+        .replace(capturedApkPath, hostile)
+        .replace(/Failure \[.*\]/, "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]");
+      expect(stderr).toContain(hostile);
+      fakeAdb.setCommandError(
+        command,
+        adbRejectionFromInstallCapture({
+          ...downgradeCapture,
+          args: ["-s", "emulator-5600", "install", "--user", "0", "-r", hostile],
+          stderr,
+        }),
+      );
+
+      await expect(installApp.execute(hostile, 0)).rejects.toThrow("Command failed");
+      expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
+    });
+  });
+
+  // The failure texts below are SYNTHETIC: no captured `simctl install` / `devicectl device install`
+  // rejection exists under test/fixtures. To capture real ones, run
+  // `xcrun simctl install <udid> <damaged-or-wrong-arch .app>` and
+  // `xcrun devicectl device install app --device <udid> <bad .ipa>` and record stderr.
+  describe("iOS downgrade classification and recovery disclosure", () => {
+    const bundleId = "com.example.app";
+    const downgradeDirApp = "/tmp/downgrade-fixtures/MyApp.app";
+    const downgradeDirIpa = "/tmp/downgrade-fixtures/MyApp.ipa";
+    const unrelatedStderr =
+      "An error was encountered processing the command (domain=IXUserPresentableErrorDomain, code=1)";
+    const newerStderr =
+      "Unable to install. A newer version of this application is already installed.";
+
+    function execRejection(file: string, artifact: string, stderr: string | undefined): Error {
+      const error = new Error(`Command failed: ${file} ${artifact}${stderr ? `\n${stderr}` : ""}`);
+      return stderr === undefined ? error : Object.assign(error, { code: 1, stderr });
+    }
+
+    interface SimulatorHarness {
+      calls: string[];
+      action: InstallApp;
+    }
+
+    function simulatorHarness(options: {
+      firstInstallError: Error;
+      onUninstall?: () => void;
+      reinstall?: () => Promise<void>;
+    }): SimulatorHarness {
+      const calls: string[] = [];
+      let attempts = 0;
+      const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+        timer: fakeTimer,
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        plist: fakePlist(bundleId),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        iosInstallBackendResolver: () => ({
+          kind: "simulator",
+          listApps: async () => (attempts > 1 ? [{ bundleId }] : []),
+          installApp: async () => {
+            if (attempts++ === 0) {
+              calls.push("install");
+              throw options.firstInstallError;
+            }
+            calls.push("reinstall");
+            await options.reinstall?.();
+          },
+        }),
+        iosDowngradeRecoveryBackendResolver: () => ({
+          kind: "simulator",
+          terminateApp: async () => {
+            calls.push("terminate");
+          },
+          uninstallApp: async () => {
+            calls.push("uninstall");
+            options.onUninstall?.();
+          },
+        }),
+      });
+      return { calls, action };
+    }
+
+    test.each([
+      ["stderr attached", unrelatedStderr],
+      ["message only", undefined],
+    ])(
+      "simulator: a path containing 'downgrade' does not trigger recovery (%s)",
+      async (_label, stderr) => {
+        const error = execRejection(`xcrun simctl install UDID`, downgradeDirApp, stderr);
+        const { calls, action } = simulatorHarness({ firstInstallError: error });
+        await expect(action.execute(downgradeDirApp)).rejects.toBe(error);
+        expect(calls).toEqual(["install"]);
+      },
+    );
+
+    test.each([
+      ["the full artifact path", `Unable to install ${downgradeDirApp}: damaged bundle`],
+      ["the artifact basename", "Unable to install MyDowngrade.app: damaged bundle"],
+    ])("simulator: tool output echoing %s does not trigger recovery", async (label, stderr) => {
+      const artifact =
+        label === "the artifact basename" ? "/tmp/builds/MyDowngrade.app" : downgradeDirApp;
+      const error = execRejection(`xcrun simctl install UDID`, artifact, stderr);
+      const { calls, action } = simulatorHarness({ firstInstallError: error });
+      await expect(action.execute(artifact)).rejects.toBe(error);
+      expect(calls).toEqual(["install"]);
+    });
+
+    test("simulator: a real rejection that also echoes the artifact path still recovers", async () => {
+      const error = execRejection(
+        `xcrun simctl install UDID`,
+        downgradeDirApp,
+        `${downgradeDirApp}: ${newerStderr}`,
+      );
+      const { calls, action } = simulatorHarness({ firstInstallError: error });
+      const result = await action.execute(downgradeDirApp);
+      expect(result.success).toBe(true);
+      expect(calls).toEqual(["install", "terminate", "uninstall", "reinstall"]);
+    });
+
+    test("simulator: a real downgrade rejection still recovers when the path contains 'downgrade'", async () => {
+      const error = execRejection(`xcrun simctl install UDID`, downgradeDirApp, newerStderr);
+      const { calls, action } = simulatorHarness({ firstInstallError: error });
+      const result = await action.execute(downgradeDirApp);
+      expect(result.success).toBe(true);
+      expect(calls).toEqual(["install", "terminate", "uninstall", "reinstall"]);
+    });
+
+    test.each([
+      ["stderr attached", unrelatedStderr],
+      ["message only", undefined],
+    ])(
+      "physical: a path containing 'downgrade' does not claim a newer version is installed (%s)",
+      async (_label, stderr) => {
+        const installer = new FakeDeviceAppInstaller();
+        const error = execRejection(
+          `xcrun devicectl device install app --device UDID`,
+          downgradeDirIpa,
+          stderr,
+        );
+        installer.shouldThrow = error;
+        const action = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+          performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+          deviceAppInstaller: installer,
+        });
+        await expect(action.execute(downgradeDirIpa)).rejects.toBe(error);
+      },
+    );
+
+    test("physical: a downgrade rejection wrapped with a cause still gives uninstall guidance", async () => {
+      const installer = new FakeDeviceAppInstaller();
+      installer.shouldThrow = new ActionableError(
+        `Failed to install app on physical iOS device: Command failed: xcrun devicectl ${downgradeDirIpa}`,
+        { cause: execRejection("xcrun devicectl", downgradeDirIpa, newerStderr) },
+      );
+      const action = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        deviceAppInstaller: installer,
+      });
+      await expect(action.execute(downgradeDirIpa)).rejects.toThrow(
+        "Uninstall the app first with uninstallApp",
+      );
+    });
+
+    test.each(["explicit", "ambient"] as const)(
+      "simulator: cancellation after the uninstall still finishes the reinstall (%s)",
+      async (source) => {
+        const controller = new AbortController();
+        const reinstallSawAbort: boolean[] = [];
+        const { calls, action } = simulatorHarness({
+          firstInstallError: new Error(newerStderr),
+          onUninstall: () => controller.abort(),
+          reinstall: async () => {
+            // simctl reads the ambient signal; an aborted request would reject it at once.
+            reinstallSawAbort.push(getAbortSignal()?.aborted === true);
+            if (getAbortSignal()?.aborted) {
+              throw new Error("simctl aborted");
+            }
+          },
+        });
+        const run = runWithAbortSignal(source === "ambient" ? controller.signal : undefined, () =>
+          action.execute(
+            "/tmp/MyApp.app",
+            undefined,
+            source === "explicit" ? controller.signal : undefined,
+          ),
+        );
+        if (source === "explicit") {
+          await expect(run).rejects.toThrow("Operation cancelled");
+        } else {
+          expect((await run).success).toBe(true);
+        }
+        expect(calls).toEqual(["install", "terminate", "uninstall", "reinstall"]);
+        expect(reinstallSawAbort).toEqual([false]);
+      },
+    );
+
+    describe("downgrade recovery uses the bounded, cancellable simulator uninstall (#10077)", () => {
+      type UninstallOptions = { timeoutMs?: number; signal?: AbortSignal } | undefined;
+
+      class RecoverySimctl extends DowngradeFakeSimctl {
+        events: string[] = [];
+        uninstallOptions: UninstallOptions[] = [];
+        onTerminate?: () => void;
+        onUninstall?: () => Error | undefined;
+
+        override async terminateApp(
+          bundle: string,
+          deviceId?: string,
+          options?: { timeoutMs?: number; signal?: AbortSignal },
+        ): Promise<void> {
+          this.events.push("terminate");
+          this.onTerminate?.();
+          return super.terminateApp(bundle, deviceId, options);
+        }
+
+        override async uninstallApp(
+          bundle: string,
+          deviceId?: string,
+          options?: UninstallOptions,
+        ): Promise<void> {
+          this.events.push("uninstall");
+          this.uninstallOptions.push(options);
+          const failure = this.onUninstall?.();
+          if (failure) {
+            throw failure;
+          }
+          return super.uninstallApp(bundle, deviceId, options);
+        }
+
+        override async installApp(appPath: string, deviceId?: string): Promise<void> {
+          this.events.push("install");
+          return super.installApp(appPath, deviceId);
+        }
+      }
+
+      function realRecovery() {
+        const simctl = new RecoverySimctl();
+        simctl.installError = new Error(newerStderr);
+        simctl.setListResponses([[], [{ bundleId, bundlePath: "/tmp/MyApp.app" }]]);
+        const repository = new CountingInstalledAppsRepository();
+        const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+          timer: fakeTimer,
+          performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+          simctl,
+          plist: fakePlist(bundleId),
+          installedAppsRepository: repository,
+        });
+        return { simctl, action, repository };
+      }
+
+      test("bounds the uninstall and carries the request signal to simctl", async () => {
+        const { simctl, action } = realRecovery();
+        const controller = new AbortController();
+
+        const result = await action.execute("/tmp/MyApp.app", undefined, controller.signal);
+
+        expect(result.success).toBe(true);
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall", "install"]);
+        expect(simctl.uninstallOptions).toHaveLength(1);
+        expect(simctl.uninstallOptions[0]?.timeoutMs).toBe(SIMULATOR_UNINSTALL_TIMEOUT_MS);
+        expect(simctl.uninstallOptions[0]?.signal).toBe(controller.signal);
+      });
+
+      test("a cancel between the terminate and the uninstall leaves the app installed", async () => {
+        const { simctl, action, repository } = realRecovery();
+        const controller = new AbortController();
+        simctl.onTerminate = () => controller.abort();
+
+        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect((failure as Error).message).toContain("Operation cancelled");
+        expect(simctl.events).toEqual(["install", "terminate"]);
+        expect(repository.markStaleCalls).toBe(0);
+      });
+
+      test("a cancel that kills the dispatched uninstall does not run the reinstall", async () => {
+        const { simctl, action } = realRecovery();
+        const controller = new AbortController();
+        simctl.onUninstall = () => {
+          controller.abort();
+          return new Error("simctl uninstall killed");
+        };
+
+        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect((failure as Error).message).toContain("Operation cancelled");
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall"]);
+      });
+
+      test("a cancel that arrives after the uninstall returned still finishes the reinstall", async () => {
+        const { simctl, action } = realRecovery();
+        const controller = new AbortController();
+        const baseUninstall = simctl.uninstallApp.bind(simctl);
+        simctl.uninstallApp = async (bundle, deviceId, options) => {
+          await baseUninstall(bundle, deviceId, options);
+          controller.abort();
+        };
+
+        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        // The explicit signal still reports the cancellation, but only once the reinstall ran.
+        expect((failure as Error).message).toContain("Operation cancelled");
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall", "install"]);
+      });
+
+      test("an uninstall that times out is reported as indeterminate and the reinstall is not attempted", async () => {
+        const { simctl, action, repository } = realRecovery();
+        const timeout = new SimctlCommandTimeoutError("Command timed out after 30000ms");
+        simctl.onUninstall = () => timeout;
+
+        const failure = await action.execute("/tmp/MyApp.app").then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect(failure).toBeInstanceOf(ActionableError);
+        expect((failure as ActionableError).message).toContain(
+          "Uninstall outcome is indeterminate",
+        );
+        expect((failure as ActionableError).message).not.toContain(
+          "was uninstalled during downgrade recovery",
+        );
+        expect((failure as ActionableError).cause).toBe(timeout);
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall"]);
+        expect(repository.markStaleCalls).toBe(0);
+      });
+    });
+
+    describe("the reinstall's explicit budget reaches the real simctl child", () => {
+      // Real SimCtlClient over a fake process seam: the reinstall runs with no ambient signal, so
+      // without an explicit timeout simctl falls back to its own 60 s default and kills the child
+      // before the stated 120 s budget can fire.
+      function wedgedReinstall() {
+        const clientTimer = new FakeTimer();
+        const reinstallStarted = Promise.withResolvers<void>();
+        const installChildren: Array<{ aborted: boolean }> = [];
+        const simctl = new SimCtlClient(
+          null,
+          async (_file, args, _maxBuffer, signal) => {
+            if (args[1] !== "install") {
+              return createExecResult("", "");
+            }
+            installChildren.push({ aborted: false });
+            const child = installChildren[installChildren.length - 1]!;
+            if (installChildren.length === 1) {
+              throw Object.assign(new Error(`Command failed: xcrun ${args.join(" ")}`), {
+                code: 1,
+                stderr: newerStderr,
+              });
+            }
+            reinstallStarted.resolve();
+            return new Promise<never>((_resolve, reject) => {
+              signal?.addEventListener(
+                "abort",
+                () => {
+                  child.aborted = true;
+                  reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+                },
+                { once: true },
+              );
+            });
+          },
+          clientTimer,
+          "darwin",
+          undefined,
+          undefined,
+          undefined,
+          // Listings parse through plutil; keep every process behind a fake.
+          fakePlist(bundleId),
+        );
+        const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+          // A separate clock: only simctl's own bound is under test, not the 120 s race.
+          timer: new FakeTimer(),
+          performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+          simctl,
+          plist: fakePlist(bundleId),
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+        });
+        return { action, clientTimer, reinstallStarted, installChildren };
+      }
+
+      test("a 60-120 s reinstall is not killed at simctl's 60 s default", async () => {
+        const { action, clientTimer, reinstallStarted, installChildren } = wedgedReinstall();
+        const execution = action.execute("/tmp/MyApp.app");
+        const outcome = execution.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        await Promise.race([reinstallStarted.promise, outcome]);
+        expect(installChildren).toHaveLength(2);
+
+        clientTimer.advanceTime(60_000);
+        await Promise.resolve();
+        expect(installChildren[1]?.aborted).toBe(false);
+
+        clientTimer.advanceTime(60_000);
+        const failure = await outcome;
+        expect(installChildren[1]?.aborted).toBe(true);
+        expect((failure as Error).message).toContain("was uninstalled during downgrade recovery");
+      });
+    });
+
+    test("simulator: a failed reinstall says the app was uninstalled and keeps the cause", async () => {
+      const reinstallError = new Error("damaged bundle");
+      const { action } = simulatorHarness({
+        firstInstallError: new Error(newerStderr),
+        reinstall: async () => {
+          throw reinstallError;
+        },
+      });
+      const failure = await action.execute("/tmp/MyApp.app").then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(ActionableError);
+      const { message, cause } = failure as ActionableError;
+      expect(message).toContain(
+        `The previous version of ${bundleId} was uninstalled during downgrade recovery`,
+      );
+      expect(message).toContain("the app is not installed");
+      expect(message).toContain("damaged bundle");
+      expect(cause).toBe(reinstallError);
+    });
+
+    test("simulator: a reinstall that never settles hits its step deadline and discloses the uninstall", async () => {
+      fakeTimer = new FakeTimer();
+      const pending = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<boolean>();
+      const { action } = simulatorHarness({
+        firstInstallError: new Error(newerStderr),
+        reinstall: () => {
+          started.resolve(true);
+          return pending.promise;
+        },
+      });
+      const execution = action.execute("/tmp/MyApp.app");
+      const outcome = execution.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
+        expect(fakeTimer.getPendingTimeouts()).toEqual([120_000]);
+        fakeTimer.advanceTime(120_000);
+        await expect(execution).rejects.toThrow("iOS downgrade reinstall timed out after 120000ms");
+        await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        pending.resolve();
+        await outcome;
+      }
+    });
   });
 });

@@ -29,6 +29,7 @@
  *   same treatment separately.
  */
 
+import type { OverlaySpec, OverlayJson } from "../../overlay/overlaySpec";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
 import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
@@ -418,6 +419,82 @@ export interface GetTraversalOrderMessage {
   requestId: string;
 }
 
+export type OverlayState = NonNullable<OverlaySpec["state"]>;
+export interface ShowOverlayMessage {
+  type: "show_overlay";
+  requestId: string;
+  spec: OverlaySpec;
+  /** Android logical display; omitted for the default display. Requires overlay_display_id_v1. */
+  displayId?: number;
+}
+/** Replacement spec.id must equal the top-level id; hosts reject mismatches before sending. */
+export type OverlayUpdate = { id: string } & (
+  | { spec: OverlaySpec; state?: never }
+  | { state: OverlayState; spec?: never }
+);
+export type UpdateOverlayMessage = { type: "update_overlay"; requestId: string } & OverlayUpdate;
+export type OverlayDismiss = { id: string; all?: never } | { all: true; id?: never };
+export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string } & OverlayDismiss;
+/**
+ * `@SerialName("put_overlay_asset")` → `PutOverlayAsset`. `dataBase64` is the encoded image file
+ * (PNG, JPEG or WebP) in standard base64 without line breaks, sent in the one JSON text frame like
+ * screenshots. Replaces any asset with the same id. Answered by one `overlay_result`.
+ */
+export interface PutOverlayAssetMessage {
+  type: "put_overlay_asset";
+  requestId: string;
+  id: string;
+  mimeType: string;
+  dataBase64: string;
+}
+/** `@SerialName("remove_overlay_asset")` → `RemoveOverlayAsset`. Idempotent on the device. */
+export interface RemoveOverlayAssetMessage {
+  type: "remove_overlay_asset";
+  requestId: string;
+  id: string;
+}
+
+export interface OverlayResult {
+  success: boolean;
+  totalTimeMs?: number;
+  error?: string | null;
+  requestId?: string;
+  timestamp?: number;
+  /**
+   * Warning, not a failure: after a successful show_overlay or update_overlay, the asset ids the
+   * spec references that the device has no copy of (never uploaded, or cleared since), so the
+   * host can re-upload them. Absent when nothing is missing and on devices that predate it.
+   */
+  missingAssets?: string[];
+}
+
+/**
+ * Outcome of an overlay asset upload or removal. `dispatched` is true once the frame was written
+ * to the socket; `acknowledged` is true only when the device answered (success or refusal). A
+ * dispatched, unacknowledged request is indeterminate: the device may or may not have applied it.
+ */
+export interface OverlayAssetResult extends OverlayResult {
+  dispatched: boolean;
+  acknowledged: boolean;
+}
+
+/** Id-less push; pager selection has its own namespace, separate from authored state. */
+export interface OverlayEvent {
+  type: "overlay_event";
+  timestamp: number;
+  id: string;
+  /**
+   * Emitter contract: per overlay id, monotonic starting at 1; reconnects must not reset it.
+   * Hosts should treat lower-or-equal sequences for the same id as duplicates.
+   */
+  sequence: number;
+  kind: "emit" | "page_changed" | "dismissed";
+  name: string | null;
+  payload: OverlayJson;
+  state: OverlayState;
+  pages: Record<string, number>;
+}
+
 // =============================================================================
 // Highlight Request
 // =============================================================================
@@ -634,6 +711,7 @@ export interface RequestLaunchIntentMessage {
 
 // =============================================================================
 // Recording Requests (no requestId on the wire)
+// Both commands are kept for wire compatibility and currently have no effect on the device.
 // =============================================================================
 
 /** `@SerialName("start_recording")` → `StartRecording` (sent without requestId) */
@@ -691,6 +769,11 @@ export type CtrlProxyRequest =
   | RequestDeviceInfoMessage
   | GetCurrentFocusMessage
   | GetTraversalOrderMessage
+  | ShowOverlayMessage
+  | UpdateOverlayMessage
+  | DismissOverlayMessage
+  | PutOverlayAssetMessage
+  | RemoveOverlayAssetMessage
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
@@ -730,6 +813,11 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
  * the raw advertised list for the remaining optional text/keyboard capabilities.
  */
 export const ANDROID_CAPABILITY_REQUEST_TYPES = [
+  "show_overlay",
+  "update_overlay",
+  "dismiss_overlay",
+  "put_overlay_asset",
+  "remove_overlay_asset",
   "discover_keystore",
   "set_hierarchy_interval",
   "request_activate_accessibility_link",
@@ -741,12 +829,19 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "request_list_keyboard_profiles",
 ] as const satisfies readonly CtrlProxyRequestType[];
 
+/**
+ * Advertised only by a CtrlProxy that attaches `show_overlay` to the requested `displayId`. An
+ * older device would ignore the unknown field and show the overlay on the default display.
+ */
+export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
   "ime_key_events_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
+  OVERLAY_DISPLAY_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -786,6 +881,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
   "current_focus_result",
   "traversal_order_result",
   "highlight_response",
+  "overlay_result",
   "global_action_result",
   "frame_context_validation_result",
   "device_info_result",
@@ -809,6 +905,7 @@ export const ANDROID_ID_LESS_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   "navigation_event",
   "package_event",
   "interaction_event",
+  "overlay_event",
   "handled_exception_event",
   "crash_event",
   "anr_event",
@@ -885,6 +982,11 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   get_current_focus: true,
   get_traversal_order: true,
   add_highlight: true,
+  show_overlay: true,
+  update_overlay: true,
+  dismiss_overlay: true,
+  put_overlay_asset: true,
+  remove_overlay_asset: true,
   list_preference_files: true,
   get_preferences: true,
   discover_keystore: true,
@@ -1143,6 +1245,50 @@ export const ctrlProxyRequests = {
 
   getTraversalOrder(args: { requestId: string }): GetTraversalOrderMessage {
     return { type: "get_traversal_order", requestId: args.requestId };
+  },
+
+  showOverlay(args: {
+    requestId: string;
+    spec: OverlaySpec;
+    displayId?: number;
+  }): ShowOverlayMessage {
+    return {
+      type: "show_overlay",
+      requestId: args.requestId,
+      spec: args.spec,
+      ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
+    };
+  },
+
+  updateOverlay(args: { requestId: string } & OverlayUpdate): UpdateOverlayMessage {
+    return args.spec !== undefined
+      ? { type: "update_overlay", requestId: args.requestId, id: args.id, spec: args.spec }
+      : { type: "update_overlay", requestId: args.requestId, id: args.id, state: args.state };
+  },
+
+  dismissOverlay(args: { requestId: string } & OverlayDismiss): DismissOverlayMessage {
+    return args.id !== undefined
+      ? { type: "dismiss_overlay", requestId: args.requestId, id: args.id }
+      : { type: "dismiss_overlay", requestId: args.requestId, all: args.all };
+  },
+
+  putOverlayAsset(args: {
+    requestId: string;
+    id: string;
+    mimeType: string;
+    dataBase64: string;
+  }): PutOverlayAssetMessage {
+    return {
+      type: "put_overlay_asset",
+      requestId: args.requestId,
+      id: args.id,
+      mimeType: args.mimeType,
+      dataBase64: args.dataBase64,
+    };
+  },
+
+  removeOverlayAsset(args: { requestId: string; id: string }): RemoveOverlayAssetMessage {
+    return { type: "remove_overlay_asset", requestId: args.requestId, id: args.id };
   },
 
   addHighlight(args: {

@@ -1,4 +1,5 @@
 import { ScreenshotUtils } from "../../src/utils/interfaces/ScreenshotUtils";
+import type { ScreenshotComparisonResult } from "../../src/utils/screenshot/ScreenshotComparator";
 
 /**
  * Fake implementation of ScreenshotUtils for testing
@@ -8,11 +9,9 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   // Configuration state
   private cachedScreenshots: Map<string, { buffer: Buffer; hash: string }> = new Map();
   private imageDimensions: { width: number; height: number } = { width: 1080, height: 2400 };
-  private compareImagesResult: {
-    similarity: number;
-    pixelDifference: number;
-    totalPixels: number;
-  } = {
+  private dimensionsByBuffer: Map<string, { width: number; height: number }> = new Map();
+  private compareImagesResult: ScreenshotComparisonResult = {
+    compared: true,
     similarity: 100,
     pixelDifference: 0,
     totalPixels: 2592000, // 1080 * 2400
@@ -36,13 +35,17 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   }
 
   /**
+   * Configure dimensions for one specific buffer (matched by content), e.g. to model a screenshot
+   * taken after a rotation. Other buffers keep the default from setImageDimensions.
+   */
+  setImageDimensionsForBuffer(buffer: Buffer, width: number, height: number): void {
+    this.dimensionsByBuffer.set(buffer.toString("utf8"), { width, height });
+  }
+
+  /**
    * Configure comparison result
    */
-  setCompareImagesResult(result: {
-    similarity: number;
-    pixelDifference: number;
-    totalPixels: number;
-  }): void {
+  setCompareImagesResult(result: ScreenshotComparisonResult): void {
     this.compareImagesResult = result;
   }
 
@@ -103,7 +106,7 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
 
   async getImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }> {
     this.recordCall("getImageDimensions", { bufferLength: buffer.length });
-    return this.imageDimensions;
+    return this.dimensionsByBuffer.get(buffer.toString("utf8")) ?? this.imageDimensions;
   }
 
   async compareImages(
@@ -111,12 +114,7 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     buffer2: Buffer,
     threshold: number = 0.1,
     fastMode: boolean = false,
-  ): Promise<{
-    similarity: number;
-    pixelDifference: number;
-    totalPixels: number;
-    filePath?: string;
-  }> {
+  ): Promise<ScreenshotComparisonResult> {
     this.recordCall("compareImages", {
       buffer1Length: buffer1.length,
       buffer2Length: buffer2.length,

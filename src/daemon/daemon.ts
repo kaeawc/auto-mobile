@@ -1,7 +1,10 @@
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
-import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
+import {
+  cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
+  releaseSessionAndDevice,
+} from "./releaseSessionAndDevice";
 import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
@@ -80,6 +83,8 @@ import {
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { NetworkState } from "../server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -129,6 +134,7 @@ import {
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
+  createPooledObservationExecutor,
   runObservationRequestBatch,
 } from "./observationRequestBatch";
 import {
@@ -192,7 +198,7 @@ import {
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
-  stopVideoRecording,
+  stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -249,6 +255,12 @@ const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
 const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+// How long device-disconnect cleanup waits for a recording's stop before releasing the device.
+// An iOS recording started with `resolution` is re-encoded by ffmpeg on stop, which an
+// unattended stop bounds by up to 10 minutes; the device and its session must not wait that
+// long. This is the stream-copy post-process budget (and the former fixed bound). The stop
+// keeps running in the background under its own unattended ceiling.
+const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
@@ -272,6 +284,38 @@ type DeviceSessionRoutingTargets = {
   failuresPush: ReturnType<typeof getFailuresPushServer>;
   telemetryPush: ReturnType<typeof getTelemetryPushServer>;
 };
+
+function toBootedDevice(pooledDevice: PooledDevice): BootedDevice {
+  return {
+    deviceId: pooledDevice.id,
+    name: pooledDevice.name,
+    platform: pooledDevice.platform,
+    iosVersion: pooledDevice.iosVersion,
+  };
+}
+
+/**
+ * Per-device step of the pooled observation batch. An Android floor is read from the device's
+ * own clock (host fallback inside the adb client, as the action paths do); iOS keeps the host
+ * floor (issue #9895).
+ */
+function createDaemonObservationExecutor(requestStart: number) {
+  return createPooledObservationExecutor({
+    hostRequestStartMs: requestStart,
+    readAndroidDeviceClockMs: async (pooledDevice: PooledDevice, signal: AbortSignal) =>
+      (
+        await defaultAdbClientFactory
+          .create(toBootedDevice(pooledDevice))
+          .getDeviceTimestampMsWithSource(undefined, signal)
+      ).timestampMs,
+    observe: (pooledDevice: PooledDevice, { minTimestamp, signal }) =>
+      new RealObserveScreen(toBootedDevice(pooledDevice)).execute({
+        skipWaitForFresh: false,
+        minTimestamp,
+        signal,
+      }),
+  });
+}
 
 export function getProcessWideAdbServerResetCohort(
   bootedDeviceIds: ReadonlySet<string>,
@@ -578,6 +622,7 @@ export class Daemon {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
         defaultMockLocationClearRegistry.retireDevice(deviceId);
+        NetworkState.getInstance().retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
@@ -600,8 +645,8 @@ export class Daemon {
         {
           cancelDeviceExecutions: (
             deviceId: string,
-            reason: string,
-            options?: { excludeExecutionId?: string },
+            reason: string | Error,
+            options?: { excludeExecutionId?: string; onlySessionUuid?: string },
           ) => this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
         },
       ),
@@ -612,6 +657,7 @@ export class Daemon {
 
   private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
+    registerNetworkStateSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {
@@ -753,6 +799,9 @@ export class Daemon {
     }
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
+    }
+    if (options.actionsCompactMetadata) {
+      serverConfig.setActionsCompactMetadataEnabled(true);
     }
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
@@ -1997,20 +2046,7 @@ export class Daemon {
       const requestStart = this.timer.now();
       return runObservationRequestBatch(
         pooledDevices,
-        async (pooledDevice, observationSignal) => {
-          const bootedDevice: BootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: pooledDevice.platform,
-            iosVersion: pooledDevice.iosVersion,
-          };
-          const observeScreen = new RealObserveScreen(bootedDevice);
-          return observeScreen.execute({
-            skipWaitForFresh: false,
-            minTimestamp: requestStart,
-            signal: observationSignal,
-          });
-        },
+        createDaemonObservationExecutor(requestStart),
         {
           timer: this.timer,
           signal,
@@ -3051,8 +3087,38 @@ export class Daemon {
       return false;
     }
     this.stoppingRecordings.add(recordingId);
+    const stopped = this.stopOrInterruptRecordingAfterDeviceDisconnect(
+      recordingId,
+      deviceId,
+    ).finally(() => this.stoppingRecordings.delete(recordingId));
+    const stillStopping = new Error("recording stop still running");
     try {
-      await stopVideoRecording(recordingId);
+      return await raceWithDeadline(stopped, {
+        timer: this.timer,
+        timeoutMs: DISCONNECT_RECORDING_STOP_WAIT_MS,
+        label: "Stop recording after device disconnect",
+        timeoutError: () => stillStopping,
+      });
+    } catch (error) {
+      if (error !== stillStopping) {
+        throw error;
+      }
+      // The capture itself ended with the device; what is left is post-processing, bounded by
+      // the unattended stop's own ceiling. The recording stays in `stoppingRecordings` until
+      // it finishes, so releasing the device neither waits for it nor starts a second stop.
+      logger.warn(
+        `[Daemon] Recording ${recordingId} is still finishing after device ${deviceId} disconnected; releasing the device without waiting`,
+      );
+      return true;
+    }
+  }
+
+  private async stopOrInterruptRecordingAfterDeviceDisconnect(
+    recordingId: string,
+    deviceId: string,
+  ): Promise<boolean> {
+    try {
+      await stopVideoRecordingUnattended(recordingId);
       logger.warn(
         `[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`,
       );
@@ -3062,8 +3128,6 @@ export class Daemon {
         `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`,
       );
       return await this.interruptRecordingAfterDeviceDisconnect(recordingId, deviceId);
-    } finally {
-      this.stoppingRecordings.delete(recordingId);
     }
   }
 
@@ -3190,83 +3254,84 @@ export class Daemon {
     shouldCommit?: () => boolean,
     options?: { deferFailureFallback?: boolean },
   ): Promise<boolean> {
-    const cancelled = await executionTracker.cancelSessionUuidExecutions(sessionId, releaseReason);
-    // Early identity fence: discovery can replace a same-serial runtime while
-    // execution cancellation is in flight. It is not the final one — the
-    // session manager re-evaluates `shouldCommit` immediately before it
-    // removes the session, after its own setup/restoration awaits (#7031).
-    if (shouldCommit?.() === false) {
-      return false;
-    }
-    // Capture the owner before release can remove it or hide it behind a
-    // terminal fence. Pool lookup also covers expired sessions during shutdown.
-    const assignedDeviceId =
-      expectedSession?.assignedDevice ??
-      this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
-      null;
-    let deviceId: string | null = null;
-    let superseded = false;
-    await releaseSessionAndDevice(
-      this.sessionManager,
-      this.devicePool,
-      assignedDeviceId,
-      sessionId,
-      releaseReason,
-      {
-        ...options,
-        release: async () => {
-          if (expectedSession) {
-            deviceId = await this.sessionManager.releaseSessionIfOwned(
-              sessionId,
-              expectedSession,
-              expectedSession.assignedDevice,
-              releaseReason,
-            );
-          } else if (shouldCommit) {
-            const release = await this.sessionManager.releaseSessionUnlessSuperseded(
-              sessionId,
-              releaseReason,
-              shouldCommit,
-              allowExpired,
-            );
-            if (release.superseded) {
-              logger.info(
-                `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+    return cancelExecutionsAndReleaseSession(sessionId, releaseReason, async (cancelled) => {
+      // Early identity fence: discovery can replace a same-serial runtime while
+      // execution cancellation is in flight. It is not the final one — the
+      // session manager re-evaluates `shouldCommit` immediately before it
+      // removes the session, after its own setup/restoration awaits (#7031).
+      if (shouldCommit?.() === false) {
+        return false;
+      }
+      // Capture the owner before release can remove it or hide it behind a
+      // terminal fence. Pool lookup also covers expired sessions during shutdown.
+      const assignedDeviceId =
+        expectedSession?.assignedDevice ??
+        this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
+        null;
+      let deviceId: string | null = null;
+      let superseded = false;
+      await releaseSessionAndDevice(
+        this.sessionManager,
+        this.devicePool,
+        assignedDeviceId,
+        sessionId,
+        releaseReason,
+        {
+          ...options,
+          release: async () => {
+            if (expectedSession) {
+              deviceId = await this.sessionManager.releaseSessionIfOwned(
+                sessionId,
+                expectedSession,
+                expectedSession.assignedDevice,
+                releaseReason,
               );
-              superseded = true;
-              return null;
+            } else if (shouldCommit) {
+              const release = await this.sessionManager.releaseSessionUnlessSuperseded(
+                sessionId,
+                releaseReason,
+                shouldCommit,
+                allowExpired,
+              );
+              if (release.superseded) {
+                logger.info(
+                  `Kept session ${sessionId}: a newer identity confirmation superseded its release (reason=${releaseReason})`,
+                );
+                superseded = true;
+                return null;
+              }
+              deviceId = release.deviceId;
+            } else {
+              deviceId = await this.sessionManager.releaseSession(
+                sessionId,
+                releaseReason,
+                allowExpired,
+              );
             }
-            deviceId = release.deviceId;
-          } else {
-            deviceId = await this.sessionManager.releaseSession(
-              sessionId,
-              releaseReason,
-              allowExpired,
-            );
-          }
-          // A completed persistence retry may return a device already idle or
-          // reassigned. Do not issue a stale pool release or report it as freed.
-          if (!this.isSessionDeviceAssigned(deviceId, sessionId)) {
-            deviceId = null;
-          }
-          return deviceId;
+            // A completed persistence retry may return a device already idle or
+            // reassigned. Do not issue a stale pool release or report it as freed.
+            if (!this.isSessionDeviceAssigned(deviceId, sessionId)) {
+              deviceId = null;
+            }
+            return deviceId;
+          },
         },
-      },
-    );
-    if (superseded) {
-      return false;
-    }
-    if (!deviceId || this.isSessionDeviceAssigned(deviceId, sessionId)) {
-      logger.info(
-        `Cancelled session ${sessionId} (${cancelled} executions); no device freed (reason=${releaseReason})`,
       );
-      return false;
-    }
-    logger.info(
-      `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId} ` +
-        `(reason=${releaseReason})`,
-    );
-    return true;
+      if (superseded) {
+        return false;
+      }
+      if (!deviceId || this.isSessionDeviceAssigned(deviceId, sessionId)) {
+        logger.info(
+          `Cancelled session ${sessionId} (${cancelled} executions); no device freed (reason=${releaseReason})`,
+        );
+        return false;
+      }
+      logger.info(
+        `Cancelled session ${sessionId} (${cancelled} executions) and released device ${deviceId} ` +
+          `(reason=${releaseReason})`,
+      );
+      return true;
+    });
   }
 
   private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {
@@ -3275,8 +3340,8 @@ export class Daemon {
 
   private async cancelAndDrainDeviceExecutions(
     deviceId: string,
-    reason: string,
-    options?: { excludeExecutionId?: string },
+    reason: string | Error,
+    options?: { excludeExecutionId?: string; onlySessionUuid?: string },
   ): Promise<number> {
     const cancelled = await executionTracker.cancelDeviceExecutions(deviceId, reason, options);
     if (cancelled === 0) {

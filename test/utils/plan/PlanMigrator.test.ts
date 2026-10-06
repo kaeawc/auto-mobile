@@ -1,8 +1,31 @@
 import { describe, expect, test } from "bun:test";
-import { migratePlan } from "../../../src/utils/plan/PlanMigrator";
+import { migratePlan, migratePlanStep } from "../../../src/utils/plan/PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../../../src/utils/mcpVersion";
 
 describe("PlanMigrator", () => {
+  test.each([
+    { tool: "highlight", id: "login" },
+    { tool: "highlight", params: { id: "login" } },
+    { command: "highlight", id: "login" },
+  ])("migrates legacy highlight id: %j", (step) => {
+    const migrated = migratePlanStep(step, 0);
+    expect(migrated).toEqual({ tool: "highlight", params: { elementId: "login" } });
+    expect(migratePlanStep(migrated, 0)).toEqual(migrated);
+  });
+
+  test("explicit highlight elementId wins over legacy id", () => {
+    expect(
+      migratePlanStep({ tool: "highlight", id: "old", params: { elementId: "new" } }, 0),
+    ).toEqual({ tool: "highlight", params: { elementId: "new" } });
+  });
+
+  test("tapOn still migrates id into selector and inline description into label", () => {
+    expect(migratePlanStep({ tool: "tapOn", id: "login", description: "Tap login" }, 0)).toEqual({
+      tool: "tapOn",
+      label: "Tap login",
+      params: { action: "tap", selector: { elementId: "login" } },
+    });
+  });
   describe("version metadata (dev-build SHA stamp)", () => {
     // Regression: dev builds report a git-SHA-stamped version (`0.0.39+g<sha>[.dirty]`).
     // The runtime target version is stamped, and PlanSerializer persists the same
@@ -1050,5 +1073,33 @@ describe("PlanMigrator field precedence", () => {
       { message: "Mapped step description to label.", stepIndex: 0 },
       { message: "Removed deprecated step description field.", stepIndex: 0 },
     ]);
+  });
+
+  describe("migratePlanStep (criticalSection sub-steps, #9927)", () => {
+    test("wraps a legacy tapOn { text } under selector without mutating the input", () => {
+      const input = { tool: "tapOn", params: { device: "A", text: "Sync" } };
+      expect(migratePlanStep(input, 0)).toEqual({
+        tool: "tapOn",
+        params: { device: "A", action: "tap", selector: { text: "Sync" } },
+      });
+      expect(input).toEqual({ tool: "tapOn", params: { device: "A", text: "Sync" } });
+    });
+
+    test("is idempotent on an already-migrated step", () => {
+      const migrated = migratePlanStep({ tool: "tapOn", params: { device: "A", text: "Sync" } }, 0);
+      expect(migratePlanStep(migrated, 0)).toEqual(migrated);
+    });
+
+    test("resolves the inputText operation from the supplied platform", () => {
+      const step = { tool: "inputText", params: { device: "A", text: "hi" } };
+      expect(migratePlanStep(step, 0, { platform: "ios" })).toMatchObject({
+        tool: "sendKeys",
+        params: { commands: [{ action: "type", text: "hi", operation: "insert" }] },
+      });
+    });
+
+    test("returns a non-object step unchanged", () => {
+      expect(migratePlanStep("nope", 0)).toBe("nope");
+    });
   });
 });

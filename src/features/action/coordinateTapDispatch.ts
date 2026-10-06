@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/describeUnknownError";
 import { inputDurationArgument } from "./touchscreenInput";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
@@ -7,10 +8,15 @@ import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { TapAnyElementOptions } from "../../models/TapAnyElementOptions";
 import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
-import { LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { isStaleFrameContextRejection, LONG_PRESS_MIN_MS } from "./tapAtGesture";
+import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
+import type { TalkBackTapResult, TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import type { TalkBackNavigationDriver } from "../talkback/TalkBackNavigationDriver";
+import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
 export interface CoordinateTapClient<Dispatch = never> {
@@ -28,14 +34,52 @@ export interface CoordinateTapClient<Dispatch = never> {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
-export function isStaleFrameContextRejection(error: string | undefined): boolean {
-  return typeof error === "string" && error.toLowerCase().includes("stale frame context");
+/**
+ * The iOS client's coordinate-tap subset. Position seven is the abort signal and position eight
+ * the dispatch marker (Android's client has them the other way round, see `CoordinateTapClient`).
+ * `dispatched`/`acknowledged` follow `sendIOSPressCommand`: a reply from the runner, including a
+ * refusal, is acknowledged; a timeout or transport failure after the write is not.
+ */
+export interface IosCoordinateTapClient {
+  requestTapCoordinates(
+    x: number,
+    y: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: unknown,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    dispatched?: boolean;
+    acknowledged?: boolean;
+  }>;
 }
 
+export { isStaleFrameContextRejection };
+
+/** A tap that was written to the device but whose outcome was never confirmed. */
+export class IndeterminateTapError extends ActionableError {}
+
 export function indeterminateTapError(error: string | undefined): ActionableError {
-  return new ActionableError(
+  return new IndeterminateTapError(
     `Tap outcome is indeterminate: the request was dispatched but no result was confirmed (${error ?? "unknown error"}). Do not retry automatically.`,
   );
+}
+
+/**
+ * iOS double tap: the second tap is reached only after the first was confirmed, so an
+ * unconfirmed second tap leaves one tap delivered. Other failures pass through unchanged.
+ */
+export function withPartialIosDoubleTapNote(error: unknown): unknown {
+  return error instanceof IndeterminateTapError
+    ? new IndeterminateTapError(
+        `${error.message} Double tap partially applied: one tap was delivered; the second tap was not confirmed.`,
+        { cause: error },
+      )
+    : error;
 }
 
 /**
@@ -127,23 +171,178 @@ export async function dispatchAndroidCoordinateTap(
   throwIfAborted(signal);
 }
 
-/** Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure. */
+export interface IosCoordinateTapOptions {
+  failureLabel?: "tap" | "second tap";
+  signal?: AbortSignal;
+  /** Overrides the transport budget derived from the press duration (tapAny sizes its own). */
+  timeoutMs?: number;
+}
+
+/**
+ * Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure.
+ *
+ * A tap that was written to the socket but never answered (timeout, socket close, cancellation
+ * after the write) may have landed, so it is reported as indeterminate. A tap that was never
+ * sent, or that the runner answered with a refusal, stays a plain failure.
+ */
 export async function dispatchIosCoordinateTap(
-  client: CoordinateTapClient,
+  client: IosCoordinateTapClient,
   x: number,
   y: number,
   durationMs: number,
   frameContext?: string,
-  failureLabel: "tap" | "second tap" = "tap",
+  options: IosCoordinateTapOptions = {},
 ): Promise<void> {
-  const timeoutMs = resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
-  const result =
-    frameContext === undefined
-      ? await client.requestTapCoordinates(x, y, durationMs, timeoutMs)
-      : await client.requestTapCoordinates(x, y, durationMs, timeoutMs, undefined, frameContext);
-  if (!result.success) {
-    throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);
+  const { failureLabel = "tap", signal } = options;
+  const timeoutMs = options.timeoutMs ?? resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
+  let dispatched = false;
+  const onDispatch = () => {
+    dispatched = true;
+  };
+  let result: IosTapReply;
+  try {
+    result = await client.requestTapCoordinates(
+      x,
+      y,
+      durationMs,
+      timeoutMs,
+      undefined,
+      frameContext,
+      signal,
+      onDispatch,
+    );
+  } catch (error) {
+    if (isUnconfirmedIosTapThrow(error, dispatched, signal)) {
+      logger.warn(`[coordinateTapDispatch] iOS ${failureLabel} transport failed`, error);
+      throw indeterminateTapError(errorMessage(error));
+    }
+    throw error;
   }
+  if (result.success) {
+    return;
+  }
+  if (isUnconfirmedIosTapReply(result, dispatched)) {
+    throw indeterminateTapError(result.error);
+  }
+  throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);
+}
+
+/**
+ * Dispatch the second tap of an iOS double tap, which is reached only after the first was
+ * confirmed: an unconfirmed second tap leaves one tap delivered and says so.
+ */
+export async function dispatchIosSecondTap(
+  client: IosCoordinateTapClient,
+  point: { x: number; y: number },
+  durationMs: number,
+  options: Omit<IosCoordinateTapOptions, "failureLabel"> = {},
+): Promise<void> {
+  try {
+    await dispatchIosCoordinateTap(client, point.x, point.y, durationMs, undefined, {
+      ...options,
+      failureLabel: "second tap",
+    });
+  } catch (error) {
+    throw withPartialIosDoubleTapNote(error);
+  }
+}
+
+type IosTapReply = Awaited<ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>>;
+
+/** A runner refusal (an ActionableError) and the caller's own abort keep their original throw. */
+function isUnconfirmedIosTapThrow(
+  error: unknown,
+  dispatched: boolean,
+  signal: AbortSignal | undefined,
+): boolean {
+  return dispatched && !(error instanceof ActionableError) && error !== signal?.reason;
+}
+
+/** Written to the socket and not answered; a stale-frame refusal proves the tap was rejected. */
+function isUnconfirmedIosTapReply(result: IosTapReply, dispatched: boolean): boolean {
+  return (
+    (result.dispatched ?? dispatched) &&
+    result.acknowledged !== true &&
+    !isStaleFrameContextRejection(result.error)
+  );
+}
+
+export interface TalkBackDisplayTapContext {
+  strategy: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
+  driver: TalkBackNavigationDriver;
+}
+
+/** Report touches the TalkBack strategy delivered and the warnings it attached. */
+function reportTalkBackDelivery(
+  result: TalkBackTapResult,
+  action: TapAnyElementOptions["action"],
+  hooks: { onDispatched: () => void; onWarning?: (warning: string) => void },
+): void {
+  if (result.success || result.focusCompleted) {
+    hooks.onDispatched();
+  }
+  if (!result.success) {
+    return;
+  }
+  if (action === "doubleTap") {
+    // The driver's atomic request delivers both activation touches, so a late
+    // cancellation is a completed double tap rather than a partial one.
+    hooks.onDispatched();
+  }
+  // A coordinate gesture the service acknowledged does not confirm semantic activation;
+  // surface the same warnings tapAt and the default route report.
+  for (const warning of result.warnings ?? []) {
+    hooks.onWarning?.(warning);
+  }
+}
+
+/** TalkBack-on tap on the default display: the strategies the implicit-display routes use. */
+function talkBackDisplayTapDispatch(
+  options: Pick<TapAnyElementOptions, "action" | "duration">,
+  context: {
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+    onDispatched: () => void;
+    onWarning?: (warning: string) => void;
+    talkBack: TalkBackDisplayTapContext;
+  },
+): (point: { x: number; y: number }) => Promise<void> {
+  const { target, signal, talkBack } = context;
+  const fence = {
+    assertCurrent: () => {
+      throwIfAborted(signal);
+      target.assertCurrent();
+    },
+  };
+  return async ({ x, y }) => {
+    fence.assertCurrent();
+    const action = options.action;
+    const durationMs = action === "longPress" ? (options.duration ?? 800) : 50;
+    const result =
+      action === "tap"
+        ? await talkBack.strategy.executePreciseTap(x, y, talkBack.driver, fence)
+        : await talkBack.strategy.executeCoordinateFallback(
+            x,
+            y,
+            action,
+            durationMs,
+            talkBack.driver,
+            {
+              displayFence: fence,
+            },
+          );
+    reportTalkBackDelivery(result, action, context);
+    throwIfAborted(signal);
+    if (!result.success) {
+      throw new ActionableError(
+        `TalkBack coordinate tap failed: ${result.error ?? "activation was not confirmed"}${
+          result.focusCompleted
+            ? " Focus touch was delivered; activation failed. Do not retry automatically."
+            : ""
+        }`,
+      );
+    }
+  };
 }
 
 /** Shared tapOn/tapAny routing; non-default panels require an advertised CtrlProxy capability. */
@@ -157,11 +356,28 @@ export async function androidDisplayTapDispatch(
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
     onDispatched: () => void;
+    timer?: Pick<Timer, "sleep" | "now">;
+    /** Receives a caution when the sequential fallback starts the taps outside the double-tap window. */
+    onWarning?: (warning: string) => void;
+    /**
+     * Present only when TalkBack is on. A raw coordinate gesture would only move
+     * accessibility focus, and the shared driver cannot address a non-default display, so a
+     * non-default display is refused before any dispatch (#9905) and the default display
+     * uses the same TalkBack coordinate strategies as the implicit-display routes.
+     */
+    talkBack?: TalkBackDisplayTapContext;
   },
 ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-  const { target, signal } = context;
+  const { target, signal, timer = defaultTimer } = context;
+  const refusal = context.talkBack ? talkBackDisplayRefusal(target.displayId) : undefined;
+  if (refusal) {
+    throw refusal;
+  }
+  if (context.talkBack) {
+    return talkBackDisplayTapDispatch(options, { ...context, talkBack: context.talkBack });
+  }
   const useCtrlProxy = await supportsCtrlProxyGestureDisplay(client, target.displayId);
-  const dispatch = async ({ x, y }: { x: number; y: number }) => {
+  const dispatch = async ({ x, y }: { x: number; y: number }, onTapDelivered: () => void) => {
     throwIfAborted(signal);
     target.assertCurrent();
     const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
@@ -182,34 +398,69 @@ export async function androidDisplayTapDispatch(
         target.displayId === 0 ? undefined : target.displayId,
         target.assertCurrent,
       );
-      throwIfAborted(signal);
-      if (!result.success) {
-        if (dispatched) {
-          throw indeterminateTapError(result.error);
-        }
-        throw new ActionableError(result.error ?? "Android tap failed");
+      if (result.success) {
+        onTapDelivered();
       }
-    } else {
-      await executeTouchscreenInput(
-        adb,
-        options.action === "longPress"
-          ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
-          : `tap ${x} ${y}`,
-        target.displayId,
-        signal,
-        target.assertCurrent,
-        {
-          timeoutMs:
-            options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
-        },
+      throwIfAborted(signal);
+      if (result.success) {
+        return;
+      }
+      if (dispatched) {
+        throw indeterminateTapError(result.error);
+      }
+      if (isStaleFrameContextRejection(result.error)) {
+        throw new ActionableError(result.error ?? "Stale frame context");
+      }
+      logger.warn(
+        `[androidDisplayTapDispatch] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
       );
     }
-    context.onDispatched();
+    await executeTouchscreenInput(
+      adb,
+      options.action === "longPress"
+        ? `swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(duration)}`
+        : `tap ${x} ${y}`,
+      target.displayId,
+      signal,
+      target.assertCurrent,
+      {
+        timeoutMs:
+          options.action === "longPress" ? resolveGestureCtrlProxyTimeoutMs(duration) : undefined,
+      },
+    );
+    onTapDelivered();
+    throwIfAborted(signal);
   };
   return async (point) => {
-    await dispatch(point);
-    if (options.action === "doubleTap") {
-      await dispatch(point);
+    let tapsDelivered = 0;
+    const onTapDelivered = () => {
+      tapsDelivered++;
+      context.onDispatched();
+    };
+    try {
+      if (options.action === "doubleTap") {
+        await dispatchAndroidDoubleTap({
+          // The panel must be routable before a single-gesture double tap may target it.
+          client: useCtrlProxy ? client : undefined,
+          point,
+          displayId: target.displayId === 0 ? undefined : target.displayId,
+          timer,
+          signal,
+          assertCurrent: target.assertCurrent,
+          onTapDelivered,
+          onWarning: context.onWarning,
+          tap: () => dispatch(point, onTapDelivered),
+        });
+      } else {
+        await dispatch(point, onTapDelivered);
+      }
+    } catch (error) {
+      if (options.action === "doubleTap" && tapsDelivered === 1) {
+        throw indeterminateTapError(
+          `${errorMessage(error)}. Double tap partially applied: one tap was delivered; the second tap was not confirmed`,
+        );
+      }
+      throw error;
     }
   };
 }

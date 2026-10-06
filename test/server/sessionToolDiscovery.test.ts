@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ActionableError } from "../../src/models/ActionableError";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
@@ -178,4 +179,18 @@ describe("session-scoped tool discovery", () => {
     // The seed fallback is gone, so a later sessionless call no longer enforces it.
     expect(binding.effectiveSessionUuid("recreated-transport")).toBeUndefined();
   });
+});
+
+test("seeded binding conflict is actionable and retains its original routing rules", () => {
+  const binding = new SessionToolBinding("session-a", "profile-a");
+  expect(() => binding.effectiveSessionUuid(undefined, { sessionUuid: "session-b" })).toThrow(
+    ActionableError,
+  );
+  expect(() => binding.effectiveSessionUuid(undefined, { sessionUuid: "session-b" })).toThrow(
+    /session-a.*session-b.*separate MCP connection/,
+  );
+  expect(binding.effectiveSessionUuid(undefined, { sessionUuid: "session-a" })).toBe("session-a");
+  expect(binding.effectiveSessionUuid(undefined, { sessionUuid: "profile-a" })).toBe("profile-a");
+  binding.unbindSession("session-a");
+  expect(binding.effectiveSessionUuid(undefined, { sessionUuid: "session-b" })).toBe("session-b");
 });

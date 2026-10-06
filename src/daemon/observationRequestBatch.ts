@@ -23,6 +23,41 @@ export interface ObservationRequestDevice {
   id: string;
 }
 
+export interface PooledObservationDeps<TDevice extends ObservationRequestDevice> {
+  /** Host clock at request start: the floor for iOS, which shares the host clock. */
+  hostRequestStartMs: number;
+  /** One device-clock read for an Android device; it falls back to host time on failure. */
+  readAndroidDeviceClockMs: (device: TDevice, signal: AbortSignal) => Promise<number>;
+  observe: (
+    device: TDevice,
+    options: { minTimestamp: number; signal: AbortSignal },
+  ) => Promise<ObserveResult>;
+}
+
+/**
+ * Build the per-device observe step for {@link runObservationRequestBatch}.
+ *
+ * `minTimestamp` is compared with the hierarchy's device-authored `updatedAt`, so
+ * an Android floor must be in that device's clock domain: a host floor reads a
+ * current capture as stale when the device clock is behind and admits an old one
+ * when it is ahead (issue #9895, same class as #6430/#9878). Android therefore
+ * reads its own clock once, in parallel with its siblings. iOS keeps the host floor.
+ */
+export function createPooledObservationExecutor<
+  TDevice extends ObservationRequestDevice & { platform: string },
+>(
+  deps: PooledObservationDeps<TDevice>,
+): (device: TDevice, signal: AbortSignal) => Promise<ObserveResult> {
+  return async (device, signal) => {
+    const minTimestamp =
+      device.platform === "android"
+        ? await deps.readAndroidDeviceClockMs(device, signal)
+        : deps.hostRequestStartMs;
+    signal.throwIfAborted();
+    return deps.observe(device, { minTimestamp, signal });
+  };
+}
+
 export interface ObservationRequestBatchOptions<TDevice extends ObservationRequestDevice> {
   timer: Timer;
   signal: AbortSignal;

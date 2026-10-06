@@ -1,3 +1,4 @@
+import { iosHierarchyAcquisition } from "./types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
  *
@@ -24,6 +25,7 @@ import type {
   CtrlProxyNode,
   XCTestHierarchy,
   CtrlProxyHierarchyResponse,
+  CtrlProxySyncedHierarchy,
   CtrlProxyPerfTiming,
   CachedHierarchy,
 } from "./types";
@@ -184,11 +186,168 @@ export class CtrlProxyHierarchy {
     minTimestamp: number = 0,
     signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchyResponse> {
-    if (signal?.aborted) {
-      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
-    }
+    this.checkHierarchyAbort(signal);
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
+    const {
+      cachedCaptureAgeMs,
+      cacheNeedsVerification,
+      cacheMissesMinTimestamp,
+      cachedIsSpringboard,
+      response,
+    } = this.inspectCachedHierarchy(cachedHierarchy, minTimestamp);
+    if (response) {
+      return response;
+    }
+
+    // Need fresh data.
+    //
+    // An unverified or too-old entry forces a sync fetch even when the caller
+    // passed skipWaitForFresh. Observe's default path is skipWaitForFresh=true.
+    // Keep the cache for an explicitly stale fallback if the sync request fails.
+    const cacheInvalidated = cachedHierarchy !== null && !cachedHierarchy.fresh;
+    const cacheMissing = cachedHierarchy === null;
+    // A cache past its freshness budget must be re-verified before it may be
+    // served, even on the `skipWaitForFresh` path —
+    // which is `observe`'s default (ObserveScreen.execute: `skipWaitForFresh ??
+    // true`). Without this clause the default path reaches neither branch below
+    // and falls straight through to the stale fallback, so the ONLY thing that
+    // could ever advance this cache was an unsolicited push. The runner
+    // deliberately does not push when its structural hash is unchanged
+    // (CtrlProxy.swift, `case .unchanged: // Don't broadcast unchanged results`),
+    // so a screen that is merely sitting still — or a runner whose extraction
+    // has wedged — leaves the entry frozen and every subsequent `observe`
+    // re-serves it, forever. That is the "no known mechanism to recover a stale
+    // tree" symptom: there was no code path that asked.
+    const requestFailure: { value?: HierarchyRequestFailure } = {};
+    if (
+      this.needsHierarchyRequest(skipWaitForFresh, {
+        cacheMissing,
+        cacheNeedsVerification,
+        cacheMissesMinTimestamp,
+        cachedIsSpringboard,
+      })
+    ) {
+      this.logCacheVerification(
+        cacheNeedsVerification,
+        skipWaitForFresh,
+        cacheInvalidated,
+        cachedCaptureAgeMs,
+      );
+      // A client-invalidated tree follows a state-changing action, and a
+      // SpringBoard tree may have gained a system-owned dialog without emitting
+      // a hierarchy update. `request_hierarchy_if_stale` trusts the runner cache
+      // in both cases and can return the same pre-dialog tree. Force a real
+      // capture so normal observe sees the same current window as raw observe.
+      const forceCapture = this.needsForcedCapture(
+        cacheMissing,
+        cacheInvalidated,
+        cachedIsSpringboard,
+        cacheMissesMinTimestamp,
+      );
+      const result = await this.requestHierarchySync(perf, false, signal, timeout, false, {
+        failureSink: requestFailure,
+        forceCapture,
+      });
+      if (result) {
+        if (result.hierarchy.packageName) {
+          this.lastKnownPackageName = result.hierarchy.packageName;
+        }
+        return {
+          hierarchy: result.hierarchy,
+          [iosHierarchyAcquisition]: "device",
+          fresh: true,
+          updatedAt: result.hierarchy.updatedAt,
+          perfTiming: result.perfTiming,
+          frameContext: result.frameContext,
+        };
+      }
+    }
+
+    const reconnectStatus = this.context.getReconnectStatus?.() ?? undefined;
+
+    return this.buildFallbackResponse(cachedHierarchy, reconnectStatus, requestFailure);
+  }
+
+  private buildFallbackResponse(
+    cachedHierarchy: CachedHierarchy | null,
+    reconnectStatus: CtrlProxyHierarchyResponse["reconnectStatus"],
+    requestFailure: { value?: HierarchyRequestFailure },
+  ): CtrlProxyHierarchyResponse {
+    // Re-read the cache: `cachedHierarchy` was captured before the awaited sync,
+    // and an unsolicited hierarchy_update push handled by
+    // IOSCtrlProxyClient.processMessage can have replaced it while that request
+    // was in flight. Serving the pre-await snapshot would hand back the very
+    // entry an invalidation was meant to retire even though newer data arrived.
+    // Note this only re-reads; it must never null the cache, because under
+    // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
+    const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
+    const fallbackSupersededOriginal =
+      fallbackHierarchy !== cachedHierarchy &&
+      !isDeepStrictEqual(
+        { hierarchy: fallbackHierarchy?.hierarchy, frameContext: fallbackHierarchy?.frameContext },
+        { hierarchy: cachedHierarchy?.hierarchy, frameContext: cachedHierarchy?.frameContext },
+      );
+
+    // Return cached (stale) data if available.
+    //
+    // This return is the last honest resort, not a normal path: reaching it
+    // means the runner did not provide a usable synchronous hierarchy. The
+    // fallback is reported as `fresh: false`, which now survives all the
+    // way to `ObserveResult.freshness` (see getAccessibilityHierarchy) instead
+    // of being overwritten with a constant `true` by ObserveScreen.
+    if (fallbackHierarchy) {
+      const fallbackIsFreshPush = fallbackSupersededOriginal && fallbackHierarchy.fresh;
+      this.trackFallbackHierarchy(fallbackHierarchy, fallbackIsFreshPush, requestFailure);
+      return {
+        hierarchy: fallbackHierarchy.hierarchy,
+        [iosHierarchyAcquisition]: "client-cache",
+        // A push with a new capture may have won the race with the synchronous
+        // re-verification. It is device-supplied fresh data, not the failed
+        // request's stale fallback. Same-capture re-deliveries remain false.
+        fresh: fallbackIsFreshPush,
+        updatedAt: fallbackHierarchy.hierarchy.updatedAt,
+        perfTiming: fallbackHierarchy.perfTiming,
+        frameContext: fallbackHierarchy.frameContext,
+        reconnectStatus,
+        reconnectMessage: reconnectStatus
+          ? this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
+          : undefined,
+      };
+    }
+
+    return this.buildUnavailableResponse(reconnectStatus, requestFailure);
+  }
+
+  private buildUnavailableResponse(
+    reconnectStatus: CtrlProxyHierarchyResponse["reconnectStatus"],
+    requestFailure: { value?: HierarchyRequestFailure },
+  ): CtrlProxyHierarchyResponse {
+    if (reconnectStatus) {
+      return {
+        hierarchy: null,
+        [iosHierarchyAcquisition]: "client-cache",
+        fresh: false,
+        reconnectStatus,
+        reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds),
+        unavailableReason:
+          requestFailure.value?.reason && requestFailure.value.reason !== "unknown"
+            ? requestFailure.value.reason
+            : "connection_lost",
+        unavailableDetail: requestFailure.value?.detail,
+      };
+    }
+
+    return {
+      hierarchy: null,
+      [iosHierarchyAcquisition]: "client-cache",
+      fresh: false,
+      unavailableReason: requestFailure.value?.reason ?? "unknown",
+      unavailableDetail: requestFailure.value?.detail,
+    };
+  }
+
+  private inspectCachedHierarchy(cachedHierarchy: CachedHierarchy | null, minTimestamp: number) {
     let cachedCaptureAgeMs: number | undefined;
     let cacheNeedsVerification = false;
     let cacheMissesMinTimestamp = false;
@@ -221,156 +380,89 @@ export class CtrlProxyHierarchy {
           this.lastKnownPackageName = cachedHierarchy.hierarchy.packageName;
         }
         return {
-          hierarchy: cachedHierarchy.hierarchy,
-          fresh: true,
-          updatedAt: cachedHierarchy.hierarchy.updatedAt,
-          perfTiming: cachedHierarchy.perfTiming,
-          frameContext: cachedHierarchy.frameContext,
+          response: {
+            hierarchy: cachedHierarchy.hierarchy,
+            [iosHierarchyAcquisition]: "client-cache" as const,
+            fresh: true,
+            updatedAt: cachedHierarchy.hierarchy.updatedAt,
+            perfTiming: cachedHierarchy.perfTiming,
+            frameContext: cachedHierarchy.frameContext,
+          },
+          cachedCaptureAgeMs,
+          cacheNeedsVerification,
+          cacheMissesMinTimestamp,
+          cachedIsSpringboard,
         };
       }
-    }
-
-    // Need fresh data.
-    //
-    // An unverified or too-old entry forces a sync fetch even when the caller
-    // passed skipWaitForFresh. Observe's default path is skipWaitForFresh=true.
-    // Keep the cache for an explicitly stale fallback if the sync request fails.
-    const cacheInvalidated = cachedHierarchy !== null && !cachedHierarchy.fresh;
-    const cacheMissing = cachedHierarchy === null;
-    // A cache past its freshness budget must be re-verified before it may be
-    // served, even on the `skipWaitForFresh` path —
-    // which is `observe`'s default (ObserveScreen.execute: `skipWaitForFresh ??
-    // true`). Without this clause the default path reaches neither branch below
-    // and falls straight through to the stale fallback, so the ONLY thing that
-    // could ever advance this cache was an unsolicited push. The runner
-    // deliberately does not push when its structural hash is unchanged
-    // (CtrlProxy.swift, `case .unchanged: // Don't broadcast unchanged results`),
-    // so a screen that is merely sitting still — or a runner whose extraction
-    // has wedged — leaves the entry frozen and every subsequent `observe`
-    // re-serves it, forever. That is the "no known mechanism to recover a stale
-    // tree" symptom: there was no code path that asked.
-    const requestFailure: { value?: HierarchyRequestFailure } = {};
-    if (
-      !skipWaitForFresh ||
-      cacheMissing ||
-      cacheNeedsVerification ||
-      cacheMissesMinTimestamp ||
-      cachedIsSpringboard
-    ) {
-      if (cacheNeedsVerification && skipWaitForFresh && !cacheInvalidated) {
-        logger.debug(
-          `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
-        );
-      }
-      // A client-invalidated tree follows a state-changing action, and a
-      // SpringBoard tree may have gained a system-owned dialog without emitting
-      // a hierarchy update. `request_hierarchy_if_stale` trusts the runner cache
-      // in both cases and can return the same pre-dialog tree. Force a real
-      // capture so normal observe sees the same current window as raw observe.
-      const forceCapture =
-        cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp;
-      const result = await this.requestHierarchySync(perf, false, signal, timeout, false, {
-        failureSink: requestFailure,
-        forceCapture,
-      });
-      if (result) {
-        if (result.hierarchy.packageName) {
-          this.lastKnownPackageName = result.hierarchy.packageName;
-        }
-        return {
-          hierarchy: result.hierarchy,
-          fresh: true,
-          updatedAt: result.hierarchy.updatedAt,
-          perfTiming: result.perfTiming,
-          frameContext: result.frameContext,
-        };
-      }
-    }
-
-    const reconnectStatus = this.context.getReconnectStatus?.() ?? undefined;
-
-    // Re-read the cache: `cachedHierarchy` was captured before the awaited sync,
-    // and an unsolicited hierarchy_update push handled by
-    // IOSCtrlProxyClient.processMessage can have replaced it while that request
-    // was in flight. Serving the pre-await snapshot would hand back the very
-    // entry an invalidation was meant to retire even though newer data arrived.
-    // Note this only re-reads; it must never null the cache, because under
-    // skipWaitForFresh a missing cache yields no hierarchy at all (#4193/#4230).
-    const fallbackHierarchy = this.context.getCachedHierarchy() ?? cachedHierarchy;
-    const fallbackSupersededOriginal =
-      fallbackHierarchy !== cachedHierarchy &&
-      !isDeepStrictEqual(
-        { hierarchy: fallbackHierarchy?.hierarchy, frameContext: fallbackHierarchy?.frameContext },
-        { hierarchy: cachedHierarchy?.hierarchy, frameContext: cachedHierarchy?.frameContext },
-      );
-
-    // Return cached (stale) data if available.
-    //
-    // This return is the last honest resort, not a normal path: reaching it
-    // means the runner did not provide a usable synchronous hierarchy. The
-    // fallback is reported as `fresh: false`, which now survives all the
-    // way to `ObserveResult.freshness` (see getAccessibilityHierarchy) instead
-    // of being overwritten with a constant `true` by ObserveScreen.
-    if (fallbackHierarchy) {
-      const fallbackIsFreshPush = fallbackSupersededOriginal && fallbackHierarchy.fresh;
-      if (!fallbackIsFreshPush) {
-        const fallbackAgeMs =
-          this.context.timer.now() -
-          (fallbackHierarchy.captureReceivedAt ?? fallbackHierarchy.receivedAt);
-        logger.warn(
-          `[CTRL_PROXY] Serving an UNVERIFIED cached hierarchy: synchronous request ` +
-            `failed (${requestFailure.value?.reason ?? "no hierarchy returned"}). Tree was captured ` +
-            `${fallbackAgeMs}ms ago. Reporting freshness.isFresh=false.`,
-        );
-      }
-      // Update tracking from cache — it may have been refreshed by a WebSocket push
-      if (fallbackHierarchy.hierarchy.packageName) {
-        if (
-          this.lastKnownPackageName &&
-          fallbackHierarchy.hierarchy.packageName !== this.lastKnownPackageName
-        ) {
-          logger.warn(
-            `[CTRL_PROXY] Stale cache packageName differs: cached=${fallbackHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`,
-          );
-        }
-        this.lastKnownPackageName = fallbackHierarchy.hierarchy.packageName;
-      }
-      return {
-        hierarchy: fallbackHierarchy.hierarchy,
-        // A push with a new capture may have won the race with the synchronous
-        // re-verification. It is device-supplied fresh data, not the failed
-        // request's stale fallback. Same-capture re-deliveries remain false.
-        fresh: fallbackIsFreshPush,
-        updatedAt: fallbackHierarchy.hierarchy.updatedAt,
-        perfTiming: fallbackHierarchy.perfTiming,
-        frameContext: fallbackHierarchy.frameContext,
-        reconnectStatus,
-        reconnectMessage: reconnectStatus
-          ? this.buildReconnectMessage(reconnectStatus.retryAfterSeconds)
-          : undefined,
-      };
-    }
-
-    if (reconnectStatus) {
-      return {
-        hierarchy: null,
-        fresh: false,
-        reconnectStatus,
-        reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds),
-        unavailableReason:
-          requestFailure.value?.reason && requestFailure.value.reason !== "unknown"
-            ? requestFailure.value.reason
-            : "connection_lost",
-        unavailableDetail: requestFailure.value?.detail,
-      };
     }
 
     return {
-      hierarchy: null,
-      fresh: false,
-      unavailableReason: requestFailure.value?.reason ?? "unknown",
-      unavailableDetail: requestFailure.value?.detail,
+      cachedCaptureAgeMs,
+      cacheNeedsVerification,
+      cacheMissesMinTimestamp,
+      cachedIsSpringboard,
+      response: undefined,
     };
+  }
+
+  private trackFallbackHierarchy(
+    fallbackHierarchy: CachedHierarchy,
+    fallbackIsFreshPush: boolean,
+    requestFailure: { value?: HierarchyRequestFailure },
+  ): void {
+    if (!fallbackIsFreshPush) {
+      const fallbackAgeMs =
+        this.context.timer.now() -
+        (fallbackHierarchy.captureReceivedAt ?? fallbackHierarchy.receivedAt);
+      logger.warn(
+        `[CTRL_PROXY] Serving an UNVERIFIED cached hierarchy: synchronous request ` +
+          `failed (${requestFailure.value?.reason ?? "no hierarchy returned"}). Tree was captured ` +
+          `${fallbackAgeMs}ms ago. Reporting freshness.isFresh=false.`,
+      );
+    }
+    // Update tracking from cache — it may have been refreshed by a WebSocket push
+    if (fallbackHierarchy.hierarchy.packageName) {
+      if (
+        this.lastKnownPackageName &&
+        fallbackHierarchy.hierarchy.packageName !== this.lastKnownPackageName
+      ) {
+        logger.warn(
+          `[CTRL_PROXY] Stale cache packageName differs: cached=${fallbackHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`,
+        );
+      }
+      this.lastKnownPackageName = fallbackHierarchy.hierarchy.packageName;
+    }
+  }
+
+  private needsHierarchyRequest(
+    skipWaitForFresh: boolean,
+    cache: {
+      cacheMissing: boolean;
+      cacheNeedsVerification: boolean;
+      cacheMissesMinTimestamp: boolean;
+      cachedIsSpringboard: boolean;
+    },
+  ): boolean {
+    return (
+      !skipWaitForFresh ||
+      cache.cacheMissing ||
+      cache.cacheNeedsVerification ||
+      cache.cacheMissesMinTimestamp ||
+      cache.cachedIsSpringboard
+    );
+  }
+
+  private logCacheVerification(
+    cacheNeedsVerification: boolean,
+    skipWaitForFresh: boolean,
+    cacheInvalidated: boolean,
+    cachedCaptureAgeMs: number | undefined,
+  ): void {
+    if (cacheNeedsVerification && skipWaitForFresh && !cacheInvalidated) {
+      logger.debug(
+        `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
+      );
+    }
   }
 
   private buildReconnectMessage(retryAfterSeconds: number): string {
@@ -450,37 +542,23 @@ export class CtrlProxyHierarchy {
       forceCapture?: boolean;
       observerMode?: boolean;
     },
-  ): Promise<{
-    hierarchy: XCTestHierarchy;
-    perfTiming?: CtrlProxyPerfTiming;
-    frameContext?: string;
-  } | null> {
+  ): Promise<CtrlProxySyncedHierarchy | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
-      if (requestOptions?.failureSink) {
-        requestOptions.failureSink.value = failure;
-      }
+      this.recordHierarchyFailure(requestOptions, failure);
     };
     const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
     throwIfAborted(signal);
-    const connection = requestOptions?.observerMode
-      ? this.context.getWebSocket()?.readyState === WebSocket.OPEN
-        ? { status: "connected" as const }
-        : { status: "failed" as const, failure: { reason: "connection_lost" as const } }
+    const connection = this.isObserverRequest(requestOptions)
+      ? this.observerConnectionStatus()
       : await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal);
     if (connection.status !== "connected") {
-      recordFailure(
-        connection.status === "timeout"
-          ? { reason: "request_timed_out" }
-          : (connection.failure ?? { reason: "connection_lost" }),
-      );
+      recordFailure(this.connectionFailure(connection));
       return null;
     }
     // Connection establishment can include iOS runner setup. It is not
     // interruptible through this delegate, but it still spends this request's
     // budget: never dispatch a hierarchy extraction after that budget expired.
-    if (signal?.aborted) {
-      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
-    }
+    this.checkHierarchyAbort(signal);
     const remainingTimeoutMs = deadlineMs - this.context.timer.now();
     if (remainingTimeoutMs <= 0) {
       recordFailure({ reason: "request_timed_out" });
@@ -488,12 +566,12 @@ export class CtrlProxyHierarchy {
     }
 
     const requestId = this.context.requestManager.generateId("hierarchy");
-    if (requestOptions?.observerMode) {
-      this.context.markObserverHierarchyRequest?.(requestId);
-    }
-    if (suppressObservationStreamPush) {
-      this.context.suppressHierarchyObservationStreamPush?.(requestId, remainingTimeoutMs);
-    }
+    this.prepareHierarchyRequest(
+      requestOptions,
+      requestId,
+      suppressObservationStreamPush,
+      remainingTimeoutMs,
+    );
     const promise = this.context.requestManager.register<{
       hierarchy?: XCTestHierarchy;
       perfTiming?: CtrlProxyPerfTiming;
@@ -511,21 +589,11 @@ export class CtrlProxyHierarchy {
     );
 
     const rejectOnAbort = () => {
-      this.context.requestManager.reject(
-        requestId,
-        signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"),
-      );
+      this.rejectAbortedHierarchyRequest(requestId, signal);
     };
     signal?.addEventListener("abort", rejectOnAbort, { once: true });
 
-    const message = {
-      type:
-        requestOptions?.forceCapture || disableAllFiltering
-          ? "request_hierarchy"
-          : "request_hierarchy_if_stale",
-      requestId,
-      disableAllFiltering: disableAllFiltering ?? false,
-    };
+    const message = this.hierarchyRequestMessage(requestId, disableAllFiltering, requestOptions);
 
     const ws = this.context.getWebSocket();
     try {
@@ -533,21 +601,7 @@ export class CtrlProxyHierarchy {
       // Rejecting the registered request first keeps that cancellation from
       // leaking a pending RequestManager entry.
       throwIfAborted(signal);
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        this.context.requestManager.reject(
-          requestId,
-          new ActionableError("CtrlProxy socket is not connected"),
-        );
-      } else {
-        try {
-          ws.send(JSON.stringify(message));
-        } catch (error) {
-          this.context.requestManager.reject(
-            requestId,
-            new ActionableError("CtrlProxy socket is not connected", { cause: error }),
-          );
-        }
-      }
+      this.sendHierarchyRequest(ws, requestId, message);
 
       const result = await promise;
       // A response that races with cancellation must not be accepted. The
@@ -558,32 +612,10 @@ export class CtrlProxyHierarchy {
       throwIfAborted(signal);
 
       if (result.hierarchy) {
-        this.observeReceivedHierarchy(result.hierarchy);
-        if (requestOptions?.observerMode) {
-          return {
-            hierarchy: result.hierarchy,
-            perfTiming: result.perfTiming,
-            frameContext: result.frameContext,
-          };
-        }
-        // Update cache
-        const now = this.context.timer.now();
-        const previous = this.context.getCachedHierarchy();
-        const newCache: CachedHierarchy = {
-          hierarchy: result.hierarchy,
-          receivedAt: now,
-          captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
-          fresh: true,
-          perfTiming: result.perfTiming,
-          frameContext: result.frameContext,
-        };
-        this.context.setCachedHierarchy(newCache);
-
-        return {
-          hierarchy: result.hierarchy,
-          perfTiming: result.perfTiming,
-          frameContext: result.frameContext,
-        };
+        return this.acceptHierarchyResponse(
+          result as typeof result & { hierarchy: XCTestHierarchy },
+          requestOptions,
+        );
       }
 
       recordFailure(
@@ -593,11 +625,145 @@ export class CtrlProxyHierarchy {
       );
       return null;
     } finally {
-      if (requestOptions?.observerMode) {
+      if (this.isObserverRequest(requestOptions)) {
         this.context.unmarkObserverHierarchyRequest?.(requestId);
       }
       signal?.removeEventListener("abort", rejectOnAbort);
     }
+  }
+
+  private isObserverRequest(
+    requestOptions: { observerMode?: boolean } | undefined,
+  ): boolean | undefined {
+    return requestOptions?.observerMode;
+  }
+
+  private prepareHierarchyRequest(
+    requestOptions: { observerMode?: boolean } | undefined,
+    requestId: string,
+    suppressObservationStreamPush: boolean,
+    remainingTimeoutMs: number,
+  ): void {
+    if (this.isObserverRequest(requestOptions)) {
+      this.context.markObserverHierarchyRequest?.(requestId);
+    }
+    if (suppressObservationStreamPush) {
+      this.context.suppressHierarchyObservationStreamPush?.(requestId, remainingTimeoutMs);
+    }
+  }
+
+  private rejectAbortedHierarchyRequest(requestId: string, signal: AbortSignal | undefined): void {
+    this.context.requestManager.reject(
+      requestId,
+      signal?.reason instanceof Error ? signal.reason : new Error("Operation cancelled"),
+    );
+  }
+
+  private checkHierarchyAbort(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error("Operation cancelled");
+    }
+  }
+
+  private needsForcedCapture(
+    cacheMissing: boolean,
+    cacheInvalidated: boolean,
+    cachedIsSpringboard: boolean,
+    cacheMissesMinTimestamp: boolean,
+  ): boolean {
+    return cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp;
+  }
+
+  private observerConnectionStatus() {
+    return this.context.getWebSocket()?.readyState === WebSocket.OPEN
+      ? { status: "connected" as const }
+      : { status: "failed" as const, failure: { reason: "connection_lost" as const } };
+  }
+
+  private recordHierarchyFailure(
+    requestOptions: { failureSink?: { value?: HierarchyRequestFailure } } | undefined,
+    failure: HierarchyRequestFailure,
+  ): void {
+    if (requestOptions?.failureSink) {
+      requestOptions.failureSink.value = failure;
+    }
+  }
+
+  private connectionFailure(connection: {
+    status: string;
+    failure?: HierarchyRequestFailure;
+  }): HierarchyRequestFailure {
+    return connection.status === "timeout"
+      ? { reason: "request_timed_out" }
+      : (connection.failure ?? { reason: "connection_lost" });
+  }
+
+  private hierarchyRequestMessage(
+    requestId: string,
+    disableAllFiltering: boolean | undefined,
+    requestOptions: { forceCapture?: boolean } | undefined,
+  ): string {
+    // Keep the literal discriminator at the serialization sink for the wire-parity scanner.
+    return JSON.stringify({
+      type:
+        requestOptions?.forceCapture || disableAllFiltering
+          ? "request_hierarchy"
+          : "request_hierarchy_if_stale",
+      requestId,
+      disableAllFiltering: disableAllFiltering ?? false,
+    });
+  }
+
+  private sendHierarchyRequest(ws: WebSocket | null, requestId: string, payload: string): void {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      this.context.requestManager.reject(
+        requestId,
+        new ActionableError("CtrlProxy socket is not connected"),
+      );
+    } else {
+      try {
+        ws.send(payload);
+      } catch (error) {
+        this.context.requestManager.reject(
+          requestId,
+          new ActionableError("CtrlProxy socket is not connected", { cause: error }),
+        );
+      }
+    }
+  }
+
+  private acceptHierarchyResponse(
+    result: { hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string },
+    requestOptions: { observerMode?: boolean } | undefined,
+  ): CtrlProxySyncedHierarchy {
+    this.observeReceivedHierarchy(result.hierarchy);
+    if (this.isObserverRequest(requestOptions)) {
+      return {
+        hierarchy: result.hierarchy,
+        [iosHierarchyAcquisition]: "device",
+        perfTiming: result.perfTiming,
+        frameContext: result.frameContext,
+      };
+    }
+    // Update cache
+    const now = this.context.timer.now();
+    const previous = this.context.getCachedHierarchy();
+    const newCache: CachedHierarchy = {
+      hierarchy: result.hierarchy,
+      receivedAt: now,
+      captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
+      fresh: true,
+      perfTiming: result.perfTiming,
+      frameContext: result.frameContext,
+    };
+    this.context.setCachedHierarchy(newCache);
+
+    return {
+      hierarchy: result.hierarchy,
+      [iosHierarchyAcquisition]: "device",
+      perfTiming: result.perfTiming,
+      frameContext: result.frameContext,
+    };
   }
 
   private captureReceivedAt(
@@ -668,6 +834,26 @@ export class CtrlProxyHierarchy {
     if (node.value) {
       attrs["value"] = node.value;
     }
+    const fields = this.readConversionFields(node);
+    this.assignContentAttributes(node, attrs, fields);
+    this.assignInteractionAttributes(node, attrs, fields);
+    this.assignSemanticAttributes(node, attrs, fields);
+
+    const result: ConvertedNode = { $: attrs };
+
+    if (node.extras && Object.keys(node.extras).length > 0) {
+      result.extras = node.extras;
+    }
+
+    if (node.node) {
+      const children = Array.isArray(node.node) ? node.node : [node.node];
+      result.node = children.map((child) => this.convertNode(child));
+    }
+
+    return result;
+  }
+
+  private readConversionFields(node: CtrlProxyNode) {
     const contentDesc = this.readNodeField<string>(node, "contentDesc", "content-desc");
     const resourceId = this.readNodeField<string>(node, "resourceId", "resource-id");
     const testTag = this.readNodeField<string>(node, "testTag", "test-tag");
@@ -691,6 +877,26 @@ export class CtrlProxyHierarchy {
     const hintText = this.readNodeField<string>(node, "hintText", "hint-text");
     const viewId = this.readNodeField<string>(node, "viewId", "view-id");
 
+    return {
+      contentDesc,
+      resourceId,
+      testTag,
+      accessibilityFocused,
+      longClickable,
+      semanticLinks,
+      stateDescription,
+      errorMessage,
+      hintText,
+      viewId,
+    };
+  }
+
+  private assignContentAttributes(
+    node: CtrlProxyNode,
+    attrs: Record<string, unknown>,
+    fields: ReturnType<CtrlProxyHierarchy["readConversionFields"]>,
+  ): void {
+    const { contentDesc, resourceId, testTag } = fields;
     if (contentDesc) {
       attrs["content-desc"] = contentDesc;
     }
@@ -715,6 +921,14 @@ export class CtrlProxyHierarchy {
     if (node.focusable) {
       attrs["focusable"] = node.focusable;
     }
+  }
+
+  private assignInteractionAttributes(
+    node: CtrlProxyNode,
+    attrs: Record<string, unknown>,
+    fields: ReturnType<CtrlProxyHierarchy["readConversionFields"]>,
+  ): void {
+    const { accessibilityFocused, longClickable } = fields;
     if (node.focused) {
       attrs["focused"] = node.focused;
     }
@@ -739,6 +953,14 @@ export class CtrlProxyHierarchy {
     if (longClickable) {
       attrs["long-clickable"] = longClickable;
     }
+  }
+
+  private assignSemanticAttributes(
+    node: CtrlProxyNode,
+    attrs: Record<string, unknown>,
+    fields: ReturnType<CtrlProxyHierarchy["readConversionFields"]>,
+  ): void {
+    const { semanticLinks, stateDescription, errorMessage, hintText, viewId } = fields;
     if (semanticLinks && semanticLinks.length > 0) {
       attrs["semantic-links"] = semanticLinks;
     }
@@ -762,19 +984,6 @@ export class CtrlProxyHierarchy {
     if (node.actions && node.actions.length > 0) {
       attrs["actions"] = node.actions;
     }
-
-    const result: ConvertedNode = { $: attrs };
-
-    if (node.extras && Object.keys(node.extras).length > 0) {
-      result.extras = node.extras;
-    }
-
-    if (node.node) {
-      const children = Array.isArray(node.node) ? node.node : [node.node];
-      result.node = children.map((child) => this.convertNode(child));
-    }
-
-    return result;
   }
 
   private readNodeField<T>(

@@ -76,6 +76,19 @@ describe("createAndroidH264CaptureSource", () => {
     expect(persistent.started).toBe(0);
   });
 
+  test("passes the packet-boundary callback to the persistent encoder (issue #10150)", () => {
+    const onEncodedAccessUnit = () => {};
+    let persistentOptions: PersistentEncoderH264SourceOptions | undefined;
+    const { deps } = makeDeps({
+      createPersistent: (options) => {
+        persistentOptions = options;
+        return new FakeSource();
+      },
+    });
+    createAndroidH264CaptureSource({ ...baseOptions(), onEncodedAccessUnit }, "/tmp/jar", deps);
+    expect(persistentOptions?.onEncodedAccessUnit).toBe(onEncodedAccessUnit);
+  });
+
   test("prefers the persistent encoder when a jar path is provided", async () => {
     const { deps, persistent, screenrecord } = makeDeps({});
     const source = createAndroidH264CaptureSource(baseOptions(), "/tmp/automobile-video.jar", deps);

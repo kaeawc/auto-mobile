@@ -170,13 +170,16 @@ export class DeviceCapabilitiesDetector {
       // p99 is for outliers - more lenient
       p99ThresholdMs: frameTimeMs * 1.5, // 150% of frame time
 
-      // Jank count: allow more jank frames on higher refresh rates
-      // since there are more frames rendered per second
+      // Jank count: janky frames PER SECOND, compared by PerformanceAudit with
+      // the rate measured over its sampling window (#10094). Allow more jank
+      // frames on higher refresh rates since there are more frames rendered
+      // per second
       // For 60Hz: ~5 jank frames per second is bad
       // For 120Hz: ~10 jank frames per second is bad
       jankCountThreshold: Math.ceil(refreshRate / 12),
 
-      // CPU usage threshold: 80% is generally considered high
+      // CPU usage threshold: 80% of one core, measured by PerformanceAudit as
+      // process CPU time over the interval between two samples (#10094)
       cpuUsageThresholdPercent: 80.0,
 
       // Touch latency: should respond within 2 frames

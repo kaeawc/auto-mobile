@@ -1,6 +1,6 @@
 import type { RawTouchFrame, GestureEvent } from "./types";
 import { GESTURE_THRESHOLDS } from "./types";
-import type { CoordScaler } from "./AxisRanges";
+import type { CoordScaler, GestureScaler } from "./AxisRanges";
 
 interface ContactInfo {
   /** First observed raw position per axis; unknownAxes retains missing START axes. */
@@ -10,6 +10,8 @@ interface ContactInfo {
   /** Last known raw sensor position (updated on each active frame) */
   lastX: number;
   lastY: number;
+  /** Scaler in force when the contact went down; a rotation later does not change it. */
+  scaler: CoordScaler;
   unknownAxes?: GestureEvent["unknownAxes"];
 }
 
@@ -53,9 +55,18 @@ export class GestureClassifier {
    * @param densityDp dp multiplier (e.g. 420/160 = 2.625 for a 420dpi screen)
    */
   constructor(
-    private readonly scaler: CoordScaler,
+    private readonly scaler: GestureScaler,
     private readonly densityDp: number,
   ) {}
+
+  private scalerAt(time: number): CoordScaler {
+    return "scalerAt" in this.scaler ? this.scaler.scalerAt(time) : this.scaler;
+  }
+
+  /** Only a timeline-backed classifier reports the DOWN time (see GestureEvent.downAt). */
+  private downStamp(contact: ContactInfo): { downAt?: number } {
+    return "scalerAt" in this.scaler ? { downAt: contact.arrivedAt } : {};
+  }
 
   /** Feed one frame. Returns a completed GestureEvent or null. */
   feedFrame(frame: RawTouchFrame): GestureEvent | null {
@@ -126,6 +137,7 @@ export class GestureClassifier {
           arrivedAt: frame.arrivedAt,
           lastX: slot.x,
           lastY: slot.y,
+          scaler: this.scalerAt(frame.arrivedAt),
           unknownAxes: slot.unknownAxes,
         });
       }
@@ -140,7 +152,8 @@ export class GestureClassifier {
         this.contacts.get(a.slotId)?.unknownAxes,
         this.contacts.get(b.slotId)?.unknownAxes,
       );
-      const dist = unknownAxes?.length ? undefined : this.screenDist(a.x, a.y, b.x, b.y);
+      const scaler = this.contacts.get(a.slotId)?.scaler ?? this.scalerAt(frame.arrivedAt);
+      const dist = unknownAxes?.length ? undefined : screenDist(scaler, a.x, a.y, b.x, b.y);
       if (!this.pinchState) {
         this.pinchState = { initialDist: dist, finalDist: dist, unknownAxes };
       } else {
@@ -162,16 +175,17 @@ export class GestureClassifier {
       return this.evaluateUnknownContact(contact, frame.arrivedAt);
     }
 
-    const { x: downX, y: downY } = this.scaler.toScreenPoint(contact.startX, contact.startY);
-    const { x: upX, y: upY } = this.scaler.toScreenPoint(contact.lastX, contact.lastY);
+    const { x: downX, y: downY } = contact.scaler.toScreenPoint(contact.startX, contact.startY);
+    const { x: upX, y: upY } = contact.scaler.toScreenPoint(contact.lastX, contact.lastY);
     const durationMs = frame.arrivedAt - contact.arrivedAt;
     const displacement = dist(downX, downY, upX, upY);
     const slopPx = GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp;
 
-    if (displacement < slopPx) {
-      return this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt);
-    }
-    return this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
+    const gesture =
+      displacement < slopPx
+        ? this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt)
+        : this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
+    return { ...gesture, ...this.downStamp(contact) };
   }
 
   private evaluateUnknownContact(contact: ContactInfo, arrivedAt: number): GestureEvent {
@@ -184,7 +198,7 @@ export class GestureClassifier {
     const firstY = Number.isFinite(contact.startY) ? contact.startY : 0;
     const lastX = Number.isFinite(contact.lastX) ? contact.lastX : firstX;
     const lastY = Number.isFinite(contact.lastY) ? contact.lastY : firstY;
-    const displacement = this.screenDist(firstX, firstY, lastX, lastY);
+    const displacement = screenDist(contact.scaler, firstX, firstY, lastX, lastY);
     const type =
       displacement >= GESTURE_THRESHOLDS.TOUCH_SLOP_DP * this.densityDp
         ? "swipe"
@@ -192,12 +206,6 @@ export class GestureClassifier {
           ? "longPress"
           : "tap";
     return { type, arrivedAt, durationMs, unknownAxes: contact.unknownAxes };
-  }
-
-  private screenDist(rawX1: number, rawY1: number, rawX2: number, rawY2: number): number {
-    const first = this.scaler.toScreenPoint(rawX1, rawY1);
-    const second = this.scaler.toScreenPoint(rawX2, rawY2);
-    return dist(first.x, first.y, second.x, second.y);
   }
 
   private maybeEmitPinch(arrivedAt: number): GestureEvent | null {
@@ -285,6 +293,18 @@ export class GestureClassifier {
       speed,
     };
   }
+}
+
+function screenDist(
+  scaler: CoordScaler,
+  rawX1: number,
+  rawY1: number,
+  rawX2: number,
+  rawY2: number,
+): number {
+  const first = scaler.toScreenPoint(rawX1, rawY1);
+  const second = scaler.toScreenPoint(rawX2, rawY2);
+  return dist(first.x, first.y, second.x, second.y);
 }
 
 function dist(x1: number, y1: number, x2: number, y2: number): number {

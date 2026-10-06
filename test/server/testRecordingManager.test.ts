@@ -13,6 +13,8 @@ import type {
   GestureEvent,
   ReceivedInteraction,
 } from "../../src/features/record/android/types";
+import { DisplayGeometryTracker } from "../../src/features/record/android/DisplayGeometryTracker";
+import { ScreenGeometryTimeline } from "../../src/features/record/android/ScreenGeometryTimeline";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class Deferred<T> {
@@ -391,5 +393,103 @@ describe("testRecordingManager touch-track health", () => {
         "platform",
       ].sort(),
     );
+  });
+});
+
+function geometryTracker(timer: FakeTimer, deviceRotation: number): DisplayGeometryTracker {
+  const timeline = new ScreenGeometryTimeline(
+    { xMin: 0, xMax: 32767, yMin: 0, yMax: 32767 },
+    { rotation: 0, display: { width: 1080, height: 2400 } },
+    timer.now(),
+  );
+  return new DisplayGeometryTracker(
+    timeline,
+    {
+      readRotation: async () => deviceRotation,
+      readPhysicalSize: async () => ({ width: 1080, height: 2400 }),
+    },
+    timer,
+  );
+}
+
+describe("testRecordingManager display geometry (#10174)", () => {
+  test("a rotation that was never pushed warns on the stop result", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    const tracker = geometryTracker(timer, 1);
+    await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("geometry"),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+    );
+    gestures.onGesture?.({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 918,
+      screenY: 1184,
+      downAt: timer.now() - 100,
+    });
+    // The device reads rotation 1 although none was pushed; the stop-time check notices.
+    const result = await stopTestRecording(undefined, "rotated", timer);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.error).toStartWith(
+      "Warning: Display geometry changed or was unreadable during recording:",
+    );
+    expect(result.error).toContain("display rotation at stop (1) differs");
+  });
+
+  test("a labelled step survives plan validation and the result warns", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    const tracker = geometryTracker(timer, 1);
+    await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("geometry-label"),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+    );
+    tracker.handleTransition({ change: "changed", displayId: 0, rotation: 1 });
+    timer.advanceTime(100);
+    gestures.onGesture?.({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 1184,
+      screenY: 162,
+      downAt: timer.now() - 50,
+    });
+    const result = await stopTestRecording(undefined, "labelled", timer);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("label: 'Warning: display rotation/size changed within");
+    expect(result.error).toContain("Steps labelled");
+  });
+
+  test("a recording whose geometry never changed has no warning and no labels", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    const tracker = geometryTracker(timer, 0);
+    await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("geometry-clean"),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+    );
+    timer.advanceTime(5_000);
+    gestures.onGesture?.({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 918,
+      screenY: 1184,
+      downAt: timer.now() - 100,
+    });
+    const result = await stopTestRecording(undefined, "steady", timer);
+
+    expect(result.error).toBeUndefined();
+    expect(result.planContent).not.toContain("label");
   });
 });

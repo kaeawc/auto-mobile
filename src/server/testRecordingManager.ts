@@ -255,14 +255,18 @@ async function stopAndBuildResult(
 ): Promise<TestRecordingStopResult> {
   let steps: PlanStep[];
   let touchTrackFailure: TouchTrackFailure | undefined;
+  let geometryWarnings: string[] | undefined;
   try {
-    ({ steps, touchTrackFailure } = await raceWithDeadline(() => session.recorder.stop(), {
-      timer,
-      timeoutMs: STOP_RECORDING_TIMEOUT_MS,
-      label: "Stopping test recording",
-      timeoutError: () =>
-        new Error(`Test recording stop timed out after ${STOP_RECORDING_TIMEOUT_MS} ms`),
-    }));
+    ({ steps, touchTrackFailure, geometryWarnings } = await raceWithDeadline(
+      () => session.recorder.stop(),
+      {
+        timer,
+        timeoutMs: STOP_RECORDING_TIMEOUT_MS,
+        label: "Stopping test recording",
+        timeoutError: () =>
+          new Error(`Test recording stop timed out after ${STOP_RECORDING_TIMEOUT_MS} ms`),
+      },
+    ));
   } catch (error) {
     logger.warn(`[TestRecording] Failed to stop recording ${session.recordingId}`, error);
     throw toActionableError(error, "Failed to stop test recording");
@@ -282,6 +286,15 @@ async function stopAndBuildResult(
   if (touchTrackMessage) {
     logger.warn(`[TestRecording] ${touchTrackMessage}`);
   }
+  // A rotation or display size change (or an unreadable rotation) can leave tapAt/swipeOn
+  // steps at the wrong coordinates or direction (#10174); never report that as a clean plan.
+  const geometryMessage = geometryWarnings?.length
+    ? `Display geometry changed or was unreadable during recording: ${geometryWarnings.join("; ")}. Steps labelled "Warning:" may be recorded at the wrong coordinates or direction.`
+    : undefined;
+  if (geometryMessage) {
+    logger.warn(`[TestRecording] ${geometryMessage}`);
+  }
+  const warningMessage = [touchTrackMessage, geometryMessage].filter(Boolean).join(" ");
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
@@ -304,7 +317,7 @@ async function stopAndBuildResult(
     planName: resolvedPlanName,
     planContent,
     stepCount,
-    ...(touchTrackMessage ? { error: `Warning: ${touchTrackMessage}` } : {}),
+    ...(warningMessage ? { error: `Warning: ${warningMessage}` } : {}),
     deviceId: session.deviceId,
     platform: session.platform,
   };

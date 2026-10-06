@@ -2322,13 +2322,29 @@ class TestPlanValidatorTest {
             permissions:
               - camera
         - tool: provisionDevice
-        - tool: stageSharedStorage
+        - tool: putAppFile
         - tool: deleteDevice
       """
         .trimIndent()
 
     val result = TestPlanValidator.validateYaml(yaml)
     assertTrue(result.valid, "YAML with valid tools should pass validation: ${result.errors}")
+  }
+
+  @Test
+  fun `rejects removed shared storage tools`() {
+    for (tool in listOf("stageSharedStorage", "stageSharedStorageFixtures")) {
+      val yaml =
+        """
+        name: removed-tool
+        steps:
+          - tool: $tool
+        """
+          .trimIndent()
+      assertFalse(TestPlanValidator.validateYaml(yaml).valid)
+      assertFalse(tool in ValidTools.TOOLS)
+    }
+    assertTrue("putAppFile" in ValidTools.TOOLS)
   }
 
   @Test

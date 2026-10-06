@@ -7,11 +7,14 @@ See [the unified call shape and target policy](../tools.md). Its stored override
 remain attached to this exact name; it does not grant unified private writes.
 
 Stage the files a system picker (documents, gallery, media) would open from the
-device's shared **Downloads** tree, bound to the caller's device session. The
-`stageSessionDownloads` tool is the session-scoped companion to
-`stageSharedStorage`: instead of targeting a device by serial, every operation
-is scoped to the live session that owns the device, and the tool refuses before
-touching the device when that session is missing or no longer active.
+device's shared **Downloads** tree, bound to the caller's device session.
+Every operation is scoped to the live session that owns the device, and the
+tool refuses before touching the device when that session is missing or no
+longer active. For device-targeted staging, use default-enabled `putAppFile`
+with `target: { domain: "user_files", namespace: "fixtures" }` and `files`.
+The former `stageSharedStorage` and `stageSharedStorageFixtures` tools have been
+removed; stored overrides under those names are ignored without migration.
+Existing Downloads resource URIs remain readable as compatibility aliases.
 
 ## Tool
 

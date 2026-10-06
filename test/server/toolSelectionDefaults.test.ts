@@ -4,6 +4,8 @@ import {
   validateConfiguredToolSelectionDefaults,
 } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { registerMcpTools } from "../../src/server";
+import definitions from "../../schemas/tool-definitions.json";
+import { initializeCliTools } from "../../src/cli/cliToolRegistration";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("tool selection default declarations", () => {
@@ -16,6 +18,21 @@ describe("tool selection default declarations", () => {
     ToolRegistry.clearTools();
     registerMcpTools(false);
     expect(ToolRegistry.getToolsMissingDeclaredDefault()).toEqual([]);
+    for (const name of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
+      expect(ToolRegistry.getRegisteredTool(name)).toBeUndefined();
+      expect(ToolRegistry.getToolDefinitions().some((tool) => tool.name === name)).toBe(false);
+    }
+  });
+
+  test("CLI registration and generated definitions omit removed shared-storage tools", () => {
+    ToolRegistry.clearTools();
+    initializeCliTools();
+    for (const name of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
+      expect(ToolRegistry.getRegisteredTool(name)).toBeUndefined();
+      expect(definitions.some((tool) => tool.name === name)).toBe(false);
+    }
+    expect(definitions.some((tool) => tool.name === "putAppFile")).toBe(true);
+    expect(definitions.some((tool) => tool.name === "stageSessionDownloads")).toBe(true);
   });
 
   test("tool registration rejects unknown startup defaults before creating a server", () => {

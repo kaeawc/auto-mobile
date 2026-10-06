@@ -217,7 +217,6 @@
 7	test/server/sessionPlatformRouting.daemon.integration.test.ts
 7	test/server/sessionPlatformRouting.integration.test.ts
 4	test/server/setToolEnabledBatch.test.ts
-2	test/server/sharedStorageTools.test.ts
 5	test/server/snapshotTools.test.ts
 7	test/server/storageTools.androidInspectionFallback.test.ts
 2	test/server/storageTools.test.ts

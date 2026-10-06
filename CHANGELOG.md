@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking changes
+
+- Removed `stageSharedStorage` and `stageSharedStorageFixtures`. Replace their
+  calls with `putAppFile` (now enabled by default for every storage domain):
+
+  ```json
+  {
+    "name": "putAppFile",
+    "arguments": {
+      "target": { "domain": "user_files", "namespace": "fixtures", "reset": true },
+      "files": [{ "destinationPath": "hello.txt", "contentText": "hello" }]
+    }
+  }
+  ```
+
+  Stored session overrides under the removed names are ignored without migration
+  or deletion. `stageSessionDownloads` retains its separate session-bound workflow.
+  Existing Downloads resource URIs remain readable as compatibility aliases.
+
 ## [v0.0.83] - 2026-10-05
 
 ### Added

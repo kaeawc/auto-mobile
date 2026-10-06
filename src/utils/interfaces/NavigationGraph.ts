@@ -12,6 +12,20 @@ export interface NavigationEvent {
   applicationId?: string;
   /** The interaction that triggered this navigation (set by CtrlProxyClient) */
   triggeringInteraction?: { type: string; elementText?: string; elementResourceId?: string } | null;
+  /**
+   * The device whose client received the event (#10195). Set by that client so the navigation
+   * telemetry record is stamped with the device that navigated, not whichever device last set
+   * the telemetry recorder's ambient context. The manager also uses it to tell which device a
+   * signal came from, so another device's signal does not retire this device's tool calls.
+   */
+  deviceId?: string;
+  /**
+   * When the SDK says the navigation happened, for the telemetry record ONLY (#10206 review):
+   * the iOS ingestor keeps every other telemetry event on SDK time, so one device's timeline
+   * sorts consistently. Graph correlation and `timestamp` are unaffected, because the SDK clock
+   * is not the clock the hierarchy detector and tool calls are measured against.
+   */
+  telemetryTimestamp?: number;
 }
 
 /**
@@ -90,9 +104,24 @@ export interface ToolCallInteraction {
   toolName: string;
   args: Record<string, any>;
   timestamp: number; // milliseconds
+  /** The device the call ran on, when the tool call carried one (#10206 review). */
+  deviceId?: string;
+  /**
+   * When the call's gesture was actually dispatched, if the action reported it (#10196).
+   * `timestamp` is when the tool started, which can be seconds earlier for a `tapOn` that
+   * waits for its target; correlation measures from this when present.
+   */
+  dispatchedAt?: number;
   /** UI state at the time of the tool call */
   uiState?: UIState;
 }
+
+/**
+ * What recording a tool call returns: calling it withdraws the call (the tool failed or was
+ * cancelled). `markDispatched` is present on a real graph so the running action can report
+ * the moment its gesture went out.
+ */
+export type NavigationToolCallHandle = (() => void) & { markDispatched?: () => void };
 
 /**
  * Represents a screen/destination in the navigation graph.
@@ -147,6 +176,11 @@ export interface PathResult {
   path: NavigationEdge[];
   startScreen: string;
   targetScreen: string;
+  /**
+   * On a failed search: how many recorded edges were ignored because nothing says what
+   * caused them, so they cannot be replayed (#10196).
+   */
+  unreplayableEdges?: number;
 }
 
 /**
@@ -462,7 +496,12 @@ export interface NavigationGraph {
   recordBackStack(backStack: BackStackInfo): void | Promise<void>;
 
   /** Record an eligible tool call; returns an idempotent withdrawal handle. */
-  recordToolCall(toolName: string, args: Record<string, any>, uiState?: UIState): () => void;
+  recordToolCall(
+    toolName: string,
+    args: Record<string, any>,
+    uiState?: UIState,
+    deviceId?: string,
+  ): NavigationToolCallHandle;
 
   /** Get the current screen name */
   getCurrentScreen(): string | null;

@@ -5,6 +5,8 @@ import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 import { reportToolDispatched } from "../../src/utils/ToolDispatchContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { createNavigationGraphResolver } from "../../src/features/navigation/deviceNavigationGraph";
+import { createTestDatabase } from "../db/testDbHelper";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import {
@@ -261,6 +263,60 @@ describe("navigation recorder handler outcomes", () => {
         "Home",
       ]);
     });
+  });
+
+  test("a session's process-replacing call forgets the screen on the manager its prediction reads resolve to (#10193, #10197)", async () => {
+    const sessionId = "session-lifecycle";
+    const sessionDb = await createTestDatabase();
+    const sessionManager = NavigationGraphManager.createForTesting(
+      new NavigationRepository(sessionDb),
+      new TestCoverageRepository(undefined, sessionDb),
+      timer,
+      sessionId,
+    );
+    NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionManager);
+    // The execution target names the session the call ran under, as a real session-bound call does.
+    const restoreTarget = registry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async () => ({
+          shouldResolveDevice: true,
+          device: { deviceId: "fake", platform: "android" },
+          sessionUuid: sessionId,
+        }),
+      },
+    });
+    try {
+      await sessionManager.recordNavigationEvent({
+        applicationId: "com.x",
+        destination: "Splash",
+        source: "sdk",
+        arguments: {},
+        metadata: {},
+        timestamp: timer.now(),
+        sequenceNumber: 0,
+      });
+      registry.registerDeviceAware("installApp", "fake", z.object({}), async () => ({
+        success: true,
+      }));
+
+      await registry
+        .getTool("installApp")!
+        .handler({ artifactPath: "/tmp/a.apk", sessionUuid: sessionId });
+
+      // The prediction reader resolves the session's manager from the bound session...
+      const readBy = createNavigationGraphResolver(() => sessionId)({
+        deviceId: "fake",
+        platform: "android",
+      });
+      expect(readBy).toBe(sessionManager);
+      expect(readBy.getCurrentScreen()).toBeNull();
+      // ...and the global manager, which no session call acted on, keeps its screen.
+      expect(harness.manager.getCurrentScreen()).toBe("Splash");
+    } finally {
+      restoreTarget();
+      NavigationGraphManager.resetSession(sessionId);
+      await sessionDb.destroy();
+    }
   });
 
   test("navigation while a handler is running keeps its tap attribution", async () => {

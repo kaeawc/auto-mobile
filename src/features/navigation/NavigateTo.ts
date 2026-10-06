@@ -9,7 +9,6 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";

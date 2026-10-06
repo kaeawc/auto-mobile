@@ -22,6 +22,28 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
     await harness.dispose();
   });
 
+  /** Append `count` more traversal rows of a tool-less transition: the append-only log (#10194). */
+  async function insertTraversals(
+    count: number,
+    from: string,
+    to: string,
+    firstTimestamp: number,
+  ): Promise<void> {
+    await harness.db
+      .insertInto("navigation_edges")
+      .values(
+        Array.from({ length: count }, (_, index) => ({
+          app_id: "com.test.app",
+          from_screen: from,
+          to_screen: to,
+          tool_name: null,
+          tool_args: null,
+          timestamp: firstTimestamp + index,
+        })),
+      )
+      .execute();
+  }
+
   test("prefers a later tapOn edge over an earlier edge with no tool call (#9990)", async () => {
     const now = Date.now();
     await manager.recordNavigationEvent(createEvent("Home", now));
@@ -113,9 +135,10 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
     const result = await manager.findPath("Settings");
 
     // Nothing says what caused Home -> Settings, so it is not replayed as a guessed Back press.
+    // Path finding reads distinct transitions (#10194): four traversals are two edges.
     expect(result.found).toBe(false);
     expect(result.path).toEqual([]);
-    expect(result.unreplayableEdges).toBe(4);
+    expect(result.unreplayableEdges).toBe(2);
   });
 
   test("routes around an edge with no tool call through recorded edges (#10196)", async () => {
@@ -177,8 +200,8 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
       const result = await manager.findPath("Detail");
 
       expect(result.found).toBe(false);
-      // Home -> Detail twice; the Detail -> Home edge is the replayable one.
-      expect(result.unreplayableEdges).toBe(2);
+      // Home -> Detail (traversed twice, one distinct edge); Detail -> Home is the replayable one.
+      expect(result.unreplayableEdges).toBe(1);
     });
 
     test.each([
@@ -192,7 +215,35 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
       const result = await manager.findPath("Home");
 
       expect(result.found).toBe(false);
-      expect(result.unreplayableEdges).toBe(3);
+      // Both directions, each traversed once or twice: two distinct edges.
+      expect(result.unreplayableEdges).toBe(2);
+    });
+
+    test("500 traversals of one Back edge are one distinct edge and still replay as Back (#10194, #10196)", async () => {
+      await recordWithDepths(1, 2);
+      await insertTraversals(500, "Detail", "Home", 10_000);
+
+      const result = await manager.findPath("Home");
+
+      // Back evidence is read from the node depths, so it still holds with distinct edges.
+      expect(result.found).toBe(true);
+      expect(result.path.map((edge) => [edge.from, edge.to, edge.edgeType])).toEqual([
+        ["Detail", "Home", "back"],
+      ]);
+      expect(await harness.db.selectFrom("navigation_edges").selectAll().execute()).toHaveLength(
+        503,
+      );
+    });
+
+    test("500 traversals of one unreplayable edge are counted once, not 500 times (#10194, #10196)", async () => {
+      await recordWithDepths(null, null);
+      await insertTraversals(500, "Home", "Detail", 10_000);
+
+      const result = await manager.findPath("Home");
+
+      expect(result.found).toBe(false);
+      // Home -> Detail and Detail -> Home: two distinct edges, however many rows exist.
+      expect(result.unreplayableEdges).toBe(2);
     });
 
     test("a recorded tool edge for the pair is still preferred when the Back edge is older", async () => {
@@ -223,6 +274,62 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
     expect(result.path[0].interaction).toMatchObject({
       toolName: "pressButton",
       args: { button: "back" },
+    });
+  });
+
+  describe("scroll-search demotion with unreplayable edges in one search (#10154, #10196)", () => {
+    /** Home -> Target once with no attributable tool, then by one tapOn per entry of `texts`. */
+    async function recordTools(texts: string[]): Promise<void> {
+      const now = Date.now();
+      await manager.recordNavigationEvent(createEvent("Home", now));
+      await manager.recordNavigationEvent(createEvent("Target", now + 10));
+      await manager.recordNavigationEvent(createEvent("Home", now + 20));
+      let at = now + 100;
+      for (const text of texts) {
+        manager.recordToolCall("tapOn", { text });
+        await manager.recordNavigationEvent(createEvent("Target", at));
+        await manager.recordNavigationEvent(createEvent("Home", at + 10));
+        at += 100;
+      }
+    }
+
+    /** What navigateTo does when a replayed tap's target is not found after scrolling, twice running. */
+    async function demoteAfterTwoMisses(): Promise<void> {
+      const edge = (await manager.findPath("Target")).path[0];
+      for (let call = 0; call < 2; call++) {
+        manager.recordEdgeReplayOutcome(edge, false);
+        manager.settleTransientEdgeFailure(edge, true);
+      }
+      expect(manager.hasEdgeReplayFailure(edge)).toBe(true);
+    }
+
+    test("a demoted tool edge ranks below the working edge for its pair; the unknown edge is skipped", async () => {
+      await recordTools(["Old", "New"]);
+      // The newest edge is the one a search tries first; two misses demote it below "Old".
+      await demoteAfterTwoMisses();
+
+      const result = await manager.findPath("Target");
+
+      expect(result.found).toBe(true);
+      expect(result.path).toHaveLength(1);
+      expect(result.path[0].interaction?.args).toEqual({ text: "Old" });
+      expect(result.unreplayableEdges).toBeUndefined();
+    });
+
+    test("a demoted tool edge is still offered alone, and is not counted as unreplayable", async () => {
+      await recordTools(["Only"]);
+      await demoteAfterTwoMisses();
+      await insertTraversals(500, "Home", "Elsewhere", 100_000);
+
+      const offered = await manager.findPath("Target");
+      const unreachable = await manager.findPath("Nowhere");
+
+      expect(offered.found).toBe(true);
+      expect(offered.path[0].interaction?.args).toEqual({ text: "Only" });
+      expect(unreachable.found).toBe(false);
+      // Home -> Target and Target -> Home (tool-less) plus Home -> Elsewhere (500 rows): three
+      // distinct unknown edges; the demoted tool edge is replayable, so it adds nothing.
+      expect(unreachable.unreplayableEdges).toBe(3);
     });
   });
 });

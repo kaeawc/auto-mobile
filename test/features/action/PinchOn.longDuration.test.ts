@@ -155,6 +155,57 @@ for (const platform of ["android", "ios"] as const) {
       }
     });
 
+    test("iOS forwards the abort signal to the pinch request", async () => {
+      if (platform !== "ios") {
+        return;
+      }
+      timer.enableAutoAdvance();
+      const controller = new AbortController();
+      await pinch.execute(
+        { direction: "in", autoTarget: false, duration: 300 },
+        undefined,
+        controller.signal,
+      );
+      expect(ios.getPinchHistory()[0]?.signal).toBe(controller.signal);
+    });
+
+    test("iOS request sent but unanswered (socket close) is indeterminate, not retryable", async () => {
+      if (platform !== "ios") {
+        return;
+      }
+      timer.enableAutoAdvance();
+      ios.setPinchResult({
+        success: false,
+        totalTimeMs: 40,
+        error: "WebSocket connection closed",
+        dispatched: true,
+        acknowledged: false,
+        retryable: false,
+      });
+      const result = await pinch.execute({ direction: "in", autoTarget: false });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "Pinch outcome is indeterminate: the request was dispatched but no result was confirmed (WebSocket connection closed). Do not retry automatically.",
+      );
+      expect(history()).toHaveLength(1);
+    });
+
+    test("iOS pre-dispatch failure stays a plain failure", async () => {
+      if (platform !== "ios") {
+        return;
+      }
+      timer.enableAutoAdvance();
+      ios.setPinchResult({
+        success: false,
+        totalTimeMs: 0,
+        error: "Not connected",
+        dispatched: false,
+        acknowledged: false,
+      });
+      const result = await pinch.execute({ direction: "in", autoTarget: false });
+      expect(result.error).toBe("Not connected");
+    });
+
     test("transport timeout reports an indeterminate outcome without retrying", async () => {
       timer.enableAutoAdvance();
       fake().setPinchResult({

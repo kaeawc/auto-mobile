@@ -127,6 +127,9 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   private readonly observationIds = new Map<string, string>();
   private readonly panelRevisions = new Map<string, number>();
   private readonly revisions = new Map<string, number>();
+  // Counts inventory invalidations. Deliberately not cleared by reset(): it only grows, so
+  // a cache keyed on displayStateRevision() can never match an entry from before a reset.
+  private readonly inventoryRevisions = new Map<string, number>();
   private readonly identityRevisions = new Map<string, number>();
   private readonly lastIdentityChangeRevisions = new Map<string, number>();
   private readonly pendingPushes = new Map<
@@ -155,6 +158,21 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
 
   revision(deviceId: string): number {
     return this.revisions.get(deviceId) ?? 0;
+  }
+
+  /**
+   * Changes whenever the default panel's generation advances or the device's display
+   * inventory is invalidated. A secondary display being added, removed or changed does
+   * not advance {@link revision}, but it does change which logical display ids map to
+   * which physical panels, so caches of that mapping key on this value instead.
+   */
+  displayStateRevision(deviceId: string): number {
+    return this.revision(deviceId) + (this.inventoryRevisions.get(deviceId) ?? 0);
+  }
+
+  private dropInventory(deviceId: string): void {
+    this.inventoryRevisions.set(deviceId, (this.inventoryRevisions.get(deviceId) ?? 0) + 1);
+    this.invalidateInventory(deviceId);
   }
 
   /**
@@ -391,7 +409,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   notifyTransition(deviceId: string, reason: string): void {
     // A panel or posture transition can add, remove or resize a panel; never serve
     // the pre-transition inventory to the next call.
-    this.invalidateInventory(deviceId);
+    this.dropInventory(deviceId);
     ObservedAndroidDisplayCache.clear(deviceId);
     this.identityRevisions.set(deviceId, this.identityRevision(deviceId) + 1);
     this.notifyGeometryTransition(deviceId, reason);
@@ -406,7 +424,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   /** A push fences actions before the next observe, which then reconciles the new stamp. */
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void {
     if (inventoryChangedByPush(event)) {
-      this.invalidateInventory(deviceId);
+      this.dropInventory(deviceId);
     }
     if (event.change !== "device_state" && event.displayId !== 0) {
       // A secondary display must not bump the default panel's generation.

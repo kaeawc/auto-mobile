@@ -235,7 +235,12 @@ export class HierarchyCollector {
           undefined,
           displayId,
         );
-        client.invalidateCache();
+        // A read of a non-default display answers its caller only (#10106): it never wrote
+        // the unfiltered tree into the shared default-display cache, so there is nothing to
+        // drop, and dropping would cost the next default-display action a device read.
+        if (displayId === undefined || displayId === 0) {
+          client.invalidateCache();
+        }
         if (syncResult?.hierarchy) {
           result.rawViewHierarchy = {
             json: JSON.stringify(syncResult.hierarchy, null, 2),

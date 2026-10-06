@@ -1,5 +1,8 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
+import type { ObserveResult } from "../../../src/models";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
@@ -88,13 +91,13 @@ function markerCount(client: AndroidCtrlProxyClient): number {
   return (Reflect.get(client, "observerHierarchyRequestIds") as Map<string, boolean>).size;
 }
 
-async function connectedClient(deviceId: string) {
+async function connectedClient(deviceId: string, adb = new FakeAdbExecutor()) {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const timer = new FakeTimer();
   const sockets = capturingSockets(timer);
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId, name: "Android", platform: "android" },
-    new FakeAdbExecutor(),
+    adb,
     sockets.factory,
     timer,
   );
@@ -206,6 +209,43 @@ test("an unanswered explicit display read releases its marker so a later frame i
     socket.simulateMessage(frame("default later", DEFAULT_DISPLAY, 0, 3));
     expect(cachedText(client)).toBe("default later");
     expect(stream).toHaveBeenCalledTimes(1);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a raw read of another display leaves the default display's cache and geometry for the next action", async () => {
+  // A cached tree is only served while its package is known to run; an unanswerable
+  // liveness probe leaves the cache in place.
+  const adb = new FakeAdbExecutor();
+  adb.setCommandError("shell dumpsys activity processes", new Error("liveness probe unavailable"));
+  const { client, socket } = await connectedClient("owner-display-raw-then-default", adb);
+  try {
+    const geometryBefore = client.screenGeometry.bind();
+    const scaleBefore = client.getScreenScaleMetadata();
+    const collector = new HierarchyCollector({
+      device: { deviceId: "owner-display-raw-then-default", name: "Android", platform: "android" },
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      timer: new FakeTimer(),
+      androidRawClient: () => client,
+    });
+    const observed = { viewHierarchy: { hierarchy: {} } } as ObserveResult;
+
+    // `observe { raw: true, display }` attaches the unfiltered tree of the observed display.
+    const raw = collector.collectRaw(observed, undefined, 2);
+    const { requestId, displayId } = await sentHierarchyRequest(socket);
+    expect(displayId).toBe(2);
+    socket.simulateMessage(frame("external raw", SECOND_DISPLAY, 2, 2, requestId));
+    await raw;
+    expect(observed.rawViewHierarchy?.json).toContain("external raw");
+
+    // The default display's capture still backs the next default-display action.
+    expect(cachedText(client)).toBe("default");
+    expect(client.screenGeometry.bind()).toEqual(geometryBefore);
+    expect(client.getScreenScaleMetadata()).toEqual(scaleBefore);
+    const action = await client.getLatestHierarchy(false);
+    expect(action.hierarchy.hierarchy.text).toBe("default");
+    expect(socket.sent.filter((wire) => wire.includes("request_hierarchy"))).toHaveLength(1);
   } finally {
     await client.close();
   }

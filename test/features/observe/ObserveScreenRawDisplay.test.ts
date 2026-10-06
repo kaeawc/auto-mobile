@@ -123,7 +123,8 @@ describe("raw hierarchy display routing (#9981)", () => {
     expect(requests[0]?.[1]).toBe(true);
     expect(requests[0]?.[5]).toBe(2);
     expect(result.rawViewHierarchy?.json).toContain("raw");
-    expect(invalidations()).toBe(1);
+    // A non-default display answers its caller only (#10106); the shared cache was never written.
+    expect(invalidations()).toBe(0);
   });
 
   test("a display pinned through the screen's display argument is routed the same way", async () => {
@@ -138,10 +139,12 @@ describe("raw hierarchy display routing (#9981)", () => {
   });
 
   test("the default display sends the unchanged request without a display id", async () => {
-    const { screen, requests } = buildScreen({ displays: bothDisplays });
+    const { screen, requests, invalidations } = buildScreen({ displays: bothDisplays });
     const signal = new AbortController().signal;
 
     await screen.appendRawViewHierarchy(primary(), signal);
+    // The unfiltered default-display tree was cached by the read, so it is dropped again.
+    expect(invalidations()).toBe(1);
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.[1]).toBe(true);

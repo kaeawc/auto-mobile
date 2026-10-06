@@ -110,7 +110,7 @@ export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolv
     this.timer = options.timer ?? defaultTimer;
     this.ttlMs = options.ttlMs ?? PHYSICAL_DISPLAY_ID_CACHE_TTL_MS;
     this.displayRevision =
-      options.displayRevision ?? ((deviceId) => displayTransitions.revision(deviceId));
+      options.displayRevision ?? ((deviceId) => displayTransitions.displayStateRevision(deviceId));
   }
 
   async resolve(adb: AdbExecutor, deviceId: string, signal?: AbortSignal): Promise<string | null> {

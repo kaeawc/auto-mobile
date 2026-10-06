@@ -279,6 +279,17 @@ interface CtrlProxyActions {
     selector: NodeSelector?,
   )
 
+  /**
+   * `click` or `set_selection` on the input-focused editable node, for fields that have no stable
+   * selector (Compose text fields).
+   */
+  fun requestFocusedInputAction(
+    requestId: String?,
+    action: String,
+    selectionStart: Int?,
+    selectionEnd: Int?,
+  )
+
   fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,

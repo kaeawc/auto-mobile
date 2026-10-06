@@ -47,6 +47,15 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     signal?: AbortSignal;
   }> = [];
 
+  private focusedInputActionHistory: Array<{
+    action: "click" | "set_selection";
+    selection?: { start: number; end: number };
+  }> = [];
+
+  getFocusedInputActionHistory() {
+    return this.focusedInputActionHistory.map((entry) => ({ ...entry }));
+  }
+
   setSupportsNodeActionSelectors(supported: boolean): void {
     this.nodeActionSelectorsSupported = supported;
   }
@@ -594,6 +603,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.imeActionHistory = [];
     this.actionHistory = [];
     this.nodeActionHistory = [];
+    this.focusedInputActionHistory = [];
     this.twoFingerSwipeHistory = [];
     this.screenshotRequestCount = 0;
     this.hierarchyRequestCount = 0;
@@ -1010,6 +1020,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         perfTiming: this.performanceTiming || undefined,
       }
     );
+  }
+
+  async requestFocusedInputAction(
+    action: "click" | "set_selection",
+    selection?: { start: number; end: number },
+  ): Promise<A11yActionResult> {
+    await this.applyDelay("requestFocusedInputAction");
+    this.checkFailure("requestFocusedInputAction");
+    this.focusedInputActionHistory.push({ action, ...(selection ? { selection } : {}) });
+    return this.actionResult ?? { success: true, action, totalTimeMs: 100 };
   }
 
   async supportsNodeActionSelectors(

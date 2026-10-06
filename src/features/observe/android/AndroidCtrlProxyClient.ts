@@ -465,6 +465,15 @@ interface WsKeyboardProfilesResultMessage extends WsMessageBase {
   profiles?: KeyboardProfileCatalog["profiles"];
 }
 
+/** What a node action addresses: a resource id, a stable selector, or the input-focused field. */
+interface NodeActionTarget {
+  resourceId?: string;
+  selector?: AccessibilityNodeSelector;
+  focusedInput?: boolean;
+  selectionStart?: number;
+  selectionEnd?: number;
+}
+
 interface WsInsertTextStateResultMessage extends WsRequestBase {
   type: "insert_text_state_result";
   state?: InsertTextState;
@@ -1191,6 +1200,14 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
+
+  requestFocusedInputAction(
+    action: "click" | "set_selection",
+    selection?: { start: number; end: number },
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
@@ -3625,6 +3642,36 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     selector?: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
+    return this.dispatchNodeAction(action, { resourceId, selector }, timeoutMs, perf, signal);
+  }
+
+  /**
+   * `click` or `set_selection` on the input-focused editable node, which needs no selector (a
+   * Compose text field has none). A runner that predates the `focusedInput` field rejects the
+   * request for lacking a selector without acting, so the caller can fall back.
+   */
+  async requestFocusedInputAction(
+    action: "click" | "set_selection",
+    selection?: { start: number; end: number },
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    const target: NodeActionTarget = {
+      focusedInput: true,
+      ...(selection ? { selectionStart: selection.start, selectionEnd: selection.end } : {}),
+    };
+    return this.dispatchNodeAction(action, target, timeoutMs, perf, signal);
+  }
+
+  private async dispatchNodeAction(
+    action: string,
+    target: NodeActionTarget,
+    timeoutMs: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    const { resourceId, selector } = target;
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let pendingRequestId: string | undefined;
@@ -3689,7 +3736,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
+          ctrlProxyRequests.requestAction({ requestId, action, ...target }),
         );
         this.ws.send(message);
         dispatched = true;

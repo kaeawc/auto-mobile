@@ -2924,6 +2924,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     selector: NodeSelector?,
   ) = performNodeAction(requestId, action, resourceId, selector)
 
+  override fun requestFocusedInputAction(
+    requestId: String?,
+    action: String,
+    selectionStart: Int?,
+    selectionEnd: Int?,
+  ) = performFocusedInputAction(requestId, action, selectionStart, selectionEnd)
+
   override fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
@@ -6073,6 +6080,74 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
       }
     }
+  }
+
+  /**
+   * `click` or `set_selection` on the input-focused editable node. Used by `keyboard open`, whose
+   * target (a Compose text field) has no resource id or test tag a selector could name.
+   * `ACTION_FOCUS` is deliberately not offered: an already-focused field ignores it, so it cannot
+   * bring the IME back.
+   */
+  private fun performFocusedInputAction(
+    requestId: String?,
+    action: String,
+    selectionStart: Int?,
+    selectionEnd: Int?,
+  ) {
+    rememberedInsert = null
+    val startTime = System.currentTimeMillis()
+    val node =
+      try {
+        findFocusedEditableNode(rootInActiveWindow)
+      } catch (e: Exception) {
+        Log.w(TAG, "Focused input lookup failed", e)
+        null
+      }
+    val error =
+      try {
+        focusedInputActionError(node, action, selectionStart, selectionEnd)
+      } catch (e: Exception) {
+        Log.e(TAG, "Error performing focused input action", e)
+        e.message ?: e.javaClass.simpleName
+      } finally {
+        node?.recycle()
+      }
+    kotlinx.coroutines.runBlocking {
+      broadcastActionResult(
+        requestId,
+        action,
+        error == null,
+        error,
+        System.currentTimeMillis() - startTime,
+      )
+    }
+  }
+
+  /** Performs the action and returns its failure, or null when it succeeded. */
+  private fun focusedInputActionError(
+    node: AccessibilityNodeInfo?,
+    action: String,
+    selectionStart: Int?,
+    selectionEnd: Int?,
+  ): String? {
+    val plan = planFocusedInputAction(action, selectionStart, selectionEnd)
+    if (plan is FocusedInputActionPlan.Rejected) return plan.error
+    plan as FocusedInputActionPlan.Perform
+    if (node == null) return "No focused editable node found"
+    focusedInputActionAvailability(action, plan.actionId, node.actionList?.map { it.id })?.let {
+      return it
+    }
+    val arguments =
+      if (plan.selectionStart != null && plan.selectionEnd != null) {
+        android.os.Bundle().apply {
+          putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, plan.selectionStart)
+          putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, plan.selectionEnd)
+        }
+      } else {
+        null
+      }
+    val performed = node.performAction(plan.actionId, arguments)
+    return if (performed) null else "performAction returned false"
   }
 
   /**

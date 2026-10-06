@@ -126,6 +126,51 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     },
   );
 
+  test("requestFocusedInputAction sends request_action for the focused input with no selector", async () => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const frames: Array<Record<string, unknown>> = [];
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const message = JSON.parse(String(data));
+      const { requestId, ...withoutId } = message;
+      void requestId;
+      frames.push(withoutId);
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "action_result",
+          requestId: message.requestId,
+          action: message.action,
+          success: true,
+          totalTimeMs: 1,
+        }),
+      );
+    });
+    try {
+      await client.requestFocusedInputAction("click");
+      await client.requestFocusedInputAction("set_selection", { start: 0, end: 3 });
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
+
+    expect(frames).toEqual([
+      { type: "request_action", action: "click", focusedInput: true },
+      {
+        type: "request_action",
+        action: "set_selection",
+        focusedInput: true,
+        selectionStart: 0,
+        selectionEnd: 3,
+      },
+    ]);
+  });
+
   test("waits for the connected handshake before reading node selector support", async function () {
     let socket: FakeWebSocket | null = null;
     const client = AndroidCtrlProxyClient.createForTesting(

@@ -440,6 +440,29 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
     },
     {
       builder: "requestAction",
+      name: "focusedInput click names no selector or resourceId",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({ requestId: "a-f1", action: "click", focusedInput: true }),
+      ),
+      expected: '{"type":"request_action","requestId":"a-f1","action":"click","focusedInput":true}',
+    },
+    {
+      builder: "requestAction",
+      name: "focusedInput set_selection carries the range, including a zero start",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-f2",
+          action: "set_selection",
+          focusedInput: true,
+          selectionStart: 0,
+          selectionEnd: 0,
+        }),
+      ),
+      expected:
+        '{"type":"request_action","requestId":"a-f2","action":"set_selection","focusedInput":true,"selectionStart":0,"selectionEnd":0}',
+    },
+    {
+      builder: "requestAction",
       name: "resourceId omitted when undefined",
       actual: serializeCtrlProxyRequest(
         ctrlProxyRequests.requestAction({ requestId: "a-2", action: "clear_focus" }),

@@ -537,6 +537,26 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches a focused-input request_action without a selector`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"f1","action":"set_selection","focusedInput":true,"selectionStart":0,"selectionEnd":2}"""
+    )
+    assertEquals(
+      "requestFocusedInputAction" to listOf<Any?>("f1", "set_selection", 0, 2),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches a focused-input click`() = runTest {
+    dispatch("""{"type":"request_action","requestId":"f2","action":"click","focusedInput":true}""")
+    assertEquals(
+      "requestFocusedInputAction" to listOf<Any?>("f2", "click", null, null),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches request_action selector`() = runTest {
     dispatch(
       """{"type":"request_action","requestId":"a2","action":"long_click","selector":{"testTag":"message_row_42","collectionRow":4,"collectionColumn":0}}"""

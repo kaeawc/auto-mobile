@@ -183,7 +183,11 @@ import type {
   OverlayUpdate,
 } from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
-import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
+import {
+  CtrlProxyPackages,
+  packageEventAndroidUserId,
+  type PackageInfoOptions,
+} from "./CtrlProxyPackages";
 
 // Import types
 import type { DelegateContext } from "../shared/types";
@@ -251,7 +255,10 @@ export interface InteractionEvent {
 interface PackageEvent {
   action: "added" | "removed" | "replaced";
   packageName: string;
+  /** Android user id; APKs before #10067 sent the package uid here. */
   userId: number;
+  /** Raw package uid; present only on APKs whose `userId` is a real user id (#10067). */
+  uid?: number | null;
   isSystem?: boolean | null;
   removedForAllUsers?: boolean | null;
 }
@@ -260,8 +267,11 @@ interface PackageEvent {
  * Interface for handled exception event from SDK
  */
 interface HandledExceptionEvent {
-  timestamp: number;
+  timestamp?: number;
   exceptionClass: string;
+  /** The wire name the device writes (#10068). */
+  message?: string | null;
+  /** Legacy name from before #10068; read only when `message` is absent. */
   exceptionMessage?: string;
   stackTrace: string;
   customMessage?: string;
@@ -1327,6 +1337,9 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
  */
 const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 
+/** Isolation markers kept for hierarchy requests whose waiter already gave up. */
+const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
+
 /**
  * Process-held ownership claim for a device's CtrlProxy ADB forwards. The ADB
  * server is shared by AutoMobile processes, so its global forward listing alone
@@ -2219,6 +2232,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       },
       markObserverHierarchyRequest: (requestId, options) => {
         this.observerHierarchyRequestIds.set(requestId, options?.isolateResponse ?? false);
+        // Markers of unanswered requests outlive their waiter (a late reply must stay isolated);
+        // evict the oldest so an unresponsive runner cannot grow the map without bound.
+        while (this.observerHierarchyRequestIds.size > MAX_RETAINED_HIERARCHY_REQUEST_MARKERS) {
+          const oldest = this.observerHierarchyRequestIds.keys().next().value;
+          if (oldest === undefined) {
+            break;
+          }
+          this.observerHierarchyRequestIds.delete(oldest);
+        }
       },
       unmarkObserverHierarchyRequest: (requestId) => {
         this.observerHierarchyRequestIds.delete(requestId);
@@ -6617,6 +6639,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     const deviceId = this.device.deviceId;
+    const androidUserId = packageEventAndroidUserId(event);
     const eventTimestamp = typeof timestamp === "number" ? timestamp : this.timer.now();
     const repo = this.getInstalledAppsRepository();
 
@@ -6631,13 +6654,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (event.removedForAllUsers) {
           await repo.removeInstalledAppForDevice(deviceId, event.packageName);
         } else {
-          await repo.removeInstalledApp(deviceId, event.userId, event.packageName);
+          await repo.removeInstalledApp(deviceId, androidUserId, event.packageName);
         }
       } else {
         const isSystem = event.isSystem === true;
         await repo.upsertInstalledApp(
           deviceId,
-          event.userId,
+          androidUserId,
           event.packageName,
           isSystem,
           eventTimestamp,
@@ -6646,8 +6669,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Notify work profile monitor that this user has accessibility service
       // (if we're receiving package events, the service is working for this user)
-      if (event.userId > 0 && this.workProfileMonitor) {
-        this.workProfileMonitor.setProfileHasAccessibilityService(event.userId, true);
+      if (androidUserId > 0 && this.workProfileMonitor) {
+        this.workProfileMonitor.setProfileHasAccessibilityService(androidUserId, true);
       }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);

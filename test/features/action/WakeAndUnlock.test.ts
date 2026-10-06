@@ -31,19 +31,37 @@ const LOCKED_SWIPE: DeviceLockState = { locked: true, keyguardShowing: true, sec
 // `secure` unreadable (dumpsys emitted showing= but not secure=): stays undefined.
 const LOCKED_UNKNOWN_SECURE: DeviceLockState = { locked: true, keyguardShowing: true };
 const UNLOCKED: DeviceLockState = { locked: false, keyguardShowing: false, secure: true };
+// Keyguard still up behind a show-when-locked activity (call, alarm, secure camera):
+// `dumpsys window policy` reports showing=true occluded=true.
+const OCCLUDED_SECURE: DeviceLockState = { locked: false, keyguardShowing: true, secure: true };
+
+const OCCLUDED_SWIPE: DeviceLockState = { locked: false, keyguardShowing: true, secure: false };
 
 class FakeCredentialStore implements LockCredentialStore {
   recorded: string | null = null;
+  /** When set, `recorded` is only replayed on this identity (like the real store). */
+  learnedOn: string | undefined;
+  lookups: Array<{ deviceId: string; identity: string | undefined }> = [];
   remembered: Array<{ deviceId: string; lockType: DeviceLockType; credential: string | null }> = [];
-  async getRecordedCredential(): Promise<string | null> {
+  rememberedIdentities: Array<string | undefined> = [];
+  async getRecordedCredential(
+    deviceId: string,
+    identity: string | undefined,
+  ): Promise<string | null> {
+    this.lookups.push({ deviceId, identity });
+    if (this.learnedOn !== undefined && identity !== this.learnedOn) {
+      return null;
+    }
     return this.recorded;
   }
   async rememberLock(
     deviceId: string,
     lockType: DeviceLockType,
     credential: string | null,
+    identity: string | undefined,
   ): Promise<void> {
     this.remembered.push({ deviceId, lockType, credential });
+    this.rememberedIdentities.push(identity);
   }
 }
 
@@ -518,7 +536,7 @@ describe("WakeAndUnlock", () => {
   );
 
   test.each([
-    { locked: false, keyguardShowing: true, secure: true }, // occluded by an app
+    OCCLUDED_SECURE, // occluded by an app
     LOCKED_SWIPE,
   ])("keyguard no longer needs credential input: sends no PIN (%j)", async (lock) => {
     adb.setScreenState(true, "Awake");
@@ -615,6 +633,154 @@ describe("WakeAndUnlock", () => {
     adb.setDeviceLock(LOCKED_UNKNOWN_SECURE); // never clears
 
     await expect(android().execute()).rejects.toThrow(/secure status could not be read/i);
+  });
+
+  describe("occluded keyguard (#10064)", () => {
+    test("showing but occluded is not unlocked: no dismissal, no PIN, nothing remembered", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(OCCLUDED_SECURE);
+
+      const result = await android().execute("1234");
+
+      expect(result).toMatchObject({
+        success: false,
+        wasLocked: true,
+        secure: true,
+        unlocked: false,
+      });
+      expect(result.error).toMatch(/occluded by a foreground show-when-locked activity/);
+      expect(adb.getExecutedCommands()).toEqual([]);
+      expect(store.remembered).toEqual([]);
+    });
+
+    test("an occluded swipe keyguard needs no credential: it is dismissed, not refused", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLockSequence([OCCLUDED_SWIPE, UNLOCKED]);
+
+      const result = await android().execute();
+
+      expect(result).toMatchObject({ success: true, unlocked: true });
+      expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    });
+
+    test("an occluded swipe keyguard that does not dismiss is reported, never as unlocked", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(OCCLUDED_SWIPE);
+
+      const result = await android().execute();
+
+      expect(result).toMatchObject({ success: false, unlocked: false });
+      expect(result.error).toContain("did not dismiss");
+      expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    });
+
+    test("an occluded keyguard whose security could not be read is still refused", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock({ locked: false, keyguardShowing: true });
+
+      const result = await android().execute("1234");
+
+      expect(result).toMatchObject({ success: false, wasLocked: true, unlocked: false });
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("an occluder arriving mid-poll after PIN entry does not count as unlocked or remember the PIN", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLockSequence([LOCKED_SECURE, LOCKED_SECURE, OCCLUDED_SECURE]);
+
+      const result = await android().execute("1234");
+
+      expect(result.success).toBe(false);
+      expect(result.unlocked).toBe(false);
+      expect(result.error).toContain("remained locked");
+      expect(store.remembered).toEqual([]);
+    });
+
+    test("an occluder arriving mid-poll after swipe dismissal is not a dismissed keyguard", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLockSequence([LOCKED_SWIPE, OCCLUDED_SECURE]);
+
+      const result = await android().execute();
+
+      expect(result).toMatchObject({ success: false, unlocked: false });
+      expect(result.error).toContain("did not dismiss");
+      expect(store.remembered).toEqual([]);
+    });
+
+    test("keyguard not showing is still reported unlocked with no commands", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(UNLOCKED);
+
+      const result = await android().execute("1234");
+
+      expect(result).toMatchObject({ success: true, wasLocked: false, unlocked: true });
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+  });
+
+  describe("recorded credential is bound to the device it was learned on (#10065)", () => {
+    const avdA: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "avd-a" };
+    const avdB: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "avd-b" };
+
+    function on(device: BootedDevice): WakeAndUnlock {
+      return new WakeAndUnlock(device, adb, { timer, credentialStore: store });
+    }
+
+    test("a different AVD behind the same serial fails up front and sends no key events", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(LOCKED_SECURE);
+      store.recorded = "1234";
+      store.learnedOn = "avd-a";
+
+      await expect(on(avdB).execute()).rejects.toThrow(ActionableError);
+      await expect(on(avdB).execute()).rejects.toThrow(/provide `pin`/);
+
+      expect(adb.getExecutedCommands().some((c) => c.includes("KEYCODE_"))).toBe(false);
+      expect(store.lookups[0]).toEqual({ deviceId: "emulator-5554", identity: "avd-b" });
+    });
+
+    test("the AVD the PIN was learned on still replays it", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLockSequence([LOCKED_SECURE, LOCKED_SECURE, UNLOCKED]);
+      store.recorded = "1234";
+      store.learnedOn = "avd-a";
+
+      const result = await on(avdA).execute();
+
+      expect(result).toMatchObject({ success: true, usedRecordedCredential: true });
+      expect(adb.wasCommandExecuted("KEYCODE_1")).toBe(true);
+    });
+
+    test("an emulator whose AVD name is unresolved never replays a recorded PIN", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(LOCKED_SECURE);
+      store.recorded = "1234";
+      store.learnedOn = "avd-a";
+      const unresolved: BootedDevice = { ...avdA, name: "emulator-5554" };
+
+      await expect(on(unresolved).execute()).rejects.toThrow(/provide `pin`/);
+
+      expect(store.lookups[0]?.identity).toBeUndefined();
+      expect(adb.wasCommandExecuted("KEYCODE_")).toBe(false);
+    });
+
+    test("a PIN is remembered under the device's stable identity", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLockSequence([LOCKED_SECURE, LOCKED_SECURE, UNLOCKED]);
+
+      await on(avdA).execute("1234");
+
+      expect(store.rememberedIdentities).toEqual(["avd-a"]);
+    });
+
+    test("a handset is identified by its serial, which is never reassigned", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(LOCKED_SECURE);
+
+      await expect(android().execute()).rejects.toThrow(/provide `pin`/);
+
+      expect(store.lookups).toEqual([{ deviceId: "wau-android", identity: "wau-android" }]);
+    });
   });
 
   test("a recorded pin that fails is forgotten (avoids re-submitting a stale pin into lockout)", async () => {

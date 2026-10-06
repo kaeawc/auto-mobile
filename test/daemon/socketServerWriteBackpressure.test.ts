@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { DaemonSocketQueueOverflowError, UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
@@ -11,9 +11,15 @@ import {
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
 } from "../../src/daemon/constants";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
+import {
+  DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES as MAX_QUEUED_BYTES,
+  DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS,
+} from "../../src/daemon/outboundWriteGuard";
+import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-const MAX_QUEUED_BYTES = 1024 * 1024;
+/** A response comparable to a base64 screenshot blob: well over 1 MiB. */
+const LARGE_FRAME_BYTES = 3 * 1024 * 1024;
 
 class BackpressuredSocket extends EventEmitter {
   destroyed = false;
@@ -41,6 +47,11 @@ class BackpressuredSocket extends EventEmitter {
       this.emit("close", false);
     }
     return this;
+  }
+
+  /** Free queued bytes the way a reading peer does, without emptying the queue. */
+  drainPartially(bytes: number): void {
+    this.writableLength = Math.max(0, this.writableLength - bytes);
   }
 
   flush(): void {
@@ -87,11 +98,20 @@ const response: DaemonResponse = {
   result: {},
 };
 
-test("disconnects before a queued RPC frame would exceed the byte cap", () => {
+function largeFrame(bytes = LARGE_FRAME_BYTES): DaemonResponse {
+  return { ...response, id: "large", result: { data: "x".repeat(bytes) } };
+}
+
+function writtenIds(socket: BackpressuredSocket): unknown[] {
+  return socket.writes.map((line) => (JSON.parse(line) as { id: unknown }).id);
+}
+
+test("disconnects before the bytes queued behind the head frame would exceed the cap", () => {
   const socket = new BackpressuredSocket();
   const server = connectedServer(new FakeTimer(), socket);
   const errors: Array<Error | null | undefined> = [];
-  const frame: DaemonResponse = { ...response, result: { data: "x".repeat(64 * 1024) } };
+  const frame = largeFrame(1024 * 1024);
+  const frameBytes = Buffer.byteLength(JSON.stringify(frame) + "\n");
 
   while (!socket.destroyed) {
     server.writeFrameData(socket as unknown as Socket, "session", frame, (error) => {
@@ -99,7 +119,9 @@ test("disconnects before a queued RPC frame would exceed the byte cap", () => {
     });
   }
 
-  expect(socket.writableLength).toBeLessThanOrEqual(MAX_QUEUED_BYTES);
+  // The head frame is exempt; at most the cap is queued behind it.
+  expect(socket.writableLength).toBeLessThanOrEqual(frameBytes + MAX_QUEUED_BYTES);
+  expect(socket.writableLength).toBeGreaterThan(MAX_QUEUED_BYTES - frameBytes);
   expect(socket.callbacks.length).toBeGreaterThan(0);
   expect(errors).toHaveLength(1);
   expect(errors[0]?.message).toContain("queued bytes exceeded");
@@ -109,15 +131,20 @@ test("rejects an overflowing frame once with a typed queue overflow error", () =
   const socket = new BackpressuredSocket();
   const server = connectedServer(new FakeTimer(), socket);
   const errors: Array<Error | null | undefined> = [];
-  socket.writableLength = MAX_QUEUED_BYTES;
+  // A small head frame, then filler up to the cap behind it.
+  server.writeFrameData(socket as unknown as Socket, "session", response);
+  const filler = largeFrame(MAX_QUEUED_BYTES - 1024);
+  server.writeFrameData(socket as unknown as Socket, "session", filler);
+  expect(socket.destroyed).toBeFalse();
+  const queuedBeforeOverflow = socket.writableLength;
 
-  server.writeFrameData(socket as unknown as Socket, "session", response, (error) => {
+  server.writeFrameData(socket as unknown as Socket, "session", largeFrame(2048), (error) => {
     expect(socket.destroyed).toBeFalse();
     errors.push(error);
   });
 
   expect(socket.destroyed).toBeTrue();
-  expect(socket.callbacks).toHaveLength(0);
+  expect(socket.callbacks).toHaveLength(2);
   expect(errors).toHaveLength(1);
   const error = errors[0];
   expect(error).toBeInstanceOf(DaemonSocketQueueOverflowError);
@@ -126,46 +153,128 @@ test("rejects an overflowing frame once with a typed queue overflow error", () =
   }
   expect(error.reason).toBe("queue_overflow");
   expect(error.queuedBytes).toBe(
-    MAX_QUEUED_BYTES + Buffer.byteLength(JSON.stringify(response) + "\n"),
+    queuedBeforeOverflow + Buffer.byteLength(JSON.stringify(largeFrame(2048)) + "\n"),
   );
   expect(error.limitBytes).toBe(MAX_QUEUED_BYTES);
   expect(error.message).toContain("queued bytes exceeded");
 });
 
-test("allows one oversized frame in an empty queue but rejects a following write", () => {
+// Issue #10176: this test used to pin the opposite ("rejects a following
+// write"), which destroyed a healthy reader on the next heartbeat reply.
+test("a following small frame does not destroy a reader still draining one oversized frame", () => {
   const socket = new BackpressuredSocket();
   const server = connectedServer(new FakeTimer(), socket);
-  const firstErrors: Array<Error | null | undefined> = [];
-  const rejectedErrors: Array<Error | null | undefined> = [];
-  const frame: DaemonResponse = { ...response, result: { data: "x".repeat(MAX_QUEUED_BYTES) } };
+  const flushed: Array<Error | null | undefined> = [];
+  const frame = largeFrame();
   const frameBytes = Buffer.byteLength(JSON.stringify(frame) + "\n");
 
   server.writeFrameData(socket as unknown as Socket, "session", frame, (error) => {
-    firstErrors.push(error);
+    flushed.push(error);
+  });
+  server.writeFrameData(socket as unknown as Socket, "session", response, (error) => {
+    flushed.push(error);
   });
 
   expect(socket.destroyed).toBeFalse();
-  expect(socket.writableLength).toBe(frameBytes);
-  expect(socket.callbacks).toHaveLength(1);
-  expect(firstErrors).toHaveLength(0);
+  expect(socket.writableLength).toBe(
+    frameBytes + Buffer.byteLength(JSON.stringify(response) + "\n"),
+  );
+  expect(writtenIds(socket)).toEqual(["large", "request"]);
+  expect(flushed).toHaveLength(0);
 
-  server.writeFrameData(socket as unknown as Socket, "session", response, (error) => {
-    rejectedErrors.push(error);
-  });
+  socket.flush();
 
-  expect(socket.destroyed).toBeTrue();
-  expect(socket.writableLength).toBe(frameBytes);
-  expect(socket.callbacks).toHaveLength(1);
-  expect(firstErrors).toHaveLength(0);
-  expect(rejectedErrors).toHaveLength(1);
-  const error = rejectedErrors[0];
-  expect(error).toBeInstanceOf(DaemonSocketQueueOverflowError);
-  if (!(error instanceof DaemonSocketQueueOverflowError)) {
-    throw new Error("Expected a typed queue overflow error");
+  expect(socket.destroyed).toBeFalse();
+  expect(flushed).toEqual([undefined, undefined]);
+});
+
+test("a heartbeat reply written while a large response drains keeps the connection and its in-flight call", async () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  socket.backpressure = false;
+  const server = connectedServer(timer, socket);
+  const slow = Promise.withResolvers<unknown>();
+  server.handleLocalSocketRequest = () => slow.promise;
+  sendRequest(socket, "slow");
+  await settleHandlers();
+
+  server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+  socket.emit(
+    "data",
+    Buffer.from(
+      JSON.stringify({
+        id: "heartbeat",
+        type: "mcp_request",
+        method: DAEMON_HEARTBEAT_METHOD,
+        params: {},
+      }) + "\n",
+    ),
+  );
+  await settleHandlers();
+
+  expect(socket.destroyed).toBeFalse();
+  expect(writtenIds(socket)).toEqual(["large", "heartbeat"]);
+
+  slow.resolve({ answered: true });
+  await settleHandlers();
+  expect(writtenIds(socket)).toEqual(["large", "heartbeat", "slow"]);
+  expect(socket.destroyed).toBeFalse();
+  socket.flush();
+});
+
+test("a reader that frees no queued bytes for the stall deadline is destroyed with the reason logged", () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+    server.writeFrameData(socket as unknown as Socket, "session", response);
+
+    timer.advanceTime(DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS - 1);
+    expect(socket.destroyed).toBeFalse();
+    timer.advanceTime(1);
+
+    expect(socket.destroyed).toBeTrue();
+    const messages = warn.mock.calls.map((call) => String(call[0]));
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain("reader stalled");
+    expect(messages[0]).toContain(`${DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS}ms`);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  } finally {
+    warn.mockRestore();
   }
-  expect(error.reason).toBe("queue_overflow");
-  expect(error.queuedBytes).toBe(frameBytes + Buffer.byteLength(JSON.stringify(response) + "\n"));
-  expect(error.limitBytes).toBe(MAX_QUEUED_BYTES);
+});
+
+test("a reader that keeps freeing queued bytes is never treated as stalled", () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+
+  for (let tick = 0; tick < 4; tick++) {
+    timer.advanceTime(DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS - 1);
+    // New frames land while the reader makes slow progress.
+    server.writeFrameData(socket as unknown as Socket, "session", response);
+    socket.drainPartially(1024);
+    timer.advanceTime(1);
+    expect(socket.destroyed).toBeFalse();
+  }
+
+  socket.flush();
+  expect(timer.getPendingTimeoutCount()).toBe(1);
+  timer.advanceTime(DAEMON_RPC_SOCKET_WRITE_STALL_TIMEOUT_MS);
+  expect(socket.destroyed).toBeFalse();
+});
+
+test("a stall deadline armed for a large frame is cancelled when the queue empties", () => {
+  const timer = new FakeTimer();
+  const socket = new BackpressuredSocket();
+  const server = connectedServer(timer, socket);
+  server.writeFrameData(socket as unknown as Socket, "session", largeFrame());
+  const idleOnly = timer.getPendingTimeoutCount();
+  socket.flush();
+  expect(timer.getPendingTimeoutCount()).toBe(idleOnly - 1);
 });
 
 test("outbound writes cannot keep an unread RPC socket alive", () => {

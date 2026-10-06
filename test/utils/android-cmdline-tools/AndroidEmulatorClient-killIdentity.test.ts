@@ -378,3 +378,70 @@ test("an unforced kill still enriches discovery with the AVD-name probe", async 
   expect(timer.now() - startedAt).toBe(AVD_NAME_PROBE_BUDGET_MS);
   expect(commands.some((args) => args.slice(-2).join(" ") === "emu kill")).toBe(false);
 });
+
+// An emulator whose adb transport dropped is listed `offline`, which the
+// booted-device discovery filters out. "Missing from the online list" is not
+// "not running": the process keeps running and holding its AVD (#10074).
+function offlineFixture(states: Array<{ deviceId: string; state: string }>) {
+  const adb = new FakeAdbExecutor();
+  adb.setDevices([]);
+  adb.setDeviceStates(states);
+  const client = new AndroidEmulatorClient(
+    null,
+    null,
+    new FakeTimer(),
+    new FakeAdbClientFactory(adb),
+  );
+  return { client, adb };
+}
+
+const offlineEmulator = [{ deviceId: "emulator-5554", state: "offline" }];
+
+function emuKillArgv(adb: FakeAdbExecutor): string[][] {
+  return adb.getExecutedArgv().filter((args) => args.slice(-2).join(" ") === "emu kill");
+}
+
+test("an unforced kill of an offline emulator is not reported as not running and sends no kill", async () => {
+  const { client, adb } = offlineFixture(offlineEmulator);
+
+  const failure = await client.killDevice(original).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(Error);
+  const message = (failure as Error).message;
+  expect(message).not.toContain("is not running");
+  expect(message).toContain("emulator-5554");
+  expect(message).toContain("'offline'");
+  expect(message).toContain("force");
+  expect(emuKillArgv(adb)).toEqual([]);
+});
+
+test("a forced kill of an offline emulator dispatches the serial-scoped console kill", async () => {
+  const { client, adb } = offlineFixture(offlineEmulator);
+
+  await expect(client.killDevice(original, { force: true })).resolves.toMatchObject(original);
+
+  expect(emuKillArgv(adb)).toHaveLength(1);
+  expectNoTransportOrRebootCommand(adb.getExecutedArgv());
+});
+
+test("a serial that is in neither the online list nor the adb states is still not running", async () => {
+  const { client, adb } = offlineFixture([{ deviceId: "emulator-5556", state: "offline" }]);
+
+  await expect(client.killDevice(original)).rejects.toThrow("is not running");
+  await expect(client.killDevice(original, { force: true })).rejects.toThrow("is not running");
+  expect(emuKillArgv(adb)).toEqual([]);
+});
+
+test("an unreadable adb state list fails the kill instead of reporting the emulator stopped", async () => {
+  const { client, adb } = offlineFixture(offlineEmulator);
+  adb.getDeviceStates = async () => {
+    throw new Error("adb server unreachable");
+  };
+
+  const failure = await client.killDevice(original).catch((error: unknown) => error);
+
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toContain("adb server unreachable");
+  expect((failure as Error).message).not.toContain("is not running");
+  expect(emuKillArgv(adb)).toEqual([]);
+});

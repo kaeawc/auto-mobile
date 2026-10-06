@@ -23,30 +23,30 @@ describe("DeviceLockRepository", () => {
   });
 
   test("returns null for a device with nothing recorded", async () => {
-    expect(await repo.getCredential("emulator-5554")).toBeNull();
+    expect(await repo.getCredential("emulator-5554", "avd")).toBeNull();
   });
 
   test("remembers and reads back a credential, with no session row required", async () => {
-    await repo.rememberLock("emulator-5554", "pin", "1234");
-    expect(await repo.getCredential("emulator-5554")).toBe("1234");
+    await repo.rememberLock("emulator-5554", "pin", "1234", "avd");
+    expect(await repo.getCredential("emulator-5554", "avd")).toBe("1234");
   });
 
   test("upserts by device_id: remembering again overwrites the prior credential", async () => {
-    await repo.rememberLock("emulator-5554", "pin", "1234");
-    await repo.rememberLock("emulator-5554", "pin", "5678");
-    expect(await repo.getCredential("emulator-5554")).toBe("5678");
+    await repo.rememberLock("emulator-5554", "pin", "1234", "avd");
+    await repo.rememberLock("emulator-5554", "pin", "5678", "avd");
+    expect(await repo.getCredential("emulator-5554", "avd")).toBe("5678");
   });
 
   test("a null credential clears a previously remembered one (self-heal on stale pin)", async () => {
-    await repo.rememberLock("emulator-5554", "pin", "1234");
-    await repo.rememberLock("emulator-5554", "pin", null);
-    expect(await repo.getCredential("emulator-5554")).toBeNull();
+    await repo.rememberLock("emulator-5554", "pin", "1234", "avd");
+    await repo.rememberLock("emulator-5554", "pin", null, "avd");
+    expect(await repo.getCredential("emulator-5554", "avd")).toBeNull();
   });
 
   test("credentials are isolated per device", async () => {
-    await repo.rememberLock("emulator-5554", "pin", "1234");
-    await repo.rememberLock("emulator-5556", "pin", "9999");
-    expect(await repo.getCredential("emulator-5554")).toBe("1234");
-    expect(await repo.getCredential("emulator-5556")).toBe("9999");
+    await repo.rememberLock("emulator-5554", "pin", "1234", "avd");
+    await repo.rememberLock("emulator-5556", "pin", "9999", "avd");
+    expect(await repo.getCredential("emulator-5554", "avd")).toBe("1234");
+    expect(await repo.getCredential("emulator-5556", "avd")).toBe("9999");
   });
 });

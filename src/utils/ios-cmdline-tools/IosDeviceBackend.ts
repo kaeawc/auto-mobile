@@ -1,8 +1,15 @@
 import type { DeviceUrlLauncher } from "./DeviceAppManager";
 import { logger } from "../logger";
+import { combineWithAmbientAbort } from "../AbortContext";
+import { throwIfAborted } from "../toolUtils";
 import { isIosPhysicalUdid } from "./iosDeviceType";
 import { resolveIosDeviceKind } from "./IosDeviceKind";
 import type { SimCtlClient } from "./SimCtlClient";
+import { SimctlCommandTimeoutError } from "./SimctlCommandTimeoutError";
+import {
+  indeterminateSimulatorUninstallError,
+  SIMULATOR_UNINSTALL_TIMEOUT_MS,
+} from "./simulatorUninstallBound";
 import type { IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 import { promises as fs } from "fs";
@@ -14,12 +21,25 @@ import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainer
 /** The iOS operation currently shared by simulator and physical-device actions. */
 export interface IosDeviceBackend {
   readonly kind: "simulator" | "physical";
-  uninstallApp(bundleId: string): Promise<void>;
+  /**
+   * `signal` is the request's cancellation signal; the ambient request signal is
+   * always honoured as well. A cancellation seen before the uninstall is
+   * dispatched rejects without removing the app.
+   */
+  uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export interface DeviceAppUninstaller {
-  uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
+  uninstallApp(
+    deviceUdid: string,
+    bundleId: string,
+    isSimulator?: boolean,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
 }
+
+/** The pre-uninstall terminate is best-effort, so it gets a short bound of its own. */
+const SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS = 15_000;
 
 export interface IosDeviceBackendDeps {
   simctl: Pick<SimCtlClient, "terminateApp">;
@@ -34,13 +54,29 @@ export class SimulatorIosDeviceBackend implements IosDeviceBackend {
     private readonly deps: IosDeviceBackendDeps,
   ) {}
 
-  async uninstallApp(bundleId: string): Promise<void> {
+  async uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void> {
+    const requestSignal = combineWithAmbientAbort(signal);
+    requestSignal?.throwIfAborted();
     try {
-      await this.deps.simctl.terminateApp(bundleId, this.deviceId);
+      await this.deps.simctl.terminateApp(bundleId, this.deviceId, {
+        timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
+        ...(requestSignal ? { signal: requestSignal } : {}),
+      });
     } catch (error) {
+      // A cancellation is not a terminate failure to shrug off: continuing would
+      // remove the app for a request the caller already abandoned (issue #10077).
+      requestSignal?.throwIfAborted();
       logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
     }
-    await this.deps.deviceAppUninstaller.uninstallApp(this.deviceId, bundleId, true);
+    // The terminate may have succeeded just as the request was cancelled; fence
+    // the destructive step so it is never dispatched for a cancelled request.
+    requestSignal?.throwIfAborted();
+    await this.deps.deviceAppUninstaller.uninstallApp(
+      this.deviceId,
+      bundleId,
+      true,
+      requestSignal ? { signal: requestSignal } : undefined,
+    );
   }
 }
 
@@ -419,7 +455,13 @@ export function resolveIosColdStartTerminateBackend(
 export interface IosDowngradeRecoveryBackend {
   readonly kind: "simulator";
   terminateApp(bundleId: string): Promise<void>;
-  uninstallApp(bundleId: string): Promise<void>;
+  /**
+   * Removes the installed (newer) app. Bounded by the simulator uninstall budget and cancellable
+   * through `signal` plus the ambient request signal; a cancellation seen before the uninstall is
+   * dispatched rejects with the app still installed. A timeout rejects with an indeterminate
+   * outcome, never as a plain failure.
+   */
+  uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void>;
 }
 
 export function resolveIosDowngradeRecoveryBackend(
@@ -431,9 +473,45 @@ export function resolveIosDowngradeRecoveryBackend(
   }
   return {
     kind: "simulator",
-    terminateApp: (bundleId) => deps.simctl.terminateApp(bundleId, deviceId),
-    uninstallApp: (bundleId) => deps.simctl.uninstallApp(bundleId, deviceId),
+    terminateApp: (bundleId) =>
+      deps.simctl.terminateApp(bundleId, deviceId, {
+        timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
+      }),
+    uninstallApp: (bundleId, signal) =>
+      uninstallSimulatorAppBounded(deps.simctl, deviceId, bundleId, signal),
   };
+}
+
+async function uninstallSimulatorAppBounded(
+  simctl: Pick<SimCtlClient, "uninstallApp">,
+  deviceId: string,
+  bundleId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const requestSignal = combineWithAmbientAbort(signal);
+  // Nothing destructive has been dispatched yet: a cancelled request stops with the app installed.
+  throwIfAborted(requestSignal);
+  try {
+    await simctl.uninstallApp(bundleId, deviceId, {
+      timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS,
+      ...(requestSignal ? { signal: requestSignal } : {}),
+    });
+  } catch (error) {
+    // Cancellation is the caller's own decision; it propagates unchanged, but the killed
+    // uninstall was already dispatched, so leave a trace that the app's state is unknown.
+    if (requestSignal?.aborted) {
+      logger.warn(
+        `[IosDowngradeRecovery] Uninstall of ${bundleId} was cancelled after it was dispatched; the app may or may not be uninstalled`,
+      );
+    }
+    throwIfAborted(requestSignal);
+    if (!(error instanceof SimctlCommandTimeoutError)) {
+      throw error;
+    }
+    const indeterminate = indeterminateSimulatorUninstallError(bundleId, error);
+    logger.warn(indeterminate.message);
+    throw indeterminate;
+  }
 }
 
 /** Snapshot capture rejects physical devices; unknown IDs historically keep simctl. */
@@ -447,7 +525,8 @@ export function resolveIosSnapshotAppListBackend(
 /** Install transport and strict app listings used to verify the installed bundle. */
 export interface IosInstallBackend {
   readonly kind: "simulator" | "physical";
-  installApp(artifactPath: string): Promise<void>;
+  /** `timeoutMs` bounds a simulator install at the transport (it kills the child); physical ignores it. */
+  installApp(artifactPath: string, options?: { timeoutMs?: number }): Promise<void>;
   listApps(): Promise<Record<string, unknown>[]>;
 }
 
@@ -469,8 +548,12 @@ export class SimulatorIosInstallBackend implements IosInstallBackend {
     private readonly simctl: IosInstallBackendDeps["simctl"],
   ) {}
 
-  installApp(artifactPath: string): Promise<void> {
-    return this.simctl.installApp(artifactPath, this.deviceId);
+  installApp(artifactPath: string, options?: { timeoutMs?: number }): Promise<void> {
+    return this.simctl.installApp(
+      artifactPath,
+      this.deviceId,
+      options?.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs },
+    );
   }
 
   listApps(): Promise<Record<string, unknown>[]> {

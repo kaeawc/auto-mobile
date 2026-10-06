@@ -85,6 +85,28 @@ describe("deriveIosScreenIdentity keyboard visibility on captured states (#10027
     expect(isIosKeyboardVisible(sizeless, { width: 402, height: 874 })).toBe(false);
   });
 
+  test("the identity applies the observation's screen size as the same fallback", () => {
+    const sizeless: ViewHierarchyResult = {
+      ...iosKeyboardMinimizedHierarchy,
+      screenWidth: undefined,
+      screenHeight: undefined,
+    };
+    const parked = deriveIosScreenIdentity(sizeless, { width: 402, height: 874 });
+
+    expect(parked?.components).not.toHaveProperty("keyboardVisible");
+    expect(parked?.key).not.toContain("keyboard");
+    // The visible capture stays visible under the same fallback.
+    const visibleSizeless: ViewHierarchyResult = {
+      ...iosKeyboardVisibleHierarchy,
+      screenWidth: undefined,
+      screenHeight: undefined,
+    };
+    expect(
+      deriveIosScreenIdentity(visibleSizeless, { width: 402, height: 874 })?.components
+        .keyboardVisible,
+    ).toBe(true);
+  });
+
   test("a one-point sliver is hidden but a two-point strip is visible", () => {
     // The container top lands at y=873 (1pt of an 874pt screen) and y=872 (2pt).
     expect(isIosKeyboardVisible(withKeyboardShiftedDown(iosKeyboardVisibleHierarchy, 283))).toBe(

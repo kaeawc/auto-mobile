@@ -1093,7 +1093,7 @@ Without an owner, iOS selects the first element carrying a matching semantic
 link in document order, then resolves `occurrence` within that element. This
 changes the previous tree-wide counting (#6631). It never skips to a later owner
 when the first lacks the occurrence or link geometry. With multiple candidate
-owners, a successful SDK activation includes a runner `warning` naming the
+owners, a successful SDK activation adds the runner's note to the result's `warnings`, naming the
 selected owner and candidate count; use `container`/`subtext` for a specific owner.
 
 When SDK resolution fails, the XCUITest fallback remains available. Its flat
@@ -1171,7 +1171,11 @@ false; Android only).
 when opening the URL displays an intent chooser.
 
 `sqlQuery.databasePath` selects the database path; for iOS SDK databases, use the
-absolute registered path reported by the App Databases resource.
+absolute registered path reported by the App Databases resource. On Android,
+`sqlQuery` rows and the table-data resource return integers within ±(2^53 - 1) as
+JSON numbers; an integer outside that range is returned as its exact decimal
+string, and the response lists the zero-based columns that hold such strings in
+`bigIntegerColumns` so they can be told apart from TEXT.
 `getDataStore.adapterName` and `listDataStores.adapterName` select the name under
 which the host app registered its AutoMobile SDK DataStore adapter.
 
@@ -1573,7 +1577,21 @@ unchanged. `shake.intensity` sets Android shake intensity (default 100).
 `sendSms.phoneNumber` specifies the sender's number.
 `postNotification.channelId` supplies the Android channel ID or iOS APNs category.
 `imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
-image path for `bigPicture`.
+image path for `bigPicture`. The host reads only the file's first bytes and
+rejects files over 16 MiB. It accepts PNG, JPEG, WebP, GIF and BMP everywhere,
+and HEIF/HEIC (decoded on Android 8.0+) and AVIF (Android 14+) with a warning,
+because the app falls back to showing the notification without the image on a
+device that cannot decode them.
+
+#### postNotification SDK compatibility
+
+The app's SDK receiver reports `0` (failed), `1` (posted) or `2` (posted, but the
+requested big picture could not be loaded, so it was shown without it). The host
+maps `2` to `success: true` with a warning and fails closed on any code it does
+not know, naming the code. A host older than the app's SDK predates code `2`, so
+an image-less `bigPicture` post that was actually posted is reported as
+`success: false` and a retry would post a duplicate. Update the host (AutoMobile)
+before, or together with, the SDK in the app.
 
 `biometricAuth.modality` selects `any` (default), `fingerprint`, or `face`.
 `fingerprintId` defaults to 1 for match/error and 2 for fail/cancel.
@@ -1774,7 +1792,12 @@ snapshots to the step debug trace; multi-device plans ignore this capture option
 lifts. `criticalSection.deviceCount` specifies the devices required at its
 barrier before serial execution.
 
-`recordSteps.planName` names the plan for `action: "end"`.
+`recordSteps.planName` names the plan for `action: "end"`. The end response
+carries a `warnings` list when a call was skipped (a file-staging call with a
+host `sourcePath`, or a param over 64 KiB) or recorded in a weakened form:
+`resetKeychain` is recorded with `confirm: false`, so a replay stops at that
+step until you set `confirm: true` in the plan by hand. A recording whose calls
+were all skipped fails with an error that lists them.
 `exportPlan.recordingId` identifies the recording to export, and `planName`
 names the exported plan.
 

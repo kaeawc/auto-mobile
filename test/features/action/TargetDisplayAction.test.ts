@@ -17,6 +17,7 @@ import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
@@ -2259,6 +2260,9 @@ describe("display gesture dispatch boundary race", () => {
   }
 });
 
+// screencap -d takes the SurfaceFlinger physical id, not the logical id 2 the tap targets.
+const EXTERNAL_PHYSICAL_DISPLAY_ID = "4619827259835644673";
+
 describe("post-action screenshot resolved display", () => {
   test.each(["explicit", "pinned", "legacy", "unmappable", "pinnedCtrlProxy"] as const)(
     "%s display reaches the automatic capture command",
@@ -2285,7 +2289,7 @@ describe("post-action screenshot resolved display", () => {
         new FakeScreenshotFileWriter(),
         new FakeFileSystem(),
         () => "/fake/screenshots",
-        undefined,
+        new FakeAndroidPhysicalDisplayIdResolver(new Map([[2, EXTERNAL_PHYSICAL_DISPLAY_ID]])),
         false,
         { pathProtection: new FakeScreenshotPathProtection(timer) },
       );
@@ -2404,7 +2408,7 @@ describe("post-action screenshot resolved display", () => {
           expect(wireClient?.["requestManager"].getPendingCount()).toBe(0);
         } else {
           expect(commands).toEqual([
-            `shell "screencap ${targeted ? "-d 2 " : ""}-p /data/local/tmp/am-shot-command-5d347fd948b6.png && base64 /data/local/tmp/am-shot-command-5d347fd948b6.png && rm /data/local/tmp/am-shot-command-5d347fd948b6.png"`,
+            `shell "screencap ${targeted ? `-d ${EXTERNAL_PHYSICAL_DISPLAY_ID} ` : ""}-p /data/local/tmp/am-shot-command-5d347fd948b6.png && base64 /data/local/tmp/am-shot-command-5d347fd948b6.png && rm /data/local/tmp/am-shot-command-5d347fd948b6.png"`,
           ]);
         }
       } finally {

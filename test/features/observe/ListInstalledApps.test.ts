@@ -1308,6 +1308,50 @@ describe("ListInstalledApps", function () {
       expect(stored.some((row) => row.package_name === "com.stale.app")).toBe(false);
     });
 
+    test("rebuilds from the device when a package event lands on an empty cache (#10041)", async function () {
+      // After a daemon start (clearOldDaemonSessions), a device leaving the pool
+      // or a never-listed device the row set is empty. A package broadcast must
+      // not turn it into a one-app "snapshot" that passes the freshness check.
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      // A zero timestamp is read as "never verified", which would rebuild
+      // regardless; use a real-looking one so only the fix can force the rebuild.
+      timer.advanceTime(1_000);
+      await repo.upsertInstalledApp(
+        mockDevice.deviceId,
+        0,
+        "com.broadcast.app",
+        false,
+        timer.now(),
+      );
+
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.broadcast.app\npackage:com.example.other\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
+        stdout: "",
+        stderr: "",
+      });
+
+      const cachedList = new ListInstalledApps(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer },
+      );
+      const result = await cachedList.executeDetailed();
+
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(result.profiles[0].map((app) => app.packageName).sort()).toEqual([
+        "com.broadcast.app",
+        "com.example.other",
+      ]);
+      // The rebuild is what establishes the snapshot the broadcasts now patch.
+      expect(await repo.listInstalledApps(mockDevice.deviceId)).toHaveLength(2);
+    });
+
     test("rebuilds when only one row was refreshed by a package event", async function () {
       // Regression for issue #6639: a single CtrlProxy package-added broadcast
       // upserts one row with a fresh timestamp while the rest of the device's

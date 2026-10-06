@@ -20,6 +20,7 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
 import type { DeviceAppManager } from "../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
+import { SimctlCommandTimeoutError } from "../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -2088,6 +2089,96 @@ describe("IOSCtrlProxyManager", function () {
 
       expect((await manager.setup()).success).toBe(true);
       expect(legacyProbeCount).toBe(1);
+    });
+  });
+
+  describe("legacy-app probe treats a timed-out lookup as unknown, not absent", () => {
+    function setupWithLegacyLookup(lookup: (callNumber: number) => Promise<string | null>) {
+      const fakeExecutor = new FakeProcessExecutor();
+      let healthy = false;
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          healthy ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }) : "",
+          "",
+        ),
+      );
+      fakeExecutor.setCommandHandler("kill -0", () => {
+        throw new Error("runner is no longer running");
+      });
+      const lookupOptions: unknown[] = [];
+      const fakeDeviceAppManager = {
+        getInstalledAppBundleHash: async (
+          _deviceId: string,
+          _bundleId: string,
+          _simulator: boolean,
+          options?: unknown,
+        ) => {
+          lookupOptions.push(options);
+          return lookup(lookupOptions.length);
+        },
+      } as unknown as DeviceAppManager;
+      const xcodebuild: Xcodebuild = {
+        executeCommand: async () => createExecResult("", ""),
+        isAvailable: async () => true,
+        startStreaming: async () => {
+          healthy = true;
+          return new FakeChildProcess() as unknown as ChildProcess;
+        },
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        undefined,
+        fakeDeviceAppManager,
+        undefined,
+        undefined,
+        xcodebuild,
+      );
+      fakeTimer.enableAutoAdvance();
+      return {
+        manager,
+        lookupOptions,
+        stop: () => {
+          healthy = false;
+        },
+      };
+    }
+
+    test("a get_app_container timeout is re-checked on the next setup", async function () {
+      const { manager, lookupOptions, stop } = setupWithLegacyLookup(async (callNumber) => {
+        if (callNumber === 1) {
+          throw new SimctlCommandTimeoutError("get_app_container timed out");
+        }
+        return null;
+      });
+
+      expect((await manager.setup()).success).toBe(true);
+      expect(lookupOptions).toHaveLength(1);
+      expect(lookupOptions[0]).toEqual({ throwOnLookupTimeout: true });
+
+      stop();
+      manager.resetSetupState();
+      expect((await manager.setup()).success).toBe(true);
+      expect(lookupOptions).toHaveLength(2);
+
+      // The second lookup answered "absent", which is recorded: no third probe.
+      stop();
+      manager.resetSetupState();
+      expect((await manager.setup()).success).toBe(true);
+      expect(lookupOptions).toHaveLength(2);
+    });
+
+    test("a plain absent answer is still recorded and never re-probed", async function () {
+      const { manager, lookupOptions, stop } = setupWithLegacyLookup(async () => null);
+
+      expect((await manager.setup()).success).toBe(true);
+      stop();
+      manager.resetSetupState();
+      expect((await manager.setup()).success).toBe(true);
+
+      expect(lookupOptions).toHaveLength(1);
     });
   });
 

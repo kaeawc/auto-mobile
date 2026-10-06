@@ -112,6 +112,7 @@ import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
@@ -130,6 +131,7 @@ import {
   setAndroidKeyValueDirect,
   withAndroidSharedPreferencesInspectionFallback,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { rethrowForRouteWithoutUserId } from "../features/preferences/resolveAndroidPreferencesUser";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   resolveApkChecksum,
@@ -329,9 +331,6 @@ export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
 const DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS = 1_000;
-/** Bound queued bytes to max(cap, one frame); bytes measure memory and frames are ~100+ bytes, so no count cap is needed. */
-const DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES = 1024 * 1024;
-
 export class DaemonSocketQueueOverflowError extends Error {
   readonly reason = "queue_overflow";
 
@@ -817,6 +816,8 @@ export class UnixSocketServer {
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
+  private readonly outboundWriteGuards = new WeakMap<Socket, OutboundWriteGuard>();
   private readonly backpressuredSocketIdle = new WeakMap<
     Socket,
     { start: () => void; refresh: () => void; responseFlushed: () => void }
@@ -1237,6 +1238,7 @@ export class UnixSocketServer {
       },
     });
     socket.on("drain", refreshIdle);
+    socket.on("drain", () => this.outboundWriteGuards.get(socket)?.flushed());
 
     if (this.onFrameTrace) {
       socket.on("drain", () => this.traceFrame("socket_drain", "*"));
@@ -1269,6 +1271,7 @@ export class UnixSocketServer {
         this.timer.clearTimeout(idleTimeout);
       }
       this.backpressuredSocketIdle.delete(socket);
+      this.outboundWriteGuards.get(socket)?.dispose();
       if (this.onFrameTrace) {
         this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
       }
@@ -1720,8 +1723,9 @@ export class UnixSocketServer {
     try {
       const payload = JSON.stringify(frame) + "\n";
       const byteLength = Buffer.byteLength(payload);
-      const queuedBytes = socket.writableLength + byteLength;
-      if (queuedBytes > Math.max(DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, byteLength)) {
+      const guard = this.outboundWriteGuard(socket, sessionId);
+      const queuedBytes = guard.admit(byteLength);
+      if (queuedBytes !== undefined) {
         const error = new DaemonSocketQueueOverflowError(
           queuedBytes,
           DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES,
@@ -1736,9 +1740,11 @@ export class UnixSocketServer {
       const ok = socket.write(payload, (error) => {
         if (!error && !socket.destroyed && socket.writableLength === 0) {
           this.backpressuredSocketIdle.get(socket)?.refresh();
+          guard.flushed();
         }
         onFlushed?.(error);
       });
+      guard.written();
       if (onWritten) {
         onWritten(socket.writableLength, byteLength);
       }
@@ -1753,6 +1759,25 @@ export class UnixSocketServer {
         socket.destroy();
       }
     }
+  }
+
+  /**
+   * The socket's outbound guard. A reader that frees no queued bytes for the
+   * stall deadline is destroyed with the reason logged; a reader that is
+   * draining, however slowly, is not.
+   */
+  private outboundWriteGuard(socket: Socket, sessionId: string): OutboundWriteGuard {
+    let guard = this.outboundWriteGuards.get(socket);
+    if (!guard) {
+      guard = new OutboundWriteGuard(socket, this.timer, (stall) => {
+        logger.warn(
+          `Daemon RPC socket ${sessionId} reader stalled: no queued bytes freed for ${stall.stalledMs}ms with ${stall.queuedBytes} bytes queued; destroying`,
+        );
+        socket.destroy();
+      });
+      this.outboundWriteGuards.set(socket, guard);
+    }
+    return guard;
   }
 
   /**
@@ -4967,7 +4992,8 @@ export class UnixSocketServer {
       async () => {
         resolution = (await viaSdk()) || undefined;
       },
-      viaDirectFile,
+      // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
+      (adb) => viaDirectFile(adb).catch(rethrowForRouteWithoutUserId),
     );
     return { ...result, resolution };
   }

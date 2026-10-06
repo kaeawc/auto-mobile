@@ -56,6 +56,17 @@ export interface NavigationEdgeProvenanceRow {
 }
 
 /**
+ * One distinct outgoing transition of a screen, without hydration (see
+ * {@link NavigationRepository.getEdgeTargetsFrom}). `toolArgs` is the raw stored JSON
+ * string; callers that need it must parse it defensively.
+ */
+export interface NavigationEdgeTarget {
+  toScreen: string;
+  toolName: string | null;
+  toolArgs: string | null;
+}
+
+/**
  * Repository for navigation graph database operations.
  * Provides type-safe access to navigation data.
  */
@@ -394,6 +405,30 @@ export class NavigationRepository {
       .where("app_id", "=", appId)
       .where("from_screen", "=", fromScreen)
       .execute();
+  }
+
+  /**
+   * Adjacency-only read for graph walks: the distinct (to_screen, tool_name, tool_args)
+   * combinations leaving `fromScreen`, app-scoped like getEdgesFrom. Edge modals, UI
+   * elements, scroll positions and provenance are not read, `tool_args` stays the raw
+   * stored string (never parsed here, so a malformed payload cannot throw), and
+   * duplicate rows for the same transition collapse to one. Uses the existing
+   * idx_navigation_edges_from index; no schema change.
+   */
+  async getEdgeTargetsFrom(appId: string, fromScreen: string): Promise<NavigationEdgeTarget[]> {
+    const db = this.getDb();
+    const rows = await db
+      .selectFrom("navigation_edges")
+      .select(["to_screen", "tool_name", "tool_args"])
+      .distinct()
+      .where("app_id", "=", appId)
+      .where("from_screen", "=", fromScreen)
+      .execute();
+    return rows.map((row) => ({
+      toScreen: row.to_screen,
+      toolName: row.tool_name,
+      toolArgs: row.tool_args,
+    }));
   }
 
   /**

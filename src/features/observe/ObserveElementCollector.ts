@@ -11,7 +11,7 @@ import {
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
-import { IOS_KEYBOARD_CONTAINER_CLASSES } from "./ios/IosScreenIdentity";
+import { IOS_KEYBOARD_CONTAINER_CLASSES, IOS_KEYBOARD_KEY_CLASS } from "./ios/IosScreenIdentity";
 import {
   ElementProvenance,
   setElementProvenance,
@@ -312,7 +312,7 @@ function nextIosKeyboardRoot(
   if (persistentRoot) {
     return persistentRoot;
   }
-  return className === "UIKeyboardKey"
+  return className === IOS_KEYBOARD_KEY_CLASS
     ? { depth: depth - 1, package: "com.apple.keyboard", memberClass: className }
     : undefined;
 }

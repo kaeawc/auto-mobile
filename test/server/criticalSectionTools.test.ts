@@ -1382,7 +1382,7 @@ describe("criticalSection tool", () => {
         throw validation.error;
       });
       await expect(runSteps(true)).rejects.toThrow(
-        `Critical section "optional-lock" failed for device optional-device: ${validation.error.message}`,
+        `Critical section "optional-lock" failed for device optional-device: Invalid parameters for tool mockOptionalStep: required expected string, received undefined`,
       );
       expect(nextStep).not.toHaveBeenCalled();
     });

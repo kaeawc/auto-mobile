@@ -4694,13 +4694,13 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     });
 
     describe("a replace on a password field (#9941 pre-flight is insert-only)", () => {
-      const secretText = "hunter2-old";
-      const passwordHarness = () => {
+      const fieldText = "hunter2-old";
+      const secureFieldHarness = () => {
         const h = harness([""]);
         h.seq.observer.execute = async (options) => {
           h.seq.options.push(options);
           h.order.push("read");
-          return focusedAndroidObservation(secretText, { password: "true" }, 0);
+          return focusedAndroidObservation(fieldText, { password: "true" }, 0);
         };
         return h;
       };
@@ -4709,7 +4709,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         calls.map((call) => call.map((part) => String(part)).join(" ")).join("\n");
 
       test("auto replace still routes to a11y replace: one routing read, no clear, no refusal", async () => {
-        const h = passwordHarness();
+        const h = secureFieldHarness();
         const result = await h.executor.type({
           action: "type",
           text: "contraseña1!A",
@@ -4725,7 +4725,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         const info = spyOn(logger, "info").mockImplementation(() => {});
         const debug = spyOn(logger, "debug").mockImplementation(() => {});
         try {
-          const h = passwordHarness();
+          const h = secureFieldHarness();
           const result = await h.executor.type({
             action: "type",
             text: "Pass1",
@@ -4739,8 +4739,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           expect(h.order.filter((entry) => entry === "clear")).toHaveLength(1);
           const logged = warnedText([...warn.mock.calls, ...info.mock.calls, ...debug.mock.calls]);
           expect(logged).toContain("Focused text is unreadable before the clear");
-          expect(logged).not.toContain(secretText);
-          expect(JSON.stringify(result)).not.toContain(secretText);
+          expect(logged).not.toContain(fieldText);
+          expect(JSON.stringify(result)).not.toContain(fieldText);
         } finally {
           warn.mockRestore();
           info.mockRestore();
@@ -4751,7 +4751,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       test("explicit eventLast replace with an empty prefix does not read or echo the old value", async () => {
         const warn = spyOn(logger, "warn").mockImplementation(() => {});
         try {
-          const h = passwordHarness();
+          const h = secureFieldHarness();
           const result = await h.executor.type({
             action: "type",
             text: "0",
@@ -4761,7 +4761,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           expect(result.success).toBe(true);
           expect(result.warning).toBeUndefined();
           expect(h.seq.reads()).toBe(2);
-          expect(warnedText(warn.mock.calls)).not.toContain(secretText);
+          expect(warnedText(warn.mock.calls)).not.toContain(fieldText);
         } finally {
           warn.mockRestore();
         }

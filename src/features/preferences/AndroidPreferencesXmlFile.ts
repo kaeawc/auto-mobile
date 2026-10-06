@@ -17,6 +17,20 @@ import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 export type AndroidPreferencesXmlDocument = { map: Record<string, unknown> };
 
 /**
+ * `run-as <pkg> [--user <id>]` prefix. `run-as` without `--user` targets user 0
+ * (AOSP: `usage: run-as <package-name> [--user <uid>] <command> [<args>]`), so the flag is
+ * emitted only for nonzero users and a single-user device sends the exact same command as
+ * before user targeting existed (issue #9919).
+ */
+export function androidPreferencesRunAs(appId: string, userId?: number): string {
+  return `shell run-as ${shellQuoteUnlessSafe(appId)}${userId ? ` --user ${userId}` : ""}`;
+}
+
+function runAsTarget(appId: string, userId?: number): string {
+  return userId ? `${appId} (user ${userId})` : appId;
+}
+
+/**
  * Validates and normalizes a SharedPreferences file name (without the `.xml` extension).
  */
 export function sanitizeAndroidPreferencesFileName(name: string): string {
@@ -38,10 +52,11 @@ export async function readAndroidPreferencesXml(
   adb: AdbExecutor,
   appId: string,
   fileName: string,
+  userId?: number,
 ): Promise<string> {
   try {
     const result = await adb.executeCommand(
-      `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`,
+      `${androidPreferencesRunAs(appId, userId)} cat shared_prefs/${fileName}.xml`,
     );
     return result.stdout;
   } catch (error) {
@@ -49,7 +64,7 @@ export async function readAndroidPreferencesXml(
       return "<map/>";
     }
     throw new ActionableError(
-      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${errorMessage(error)}`,
+      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
       { cause: error },
     );
   }
@@ -65,10 +80,11 @@ export async function readAndroidPreferencesXmlIfExists(
   adb: AdbExecutor,
   appId: string,
   fileName: string,
+  userId?: number,
 ): Promise<{ xml: string; exists: boolean }> {
   try {
     const result = await adb.executeCommand(
-      `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`,
+      `${androidPreferencesRunAs(appId, userId)} cat shared_prefs/${fileName}.xml`,
     );
     return { xml: result.stdout, exists: true };
   } catch (error) {
@@ -76,7 +92,7 @@ export async function readAndroidPreferencesXmlIfExists(
       return { xml: "<map/>", exists: false };
     }
     throw new ActionableError(
-      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${errorMessage(error)}`,
+      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
       { cause: error },
     );
   }
@@ -90,16 +106,17 @@ export async function writeAndroidPreferencesXml(
   appId: string,
   fileName: string,
   xml: string,
+  userId?: number,
 ): Promise<void> {
   const encodedXml = Buffer.from(xml, "utf8").toString("base64");
   const innerCommand = `mkdir -p shared_prefs && printf '%s' '${encodedXml}' | base64 -d > shared_prefs/${fileName}.xml`;
   try {
     await adb.executeCommand(
-      `shell run-as ${shellQuoteUnlessSafe(appId)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`,
+      `${androidPreferencesRunAs(appId, userId)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`,
     );
   } catch (error) {
     throw new ActionableError(
-      `Failed to write Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${errorMessage(error)}`,
+      `Failed to write Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
       { cause: error },
     );
   }

@@ -4,6 +4,7 @@ import type { NavigationEdge, NavigationGraphService } from "./NavigationGraphMa
 import type { NavigationEdgeTarget } from "../../db/navigationRepository";
 import type { Timer } from "../../utils/SystemTimer";
 import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { scoreSelectedElementMatch } from "./ExploreElementScoring";
 
@@ -319,7 +320,9 @@ export function isRecordedBackEdgeTarget(target: NavigationEdgeTarget): boolean 
     return asRecord(JSON.parse(target.toolArgs))?.button === "back";
   } catch (error) {
     // A malformed stored payload cannot be a recorded Back press; treat it as a forward edge.
-    logger.debug(`[Explore] Unparseable tool_args on ${target.toScreen} edge: ${error}`);
+    logger.debug(
+      `[Explore] Unparseable tool_args on ${target.toScreen} edge: ${errorMessage(error)}`,
+    );
     return false;
   }
 }

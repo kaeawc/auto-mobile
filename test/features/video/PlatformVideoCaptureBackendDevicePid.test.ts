@@ -9,6 +9,7 @@ import type {
 } from "../../../src/features/video/VideoRecorderService";
 import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
 import { logger } from "../../../src/utils/logger";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -62,8 +63,10 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
       device: { platform: "android", deviceId: "pid-device", name: "Pixel" },
     };
     const handle = await backend.start(config);
-    // Let the buffered launch stdout reach the pid reader.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Let the buffered launch stdout reach the pid reader. A real macrotask turn rather than
+    // setImmediate: start's settle probe leaves a FakeTimer dispatch immediate queued, and
+    // an immediate-based flush here lost that chain, hanging the later fake sleeps.
+    await defaultTimer.sleep(0);
     return handle;
   }
 

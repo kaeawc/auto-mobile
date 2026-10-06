@@ -28,6 +28,8 @@ test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
+# Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
+android/junit-runner/src/test/resources/captured/*.json text eol=lf
 
 # Git LFS tracking for binary assets
 # Keeps clone size small for SPM consumers and other tooling

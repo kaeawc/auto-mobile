@@ -53,19 +53,28 @@ data class AutoMobilePlanExecutionResult(
   val parametersUsed: Map<String, Any> = emptyMap(),
   val toolResults: List<ToolResultEntry> = emptyList(),
 ) {
-  /** Get tool result by step index. */
+  /**
+   * The entry for the plan step at [stepIndex] (0-based, as in the plan YAML). The daemon returns
+   * results for completed steps only, so a skipped optional step or a step before a resumed
+   * `startStep` has no entry, and a position in [toolResults] is not a step index (issue #10090).
+   */
+  private fun entryFor(stepIndex: Int): ToolResultEntry? {
+    return toolResults.firstOrNull { it.stepIndex == stepIndex }
+  }
+
+  /** Get tool result by plan step index. */
   fun getToolResult(stepIndex: Int): ToolResult? {
-    return toolResults.getOrNull(stepIndex) as? ToolResult
+    return entryFor(stepIndex) as? ToolResult
   }
 
   /** Get tool result entry by step index. */
   fun getToolResultEntry(stepIndex: Int): ToolResultEntry? {
-    return toolResults.getOrNull(stepIndex)
+    return entryFor(stepIndex)
   }
 
   /** Get tool error result by step index. */
   fun getErrorToolResult(stepIndex: Int): ErrorToolResult? {
-    return toolResults.getOrNull(stepIndex) as? ErrorToolResult
+    return entryFor(stepIndex) as? ErrorToolResult
   }
 
   /** Get the selected element text from a random tapOn operation. */

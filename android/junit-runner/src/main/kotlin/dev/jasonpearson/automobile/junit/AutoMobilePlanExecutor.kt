@@ -58,8 +58,9 @@ internal object AutoMobilePlanExecutor {
         for (method in methods) {
           if (method.name == element.methodName && method.isAnnotationPresent(Test::class.java)) {
             // Found a @Test annotated method in the call stack
-            val simpleClassName = clazz.simpleName
-            return TestContext(simpleClassName, method.name)
+            // Fully qualified: two `SmokeTest` classes in different packages must not share one
+            // (test_class, test_method) history (#10091).
+            return TestContext(clazz.name, method.name)
           }
         }
       } catch (_: ClassNotFoundException) {
@@ -616,9 +617,12 @@ internal object AutoMobilePlanExecutor {
       val succeededSteps = mutableListOf<SucceededStepSummary>()
       val toolResultsArray = (payload["toolResults"] ?: payload["toolResult"]) as? JsonArray
       if (toolResultsArray != null) {
-        for ((index, stepElement) in toolResultsArray.withIndex()) {
-          if (index >= failedStepIndex) break
+        for ((position, stepElement) in toolResultsArray.withIndex()) {
           val stepObj = stepElement as? JsonObject ?: continue
+          // The daemon reports completed steps only, tagged with the plan step index, so a
+          // skipped optional step leaves a gap; fall back to the position for untagged entries.
+          val index = (stepObj["stepIndex"] as? JsonPrimitive)?.intOrNull ?: position
+          if (index >= failedStepIndex) continue
           val tool =
             stepObj["toolName"]?.jsonPrimitive?.content
               ?: stepObj["tool"]?.jsonPrimitive?.content

@@ -1741,6 +1741,38 @@
             "required": ["stepIndex", "tool", "error"],
             "additionalProperties": false
           }
+        },
+        "toolResults": {
+          "description": "Completed steps' tool payloads in plan step order (stepIndex is the plan step index), without bulky fields (observation, view hierarchies, screenshots, tap diagnostics, warnings); capped per step and per plan, with truncated:true when a payload was narrowed. Executed only; failed and skipped steps are in failedStep/skippedSteps.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stepIndex": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "tool": {
+                "type": "string"
+              },
+              "device": {
+                "type": "string"
+              },
+              "result": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": ["stepIndex", "tool", "result"],
+            "additionalProperties": false
+          }
         }
       },
       "required": ["success", "executedSteps", "totalSteps"],

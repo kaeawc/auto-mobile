@@ -504,6 +504,24 @@ const migrateSwipeDuration = (
   return changed;
 };
 
+/** Tools whose own input has a `description` parameter (the legacy step `description` is not it). */
+const TOOLS_WITH_DESCRIPTION_PARAM: ReadonlySet<string> = new Set(["highlight"]);
+
+const migrateHighlightParams = (
+  mergedParams: Record<string, any>,
+  stepIndex: number,
+  warnings: MigrationWarning[],
+): boolean => {
+  // highlight's selector is `elementId`; older plans spelled it `id` (as tapOn once did).
+  if (mergedParams.elementId === undefined && typeof mergedParams.id === "string") {
+    mergedParams.elementId = mergedParams.id;
+    delete mergedParams.id;
+    recordWarning(warnings, "Renamed id to elementId for highlight.", stepIndex);
+    return true;
+  }
+  return false;
+};
+
 const migrateToolParams = (
   normalizedTool: string,
   mergedParams: Record<string, any>,
@@ -516,6 +534,10 @@ const migrateToolParams = (
 
   if (normalizedTool === "tapOn") {
     return migrateTapParams(mergedParams, stepIndex, warnings);
+  }
+
+  if (normalizedTool === "highlight") {
+    return migrateHighlightParams(mergedParams, stepIndex, warnings);
   }
 
   if (normalizedTool === "openLink") {
@@ -556,6 +578,11 @@ const migrateStepMetadata = (
     changed = true;
   }
 
+  // `highlight` declares its own `description` parameter, so for that tool an inline description
+  // is tool input and must reach the tool rather than become the step label.
+  if (TOOLS_WITH_DESCRIPTION_PARAM.has(step.tool)) {
+    return changed;
+  }
   if (typeof step.description === "string" && !step.label) {
     step.label = step.description;
     recordWarning(warnings, "Mapped step description to label.", stepIndex);

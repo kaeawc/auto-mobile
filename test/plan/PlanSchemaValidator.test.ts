@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from "bun:test
 import Ajv from "ajv";
 import { dump } from "js-yaml";
 import path from "path";
+import { importPlanFromYaml } from "../../src/utils/planUtils";
 import type { FileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
 import {
   PlanSchemaValidator,
@@ -725,6 +726,46 @@ steps:
         expect(validator.validateYaml(yaml).valid).toBe(false);
       },
     );
+
+    // The schema validates the raw YAML before PlanMigrator runs, so it must accept the legacy `id`
+    // spelling the migrator renames, or an old plan is rejected before it can be migrated.
+    it("validates, then migrates, a legacy plan with inputText and a highlight using id (#10124)", () => {
+      const yaml = `
+name: legacy-highlight
+steps:
+  - tool: inputText
+    text: hello
+  - tool: highlight
+    id: com.example:id/btn_login
+    description: Login button
+  - tool: highlight
+    params:
+      id: com.example:id/btn_other
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(true);
+      const plan = importPlanFromYaml(yaml, { platform: "ios" });
+      expect(plan.steps[0].params).toEqual({
+        commands: [{ action: "type", text: "hello", operation: "insert" }],
+      });
+      expect(plan.steps[1].params).toEqual({
+        elementId: "com.example:id/btn_login",
+        description: "Login button",
+      });
+      expect(plan.steps[2].params).toEqual({ elementId: "com.example:id/btn_other" });
+      // Idempotent: the migrated plan, serialized back, is still valid and unchanged.
+      const again = importPlanFromYaml(dump(plan), { platform: "ios" });
+      expect(again.steps.map((step) => step.params)).toEqual(plan.steps.map((s) => s.params));
+    });
+
+    it("rejects a highlight step with neither a selector nor a shape, legacy id aside (#10124)", () => {
+      const yaml = `
+name: highlight-nothing
+steps:
+  - tool: highlight
+    description: Login button
+`;
+      expect(validator.validateYaml(yaml).valid).toBe(false);
+    });
 
     it("validates a circle highlight and rejects a style property the tool does not have (#10124)", () => {
       const circle = "{ type: circle, bounds: { x: 1, y: 2, width: 3, height: 4 } }";

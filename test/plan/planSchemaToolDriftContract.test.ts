@@ -5,6 +5,7 @@ import { dump } from "js-yaml";
 import fs from "fs";
 import path from "path";
 import { PlanSchemaValidator } from "../../src/utils/plan/PlanSchemaValidator";
+import { migratePlan } from "../../src/utils/plan/PlanMigrator";
 
 /**
  * Drift contract between `schemas/test-plan.schema.json` (hand-maintained: nothing generates
@@ -106,6 +107,15 @@ const PLAN_REJECTS_BY_DESIGN: Record<string, Record<string, ByDesignRejection>> 
  * `addDeviceTargetingToSchema`), so the plan schema may declare it without the tool listing it.
  */
 const INJECTED_UNADVERTISED = new Set(["deviceId"]);
+
+/**
+ * DELIBERATE divergence 4: legacy spellings the plan schema must still ACCEPT because it validates
+ * the raw YAML before `PlanMigrator` rewrites it, but the live tool does not have. The migrator
+ * renames each one (a test below proves it), so the tool never sees it. Keyed by tool.
+ */
+const MIGRATED_LEGACY_ALIASES: Record<string, Record<string, string>> = {
+  highlight: { id: "elementId" },
+};
 
 /** Probe size cap for tools the plan schema has no per-tool rules for. */
 const MAX_UNRULED_PROBE_CHARS = 400;
@@ -450,6 +460,46 @@ describe("plan schema vs live tool input schemas (#10124, #10125)", () => {
     expect(stale).toEqual([]);
   });
 
+  it("keeps the migrated legacy aliases honest: absent on the tool, accepted by the plan, renamed by the migrator", () => {
+    const stale: string[] = [];
+    for (const [tool, aliases] of Object.entries(MIGRATED_LEGACY_ALIASES)) {
+      const def = toolDefinitions.find((d) => d.name === tool)!;
+      const toolProps = toolProperties(def);
+      for (const [alias, canonical] of Object.entries(aliases)) {
+        if (toolProps[alias] !== undefined) {
+          stale.push(`${tool}.${alias} is a real tool parameter now`);
+        }
+        if (toolProps[canonical] === undefined) {
+          stale.push(`${tool}.${canonical} is not a tool parameter`);
+        }
+        const legacy = { [alias]: "com.example:id/btn" };
+        for (const step of [inline(tool, legacy), viaParams(tool, legacy)]) {
+          if (!planAccepts(step)) {
+            stale.push(`${tool}: legacy ${alias} is rejected by the plan schema`);
+          }
+          const migrated = migratePlan({ name: "contract", steps: [step] }).plan.steps[0];
+          if (migrated.params[canonical] !== "com.example:id/btn" || alias in migrated.params) {
+            stale.push(`${tool}: ${alias} is not renamed to ${canonical} by the migrator`);
+          }
+          if (!toolValidators.get(tool)!(migrated.params)) {
+            stale.push(`${tool}: the migrated ${alias} step is not valid for the tool`);
+          }
+        }
+      }
+    }
+    expect(stale).toEqual([]);
+  });
+
+  it("accepts an inline highlight description the migrator leaves as a tool parameter", () => {
+    const step = inline("highlight", { elementId: "x", description: "Login button" });
+    expect(planAccepts(step)).toBe(true);
+    expect(planDeclaredProps("highlight")).toContain("description");
+    const migrated = migratePlan({ name: "contract", steps: [step] }).plan.steps[0];
+    expect(migrated.params).toEqual({ elementId: "x", description: "Login button" });
+    expect(migrated.label).toBeUndefined();
+    expect(toolValidators.get("highlight")!(migrated.params)).toBe(true);
+  });
+
   it("lists the tools the plan schema has per-tool rules for", () => {
     expect([...planToolRules().keys()].sort()).toEqual([
       "barrier",
@@ -474,8 +524,14 @@ describe("plan schema vs live tool input schemas (#10124, #10125)", () => {
     (_name, def) => {
       const toolProps = toolProperties(def);
       const declared = planDeclaredProps(def.name);
+      const legacy = MIGRATED_LEGACY_ALIASES[def.name] ?? {};
       expect(
-        declared.filter((key) => toolProps[key] === undefined && !INJECTED_UNADVERTISED.has(key)),
+        declared.filter(
+          (key) =>
+            toolProps[key] === undefined &&
+            !INJECTED_UNADVERTISED.has(key) &&
+            legacy[key] === undefined,
+        ),
       ).toEqual([]);
       const base = minimalInput(def);
       const validate = toolValidators.get(def.name)!;

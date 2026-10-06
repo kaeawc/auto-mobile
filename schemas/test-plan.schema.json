@@ -327,14 +327,22 @@
             "required": ["tool"]
           },
           "then": {
-            "$comment": "An inline `description` is intentionally NOT declared for highlight: PlanMigrator.migrateStepMetadata treats every inline step description as the deprecated step label (copies it to `label` and deletes it), so it never reaches the tool. Put the highlight description under `params` (#10124). The inline selector spelling is `elementId` (the live tool is strict; `id` is not a highlight field).",
+            "$comment": "For highlight an inline `description` is a tool parameter, not the deprecated step label: PlanMigrator.migrateStepMetadata leaves it in place for this tool (#10124). The inline selector spelling is `elementId` (the live tool is strict; a legacy `id` is renamed to `elementId` by the migrator).",
             "properties": {
               "params": {
                 "$ref": "#/$defs/highlightParams"
               },
+              "description": {
+                "type": "string",
+                "description": "Optional description of the highlight"
+              },
               "elementId": {
                 "type": "string",
                 "description": "Element resource ID / accessibility identifier"
+              },
+              "id": {
+                "type": "string",
+                "description": "DEPRECATED legacy spelling of elementId; PlanMigrator renames it"
               },
               "text": {
                 "type": "string",
@@ -387,6 +395,9 @@
                     "required": ["elementId"]
                   },
                   {
+                    "required": ["id"]
+                  },
+                  {
                     "required": ["text"]
                   },
                   {
@@ -401,6 +412,14 @@
                     "properties": {
                       "params": {
                         "required": ["elementId"]
+                      }
+                    },
+                    "required": ["params"]
+                  },
+                  {
+                    "properties": {
+                      "params": {
+                        "required": ["id"]
                       }
                     },
                     "required": ["params"]
@@ -1487,6 +1506,10 @@
         "elementId": {
           "type": "string",
           "description": "Element resource ID / accessibility identifier"
+        },
+        "id": {
+          "type": "string",
+          "description": "DEPRECATED legacy spelling of elementId; PlanMigrator renames it"
         },
         "text": {
           "type": "string",

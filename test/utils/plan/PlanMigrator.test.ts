@@ -805,6 +805,92 @@ describe("PlanMigrator", () => {
       });
     });
 
+    describe("highlight steps (#10124)", () => {
+      test("renames an inline id to elementId", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          steps: [{ tool: "highlight", id: "com.example:id/btn" }],
+        });
+
+        expect(plan.steps[0].params).toEqual({ elementId: "com.example:id/btn" });
+        expect(report.warnings.map((w) => w.message)).toContain(
+          "Renamed id to elementId for highlight.",
+        );
+      });
+
+      test("renames an id under params to elementId", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          steps: [{ tool: "highlight", params: { id: "com.example:id/btn", containerOf: true } }],
+        });
+
+        expect(plan.steps[0].params).toEqual({
+          elementId: "com.example:id/btn",
+          containerOf: true,
+        });
+      });
+
+      test("keeps an existing elementId and does not overwrite it with id", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          steps: [{ tool: "highlight", params: { elementId: "a", id: "b" } }],
+        });
+
+        expect(plan.steps[0].params.elementId).toBe("a");
+      });
+
+      test("keeps an inline description as the highlight description, not the step label", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          steps: [{ tool: "highlight", elementId: "x", description: "Login button" }],
+        });
+
+        expect(plan.steps[0].label).toBeUndefined();
+        expect(plan.steps[0].description).toBeUndefined();
+        expect(plan.steps[0].params).toEqual({ elementId: "x", description: "Login button" });
+        expect(report.warnings.map((w) => w.message)).not.toContain(
+          "Mapped step description to label.",
+        );
+      });
+
+      test("keeps the description of a legacy command-spelled highlight step", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          steps: [{ command: "highlight", id: "x", description: "Login button" }],
+        });
+
+        expect(plan.steps[0].tool).toBe("highlight");
+        expect(plan.steps[0].params).toEqual({ elementId: "x", description: "Login button" });
+      });
+
+      test("still maps the inline description of every other tool to the step label", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          steps: [{ tool: "tapOn", text: "Go", description: "Tap go" }],
+        });
+
+        expect(plan.steps[0].label).toBe("Tap go");
+        expect(plan.steps[0].description).toBeUndefined();
+        expect(plan.steps[0].params.description).toBeUndefined();
+      });
+
+      test("is idempotent", () => {
+        const legacy = {
+          name: "Plan",
+          platform: "android",
+          steps: [
+            { tool: "inputText", text: "hi" },
+            { tool: "highlight", id: "x", description: "Login button" },
+          ],
+        };
+        const once = migratePlan(structuredClone(legacy));
+        const twice = migratePlan(structuredClone(once.plan));
+
+        expect(twice.plan.steps).toEqual(once.plan.steps);
+        expect(twice.report.appliedMigrations).not.toContain("step-fields");
+      });
+    });
+
     describe("migration report", () => {
       test("reports original and target versions", () => {
         const { report } = migratePlan({

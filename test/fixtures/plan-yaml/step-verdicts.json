@@ -1,0 +1,102 @@
+[
+  {
+    "name": "highlight by elementId, inline",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    elementId: com.example:id/btn_login\n"
+  },
+  {
+    "name": "highlight by elementId with a description under params",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    params:\n      elementId: com.example:id/btn_login\n      description: Login button\n"
+  },
+  {
+    "name": "highlight with an inline description",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    elementId: com.example:id/btn_login\n    description: Login button\n"
+  },
+  {
+    "name": "highlight with a non-string inline description",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    elementId: com.example:id/btn_login\n    description: 5\n"
+  },
+  {
+    "name": "highlight with no selector and no shape",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    description: Login button\n"
+  },
+  {
+    "name": "highlight with a legacy inline id",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    id: com.example:id/btn_login\n"
+  },
+  {
+    "name": "highlight with a legacy id under params",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    params:\n      id: com.example:id/btn_login\n"
+  },
+  {
+    "name": "highlight with a non-string legacy id",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    id: 5\n"
+  },
+  {
+    "name": "highlight with a box shape the tool rejects",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    shape: { type: box, bounds: { x: 1, y: 2, width: 3, height: 4 } }\n"
+  },
+  {
+    "name": "highlight with a circle shape",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: highlight\n    shape: { type: circle, bounds: { x: 1, y: 2, width: 3, height: 4 } }\n"
+  },
+  {
+    "name": "a legacy plan with inputText and a highlight using id",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: inputText\n    text: hello\n  - tool: highlight\n    id: com.example:id/btn_login\n    description: Login button\n"
+  },
+  {
+    "name": "dragAndDrop with a nested container and selectionStrategy",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: dragAndDrop\n    source:\n      text: Item 1\n      selectionStrategy: unique\n      container:\n        elementId: com.example:id/list_a\n        container:\n          text: Lists\n          index: 1\n    target:\n      text: Item 2\n    dragDurationMs: 2000\n"
+  },
+  {
+    "name": "dragAndDrop with an unknown endpoint key",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: dragAndDrop\n    source: { text: a, bogus: 1 }\n    target: { text: b }\n"
+  },
+  {
+    "name": "dragAndDrop with a container selector that sets both elementId and text",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: dragAndDrop\n    source: { text: a, container: { elementId: x, text: y } }\n    target: { text: b }\n"
+  },
+  {
+    "name": "setDeviceState with only connectivity",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: setDeviceState\n    connectivity:\n      airplaneMode: true\n"
+  },
+  {
+    "name": "setDeviceState with only a static location (unquoted decimals)",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: setDeviceState\n    location:\n      mode: static\n      latitude: 37.77\n      longitude: -122.42\n"
+  },
+  {
+    "name": "setDeviceState with a stop location under params",
+    "valid": true,
+    "yaml": "name: p\nsteps:\n  - tool: setDeviceState\n    params:\n      location:\n        mode: stop\n"
+  },
+  {
+    "name": "setDeviceState with a non-boolean airplaneMode",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: setDeviceState\n    connectivity: { airplaneMode: maybe }\n"
+  },
+  {
+    "name": "setDeviceState with an out-of-range latitude",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: setDeviceState\n    location: { mode: static, latitude: 91, longitude: 0 }\n"
+  },
+  {
+    "name": "setDeviceState with no device state field",
+    "valid": false,
+    "yaml": "name: p\nsteps:\n  - tool: setDeviceState\n    params: {}\n"
+  }
+]

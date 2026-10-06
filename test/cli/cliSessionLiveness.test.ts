@@ -210,12 +210,15 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     const client = new FakeDaemonClient({
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
       onCallDaemonMethod: async (method, params) => {
-        if (method === DAEMON_HEARTBEAT_METHOD && typeof params.sessionId === "string") {
-          if (params.livenessPolicy === CLI_SESSION_LIVENESS_POLICY) {
-            sessionManager.adoptCliLivenessPolicy(params.sessionId);
-          } else {
-            sessionManager.recordHeartbeat(params.sessionId);
-          }
+        if (!method.startsWith("daemon/")) {
+          return;
+        }
+        const response = await handleDaemonRequest(
+          { id: "unit", type: "daemon_request", method, params },
+          daemonStateFor(sessionManager),
+        );
+        if (!response.success) {
+          throw new Error(response.error);
         }
       },
     });
@@ -237,6 +240,26 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       ),
     ).toHaveLength(1);
     expect(sessionManager.getSession("minted")?.livenessPolicy).toBe("cli-idle");
+    expect(sessionManager.getSession("minted")?.livenessOwnerToken).toBeUndefined();
+    expect(client.callDaemonMethodCalls.at(-1)).toEqual({
+      method: "daemon/releaseLivenessOwnership",
+      params: { sessionId: "minted", livenessOwnerToken: expect.any(String) },
+    });
+    // A separate proxy process uses its own token and immediately restores the strict policy.
+    const next = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      initialSessionUuid: "minted",
+    });
+    try {
+      await next.listTools();
+      expect(sessionManager.getSession("minted")?.livenessPolicy).toBe("heartbeat");
+      expect(sessionManager.getSession("minted")?.livenessOwnerToken).toBeDefined();
+    } finally {
+      await next.close();
+    }
   });
 
   test("the declared session outlives the think-time that reaps a heartbeat session", async () => {
@@ -888,7 +911,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       };
       expect(beforeStaleKeeper).toMatchObject({
         livenessPolicy: "cli-idle",
-        livenessOwnerToken: "cli-token",
+        livenessOwnerToken: undefined,
       });
       await timer.advanceTimeAsync(1_000);
       await settleAsyncWork();

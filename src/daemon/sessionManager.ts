@@ -52,6 +52,7 @@ import {
   effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
   livenessLeaseState,
+  ownerLeaseHeartbeat,
   sessionLeaseSnapshot,
   sessionOwnerLeaseSnapshot,
   suspectGraceMsFor,
@@ -293,6 +294,8 @@ export interface Session {
    * the token before extending the session.
    */
   livenessOwnerToken?: string;
+  /** Deliberately unowned; only an explicit claim can end the existing lease/grace window. */
+  livenessOwnershipReleased?: boolean;
   /**
    * Tokens whose explicit ownership claim this daemon has already processed.
    * A client may retry the same claim when its reply is lost; if a newer owner
@@ -351,12 +354,14 @@ export interface PreCliLivenessSnapshot {
  */
 export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
 
+export type LivenessReleaseOutcome = "released" | "already-unowned" | "superseded" | "not-found";
+
 /**
  * Result of an explicit liveness-ownership claim (#10050).
  *
  * - `claimed`: the token now owns (or already owned) the session.
  * - `conflict`: a different token owns it and that owner's lease is live; nothing changed.
- * - `superseded`: this token already claimed and was displaced; it can never reclaim.
+ * - `superseded`: this token already claimed and was displaced; it cannot reclaim an owned session.
  * - `not-found`: the session is unknown or was replaced while the claim waited.
  */
 export type LivenessClaimOutcome = "claimed" | "conflict" | "superseded" | "not-found";
@@ -5460,6 +5465,41 @@ export class SessionManager {
     });
   }
 
+  /** Clear only liveness ownership, retaining the policy, device and existing lease clock. */
+  async releaseLivenessOwnership(
+    sessionId: string,
+    ownerToken: string,
+  ): Promise<LivenessReleaseOutcome> {
+    const session = this.getSession(sessionId);
+    if (!session) {
+      return "not-found";
+    }
+    return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
+      if (this.getSession(sessionId) !== session) {
+        return "not-found";
+      }
+      if (session.livenessOwnerToken === undefined) {
+        return "already-unowned";
+      }
+      if (session.livenessOwnerToken !== ownerToken) {
+        return "superseded";
+      }
+      const previouslyReleased = session.livenessOwnershipReleased;
+      session.livenessOwnerToken = undefined;
+      session.livenessOwnershipReleased = true;
+      // Fence a failed older heartbeat write's activity rollback across this handoff.
+      session.activityGeneration++;
+      try {
+        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
+      } catch (error) {
+        session.livenessOwnerToken = ownerToken;
+        session.livenessOwnershipReleased = previouslyReleased;
+        throw error;
+      }
+      return "released";
+    });
+  }
+
   private livenessOwnershipClaimMutexFor(session: Session): Mutex {
     const existing = this.livenessOwnershipClaimMutexes.get(session);
     if (existing) {
@@ -5476,9 +5516,9 @@ export class SessionManager {
   ): Promise<LivenessClaimOutcome> {
     const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
     session.livenessOwnershipClaims = processedClaims;
-    if (processedClaims.has(ownerToken)) {
-      // A retried claim whose token has since been displaced must never take
-      // the session back, whatever the new owner's lease says.
+    if (!session.livenessOwnershipReleased && processedClaims.has(ownerToken)) {
+      // A displaced token cannot retake an owned session, whatever the new owner's
+      // lease says. Deliberate release instead admits an explicit claim by any token.
       return session.livenessOwnerToken === ownerToken ? "claimed" : "superseded";
     }
     const previousOwnerToken = session.livenessOwnerToken;
@@ -5489,18 +5529,27 @@ export class SessionManager {
       return "conflict";
     }
     const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+    const alreadyProcessed = processedClaims.has(ownerToken);
     processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
     // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
     // request handler records the claimant's heartbeat several awaits later; until then a second
     // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
     session.lastOwnerHeartbeat = this.timer.now();
-    await this.persistNewLivenessOwnershipClaim(
-      session,
-      ownerToken,
-      { previousOwnerToken, previousOwnerHeartbeat },
-      processedClaims,
-    );
+    try {
+      await this.persistNewLivenessOwnershipClaim(
+        session,
+        ownerToken,
+        { previousOwnerToken, previousOwnerHeartbeat },
+        processedClaims,
+      );
+    } catch (error) {
+      if (alreadyProcessed) {
+        processedClaims.add(ownerToken);
+      }
+      throw error;
+    }
+    session.livenessOwnershipReleased = undefined;
     return "claimed";
   }
 
@@ -5516,11 +5565,11 @@ export class SessionManager {
   /**
    * Whether the session's owner lease is live or inside its suspect window, and
    * how long until that phase ends. Undefined for an unknown session and for a
-   * `cli-idle` session, which has no lease.
+   * owned `cli-idle` session. A deliberately unowned CLI session reports its idle window.
    */
   getSessionLeaseState(sessionId: string): LivenessLeaseState | undefined {
     const session = this.sessions.get(sessionId);
-    if (!session || session.livenessPolicy === "cli-idle") {
+    if (!session || (session.livenessPolicy === "cli-idle" && !session.livenessOwnershipReleased)) {
       return undefined;
     }
     return livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
@@ -5557,7 +5606,9 @@ export class SessionManager {
       if (session.livenessPolicy === "cli-idle") {
         continue;
       }
-      const leaseStart = effectiveLastHeartbeat(session);
+      const leaseStart = session.livenessOwnershipReleased
+        ? ownerLeaseHeartbeat(session)
+        : effectiveLastHeartbeat(session);
       session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
       session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
       if (session.awaitingOwnerSince !== undefined) {
@@ -5602,7 +5653,7 @@ export class SessionManager {
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
     const session = this.getSession(sessionId);
-    if (!session || session.livenessOwnerToken !== undefined) {
+    if (!session || session.livenessOwnerToken !== undefined || session.livenessOwnershipReleased) {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
@@ -5781,7 +5832,9 @@ export class SessionManager {
     // first: autolock mints sessions with a 60 s `sessionTimeoutMs`, and both
     // deadlines would otherwise land on the same millisecond once adoption
     // widens `expiresAt`, letting the generic sweep win the tie.
-    if (session.livenessPolicy === "cli-idle") {
+    // Deliberately unowned sessions also defer to the monitor so tool activity cannot
+    // change their release reason or replace their owner-clock lease/grace deadline.
+    if (session.livenessPolicy === "cli-idle" || session.livenessOwnershipReleased) {
       return false;
     }
     // A session whose owner has been heartbeating is held a further suspect

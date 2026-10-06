@@ -89,6 +89,7 @@ export type LeaseSession = Pick<
   | "livenessPolicy"
   | "hasReceivedHeartbeat"
   | "ownership"
+  | "livenessOwnershipReleased"
 >;
 
 /**
@@ -125,16 +126,20 @@ export function ownerLeaseHeartbeat(
 
 /**
  * The suspect window a session is entitled to. Only a session whose owner has
- * actually delivered a heartbeat holds a lease worth a grace period; a session
+ * actually delivered a heartbeat or explicitly released ownership holds a lease
+ * worth a grace period; a session
  * that never heartbeated, an awaiting-owner rehydration and a `cli-idle` session
  * keep their existing release policies.
  */
 export function suspectGraceMsFor(
-  session: Pick<LeaseSession, "livenessPolicy" | "hasReceivedHeartbeat" | "ownership">,
+  session: Pick<
+    LeaseSession,
+    "livenessPolicy" | "hasReceivedHeartbeat" | "ownership" | "livenessOwnershipReleased"
+  >,
 ): number {
   return session.livenessPolicy === "heartbeat" &&
-    session.hasReceivedHeartbeat &&
-    session.ownership === "owned"
+    ((session.hasReceivedHeartbeat && session.ownership === "owned") ||
+      session.livenessOwnershipReleased)
     ? SUSPECT_GRACE_MS
     : 0;
 }
@@ -146,7 +151,9 @@ export function sessionLeaseSnapshot(
 ): LivenessOwnerLeaseSnapshot {
   return {
     now,
-    lastHeartbeat: effectiveLastHeartbeat(session),
+    lastHeartbeat: session.livenessOwnershipReleased
+      ? ownerLeaseHeartbeat(session)
+      : effectiveLastHeartbeat(session),
     heartbeatTimeoutMs: session.heartbeatTimeoutMs,
     livenessPolicy: session.livenessPolicy,
     graceMs: suspectGraceMsFor(session),

@@ -216,6 +216,42 @@ successful no-ops. Missing or releasing sessions still return
 `daemon_session_not_found`. A keeper cannot currently claim through the
 heartbeat CLI without adopting its CLI policy.
 
+### Deliberate CLI-to-proxy handoff
+
+As its last exit step, a one-shot CLI adopts the CLI idle policy and calls
+`daemon/releaseLivenessOwnership` with its current owner token. This clears only
+liveness ownership: the session UUID, device, policy and deadlines remain intact.
+`--daemon session-info S` reports `livenessOwner: "unowned"` and
+`liveness.state: "unowned"`, with `leasePhase` and `remainingMs` describing the
+existing deadline. A proxy started with `--initial-session-uuid S` can explicitly
+claim immediately and restore the heartbeat policy. A second proxy still gets
+`liveness_owner_conflict` while the new owner's lease or suspect grace is live.
+
+A harness that owns a session through a keeper can stop its recurring ticks and
+hand it off with:
+
+```bash
+auto-mobile --daemon release-liveness-ownership S --liveness-owner-token T
+```
+
+The equivalent daemon request takes `{ sessionId: S, livenessOwnerToken: T }`.
+Only the current token can release an owned session. A foreign token receives
+`liveness_owner_superseded`; an unknown or releasing session receives
+`daemon_session_not_found`. Repeating release on an unowned session succeeds
+with `alreadyUnowned: true` and changes nothing. A successful first release
+returns `alreadyUnowned: false`. A failed persistence write fails the request
+and retains ownership.
+
+After release, recurring ticks from the former owner are superseded and
+legacy tokenless ticks are no-ops. An explicit claim by any token (including a
+previously used token) may win while the session is unowned; after another token
+wins, the existing displaced-token fencing applies again. Release never resets
+the lease clock. Tool activity cannot extend the deliberately unowned window:
+without a claim, a heartbeat-policy session expires after its remaining lease
+plus the existing 10-second suspect grace as `heartbeat-timeout`; a CLI-idle
+session expires at its existing idle deadline as `cli-idle-timeout`, without
+additional grace. Existing active-execution and daemon-stall handling still apply.
+
 ### Supported liveness stack
 
 The only supported liveness stack is harness → stdio proxy → daemon. The harness

@@ -21,6 +21,7 @@ import {
 import {
   DeviceLabelMap,
   type LivenessClaimOutcome,
+  type LivenessReleaseOutcome,
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
@@ -33,6 +34,7 @@ import {
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
@@ -65,6 +67,10 @@ export interface DaemonStateAccess {
     recordHeartbeat?(sessionId: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
     claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
+    releaseLivenessOwnership?(
+      sessionId: string,
+      ownerToken: string,
+    ): Promise<LivenessReleaseOutcome>;
     /** Verify that a keeper still owns the token permitted to refresh liveness. */
     hasLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Lease phase (live, suspect, lapsed) and time remaining in it; absent for `cli-idle` (#10051). */
@@ -224,9 +230,19 @@ export async function handleDaemonRequest(
     };
   }
 
+  return handleInitializedDaemonRequest(request, state, executions);
+}
+
+async function handleInitializedDaemonRequest(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  executions?: SessionExecutionCanceller,
+): Promise<DaemonMethodResult> {
   switch (request.method) {
     case DAEMON_REGISTER_SESSION_METHOD:
       return handleRegisterSession(request, state);
+    case DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD:
+      return handleReleaseLivenessOwnership(request, state);
     case DAEMON_HEARTBEAT_METHOD:
       return handleHeartbeat(request, state);
     case "daemon/refreshDevices":
@@ -247,6 +263,49 @@ export async function handleDaemonRequest(
         error: `Unsupported daemon method: ${request.method}`,
       };
   }
+}
+
+async function handleReleaseLivenessOwnership(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z
+    .object({
+      sessionId: z.string().min(1),
+      livenessOwnerToken: z
+        .string()
+        .min(1)
+        .refine((token) => token.trim().length > 0),
+    })
+    .safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid releaseLivenessOwnership parameters: ${parsed.error.message}`,
+    };
+  }
+  const { sessionId, livenessOwnerToken } = parsed.data;
+  const outcome = await state
+    .getSessionManager()
+    .releaseLivenessOwnership?.(sessionId, livenessOwnerToken);
+  if (outcome === "not-found") {
+    return {
+      success: false,
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+      error: `Session not found: ${sessionId}`,
+    };
+  }
+  if (outcome === "superseded" || outcome === undefined) {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+      error: `Session ${sessionId}'s liveness can only be released by its current owner token; nothing changed.`,
+    };
+  }
+  return {
+    success: true,
+    result: { sessionId, alreadyUnowned: outcome === "already-unowned" },
+  };
 }
 
 async function handleHeartbeat(
@@ -295,19 +354,30 @@ async function handleHeartbeat(
       ? heartbeatParams.livenessOwnerToken
       : undefined;
   const claimsLivenessOwnership = heartbeatParams?.claimLivenessOwnership === true;
-  if (!livenessOwnerToken && session.livenessOwnerToken !== undefined) {
+  if (
+    !livenessOwnerToken &&
+    (session.livenessOwnerToken !== undefined || session.livenessOwnershipReleased)
+  ) {
     // Tokenless clients predate liveness ownership. Keep them compatible
     // only until a token-bearing owner has claimed this session; afterward
     // they are stale by definition and must not change policy or deadlines.
     return { success: true, result: { sessionId } };
   }
   if (livenessOwnerToken) {
-    const rejection = await rejectHeartbeatWithoutOwnership(
+    const outcome = await resolveLivenessOwnership(
+      manager,
+      sessionId,
+      livenessOwnerToken,
+      claimsLivenessOwnership,
+    );
+    // No authorization crosses an await: check the session and owner at the final
+    // synchronous boundary before changing policy or recording the heartbeat.
+    const rejection = rejectHeartbeatWithoutOwnership(
       manager,
       session,
       sessionId,
       livenessOwnerToken,
-      claimsLivenessOwnership,
+      outcome,
     );
     if (rejection) {
       return rejection;
@@ -388,25 +458,19 @@ export function refuseCliKeeperOnProxySession(
 }
 
 /**
- * Verify (or, for an explicit claim, attempt) liveness ownership for a
- * token-bearing heartbeat. Returns the failure to answer with, or undefined
+ * Verify the resolved ownership outcome at the synchronous heartbeat mutation boundary.
+ * Returns the failure to answer with, or undefined
  * when the token owns the session. A rejected claim is a complete liveness
  * no-op: it cannot change the owner, restore a policy, or extend
  * lastUsedAt/lastHeartbeat/expiresAt (#10050).
  */
-async function rejectHeartbeatWithoutOwnership(
+function rejectHeartbeatWithoutOwnership(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   session: Session,
   sessionId: string,
   livenessOwnerToken: string,
-  claimsLivenessOwnership: boolean,
-): Promise<DaemonMethodResult | undefined> {
-  const outcome = await resolveLivenessOwnership(
-    manager,
-    sessionId,
-    livenessOwnerToken,
-    claimsLivenessOwnership,
-  );
+  outcome: LivenessClaimOutcome,
+): DaemonMethodResult | undefined {
   // A claim can yield while release ends admission or replaces this UUID.
   // Keep the request bound to the device session admitted above.
   const currentSession = manager.getSession(sessionId);
@@ -422,7 +486,13 @@ async function rejectHeartbeatWithoutOwnership(
       code: DAEMON_SESSION_NOT_FOUND_CODE,
     };
   }
-  return livenessOwnershipFailure(outcome, sessionId);
+  const stillOwns =
+    manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken) ??
+    currentSession.livenessOwnerToken === livenessOwnerToken;
+  return livenessOwnershipFailure(
+    outcome === "claimed" && !stillOwns ? "superseded" : outcome,
+    sessionId,
+  );
 }
 
 async function resolveLivenessOwnership(
@@ -546,7 +616,8 @@ async function handleSessionInfo(
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
-      ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
+      ...(session.livenessOwnershipReleased ? { livenessOwner: "unowned" } : {}),
+      ...livenessInfo(manager.getSessionLeaseState?.(sessionId), session),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
     },
   };
@@ -559,8 +630,26 @@ async function handleSessionInfo(
  */
 function livenessInfo(
   lease: LivenessLeaseState | undefined,
-): { liveness: { state: LivenessLeasePhase; remainingMs: number } } | Record<string, never> {
-  return lease ? { liveness: { state: lease.phase, remainingMs: lease.remainingMs } } : {};
+  session: Session,
+):
+  | {
+      liveness: {
+        state: LivenessLeasePhase | "unowned";
+        remainingMs: number;
+        leasePhase?: LivenessLeasePhase;
+      };
+    }
+  | Record<string, never> {
+  if (!lease) {
+    return {};
+  }
+  return {
+    liveness: {
+      state: session.livenessOwnershipReleased ? "unowned" : lease.phase,
+      remainingMs: lease.remainingMs,
+      ...(session.livenessOwnershipReleased ? { leasePhase: lease.phase } : {}),
+    },
+  };
 }
 
 async function handleActiveSessions(

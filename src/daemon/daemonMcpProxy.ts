@@ -32,6 +32,7 @@ import {
   DAEMON_RESTART_HANDOFF_DELAY_MS,
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
@@ -3800,7 +3801,8 @@ export class DaemonMcpProxy {
    * reading the previous result. Sending one heartbeat that also carries
    * {@link CLI_SESSION_LIVENESS_POLICY} records ownership AND moves the session
    * onto a wall-clock idle timeout measured in minutes, so the next invocation
-   * still finds it. Returns the declared session uuid, or undefined when there
+   * still finds it. The final release clears this process's token so an independent
+   * proxy can claim immediately. Returns the declared session uuid, or undefined when there
    * was nothing to declare.
    *
    * Long-lived clients (stdio/HTTP MCP) never call this and keep the strict
@@ -3843,14 +3845,20 @@ export class DaemonMcpProxy {
         },
         { timeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS },
       );
+      await this.client.callDaemonMethod(
+        DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
+        { sessionId: sessionUuid, livenessOwnerToken: this.livenessOwnerToken },
+        { timeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS },
+      );
       return sessionUuid;
     } catch (error) {
       // Best-effort: the tool call already succeeded and its result is the
       // caller's answer. A failed declaration only means the next invocation may
       // have to re-acquire, which is the pre-#6870 behaviour — never a reason to
       // fail the invocation that just ran.
-      logger.debug(
-        `[DaemonMcpProxy] CLI session liveness declaration failed: ${errorMessage(error)}`,
+      logger.warn(
+        `[DaemonMcpProxy] CLI session liveness handoff failed: ${errorMessage(error)}`,
+        error,
       );
       return undefined;
     }

@@ -6,7 +6,11 @@ import {
   type Session,
 } from "./sessionManager";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
+import {
+  effectiveLastHeartbeat,
+  ownerLeaseHeartbeat,
+  suspectGraceMsFor,
+} from "./livenessOwnerLease";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -214,7 +218,7 @@ export class SessionHeartbeatMonitor {
       // the rehydration-owner timeout while they await ownership.
       const now = this.timer.now();
       const reason =
-        session.ownership === "awaiting-owner"
+        session.ownership === "awaiting-owner" && !session.livenessOwnershipReleased
           ? this.rehydrationOwnerStaleReason(session, now)
           : this.staleReason(session, now);
       if (reason) {
@@ -246,10 +250,12 @@ export class SessionHeartbeatMonitor {
   private staleReason(session: Session, now: number): SessionHeartbeatReleaseReason | undefined {
     const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
     // The daemon's own stall is never held against the owner (#10051).
-    const lastHeartbeat = effectiveLastHeartbeat({
-      lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt,
-      stallForgivenAt: session.stallForgivenAt,
-    });
+    const lastHeartbeat = session.livenessOwnershipReleased
+      ? ownerLeaseHeartbeat(session)
+      : effectiveLastHeartbeat({
+          lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt,
+          stallForgivenAt: session.stallForgivenAt,
+        });
 
     // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
     // the 10 s heartbeat contract: the `--cli` process that owns it exits between
@@ -260,7 +266,7 @@ export class SessionHeartbeatMonitor {
       return now - lastHeartbeat > timeoutMs ? "cli-idle-timeout" : undefined;
     }
 
-    if (!session.hasReceivedHeartbeat) {
+    if (!session.hasReceivedHeartbeat && !session.livenessOwnershipReleased) {
       if (session.heartbeatTimeoutSource === "default") {
         return now - lastHeartbeat > this.preFirstHeartbeatGraceMs
           ? "missing-first-heartbeat"

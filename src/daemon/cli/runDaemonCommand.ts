@@ -1,10 +1,11 @@
 import { isSessionReleasing } from "../sessionReleaseState";
-import { refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
+import { handleDaemonRequest, refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
 import {
   CLI_KEEPER_LIVENESS_OWNER_KIND,
+  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "../constants";
@@ -431,18 +432,19 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
     const daemonState = manager.getDaemonState();
     if (daemonState.isInitialized()) {
       // Running inside daemon process
-      const sessionManager = daemonState.getSessionManager();
-      const session = requireDaemonSession(sessionManager, sessionId);
-      console.log(
-        JSON.stringify({
-          sessionId: session.sessionId,
-          assignedDevice: session.assignedDevice,
-          createdAt: session.createdAt,
-          lastUsedAt: session.lastUsedAt,
-          expiresAt: session.expiresAt,
-          cacheSize: JSON.stringify(session.cacheData).length,
-        }),
+      const response = await handleDaemonRequest(
+        {
+          id: "session-info",
+          type: "daemon_request",
+          method: "daemon/sessionInfo",
+          params: { sessionId },
+        },
+        daemonState,
       );
+      if (!response.success) {
+        throw new ActionableError(response.error ?? `Session not found: ${sessionId}`);
+      }
+      console.log(JSON.stringify(response.result));
       return;
     }
     {
@@ -588,6 +590,68 @@ async function recordDaemonHeartbeat(args: string[], manager: DaemonManager): Pr
   }
 }
 
+export function parseDaemonReleaseLivenessCommandArgs(args: string[]): {
+  sessionId: string;
+  livenessOwnerToken: string;
+} {
+  if (
+    args.length !== 3 ||
+    !args[0] ||
+    args[1] !== "--liveness-owner-token" ||
+    !args[2]?.trim() ||
+    args[2].startsWith("--")
+  ) {
+    throw new ActionableError(
+      "Usage: release-liveness-ownership <session> --liveness-owner-token <token>",
+    );
+  }
+  return { sessionId: args[0], livenessOwnerToken: args[2] };
+}
+
+async function releaseDaemonLivenessOwnership(
+  args: string[],
+  manager: DaemonManager,
+): Promise<void> {
+  try {
+    const params = parseDaemonReleaseLivenessCommandArgs(args);
+    const state = manager.getDaemonState();
+    if (state.isInitialized()) {
+      const response = await handleDaemonRequest(
+        {
+          id: "release-liveness-ownership",
+          type: "daemon_request",
+          method: DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
+          params,
+        },
+        state,
+      );
+      if (!response.success) {
+        throw new ActionableError(`${response.error} [${response.code}]`);
+      }
+      console.log(JSON.stringify(response.result));
+      return;
+    }
+    const client = manager.createClient();
+    try {
+      await client.connect();
+      console.log(
+        JSON.stringify(
+          await client.callDaemonMethod(DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD, params),
+        ),
+      );
+    } finally {
+      await client.close();
+    }
+  } catch (error) {
+    const code =
+      error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
+    console.error(
+      `Failed to release liveness ownership: ${errorMessage(error)}${typeof code === "string" ? ` [${code}]` : ""}`,
+    );
+    process.exit(1);
+  }
+}
+
 function printUnknownDaemonCommand(command: string): void {
   try {
     console.error(`Unknown daemon command: ${command}`);
@@ -601,6 +665,9 @@ function printUnknownDaemonCommand(command: string): void {
     console.log("  available-devices     Query device pool status");
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
+    console.log(
+      "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
+    );
     console.log("  heartbeat <id>        Heartbeat a one-shot CLI session (proxy-owned: refused)");
     process.exit(1);
   } catch (error) {
@@ -637,6 +704,7 @@ export async function runDaemonCommand(
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),
+    "release-liveness-ownership": () => releaseDaemonLivenessOwnership(args, manager),
   };
   const handler = Object.hasOwn(handlers, command) ? handlers[command] : undefined;
   if (!handler) {

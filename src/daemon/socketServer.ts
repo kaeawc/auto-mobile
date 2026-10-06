@@ -130,6 +130,7 @@ import {
   setAndroidKeyValueDirect,
   withAndroidSharedPreferencesInspectionFallback,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { rethrowForRouteWithoutUserId } from "../features/preferences/resolveAndroidPreferencesUser";
 import {
   IOS_CTRL_PROXY_APP_HASH,
   resolveApkChecksum,
@@ -4967,7 +4968,8 @@ export class UnixSocketServer {
       async () => {
         resolution = (await viaSdk()) || undefined;
       },
-      viaDirectFile,
+      // The ide/* params carry no userId, so an ambiguous-user error cannot say "pass userId".
+      (adb) => viaDirectFile(adb).catch(rethrowForRouteWithoutUserId),
     );
     return { ...result, resolution };
   }

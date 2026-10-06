@@ -1,6 +1,5 @@
 import { logger } from "../../utils/logger";
 import { NavigationGraphManager } from "./NavigationGraphManager";
-import { PathResult } from "../../utils/interfaces/NavigationGraph";
 import {
   PathOptimizer,
   BackButtonRecommendation,
@@ -57,12 +56,17 @@ export class DefaultPathOptimizer implements PathOptimizer {
     // Calculate depth difference
     const depthDifference = currentBackStackDepth - targetNode.backStackDepth;
 
-    // Find if there's a known forward path from target to current
-    // If yes, then back navigation should work
-    const pathResult: PathResult = await this.navigationGraph.findPath(targetScreen);
-    const hasForwardPath = pathResult.found && pathResult.path.length > 0;
+    // Find if there's a known forward path from target to current: that is the route
+    // the user took down the stack, so Back retraces it. NavigationGraphManager.findPath
+    // always starts at the *current* screen, so it cannot answer this; it would verify
+    // the opposite direction and approve (or miss) Back for the wrong screen.
+    const forwardPathLength = await this.shortestForwardPathLength(
+      targetScreen,
+      currentScreen,
+      depthDifference,
+    );
 
-    if (!hasForwardPath) {
+    if (forwardPathLength === undefined) {
       logger.debug(
         `[PATH_OPTIMIZER] No forward path from ${targetScreen} to ${currentScreen}, ` +
           `cannot verify back navigation safety`,
@@ -87,7 +91,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
 
     // Check if the path length matches the depth difference
     // This suggests a linear navigation path where back button would work
-    if (pathResult.path.length === depthDifference) {
+    if (forwardPathLength === depthDifference) {
       logger.info(
         `[PATH_OPTIMIZER] Using back button navigation: ${currentScreen} -> ${targetScreen} ` +
           `(${depthDifference} back presses)`,
@@ -96,7 +100,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
       return {
         shouldUseBack: true,
         backPresses: depthDifference,
-        reason: `Path length (${pathResult.path.length}) matches depth difference (${depthDifference})`,
+        reason: `Path length (${forwardPathLength}) matches depth difference (${depthDifference})`,
       };
     }
 
@@ -105,8 +109,36 @@ export class DefaultPathOptimizer implements PathOptimizer {
     return {
       shouldUseBack: false,
       backPresses: 0,
-      reason: `Path length (${pathResult.path.length}) doesn't match depth difference (${depthDifference}), not safe to use back`,
+      reason: `Path length (${forwardPathLength}) doesn't match depth difference (${depthDifference}), not safe to use back`,
     };
+  }
+
+  /**
+   * Shortest known forward path length (in edges) from `from` to `to`, searching no
+   * deeper than `maxHops`; undefined when there is none within that bound.
+   */
+  private async shortestForwardPathLength(
+    from: string,
+    to: string,
+    maxHops: number,
+  ): Promise<number | undefined> {
+    const visited = new Set<string>([from]);
+    let frontier = [from];
+    for (let hops = 1; hops <= maxHops && frontier.length > 0; hops++) {
+      const outgoing = (
+        await Promise.all(frontier.map((screen) => this.navigationGraph.getEdgeTargetsFrom(screen)))
+      )
+        .flat()
+        .map((target) => target.toScreen);
+      if (outgoing.includes(to)) {
+        return hops;
+      }
+      frontier = [...new Set(outgoing)].filter((screen) => !visited.has(screen));
+      for (const screen of frontier) {
+        visited.add(screen);
+      }
+    }
+    return undefined;
   }
 
   /**

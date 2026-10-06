@@ -23,7 +23,7 @@ import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
 import type { UninstallAppResult } from "../models/UninstallAppResult";
-import { AppPermissions } from "../features/action/AppPermissions";
+import { AppPermissions, type SetAppPermissionsResult } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
 import { resolveMissingForegroundWindow } from "../features/observe/ObserveScreen";
 import {
@@ -868,6 +868,15 @@ export function resetAppPermissionsFactory(): void {
   appPermissionsFactory = (device) => new AppPermissions(device);
 }
 
+function describeSetPermissionsSuccess(appId: string, result: SetAppPermissionsResult): string {
+  if (result.warnings?.length) {
+    return `Applied ${result.changedCount} verified app permission change(s) for ${appId}; not verified: ${result.warnings.join("; ")}`;
+  }
+  return result.changedCount === 0
+    ? `No app permission changes were needed for ${appId} (already in the requested state)`
+    : `Applied ${result.changedCount} app permission change(s) for ${appId}`;
+}
+
 export const setAppPermissionsHandler = async (
   device: BootedDevice,
   args: SetAppPermissionsArgs,
@@ -884,9 +893,7 @@ export const setAppPermissionsHandler = async (
 
   const response = createJSONToolResponse({
     message: result.success
-      ? result.changedCount === 0
-        ? `No app permission changes were needed for ${args.appId} (already in the requested state)`
-        : `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
+      ? describeSetPermissionsSuccess(args.appId, result)
       : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
     ...result,
   });

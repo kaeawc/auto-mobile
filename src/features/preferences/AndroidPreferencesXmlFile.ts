@@ -63,10 +63,7 @@ export async function readAndroidPreferencesXml(
     if (looksLikeMissingAndroidPrefsFile(error)) {
       return "<map/>";
     }
-    throw new ActionableError(
-      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
-      { cause: error },
-    );
+    throw androidPrefsRunAsFailure("read", error, appId, userId);
   }
 }
 
@@ -91,10 +88,7 @@ export async function readAndroidPreferencesXmlIfExists(
     if (looksLikeMissingAndroidPrefsFile(error)) {
       return { xml: "<map/>", exists: false };
     }
-    throw new ActionableError(
-      `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
-      { cause: error },
-    );
+    throw androidPrefsRunAsFailure("read", error, appId, userId);
   }
 }
 
@@ -115,10 +109,7 @@ export async function writeAndroidPreferencesXml(
       `${androidPreferencesRunAs(appId, userId)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`,
     );
   } catch (error) {
-    throw new ActionableError(
-      `Failed to write Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
-      { cause: error },
-    );
+    throw androidPrefsRunAsFailure("write", error, appId, userId);
   }
 }
 
@@ -238,10 +229,63 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
-  const message = errorMessage(error);
-  if (!/No such file|not found|does not exist/i.test(message)) {
-    return false;
+/**
+ * The part of a failed `run-as` command that the device printed, for classification only.
+ * An adb rejection's `message` is `Command failed: <command line>` plus the output, and the
+ * command line carries the `shared_prefs/<name>.xml` path being read, so matching the whole
+ * message makes every failure look like a missing prefs file (issue #10085). Prefer the
+ * attached stderr/stdout (walking `cause` for wrapped errors); when none is attached, drop the
+ * `Command failed:` lines (the command line, also echoed in `raw error:`) from the message.
+ */
+export function androidRunAsOutput(error: unknown): string {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    const details = current as Error & { stderr?: unknown; stdout?: unknown };
+    const streams = [details.stderr, details.stdout]
+      .map((stream) => (Buffer.isBuffer(stream) ? stream.toString() : stream))
+      .filter((stream): stream is string => typeof stream === "string" && stream.length > 0);
+    if (streams.length > 0) {
+      return streams.join("\n");
+    }
+    current = current.cause;
   }
-  return /shared_prefs\/[^/\s]+\.xml/i.test(message);
+  return errorMessage(error)
+    .split("\n")
+    .filter((line) => !line.includes("Command failed:"))
+    .join("\n");
+}
+
+/** `run-as: couldn't stat /data/user/<N>: No such file or directory`: user N has no data dir. */
+const MISSING_USER_DATA_DIR = /^run-as: couldn't stat \/data\/user(?:_de)?\/(\d+)\b/m;
+
+/** A `run-as:` diagnostic means run-as itself failed, so the prefs file was never looked up. */
+const RUN_AS_DIAGNOSTIC = /^run-as:/m;
+
+/** `cat`'s own report that the prefs file is absent for a user and package that run-as reached. */
+const CAT_MISSING_PREFS_FILE =
+  /^cat: [^\n]*shared_prefs\/[^/\s:]+\.xml: No such file or directory/m;
+
+function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
+  const output = androidRunAsOutput(error);
+  return !RUN_AS_DIAGNOSTIC.test(output) && CAT_MISSING_PREFS_FILE.test(output);
+}
+
+/** The error for a failed run-as access; names the user when run-as says it has no data dir. */
+function androidPrefsRunAsFailure(
+  action: "read" | "write",
+  error: unknown,
+  appId: string,
+  userId?: number,
+): ActionableError {
+  const missingUser = MISSING_USER_DATA_DIR.exec(androidRunAsOutput(error))?.[1];
+  if (missingUser !== undefined) {
+    return new ActionableError(
+      `Cannot ${action} Android SharedPreferences: user ${missingUser} does not exist, or ${appId} is not installed for it (run-as could not open /data/user/${missingUser}). Pass a userId of an existing user that has the app installed.`,
+      { cause: error },
+    );
+  }
+  return new ActionableError(
+    `Failed to ${action} Android SharedPreferences via run-as. This requires a debuggable/test build for ${runAsTarget(appId, userId)}. ${errorMessage(error)}`,
+    { cause: error },
+  );
 }

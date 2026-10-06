@@ -33,6 +33,7 @@ import {
   SomePlatform,
 } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
@@ -487,6 +488,17 @@ describe("DevicePool", () => {
   class FakeDeviceManagerWithStubbornFailingReadiness extends FakeDeviceManagerWithStubbornProcess {
     override async waitForDeviceReady(): Promise<BootedDevice> {
       throw new Error("readiness timeout");
+    }
+  }
+
+  /** Like the real client, a launch cancelled after the spawn rejects carrying its child (#10075). */
+  class FakeDeviceManagerWithCancelledLaunch extends FakeDeviceManagerWithStubbornProcess {
+    override async startDevice(
+      device: DeviceInfo,
+      timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    ): Promise<ChildProcess> {
+      const childProcess = await super.startDevice(device, timeoutMs);
+      throw new EmulatorLaunchCancelledError(device.name, childProcess);
     }
   }
 
@@ -2799,7 +2811,7 @@ describe("DevicePool", () => {
 
     test("removes unassigned devices that are no longer booted", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
-      await fakeAppsRepo.upsertInstalledApp("sim-old", 0, "com.test.app", false, Date.now());
+      await fakeAppsRepo.seedInstalledApp("sim-old", 0, "com.test.app", false, Date.now());
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
 
       const added = await devicePool.refreshDevices();
@@ -7431,6 +7443,63 @@ describe("DevicePool", () => {
       teardownLease.release();
     });
 
+    test("retains a cancelled pool-start launch's lease until its emulator exits (#10075)", async () => {
+      const image: DeviceInfo = {
+        name: "Pixel 8",
+        platform: "android",
+        isRunning: false,
+        deviceId: "emulator-5554",
+        source: "local",
+      };
+      const manager = new FakeDeviceManagerWithCancelledLaunch([image]);
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(fakeTimer);
+      devicePool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: fakeAppsRepo,
+          deviceManager: manager,
+          retryExecutor: new DefaultRetryExecutor(fakeTimer),
+          lifecycleCoordinator: lifecycleCoordinator,
+        }),
+      );
+
+      const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
+      const allocationOutcome = allocation.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await drainUntil(
+        () =>
+          manager.childProcess.signals.includes("SIGTERM") &&
+          fakeTimer.getPendingTimeouts().includes(1_000),
+        { description: "cancelled-launch SIGTERM exit timeout parked" },
+      );
+      fakeTimer.advanceTime(1_000);
+      await drainUntil(() => manager.childProcess.signals.includes("SIGKILL"), {
+        description: "cancelled-launch SIGKILL sent",
+      });
+      expect(manager.childProcess.signals).toEqual(["SIGTERM", "SIGKILL"]);
+      fakeTimer.advanceTime(1_000);
+      expect(await allocationOutcome).toBeInstanceOf(Error);
+
+      const teardown = lifecycleCoordinator.reserve(
+        { kind: "stable", platform: "android", stableId: image.name },
+        { operation: "teardown", deadlineMs: 3_000 },
+      );
+      let teardownAcquired = false;
+      void teardown.then(() => {
+        teardownAcquired = true;
+      });
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      expect(teardownAcquired).toBe(false);
+
+      manager.childProcess.emit("exit", 0, null);
+      const teardownLease = await teardown;
+      teardownLease.release();
+    });
+
     test("bounds a pending pool cold-boot readiness wait by the allocation deadline", async () => {
       const image: DeviceInfo = {
         name: "Pixel 8",
@@ -8243,7 +8312,7 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
 
       // Add some fake cache data
-      await fakeAppsRepo.upsertInstalledApp("emulator-5554", 0, "com.test.app", false, Date.now());
+      await fakeAppsRepo.seedInstalledApp("emulator-5554", 0, "com.test.app", false, Date.now());
       const appsBefore = await fakeAppsRepo.listInstalledApps("emulator-5554");
       expect(appsBefore.length).toBe(1);
 

@@ -4214,7 +4214,64 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("package events", function () {
-    test("should upsert package on added event", async function () {
+    test("should upsert package on added event onto an existing snapshot", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const timestamp = timer.now();
+      await repo.replaceInstalledApps(testDevice.deviceId, [
+        {
+          device_id: testDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.existing",
+          is_system: 0,
+          installed_at: timestamp,
+          last_verified_at: timestamp,
+        },
+      ]);
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        timer,
+        repo,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_event",
+            timestamp,
+            event: {
+              action: "added",
+              packageName: "com.example.new",
+              userId: 0,
+              isSystem: false,
+            },
+          }),
+        );
+
+        await flushPromises();
+
+        const rows = await repo.listInstalledApps(testDevice.deviceId);
+        expect(rows).toHaveLength(2);
+        const added = rows.find((row) => row.package_name === "com.example.new");
+        expect(added?.user_id).toBe(0);
+        expect(added?.is_system).toBe(0);
+        expect(added?.last_verified_at).toBe(timestamp);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("should drop an added event when the device has no cached snapshot (#10041)", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -4250,12 +4307,10 @@ describe("AndroidCtrlProxyClient", function () {
 
         await flushPromises();
 
-        const rows = await repo.listInstalledApps(testDevice.deviceId);
-        expect(rows).toHaveLength(1);
-        expect(rows[0].package_name).toBe("com.example.new");
-        expect(rows[0].user_id).toBe(0);
-        expect(rows[0].is_system).toBe(0);
-        expect(rows[0].last_verified_at).toBe(timestamp);
+        // A lone broadcast row would pass the freshness check as the whole
+        // app list; the next listApps must rebuild from the device instead.
+        expect(await repo.listInstalledApps(testDevice.deviceId)).toHaveLength(0);
+        expect(await repo.getCacheVerifiedAt(testDevice.deviceId)).toBeNull();
       } finally {
         await testClient.close();
       }

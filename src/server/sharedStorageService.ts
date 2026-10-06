@@ -44,6 +44,13 @@ export { SHARED_STORAGE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransfer
 const SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS = 5000;
 const SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS = 15000;
 const SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND = 64;
+/**
+ * Extra rollback budget per restored file. A restore is a rename, but the rollback must not be
+ * cut off halfway through a large batch, so the budget grows with the restore count.
+ */
+const SHARED_STORAGE_ROLLBACK_PER_PATH_TIMEOUT_MS = 500;
+/** Budget per re-indexed file; one `am broadcast` start is the dominant cost of a media rescan. */
+const SHARED_STORAGE_RESCAN_PER_FILE_TIMEOUT_MS = 3000;
 /** Printed by the backup script only when it saved the previous content of an existing file. */
 const SHARED_STORAGE_BACKUP_MARKER = "AUTOMOBILE_SHARED_STORAGE_BACKUP";
 
@@ -353,7 +360,10 @@ class DefaultSharedStorageService implements SharedStorageService {
       throw new ActionableError(
         `Android ${request.requireMediaIndexing ? "media-library" : "shared-storage"} batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
           `Rolled back: ${rollback.rolledBack.length > 0 ? rollback.rolledBack.join(", ") : "none"}. ` +
-          `Rollback failures: ${rollback.failures.length > 0 ? rollback.failures.join("; ") : "none"}.`,
+          `Rollback failures: ${rollback.failures.length > 0 ? rollback.failures.join("; ") : "none"}.` +
+          (rollback.reindexFailures.length > 0
+            ? ` Media re-index not confirmed for restored files: ${rollback.reindexFailures.join(", ")}.`
+            : ""),
         { cause: error },
       );
     }
@@ -365,7 +375,7 @@ class DefaultSharedStorageService implements SharedStorageService {
     files: PreparedSharedStorageFile[],
     request: StageSharedStorageRequest,
   ): Promise<ReadonlyMap<string, string>> {
-    if (!shouldKeepPrevious(request, files.length)) {
+    if (!shouldKeepPrevious(request)) {
       return new Map();
     }
     return saveExistingFiles(adb, this.planBackups(destinationDirectory, files), request.signal);
@@ -431,9 +441,13 @@ interface BackupPlan {
   backup: string;
 }
 
-/** A single file has no earlier file to roll back, and a reset leaves nothing to overwrite. */
-function shouldKeepPrevious(request: StageSharedStorageRequest, fileCount: number): boolean {
-  return request.rollbackOnFailure === true && fileCount > 1 && !request.reset;
+/**
+ * Whenever a rollback can run, the previous content of an overwritten file is kept, whatever the
+ * file count: a file can fail after its own commit (for example media indexing), and its rollback
+ * must restore the original rather than delete it. A reset leaves nothing to overwrite.
+ */
+function shouldKeepPrevious(request: StageSharedStorageRequest): boolean {
+  return request.rollbackOnFailure === true && !request.reset;
 }
 
 interface PreparedSharedStorageFile {
@@ -450,40 +464,134 @@ async function rollbackStagedFiles(context: {
   /** Rescan restored media files so MediaStore stops describing the overwritten bytes. */
   rescanRestored: boolean;
   timer: Timer;
-}): Promise<{ rolledBack: string[]; failures: string[] }> {
+}): Promise<RollbackOutcome> {
   const { adb, destinationDirectory, writtenPaths, backups, userId, rescanRestored, timer } =
     context;
-  const result = await rollbackWrittenFiles(writtenPaths, timer, (chunk, signal, timeoutMs) => {
-    const created: string[] = [];
-    const restores: string[] = [];
-    for (const path of chunk) {
-      const destination = posix.join(destinationDirectory, path);
-      const backup = backups.get(path);
-      if (backup === undefined) {
-        created.push(shellQuote(destination));
-        continue;
+  // Restores are pure renames, so they run first in one bounded command per chunk. The slower
+  // MediaStore rescans happen afterwards and can never turn a finished restore into a failure.
+  const result = await rollbackWrittenFiles(
+    writtenPaths,
+    timer,
+    (chunk, signal, timeoutMs) => {
+      const created: string[] = [];
+      const restores: string[] = [];
+      for (const path of chunk) {
+        const destination = posix.join(destinationDirectory, path);
+        const backup = backups.get(path);
+        if (backup === undefined) {
+          created.push(shellQuote(destination));
+          continue;
+        }
+        restores.push(`mv -f ${shellQuote(backup)} ${shellQuote(destination)}`);
       }
-      const restore = `mv -f ${shellQuote(backup)} ${shellQuote(destination)}`;
-      restores.push(
-        rescanRestored && shouldIndexMedia(path, true)
-          ? `${restore} && ${mediaScanCommand(userId, destination)} >/dev/null`
-          : restore,
-      );
-    }
-    // Only destinations this batch created are deleted; overwritten ones get their content back.
-    const command =
-      restores.length === 0
-        ? `shell rm -f ${created.join(" ")}`
-        : `shell sh -c ${shellQuote(androidRollbackScript(created, restores))}`;
-    return execute(adb, command, signal, timeoutMs);
-  });
+      // Only destinations this batch created are deleted; overwritten ones get their content back.
+      const command =
+        restores.length === 0
+          ? `shell rm -f ${created.join(" ")}`
+          : `shell sh -c ${shellQuote(androidRollbackScript(created, restores))}`;
+      return execute(adb, command, signal, timeoutMs);
+    },
+    sharedStorageRollbackBudget(writtenPaths, backups),
+  );
+  const toRescan = rescanRestored
+    ? result.rolledBack.filter((path) => backups.has(path) && shouldIndexMedia(path, true))
+    : [];
+  const reindexFailures = await rescanRestoredFiles(adb, userId, toRescan, destinationDirectory);
   // A saved copy of a file this batch never reached still sits beside an untouched original.
   await discardHiddenFiles(
     adb,
     [...backups].filter(([path]) => !writtenPaths.includes(path)).map(([, backup]) => backup),
     "previous-content backups",
   );
-  return result;
+  return {
+    rolledBack: result.rolledBack,
+    failures: [
+      ...result.failures,
+      ...unconfirmedRestores(writtenPaths, result.rolledBack, backups),
+    ],
+    reindexFailures,
+  };
+}
+
+interface RollbackOutcome {
+  rolledBack: string[];
+  failures: string[];
+  /** Restored files whose MediaStore rescan was not confirmed; the restore itself succeeded. */
+  reindexFailures: string[];
+}
+
+/**
+ * A chunk whose command failed or timed out may not have run its restores. Names each overwritten
+ * file that was not confirmed restored together with the saved copy that may still hold its
+ * previous content (the failure line for the chunk already names the files themselves).
+ */
+function unconfirmedRestores(
+  writtenPaths: string[],
+  rolledBack: string[],
+  backups: ReadonlyMap<string, string>,
+): string[] {
+  return writtenPaths
+    .filter((path) => !rolledBack.includes(path) && backups.has(path))
+    .map(
+      (path) =>
+        `${path}: restore not confirmed; its previous content may still be saved at ${backups.get(path)}`,
+    );
+}
+
+/** Only restores scale the budget; a delete-only rollback keeps the fixed bounds. */
+function sharedStorageRollbackBudget(
+  writtenPaths: string[],
+  backups: ReadonlyMap<string, string>,
+): RollbackBudget {
+  const restoreBudgetMs = (paths: string[]) =>
+    paths.filter((path) => backups.has(path)).length * SHARED_STORAGE_ROLLBACK_PER_PATH_TIMEOUT_MS;
+  return {
+    commandTimeoutMs: (chunk) =>
+      SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS + restoreBudgetMs(chunk),
+    totalTimeoutMs: SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS + restoreBudgetMs(writtenPaths),
+  };
+}
+
+/**
+ * Best-effort MediaStore rescan of restored files, one bounded command per chunk, detached from
+ * the caller's cancellation. Returns the files whose rescan was not confirmed; never throws.
+ */
+async function rescanRestoredFiles(
+  adb: AdbExecutor,
+  userId: number,
+  paths: string[],
+  destinationDirectory: string,
+): Promise<string[]> {
+  const failed: string[] = [];
+  await runWithAbortSignal(undefined, async () => {
+    for (
+      let offset = 0;
+      offset < paths.length;
+      offset += SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND
+    ) {
+      const chunk = paths.slice(offset, offset + SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND);
+      const script = androidStepsScript(
+        chunk.map(
+          (path) =>
+            `${mediaScanCommand(userId, posix.join(destinationDirectory, path))} >/dev/null`,
+        ),
+      );
+      try {
+        await execute(
+          adb,
+          `shell sh -c ${shellQuote(script)}`,
+          undefined,
+          chunk.length * SHARED_STORAGE_RESCAN_PER_FILE_TIMEOUT_MS,
+        );
+      } catch (error) {
+        // The files themselves are already restored; a stale MediaStore row is a lesser failure
+        // than reporting a finished restore as failed, so it is warned about and returned.
+        logger.warn(`[SharedStorage] Media re-index failed for ${chunk.join(", ")}`, error);
+        failed.push(...chunk);
+      }
+    }
+  });
+  return failed;
 }
 
 /**
@@ -513,7 +621,15 @@ async function saveExistingFiles(
       ),
     );
     try {
-      const result = await executeResult(adb, `shell sh -c ${shellQuote(script)}`, signal);
+      // The copies are device-local but as large as the files the push will replace, so the
+      // budget scales with the file count the same way the push budget does (one push budget per
+      // file) instead of the 15 s default, which would fail a batch that used to succeed.
+      const result = await executeResult(
+        adb,
+        `shell sh -c ${shellQuote(script)}`,
+        signal,
+        chunk.length * SHARED_STORAGE_PUSH_TIMEOUT_MS,
+      );
       for (const [path, backup] of copiedBackups(chunk, result.stdout)) {
         saved.set(path, backup);
       }
@@ -566,16 +682,28 @@ async function discardHiddenFiles(adb: AdbExecutor, paths: string[], what: strin
   });
 }
 
+/** How long a rollback may run: per command (given its chunk of paths) and across the whole batch. */
+export interface RollbackBudget {
+  commandTimeoutMs(chunk: string[]): number;
+  totalTimeoutMs: number;
+}
+
+const DEFAULT_ROLLBACK_BUDGET: RollbackBudget = {
+  commandTimeoutMs: () => SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS,
+  totalTimeoutMs: SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS,
+};
+
 /** Shared bounded, cancellation-detached rollback contract for Android file batches. */
 export async function rollbackWrittenFiles(
   writtenPaths: string[],
   timer: Timer,
   removePaths: (paths: string[], signal: AbortSignal, timeoutMs: number) => Promise<unknown>,
+  budget: RollbackBudget = DEFAULT_ROLLBACK_BUDGET,
 ): Promise<{ rolledBack: string[]; failures: string[] }> {
   return runWithAbortSignal(undefined, async () => {
     const rolledBack: string[] = [];
     const failures: string[] = [];
-    const deadline = timer.now() + SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS;
+    const deadline = timer.now() + budget.totalTimeoutMs;
     const reversePaths = [...writtenPaths].reverse();
     for (
       let offset = 0;
@@ -587,12 +715,12 @@ export async function rollbackWrittenFiles(
         offset + SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND,
       );
       const remainingMs = Math.max(0, deadline - timer.now());
-      const timeoutMs = Math.min(SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS, remainingMs);
+      const timeoutMs = Math.min(budget.commandTimeoutMs(chunk), remainingMs);
       const cleanup = new AbortController();
       try {
         if (remainingMs === 0) {
           throw new ActionableError(
-            `Shared-storage batch rollback exceeded total timeout of ${SHARED_STORAGE_ROLLBACK_TOTAL_TIMEOUT_MS}ms`,
+            `Shared-storage batch rollback exceeded total timeout of ${budget.totalTimeoutMs}ms`,
           );
         }
         await raceWithDeadline(() => removePaths(chunk, cleanup.signal, timeoutMs), {
@@ -706,9 +834,14 @@ function mediaScanCommand(userId: number, destination: string): string {
   return `am broadcast --user ${userId} -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(fileUriFor(destination))}`;
 }
 
-async function executeResult(adb: AdbExecutor, command: string, signal?: AbortSignal) {
+async function executeResult(
+  adb: AdbExecutor,
+  command: string,
+  signal?: AbortSignal,
+  timeoutMs?: number,
+) {
   try {
-    return await adb.executeCommand(command, undefined, undefined, true, signal, true);
+    return await adb.executeCommand(command, timeoutMs, undefined, true, signal, true);
   } catch (error) {
     throw new ActionableError(`Android shared-storage operation failed: ${errorMessage(error)}`);
   }

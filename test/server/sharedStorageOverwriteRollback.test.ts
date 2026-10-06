@@ -2,6 +2,7 @@ import { logger } from "../../src/utils/logger";
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   createSharedStorageServiceForTesting,
+  SHARED_STORAGE_PUSH_TIMEOUT_MS,
   type SharedStorageFileSystem,
   type StageSharedStorageRequest,
 } from "../../src/server/sharedStorageService";
@@ -94,13 +95,14 @@ describe("stageSharedStorage rollback of overwritten files", () => {
 
     const backup = `${DIR}/.automobile-t-1.bak`;
     const commands = executor.getExecutedCommands();
-    expect(mutating(commands).at(-1)).toBe(
-      rollbackScript(
-        [q("second.png")],
-        [
-          `mv -f ${shellQuote(backup)} ${q("first.png")} && ${SCAN} ${shellQuote(`file://${DIR}/first.png`)} >/dev/null`,
-        ],
-      ),
+    // The restore is a pure rename: the MediaStore rescan is not part of the bounded restore.
+    const restoreIndex = commands.indexOf(
+      rollbackScript([q("second.png")], [`mv -f ${shellQuote(backup)} ${q("first.png")}`]),
+    );
+    expect(restoreIndex).toBeGreaterThan(-1);
+    // The rescan runs afterwards, as its own best-effort command.
+    expect(commands[restoreIndex + 1]).toBe(
+      `shell sh -c ${shellQuote(`rc=0; ${SCAN} ${shellQuote(`file://${DIR}/first.png`)} >/dev/null || rc=1; exit $rc`)}`,
     );
     // The overwritten file is never passed to a plain delete; only the failed push's temp is.
     expect(commands.filter((command) => command.startsWith("shell rm -f"))).toEqual([
@@ -299,11 +301,16 @@ describe("stageSharedStorage rollback of overwritten files", () => {
       expect(after).toHaveLength(before.length + 1);
     });
 
-    test("a single-file batch sends the previous commands", async () => {
+    test("a single-file batch adds only the probe to the previous commands", async () => {
       const files = [fileAt("only.png")];
-      expect(await commandsFor({ files })).toEqual(
-        await commandsFor({ files, rollbackOnFailure: false }),
-      );
+      const before = await commandsFor({ files, rollbackOnFailure: false });
+      const after = await commandsFor({ files });
+
+      const sameIds = (commands: string[]) =>
+        commands.map((command) => command.replace(/\.automobile-t-\d+\.part/g, ".part"));
+      const withoutProbe = after.filter((command) => !command.includes(MARKER));
+      expect(sameIds(withoutProbe)).toEqual(sameIds(before));
+      expect(after).toHaveLength(before.length + 1);
     });
 
     test("a reset batch sends the previous commands", async () => {
@@ -325,5 +332,180 @@ describe("stageSharedStorage rollback of overwritten files", () => {
         `shell rm -f ${q("second.txt")} ${q("first.txt")}`,
       );
     });
+  });
+
+  describe("a single-file batch (#9965)", () => {
+    test("restores the file it overwrote when media indexing fails after its own commit", async () => {
+      const { executor, stage } = setup([0]);
+      // Only the initial indexing broadcast fails; the later restore rescan runs inside `sh -c`.
+      executor.setCommandError("shell am broadcast", new Error("indexing failed"));
+
+      await expect(stage({ files: [fileAt("only.png")] })).rejects.toThrow(
+        "Rolled back: only.png. Rollback failures: none.",
+      );
+
+      const commands = executor.getExecutedCommands();
+      expect(commands).toContain(
+        rollbackScript([], [`mv -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${q("only.png")}`]),
+      );
+      // The overwritten destination is never deleted.
+      expect(commands.filter((command) => command.includes(`rm -f ${q("only.png")}`))).toEqual([]);
+    });
+
+    test("still deletes a single file the batch created", async () => {
+      const { executor, stage } = setup();
+      executor.setCommandError("shell am broadcast", new Error("indexing failed"));
+
+      await expect(stage({ files: [fileAt("only.png")] })).rejects.toThrow(
+        "Rolled back: only.png. Rollback failures: none.",
+      );
+
+      expect(executor.getExecutedCommands()).toContain(`shell rm -f ${q("only.png")}`);
+    });
+  });
+
+  describe("backup timeout", () => {
+    const probeTimeouts = (executor: FakeAdbExecutor) =>
+      executor
+        .getCommandCalls()
+        .filter((call) => call.command.includes(MARKER))
+        .map((call) => call.timeoutMs);
+
+    test("scales with the number of files copied, one push budget per file", async () => {
+      const { executor, stage } = setup();
+
+      await stage({ files: [fileAt("a.png"), fileAt("b.png")] });
+
+      expect(probeTimeouts(executor)).toEqual([2 * SHARED_STORAGE_PUSH_TIMEOUT_MS]);
+    });
+
+    test("a single-file backup gets one push budget, not the 15 s default", async () => {
+      const { executor, stage } = setup();
+
+      await stage({ files: [fileAt("a.png")] });
+
+      expect(probeTimeouts(executor)).toEqual([SHARED_STORAGE_PUSH_TIMEOUT_MS]);
+    });
+
+    test("each chunk of 64 is budgeted for its own size", async () => {
+      const { executor, stage } = setup();
+
+      await stage({
+        files: Array.from({ length: 65 }, (_, index) => fileAt(`f-${index}.txt`)),
+      });
+
+      expect(probeTimeouts(executor)).toEqual([
+        64 * SHARED_STORAGE_PUSH_TIMEOUT_MS,
+        SHARED_STORAGE_PUSH_TIMEOUT_MS,
+      ]);
+    });
+  });
+
+  describe("rollback budget and re-index", () => {
+    const restoreCalls = (executor: FakeAdbExecutor) =>
+      executor
+        .getCommandCalls()
+        .filter(
+          (call) =>
+            call.command.includes("sh -c") &&
+            !call.command.includes(MARKER) &&
+            call.command.includes(".bak'") &&
+            call.command.includes("mv -f"),
+        );
+
+    test("the restore command's budget grows with the number of restores", async () => {
+      const { executor, stage } = setup(Array.from({ length: 11 }, (_, index) => index));
+      const files = Array.from({ length: 12 }, (_, index) => fileAt(`f-${index}.png`));
+      executor.setCommandError("push /fixtures/f-11.png", new Error("push failed"));
+
+      await expect(stage({ files })).rejects.toThrow("Rollback failures: none.");
+
+      const calls = restoreCalls(executor);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.command).not.toContain("am broadcast");
+      expect(calls[0]?.timeoutMs).toBe(5000 + 11 * 500);
+    });
+
+    test("a delete-only rollback keeps the fixed 5 s bound", async () => {
+      const { executor, stage } = setup();
+      executor.setCommandError("push /fixtures/b.txt", new Error("push failed"));
+
+      await expect(stage({ files: [fileAt("a.txt"), fileAt("b.txt")] })).rejects.toThrow(
+        "Rolled back: a.txt.",
+      );
+
+      const removal = executor
+        .getCommandCalls()
+        .find((call) => call.command === `shell rm -f ${q("a.txt")}`);
+      expect(removal?.timeoutMs).toBe(5000);
+    });
+
+    test("re-indexes every restored media file in one command after the restores", async () => {
+      const { executor, stage } = setup([0, 1]);
+      executor.setCommandError("push /fixtures/c.png", new Error("push failed"));
+
+      await expect(
+        stage({ files: [fileAt("a.png"), fileAt("b.png"), fileAt("c.png")] }),
+      ).rejects.toThrow("Rolled back: b.png, a.png. Rollback failures: none.");
+
+      const commands = executor.getExecutedCommands();
+      const rescans = commands.filter((command) => command.includes("rc=0; am broadcast"));
+      expect(rescans).toHaveLength(1);
+      expect(rescans[0]).toContain(shellQuote(`file://${DIR}/b.png`));
+      expect(rescans[0]).toContain(shellQuote(`file://${DIR}/a.png`));
+      const rescanCall = executor.getCommandCalls().find((call) => call.command === rescans[0]);
+      expect(rescanCall?.timeoutMs).toBe(2 * 3000);
+      expect(commands.indexOf(rescans[0] ?? "")).toBeGreaterThan(
+        commands.findIndex((command) => command.includes("rc=0; rm -f")),
+      );
+    });
+
+    test("a failed re-index is a warning, never a failed restore", async () => {
+      const { executor, stage } = setup([0]);
+      executor.setCommandError("push /fixtures/b.txt", new Error("push failed"));
+      executor.setCommandError("rc=0; am broadcast", new Error("am unavailable"));
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      let message = "";
+      try {
+        message = await stage({ files: [fileAt("a.png"), fileAt("b.txt")] }).then(
+          () => "unexpected success",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(message).toContain("Rolled back: a.png. Rollback failures: none.");
+      expect(message).toContain("Media re-index not confirmed for restored files: a.png.");
+    });
+  });
+
+  test("names every file whose restore was not confirmed and the saved copy that may hold it", async () => {
+    const { executor, stage } = setup([0, 1]);
+    executor.setCommandError("push /fixtures/c.txt", new Error("push failed"));
+    executor.setCommandError(
+      // The restore is nested inside `sh -c '...'`, so its quotes appear escaped.
+      shellQuote(`mv -f ${shellQuote(`${DIR}/.automobile-t-1.bak`)} ${q("a.txt")}`).slice(1, -1),
+      new Error("device unavailable"),
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    let message = "";
+    try {
+      message = await stage({ files: [fileAt("a.txt"), fileAt("b.txt"), fileAt("c.txt")] }).then(
+        () => "unexpected success",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(message).toContain("Rolled back: none.");
+    expect(message).toContain(
+      `a.txt: restore not confirmed; its previous content may still be saved at ${DIR}/.automobile-t-1.bak`,
+    );
+    expect(message).toContain(
+      `b.txt: restore not confirmed; its previous content may still be saved at ${DIR}/.automobile-t-2.bak`,
+    );
   });
 });

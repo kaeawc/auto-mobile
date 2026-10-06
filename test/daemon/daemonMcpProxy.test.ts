@@ -19,7 +19,11 @@ import {
   type DaemonClientLike,
 } from "../../src/daemon/client";
 import type { DaemonRestartResult } from "../../src/daemon/manager";
-import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
+import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_TOOL_UNAVAILABLE_CODE,
+} from "../../src/daemon/types";
+import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import { ActionableError } from "../../src/models";
 import {
@@ -6688,6 +6692,211 @@ describe("DaemonMcpProxy", () => {
         isAvailableSpy.mockRestore();
         await proxy.close();
       }
+    });
+
+    // Issue #10177: an availability-gated tool is not a stale daemon. The daemon
+    // marks the rejection with DAEMON_TOOL_UNAVAILABLE_CODE (DaemonClient keeps
+    // response.code on the thrown error); the proxy must not reset the shared
+    // client, which would abort every sibling call in flight on it.
+    describe("availability-gated tools (issue #10177)", () => {
+      type GateClass = "debug-only" | "embedded-SDK-only" | "plan-only";
+      const GATE_REASON: Record<GateClass, string> = {
+        "debug-only": "--debug is disabled; start the daemon with --debug",
+        "embedded-SDK-only": "embedded SDK mode is disabled; start the daemon with --embedded-sdk",
+        "plan-only": "plan-only tool",
+      };
+      const GATE_META: Record<GateClass, string> = {
+        "debug-only": "automobile/debugOnly",
+        "embedded-SDK-only": "automobile/embeddedSdkOnly",
+        "plan-only": "automobile/planOnly",
+      };
+
+      // Enumerated from the committed definitions, which are generated with
+      // includeUnavailable from the live ToolRegistry and kept in sync with it
+      // (toolRegistration.integration.test.ts), so a newly gated tool joins this
+      // table without a hand edit.
+      const gatedTools = (
+        toolDefinitionsJson as Array<{ name: string; _meta?: Record<string, unknown> }>
+      ).flatMap((tool) => {
+        const classes = (Object.keys(GATE_META) as GateClass[]).filter(
+          (gateClass) => tool._meta?.[GATE_META[gateClass]] === true,
+        );
+        return classes.length === 0
+          ? []
+          : [
+              {
+                name: tool.name,
+                gateClass: classes[0],
+                reason: classes.map((c) => GATE_REASON[c]).join("; "),
+              },
+            ];
+      });
+
+      const gatedDaemonError = (name: string, reason: string) =>
+        Object.assign(new ActionableError(`MCP error -32603: Unknown tool: ${name}. ${reason}`), {
+          code: DAEMON_TOOL_UNAVAILABLE_CODE,
+        });
+
+      // A shared client whose close() rejects what is in flight, like
+      // DaemonClient.close() does ("Socket connection closed").
+      const createSharedClient = (rejectCall: (name: string) => Error | undefined) => {
+        const installStarted = Promise.withResolvers<void>();
+        const installRelease = Promise.withResolvers<void>();
+        const closed = Promise.withResolvers<never>();
+        closed.promise.catch(() => undefined);
+        let closeCount = 0;
+        class SharedClient extends FakeDaemonClient {
+          override async close(): Promise<void> {
+            closeCount++;
+            closed.reject(new DaemonUnavailableError("Socket connection closed"));
+            await super.close();
+          }
+        }
+        const client = new SharedClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          onCallTool: async (name) => {
+            if (name === "installApp") {
+              installStarted.resolve();
+              await Promise.race([installRelease.promise, closed.promise]);
+              return;
+            }
+            const error = rejectCall(name);
+            if (error) {
+              throw error;
+            }
+          },
+        });
+        return {
+          client,
+          installStarted: installStarted.promise,
+          releaseInstall: installRelease.resolve,
+          closeCount: () => closeCount,
+        };
+      };
+
+      const createProxy = (clientFactory: () => DaemonClientLike) =>
+        new DaemonMcpProxy({
+          clientFactory,
+          daemonManager: matchingDaemonManager(),
+          daemonAvailabilityProbe: async () => true,
+          autoStartDaemon: false,
+        });
+
+      test("the table covers every gate class in the registry", () => {
+        const classes = new Set(gatedTools.map((tool) => tool.gateClass));
+        expect([...classes].sort()).toEqual(["debug-only", "embedded-SDK-only", "plan-only"]);
+        expect(gatedTools.length).toBeGreaterThanOrEqual(18);
+      });
+
+      test.each(gatedTools)(
+        "$name ($gateClass): caller gets the gate reason, shared client untouched, sibling completes",
+        async ({ name, reason }) => {
+          const shared = createSharedClient((called) =>
+            called === name ? gatedDaemonError(name, reason) : undefined,
+          );
+          let factoryCalls = 0;
+          const proxy = createProxy(() => {
+            factoryCalls++;
+            return shared.client;
+          });
+          try {
+            let installSettled = false;
+            const install = proxy
+              .callTool("installApp", { apkPath: "/tmp/app.apk" })
+              .finally(() => {
+                installSettled = true;
+              });
+            await shared.installStarted;
+
+            let caught: unknown;
+            try {
+              await proxy.callTool(name, {});
+            } catch (error) {
+              caught = error;
+            }
+            expect(caught).toBeInstanceOf(DaemonToolUnavailableError);
+            expect((caught as DaemonToolUnavailableError).toolName).toBe(name);
+            expect((caught as Error).message).toContain(reason);
+
+            expect(shared.closeCount()).toBe(0);
+            expect(factoryCalls).toBe(1);
+            expect(installSettled).toBe(false);
+            expect(
+              shared.client.callToolCalls.filter((call) => call.toolName === name),
+            ).toHaveLength(1);
+
+            shared.releaseInstall();
+            await expect(install).resolves.toEqual({
+              content: [{ type: "text", text: "success" }],
+            });
+          } finally {
+            await proxy.close();
+          }
+        },
+      );
+
+      test("a gated tool this frontend has never heard of still surfaces the daemon's reason", async () => {
+        const reason = GATE_REASON["debug-only"];
+        const shared = createSharedClient((name) => gatedDaemonError(name, reason));
+        const proxy = createProxy(() => shared.client);
+        try {
+          await expect(proxy.callTool("futureGatedTool", {})).rejects.toThrow(
+            `Unknown tool: futureGatedTool. ${reason}`,
+          );
+          expect(shared.closeCount()).toBe(0);
+        } finally {
+          await proxy.close();
+        }
+      });
+
+      // A daemon that predates the marker sends the same prose with no code. The
+      // gate wording is deliberately NOT parsed: it takes the stale-daemon path
+      // (reconnect re-runs build-identity reconciliation and replaces that daemon).
+      test("an older daemon without the marker still takes the stale-daemon recovery", async () => {
+        const unmarked = new Error(
+          `MCP error -32603: Unknown tool: setUIState. ${GATE_REASON["debug-only"]}`,
+        );
+        const staleClient = new ScriptedDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolError: unmarked,
+        });
+        const recovered = { content: [{ type: "text", text: "after reconnect" }] };
+        const freshClient = new ScriptedDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolResult: recovered,
+        });
+        const clients = [staleClient, freshClient];
+        const proxy = createProxy(() => clients.shift()!);
+        try {
+          await expect(proxy.callTool("setUIState", {})).resolves.toEqual(recovered);
+          expect(staleClient.closeCallCount).toBe(1);
+          expect(freshClient.callToolCalls).toHaveLength(1);
+        } finally {
+          await proxy.close();
+        }
+      });
+
+      test("a genuine unknown tool from a stale daemon still resets and retries a non-idempotent call", async () => {
+        const shared = createSharedClient((name) =>
+          name === "setPreference"
+            ? new Error("MCP error -32603: Unknown tool: setPreference")
+            : undefined,
+        );
+        const recovered = { content: [{ type: "text", text: "after reconnect" }] };
+        const freshClient = new ScriptedDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolResult: recovered,
+        });
+        const clients: DaemonClientLike[] = [shared.client, freshClient];
+        const proxy = createProxy(() => clients.shift()!);
+        try {
+          await expect(proxy.callTool("setPreference", { key: "k" })).resolves.toEqual(recovered);
+          expect(shared.closeCount()).toBe(1);
+          expect(freshClient.callToolCalls).toHaveLength(1);
+        } finally {
+          await proxy.close();
+        }
+      });
     });
   });
 

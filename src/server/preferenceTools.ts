@@ -39,7 +39,7 @@ const getPreferenceBaseSchema = z
       .nonnegative()
       .optional()
       .describe(
-        "Android sharedPreferences only: user whose copy of the app to read/write (e.g. a work profile). Defaults to the user the app is installed for, as clearAppData resolves it.",
+        "Android sharedPreferences only: user whose copy of the app to read/write (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The result reports the userId used.",
       ),
   })
   .strict();

@@ -1303,6 +1303,87 @@ describe("AppPreferences", () => {
       expect(runAsCommands(adb).some((command) => command.includes("--user"))).toBe(false);
     });
 
+    test("stays on user 0 when the app is installed for both user 0 and the work profile", async () => {
+      const adb = workProfileAdb({ user0: true, user10: true });
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.setPreference(setInput);
+
+      expect(result).toMatchObject({ userId: 0 });
+      const commands = runAsCommands(adb);
+      expect(commands).toHaveLength(3);
+      expect(commands.some((command) => command.includes("--user"))).toBe(false);
+      expect(commands[0]).toBe("shell run-as com.example.app cat shared_prefs/settings.xml");
+    });
+
+    test("fails asking for userId when installed for several non-zero users but not user 0", async () => {
+      const adb = workProfileAdb({ user0: false, user10: true });
+      adb.setUsers([owner, work, { userId: 11, name: "Second", flags: 0x1030, running: true }]);
+      adb.setCommandResponse(
+        "shell pm list packages --user 11",
+        createExecResult("package:com.example.app", ""),
+      );
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      await expect(preferences.setPreference(setInput)).rejects.toThrow("Pass userId");
+      expect(runAsCommands(adb)).toEqual([]);
+    });
+
+    test("falls back to user 0 when the users cannot be listed", async () => {
+      class UnlistableUsersAdb extends FakeAdbExecutor {
+        override async listUsers(): Promise<never> {
+          throw new Error("dumpsys user unavailable");
+        }
+      }
+      const adb = new UnlistableUsersAdb();
+      adb.setCommandResponse(
+        "cat shared_prefs/settings.xml",
+        createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+      );
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "settings",
+        key: "launch_count",
+      });
+
+      expect(result.userId).toBe(0);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell run-as com.example.app cat shared_prefs/settings.xml",
+      ]);
+    });
+
+    test("falls back to user 0 when the package listing fails", async () => {
+      const adb = workProfileAdb({ user0: false, user10: true });
+      adb.setCommandError("shell pm list packages --user 0", new Error("pm unavailable"));
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.setPreference(setInput);
+
+      expect(result).toMatchObject({ userId: 0 });
+      expect(runAsCommands(adb).some((command) => command.includes("--user"))).toBe(false);
+    });
+
+    test("a single-user device issues no package listing to pick the default user", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "cat shared_prefs/settings.xml",
+        createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+      );
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      await preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "settings",
+        key: "launch_count",
+      });
+
+      expect(adb.getExecutedCommands().some((c) => c.includes("pm list packages"))).toBe(false);
+    });
+
     test("a single-user device sends the same unscoped run-as commands as before", async () => {
       const adb = new FakeAdbExecutor();
       adb.setCommandResponse(

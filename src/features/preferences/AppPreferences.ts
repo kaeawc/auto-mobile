@@ -20,7 +20,6 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
@@ -39,6 +38,7 @@ import {
   writeAndroidPreferencesXml,
   type AndroidPreferencesXmlDocument,
 } from "./AndroidPreferencesXmlFile";
+import { resolveDefaultAndroidPreferencesUser } from "./resolveAndroidPreferencesUser";
 import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
@@ -55,7 +55,7 @@ export interface GetPreferenceInput {
   key: string;
   /**
    * Android sharedPreferences only: the user whose copy of the app to read/write
-   * (`run-as <pkg> --user <id>`). Defaults to the user the other app-data tools resolve.
+   * (`run-as <pkg> --user <id>`). Defaults to user 0 when the app is installed for it.
    */
   userId?: number;
 }
@@ -334,23 +334,9 @@ export class AppPreferences {
     }
   }
 
-  /** Explicit `userId` wins; otherwise the user the package is installed for (as `clearAppData`). */
+  /** Explicit `userId` wins; otherwise user 0 unless the app is only on one other user. */
   private async resolveAndroidPreferencesUser(input: GetPreferenceInput): Promise<number> {
-    if (input.userId !== undefined) {
-      return input.userId;
-    }
-    try {
-      const target = await new AndroidUserTargetResolver(this.adb()).resolve({
-        packageName: input.appId,
-        installedOnly: true,
-      });
-      return target.userId;
-    } catch (error) {
-      throw toActionableError(
-        error,
-        `Failed to resolve the Android user for ${input.appId}. Pass userId explicitly`,
-      );
-    }
+    return input.userId ?? (await resolveDefaultAndroidPreferencesUser(this.adb(), input.appId!));
   }
 
   private adb(): AdbExecutor {

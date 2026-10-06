@@ -22,6 +22,7 @@ import { ExecutionTracker } from "../../src/server/executionTracker";
 
 import {
   PlanExecutionOrchestrator,
+  type PlanExecutionRequest,
   convertDebugStepsToRecords,
   VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
@@ -282,6 +283,120 @@ steps:
     const result = await orchestrator.execute();
     expect(result.success).toBe(false);
     expect(result.error).toContain("Device label requires a devices list");
+  });
+
+  test.each([
+    { devices: ["X", "Y"] },
+    { device: "X" },
+    { planContent: `name: nested\ndevices: [X, Y]\nsteps: []` },
+    {
+      planContent: `base64:${Buffer.from("name: nested\ndevices: [{label: X, platform: ios}]\nsteps: []").toString("base64")}`,
+    },
+  ])("rejects nested labels before allocation: %j", async (labels) => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const devicePool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", { timer }),
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("base", iosDevice.deviceId, "ios");
+    const outerLabels = { A: "base", B: "base:B" };
+    sessionManager.setDeviceLabels("base", outerLabels);
+    const allocate = spyOn(devicePool, "assignMultipleDevices").mockRejectedValue(
+      new Error("unexpected label allocation"),
+    );
+    const allocateByCriteria = spyOn(
+      devicePool,
+      "assignMultipleDevicesByCriteria",
+    ).mockRejectedValue(new Error("unexpected label allocation"));
+    const sessionsBefore = sessionManager.getAllSessions();
+
+    try {
+      const result = await runWithToolSelectionContext({ planRequest: {} }, () =>
+        new PlanExecutionOrchestrator(
+          { device: iosDevice, request: { ...baseRequest, sessionUuid: "base", ...labels } },
+          { ...baseDeps(), timer },
+        ).execute(),
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        "Nested executePlan cannot use devices/device labels. Remove the labels; nested plans run on the enclosing plan's session/device.",
+      );
+      expect(allocate).not.toHaveBeenCalled();
+      expect(allocateByCriteria).not.toHaveBeenCalled();
+      expect(sessionManager.getAllSessions()).toEqual(sessionsBefore);
+      expect(sessionManager.getDeviceLabels("base")).toEqual(outerLabels);
+      expect(executePlanMock).not.toHaveBeenCalled();
+    } finally {
+      allocate.mockRestore();
+      allocateByCriteria.mockRestore();
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test.each([false, true])("preserves label behavior with nested=%s", async (nested) => {
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const devicePool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", { timer }),
+    );
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+    await sessionManager.createSession("base", iosDevice.deviceId, "ios");
+    const outerLabels = { A: "base", B: "base:B" };
+    sessionManager.setDeviceLabels("base", outerLabels);
+    const allocate = spyOn(devicePool, "assignMultipleDevices").mockImplementation(
+      async (sessionIds) => {
+        for (const sessionId of sessionIds) {
+          if (!sessionManager.getSession(sessionId)) {
+            await sessionManager.createSession(sessionId, iosDevice.deviceId, "ios");
+          }
+        }
+        return new Map(sessionIds.map((id) => [id, iosDevice.deviceId]));
+      },
+    );
+    const request: PlanExecutionRequest = {
+      ...baseRequest,
+      sessionUuid: "base",
+      ...(nested ? {} : { devices: ["X", "Y"], device: "X" }),
+    };
+    const construct = () =>
+      new PlanExecutionOrchestrator(
+        { device: iosDevice, request },
+        {
+          ...baseDeps(),
+          timer,
+        },
+      );
+
+    try {
+      // The handler constructs before installing its own planRequest context.
+      const orchestrator = nested
+        ? await runWithToolSelectionContext({ planRequest: {} }, async () => construct())
+        : construct();
+      const result = await runWithToolSelectionContext({ planRequest: {} }, () =>
+        orchestrator.execute(),
+      );
+      expect(result.success).toBe(true);
+      expect(executePlanMock).toHaveBeenCalledTimes(1);
+      if (nested) {
+        expect(allocate).not.toHaveBeenCalled();
+        expect(result.deviceMapping).toBeUndefined();
+        expect(sessionManager.getDeviceLabels("base")).toEqual(outerLabels);
+        expect(sessionManager.getAllSessions()).toHaveLength(1);
+        expect(executePlanMock.mock.calls[0][3]).toBe(iosDevice.deviceId);
+        expect(executePlanMock.mock.calls[0][4]).toBe("base");
+      } else {
+        expect(allocate).toHaveBeenCalledWith(["base", "base:Y"], 5000, "ios");
+        expect(sessionManager.getSession("base:Y")).not.toBeNull();
+        expect(sessionManager.getDeviceLabels("base")).toEqual({ X: "base", Y: "base:Y" });
+        expect(result.deviceMapping).toEqual({ X: iosDevice.deviceId, Y: iosDevice.deviceId });
+      }
+    } finally {
+      allocate.mockRestore();
+      DaemonState.getInstance().reset();
+      sessionManager.stopCleanupTimer();
+    }
   });
 
   test("keeps every labeled session assigned when expired setup follows allocation", async () => {

@@ -1904,6 +1904,11 @@ sets the minimum request count.
 
 `executePlan.planContent` contains YAML plan content (also accepts a `base64:`
 prefix). `startStep` is the start step index (default 0).
+Nested `executePlan` calls run on the enclosing plan's session/device. Remove
+`devices`/`device` labels from the nested call and device declarations from its
+YAML; otherwise execution fails before label allocation with: "Nested executePlan
+cannot use devices/device labels. Remove the labels; nested plans run on the
+enclosing plan's session/device."
 `deviceAllocationTimeoutMs` is the device allocation timeout in milliseconds
 (default 300000). For multi-device failures, `abortStrategy` selects `immediate`
 (default) or `finish-current-step`. `testMetadata` supplies test identity

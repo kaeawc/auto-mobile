@@ -545,6 +545,52 @@ describe("videoRecordingManager", () => {
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
     });
 
+    test("size cap measures the live capture file, not the not-yet-written output (#10017)", async () => {
+      const probed: string[] = [];
+      fakeBackend.setLiveCapturePath(
+        (config) => `${config.outputDirectory}/${config.recordingId}-raw.mov`,
+      );
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        // The final output is absent until stop's post-process; only the raw file grows.
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return filePath.endsWith("-raw.mov") ? capBytes * 2 : 0;
+        },
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      expect(active.liveCapturePath).toBe(
+        `${path.dirname(active.outputPath)}/${active.recordingId}-raw.mov`,
+      );
+      expect(active.liveCapturePath).not.toBe(active.outputPath);
+
+      const stopping = fakeBackend.waitForStopCall();
+      fakeTimer.advanceTime(15_000);
+      await stopping;
+      await stopVideoRecording(active.recordingId);
+
+      expect(probed).toEqual([active.liveCapturePath!]);
+      expect(fakeBackend.stopCalls).toHaveLength(1);
+      expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("size cap still measures the output path when the backend reports no live path", async () => {
+      const probed: string[] = [];
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return 0;
+        },
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      expect(active.liveCapturePath).toBeUndefined();
+      fakeTimer.advanceTime(15_000);
+      await Promise.resolve();
+      expect(probed).toEqual([active.outputPath]);
+      expect(fakeBackend.stopCalls).toHaveLength(0);
+    });
+
     test.each([
       ["ENOENT", 0],
       ["EACCES", 3],
@@ -1746,6 +1792,43 @@ describe("videoRecordingManager", () => {
       // restores it and also schedules a bounded stop retry.
       expect(fakeTimer.getPendingIntervalCount()).toBe(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+    });
+
+    test("re-armed size monitor keeps probing the live capture path (#10017)", async () => {
+      const capBytes = baseConfig.maxArchiveSizeMb * 1024 * 1024;
+      const probed: string[] = [];
+      fakeBackend.setLiveCapturePath(
+        (config) => `${config.outputDirectory}/${config.recordingId}-raw.mov`,
+      );
+      await reconfigureRetention(
+        { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
+        async (filePath) => {
+          probed.push(filePath);
+          return filePath.endsWith("-raw.mov") ? capBytes * 2 : 0;
+        },
+      );
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 300 });
+      let stopAttempts = 0;
+      let stopped = Promise.withResolvers<void>();
+      fakeBackend.stop = async () => {
+        stopAttempts++;
+        stopped.resolve();
+        throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+      };
+
+      fakeTimer.advanceTime(1000);
+      await stopped.promise;
+      await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+      // Retained safety re-armed the monitor; its next tick must still see the raw file.
+      stopped = Promise.withResolvers<void>();
+      fakeTimer.advanceTime(1000);
+      await stopped.promise;
+
+      expect(stopAttempts).toBeGreaterThanOrEqual(2);
+      expect(probed.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(probed)).toEqual(
+        new Set([`${path.dirname(active.outputPath)}/${active.recordingId}-raw.mov`]),
+      );
     });
 
     test("in-progress recording under the cap keeps running", async () => {

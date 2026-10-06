@@ -19,9 +19,9 @@ import {
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   readAndroidPreferencesXml,
-  resolveAndroidPreferencesUser,
   sanitizeAndroidPreferencesFileName,
 } from "../features/preferences/AndroidPreferencesXmlFile";
+import { resolveDefaultAndroidPreferencesUser } from "../features/preferences/resolveAndroidPreferencesUser";
 import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { isCtrlProxyStorageUnavailableError } from "../features/observe/android/CtrlProxyStorage";
 
@@ -122,11 +122,11 @@ async function getPreferenceEntriesForDevice(
       }
       try {
         const adb = adbClientFactory.create(device);
-        // A resource URI carries no user, so resolve it as the preference tools do: the user the
-        // package is installed for. A URI could name a user later through a `?userId=` query
+        // A resource URI carries no user, so resolve it as the preference tools do: user 0 unless the
+        // app is only on one other user. A URI could name a user later through a `?userId=` query
         // parameter (templates can declare `queryParamNames`) without changing the path shape; the
         // cache key would then need the user too.
-        const userId = await resolveAndroidPreferencesUser(adb, packageName);
+        const userId = await resolveDefaultAndroidPreferencesUser(adb, packageName);
         const xml = await readAndroidPreferencesXml(
           adb,
           packageName,

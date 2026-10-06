@@ -1982,17 +1982,21 @@ tool selection, see [Dynamic Tools](using/dynamic-tools.md).
 
 For `scope: "sharedPreferences"`, `getPreference` and `setPreference` accept an optional
 `userId` (for example a work profile). It is passed to `adb shell run-as <pkg> --user <id>`
-for nonzero users; user 0 keeps the unscoped `run-as <pkg>` command. When omitted, the user
-is resolved like `clearAppData` (the user the package is installed for), and the result
-reports the `userId` that was read or written. `userId` is rejected for other scopes.
+for nonzero users; user 0 keeps the unscoped `run-as <pkg>` command. When omitted, user 0 is
+used whenever the package is installed for it. Another user is used only when the package is
+not installed for user 0 and is installed for exactly one other running user; if several such
+users have it, the call fails and asks for `userId`. If the device's users cannot be listed,
+user 0 is used (with a warning). The result always reports the `userId` that was read or
+written. `userId` is rejected for other scopes.
 
 `setKeyValue`, `removeKeyValue` and `clearKeyValueFile` accept the same optional `userId` on
 Android. It applies to their direct-file fallback (the `run-as` XML edit used when the SDK route
-is disabled by inspection or mutation policy) and resolves identically: an explicit `userId`
-wins, otherwise the user the package is installed for. The SDK route itself is not user-scoped.
+is disabled by inspection or mutation policy) and resolve the default identically: an explicit
+`userId` wins, otherwise user 0 when the package is installed for it, else the one other running
+user that has it (several such users: the call fails and asks for `userId`). The SDK route itself is not user-scoped.
 The mutation queue is keyed per user, so the same file in two users never serializes together.
 `userId` is rejected on iOS devices. The `automobile:devices/{deviceId}/storage/...` entries
-resource has no input, so its `run-as` fallback reads the user the package is installed for.
+resource has no input, so its `run-as` fallback reads the same default user.
 
 ### iOS UserDefaults preferences
 

@@ -401,16 +401,19 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
     },
   );
 
-  test.each(toolCalls)("%s defaults to the user the app is installed for", async (name, extra) => {
-    const adb = WORK_PROFILE_ADB();
-    useFallback(adb);
+  test.each(toolCalls)(
+    "%s defaults to the work profile when only it has the app",
+    async (name, extra) => {
+      const adb = WORK_PROFILE_ADB();
+      useFallback(adb);
 
-    await toolHandler(name)(ANDROID_DEVICE, { appId: APP_ID, name: FILE_NAME, ...extra });
+      await toolHandler(name)(ANDROID_DEVICE, { appId: APP_ID, name: FILE_NAME, ...extra });
 
-    for (const command of runAsCommands(adb)) {
-      expect(command).toStartWith(`shell run-as ${APP_ID} --user 10 `);
-    }
-  });
+      for (const command of runAsCommands(adb)) {
+        expect(command).toStartWith(`shell run-as ${APP_ID} --user 10 `);
+      }
+    },
+  );
 
   test.each(toolCalls)("%s rejects userId on an iOS device", async (name, extra) => {
     setStorageToolsDependenciesForTesting({

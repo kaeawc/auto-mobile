@@ -212,7 +212,7 @@ const userIdSchema = z
   .nonnegative()
   .optional()
   .describe(
-    "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to the user the app is installed for, as clearAppData resolves it. The SDK route is not user-scoped.",
+    "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
   );
 
 /** Android-only input: a `userId` on an iOS device would be silently ignored, so reject it. */

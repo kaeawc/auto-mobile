@@ -9,12 +9,12 @@ import {
   readAndroidPreferencesXml,
   readAndroidPreferencesXmlIfExists,
   removeNamedNodes,
-  resolveAndroidPreferencesUser,
   sanitizeAndroidPreferencesFileName,
   serializeAndroidPreferencesXml,
   writeAndroidPreferencesXml,
   type AndroidPreferencesXmlDocument,
 } from "../preferences/AndroidPreferencesXmlFile";
+import { resolveDefaultAndroidPreferencesUser } from "../preferences/resolveAndroidPreferencesUser";
 import { getAndroidSharedPreferencesMutationCoordinator } from "../preferences/AndroidSharedPreferencesMutationCoordinator";
 import type { KeyValueType } from "./storageTypes";
 import { float32ToJavaString } from "../../utils/float32ToJavaString";
@@ -33,8 +33,8 @@ import { float32ToJavaString } from "../../utils/float32ToJavaString";
  * as `setPreference` for that fallback case.
  *
  * Like `setPreference`, every `run-as` targets one Android user: an explicit `userId`, else the
- * user the package is installed for (see `resolveAndroidPreferencesUser`), so a work-profile app
- * is read and written in its own profile rather than user 0 (issue #9964).
+ * default (see `resolveDefaultAndroidPreferencesUser`: user 0 unless the app is only on one other
+ * user), so a work-profile-only app is read and written in its own profile (issue #9964).
  */
 
 const KEY_VALUE_TYPE_TO_TAG: Partial<Record<KeyValueType, string>> = {
@@ -95,7 +95,7 @@ export async function setAndroidKeyValueDirect(
   userId?: number,
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
-  const targetUser = await resolveAndroidPreferencesUser(adb, appId, userId);
+  const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
     const existingXml = await readAndroidPreferencesXml(adb, appId, safeFileName, targetUser);
     const document = await parseAndroidPreferencesXml(existingXml);
@@ -127,7 +127,7 @@ export async function removeAndroidKeyValueDirect(
   userId?: number,
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
-  const targetUser = await resolveAndroidPreferencesUser(adb, appId, userId);
+  const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
     const { xml: existingXml, exists } = await readAndroidPreferencesXmlIfExists(
       adb,
@@ -160,7 +160,7 @@ export async function clearAndroidKeyValueFileDirect(
   userId?: number,
 ): Promise<void> {
   const safeFileName = androidKeyValueFileName(fileName);
-  const targetUser = await resolveAndroidPreferencesUser(adb, appId, userId);
+  const targetUser = userId ?? (await resolveDefaultAndroidPreferencesUser(adb, appId));
   return serializeDirectMutationPerFile(deviceId, appId, safeFileName, targetUser, async () => {
     const { exists } = await readAndroidPreferencesXmlIfExists(
       adb,

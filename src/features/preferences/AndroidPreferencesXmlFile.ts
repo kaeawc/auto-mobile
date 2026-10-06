@@ -1,7 +1,6 @@
 import { Builder, parseStringPromise } from "xml2js";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ActionableError, toActionableError } from "../../models";
-import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuoteUnlessSafe } from "../../utils/shellQuote";
 
@@ -25,34 +24,6 @@ export type AndroidPreferencesXmlDocument = { map: Record<string, unknown> };
  */
 export function androidPreferencesRunAs(appId: string, userId?: number): string {
   return `shell run-as ${shellQuoteUnlessSafe(appId)}${userId ? ` --user ${userId}` : ""}`;
-}
-
-/**
- * The Android user whose copy of `appId` the `run-as` calls should target. An explicit `userId`
- * wins; otherwise it is the user the package is installed for, resolved exactly as `clearAppData`
- * does (issue #9919). Shared by `AppPreferences` and the key-value fallback/resource paths so
- * every `run-as` caller resolves the default the same way (issue #9964).
- */
-export async function resolveAndroidPreferencesUser(
-  adb: AdbExecutor,
-  appId: string,
-  userId?: number,
-): Promise<number> {
-  if (userId !== undefined) {
-    return userId;
-  }
-  try {
-    const target = await new AndroidUserTargetResolver(adb).resolve({
-      packageName: appId,
-      installedOnly: true,
-    });
-    return target.userId;
-  } catch (error) {
-    throw toActionableError(
-      error,
-      `Failed to resolve the Android user for ${appId}. Pass userId explicitly`,
-    );
-  }
 }
 
 function runAsTarget(appId: string, userId?: number): string {

@@ -668,7 +668,7 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
   });
 
   test.each(mutations)(
-    "%s: with no userId it resolves the user the app is installed for",
+    "%s: with no userId a work-profile-only app resolves to the work profile",
     async (_name, run) => {
       const adb = adbWithUsers({ user0: false, user10: true });
 
@@ -698,13 +698,43 @@ describe("Android user targeting for the direct key-value fallback (#9964)", () 
     },
   );
 
-  test("a resolution failure is an actionable error that asks for an explicit userId", async () => {
-    const adb = new FakeAdbExecutor();
-    adb.setUsers([]);
+  test.each(mutations)(
+    "%s: installed for both user 0 and the work profile defaults to user 0",
+    async (_name, run) => {
+      const adb = adbWithUsers({ user0: true, user10: true });
+
+      await run(adb);
+
+      const commands = runAsCommands(adb);
+      expect(commands).toHaveLength(2);
+      expect(commands[0]).toBe(`shell run-as ${APP} cat shared_prefs/settings.xml`);
+      expect(commands.some((command) => command.includes("--user"))).toBe(false);
+    },
+  );
+
+  test("several non-zero users with the app and none on user 0 asks for an explicit userId", async () => {
+    const adb = adbWithUsers({ user0: false, user10: true });
+    adb.setUsers([owner, work, { userId: 11, name: "Second", flags: 0x1030, running: true }]);
+    adb.setCommandResponse(
+      "shell pm list packages --user 11",
+      createExecResult(`package:${APP}`, ""),
+    );
 
     await expect(
       setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING"),
-    ).rejects.toThrow(/Failed to resolve the Android user for com\.example\.app\. Pass userId/);
+    ).rejects.toThrow(/Pass userId to choose one/);
     expect(runAsCommands(adb)).toHaveLength(0);
+  });
+
+  test("a failure to list users falls back to user 0 instead of failing", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.listUsers = async () => {
+      throw new Error("dumpsys user unavailable");
+    };
+    adb.setCommandResponse("cat shared_prefs/settings.xml", createExecResult(STORED_XML, ""));
+
+    await setAndroidKeyValueDirect(adb, "device-1", APP, "settings", "k", "v", "STRING");
+
+    expect(runAsCommands(adb)[0]).toBe(`shell run-as ${APP} cat shared_prefs/settings.xml`);
   });
 });

@@ -33,12 +33,12 @@ import {
   parseAndroidPreferencesXml,
   readAndroidPreferencesXml,
   removeNamedNodes,
-  resolveAndroidPreferencesUser,
   sanitizeAndroidPreferencesFileName,
   serializeAndroidPreferencesXml,
   writeAndroidPreferencesXml,
   type AndroidPreferencesXmlDocument,
 } from "./AndroidPreferencesXmlFile";
+import { resolveDefaultAndroidPreferencesUser } from "./resolveAndroidPreferencesUser";
 import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
@@ -55,7 +55,7 @@ export interface GetPreferenceInput {
   key: string;
   /**
    * Android sharedPreferences only: the user whose copy of the app to read/write
-   * (`run-as <pkg> --user <id>`). Defaults to the user the other app-data tools resolve.
+   * (`run-as <pkg> --user <id>`). Defaults to user 0 when the app is installed for it.
    */
   userId?: number;
 }
@@ -334,9 +334,9 @@ export class AppPreferences {
     }
   }
 
-  /** Explicit `userId` wins; otherwise the user the package is installed for (as `clearAppData`). */
-  private resolveAndroidPreferencesUser(input: GetPreferenceInput): Promise<number> {
-    return resolveAndroidPreferencesUser(this.adb(), input.appId!, input.userId);
+  /** Explicit `userId` wins; otherwise user 0 unless the app is only on one other user. */
+  private async resolveAndroidPreferencesUser(input: GetPreferenceInput): Promise<number> {
+    return input.userId ?? (await resolveDefaultAndroidPreferencesUser(this.adb(), input.appId!));
   }
 
   private adb(): AdbExecutor {

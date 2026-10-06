@@ -3317,6 +3317,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val eventPackage = event.packageName?.toString()
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
     if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    // A window appearing in an app is the cheapest sign its process (re)started; an open storage
+    // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
+    // for every package without a subscription, so this is free on the hot path.
+    if (
+      eventPackage != null &&
+        event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        ::storageSubscriptionManager.isInitialized
+    ) {
+      storageSubscriptionManager.onPackageActivity(eventPackage)
+    }
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED

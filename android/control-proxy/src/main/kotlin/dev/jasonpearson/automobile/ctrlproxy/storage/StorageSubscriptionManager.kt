@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import java.util.ArrayDeque
@@ -82,6 +83,9 @@ class StorageSubscriptionManager(
     // (#10069).
     @Volatile var lastSequence: Long = 0,
     @Volatile var processToken: String? = null,
+    // Set when a restart was detected but the app's listener has not been re-armed yet (the
+    // re-arm call failed or the app vanished again). The next fetch for this file retries it.
+    @Volatile var needsRearm: Boolean = false,
   )
 
   /** State for a package being observed. */
@@ -421,6 +425,7 @@ class StorageSubscriptionManager(
         existing.lastSequence = 0
       }
       existing.processToken = token
+      existing.needsRearm = false
       return Result.success(existing.subscription)
     }
 
@@ -903,31 +908,90 @@ class StorageSubscriptionManager(
     val firstReply = requestChanges(uri, fileName, subState.lastSequence) ?: return true
     val reportedToken = firstReply.processToken
     val knownToken = subState.processToken
-    var pending = firstReply.changes
-    var advanceCursor = true
-    if (knownToken != null && reportedToken != null && knownToken != reportedToken) {
-      // The app restarted: its sequence counter began again at 1, so the old cursor would hide
-      // every new change. The SDK removes the changes it returns, so the first reply (filtered by
-      // the stale cursor) already holds new-process changes that a re-read will never return
-      // again. Keep them and merge with the read from 0, de-duplicated by sequence number.
+    val restarted = knownToken != null && reportedToken != null && knownToken != reportedToken
+    if (restarted) {
+      // The app restarted: its sequence counter began again at 1 and its listener is gone, so the
+      // old cursor would hide every new change and no further change would ever be queued.
       Log.i(
         TAG,
-        "Inspected app restarted; resetting storage sequence for ${subState.subscription.subscriptionId}",
+        "Inspected app restarted; re-arming storage subscription ${subState.subscription.subscriptionId}",
       )
       subState.lastSequence = 0
       subState.processToken = reportedToken
+      subState.needsRearm = true
+    } else if (knownToken == null) {
+      subState.processToken = reportedToken
+    }
+    if (subState.needsRearm) rearmListener(packageName, fileName, uri, subState)
+
+    var pending = firstReply.changes
+    var advanceCursor = true
+    if (restarted) {
+      // The SDK removes the changes it returns, so the first reply (filtered by the stale cursor)
+      // already holds new-process changes that a re-read will never return again. Keep them and
+      // merge with the read from 0, de-duplicated by sequence number. If the re-read failed, its
+      // changes are still queued in the app: deliver the first reply but leave the cursor at 0 so
+      // the next poll reads them.
       val reread = requestChanges(uri, fileName, 0)
-      // If the re-read failed, its changes are still queued in the app. Deliver the first reply
-      // but leave the cursor at 0 so the next poll reads them.
       advanceCursor = reread != null
       pending =
         (pending + reread?.changes.orEmpty())
           .distinctBy { it.sequenceNumber }
           .sortedBy { it.sequenceNumber }
-    } else if (knownToken == null) {
-      subState.processToken = reportedToken
     }
+    return deliverChanges(packageName, fileName, subState, pending, advanceCursor)
+  }
 
+  /**
+   * Tells the manager the app [packageName] showed a window. A freshly started app process shows a
+   * window shortly after it starts, and a restart leaves no push of its own (the old process's
+   * listener is gone and the new one has none until it is re-armed), so this is the liveness signal
+   * that makes an open subscription notice a restart without the client re-subscribing (#10069).
+   *
+   * Cost: nothing while idle (no timer, no polling). A subscribed package triggers one `getChanges`
+   * call per subscribed file per signal, coalesced by the package's conflated worker queue; a
+   * package with no subscription is a single map miss.
+   */
+  fun onPackageActivity(packageName: String) {
+    if (destroyed) return
+    packageObservers[packageName]?.signals?.trySend(Unit)
+  }
+
+  /**
+   * Re-registers the app-side listener in the new process. Leaves [SubscriptionState.needsRearm]
+   * set when the call fails so the next signal retries; a retry happens only when a signal arrives,
+   * never on a timer.
+   */
+  private suspend fun rearmListener(
+    packageName: String,
+    fileName: String,
+    uri: Uri,
+    subState: SubscriptionState,
+  ) {
+    val extras = Bundle().apply { putString("fileName", fileName) }
+    val result = backgroundCalls.call(uri, "subscribeToFile", extras)
+    coroutineContext.ensureActive()
+    if (result == null || !result.getBoolean("success", false)) {
+      Log.w(TAG, "Could not re-arm storage subscription $packageName:$fileName; will retry")
+      return
+    }
+    val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
+    val token = (response as? StorageResponse.SubscriptionResult)?.processToken
+    if (token != null && token != subState.processToken) {
+      // The app restarted again between the read and the re-arm.
+      subState.processToken = token
+      subState.lastSequence = 0
+    }
+    subState.needsRearm = false
+  }
+
+  private fun deliverChanges(
+    packageName: String,
+    fileName: String,
+    subState: SubscriptionState,
+    pending: List<StorageChangeEvent>,
+    advanceCursor: Boolean,
+  ): Boolean {
     for (change in pending) {
       val event =
         PreferenceChangeEvent(

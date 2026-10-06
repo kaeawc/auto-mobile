@@ -69,6 +69,29 @@ describe("accessibilityTools", () => {
     }
   });
 
+  test("unreadable iOS VoiceOver status reports a reason without enabled false (#10038)", async () => {
+    const client = new FakeIOSCtrlProxy(new FakeTimer());
+    const spies = [
+      spyOn(iosVoiceOverDetector, "invalidateCache").mockImplementation(() => {}),
+      spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as IOSCtrlProxyClient),
+      spyOn(iosVoiceOverDetector, "resolveState").mockResolvedValue(null),
+    ];
+    try {
+      registerAccessibilityTools();
+      const response = await accessibilityHandler()(IOS_DEVICE, {});
+      expect(response).toMatchObject({
+        structuredContent: {
+          service: "unknown",
+          reason: "could not determine VoiceOver state: CtrlProxy VoiceOver probe unavailable",
+        },
+      });
+      expect(response.structuredContent).not.toHaveProperty("enabled");
+      expect(accessibilityStateSchema.safeParse(response.structuredContent).success).toBe(true);
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+  });
+
   describe("registration", () => {
     test("registers the accessibility tool", () => {
       registerAccessibilityTools();
@@ -256,7 +279,7 @@ describe("accessibilityTools", () => {
           calls.push("client");
           return client as IOSCtrlProxyClient;
         }),
-        spyOn(iosVoiceOverDetector, "isVoiceOverEnabled").mockImplementation(async () => {
+        spyOn(iosVoiceOverDetector, "resolveState").mockImplementation(async () => {
           calls.push("enabled");
           return enabled;
         }),

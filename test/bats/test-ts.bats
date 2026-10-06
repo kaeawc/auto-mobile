@@ -837,6 +837,37 @@ EOF
   [[ "$output" == *"\\*\\*/\\*.integration.test.ts"* ]]
 }
 
+@test "coverage prints one chunked invocation per default shard over an explicit file list" {
+  stub_chunk_discovery
+  run_lane coverage
+  [ "$status" -eq 0 ]
+  # Two shard processes by default, never the four of the failed #10213 attempt.
+  [ "$(wc -l <<< "$output" | tr -d ' ')" -eq 2 ]
+  # Chunker args: root, OS, chunk size (50), no JUnit dir (printed as ''), 1-based shard.
+  empty="''"
+  [[ "$(sed -n 1p <<< "$output")" == *" 50 ${empty} 1 "* ]]
+  [[ "$(sed -n 2p <<< "$output")" == *" 50 ${empty} 2 "* ]]
+  [[ "$output" == *"bun-unit-chunks.sh"* ]]
+  [[ "$output" == *" -- test/fixture00.test.ts test/fixture02.test.ts "* ]]
+  [[ "$output" == *" -- test/fixture01.test.ts test/fixture03.test.ts "* ]]
+}
+
+@test "coverage chunk and shard sizes are configurable and validated before Bun" {
+  stub_chunk_discovery
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 AUTOMOBILE_COVERAGE_SHARDS=3 \
+    AUTOMOBILE_COVERAGE_CHUNK_FILES=7 bash "$SCRIPT" coverage
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output" | tr -d ' ')" -eq 3 ]
+  empty="''"
+  [[ "$output" == *" 7 ${empty} 3 "* ]]
+
+  for value in '' abc 1.5 0 -1 05; do
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_COVERAGE_CHUNK_FILES="$value" bash "$SCRIPT" coverage
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_COVERAGE_CHUNK_FILES must be a positive integer"* ]]
+  done
+}
+
 @test "coverage wall timeout is 720 seconds" {
   cat > "$STUB_BIN/timeout" <<'EOF'
 #!/usr/bin/env bash

@@ -173,6 +173,9 @@ function convertDBScrollPosition(
 /** Above SQLite's 5s busy timeout and normal loaded writes; callers only log failures, while 15s bounds a wedged tracking queue. */
 const NAVIGATION_WRITE_TIMEOUT_MS = 15_000;
 
+/** Consecutive navigateTo calls whose scroll search missed an edge's target before it is demoted (#10154). */
+const EDGE_TARGET_MISS_DEMOTION_THRESHOLD = 2;
+
 function assertNavigationWriteCurrent(epoch: number, state: { epoch: number }): void {
   if (epoch !== state.epoch) {
     throw new ActionableError("Navigation write was superseded after its deadline");
@@ -214,6 +217,8 @@ export interface NavigationGraphService
   // Pathfinding
   findPath(targetScreen: string): Promise<PathResult>;
   recordEdgeReplayOutcome(edge: NavigationEdge, reached: boolean): void;
+  hasEdgeReplayFailure(edge: NavigationEdge): boolean;
+  settleTransientEdgeFailure(edge: NavigationEdge, searched: boolean): void;
 
   // Graph queries
   getKnownScreens(): Promise<string[]>;
@@ -465,6 +470,13 @@ export class NavigationGraphManager implements NavigationGraphService {
   // a daemon restart may forget (the edge is simply tried again), not graph data, so it
   // needs no column or migration. Cleared when the edge works or is re-recorded.
   private failedEdgeReplays: Map<string, Set<string>> = new Map();
+
+  // Consecutive navigateTo calls whose replay of an edge found its target missing even
+  // after a bounded scroll search (#10154), per (app, from, to) pair then action. One
+  // miss may only mean the list is positioned differently; repeated misses promote the
+  // edge into `failedEdgeReplays` so later calls stop paying for the search. A replay
+  // that reaches its target clears the count.
+  private edgeTargetMisses: Map<string, Map<string, number>> = new Map();
 
   // Test coverage tracking
   private activeTestSession: TestCoverageSession | null = null;
@@ -1605,8 +1617,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
 
-    // Get all edges for BFS
-    const dbEdges = await this.repository.getEdges(this.currentAppId);
+    // Distinct transitions for BFS: path finding must not load every traversal row (#10194)
+    const dbEdges = await this.repository.getDistinctEdges(this.currentAppId);
 
     const appId = this.currentAppId;
     const edgesBySource = indexPathEdgesBySource(dbEdges, (edge) =>
@@ -1670,11 +1682,61 @@ export class NavigationGraphManager implements NavigationGraphService {
     const actionKey = edgeActionKey(edge.interaction?.toolName, edge.interaction?.args);
     if (reached) {
       this.forgetFailedEdgeReplay(pairKey, actionKey);
+      this.forgetEdgeTargetMisses(pairKey, actionKey);
       return;
     }
+    this.addFailedEdgeReplay(pairKey, actionKey);
+  }
+
+  private addFailedEdgeReplay(pairKey: string, actionKey: string): void {
     const actions = this.failedEdgeReplays.get(pairKey) ?? new Set<string>();
     actions.add(actionKey);
     this.failedEdgeReplays.set(pairKey, actions);
+  }
+
+  /** Whether `edge`'s action is currently remembered as failed (ranked last by findPath). */
+  public hasEdgeReplayFailure(edge: NavigationEdge): boolean {
+    if (!this.currentAppId) {
+      return false;
+    }
+    const actions = this.failedEdgeReplays.get(edgePairKey(this.currentAppId, edge.from, edge.to));
+    return actions?.has(edgeActionKey(edge.interaction?.toolName, edge.interaction?.args)) ?? false;
+  }
+
+  /**
+   * End of a navigateTo call in which replaying `edge` failed only because its target
+   * was not on screen, and the call remembered that as a failure so the fallback edge
+   * would rank first (#10154). The call-scoped failure is forgotten unless this was
+   * the edge's `EDGE_TARGET_MISS_DEMOTION_THRESHOLD`th consecutive call whose scroll
+   * `searched` for the target without finding it, which keeps the failure so later
+   * calls try the edge last until it next reaches its target. A failure without a
+   * search (the search was refused or skipped) never counts towards demotion.
+   */
+  public settleTransientEdgeFailure(edge: NavigationEdge, searched: boolean): void {
+    if (!this.currentAppId) {
+      return;
+    }
+    const pairKey = edgePairKey(this.currentAppId, edge.from, edge.to);
+    const actionKey = edgeActionKey(edge.interaction?.toolName, edge.interaction?.args);
+    const misses = searched ? this.countEdgeTargetMiss(pairKey, actionKey) : 0;
+    if (misses < EDGE_TARGET_MISS_DEMOTION_THRESHOLD) {
+      this.forgetFailedEdgeReplay(pairKey, actionKey);
+    }
+  }
+
+  private countEdgeTargetMiss(pairKey: string, actionKey: string): number {
+    const actions = this.edgeTargetMisses.get(pairKey) ?? new Map<string, number>();
+    const count = (actions.get(actionKey) ?? 0) + 1;
+    actions.set(actionKey, count);
+    this.edgeTargetMisses.set(pairKey, actions);
+    return count;
+  }
+
+  private forgetEdgeTargetMisses(pairKey: string, actionKey: string): void {
+    const actions = this.edgeTargetMisses.get(pairKey);
+    if (actions?.delete(actionKey) && actions.size === 0) {
+      this.edgeTargetMisses.delete(pairKey);
+    }
   }
 
   private forgetFailedEdgeReplay(pairKey: string, actionKey: string): void {
@@ -1982,6 +2044,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentScreen = null;
       this.failedEdgeReplays.clear();
+      this.edgeTargetMisses.clear();
       logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${appId}`);
       this.notifyGraphUpdated();
     }
@@ -2025,7 +2088,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     }
 
     const dbNodes = await this.repository.getNodes(appId);
-    const dbEdges = await this.repository.getEdges(appId);
+    // One edge per distinct transition (newest traversal's metadata), not per traversal (#10194)
+    const dbEdges = await this.repository.getDistinctEdges(appId);
 
     const nodes: NavigationNode[] = [];
     for (const dbNode of dbNodes) {

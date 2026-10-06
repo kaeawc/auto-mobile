@@ -23,6 +23,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
+  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
@@ -93,7 +94,11 @@ import {
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
-import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
+import {
+  daemonProcessOptions,
+  daemonReuseOptions,
+  CONNECTION_PRESENTATION_OPTION_KEYS,
+} from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,
   LivenessRecovery,
@@ -686,7 +691,7 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "mcpRecording",
   "noNavigationScreenshots",
   ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
-    (spec) => spec.field !== "toolResultsNoStructuredContent",
+    (spec) => !CONNECTION_PRESENTATION_OPTION_KEYS.some((key) => key === spec.field),
   ).map((spec) => spec.field),
 ];
 
@@ -768,9 +773,7 @@ function requestedOptionDeficits<T>(
  * the daemon already has is never reported as a deficit just because a
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
  * Default-off booleans are compared strictly (`=== true`), so `undefined` and
- * `false` read as "no opinion". Compact metadata is default-on: explicit false
- * is a request, and an unspecified running value cannot prove it is satisfied
- * (the saved feature flag may differ from the default).
+ * `false` read as "no opinion".
  * Strings and marker arrays count only when the client
  * supplies one that differs from the daemon's. Connection presentation options
  * are intentionally absent from this comparison.
@@ -786,16 +789,8 @@ function startupOptionDeficits(
       REUSE_CRITICAL_OPTION_KEYS,
       requested,
       running,
-      (options, key) =>
-        key === "actionsCompactMetadata"
-          ? options?.actionsCompactMetadata
-          : options?.[key] === true
-            ? true
-            : undefined,
-      (options, key) =>
-        key === "actionsCompactMetadata"
-          ? options?.actionsCompactMetadata
-          : options?.[key] === true,
+      (options, key) => (options?.[key] === true ? true : undefined),
+      (options, key) => options?.[key] === true,
     ),
     ...requestedOptionDeficits(
       REUSE_CRITICAL_STRING_OPTION_KEYS,
@@ -840,7 +835,7 @@ function startupOptionDeficits(
  * silently strip a flag the daemon was already launched with (issue #3846) —
  * it only ever adds flags the client explicitly asks for. Default-off boolean
  * CLI options are one-directional: `false` means the caller has no opinion, so
- * active values are preserved. Compact metadata accepts an explicit false.
+ * active values are preserved.
  */
 function mergeDaemonOptions(
   running: DaemonOptions | undefined,
@@ -855,10 +850,6 @@ function mergeDaemonOptions(
       mergedRecord[key] = true;
     }
   }
-  // A default-on flag's explicit false must win over a running true. Absence
-  // preserves the running choice, including false, during unrelated restarts.
-  merged.actionsCompactMetadata =
-    requestedOptions.actionsCompactMetadata ?? runningOptions.actionsCompactMetadata;
   if (requested?.accessibilityAudit === true) {
     merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }
@@ -1494,14 +1485,17 @@ export class DaemonMcpProxy {
    * any of these options back to process-global startup state.
    */
   private async applyConnectionPresentationProfile(client: DaemonClientLike): Promise<void> {
-    const enabledTools = this.config.daemonOptions?.enabledTools ?? [];
-    const disabledTools = this.config.daemonOptions?.disabledTools ?? [];
-    const toolResultsNoStructuredContent =
-      this.config.daemonOptions?.toolResultsNoStructuredContent;
+    const {
+      enabledTools = [],
+      disabledTools = [],
+      toolResultsNoStructuredContent,
+      actionsCompactMetadata,
+    } = this.config.daemonOptions ?? {};
     const updates = this.connectionPresentationUpdates(
       enabledTools,
       disabledTools,
       toolResultsNoStructuredContent,
+      actionsCompactMetadata,
     );
 
     for (const update of updates) {
@@ -1511,6 +1505,9 @@ export class DaemonMcpProxy {
           ? {
               [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: toolResultsNoStructuredContent,
             }
+          : {}),
+        ...(actionsCompactMetadata !== undefined
+          ? { [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: actionsCompactMetadata }
           : {}),
       };
       const forwardedArgs = this.withToolSelectionProfile(requestedArgs);
@@ -1535,11 +1532,13 @@ export class DaemonMcpProxy {
     enabledTools: string[],
     disabledTools: string[],
     toolResultsNoStructuredContent: boolean | undefined,
+    actionsCompactMetadata: boolean | undefined,
   ): Array<{ toolNames: string[]; enabled: boolean }> {
     if (
       enabledTools.length === 0 &&
       disabledTools.length === 0 &&
-      toolResultsNoStructuredContent === undefined
+      toolResultsNoStructuredContent === undefined &&
+      actionsCompactMetadata === undefined
     ) {
       return [];
     }
@@ -1553,7 +1552,7 @@ export class DaemonMcpProxy {
     }
     if (updates.length === 0) {
       // setToolEnabled is always-on; reaffirming it is a no-op that mints the
-      // connection profile needed to carry a structured-content-only policy.
+      // connection profile needed to carry a presentation-only policy.
       updates.push({ toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true });
     }
 
@@ -3141,6 +3140,7 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete callerArgs[INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM];
+    delete callerArgs[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
     // The acceptance controls are configuration of the dedicated harness proxy,
     // never client-provided tool arguments. Remove both before routing so a
     // caller cannot forge or override that configuration.

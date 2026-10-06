@@ -412,11 +412,12 @@ describe("reuse-critical drift guard", () => {
     // observe-scope flags propagate to an already-running daemon. Spec-driven, so
     // a new output-reduction flag is covered automatically; this pins that.
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS.filter(
-      ({ field }) => field !== "toolResultsNoStructuredContent",
+      ({ field }) => !CONNECTION_PRESENTATION_OPTION_KEYS.some((key) => key === field),
     )) {
       expect(REUSE_CRITICAL_OPTION_KEYS).toContain(spec.field);
     }
     expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("toolResultsNoStructuredContent");
+    expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("actionsCompactMetadata");
   });
 
   test("startup tool defaults reach the daemon without becoming reuse-critical", () => {
@@ -424,6 +425,7 @@ describe("reuse-critical drift guard", () => {
       "enabledTools",
       "disabledTools",
       "toolResultsNoStructuredContent",
+      "actionsCompactMetadata",
     ]);
     expect(
       daemonProcessOptions({
@@ -431,6 +433,7 @@ describe("reuse-critical drift guard", () => {
         enabledTools: ["clipboard"],
         disabledTools: ["observe"],
         toolResultsNoStructuredContent: true,
+        actionsCompactMetadata: false,
       }),
     ).toEqual({
       debug: true,
@@ -443,6 +446,7 @@ describe("reuse-critical drift guard", () => {
         enabledTools: ["clipboard"],
         disabledTools: ["observe"],
         toolResultsNoStructuredContent: true,
+        actionsCompactMetadata: false,
       }),
     ).toEqual({ debug: true });
   });
@@ -452,23 +456,25 @@ describe("reuse-critical drift guard", () => {
       "AUTOMOBILE_ENABLED_TOOLS",
       "AUTOMOBILE_DISABLED_TOOLS",
       "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
+      "AUTOMOBILE_ACTIONS_COMPACT_METADATA",
     ]);
     expect(
       daemonProcessEnvironment({
         AUTOMOBILE_ENABLED_TOOLS: "observe",
         AUTOMOBILE_DISABLED_TOOLS: "tapOn",
         AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT: "1",
+        AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
         AUTOMOBILE_DEBUG: "1",
       }),
     ).toEqual({ AUTOMOBILE_DEBUG: "1" });
   });
 });
 
-describe("compact metadata opt-out startup relay", () => {
+describe("compact metadata direct daemon startup", () => {
   const previous = serverConfig.isActionsCompactMetadataEnabled();
   afterEach(() => serverConfig.setActionsCompactMetadataEnabled(previous));
 
-  test("manager relay and daemon startup apply an explicit false", () => {
+  test("direct daemon startup applies an explicit false", () => {
     serverConfig.setActionsCompactMetadataEnabled(true);
     const parsed = parseDaemonArgs(serialize({ actionsCompactMetadata: false }), {});
     expect(parsed.actionsCompactMetadata).toBe(false);

@@ -76,12 +76,15 @@ In diff mode (`--actions-diff-observe`) the flag rides on the diff alongside
 Compact action metadata is enabled by default. Set
 `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0` or the feature-flag key
 `actions-compact-metadata` to `false` to restore full metadata and duplicate
-matched elements. An explicit CLI/env override takes precedence over the saved
-feature flag; absence preserves that saved choice. The existing
-`--actions-compact-metadata` flag and env value `1` explicitly enable compaction.
-The daemon relay uses `--no-actions-compact-metadata` to preserve an explicit
-opt-out, even with an inherited env value `1`; the positive CLI flag wins if
-both CLI forms are present. With an external action call's `sessionUuid` and
+matched elements. Precedence is `--actions-compact-metadata`, then
+`--no-actions-compact-metadata`, then exact env `1`/`0`, then the saved feature
+flag (default on). CLI/env overrides apply only to the launching process and
+its connection; they never write the shared DB. Only feature-flag changes
+persist. Without an override, a new launch uses the saved choice again.
+The proxy relays explicit preferences through its live connection profile,
+independent of device routing, and reapplies them after reconnect. Clients with
+opposing preferences share a daemon without restarting it; child startup args
+and inherited env exclude this presentation preference. With an external action call's `sessionUuid` and
 session store, compaction omits each unchanged `observation` block independently: `insets`,
 `systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,
 `accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`

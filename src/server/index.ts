@@ -48,6 +48,7 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
+  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -529,6 +530,53 @@ function rememberToolResultsNoStructuredContent(
   }
 }
 
+function extractInternalActionsCompactMetadata(params: unknown): boolean | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function resolveActionsCompactMetadata(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+): boolean {
+  const daemonDefault = serverConfig.isActionsCompactMetadataEnabled();
+  if (!connectionProfileUuid) {
+    return daemonDefault;
+  }
+  try {
+    return registry.getActionsCompactMetadata(connectionProfileUuid) ?? daemonDefault;
+  } catch (error) {
+    // Presentation lookup is fail-safe: keep serving with the daemon default.
+    logger.warn("[MCP] Could not resolve connection compact-metadata preference", {
+      connectionProfileUuid,
+      error,
+    });
+    return daemonDefault;
+  }
+}
+
+function rememberActionsCompactMetadata(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+  preference: boolean | undefined,
+): void {
+  if (!connectionProfileUuid || preference === undefined) {
+    return;
+  }
+  try {
+    registry.setActionsCompactMetadata(connectionProfileUuid, preference);
+  } catch (error) {
+    // Presentation storage is best-effort: this request uses the daemon default.
+    logger.warn("[MCP] Could not store connection compact-metadata preference", {
+      connectionProfileUuid,
+      error,
+    });
+  }
+}
+
 function extractInternalAcceptanceDiscoveryOrder(
   params: unknown,
   expectedCapability: string | undefined,
@@ -897,6 +945,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestedToolResultsNoStructuredContent = daemonMode
       ? extractInternalToolResultsNoStructuredContent(toolParams)
       : undefined;
+    const requestedActionsCompactMetadata = daemonMode
+      ? extractInternalActionsCompactMetadata(toolParams)
+      : undefined;
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
     const requestedToolSelectionProfileUuid =
@@ -1054,6 +1105,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       name === SET_TOOL_ENABLED_TOOL_NAME ? requestedToolResultsNoStructuredContent : undefined,
     );
     const toolResultsNoStructuredContent = resolveToolResultsNoStructuredContent(
+      toolSelectionProfileRegistry,
+      connectionProfileUuid,
+    );
+    rememberActionsCompactMetadata(
+      toolSelectionProfileRegistry,
+      connectionProfileUuid,
+      name === SET_TOOL_ENABLED_TOOL_NAME ? requestedActionsCompactMetadata : undefined,
+    );
+    const actionsCompactMetadata = resolveActionsCompactMetadata(
       toolSelectionProfileRegistry,
       connectionProfileUuid,
     );
@@ -1385,6 +1445,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.
             toolSelectionProfileUuid: connectionProfileUuid,
+            actionsCompactMetadata,
             labelSessionUuids,
             routingBaseSessionUuid,
             // Keep profile persistence lazy for ordinary core-tool calls while

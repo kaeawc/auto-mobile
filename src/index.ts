@@ -386,12 +386,14 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
-      ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec): CliFeatureFlagOverride => [
-        spec.featureFlagKey,
-        outputReductionOverrides[spec.field],
-        spec.label,
-        undefined,
-      ]),
+      ...OUTPUT_REDUCTION_FLAG_SPECS.filter((spec) => spec.field !== "actionsCompactMetadata").map(
+        (spec): CliFeatureFlagOverride => [
+          spec.featureFlagKey,
+          outputReductionOverrides[spec.field],
+          spec.label,
+          undefined,
+        ],
+      ),
     ];
 
     // All DB-touching feature-flag startup work: migration-gated initialize()
@@ -405,11 +407,19 @@ async function main() {
       await featureFlagService.initialize();
 
       for (const [key, enabled, flagLabel, config] of cliOverrides) {
-        if (enabled === undefined || (!enabled && key !== "actions-compact-metadata")) {
+        if (!enabled) {
           continue;
         }
         await featureFlagService.setFlag(key, enabled, config);
         logger.info(`Feature flag ${enabled ? "enabled" : "disabled"} (${flagLabel})`);
+      }
+
+      // Compact metadata is process/connection presentation, never a DB write.
+      // Apply after initialize() so the saved feature flag is only the fallback.
+      if (outputReductionOverrides.actionsCompactMetadata !== undefined) {
+        serverConfig.setActionsCompactMetadataEnabled(
+          outputReductionOverrides.actionsCompactMetadata,
+        );
       }
 
       if (!navigationScreenshots) {

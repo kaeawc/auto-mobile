@@ -54,6 +54,9 @@ export interface ToolSelectionProfileRegistry {
   setToolResultsNoStructuredContent(profileUuid: string, enabled: boolean): void;
   /** Read a live profile preference, or undefined when the profile expressed none. */
   getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined;
+  /** Live compact-metadata override; absence uses the persistent feature flag. */
+  setActionsCompactMetadata(profileUuid: string, enabled: boolean): void;
+  getActionsCompactMetadata(profileUuid: string): boolean | undefined;
 }
 
 /**
@@ -75,6 +78,7 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
   // Deliberately live-only: a reconnecting proxy reapplies its preference, and
   // a replacement daemon must not inherit presentation state from old clients.
   private readonly toolResultsNoStructuredContent = new Map<string, boolean>();
+  private readonly actionsCompactMetadata = new Map<string, boolean>();
 
   record(profileUuid: string): void {
     if (profileUuid.trim().length > 0) {
@@ -94,6 +98,16 @@ export class InMemoryToolSelectionProfileRegistry implements ToolSelectionProfil
 
   getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined {
     return this.toolResultsNoStructuredContent.get(profileUuid);
+  }
+
+  setActionsCompactMetadata(profileUuid: string, enabled: boolean): void {
+    if (profileUuid.trim().length > 0) {
+      this.actionsCompactMetadata.set(profileUuid, enabled);
+    }
+  }
+
+  getActionsCompactMetadata(profileUuid: string): boolean | undefined {
+    return this.actionsCompactMetadata.get(profileUuid);
   }
 }
 
@@ -146,6 +160,14 @@ export class PersistentToolSelectionProfileRegistry
 
   getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined {
     return this.memory.getToolResultsNoStructuredContent(profileUuid);
+  }
+
+  setActionsCompactMetadata(profileUuid: string, enabled: boolean): void {
+    this.memory.setActionsCompactMetadata(profileUuid, enabled);
+  }
+
+  getActionsCompactMetadata(profileUuid: string): boolean | undefined {
+    return this.memory.getActionsCompactMetadata(profileUuid);
   }
 
   async load(): Promise<void> {

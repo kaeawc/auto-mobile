@@ -4834,6 +4834,24 @@ describe("actions-compact-metadata", () => {
       expect(records.size).toBe(0);
     },
   );
+  test("connection preferences override the saved flag without changing other clients", () => {
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    expectFull(emit(action(), { sessionUuid: "compact-client", actionsCompactMetadata: true }));
+    expect(
+      observation(emit(action(), { sessionUuid: "compact-client", actionsCompactMetadata: true })),
+    ).not.toHaveProperty("backStack");
+    expectFull(emit(action(), { sessionUuid: "default-client" }));
+    expectFull(emit(action(), { sessionUuid: "default-client" }));
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    expectFull(emit(action(), { sessionUuid: "full-client", actionsCompactMetadata: false }));
+    expectFull(emit(action(), { sessionUuid: "full-client", actionsCompactMetadata: false }));
+    expectFull(
+      emit(action("phone-b"), { sessionUuid: "compact-client", actionsCompactMetadata: true }),
+    );
+    expectFull(emit(action(), { sessionUuid: "compact-client", actionsCompactMetadata: true }));
+    expectFull(emit(action(), { sessionUuid: "new-client", actionsCompactMetadata: true }));
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
+  });
   test("first full; identical second omits each block; changed block alone reappears", () => {
     expectFull(emit());
     const repeated = observation(emit());

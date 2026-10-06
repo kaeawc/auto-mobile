@@ -531,6 +531,7 @@ export interface DaemonOptions {
   actionsDiffObserve?: boolean;
   /** Output reduction: skip the post-action observation entirely (issue #2756) */
   actionsNoObserve?: boolean;
+  /** Live connection presentation override; excluded from child startup and reuse checks. */
   actionsCompactMetadata?: boolean;
 }
 

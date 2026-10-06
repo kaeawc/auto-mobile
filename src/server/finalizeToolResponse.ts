@@ -324,6 +324,8 @@ export interface FinalizeToolResponseContext {
   args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
+  /** Connection preference takes precedence over the persistent feature flag. */
+  actionsCompactMetadata?: boolean;
   /**
    * Internal tool-to-tool invocation guard (issue #3053). PlanExecutor calls the
    * wrapped `tool.handler` (so this hook runs) with an injected `sessionUuid`, so a
@@ -969,7 +971,7 @@ const HIERARCHY_METADATA_FIELDS = ["insets", "systemInsets"] as const;
 
 function canRecordActionMetadata(ctx: FinalizeToolResponseContext): boolean {
   return (
-    serverConfig.isActionsCompactMetadataEnabled() &&
+    (ctx.actionsCompactMetadata ?? serverConfig.isActionsCompactMetadataEnabled()) &&
     !ctx.internal &&
     !!ctx.sessionUuid &&
     !!ctx.baselineStore?.getActionMetadata &&

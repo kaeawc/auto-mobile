@@ -99,7 +99,16 @@ describe("outputReductionFlagsToArgs (property-based)", () => {
     fc.assert(
       fc.property(flagsArb, (flags) => {
         const args = outputReductionFlagsToArgs(flags);
-        return args.every((a) => cliSet.has(a));
+        return args.every((a) => {
+          const emittedSpec = OUTPUT_REDUCTION_FLAG_SPECS.find(
+            (s) => s.cli === a || s.disableCli === a,
+          );
+          return (
+            cliSet.has(a) &&
+            emittedSpec !== undefined &&
+            flags[emittedSpec.field] === (a === emittedSpec.cli)
+          );
+        });
       }),
       RUN_OPTIONS,
     );

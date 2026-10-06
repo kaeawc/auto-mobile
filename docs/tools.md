@@ -65,8 +65,12 @@ are sent again. `screenSize`, `display`, and device/observation join keys remain
 present. An identical top-level `element` is omitted in favour of
 `selectedElement.matchedElement` when the output schema allows it. Set
 `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0` or feature-flag
-`actions-compact-metadata` to `false` to restore full metadata. Explicit CLI/env
-overrides take precedence over the saved feature flag. `observe` itself always
+`actions-compact-metadata` to `false` to restore full metadata. Precedence is
+`--actions-compact-metadata`, then `--no-actions-compact-metadata`, then exact
+env `1`/`0`, then the saved feature flag (default on). CLI/env overrides apply
+only to that process/connection, never write the shared DB, and do not restart
+a shared daemon. Only feature-flag changes persist; removing an override uses
+the saved flag again on the next launch. `observe` itself always
 sends full metadata. See [the interaction loop](design-docs/mcp/interaction-loop.md#default-compact-action-metadata)
 for diff, artifact, and freshness behavior.
 

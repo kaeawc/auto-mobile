@@ -1,4 +1,7 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Both coverage tests own the shared repo-relative `coverage/` directory, so
+# they must not run in parallel with each other.
 #
 # Tests for scripts/ci/run-ts-coverage.sh
 #

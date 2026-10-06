@@ -27,6 +27,83 @@ describe("PlanSchemaValidator", () => {
     validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
   });
 
+  it("keeps timestamps and YAML 1.1 boolean words as strings", () => {
+    for (const quoted of [false, true]) {
+      for (const label of ["yes", "no", "on", "off", "YES", "ON"]) {
+        const scalar = (value: string) => (quoted ? JSON.stringify(value) : value);
+        const result = validator.validateYaml(`
+name: clock-plan
+generated: ${scalar("2026-01-08T00:00:00Z")}
+metadata:
+  createdAt: ${scalar("2026-01-08T00:00:00Z")}
+steps:
+  - tool: setDeviceState
+    clock:
+      mode: set
+      instant: ${scalar("2026-03-01T09:00:00Z")}
+  - tool: observe
+    label: ${scalar(label)}
+`);
+        expect(result.errors ?? []).toEqual([]);
+        expect(result.valid).toBe(true);
+      }
+    }
+  });
+
+  it("reports the window error for an unquoted out-of-window clock instant", () => {
+    const result = validator.validateYaml(`
+name: clock-plan
+steps:
+  - tool: setDeviceState
+    clock:
+      mode: set
+      instant: 1999-01-01T00:00:00Z
+`);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        field: "steps[0].clock.instant",
+        message: expect.stringContaining("2000-01-01"),
+      }),
+    ]);
+  });
+
+  it("preserves core scalar types and merge keys", () => {
+    for (const number of ["01000", "0o1750", "0x3e8", "1e3", "1000.0"]) {
+      const result = validator.validateYaml(`
+name: scalar-plan
+metadata:
+  generatedFromToolCalls: true
+  duration: 1.5e2
+steps:
+  - &state
+    tool: setDeviceState
+    connectivity: {airplaneMode: false, wifiEnabled: TRUE}
+  - <<: *state
+    clock: {mode: advance, byMs: ${number}}
+  - tool: observe
+    label: "true"
+`);
+      expect(result.errors ?? []).toEqual([]);
+      expect(result.valid).toBe(true);
+    }
+    for (const text of ["0b10", "1_000", "1:20", "-0x10", "+0o10"]) {
+      expect(
+        validator.validateYaml(`name: scalar-plan\nsteps: [{tool: observe, label: ${text}}]`).valid,
+      ).toBe(true);
+    }
+    for (const value of ["null", "Null", "NULL", "~", "", "true", "false"]) {
+      expect(validator.validateYaml(`name: ${value}\nsteps: [{tool: observe}]`).valid).toBe(false);
+    }
+    for (const value of ["null", "Null", "NULL", "~", "", "true", "false", '"1000"']) {
+      expect(
+        validator.validateYaml(
+          `name: scalar-plan\nsteps: [{tool: setDeviceState, clock: {mode: advance, byMs: ${value}}}]`,
+        ).valid,
+      ).toBe(false);
+    }
+  });
+
   it("keeps both setDeviceState field requirements aligned with the live tool", () => {
     const targetingKeys = ["platform", "deviceId", "sessionUuid", "keepScreenAwake", "device"];
     const fields = Object.keys(setDeviceStateSchema.shape)

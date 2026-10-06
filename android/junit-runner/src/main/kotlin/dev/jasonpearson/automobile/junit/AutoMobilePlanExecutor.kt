@@ -606,7 +606,12 @@ internal object AutoMobilePlanExecutor {
         failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
       val failedTool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
       val error = failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown error"
-      val failedDevice = failedStepObj["device"]?.jsonPrimitive?.content
+      val resolvedDeviceId =
+        resolveFailedStepDeviceId(
+          payload = payload,
+          failedStepObj = failedStepObj,
+          configuredDeviceId = deviceId,
+        )
 
       // Build succeeded steps from toolResults in the payload
       val succeededSteps = mutableListOf<SucceededStepSummary>()
@@ -642,12 +647,36 @@ internal object AutoMobilePlanExecutor {
         error = SecretRedactor.redact(error, secretValues),
         succeededSteps = succeededSteps,
         planContent = SecretRedactor.redact(planContent, secretValues),
-        deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
+        deviceId = resolvedDeviceId,
       )
     } catch (e: Exception) {
       println("Warning: Failed to build recovery context: ${e.message}")
       return null
     }
+  }
+
+  /**
+   * The real device id the failed step ran on, for pinning the recovery and the resumed plan.
+   *
+   * `failedStep.device` is the plan's device LABEL ("A"), never an id, so it is only a key into the
+   * payload's `deviceMapping` (label -> id, multi-device plans). A single-device plan has no label
+   * and ran on the payload's top-level `deviceId`. A label with no mapping entry yields null (no
+   * pin) rather than the label or another track's device. [configuredDeviceId] is the id the test
+   * asked for, used only when the payload carries none.
+   */
+  private fun resolveFailedStepDeviceId(
+    payload: JsonObject,
+    failedStepObj: JsonObject,
+    configuredDeviceId: String?,
+  ): String? {
+    val label = (failedStepObj["device"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    if (label != null) {
+      val mapping = payload["deviceMapping"] as? JsonObject
+      return (mapping?.get(label) as? JsonPrimitive)?.takeIf { it.isString }?.content
+    }
+    val executedOn = (payload["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    return executedOn?.takeIf { it.isNotBlank() }
+      ?: configuredDeviceId?.takeIf { it.isNotBlank() && it != "auto" }
   }
 
   // ── Response parsing ──────────────────────────────────────────────────────

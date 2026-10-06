@@ -129,9 +129,10 @@ class RecoveryLoopTest {
 
   @Test
   fun `resume pins to the same device that was recovered`() {
-    // Failure response includes device "emulator-5554"
+    // The daemon reports the device the plan ran on as the payload's top-level deviceId;
+    // `failedStep.device` is only a plan device LABEL (multi-device plans), never an id (#10089).
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", device = "emulator-5554")
+      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554")
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -232,6 +233,7 @@ class RecoveryLoopTest {
     error: String = "Element not found",
     toolResults: JsonArray? = null,
     device: String? = null,
+    deviceId: String? = null,
   ): DaemonResponse {
     val failedStepFields =
       mutableMapOf<String, JsonElement>(
@@ -251,6 +253,9 @@ class RecoveryLoopTest {
       )
     if (toolResults != null) {
       payload["toolResults"] = toolResults
+    }
+    if (deviceId != null) {
+      payload["deviceId"] = JsonPrimitive(deviceId)
     }
     return buildDaemonResponse(JsonObject(payload))
   }

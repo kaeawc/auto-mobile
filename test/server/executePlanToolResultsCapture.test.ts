@@ -33,10 +33,13 @@ import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 // pins the exact MCP envelope the runner receives to a checked-in capture, which the Kotlin
 // AutoMobilePlanExecutorTest parses. Regenerate with UPDATE_CAPTURED_FIXTURES=1.
 
-const FIXTURE = path.join(
+const CAPTURED_DIR = path.join(
   import.meta.dir,
-  "../../android/junit-runner/src/test/resources/captured/execute-plan-tool-results.json",
+  "../../android/junit-runner/src/test/resources/captured",
 );
+const FIXTURE = path.join(CAPTURED_DIR, "execute-plan-tool-results.json");
+// A plan whose third step fails, so the runner's recovery context is built from a real failure.
+const FAILED_FIXTURE = path.join(CAPTURED_DIR, "execute-plan-failed-step.json");
 
 const device: BootedDevice = { platform: "android", deviceId: "emulator-5554", name: "Fake" };
 
@@ -59,6 +62,26 @@ steps:
       action: tap
       selector:
         text: Confirm
+`;
+
+const FAILING_PLAN = `name: tap-missing-item
+steps:
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Item
+  - tool: tapOn
+    optional: true
+    params:
+      action: tap
+      selector:
+        text: Dismiss
+  - tool: tapOn
+    params:
+      action: tap
+      selector:
+        text: Missing
 `;
 
 function selectedElement(text: string, totalMatches: number, strategy: string) {
@@ -88,7 +111,7 @@ describe("executePlan toolResults capture (#10090)", () => {
     setTapOnElementFactory(() => ({
       execute: async (params) => {
         const label = params.selector?.text ?? params.text;
-        if (label === "Dismiss") {
+        if (label === "Dismiss" || label === "Missing") {
           return {
             success: false,
             action: "tap",
@@ -134,7 +157,7 @@ describe("executePlan toolResults capture (#10090)", () => {
     restoreTools();
   });
 
-  async function runOrchestrator() {
+  async function runOrchestrator(planContent: string = PLAN) {
     const videoRecorder: VideoRecorder = {
       startVideoRecording: async () => {
         throw new Error("unexpected video start");
@@ -148,7 +171,7 @@ describe("executePlan toolResults capture (#10090)", () => {
         device,
         request: {
           platform: "android",
-          planContent: PLAN,
+          planContent,
           startStep: 0,
           deviceAllocationTimeoutMs: 5000,
         },
@@ -181,5 +204,23 @@ describe("executePlan toolResults capture (#10090)", () => {
       writeFileSync(FIXTURE, captured);
     }
     expect(captured).toBe(readFileSync(FIXTURE, "utf8"));
+  });
+
+  test("a failed plan reports the device it ran on, the failed step and the earlier steps by index (recovery context)", async () => {
+    const result = await runOrchestrator(FAILING_PLAN);
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep).toMatchObject({ stepIndex: 2, tool: "tapOn" });
+    expect(result.failedStep?.device).toBeUndefined();
+    expect(result.deviceId).toBe("emulator-5554");
+    expect(result.toolResults?.map((entry) => entry.stepIndex)).toEqual([0]);
+    expect(result.skippedSteps?.map((step) => step.stepIndex)).toEqual([1]);
+
+    const envelope = withIsErrorOnFailure(createStructuredToolResponse(result), result.success);
+    const captured = `${JSON.stringify(envelope, null, 2)}\n`;
+    if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+      writeFileSync(FAILED_FIXTURE, captured);
+    }
+    expect(captured).toBe(readFileSync(FAILED_FIXTURE, "utf8"));
   });
 });

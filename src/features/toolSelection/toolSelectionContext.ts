@@ -15,6 +15,12 @@ export type ToolSelectionContext = {
     timeoutMs?: unknown;
     startTime?: unknown;
     liveDeadlineKey?: unknown;
+    /**
+     * Nesting level of the plan this context belongs to: 1 for the outermost `executePlan`, +1 for
+     * each `executePlan` step it starts. Its mere presence also marks a call as running INSIDE a
+     * plan, which is what keeps a nested plan from releasing the enclosing plan's session (#10172).
+     */
+    planDepth?: number;
     progress?: ProgressCallback;
   };
   routingSessionUuid?: string;

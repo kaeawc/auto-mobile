@@ -451,6 +451,26 @@ describe("executePlan cleans every acquired device before release", () => {
     );
   });
 
+  test.each([1, 2, 3])(
+    "a nested executePlan (%s devices) leaves the outer plan's sessions, devices and cleanup alone (#10172)",
+    async (count) => {
+      const targets = devices.slice(0, count);
+      await acquire(targets);
+      await lifecycle.afterExecution(input({ nestedInPlan: true }));
+
+      expect(cleanup.calls).toEqual([]);
+      expect(events).toEqual([]);
+      expect(sessionManager.getSession("base")).not.toBeNull();
+      for (const name of ["B", "C"].slice(0, count - 1)) {
+        expect(sessionManager.getSession(`base:${name}`)).not.toBeNull();
+      }
+      // The outermost call (no nested flag) still cleans up and releases everything.
+      await lifecycle.afterExecution(input());
+      expectCleanupBeforeRelease(targets);
+      expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(count);
+    },
+  );
+
   test("retains cleanup for a standalone device without a daemon session", async () => {
     DaemonState.getInstance().reset();
     await lifecycle.afterExecution(input({ baseSessionUuid: undefined, sessionUuid: undefined }));

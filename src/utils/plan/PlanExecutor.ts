@@ -18,6 +18,7 @@ import { isDebugModeEnabled } from "../debug";
 import {
   ExecutePlanStepDebugInfo,
   type PlanExecutionOptions,
+  type PlanStepToolResult,
   type PlanStepWarnings,
   type PlanSkippedStep,
   type PlanDeviceFailure,
@@ -48,6 +49,7 @@ import {
   parseStepParams,
 } from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
+import { StepToolResultCollector } from "./stepToolResults";
 import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
@@ -112,6 +114,45 @@ interface StepExecutionResult {
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
+  /**
+   * A completed step's unwrapped tool payload, bounded and promoted to the plan result's
+   * `toolResults` by the caller (#10090). Absent when the tool returned no object payload.
+   */
+  toolPayload?: unknown;
+}
+
+/**
+ * The structured payload of a completed step's tool response, or undefined when it carried none
+ * (an image-only success), so the raw envelope and its image data never reach `toolResults`.
+ */
+function completedStepPayload(
+  response: unknown,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  // An envelope with a hoisted top-level `success` classifies as its own payload, so read the
+  // structured payload off it first; only a bare (unwrapped) object is used as-is.
+  const structured = getStructuredPayload<Record<string, unknown>>(
+    response as { structuredContent?: unknown; content?: unknown } | null | undefined,
+  );
+  if (structured) {
+    return structured;
+  }
+  const interpretation = classifyToolResult(response, toolName, null);
+  if ("failure" in interpretation || interpretation.kind !== "payload") {
+    return undefined;
+  }
+  const { payload } = interpretation;
+  return "content" in payload || "structuredContent" in payload ? undefined : payload;
+}
+
+/** Every device track's `toolResults`, ordered by plan step index, or nothing when none ran. */
+function mergedToolResultsField(tracks: { toolResults: PlanStepToolResult[] }[]): {
+  toolResults?: PlanStepToolResult[];
+} {
+  const toolResults = tracks
+    .flatMap((track) => track.toolResults)
+    .sort((a, b) => a.stepIndex - b.stepIndex);
+  return toolResults.length > 0 ? { toolResults } : {};
 }
 
 /** The optional-step skip record shared by every "tool answered but the step failed" branch. */
@@ -601,6 +642,39 @@ export class DefaultPlanExecutor implements PlanExecutor {
     };
   }
 
+  /**
+   * A tool answered and the step passed: build its debug details, promote its warnings, and keep
+   * its structured payload for the plan result's `toolResults` (#10090).
+   */
+  private buildCompletedStepResult(
+    step: PlanStep,
+    context: StepExecutionContext,
+    response: unknown,
+    toolResult: unknown,
+  ): StepExecutionResult {
+    const details: Record<string, unknown> = {
+      params: step.params,
+    };
+    if (step.tool === "observe" && context.captureObserveSteps) {
+      const stepObservation = this.buildObserveStepCaptureFromResponse(
+        response,
+        context.captureObserveSteps,
+      );
+      if (stepObservation) {
+        details.stepObservation = stepObservation;
+      }
+    }
+    const toolWarnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+    const warnings = withUnevaluatedExpectationsWarning(step, toolWarnings, details);
+
+    return {
+      status: "completed",
+      details,
+      toolPayload: completedStepPayload(response, step.tool),
+      ...(warnings ? { warnings } : {}),
+    };
+  }
+
   private async executeStep(
     step: PlanStep,
     context: StepExecutionContext,
@@ -697,26 +771,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         });
       }
 
-      const details: Record<string, unknown> = {
-        params: step.params,
-      };
-      if (step.tool === "observe" && context.captureObserveSteps) {
-        const stepObservation = this.buildObserveStepCaptureFromResponse(
-          response,
-          context.captureObserveSteps,
-        );
-        if (stepObservation) {
-          details.stepObservation = stepObservation;
-        }
-      }
-      const toolWarnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
-      const warnings = withUnevaluatedExpectationsWarning(step, toolWarnings, details);
-
-      return {
-        status: "completed",
-        details,
-        ...(warnings ? { warnings } : {}),
-      };
+      return this.buildCompletedStepResult(step, context, response, toolResult);
     } catch (error) {
       if (isDeviceLostError(error)) {
         throw error;
@@ -847,6 +902,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // (#6887 review).
     const warnings: PlanStepWarnings[] = [];
     const skippedSteps: PlanSkippedStep[] = [];
+    const toolResults = new StepToolResultCollector();
 
     try {
       // Validate and normalize startStep
@@ -900,6 +956,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
         if (stepResult.warnings) {
           warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
         }
+        if (stepResult.status === "completed") {
+          toolResults.add(i, step.tool, stepResult.toolPayload);
+        }
 
         if (stepResult.status === "skipped") {
           this.recordSkippedOptionalStep(
@@ -941,6 +1000,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             // ran inside the failing step.
             ...(warnings.length > 0 ? { warnings } : {}),
             ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+            ...toolResults.asField(),
           };
         }
 
@@ -969,6 +1029,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         },
         ...(warnings.length > 0 ? { warnings } : {}),
         ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+        ...toolResults.asField(),
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -1000,6 +1061,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         },
         ...(warnings.length > 0 ? { warnings } : {}),
         ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+        ...toolResults.asField(),
       };
     }
   }
@@ -1239,6 +1301,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           },
           skippedSteps: [],
           warnings: [],
+          toolResults: [],
         };
       }
     });
@@ -1298,6 +1361,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+      ...mergedToolResultsField(results),
     };
   }
 
@@ -1398,10 +1462,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
     };
     skippedSteps: DeviceSkippedStepResult[];
     warnings: PlanStepWarnings[];
+    toolResults: PlanStepToolResult[];
   }> {
     let executedSteps = 0;
     const skippedSteps: DeviceSkippedStepResult[] = [];
     const warnings: PlanStepWarnings[] = [];
+    const toolResults = new StepToolResultCollector();
 
     try {
       for (let trackIndex = 0; trackIndex < track.length; trackIndex++) {
@@ -1447,6 +1513,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
             warnings: stepResult.warnings,
           });
         }
+        if (stepResult.status === "completed") {
+          toolResults.add(planIndex, step.tool, stepResult.toolPayload, device);
+        }
 
         if (stepResult.status === "skipped") {
           logger.warn(
@@ -1481,6 +1550,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             },
             skippedSteps,
             warnings,
+            toolResults: toolResults.toArray() ?? [],
           };
         }
 
@@ -1500,6 +1570,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         totalSteps: track.length,
         skippedSteps,
         warnings,
+        toolResults: toolResults.toArray() ?? [],
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -1520,6 +1591,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         },
         skippedSteps,
         warnings,
+        toolResults: toolResults.toArray() ?? [],
       };
     }
   }

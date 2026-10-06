@@ -313,60 +313,60 @@ class AutoMobilePlanExecutorTest {
     assertTrue(result.errorMessage.contains("Unexpected daemon response format"))
   }
 
-  @Test
-  fun `parse tool results from successful plan execution`() {
-    val step =
-      JsonObject(
-        mapOf(
-          "toolName" to JsonPrimitive("tapOn"),
-          "success" to JsonPrimitive(true),
-          "action" to JsonPrimitive("tap"),
-          "selectedElement" to
-            JsonObject(
-              mapOf(
-                "text" to JsonPrimitive("Test Channel"),
-                "resourceId" to JsonPrimitive("com.example:id/item"),
-                "bounds" to
-                  JsonObject(
-                    mapOf(
-                      "left" to JsonPrimitive(0),
-                      "top" to JsonPrimitive(0),
-                      "right" to JsonPrimitive(100),
-                      "bottom" to JsonPrimitive(100),
-                      "centerX" to JsonPrimitive(50),
-                      "centerY" to JsonPrimitive(50),
-                    )
-                  ),
-                "indexInMatches" to JsonPrimitive(2),
-                "totalMatches" to JsonPrimitive(5),
-                "selectionStrategy" to JsonPrimitive("random"),
-              )
-            ),
-        )
-      )
+  // The envelope below was produced by the real TypeScript PlanExecutionOrchestrator/PlanExecutor
+  // (test/server/executePlanToolResultsCapture.test.ts pins it): a 3-step plan whose step 0 is a
+  // `tapOn { selectionStrategy: random }`, step 1 an optional tapOn that failed and was skipped,
+  // and step 2 a plain tapOn. Hand-written `toolResults` envelopes hid #10090 for a year.
+  private fun capturedToolResultsResponse(): DaemonResponse {
+    val text =
+      checkNotNull(javaClass.classLoader.getResource("captured/execute-plan-tool-results.json"))
+        .readText()
+    val result = json.parseToJsonElement(text) as JsonObject
+    return DaemonResponse(id = "captured", type = "mcp_response", success = true, result = result)
+  }
 
-    fakeDaemonClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(true),
-            "toolResults" to JsonArray(listOf(step)),
-          )
-        )
-      ),
-    )
+  @Test
+  fun `captured executePlan response yields per-step results addressed by plan step index`() {
+    fakeDaemonClient.setResponse("executePlan", capturedToolResultsResponse())
 
     val result = executePlan()
 
     assertTrue(result.success)
-    assertEquals(1, fakeDaemonClient.toolSelectionArguments.size)
     assertEquals(
       "executePlan",
       fakeDaemonClient.toolSelectionArguments.single()["toolName"]?.jsonPrimitive?.content,
     )
-    assertEquals(1, result.toolResults.size)
-    assertEquals("Test Channel", result.getSelection(0))
+    assertEquals(listOf(0, 2), result.toolResults.map { it.stepIndex })
+    assertEquals("Row 7", result.getSelection(0))
+    assertEquals("Confirm", result.getSelection(2))
+    assertEquals("tapOn", result.getToolResult(0)?.toolName)
+    assertEquals(true, result.getToolResult(0)?.success)
+  }
+
+  @Test
+  fun `a skipped optional step has no tool result and its index is not shifted onto a later step`() {
+    fakeDaemonClient.setResponse("executePlan", capturedToolResultsResponse())
+
+    val result = executePlan()
+
+    assertNull(result.getToolResult(1))
+    assertNull(result.getToolResultEntry(1))
+    assertNull(result.getErrorToolResult(1))
+    assertNull(result.getSelection(1))
+    assertNull(result.getSelection(3))
+  }
+
+  @Test
+  fun `getTypedResponse returns the captured tapOn response`() {
+    fakeDaemonClient.setResponse("executePlan", capturedToolResultsResponse())
+
+    val tapOnResponse = executePlan().getTypedResponse<TapOnResponse>(0)
+
+    assertNotNull(tapOnResponse)
+    assertEquals("Row 7", tapOnResponse?.selectedElement?.text)
+    assertEquals("random", tapOnResponse?.selectedElement?.selectionStrategy)
+    assertEquals(6, tapOnResponse?.selectedElement?.indexInMatches)
+    assertEquals(12, tapOnResponse?.selectedElement?.totalMatches)
   }
 
   @Test
@@ -410,72 +410,6 @@ class AutoMobilePlanExecutorTest {
 
     assertEquals(false, result.success)
     assertEquals(1, fakeDaemonClient.toolSelectionArguments.size)
-  }
-
-  @Test
-  fun `getSelection returns null when selectedElement is missing`() {
-    val step =
-      JsonObject(
-        mapOf(
-          "toolName" to JsonPrimitive("tapOn"),
-          "success" to JsonPrimitive(true),
-          "action" to JsonPrimitive("tap"),
-        )
-      )
-
-    fakeDaemonClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(true),
-            "toolResults" to JsonArray(listOf(step)),
-          )
-        )
-      ),
-    )
-
-    val result = executePlan()
-
-    assertNull(result.getSelection(0))
-  }
-
-  @Test
-  fun `getTypedResponse returns correct response type`() {
-    val step =
-      JsonObject(
-        mapOf(
-          "toolName" to JsonPrimitive("tapOn"),
-          "success" to JsonPrimitive(true),
-          "selectedElement" to
-            JsonObject(
-              mapOf(
-                "text" to JsonPrimitive("Channel A"),
-                "indexInMatches" to JsonPrimitive(3),
-                "totalMatches" to JsonPrimitive(10),
-              )
-            ),
-        )
-      )
-
-    fakeDaemonClient.setResponse(
-      "executePlan",
-      buildDaemonResponse(
-        JsonObject(
-          mapOf(
-            "success" to JsonPrimitive(true),
-            "toolResults" to JsonArray(listOf(step)),
-          )
-        )
-      ),
-    )
-
-    val result = executePlan()
-    val tapOnResponse = result.getTypedResponse<TapOnResponse>(0)
-
-    assertNotNull(tapOnResponse)
-    assertEquals("Channel A", tapOnResponse?.selectedElement?.text)
-    assertEquals(3, tapOnResponse?.selectedElement?.indexInMatches)
   }
 
   @Test

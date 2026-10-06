@@ -10,7 +10,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { StaleDisplayError, staleDisplayError } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
-import { resolveTargetDisplay } from "../observe/DisplaySelection";
+import { DisplaySelectionError, resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { buildDisconnectedPanelMessage, type DisplayPanel } from "../../models/DisplayPanel";
@@ -75,14 +75,28 @@ async function assertActionPanelConnected(
   if (!infos.length || logicalDisplayIdForPanel(infos, panel.key) !== undefined) {
     return;
   }
-  throw new ActionableError(
+  const connectedPanels = connectedActionPanels(infos, device);
+  const hasPostures = device.displays.postures.length > 0;
+  // DisplaySelectionError lets a session pin's displayPinFailure attach `pinnedDisplay`; an explicit
+  // display has no pin in scope, so it keeps the plain message with no pin details.
+  throw new DisplaySelectionError(
     buildDisconnectedPanelMessage(
       panel.key,
       panel.role,
-      connectedActionPanels(infos, device),
-      device.displays.postures.length > 0,
+      connectedPanels,
+      hasPostures,
       selectedDisplayPin() !== undefined,
     ),
+    {
+      disconnectedPanel: {
+        panel,
+        connectedPanels: connectedPanels.map(({ key, role }) => ({
+          key,
+          role: role ?? "unknown",
+        })),
+        hasPostures,
+      },
+    },
   );
 }
 

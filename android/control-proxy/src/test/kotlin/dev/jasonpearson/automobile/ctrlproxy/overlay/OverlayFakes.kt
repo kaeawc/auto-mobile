@@ -120,6 +120,15 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
     return accept
   }
 
+  var acceptTextField = true
+
+  override suspend fun setTextFieldVisible(visible: Boolean): Boolean {
+    calls += "textField:$visible"
+    if (!isShowing) return true
+    if (acceptTextField) requests[requests.lastIndex] = requests.last().copy(hasTextField = visible)
+    return acceptTextField
+  }
+
   override suspend fun dismiss(): Boolean {
     calls += "dismiss"
     failure?.let { throw it }

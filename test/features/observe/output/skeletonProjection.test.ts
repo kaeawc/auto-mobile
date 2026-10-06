@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { skeletonElementSchema } from "../../../../src/server/toolOutputSchemas";
@@ -326,9 +327,30 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const skeleton = toSkeleton(makeElements({ clickable: [field] }));
 
+      // The entered text stays the label; the distinct hint rides in `sublabel` (#9346).
       expect(skeleton[0]).toEqual({
         elementId: "android-field",
         label: "hello",
+        sublabel: "Email",
+        bounds: [0, 0, 100, 50],
+        affordances: ["input"],
+      });
+    });
+
+    test("leaves an iOS filled field's output alone: its hint is already searchable (#9346)", () => {
+      const field: Element = {
+        bounds: bounds(0, 0, 100, 50),
+        "resource-id": "ios-field",
+        class: "UITextField",
+        role: "textfield",
+        value: "parity.check",
+        "hint-text": "Search",
+        actions: ["set_text"],
+      };
+
+      expect(toSkeleton(makeElements({ clickable: [field] }))[0]).toEqual({
+        elementId: "ios-field",
+        label: "parity.check",
         bounds: [0, 0, 100, 50],
         affordances: ["input"],
       });
@@ -1925,4 +1947,119 @@ test("shared skeleton uses the same disabled state for iOS booleans and Android 
       }).skeleton,
     ).toEqual([{ ...enabled, enabled: false }]);
   }
+});
+
+describe("a filled Android text field keeps its hint beside the entered text (#9346)", () => {
+  const FOLDER_NAME_ID = "com.google.android.apps.nexuslauncher:id/folder_name";
+  const captureFiles = [
+    "launcher-folder-emulator-5600.json",
+    "launcher-folder-emulator-5602.json",
+  ] as const;
+
+  /** Walk every node of a captured hierarchy, applying `visit` to each object. */
+  function visitNodes(value: unknown, visit: (node: Record<string, unknown>) => void): void {
+    if (Array.isArray(value)) {
+      value.forEach((child) => visitNodes(child, visit));
+    } else if (value && typeof value === "object") {
+      visit(value as Record<string, unknown>);
+      Object.values(value).forEach((child) => visitNodes(child, visit));
+    }
+  }
+
+  function loadCapture(
+    file: string,
+    edit?: (folderName: Record<string, unknown>) => void,
+  ): ViewHierarchyResult {
+    const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+      readFileSync(new URL(`../../../fixtures/android-launcher/${file}`, import.meta.url), "utf8"),
+    );
+    if (edit) {
+      visitNodes(capture.viewHierarchy, (node) => {
+        if (node["resource-id"] === FOLDER_NAME_ID) {
+          edit(node);
+        }
+      });
+    }
+    return capture.viewHierarchy;
+  }
+
+  function project(hierarchy: ViewHierarchyResult) {
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+    const result = projectSkeleton(elements);
+    return { result, field: result.skeleton.find((row) => row.elementId === FOLDER_NAME_ID) };
+  }
+
+  test.each(captureFiles)("%s: a filled field carries the text as label and the hint", (file) => {
+    const { field } = project(loadCapture(file));
+
+    expect(field).toMatchObject({ label: "Google", sublabel: "Edit Name" });
+    expect(skeletonElementSchema.parse(field)).toEqual(field);
+  });
+
+  test.each(captureFiles)("%s: an empty field with a hint is unchanged", (file) => {
+    const { field } = project(
+      loadCapture(file, (node) => {
+        delete node.text;
+      }),
+    );
+
+    expect(field?.label).toBe("Edit Name");
+    expect(field?.sublabel).toBeUndefined();
+  });
+
+  test.each(captureFiles)("%s: a field with no hint is unchanged", (file) => {
+    const { field } = project(
+      loadCapture(file, (node) => {
+        delete node["hint-text"];
+      }),
+    );
+
+    expect(field?.label).toBe("Google");
+    expect(field?.sublabel).toBeUndefined();
+  });
+
+  test.each(captureFiles)("%s: only the field's row changes, by its sublabel", (file) => {
+    const withHint = project(loadCapture(file)).result;
+    const withoutHint = project(
+      loadCapture(file, (node) => {
+        delete node["hint-text"];
+      }),
+    ).result;
+    const expected = structuredClone(withoutHint);
+    expected.skeleton.find((entry) => entry.elementId === FOLDER_NAME_ID)!.sublabel = "Edit Name";
+
+    expect(withHint).toEqual(expected);
+    // Size budget: the hint adds only its `"sublabel":"Edit Name"` member.
+    expect(JSON.stringify(withHint).length - JSON.stringify(withoutHint).length).toBe(
+      `,"sublabel":"Edit Name"`.length,
+    );
+  });
+
+  test.each(captureFiles)("%s: a hint equal to the entered text is not duplicated", (file) => {
+    const { field } = project(
+      loadCapture(file, (node) => {
+        node["hint-text"] = node.text;
+      }),
+    );
+
+    expect(field?.label).toBe("Google");
+    expect(field?.sublabel).toBeUndefined();
+  });
+
+  test("the captured all-apps search field reports its hint as its text and is not duplicated", () => {
+    const capture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../fixtures/android-launcher/launcher-allapps-emulator-5600.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    const { result } = project(capture.viewHierarchy);
+    const search = result.skeleton.find((row) => row.affordances.includes("input"));
+
+    expect(search?.label).toBe("Search web and more");
+    expect(search?.sublabel).toBeUndefined();
+  });
 });

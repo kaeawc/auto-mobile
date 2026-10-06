@@ -30,6 +30,19 @@ interface PendingGesture extends OrderedStep {
 
 type BufferedInteraction = ReceivedInteraction & { receivedAt: number };
 
+type SendKeysTextCommand =
+  | { action: "type"; text: string; operation: "replace" }
+  | { action: "clear" };
+
+/**
+ * Map an inputText event's complete field value to a replayable sendKeys
+ * command. `sendKeys` rejects an empty `type` text (min(1)), so an emptied field
+ * (null or "") is recorded as `clear`.
+ */
+function buildTextCommand(text: string | null): SendKeysTextCommand {
+  return text ? { action: "type", text, operation: "replace" } : { action: "clear" };
+}
+
 /**
  * How long to wait for a CtrlProxy event to pair with a getevent gesture.
  * Issue #9142 measured 222–361 ms from touch-up to host receipt, including the
@@ -442,27 +455,26 @@ export class DualTrackRecorder {
     // gestures). Stable references also allow coalescing a held text step.
     // Accessibility events carry the field's complete value, so recording an
     // insert would duplicate text when the plan is replayed.
-    if (this.coalesceInputText(elementKey, event.text)) {
+    const command = buildTextCommand(event.text);
+    if (this.coalesceInputText(elementKey, command)) {
       return;
     }
 
-    const entry = { resolved: true, step: this.buildRecordedTextStep(event.text) };
+    const entry = { resolved: true, step: this.buildRecordedTextStep(command) };
     this.enqueueStep(entry);
     if (elementKey) {
       this.lastInputText = { elementKey, entry };
     }
   }
 
-  private buildRecordedTextStep(text: string): PlanStep {
+  private buildRecordedTextStep(command: SendKeysTextCommand): PlanStep {
     return {
       tool: "sendKeys",
-      params: {
-        commands: [{ action: "type", text, operation: "replace" }],
-      },
+      params: { commands: [command] },
     };
   }
 
-  private coalesceInputText(elementKey: string | null, text: string): boolean {
+  private coalesceInputText(elementKey: string | null, command: SendKeysTextCommand): boolean {
     const previous = this.lastInputText;
     if (
       !previous ||
@@ -473,16 +485,25 @@ export class DualTrackRecorder {
       return false;
     }
 
-    return this.updateCoalescedTextStep(previous.entry.step, text);
+    return this.updateCoalescedTextStep(previous.entry.step, command);
   }
 
-  private updateCoalescedTextStep(existing: PlanStep | undefined, text: string): boolean {
-    const command = existing?.params.commands?.[0];
-    if (existing?.tool !== "sendKeys" || command?.action !== "type") {
+  // The coalesced step always holds the field's latest complete value: a later
+  // non-empty value replaces an earlier clear, and an emptied field replaces
+  // earlier typed text with a `clear` (never with an empty `type`).
+  private updateCoalescedTextStep(
+    existing: PlanStep | undefined,
+    command: SendKeysTextCommand,
+  ): boolean {
+    const previous = existing?.params.commands?.[0];
+    if (
+      existing?.tool !== "sendKeys" ||
+      (previous?.action !== "type" && previous?.action !== "clear")
+    ) {
       return false;
     }
 
-    command.text = text;
+    existing.params.commands = [command];
     return true;
   }
 

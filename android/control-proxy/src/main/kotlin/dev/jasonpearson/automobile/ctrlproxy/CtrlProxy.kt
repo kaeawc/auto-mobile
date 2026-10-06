@@ -1627,6 +1627,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
               onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
+              backScope = serviceScope,
             ),
             overlayResultSink,
             onDismissed = {

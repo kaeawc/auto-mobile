@@ -119,6 +119,37 @@ class SetTextAcknowledgementOrderTest {
   }
 
   @Test
+  fun `performInsertText waits for mutation before reading selection actions`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    val body = functionBody(source, "private fun performInsertText(")
+    val mutation = body.indexOf("textMutated = setTextSucceeded")
+    val poll = body.indexOf("awaitInsertTextMutation(", startIndex = mutation)
+    val selection = body.indexOf("val selectionAttempted", startIndex = mutation)
+    val actionList = body.indexOf("targetNode.actionList", startIndex = selection)
+    assertTrue(
+      "successful SET_TEXT must poll before deciding selection",
+      poll > mutation && poll < selection,
+    )
+    assertTrue("selection support must be re-read after polling", actionList > selection)
+    assertTrue(
+      "poll must refresh the original mutation node",
+      body.contains("readSnapshot = ::readMutationSnapshot"),
+    )
+    assertTrue(
+      "poll must only run after successful SET_TEXT",
+      body.contains("if (setTextSucceeded)"),
+    )
+    val refresh = functionBody(body, "fun readMutationSnapshot()")
+    assertTrue(refresh.contains("!targetNode.refresh()"))
+    assertTrue(refresh.contains("nodeKey() != mutationNodeKey"))
+    assertTrue(refresh.contains("targetNode.isPassword"))
+    assertTrue(
+      "mutation refresh must not re-find another field",
+      !refresh.contains("findFocusedEditableNode"),
+    )
+  }
+
+  @Test
   fun `performInsertText reports caret warnings after attempting selection`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val body = functionBody(source, "private fun performInsertText(")

@@ -4510,6 +4510,38 @@ describe("Android systemTray clearAll initial shade readiness", () => {
     ToolRegistry.clearTools();
   });
 
+  test("uses the short first wait when the app inventory is empty", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell dumpsys notification --noredact", {
+      stdout: "Current Notification Manager state:\nNotification List:\nSnoozed notifications:",
+      stderr: "",
+    });
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult(createEmptyTrayObservation());
+    const installedAppsSpy = mockInstalledApps(["com.example.empty"]);
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      appLabelResolver: async () => "Empty App",
+      observeScreenFactory: () => observer,
+    });
+    registerInteractionTools();
+
+    try {
+      const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+        action: "clearAll",
+        notification: { appId: "com.example.empty" },
+        awaitTimeout: 30000,
+      });
+      expect(JSON.parse(result.content[0].text).dismissedCount).toBe(0);
+      expect(timer.now()).toBeLessThan(2000);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
   for (const [readyAfterMs, awaitTimeout, expectedSwipes] of [
     [1000, undefined, 1],
     [1000, 2000, 1],

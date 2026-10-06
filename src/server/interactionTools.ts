@@ -3102,6 +3102,7 @@ export function registerInteractionTools() {
       let swipeCount = 0;
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
+      let notificationsListedBeforeClear = false;
       if (device.platform === "android" && notification.appId) {
         const attributionLabel = await resolveClearAllAttributionLabel(
           device,
@@ -3123,6 +3124,7 @@ export function registerInteractionTools() {
           "before",
           signal,
         );
+        notificationsListedBeforeClear = listed.notifications.length > 0;
         // All correlated rows' content text lets the existing row matcher
         // isolate them, whether ownership comes from a header or dumpsys.
         clearMatchTexts = [
@@ -3141,7 +3143,11 @@ export function registerInteractionTools() {
           clearMatchTexts,
           // The list pass collapses the shade; reopening may take longer than
           // the short drain wait used after a swipe (#10249).
-          device.platform === "android" && i === 0 ? awaitTimeoutMs : 500,
+          device.platform === "android" &&
+            i === 0 &&
+            (notificationsListedBeforeClear || !notification.appId)
+            ? awaitTimeoutMs
+            : 500,
           progress,
           signal,
         );

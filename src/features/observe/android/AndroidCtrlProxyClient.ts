@@ -171,7 +171,7 @@ import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
-import { CtrlProxyFocus } from "./CtrlProxyFocus";
+import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
 import { CtrlProxyOverlays, type OverlayAssetRequestOptions } from "./CtrlProxyOverlays";
 import type { OverlaySpec } from "../../overlay/overlaySpec";
 import type { OverlayAssetUpload } from "../../overlay/overlayAssets";
@@ -490,6 +490,7 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
   action: string;
+  alreadySatisfied?: boolean;
 }
 
 interface WsClipboardResultMessage extends WsRequestBase {
@@ -3541,7 +3542,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
@@ -3549,7 +3550,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
@@ -5449,6 +5450,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         perfTiming: message.perfTiming,
+        ...(message.alreadySatisfied ? { alreadySatisfied: true } : {}),
       })),
 
     clipboard_result: (message) =>

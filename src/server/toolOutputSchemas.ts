@@ -584,6 +584,7 @@ export const accessibilityFocusResultSchema = z
     warning: z.string().optional(),
     focusedElement: elementSchema.optional(),
     confirmed: z.boolean().optional(),
+    alreadySatisfied: z.boolean().optional(),
   })
   .passthrough();
 

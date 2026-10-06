@@ -35,6 +35,28 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `action result already-satisfied flag defaults to false and round-trips`() {
+    val plain = ActionResult(timestamp = 1L, success = true, action = "click", totalTimeMs = 2L)
+    assertFalse(plain.alreadySatisfied)
+
+    val satisfied = plain.copy(action = "focus", alreadySatisfied = true)
+    val decoded =
+      json.decodeFromString(
+        ActionResult.serializer(),
+        json.encodeToString(ActionResult.serializer(), satisfied),
+      )
+    assertTrue(decoded.alreadySatisfied)
+
+    // An older runner omits the field entirely.
+    val legacy =
+      json.decodeFromString(
+        ActionResult.serializer(),
+        """{"timestamp":1,"success":true,"action":"focus","totalTimeMs":2}""",
+      )
+    assertFalse(legacy.alreadySatisfied)
+  }
+
+  @Test
   fun `serialize crash and ANR timestamps on the envelope`() {
     val deviceInfo = DeviceInfo("Pixel 7", "Google", "14", 34)
     val crash: WebSocketResponse =

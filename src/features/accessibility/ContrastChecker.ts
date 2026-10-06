@@ -51,6 +51,12 @@ interface RGB {
 interface ColorCluster {
   color: RGB;
   count: number;
+  coreCount: number;
+}
+
+interface ElementColors {
+  textColor: RGB;
+  backgroundColor: RGB;
 }
 
 interface RGBA extends RGB {
@@ -499,13 +505,13 @@ export class ContrastChecker {
     const baseSamples = await this.sampleBackgroundColors(
       image,
       element.bounds,
-      textColor,
+      { textColor, backgroundColor: dominantBackground },
       samplePoints,
     );
     const baseGradient = this.config.detectGradients ? this.detectGradient(baseSamples) : null;
 
-    // Flat backgrounds are judged on the distribution's pair, not a point that missed a glyph.
-    let samples = baseSamples.map((sample) => ({ ...sample, backgroundColor: dominantBackground }));
+    // Preserve local backgrounds even when their variation has no linear gradient axis.
+    let samples = baseSamples;
     let gradient: GradientInfo | undefined;
     if (baseGradient?.isGradient) {
       gradient = baseGradient;
@@ -513,7 +519,7 @@ export class ContrastChecker {
       const gradientSamples = await this.sampleBackgroundColors(
         image,
         element.bounds,
-        textColor,
+        { textColor, backgroundColor: dominantBackground },
         gradientPoints,
       );
       samples = this.mergeSamples(baseSamples, gradientSamples);
@@ -783,10 +789,12 @@ export class ContrastChecker {
   }
 
   /** Quantized clusters retain their actual mean colour; anti-aliasing does not dominate a bin. */
-  private colorClusters(colors: RGB[]): ColorCluster[] {
+  private colorClusters(colors: RGB[], quantized = true): ColorCluster[] {
     const bins = new Map<string, RGB[]>();
     for (const color of colors) {
-      const key = `${color.r >> 3},${color.g >> 3},${color.b >> 3}`;
+      const key = quantized
+        ? `${color.r >> 3},${color.g >> 3},${color.b >> 3}`
+        : `${color.r},${color.g},${color.b}`;
       const bin = bins.get(key);
       if (bin) {
         bin.push(color);
@@ -797,6 +805,7 @@ export class ContrastChecker {
     return Array.from(bins.values(), (bin) => ({
       color: this.averageColor(bin),
       count: bin.length,
+      coreCount: quantized ? this.colorClusters(bin, false)[0].count : bin.length,
     })).sort((a, b) => b.count - a.count);
   }
 
@@ -830,45 +839,86 @@ export class ContrastChecker {
     return colors;
   }
 
+  /** Ignore the border, while retaining the same bounded interior sampling budget. */
+  private interiorBounds(bounds: Element["bounds"]): Element["bounds"] {
+    const inset = Math.min(
+      4,
+      Math.floor((bounds.right - bounds.left - 2) / 2),
+      Math.floor((bounds.bottom - bounds.top - 2) / 2),
+    );
+    return {
+      left: bounds.left + inset,
+      top: bounds.top + inset,
+      right: bounds.right - inset,
+      bottom: bounds.bottom - inset,
+    };
+  }
+
   private sampleElementColors(
     image: RawImage,
     bounds: Element["bounds"],
-  ): {
-    textColor: RGB;
-    backgroundColor: RGB;
-  } {
-    const pixels = this.elementPixels(image, bounds);
+  ): { textColor: RGB; backgroundColor: RGB } {
+    const pixels = this.elementPixels(image, this.interiorBounds(bounds));
     const clusters = this.colorClusters(pixels);
-    const backgroundColor = clusters[0].color;
-    const perimeter = this.perimeterPixels(image, bounds);
-    // Only override a dominant interior block when it is absent from the surrounding edge.
-    const edgeSupport = perimeter.filter((color) =>
-      this.isSimilarColor(color, backgroundColor),
+    let backgroundColor = clusters[0].color;
+    const perimeterPixels = this.perimeterPixels(image, bounds);
+    const perimeter = this.colorClusters(perimeterPixels);
+    const edgeSupport = perimeter
+      .filter((cluster) => this.isSimilarColor(cluster.color, backgroundColor))
+      .reduce((sum, cluster) => sum + cluster.count, 0);
+    const interiorEdgeSupport = clusters
+      .filter(
+        (cluster) =>
+          !this.isSimilarColor(cluster.color, backgroundColor) &&
+          perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)),
+      )
+      .reduce((sum, cluster) => sum + cluster.count, 0);
+    // A dense foreground may dominate; edge background must also occur INSIDE
+    // the inset box (>=10%) and most of its inset perimeter (>=50%). A border-coloured
+    // icon cannot make the outside border replace the element fill.
+    const supportedEdges = perimeter.filter((edge) => edge.count >= 512 * 0.1);
+    const insetEdgeSupport = this.perimeterPixels(image, this.interiorBounds(bounds)).filter(
+      (color) => supportedEdges.some((edge) => this.colorDistance(color, edge.color) <= 40),
     ).length;
-    if (edgeSupport < perimeter.length * 0.1) {
-      const surrounding = this.perimeterPixels(image, {
-        left: bounds.left - 2,
-        top: bounds.top - 2,
-        right: bounds.right + 2,
-        bottom: bounds.bottom + 2,
-      });
-      return {
-        textColor: backgroundColor,
-        backgroundColor: this.colorClusters(surrounding)[0].color,
-      };
+    if (
+      edgeSupport < 512 * 0.1 &&
+      interiorEdgeSupport >= pixels.length * 0.1 &&
+      insetEdgeSupport >= 512 * 0.5
+    ) {
+      backgroundColor = this.averageColor(perimeterPixels);
     }
     const supported = clusters.filter(
-      (cluster) => cluster.count >= Math.max(2, pixels.length * 0.001),
+      (cluster) =>
+        cluster.count >= Math.max(2, pixels.length * 0.0025) &&
+        !this.isSimilarColor(cluster.color, backgroundColor),
     );
-    const text = supported.reduce(
-      (farthest, cluster) =>
-        this.colorDistance(cluster.color, backgroundColor) >
-        this.colorDistance(farthest.color, backgroundColor)
-          ? cluster
-          : farthest,
-      clusters[0],
+    const textColor = this.selectTextColor(supported, backgroundColor, perimeter);
+    return { textColor, backgroundColor };
+  }
+
+  /** Population orders the candidates; when supported core colours are ambiguous,
+   * keep the LOWER contrast. An icon cannot displace a smaller supported glyph bin.
+   * Keep bins with >=25% of the largest foreground population; smaller bins
+   * must have >=80% identical pixels and be absent from the background perimeter.
+   * This retains small flat glyphs beside a large icon without retaining fringes.
+   */
+  private selectTextColor(
+    clusters: ColorCluster[],
+    background: RGB,
+    perimeter: ColorCluster[],
+  ): RGB {
+    const largest = clusters[0]?.count ?? 0;
+    const candidates = clusters.filter(
+      (cluster) =>
+        cluster.count >= largest * 0.25 ||
+        (cluster.coreCount >= cluster.count * 0.8 &&
+          !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color))),
     );
-    return { textColor: text.color, backgroundColor };
+    return candidates.reduce((selected, candidate) => {
+      const ratio = this.getCachedContrast(candidate.color, background);
+      const selectedRatio = this.getCachedContrast(selected, background);
+      return ratio < selectedRatio ? candidate.color : selected;
+    }, candidates[0]?.color ?? background);
   }
 
   /**
@@ -877,7 +927,7 @@ export class ContrastChecker {
   private async sampleBackgroundColors(
     image: RawImage,
     bounds: Element["bounds"],
-    textColor: RGB,
+    elementColors: ElementColors,
     points: Array<{ x: number; y: number }>,
   ): Promise<ContrastSample[]> {
     const samples: ContrastSample[] = [];
@@ -885,7 +935,7 @@ export class ContrastChecker {
       const backgroundColor = await this.sampleBackgroundAtPoint(
         image,
         bounds,
-        textColor,
+        elementColors,
         point.x,
         point.y,
       );
@@ -924,82 +974,36 @@ export class ContrastChecker {
   private async sampleBackgroundAtPoint(
     image: RawImage,
     bounds: Element["bounds"],
-    textColor: RGB,
+    elementColors: ElementColors,
     x: number,
     y: number,
   ): Promise<RGB> {
     const searchRadii = [2, 4, 6, 8];
     for (const radius of searchRadii) {
-      const colors = this.backgroundColorsAtRadius(image, bounds, textColor, x, y, radius);
-      if (colors.length > 0) {
-        return this.colorClusters(colors)[0].color;
+      const colors = this.backgroundColorsAtRadius(
+        image,
+        bounds,
+        elementColors.textColor,
+        x,
+        y,
+        radius,
+      );
+      const background = this.colorClusters(colors)[0];
+      // A few remaining fringe pixels inside a stroke are not a background.
+      // Expand until a locally supported colour is found, then retain its variation.
+      if (
+        background &&
+        colors.length >= (2 * radius + 1) ** 2 * 0.2 &&
+        background.count >= colors.length * 0.2
+      ) {
+        return this.colorClusters(
+          colors.filter((color) => this.isSimilarColor(color, background.color)),
+          false,
+        )[0].color;
       }
     }
 
-    if (this.config.enableBackgroundCache) {
-      const cached = this.getBackgroundCache(bounds);
-      if (cached) {
-        return cached;
-      }
-    }
-
-    return await this.sampleBackgroundEdgeColor(image, bounds);
-  }
-
-  private async sampleBackgroundEdgeColor(
-    image: RawImage,
-    bounds: Element["bounds"],
-  ): Promise<RGB> {
-    const cached = this.config.enableBackgroundCache ? this.getBackgroundCache(bounds) : null;
-    if (cached) {
-      return cached;
-    }
-
-    const { left, top, right, bottom } = bounds;
-    const colors: RGB[] = [];
-    const edgeSampleSize = 2;
-
-    for (let x = left; x < right; x += 3) {
-      for (let y = top; y < top + edgeSampleSize; y++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-      for (let y = bottom - edgeSampleSize; y < bottom; y++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-    }
-
-    for (let y = top; y < bottom; y += 3) {
-      for (let x = left; x < left + edgeSampleSize; x++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-      for (let x = right - edgeSampleSize; x < right; x++) {
-        colors.push(this.resolvePixelColor(image, x, y));
-      }
-    }
-
-    if (colors.length === 0) {
-      const margin = 5;
-      for (let x = Math.max(0, left - margin); x < left; x++) {
-        for (let y = top; y < bottom; y += 3) {
-          colors.push(this.resolvePixelColor(image, x, y));
-        }
-      }
-    }
-
-    const color = this.averageColor(colors);
-    this.setBackgroundCache(bounds, color);
-    return color;
-  }
-
-  private getBackgroundCache(bounds: Element["bounds"]): RGB | null {
-    const key = `${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}`;
-    const cached = this.bgColorCache.get(key);
-    if (cached) {
-      this.bgColorHits++;
-      return cached;
-    }
-    this.bgColorMisses++;
-    return null;
+    return elementColors.backgroundColor;
   }
 
   private setBackgroundCache(bounds: Element["bounds"], color: RGB): void {

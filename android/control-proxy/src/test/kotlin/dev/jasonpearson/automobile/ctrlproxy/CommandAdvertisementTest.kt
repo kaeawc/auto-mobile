@@ -25,6 +25,7 @@ class CommandAdvertisementTest {
       "ime_key_events_v1",
       "tap_double_v1",
       "gesture_display_id_v1",
+      "overlay_display_id_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )
@@ -53,6 +54,10 @@ class CommandAdvertisementTest {
       assertEquals(
         sdk >= GestureDisplayRouting.DISPLAY_API,
         commands.contains("gesture_display_id_v1"),
+      )
+      assertEquals(
+        sdk >= GestureDisplayRouting.DISPLAY_API,
+        commands.contains("overlay_display_id_v1"),
       )
     }
   }

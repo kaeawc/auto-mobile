@@ -14,6 +14,7 @@ import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
+import { isIosKeyboardClass } from "../ios/IosScreenIdentity";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -1062,6 +1063,19 @@ function platformClassNameForDiff(node: Record<string, unknown>): string {
 }
 
 /**
+ * Whether a node roots (or, for a bare keycap, is) the soft keyboard the skeleton
+ * collapses to `<ime>`: the Android `automobile:imePackage` window extra, or an
+ * iOS keyboard class per the collector's own predicate. The class names are
+ * iOS-only, so no platform probe is needed.
+ */
+function isKeyboardNodeForDiff(node: ViewHierarchyNode, rec: Record<string, unknown>): boolean {
+  return (
+    Boolean(node.extras?.["automobile:imePackage"]) ||
+    isIosKeyboardClass(platformClassNameForDiff(rec).trim() || undefined)
+  );
+}
+
+/**
  * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
  * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
  * key is globally unique by position and identical cells in sibling subtrees do
@@ -1079,7 +1093,7 @@ function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObser
       return;
     }
     const rec: Record<string, unknown> = node;
-    if (collapseKeyboard && node.extras?.["automobile:imePackage"]) {
+    if (collapseKeyboard && isKeyboardNodeForDiff(node, rec)) {
       return;
     }
     const localKey = nodeKey(rec, siblingIndex);

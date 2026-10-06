@@ -166,6 +166,24 @@ describe("DatabaseInspector", () => {
       expect(fakeAdb.wasCommandExecuted("offset:s:'50'")).toBe(true);
     });
 
+    test("returns table integers beyond 2^53 losslessly and flags the column", async () => {
+      const response = `Bundle[{success=true, result={"columns":["id","name"],"rows":[[1234567890123456789,"Alice"],[2,"Bob"]],"total":2}}]`;
+
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${appId}.automobile.database --method getTableData --extra databasePath:s:'${databasePath}' --extra table:s:'users' --extra limit:s:'50' --extra offset:s:'0'`,
+        response,
+      );
+
+      const data = await inspector.getTableData(appId, databasePath, "users");
+
+      expect(data.rows).toEqual([
+        ["1234567890123456789", "Alice"],
+        [2, "Bob"],
+      ]);
+      expect(data.bigIntegerColumns).toEqual([0]);
+      expect(data.total).toBe(2);
+    });
+
     test("handles null values in rows", async () => {
       const response = `Bundle[{success=true, result={"columns":["id","name"],"rows":[[1,null],[2,"Bob"]],"total":2}}]`;
 
@@ -219,6 +237,37 @@ describe("DatabaseInspector", () => {
       expect(result.type).toBe("query");
       expect(result.columns).toEqual(["id", "name"]);
       expect(result.rows).toHaveLength(2);
+    });
+
+    test("returns integers beyond 2^53 as exact decimal strings and flags their columns", async () => {
+      const response = `Bundle[{success=true, result={"type":"query","columns":["id","n","big"],"rows":[[9007199254740993,7,-9223372036854775808],[42,8,9223372036854775807]]}}]`;
+
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'SELECT id, n, big FROM t'`,
+        response,
+      );
+
+      const result = await inspector.executeSQL(appId, databasePath, "SELECT id, n, big FROM t");
+
+      expect(result.rows).toEqual([
+        ["9007199254740993", 7, "-9223372036854775808"],
+        [42, 8, "9223372036854775807"],
+      ]);
+      expect(result.bigIntegerColumns).toEqual([0, 2]);
+    });
+
+    test("keeps every integer within the safe range a number and sets no flag", async () => {
+      const response = `Bundle[{success=true, result={"type":"query","columns":["a","b","c"],"rows":[[9007199254740991,-9007199254740991,1.5]]}}]`;
+
+      fakeAdb.setCommandResult(
+        `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'SELECT a, b, c FROM t'`,
+        response,
+      );
+
+      const result = await inspector.executeSQL(appId, databasePath, "SELECT a, b, c FROM t");
+
+      expect(result.rows).toEqual([[9007199254740991, -9007199254740991, 1.5]]);
+      expect("bigIntegerColumns" in result).toBe(false);
     });
 
     test("executes INSERT and returns rows affected", async () => {

@@ -86,11 +86,13 @@ export class AndroidWakeAndUnlock {
         unlocked: true,
       };
     }
-    if (!lock.locked) {
+    if (!lock.locked && lock.secure !== false) {
       // Showing but occluded (#10064): a show-when-locked activity (call, alarm,
       // secure camera) sits in front of a keyguard that is still up, and it is
       // back as soon as that activity finishes. Not unlocked, and no blind
       // dismissal or credential input into someone else's foreground activity.
+      // A definitely non-secure (swipe) keyguard is exempt: dismissing it needs
+      // no credential, so `wm dismiss-keyguard` below is the way forward.
       logger.warn("[WakeAndUnlock] keyguard is showing but occluded; unlock not attempted");
       return {
         success: false,

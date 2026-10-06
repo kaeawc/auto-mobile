@@ -71,8 +71,11 @@ class OverlayController(
         val patched =
           validate(checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()))
         render(patched) // Validate Compose sizes too, before mutating the live runtime.
-        activeRuntime?.replace(patched)
-        activeRuntime?.let { armIdle(it) }
+        val runtime = checkNotNull(activeRuntime)
+        runtime.replace(patched)
+        armIdle(runtime)
+        ensureShowing(runtime)
+        syncTextFieldFocus(runtime)
       }
     }
 
@@ -118,6 +121,7 @@ class OverlayController(
       )
     val interactive =
       request.copy(
+        hasTextField = mapOverlaySpec(validated, runtime.current.pages).hasTextField,
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
           OverlayRuntimeContent(runtime) { interaction -> interact(runtime, interaction) }
@@ -172,6 +176,7 @@ class OverlayController(
         )
           armIdle(runtime)
         runtime.handle(interaction)
+        if (runtime === activeRuntime && runtime.current.active) syncTextFieldFocus(runtime)
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -277,6 +282,36 @@ class OverlayController(
     if (host.show(request)) return
     if (lifecycle.isBlocked()) notifyDetached() // Locked meanwhile: hidden, restored on unlock.
     else abandon(runtime)
+  }
+
+  /**
+   * A state-only update never touches the host, so a window the host cleared as detached would
+   * leave the runtime windowless while the request reports success. A lock-hidden window is
+   * legitimate (restored on unlock) and keeps the patched state; otherwise restore it now, and fail
+   * the request when the overlay could not come back (the runtime then ended once, as teardown).
+   */
+  private suspend fun ensureShowing(runtime: OverlayRuntime) {
+    if (host.isShowing || lifecycle.isBlocked()) return
+    relayoutOrRestore(runtime)
+    check(runtime === activeRuntime && (host.isShowing || lifecycle.isBlocked())) {
+      "Overlay window was lost and could not be restored"
+    }
+  }
+
+  /**
+   * The window may hold input focus only while a text field is visible in the CURRENT tree, so a
+   * page swipe, tab change or sheet open/close can flip it; otherwise Back and key input to the app
+   * behind would be swallowed. A failed flip keeps the old request and is retried on the next
+   * change.
+   */
+  private suspend fun syncTextFieldFocus(runtime: OverlayRuntime) {
+    val request = activeRequest ?: return
+    val visible = mapOverlaySpec(runtime.current.spec, runtime.current.pages).hasTextField
+    if (visible == request.hasTextField) return
+    // A window cleared as detached is restored from activeRequest, so record the change for it.
+    if (host.setTextFieldVisible(visible) || !host.isShowing)
+      activeRequest = request.copy(hasTextField = visible)
+    else Log.w("OverlayController", "Overlay host failed to update window focusability")
   }
 
   /** Terminal teardown for a window that cannot be shown again: exactly one `dismissed` event. */

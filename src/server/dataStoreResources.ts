@@ -17,6 +17,7 @@ import {
   isSharedPreferencesInspectionDisabledError,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /**
  * MCP resources that project delivered Android Jetpack DataStore reads into the
@@ -106,7 +107,7 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
 }
 
 function buildStoresUri(deviceId: string, packageName: string, adapterName: string): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/datastore/${encodeURIComponent(adapterName)}/stores`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/datastore/${encodeUriSegment(adapterName)}/stores`;
 }
 
 function buildEntriesUri(
@@ -115,7 +116,7 @@ function buildEntriesUri(
   adapterName: string,
   storeName: string,
 ): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/datastore/${encodeURIComponent(adapterName)}/${encodeURIComponent(storeName)}/entries`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/datastore/${encodeUriSegment(adapterName)}/${encodeUriSegment(storeName)}/entries`;
 }
 
 function jsonContent(uri: string, body: Record<string, unknown>): ResourceContent {

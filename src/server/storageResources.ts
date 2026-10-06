@@ -25,6 +25,7 @@ import {
 import { resolveDefaultAndroidPreferencesUser } from "../features/preferences/resolveAndroidPreferencesUser";
 import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { isCtrlProxyStorageUnavailableError } from "../features/observe/android/CtrlProxyStorage";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 // Resource URI templates
 const STORAGE_RESOURCE_TEMPLATES = {
@@ -193,14 +194,14 @@ function malformedUriContent(params: Record<string, string>): ResourceContent {
  * Build resource URI for storage files
  */
 function buildFilesUri(deviceId: string, packageName: string): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/files`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/files`;
 }
 
 /**
  * Build resource URI for storage entries
  */
 function buildEntriesUri(deviceId: string, packageName: string, fileName: string): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/${encodeURIComponent(fileName)}/entries`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/${encodeUriSegment(fileName)}/entries`;
 }
 
 /**

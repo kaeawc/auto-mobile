@@ -15,6 +15,7 @@ import { ActionableError } from "../models/ActionableError";
 import { iosStorageErrorMessage } from "./storageSdkErrors";
 import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
 import { MALFORMED_URI_SEGMENT_MESSAGE, safeDecodeSegment } from "./resourceUriSegments";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
@@ -175,14 +176,14 @@ function getTableSchemaCacheKey(
  * Build resource URI for databases
  */
 function buildDatabasesUri(deviceId: string, appId: string): string {
-  return `automobile:devices/${deviceId}/databases?appId=${encodeURIComponent(appId)}`;
+  return `automobile:devices/${deviceId}/databases?appId=${encodeUriSegment(appId)}`;
 }
 
 /**
  * Build resource URI for tables
  */
 function buildTablesUri(deviceId: string, databasePath: string, appId: string): string {
-  return `automobile:devices/${deviceId}/databases/${encodeURIComponent(databasePath)}/tables?appId=${encodeURIComponent(appId)}`;
+  return `automobile:devices/${deviceId}/databases/${encodeUriSegment(databasePath)}/tables?appId=${encodeUriSegment(appId)}`;
 }
 
 /**
@@ -194,7 +195,7 @@ function buildTableDataUri(
   table: string,
   appId: string,
 ): string {
-  return `automobile:devices/${deviceId}/databases/${encodeURIComponent(databasePath)}/tables/${encodeURIComponent(table)}/data?appId=${encodeURIComponent(appId)}`;
+  return `automobile:devices/${deviceId}/databases/${encodeUriSegment(databasePath)}/tables/${encodeUriSegment(table)}/data?appId=${encodeUriSegment(appId)}`;
 }
 
 /**
@@ -206,7 +207,7 @@ function buildTableStructureUri(
   table: string,
   appId: string,
 ): string {
-  return `automobile:devices/${deviceId}/databases/${encodeURIComponent(databasePath)}/tables/${encodeURIComponent(table)}/structure?appId=${encodeURIComponent(appId)}`;
+  return `automobile:devices/${deviceId}/databases/${encodeUriSegment(databasePath)}/tables/${encodeUriSegment(table)}/structure?appId=${encodeUriSegment(appId)}`;
 }
 
 /**

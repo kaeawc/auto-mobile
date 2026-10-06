@@ -9,6 +9,7 @@ import { optionalEnum, optionalInteger, optionalString } from "./queryParamValid
 import type { Platform } from "../models";
 import type { LocalFileListEntry } from "./appFileService";
 import { decodeSegmentOrThrow } from "./resourceUriSegments";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /**
  * Session-scoped execution-log contract (#7006).
@@ -356,8 +357,8 @@ export function buildSessionLogResourceUri(
   }
   query.set("maxBytes", String(request.maxBytes));
   return (
-    `automobile:device-session/${encodeURIComponent(sessionUuid)}` +
-    `/apps/${encodeURIComponent(request.appId)}/logs?${query.toString()}`
+    `automobile:device-session/${encodeUriSegment(sessionUuid)}` +
+    `/apps/${encodeUriSegment(request.appId)}/logs?${query.toString()}`
   );
 }
 

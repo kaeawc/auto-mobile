@@ -115,13 +115,29 @@ function computeSubscriptionIdentity(uri: string, paginationParamNames: string[]
 // repo's type-checker, and proxyServer.ts also spells its codes numerically.
 const JSONRPC_INVALID_PARAMS = -32602;
 
+// Whether every percent-escape in the request URI decodes. Only then is a handler's
+// URIError not the client's doing.
+function requestUriIsWellEncoded(uri: string): boolean {
+  try {
+    decodeURIComponent(uri);
+    return true;
+  } catch (error) {
+    // A malformed escape in the client's URI is the expected case this check detects.
+    logger.debug(`[ResourceRegistry] Request URI is not valid percent-encoding: ${error}`);
+    return false;
+  }
+}
+
 // Backstop for a handler that decodes a path capture without guarding it: the
 // registry passes captures through undecoded, so a malformed percent-escape makes
 // `decodeURIComponent` throw a raw `URIError` ("URI malformed") with no hint of
 // which resource was wrong. Surface it as a structured invalid-params error
-// instead (#10117). Every other handler error is rethrown untouched.
+// instead (#10117). A URIError is blamed on the client only when the REQUEST URI
+// itself fails to decode: `encodeURIComponent` also throws it (a lone surrogate in a
+// device-reported name) for a well-formed request, and that is a server fault that
+// must stay a server error. Every other handler error is rethrown untouched.
 function malformedUriToMcpError(error: unknown, uri: string): unknown {
-  if (!(error instanceof URIError)) {
+  if (!(error instanceof URIError) || requestUriIsWellEncoded(uri)) {
     return error;
   }
   logger.warn(`[ResourceRegistry] Malformed percent-encoding in resource URI ${uri}: ${error}`);

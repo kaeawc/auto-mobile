@@ -25,6 +25,8 @@ describe("findUsageError (#10132)", () => {
       ["no-proxy direct launch", ["--no-proxy"]],
       ["hand-parsed value flag", ["--tool-outputs-dir", "/tmp/out", "--event-all-markers", "@,/"]],
       ["unknown value flag keeps its value", ["--some-future-flag", "value"]],
+      ["a quoted empty shell variable (#10135)", [""]],
+      ["empty elements among real flags (#10135)", ["--debug", "", "--debug-perf"]],
       ["socket-path marker", ["--daemon-mode", "--daemon-socket-path", "/tmp/am/daemon.sock"]],
     ];
 
@@ -47,6 +49,15 @@ describe("findUsageError (#10132)", () => {
       ["daemon subcommand with argument", ["--daemon", "heartbeat", "session-1"]],
       ["unknown daemon subcommand (printer reports it)", ["--daemon", "bogus"]],
       ["boot-device", ["--boot-device", "--platform", "ios", "--create-if-missing"]],
+      [
+        "cli tool argument that looks like a daemon flag (#10135)",
+        ["--cli", "sendKeys", "--text", "--daemon=x"],
+      ],
+      ["cli tool argument that looks like a cli flag (#10135)", ["--cli", "observe", "--cli=x"]],
+      [
+        "daemon argument that looks like a mode flag (#10135)",
+        ["--daemon", "heartbeat", "--cli=x"],
+      ],
     ];
 
     test.each(dispatched)("%s", (_label, argv) => {
@@ -72,6 +83,20 @@ describe("findUsageError (#10132)", () => {
       "Did you mean: auto-mobile --daemon status",
     );
     expect(findUsageError(["--boot-device=ios"])).toContain("--boot-device --platform");
+  });
+
+  test("a malformed mode flag before a real mode flag is still rejected (#10135)", () => {
+    expect(findUsageError(["--debug", "--cli=observe"])).toContain(
+      "Did you mean: auto-mobile --cli observe",
+    );
+    expect(findUsageError(["--daemon=status", "--cli", "observe"])).toContain(
+      "Did you mean: auto-mobile --daemon status",
+    );
+  });
+
+  test("an empty element does not hide a real usage error (#10135)", () => {
+    expect(findUsageError(["", "doctor"])).toContain("Unexpected argument 'doctor'");
+    expect(findUsageError(["--daemon", ""])).toContain("--daemon requires a command");
   });
 
   test("a stray word is rejected with the nearest valid form", () => {

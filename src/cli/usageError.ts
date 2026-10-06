@@ -20,9 +20,21 @@ const DAEMON_COMMAND_NAMES = new Set(DAEMON_COMMANDS.map((command) => command.sp
 
 const BOOT_DEVICE_FORM = "auto-mobile --boot-device --platform <android|ios>";
 
-/** `--flag=value` for a mode flag, e.g. `--cli=observe`, which no dispatcher recognizes. */
+/**
+ * `--flag=value` for a mode flag, e.g. `--cli=observe`, which no dispatcher recognizes.
+ * Scanning stops at the first real mode flag: everything after it belongs to that mode
+ * (a tool argument such as `--text "--daemon=x"` is a value, not a mistake).
+ */
 function malformedModeFlag(args: string[]): string | undefined {
-  return args.find((arg) => MODE_FLAGS.some((flag) => arg.startsWith(`${flag}=`)));
+  for (const arg of args) {
+    if (MODE_FLAGS.includes(arg)) {
+      return undefined;
+    }
+    if (MODE_FLAGS.some((flag) => arg.startsWith(`${flag}=`))) {
+      return arg;
+    }
+  }
+  return undefined;
 }
 
 function describeMalformedModeFlag(arg: string): string {
@@ -84,7 +96,10 @@ function missingDaemonCommand(args: string[]): boolean {
  * A command line that names a mode but is not understood must fail loudly
  * rather than fall through to the stdio server and wait on stdin (#10132).
  */
-export function findUsageError(args: string[]): string | undefined {
+export function findUsageError(rawArgs: string[]): string | undefined {
+  // An empty element (a quoted empty shell variable, `"args": [""]`) carries no
+  // meaning: it is neither a stray word nor an option, so it never blocks a launch.
+  const args = rawArgs.filter((arg) => arg !== "");
   const malformed = malformedModeFlag(args);
   if (malformed !== undefined) {
     return describeMalformedModeFlag(malformed);

@@ -3,9 +3,8 @@ import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { PostNotification } from "../../../src/features/utility/PostNotification";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { BootedDevice } from "../../../src/models";
-import { mkdir, mkdtemp, rm, writeFile } from "fs/promises";
-import os from "os";
 import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
@@ -16,6 +15,8 @@ describe("PostNotification", () => {
   let device: BootedDevice;
   let fakeAdb: FakeAdbExecutor;
   let fakeWindow: FakeWindow;
+  let hostFiles: FakeFileSystem;
+  const hostDir = path.resolve("/fake-host-images");
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   beforeEach(() => {
@@ -26,6 +27,7 @@ describe("PostNotification", () => {
     } as BootedDevice;
 
     fakeAdb = new FakeAdbExecutor();
+    hostFiles = new FakeFileSystem();
     fakeWindow = new FakeWindow();
     fakeWindow.configureCachedActiveWindow({
       appId: "com.example.app",
@@ -89,77 +91,71 @@ describe("PostNotification", () => {
   });
 
   test("logs missing host images and preserves the image failure", async () => {
-    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-"));
-    const imagePath = path.join(tmpDir, "missing.png");
-    try {
-      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+    const imagePath = path.join(hostDir, "missing.png");
+    const result = await new PostNotification(device, fakeAdb, fakeWindow, null, hostFiles).execute(
+      {
         title: "Picture",
         body: "Body",
         imageType: "bigPicture",
         imagePath,
-      });
-      expect(result).toEqual({
-        success: false,
-        supported: false,
-        imageType: "bigPicture",
-        error: `Image file not found at ${imagePath}`,
-      });
-      expect(
-        loggerCallsWithPrefix(
-          warn.mock.calls,
-          "[PostNotification]",
-          "Failed to post notification:",
-          "Image file not found at ",
-          "Failed to push image to device:",
-        ),
-      ).toHaveLength(1);
-      const warnings = loggerCallsWithPrefix(
+      },
+    );
+    expect(result).toEqual({
+      success: false,
+      supported: false,
+      imageType: "bigPicture",
+      error: `Image file not found at ${imagePath}`,
+    });
+    expect(
+      loggerCallsWithPrefix(
         warn.mock.calls,
         "[PostNotification]",
         "Failed to post notification:",
         "Image file not found at ",
         "Failed to push image to device:",
-      );
-      expect(warnings[0][0]).toStartWith(`Image file not found at ${imagePath}: `);
-      expect(warnings[0][1]).toBeInstanceOf(Error);
-      expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
+      ),
+    ).toHaveLength(1);
+    const warnings = loggerCallsWithPrefix(
+      warn.mock.calls,
+      "[PostNotification]",
+      "Failed to post notification:",
+      "Image file not found at ",
+      "Failed to push image to device:",
+    );
+    expect(warnings[0][0]).toStartWith(`Image file not found at ${imagePath}: `);
+    expect(warnings[0][1]).toBeInstanceOf(Error);
+    expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
 
   test("logs image push failures and preserves the image failure", async () => {
-    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-"));
-    const imagePath = path.join(tmpDir, "image.png");
+    const imagePath = path.join(hostDir, "image.png");
     const error = new Error("push failed");
     fakeAdb.setCommandError("push ", error);
-    try {
-      await writeFile(imagePath, "fake-image-content");
-      const result = await new PostNotification(device, fakeAdb, fakeWindow).execute({
+    hostFiles.setFile(imagePath, "fake-image-content");
+    const result = await new PostNotification(device, fakeAdb, fakeWindow, null, hostFiles).execute(
+      {
         title: "Picture",
         body: "Body",
         imageType: "bigPicture",
         imagePath,
-      });
-      expect(result).toEqual({
-        success: false,
-        supported: false,
-        imageType: "bigPicture",
-        error: "Failed to push image to device: push failed",
-      });
-      expect(
-        loggerCallsWithPrefix(
-          warn.mock.calls,
-          "[PostNotification]",
-          "Failed to post notification:",
-          "Image file not found at ",
-          "Failed to push image to device:",
-        ),
-      ).toHaveLength(1);
-      expect(warn).toHaveBeenCalledWith("Failed to push image to device: push failed", error);
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
+      },
+    );
+    expect(result).toEqual({
+      success: false,
+      supported: false,
+      imageType: "bigPicture",
+      error: "Failed to push image to device: push failed",
+    });
+    expect(
+      loggerCallsWithPrefix(
+        warn.mock.calls,
+        "[PostNotification]",
+        "Failed to post notification:",
+        "Image file not found at ",
+        "Failed to push image to device:",
+      ),
+    ).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith("Failed to push image to device: push failed", error);
   });
 
   test("posts via SDK receiver when available", async () => {
@@ -312,9 +308,8 @@ describe("PostNotification", () => {
   });
 
   test("pushes host image for bigPicture imageType", async () => {
-    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-"));
-    const imagePath = path.join(tmpDir, "image.png");
-    await writeFile(imagePath, "fake-image-content");
+    const imagePath = path.join(hostDir, "image.png");
+    hostFiles.setFile(imagePath, "fake-image-content");
 
     configureReceiverProbe();
     fakeAdb.setCommandResponse("am broadcast", {
@@ -322,7 +317,13 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(
+      device,
+      fakeAdb as any,
+      fakeWindow as any,
+      null,
+      hostFiles,
+    );
     const result = await postNotification.execute({
       title: "Picture",
       body: "Body",
@@ -330,27 +331,21 @@ describe("PostNotification", () => {
       imagePath,
     });
 
-    try {
-      expect(result.success).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell mkdir -p /sdcard/Download/automobile")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("push")).toBe(true);
-      expect(
-        fakeAdb.getCommandCalls().find((call) => call.command.startsWith("push "))?.timeoutMs,
-      ).toBe(60_000);
-      expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/image.png")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("image_path")).toBe(true);
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
+    expect(result.success).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("shell mkdir -p /sdcard/Download/automobile")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("push")).toBe(true);
+    expect(
+      fakeAdb.getCommandCalls().find((call) => call.command.startsWith("push "))?.timeoutMs,
+    ).toBe(60_000);
+    expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/image.png")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("image_path")).toBe(true);
   });
 
   test("resolves relative bigPicture image path from daemon launch cwd", async () => {
-    const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-launch-cwd-"));
-    const fixturesDir = path.join(tmpDir, "fixtures");
-    const imagePath = path.join(fixturesDir, "pic.png");
-    await mkdir(fixturesDir, { recursive: true });
-    await writeFile(imagePath, "fake-image-content");
-    process.env[DAEMON_LAUNCH_CWD_ENV] = tmpDir;
+    const launchDir = path.resolve("/fake-daemon-launch-cwd");
+    const imagePath = path.join(launchDir, "fixtures", "pic.png");
+    hostFiles.setFile(imagePath, "fake-image-content");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchDir;
 
     configureReceiverProbe();
     fakeAdb.setCommandResponse("am broadcast", {
@@ -358,7 +353,13 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(
+      device,
+      fakeAdb as any,
+      fakeWindow as any,
+      null,
+      hostFiles,
+    );
     const result = await postNotification.execute({
       title: "Picture",
       body: "Body",
@@ -366,16 +367,12 @@ describe("PostNotification", () => {
       imagePath: path.join("fixtures", "pic.png"),
     });
 
-    try {
-      expect(result.success).toBe(true);
-      const pushCommand = fakeAdb
-        .getExecutedCommands()
-        .find((command) => command.startsWith("push "));
-      expect(pushCommand?.replace(/\\\\/g, "\\")).toContain(`"${imagePath}"`);
-      expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/pic.png")).toBe(true);
-    } finally {
-      await rm(tmpDir, { recursive: true, force: true });
-    }
+    expect(result.success).toBe(true);
+    const pushCommand = fakeAdb
+      .getExecutedCommands()
+      .find((command) => command.startsWith("push "));
+    expect(pushCommand?.replace(/\\\\/g, "\\")).toContain(`"${imagePath}"`);
+    expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/pic.png")).toBe(true);
   });
 
   test("reports an absent receiver without broadcasting", async () => {

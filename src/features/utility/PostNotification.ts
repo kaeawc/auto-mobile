@@ -59,6 +59,11 @@ function preserveOrExplainSimctlPushError(error: string): string {
   return error;
 }
 
+/** The one host-filesystem read the bigPicture path needs; tests inject a fake instead of temp dirs. */
+export interface HostImageFileSystem {
+  stat(filePath: string): Promise<{ isFile(): boolean }>;
+}
+
 export class PostNotification {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -71,6 +76,7 @@ export class PostNotification {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     window: WindowInterface | null = null,
     simctl: SimCtlClient | null = null,
+    private readonly hostFiles: HostImageFileSystem = fs,
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
@@ -456,7 +462,7 @@ export class PostNotification {
 
     let stats;
     try {
-      stats = await fs.stat(sourcePath);
+      stats = await this.hostFiles.stat(sourcePath);
     } catch (error) {
       logger.warn(`Image file not found at ${sourcePath}: ${errorMessage(error)}`, error);
       return {

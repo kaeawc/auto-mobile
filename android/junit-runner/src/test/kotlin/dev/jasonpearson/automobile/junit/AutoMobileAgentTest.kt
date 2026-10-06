@@ -224,6 +224,69 @@ class AutoMobileAgentTest {
     coVerify(exactly = 1) { mockAIAgent.run(any()) }
   }
 
+  private val recoveryContext =
+    FailedStepContext(
+      failedStepIndex = 1,
+      failedTool = "tapOn",
+      error = "Element not found",
+      succeededSteps = emptyList(),
+      planContent = "name: test\nsteps: []",
+      deviceId = null,
+    )
+
+  @Test
+  fun `a liveness observe that returns an isError result is not a live device`() {
+    val modelConfig = AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "test-key")
+    every { mockTimeProvider.currentTimeMillis() } returns 1000L
+    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
+    every { mockMcpClient.isConnected() } returns false
+    every { mockMcpClient.connect(any()) } just runs
+    every { mockMcpClient.disconnect() } just runs
+    every { mockConfigProvider.getModelConfig() } returns modelConfig
+    every {
+      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
+    } returns mockAIAgent
+    every { mockMcpClient.callTool("observe", any()) } returns
+      """{"isError":true,"content":[{"type":"text","text":"Unrecognized key(s) in object"}]}"""
+    coEvery { mockAIAgent.run(any()) } returns "done"
+
+    val result = autoMobileAgent.attemptAiRecovery(recoveryContext)
+
+    assertFalse(result.success, "an isError tool result must not count as a responsive device")
+  }
+
+  @Test
+  fun `a liveness observe that returns a non-error result is a live device`() {
+    assertFalse(isToolErrorResult("""{"isError":false,"content":[]}"""))
+    assertFalse(isToolErrorResult("""{"content":[{"type":"text","text":"isError"}]}"""))
+    assertFalse(isToolErrorResult("plain text mentioning isError"))
+  }
+
+  @Test
+  fun `an unreachable daemon fails recovery loudly with an actionable stderr message`() {
+    every { mockTimeProvider.currentTimeMillis() } returns 1000L
+    every { mockConfigProvider.getMcpServerUrl() } returns "http://localhost:3000"
+    every { mockMcpClient.isConnected() } returns false
+    every { mockMcpClient.connect(any()) } throws RuntimeException("daemon is not reachable")
+    every { mockMcpClient.disconnect() } just runs
+
+    val originalErr = System.err
+    val captured = java.io.ByteArrayOutputStream()
+    System.setErr(java.io.PrintStream(captured, true))
+    val result =
+      try {
+        autoMobileAgent.attemptAiRecovery(recoveryContext)
+      } finally {
+        System.setErr(originalErr)
+      }
+
+    assertFalse(result.success)
+    val message = captured.toString()
+    assertTrue(message.contains("AI-assisted recovery could not start"), message)
+    assertTrue(message.contains("daemon is not reachable"), message)
+    verify(exactly = 0) { mockAiAgentFactory.createAIAgentWithMCPTools(any(), any(), any(), any()) }
+  }
+
   @Test
   fun `secret in a tool or observe result is scrubbed from what the recovery agent feeds the model`() {
     // Issue #6094 (CWE-200, second-order channel): after the initial (redacted) recovery prompt,
@@ -277,8 +340,7 @@ class AutoMobileAgentTest {
     // feed) then tapOn — both results are what the agent hands the LLM.
     val agentClient = agentClientSlot.captured
     val observeResult = runBlocking {
-      AutoMobileAgent.ObserveTool(agentClient)
-        .execute(AutoMobileAgent.ObserveTool.Args(withViewHierarchy = true))
+      AutoMobileAgent.ObserveTool(agentClient).execute(AutoMobileAgent.ObserveTool.Args())
     }
     val tapResult = runBlocking {
       AutoMobileAgent.TapOnTool(agentClient).execute(AutoMobileAgent.TapOnTool.Args(text = "OK"))
@@ -301,11 +363,7 @@ class AutoMobileAgentTest {
     // The tool still EXECUTED against the device with the real value: the underlying client returns
     // the raw secret, so only the model-facing wrapper scrubs it (daemon/tool execution
     // unaffected).
-    val rawObserve =
-      mockMcpClient.callTool(
-        "observe",
-        mapOf("withViewHierarchy" to true, "includeInvisible" to false),
-      )
+    val rawObserve = mockMcpClient.callTool("observe", emptyMap())
     assertTrue(
       rawObserve.contains(secret),
       "the underlying client (device execution) still receives real values",
@@ -463,7 +521,7 @@ class AutoMobileAgentTest {
 
     val observeResult = runBlocking {
       AutoMobileAgent.ObserveTool(agentClientSlot.captured)
-        .execute(AutoMobileAgent.ObserveTool.Args(withViewHierarchy = true))
+        .execute(AutoMobileAgent.ObserveTool.Args())
     }
     assertFalse(
       observeResult.contains("""pa\"ss-TOKEN"""),

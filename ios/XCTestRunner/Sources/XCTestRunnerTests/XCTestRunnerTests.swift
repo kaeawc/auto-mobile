@@ -255,6 +255,57 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(decoded.contains("appId: com.example.app"))
     }
 
+    /// Issue #10093: the plan sent to the daemon carries each parameter as exactly the text supplied,
+    /// in the scalar context it was written in (the documented `"${apiToken}"` form included).
+    func testParameterValuesAreEscapedForTheirScalarContextInTheDaemonPlan() async throws {
+        let planContent = """
+        name: Substitution
+        steps:
+          - tool: inputText
+            text: "${quoted}"
+          - tool: inputText
+            text: ${plain}
+        """
+        let planLoader = FakePlanLoader(content: planContent)
+        let mcpClient = FakeMCPClient()
+        mcpClient.queueResponse(success: true, executedSteps: 2, totalSteps: 2)
+
+        let config = try AutoMobilePlanExecutor.Configuration(
+            transport: .streamableHttp(url: XCTUnwrap(URL(string: "http://localhost:9000/auto-mobile/streamable"))),
+            planPath: "sub-plan.yaml",
+            retryCount: 0,
+            timeoutSeconds: 5,
+            retryDelaySeconds: 0,
+            startStep: 0,
+            parameters: ["quoted": #"C:\temp#1 "x""#, "plain": "shoes #1\n  - tool: terminateApp"],
+            cleanup: nil,
+            planBundle: nil
+        )
+        let executor = AutoMobilePlanExecutor(
+            configuration: config,
+            planLoader: planLoader,
+            mcpClient: mcpClient,
+            timer: FakeTimer(),
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
+        )
+
+        _ = try await executor.execute(testMetadata: nil)
+
+        let encoded = mcpClient.executePlanCalls.first?.arguments["planContent"] as? String
+        let decoded = try XCTUnwrap(decodePlanContent(from: encoded))
+        XCTAssertEqual(decoded, """
+        name: Substitution
+        steps:
+          - tool: inputText
+            text: "C:\\\\temp#1 \\"x\\""
+          - tool: inputText
+            text: "shoes #1\\n  - tool: terminateApp"
+        """)
+    }
+
     func testPlanPlatformOverridesDefault() async throws {
         let planContent = "name: Platform Plan\nplatform: android\nsteps:\n  - tool: observe"
         let planLoader = FakePlanLoader(content: planContent)

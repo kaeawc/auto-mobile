@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ActionableError,
+  AppNotInstalledError,
   BootedDevice,
   ClearAppDataResult,
   TerminateAppResult,
@@ -89,9 +90,10 @@ describe("DefaultAppCleanupService", () => {
         logger: log,
       });
 
+      // Contract change (follow-up to #10022): cleanup returns a typed per-device outcome, not void.
       await expect(
         cleanupService.cleanup(androidDevice, { appId: "com.example.app", clearAppData: true }),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ status: "cleaned" });
       expect(
         adb.getExecutedCommands().filter((command) => command.startsWith("shell pm clear ")),
       ).toEqual(installed ? ["shell pm clear --user 0 'com.example.app'"] : []);
@@ -117,13 +119,94 @@ describe("DefaultAppCleanupService", () => {
       }),
       logger: log,
     });
+    // Contract change (follow-up to #10022): a failure is reported to the caller, not only logged.
     await expect(
       cleanupService.cleanup(androidDevice, { appId: "com.example.app", clearAppData: true }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({
+      status: "failed",
+      step: "clearAppData",
+      reason: "App is not installed",
+    });
     expect(log.at("warn")).toHaveLength(1);
     expect(log.at("warn")[0].message).toContain("com.example.app");
     expect(log.at("warn")[0].message).toContain("App is not installed");
     expect(log.at("info")).toHaveLength(0);
+  });
+
+  test("an app that is not installed has nothing to clear and counts as cleaned", async () => {
+    const log = new FakeLogger();
+    const cleanupService = new DefaultAppCleanupService({
+      createClearAppData: () => ({
+        execute: async () => {
+          throw new AppNotInstalledError("App com.example.app is not installed");
+        },
+      }),
+      logger: log,
+    });
+    await expect(
+      cleanupService.cleanup(androidDevice, { appId: "com.example.app", clearAppData: true }),
+    ).resolves.toEqual({ status: "cleaned" });
+    expect(log.at("warn")).toHaveLength(1);
+  });
+
+  test.each(["result", "throw"])(
+    "reports a terminate %s failure as a failed outcome and logs it",
+    async (outcome) => {
+      const log = new FakeLogger();
+      const cleanupService = new DefaultAppCleanupService({
+        createTerminateApp: () => ({
+          execute: async () => {
+            if (outcome === "throw") {
+              throw new ActionableError("adb offline");
+            }
+            return {
+              success: false,
+              packageName: "com.example.app",
+              wasInstalled: true,
+              wasRunning: true,
+              wasForeground: false,
+              error: "adb offline",
+            };
+          },
+        }),
+        logger: log,
+      });
+      await expect(
+        cleanupService.cleanup(androidDevice, { appId: "com.example.app" }),
+      ).resolves.toEqual({ status: "failed", step: "terminateApp", reason: "adb offline" });
+      expect(log.at("warn")).toHaveLength(1);
+      expect(log.at("warn")[0].message).toContain("adb offline");
+    },
+  );
+
+  test("a failed terminate without an error message reports an unknown-error reason", async () => {
+    const cleanupService = new DefaultAppCleanupService({
+      createTerminateApp: () => ({
+        execute: async () => ({
+          success: false,
+          packageName: "com.example.app",
+          wasInstalled: true,
+          wasRunning: true,
+          wasForeground: false,
+        }),
+      }),
+      logger: { info: () => {}, warn: () => {} },
+    });
+    await expect(
+      cleanupService.cleanup(androidDevice, { appId: "com.example.app" }),
+    ).resolves.toEqual({ status: "failed", step: "terminateApp", reason: "unknown error" });
+  });
+
+  test("an empty appId is a no-op that counts as cleaned", async () => {
+    const cleanupService = new DefaultAppCleanupService({
+      createTerminateApp: () => {
+        throw new Error("must not run");
+      },
+      logger: { info: () => {}, warn: () => {} },
+    });
+    await expect(cleanupService.cleanup(androidDevice, { appId: "" })).resolves.toEqual({
+      status: "cleaned",
+    });
   });
 
   test("terminates app by default", async () => {

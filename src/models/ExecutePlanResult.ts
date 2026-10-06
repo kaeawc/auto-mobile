@@ -56,6 +56,25 @@ export interface PlanStepWarnings {
   warnings: string[];
 }
 
+/**
+ * A completed step's tool payload, bounded for the `executePlan` response (issue #10090). The
+ * JUnit runner reads these through `getToolResult` / `getSelection` / `getTypedResponse`.
+ */
+export interface PlanStepToolResult {
+  /** 0-based index of the step in the plan (not the position in this array). */
+  stepIndex: number;
+  tool: string;
+  /** Device label, for multi-device plans only. */
+  device?: string;
+  /**
+   * The tool's structured payload minus bulky fields (embedded observation, view hierarchies,
+   * screenshots, tap diagnostics, warnings, which have their own channels).
+   */
+  result: Record<string, unknown>;
+  /** The payload was narrowed to its core fields to stay within the size budget. */
+  truncated?: boolean;
+}
+
 /** A failed optional step that was skipped while execution continued. */
 export interface PlanSkippedStep {
   /** 0-based index of the step in the plan. */
@@ -100,6 +119,8 @@ export interface ExecutePlanResult {
   warnings?: PlanStepWarnings[];
   /** Failed optional steps, reported regardless of captureObserveSteps. */
   skippedSteps?: PlanSkippedStep[];
+  /** Bounded tool payloads of completed steps in plan step order, reported regardless of captureObserveSteps (issue #10090). */
+  toolResults?: PlanStepToolResult[];
   /** Populated when automatic plan video used multiple Android segments (screenrecord limit). */
   videoFilePaths?: string[];
   videoRecordingIds?: string[];

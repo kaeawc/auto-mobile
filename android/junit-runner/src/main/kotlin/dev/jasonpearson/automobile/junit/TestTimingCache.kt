@@ -55,6 +55,9 @@ internal object TestTimingCache {
   private val loaded = AtomicBoolean(false)
   private val loadLock = Any()
 
+  /** Test seam: the process environment's `CI` cannot be changed from a unit test. */
+  @Volatile internal var testCiModeOverride: Boolean? = null
+
   @Volatile private var timingMap: Map<TestTimingKey, TestTimingEntry> = emptyMap()
   @Volatile private var summary: TestTimingSummary? = null
 
@@ -76,9 +79,21 @@ internal object TestTimingCache {
     }
   }
 
-  fun getTiming(testClass: String, testMethod: String): TestTimingEntry? {
+  /**
+   * Timing for [testClass] (fully qualified, as recorded since #10091). Rows recorded before that
+   * change were keyed by simple name, so [legacySimpleName] is consulted only when no
+   * fully-qualified row exists, keeping that history until it ages out of the lookback window.
+   */
+  fun getTiming(
+    testClass: String,
+    testMethod: String,
+    legacySimpleName: String? = null,
+  ): TestTimingEntry? {
     prefetchIfEnabled()
     return timingMap[TestTimingKey(testClass, testMethod)]
+      ?: legacySimpleName
+        ?.takeIf { it != testClass }
+        ?.let { timingMap[TestTimingKey(it, testMethod)] }
   }
 
   fun hasTimings(): Boolean {
@@ -109,6 +124,9 @@ internal object TestTimingCache {
   }
 
   private fun isCiMode(): Boolean {
+    testCiModeOverride?.let {
+      return it
+    }
     if (SystemPropertyCache.getBoolean("automobile.ci.mode", false)) {
       return true
     }
@@ -154,10 +172,9 @@ internal object TestTimingCache {
     )
     addParam("minSamples", resolveMinSamples().toString())
     addParam("devicePlatform", "android")
-    val sessionUuid = DaemonSocketClientManager.sessionUuid()
-    if (sessionUuid.isNotBlank()) {
-      addParam("sessionUuid", sessionUuid)
-    }
+    // No `sessionUuid`: it is a filter on the session that RECORDED a row. This JVM's client UUID
+    // is fresh, and every executePlan attempt records under its own UUID, so scoping the query to
+    // either can never match earlier runs and timing history would always load empty (#10091).
 
     if (params.isEmpty()) {
       return TEST_TIMING_RESOURCE_URI

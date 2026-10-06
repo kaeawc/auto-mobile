@@ -58,8 +58,9 @@ internal object AutoMobilePlanExecutor {
         for (method in methods) {
           if (method.name == element.methodName && method.isAnnotationPresent(Test::class.java)) {
             // Found a @Test annotated method in the call stack
-            val simpleClassName = clazz.simpleName
-            return TestContext(simpleClassName, method.name)
+            // Fully qualified: two `SmokeTest` classes in different packages must not share one
+            // (test_class, test_method) history (#10091).
+            return TestContext(clazz.name, method.name)
           }
         }
       } catch (_: ClassNotFoundException) {
@@ -259,7 +260,9 @@ internal object AutoMobilePlanExecutor {
   }
 
   private fun loadAndProcessPlan(planContent: String, parameters: Map<String, Any>): String {
-    val processedContent = substituteParameters(planContent, parameters)
+    // Substituted on the parsed YAML tree, not the source text, so a value cannot alter the plan
+    // (#10093).
+    val processedContent = PlanParameterSubstitution.substitutePlan(planContent, parameters)
 
     // Validate YAML schema after parameter substitution
     val validationResult = PlanSchemaValidator.validateYaml(processedContent)
@@ -280,20 +283,13 @@ internal object AutoMobilePlanExecutor {
   }
 
   /**
-   * Substitute `${key}` placeholders with parameter values in a single ordered pass. Deterministic
-   * (sorted) key order so the result is reproducible — the redaction path re-runs this same
-   * function to derive exactly what landed (#6029), and a hash-ordered pass would make that mapping
-   * (and the daemon payload) non-reproducible. Kept in sync with the iOS executor's sorted
-   * substitution.
+   * Substitute `${key}` placeholders in a plain string (secret key names, the redaction path's bare
+   * `${key}`) in a single pass that never rescans substituted text. The plan itself is substituted
+   * on the parsed YAML tree by [PlanParameterSubstitution.substitutePlan] (#10093). Kept in sync
+   * with the iOS executor's substitution.
    */
-  private fun substituteParameters(content: String, parameters: Map<String, Any>): String {
-    if (parameters.isEmpty()) return content
-    var result = content
-    for ((key, value) in parameters.entries.sortedBy { it.key }) {
-      result = result.replace("\${$key}", SecretRedactor.parameterStringValue(value))
-    }
-    return result
-  }
+  private fun substituteParameters(content: String, parameters: Map<String, Any>): String =
+    PlanParameterSubstitution.substituteText(content, parameters)
 
   /**
    * The concrete secret strings to scrub, derived entirely from THIS executor's substitution so
@@ -610,15 +606,23 @@ internal object AutoMobilePlanExecutor {
         failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
       val failedTool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
       val error = failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown error"
-      val failedDevice = failedStepObj["device"]?.jsonPrimitive?.content
+      val resolvedDeviceId =
+        resolveFailedStepDeviceId(
+          payload = payload,
+          failedStepObj = failedStepObj,
+          configuredDeviceId = deviceId,
+        )
 
       // Build succeeded steps from toolResults in the payload
       val succeededSteps = mutableListOf<SucceededStepSummary>()
       val toolResultsArray = (payload["toolResults"] ?: payload["toolResult"]) as? JsonArray
       if (toolResultsArray != null) {
-        for ((index, stepElement) in toolResultsArray.withIndex()) {
-          if (index >= failedStepIndex) break
+        for ((position, stepElement) in toolResultsArray.withIndex()) {
           val stepObj = stepElement as? JsonObject ?: continue
+          // The daemon reports completed steps only, tagged with the plan step index, so a
+          // skipped optional step leaves a gap; fall back to the position for untagged entries.
+          val index = (stepObj["stepIndex"] as? JsonPrimitive)?.intOrNull ?: position
+          if (index >= failedStepIndex) continue
           val tool =
             stepObj["toolName"]?.jsonPrimitive?.content
               ?: stepObj["tool"]?.jsonPrimitive?.content
@@ -643,12 +647,36 @@ internal object AutoMobilePlanExecutor {
         error = SecretRedactor.redact(error, secretValues),
         succeededSteps = succeededSteps,
         planContent = SecretRedactor.redact(planContent, secretValues),
-        deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
+        deviceId = resolvedDeviceId,
       )
     } catch (e: Exception) {
       println("Warning: Failed to build recovery context: ${e.message}")
       return null
     }
+  }
+
+  /**
+   * The real device id the failed step ran on, for pinning the recovery and the resumed plan.
+   *
+   * `failedStep.device` is the plan's device LABEL ("A"), never an id, so it is only a key into the
+   * payload's `deviceMapping` (label -> id, multi-device plans). A single-device plan has no label
+   * and ran on the payload's top-level `deviceId`. A label with no mapping entry yields null (no
+   * pin) rather than the label or another track's device. [configuredDeviceId] is the id the test
+   * asked for, used only when the payload carries none.
+   */
+  private fun resolveFailedStepDeviceId(
+    payload: JsonObject,
+    failedStepObj: JsonObject,
+    configuredDeviceId: String?,
+  ): String? {
+    val label = (failedStepObj["device"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    if (label != null) {
+      val mapping = payload["deviceMapping"] as? JsonObject
+      return (mapping?.get(label) as? JsonPrimitive)?.takeIf { it.isString }?.content
+    }
+    val executedOn = (payload["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    return executedOn?.takeIf { it.isNotBlank() }
+      ?: configuredDeviceId?.takeIf { it.isNotBlank() && it != "auto" }
   }
 
   // ── Response parsing ──────────────────────────────────────────────────────

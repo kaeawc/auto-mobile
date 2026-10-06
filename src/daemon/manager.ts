@@ -93,9 +93,11 @@ import { DefaultRetryExecutor, type RetryExecutor } from "../utils/retry/RetryEx
 import {
   cleanupDaemonFiles,
   clearDaemonLaunchLogOwnerTombstoneSync,
+  isConfirmedRecycledProcess,
   readPidFileDataSync,
   shouldProtectLiveDaemonVersion,
 } from "./daemonFiles";
+import { recordProvesFormerSocketOwner } from "./incumbentOwnerGuard";
 import {
   formatLockContent,
   parseLockContent,
@@ -2432,7 +2434,7 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       const pidFileContent = await readFile(this.pidFilePath, "utf-8");
       const pidData: PidFileData = JSON.parse(pidFileContent);
-      if (typeof pidData.pid !== "number" || this.isProcessRunning(pidData.pid)) {
+      if (typeof pidData.pid !== "number" || this.isRecordedDaemonRunning(pidData)) {
         return undefined;
       }
       return pidData;
@@ -2440,6 +2442,17 @@ export class DaemonManager implements DaemonManagerLike {
       logger.warn(`Failed to read PID file during stop(): ${errorMessage(error)}`);
       return undefined;
     }
+  }
+
+  /**
+   * A dead record that names a former owner of a control socket still on disk
+   * is the ONLY evidence the next start's bind guard can use to prove that
+   * socket reclaimable (issue #10107). Deleting it would leave a socket nobody
+   * may ever unlink, so it stays; status() already derives "not running" from
+   * liveness, never from the file's presence.
+   */
+  private mustKeepDeadRecordAsSocketOwnerProof(record: PidFileData): boolean {
+    return this.identityRecoveryIO.socketExists() && recordProvesFormerSocketOwner(record);
   }
 
   /**
@@ -2483,7 +2496,8 @@ export class DaemonManager implements DaemonManagerLike {
   private async removeConfirmedDeadPidFile(): Promise<void> {
     // Cheap unlocked pre-check: skip acquiring the lock entirely when there is
     // plainly nothing to clean up (already gone, or already live).
-    if (!(await this.readConfirmedDeadPidData())) {
+    const unlockedRecord = await this.readConfirmedDeadPidData();
+    if (!unlockedRecord || this.mustKeepDeadRecordAsSocketOwnerProof(unlockedRecord)) {
       return;
     }
 
@@ -2505,7 +2519,7 @@ export class DaemonManager implements DaemonManagerLike {
       // RE-READ under the lock: a concurrent start could have rewritten the PID
       // file with its own live record in the window before the lock was ours.
       const pidData = await this.readConfirmedDeadPidData();
-      if (!pidData) {
+      if (!pidData || this.mustKeepDeadRecordAsSocketOwnerProof(pidData)) {
         return;
       }
       await cleanupDaemonFiles({
@@ -2544,7 +2558,7 @@ export class DaemonManager implements DaemonManagerLike {
 
   private recordedStatus(): DaemonStatus {
     const record = this.identityRecoveryIO.readRecord();
-    return record && record.socketPath === this.socketPath && this.isProcessRunning(record.pid)
+    return record && record.socketPath === this.socketPath && this.isRecordedDaemonRunning(record)
       ? { ...record, running: true }
       : { running: false };
   }
@@ -3515,6 +3529,16 @@ export class DaemonManager implements DaemonManagerLike {
     if (current && this.hasNamespaceRecordOrMarker(current)) {
       return this.isProcessRunning(expected.pid);
     }
+    if (!current && this.isRecycledPid(expected)) {
+      // The PID is alive but absent from the daemon process table, and its OS
+      // generation token differs from the recorded daemon's: the recorded
+      // generation exited and an unrelated process now holds the PID (issue
+      // #10108). Nothing is signalled; callers only update start/stop bookkeeping.
+      logger.info(
+        `Recorded daemon PID ${expected.pid} is now held by a different process generation; treating the recorded daemon as exited`,
+      );
+      return false;
+    }
     // An alive PID missing from ps is inconclusive, never proof of exit. A
     // self-identified namespace socket owner can supply the matching generation.
     const owner = await this.probeNamespaceOwner();
@@ -4163,6 +4187,33 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private isProcessRunning(pid: number): boolean {
     return this.processLivenessChecker.isProcessRunning(pid);
+  }
+
+  /**
+   * Whether the PID's current holder is DEFINITELY a different process
+   * generation than the one recorded (issue #10108). A missing token reader or
+   * any unreadable token answers false, so uncertainty keeps the PID trusted as
+   * the recorded daemon exactly as before.
+   */
+  private isRecycledPid(record: { pid: number; processGenerationToken?: unknown }): boolean {
+    const readToken = this.processLivenessChecker.readProcessGenerationToken;
+    return (
+      readToken !== undefined &&
+      isConfirmedRecycledProcess(
+        record.pid,
+        record,
+        (pid) => readToken.call(this.processLivenessChecker, pid),
+        this.pidFilePath,
+      )
+    );
+  }
+
+  /** Alive by PID AND still the recorded generation (never a recycled PID). */
+  private isRecordedDaemonRunning(record: {
+    pid: number;
+    processGenerationToken?: unknown;
+  }): boolean {
+    return this.isProcessRunning(record.pid) && !this.isRecycledPid(record);
   }
 
   /**

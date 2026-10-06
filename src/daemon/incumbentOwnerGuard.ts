@@ -1,9 +1,15 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { PID_FILE_PATH } from "./constants";
-import { isProcessRunning, readPidFileDataSync, writePidFileDataAtomicSync } from "./daemonFiles";
+import {
+  isConfirmedRecycledProcess,
+  isProcessRunning,
+  readPidFileDataSync,
+  readProcessGenerationTokenForPid,
+  writePidFileDataAtomicSync,
+} from "./daemonFiles";
 import type { SocketOwnerLiveness, SocketOwnerStatus } from "./socketServer";
-import type { PidFileData } from "./types";
+import type { PidFileData, SupersededSocketOwner } from "./types";
 import { logger } from "../utils/logger";
 
 /**
@@ -19,6 +25,12 @@ export interface IncumbentOwnerGuardDeps {
   persistPidFile: (data: PidFileData) => void;
   /** Liveness check for a recorded PID. */
   isProcessRunning: (pid: number) => boolean;
+  /**
+   * OS generation token of the process now holding a PID (issue #10108). A
+   * record whose token differs from this one names a daemon that exited and
+   * whose PID was recycled. Undefined (unreadable) keeps the PID trusted live.
+   */
+  readProcessGenerationToken: (pid: number) => string | undefined;
   /** This process's PID; a record naming it is our own, never a foreign owner. */
   selfPid: number;
 }
@@ -58,6 +70,12 @@ export interface IncumbentOwnerGuardDeps {
  */
 export class IncumbentOwnerGuard {
   private incumbent: PidFileData | null = null;
+  /**
+   * The dead former committed socket owner this contender's early record must
+   * carry forward (issue #10107), or the one a previous contender already
+   * carried. See {@link SupersededSocketOwner}.
+   */
+  private supersededOwner: SupersededSocketOwner | null = null;
   private contenderEarlyOwner: PidFileData | null = null;
   /**
    * Latched when the on-disk record at capture time named a LIVE foreign process
@@ -80,6 +98,8 @@ export class IncumbentOwnerGuard {
       persistPidFile: deps?.persistPidFile ?? defaultPersistPidFile,
       isProcessRunning:
         deps?.isProcessRunning ?? ((pid) => isProcessRunning(pid, { debugLog: logger.debug })),
+      readProcessGenerationToken:
+        deps?.readProcessGenerationToken ?? readProcessGenerationTokenForPid,
       selfPid: deps?.selfPid ?? process.pid,
     };
   }
@@ -93,6 +113,7 @@ export class IncumbentOwnerGuard {
    */
   captureIncumbentBeforeOverwrite(): void {
     this.incumbent = null;
+    this.supersededOwner = null;
     this.contenderEarlyOwner = null;
     this.sawLiveContender = false;
     const record = this.deps.readPidFile();
@@ -106,10 +127,16 @@ export class IncumbentOwnerGuard {
         logger.info(
           `Captured live incumbent daemon owner record (pid ${record.pid}) before overwriting it (issue #6232)`,
         );
+      } else {
+        this.supersededOwner = supersededOwnerFromRecord(record);
       }
       return;
     }
     if (!this.isLiveForeign(record)) {
+      // A dead contender's early record may itself be carrying an earlier dead
+      // committed owner; that proof of the socket's former owner must survive
+      // this overwrite too.
+      this.supersededOwner = this.supersededOwnerCarriedBy(record);
       return;
     }
     // A LIVE foreign process left only an EARLY owner record: another
@@ -157,14 +184,42 @@ export class IncumbentOwnerGuard {
     return this.isLiveForeign(this.incumbent) ? this.incumbent.daemonSessionId : undefined;
   }
 
+  /**
+   * The former dead committed owner this contender's early-owner record must
+   * carry (issue #10107), to be spread into that record. Without it, a start
+   * that dies before binding leaves only an uncommitted record, and the socket
+   * the dead committed owner left behind could never be proven reclaimable again.
+   */
+  supersededOwnerForEarlyRecord(): SupersededSocketOwner | undefined {
+    return this.supersededOwner ?? undefined;
+  }
+
   private getOwnerStatus(): SocketOwnerStatus {
     if (this.sawLiveContender) {
       return "unknown";
     }
     if (this.incumbent === null) {
-      return "unknown";
+      return this.supersededOwnerStatus();
     }
     return this.isLiveForeign(this.incumbent) ? "live" : "dead";
+  }
+
+  /**
+   * A carried former owner is the socket's last committed owner. It proves the
+   * socket reclaimable only while that owner is still positively gone: a PID
+   * that is alive and not provably a different generation stays `live`.
+   */
+  private supersededOwnerStatus(): SocketOwnerStatus {
+    const former = this.supersededOwner;
+    if (former === null) {
+      return "unknown";
+    }
+    return this.isLiveForeign(former) ? "live" : "dead";
+  }
+
+  private supersededOwnerCarriedBy(record: PidFileData | null): SupersededSocketOwner | null {
+    // Our own earlier early record may carry it too: re-capture must not lose it.
+    return record === null ? null : parseSupersededOwner(record.supersededOwner);
   }
 
   /** Record the exact early-owner record this contender successfully published. */
@@ -197,11 +252,45 @@ export class IncumbentOwnerGuard {
     return true;
   }
 
-  private isLiveForeign(record: PidFileData | null): record is PidFileData {
+  private isLiveForeign<T extends { pid: number; processGenerationToken?: string }>(
+    record: T | null,
+  ): record is T {
     return (
-      record !== null && record.pid !== this.deps.selfPid && this.deps.isProcessRunning(record.pid)
+      record !== null &&
+      record.pid !== this.deps.selfPid &&
+      this.deps.isProcessRunning(record.pid) &&
+      !isConfirmedRecycledProcess(
+        record.pid,
+        record,
+        this.deps.readProcessGenerationToken,
+        "the daemon PID record",
+      )
     );
   }
+}
+
+function supersededOwnerFromRecord(record: PidFileData): SupersededSocketOwner {
+  return {
+    pid: record.pid,
+    ...(record.processGenerationToken === undefined
+      ? {}
+      : { processGenerationToken: record.processGenerationToken }),
+  };
+}
+
+/** Validate a carried owner read from disk; anything malformed carries no proof. */
+function parseSupersededOwner(value: unknown): SupersededSocketOwner | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const { pid, processGenerationToken } = value as Record<string, unknown>;
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+  return {
+    pid,
+    ...(typeof processGenerationToken === "string" ? { processGenerationToken } : {}),
+  };
 }
 
 function sameOwnerRecord(a: PidFileData | null, b: PidFileData | null): boolean {
@@ -228,6 +317,16 @@ function sameOwnerRecord(a: PidFileData | null, b: PidFileData | null): boolean 
  */
 function isCommittedOwnerRecord(record: PidFileData): boolean {
   return record.entryScript !== undefined && record.buildId !== undefined;
+}
+
+/**
+ * Whether a PID record is evidence of who last owned the control socket: either
+ * a committed owner's record, or an early record carrying a dead committed
+ * owner forward ({@link SupersededSocketOwner}). The manager keeps such a record
+ * while the socket file still exists (issue #10107).
+ */
+export function recordProvesFormerSocketOwner(record: PidFileData): boolean {
+  return isCommittedOwnerRecord(record) || parseSupersededOwner(record.supersededOwner) !== null;
 }
 
 function defaultPersistPidFile(data: PidFileData): void {

@@ -349,6 +349,19 @@ export interface DaemonStatus {
 /**
  * PID file contents
  */
+/**
+ * The last COMMITTED owner of a control socket, proven dead when a later
+ * start's early-owner record overwrote its PID record (issue #10107). The early
+ * record carries it so a start that dies before binding, or a `--daemon stop`,
+ * does not erase the only proof that lets the next start's bind guard reclaim
+ * the socket the dead owner left behind. Dropped by the next committed record.
+ */
+export interface SupersededSocketOwner {
+  pid: number;
+  /** Token compared with the live PID's, so a recycled PID still reads as dead. */
+  processGenerationToken?: string;
+}
+
 export interface PidFileData {
   /** Process ID */
   pid: number;
@@ -397,6 +410,8 @@ export interface PidFileData {
   buildId?: string;
   /** Options used to start the daemon */
   options?: DaemonOptions;
+  /** Dead former committed socket owner carried by an uncommitted early record. */
+  supersededOwner?: SupersededSocketOwner;
 }
 
 /**

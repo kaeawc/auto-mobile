@@ -6,7 +6,11 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./constants";
 import { isDaemonEntryScriptPath } from "./DaemonLauncher";
 import { isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
-import { darwinProcessGenerationToken, readLinuxProcessGenerationToken } from "./processGeneration";
+import {
+  darwinProcessGenerationToken,
+  readDarwinProcessGenerationToken,
+  readLinuxProcessGenerationToken,
+} from "./processGeneration";
 
 export interface DaemonProcessRecord {
   pid: number;
@@ -426,6 +430,13 @@ export function parseWindowsDaemonProcessTable(
 
 export interface DaemonProcessLivenessChecker {
   isProcessRunning(pid: number): boolean;
+  /**
+   * Opaque OS generation token for the process currently holding `pid`
+   * (issue #10108). Optional: a checker without it leaves a recorded PID
+   * trusted as live, which is the safe default. Returns undefined when the
+   * token cannot be read; callers must never read that as "the PID is free".
+   */
+  readProcessGenerationToken?(pid: number): string | undefined;
 }
 
 export interface DaemonProcessSignaler {
@@ -510,6 +521,13 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
 
   isProcessRunning(pid: number): boolean {
     return isDaemonProcessRunning(pid, { debugLog: logger.debug });
+  }
+
+  readProcessGenerationToken(pid: number): string | undefined {
+    if (this.platform === "darwin") {
+      return readDarwinProcessGenerationToken(pid);
+    }
+    return this.platform === "linux" ? this.linuxProcessGenerationTokenForPid(pid) : undefined;
   }
 }
 

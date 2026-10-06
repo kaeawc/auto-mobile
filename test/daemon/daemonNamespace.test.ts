@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
@@ -25,11 +25,16 @@ import { FakeTimer } from "../fakes/FakeTimer";
 class NamespaceProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   records: DaemonProcessRecord[] = [];
   livePids = new Set<number>();
+  /** Generation token of the process now holding each live PID (unset = unreadable). */
+  tokens = new Map<number, string>();
   findDaemonProcesses(): DaemonProcessRecord[] {
     return this.records;
   }
   isProcessRunning(pid: number): boolean {
     return this.livePids.has(pid);
+  }
+  readProcessGenerationToken(pid: number): string | undefined {
+    return this.tokens.get(pid);
   }
 }
 
@@ -208,6 +213,7 @@ function harness(defaultNamespace = false) {
     calls,
     signals,
     socket,
+    pidPath,
     ports,
     addForeign,
     addOwn,
@@ -424,5 +430,170 @@ describe("daemon namespace ownership", () => {
     await expect(h.manager.restart()).rejects.toBeInstanceOf(ActionableError);
     expect(h.signals).toEqual([]);
     expect(h.calls).toHaveLength(0);
+  });
+});
+
+describe("a dead daemon whose PID was reused by an unrelated process (issue #10108)", () => {
+  /** The recorded daemon (PID 201) died; an unrelated process holds the PID. */
+  function recycled(h: ReturnType<typeof harness>, holderToken: string | undefined): void {
+    h.addOwn(false);
+    // The socket no longer answers: nothing can vouch for the recorded generation.
+    h.identity.owner = { running: false };
+    if (holderToken !== undefined) {
+      h.processes.tokens.set(201, holderToken);
+    }
+    writeFileSync(h.pidPath, JSON.stringify(h.identity.record));
+  }
+
+  test("start proceeds as not running and launches a child without signalling anything", async () => {
+    const h = harness();
+    recycled(h, "unrelated-process-generation");
+
+    await expect(h.manager.start()).resolves.toBe("started");
+
+    expect(h.calls).toHaveLength(1);
+    expect(h.signals).toEqual([]);
+  });
+
+  test("stop reports not running, removes the stale record and signals nothing", async () => {
+    const h = harness();
+    recycled(h, "unrelated-process-generation");
+
+    await h.manager.stop();
+
+    expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(false);
+  });
+
+  test("stop of an already-observed generation treats the exited generation as gone", async () => {
+    const h = harness();
+    recycled(h, "unrelated-process-generation");
+    const observed: DaemonStatus = { ...h.identity.record!, running: true };
+
+    await h.manager.stop(undefined, observed);
+
+    expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(false);
+  });
+
+  test("restart starts a replacement without signalling the reused PID", async () => {
+    const h = harness();
+    recycled(h, "unrelated-process-generation");
+    h.allowDefaultPort();
+
+    await expect(h.manager.restart()).resolves.toBe("restarted");
+
+    expect(h.signals).toEqual([]);
+    expect(h.calls).toHaveLength(1);
+  });
+
+  test("an unreadable live token keeps refusing to start (never a guess)", async () => {
+    const h = harness();
+    recycled(h, undefined);
+
+    await expect(h.manager.start()).rejects.toThrow(
+      "could not verify the live PID's generation and ownership",
+    );
+
+    expect(h.calls).toHaveLength(0);
+    expect(h.signals).toEqual([]);
+  });
+
+  test("a matching live token is still the recorded daemon and still refuses to start", async () => {
+    const h = harness();
+    recycled(h, "generation-201");
+
+    await expect(h.manager.start()).rejects.toThrow(
+      "could not verify the live PID's generation and ownership",
+    );
+
+    expect(h.calls).toHaveLength(0);
+    expect(h.signals).toEqual([]);
+  });
+
+  test("a token-less record (legacy) is never compared with the live PID", async () => {
+    const h = harness();
+    recycled(h, "unrelated-process-generation");
+    delete h.identity.record!.processGenerationToken;
+
+    await expect(h.manager.start()).rejects.toThrow(
+      "could not verify the live PID's generation and ownership",
+    );
+
+    expect(h.calls).toHaveLength(0);
+    expect(h.signals).toEqual([]);
+  });
+
+  test("a stop that cannot verify the live PID still refuses without removing the record", async () => {
+    const h = harness();
+    recycled(h, undefined);
+    const observed: DaemonStatus = { ...h.identity.record!, running: true };
+
+    await expect(h.manager.stop(undefined, observed)).rejects.toThrow(
+      "could not verify the live PID's generation and ownership",
+    );
+
+    expect(h.signals).toEqual([]);
+    expect(existsSync(h.pidPath)).toBe(true);
+  });
+});
+
+describe("--daemon stop keeps the proof a stale control socket needs (issue #10107)", () => {
+  /** A dead daemon (PID 301 is not live) left a PID record; the socket file remains. */
+  function deadDaemon(
+    h: ReturnType<typeof harness>,
+    record: Partial<PidFileData>,
+    socketFileExists: boolean,
+  ): void {
+    const dead: PidFileData = {
+      pid: 301,
+      socketPath: h.socket,
+      port: 3001,
+      startedAt: 1,
+      version: "test",
+      ...record,
+    };
+    h.identity.record = dead;
+    h.identity.exists = socketFileExists;
+    writeFileSync(h.pidPath, JSON.stringify(dead));
+  }
+
+  const committed = { entryScript: "/opt/auto-mobile/index.js", buildId: "deadbeefcafef00d" };
+
+  test("a committed dead record stays while the socket file it names is still on disk", async () => {
+    const h = harness();
+    deadDaemon(h, committed, true);
+
+    await h.manager.stop();
+
+    expect(existsSync(h.pidPath)).toBe(true);
+    expect(h.signals).toEqual([]);
+  });
+
+  test("a dead record carrying a superseded committed owner stays too", async () => {
+    const h = harness();
+    deadDaemon(h, { supersededOwner: { pid: 299 } }, true);
+
+    await h.manager.stop();
+
+    expect(existsSync(h.pidPath)).toBe(true);
+  });
+
+  test("a committed dead record is still removed when no socket file remains", async () => {
+    const h = harness();
+    deadDaemon(h, committed, false);
+
+    await h.manager.stop();
+
+    expect(existsSync(h.pidPath)).toBe(false);
+  });
+
+  test("a dead record that proves no former socket owner is still removed", async () => {
+    const h = harness();
+    deadDaemon(h, {}, true);
+
+    await h.manager.stop();
+
+    expect(existsSync(h.pidPath)).toBe(false);
   });
 });

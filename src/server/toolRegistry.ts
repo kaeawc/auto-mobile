@@ -816,7 +816,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         sessionUuid,
         execution,
       );
-      assertDeviceReadRouting(args, options, admittedSession?.assignedDevice);
+      assertSessionDeviceRouting(
+        name,
+        providedDeviceId,
+        sessionUuid,
+        admittedSession?.assignedDevice,
+      );
       const context = await createToolExecutionContext(
         sessionUuid,
         sessionManager,
@@ -851,7 +856,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         true,
         signal,
       );
-      assertDeviceReadRouting(args, options, context.deviceId);
+      assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, context.deviceId);
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -1676,6 +1681,28 @@ function deviceAwareHandlerArgs(
       ? undefined
       : context?.routingSessionUuid;
   return withAmbientDeviceContext(args, routingSession, context?.execution);
+}
+
+/**
+ * Daemon-mode contract (#8602, #9945): a `deviceId` sent alongside a session is
+ * a routing hint and must name the session's own device, for every device-aware
+ * tool. `providedDeviceId` is the post-label value, so a `device` label (which
+ * deliberately drops a stray `deviceId`) and a call with no `deviceId` are not
+ * checked. Tools registered with `ToolRegistry.register` (setActiveDevice,
+ * startDevice, killDevice, listDevices, ...) never reach this resolver and keep
+ * naming other devices freely.
+ */
+function assertSessionDeviceRouting(
+  toolName: string,
+  providedDeviceId: string | undefined,
+  sessionUuid: string,
+  sessionDeviceId: string | undefined,
+): void {
+  if (providedDeviceId && sessionDeviceId && providedDeviceId !== sessionDeviceId) {
+    throw new ActionableError(
+      `${toolName} deviceId '${providedDeviceId}' does not match session '${sessionUuid}' device '${sessionDeviceId}'.`,
+    );
+  }
 }
 
 function assertDeviceReadRouting(

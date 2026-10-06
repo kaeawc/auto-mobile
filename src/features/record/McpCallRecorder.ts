@@ -5,26 +5,94 @@ import { logger } from "../../utils/logger";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 
 /**
- * Set of MCP tool names that are relevant for test plan recording.
- * Infrastructure tools (device management, recording meta-tools) are excluded.
+ * MCP tool names whose successful calls are recorded as plan steps.
+ *
+ * The registry carries no per-tool "mutates the device" flag (`planExecutable`
+ * only widens which gated tools a plan may run), so this list is hand-kept.
+ * Infrastructure tools (device management, recording meta-tools, read-only
+ * queries) are excluded. `test/features/record/McpCallRecorderCoverage.test.ts`
+ * requires every tool in `schemas/tool-definitions.json` to be listed here or
+ * excluded there with a reason, so a new action tool cannot be silently left
+ * out of the exported plan (#9928).
  */
 export const PLAN_RELEVANT_TOOLS = new Set([
   // App lifecycle
   "launchApp",
   "terminateApp",
   "crashApp",
+  "appLifecycle",
   // Observation
   "observe",
   // Interaction
   "tapOn",
+  "tapAny",
+  "tapAt",
   "swipeOn",
   "sendKeys",
   "pressButton",
   "dragAndDrop",
   "pinchOn",
+  "selectAllText",
+  "clipboard",
+  "keyboard",
+  // Navigation and system UI
+  "homeScreen",
+  "recentApps",
+  "openLink",
+  "systemTray",
+  "wakeAndUnlock",
+  // Device state and orientation
+  "rotate",
+  "shake",
+  "setPosture",
+  "setDeviceState",
+  "displayConfig",
+  "changeLocalization",
+  "setAppPermissions",
+  "postNotification",
   // Form filling
   "setUIState",
 ]);
+
+/**
+ * Params that reference observation state which cannot outlive the recording
+ * session. `tapAt.snapshotId` is a short-lived observe snapshotReference that
+ * replay rejects as "unknown or evicted" (SnapshotReferenceStore). tapAny,
+ * tapOn, swipeOn, dragAndDrop and pinchOn declare no such param.
+ */
+const SESSION_SCOPED_PARAMS: Readonly<Record<string, readonly string[]>> = {
+  tapAt: ["snapshotId"],
+};
+
+export function stripSessionScopedParams(
+  toolName: string,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const scoped = SESSION_SCOPED_PARAMS[toolName];
+  if (!scoped) {
+    return params;
+  }
+  return Object.fromEntries(Object.entries(params).filter(([key]) => !scoped.includes(key)));
+}
+
+/** `action` values of multi-action tools that only read state. */
+const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  keyboard: new Set(["detect", "listProfiles", "listImes"]),
+  clipboard: new Set(["get"]),
+  systemTray: new Set(["list", "find"]),
+};
+
+// displayConfig reads current values unless one of these set fields is present.
+const DISPLAY_CONFIG_SET_FIELDS = ["fontScale", "density", "theme", "reset"];
+
+/** True when a recorded call only queried state, so replaying it adds nothing. */
+export function isReadOnlyCall(toolName: string, params: Record<string, unknown>): boolean {
+  if (toolName === "displayConfig") {
+    return DISPLAY_CONFIG_SET_FIELDS.every((field) => params[field] === undefined);
+  }
+  const readOnly = READ_ONLY_ACTIONS[toolName];
+  return readOnly !== undefined && typeof params.action === "string" && readOnly.has(params.action);
+}
 
 /**
  * Internal routing params injected by ToolRegistry.registerDeviceAware() that
@@ -93,7 +161,10 @@ export class McpCallRecorder {
       return;
     }
 
-    const params = stripInternalParams(args);
+    const params = stripSessionScopedParams(toolName, stripInternalParams(args));
+    if (isReadOnlyCall(toolName, params)) {
+      return;
+    }
     this.steps.push({ tool: toolName, params });
     logger.info(`[McpCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }

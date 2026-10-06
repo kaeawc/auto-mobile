@@ -1775,12 +1775,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         logger.info(
           "[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change",
         );
-        const staleSocket = this.ws;
-        this.ws = null;
-        this.stopHealthCheck();
-        this.requestManager.cancelAll(new CtrlProxyServicePortChangedError());
-        staleSocket.removeAllListeners();
-        staleSocket.close();
+        // Same teardown a lost connection gets (pending requests rejected,
+        // per-connection caches/polling reset via onConnectionClosed, an error
+        // listener kept on the closing socket), minus auto-reconnect.
+        this.retireLiveSocket(new CtrlProxyServicePortChangedError());
       }
     }
   }

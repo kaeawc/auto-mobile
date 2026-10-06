@@ -3191,7 +3191,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       const containerLabel = options.container.elementId
         ? `elementId '${options.container.elementId}'`
         : `text '${options.container.text}'`;
-      throw new ActionableError(`Container element not found with provided ${containerLabel}`);
+      throw new ActionableError(
+        options.container.elementId?.startsWith("s2-")
+          ? `Container element id '${options.container.elementId}' is stale; re-observe and use the id from the new observation.`
+          : `Container element not found with provided ${containerLabel}`,
+      );
     }
 
     const containerHint = options.container
@@ -3212,7 +3216,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     } else if (options.accessibilityLink) {
       baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
     } else {
-      baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
+      baseError = options.elementId?.startsWith("s2-")
+        ? `Element id '${options.elementId}' is stale; re-observe and use the id from the new observation.${containerHint}`
+        : `Element not found with provided elementId '${options.elementId}'${containerHint}`;
     }
 
     if (this.visionConfig.enabled && observeResult) {

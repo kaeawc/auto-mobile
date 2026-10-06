@@ -61,8 +61,9 @@ Every action observation carries a `settled` boolean saying whether that
 capture passed the gate:
 
 - `settled: true` — two consecutive stable hierarchies; the screen is the
-  settled post-action screen and its `s2-…` ids match what the next `observe`
-  will emit.
+  settled post-action screen. Android synthetic `s2-…` element ids are valid
+  only for the observation that returned them. A sibling leaving the screen
+  can change an id's suffix; re-observe and use the new id if an old id is stale.
 - `settled: false` — the capture was not stability-checked. Either the action
   was not navigation-class, or the bound expired on a screen that never
   reaches structural stability (a ticking clock, a blinking caret). Re-observe

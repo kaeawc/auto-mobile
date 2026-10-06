@@ -12,7 +12,7 @@ import { isIosCtrlProxyOverrideUsableSync } from "../utils/iosCtrlProxyOverride"
 import { ActionableError } from "../models";
 import { defaultTimer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { IOSCtrlProxyClient, type IosMockRuleSyncOutcome } from "../features/observe/ios";
 import type { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -227,17 +227,46 @@ async function syncMockRulesToDevice(
       rules: buildNetworkMockRules(state),
     });
   }
+  if (device.platform !== "ios") {
+    return { synced: true };
+  }
+  return syncIosMockRules(device);
+}
+
+const IOS_MOCK_SYNC_PENDING = "will be applied when the device connection is restored";
+
+const IOS_MOCK_SYNC_WARNINGS: Record<Exclude<IosMockRuleSyncOutcome, "sent">, string> = {
+  noCapability:
+    "Mock rules are stored but were not synced to the device: the foreground app does not " +
+    "expose the AutoMobile SDK network_mocking capability. They " +
+    IOS_MOCK_SYNC_PENDING +
+    " or the app exposes the capability.",
+  disabled: "Mock rules are stored but were not synced to the device: network mocking is disabled.",
+  failed:
+    "Mock rules are stored but were not synced to the device; they " + IOS_MOCK_SYNC_PENDING + ".",
+  superseded:
+    "Mock rules are stored but were not synced to the device: the sync was superseded by a " +
+    "newer foreground-app capability probe. They " +
+    IOS_MOCK_SYNC_PENDING +
+    ".",
+};
+
+async function syncIosMockRules(device: BootedDevice): Promise<DeviceSyncResult> {
   try {
-    if (device.platform === "ios") {
-      await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+    const outcome = await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+    if (outcome === "sent") {
+      return { synced: true };
     }
+    const warning = IOS_MOCK_SYNC_WARNINGS[outcome];
+    logger.warn(`[networkTools] ${warning}`);
+    return { synced: false, warning };
   } catch (error) {
     logger.warn(
       `[networkTools] Failed to sync mock rules to device: ${errorMessage(error)}`,
       error,
     );
+    return { synced: false, warning: IOS_MOCK_SYNC_WARNINGS.failed };
   }
-  return { synced: true };
 }
 
 function errorSimulationMessageFields(sim: NetworkState["simulation"]) {

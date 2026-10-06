@@ -60,6 +60,27 @@ interface StepExecutionContext {
 }
 
 /**
+ * Plan steps may carry `expectations` (accepted by the plan schema) but nothing evaluates them
+ * yet (#9925). Say so on the step's warnings rather than let a plan author believe the
+ * assertions were checked and passed.
+ */
+export const UNEVALUATED_EXPECTATIONS_WARNING =
+  "This step declares `expectations`, but expectations are not evaluated yet; the step ran without checking them.";
+
+function withUnevaluatedExpectationsWarning(
+  step: PlanStep,
+  toolWarnings: string[] | undefined,
+  details: Record<string, unknown>,
+): string[] | undefined {
+  if (!step.expectations || step.expectations.length === 0) {
+    return toolWarnings;
+  }
+  const warnings = [...(toolWarnings ?? []), UNEVALUATED_EXPECTATIONS_WARNING];
+  details.warnings = warnings;
+  return warnings;
+}
+
+/**
  * The string warnings a tool payload or thrown error reported, or undefined when it reported
  * none (issue #6868).
  */
@@ -664,7 +685,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           details.stepObservation = stepObservation;
         }
       }
-      const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+      const toolWarnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+      const warnings = withUnevaluatedExpectationsWarning(step, toolWarnings, details);
 
       return {
         status: "completed",

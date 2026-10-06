@@ -129,19 +129,14 @@ test("SDK navigation batch preserves every encoded field through client decode a
       arguments: { item: "42" },
       metadata: { origin: "fixture" },
       triggeringInteraction: null,
+      deviceId: "fixture-device",
+      // The SDK time rides along for the telemetry record only.
+      telemetryTimestamp: 1_700_000_000_001,
     },
   ]);
-  expect(calls.navigation).toEqual([
-    {
-      timestamp: event.timestamp,
-      applicationId: "fixture.app",
-      destination: "Details",
-      source: "deep_link",
-      arguments: { item: "42" },
-      metadata: { origin: "fixture" },
-      screenshotUri: null,
-    },
-  ]);
+  // The graph manager owns the navigation telemetry record (#10195): the ingestor records none
+  // beside it.
+  expect(calls.navigation).toEqual([]);
 });
 
 test("SDK WebView batch preserves every encoded field and routes event details", async () => {

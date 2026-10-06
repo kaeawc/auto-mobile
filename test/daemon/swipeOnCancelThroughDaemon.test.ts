@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -91,6 +91,25 @@ async function settle(): Promise<void> {
   }
 }
 
+async function connectProxy(fake: FakeDaemonClient, timer: FakeTimer) {
+  const daemonManager = new FakeDaemonManager();
+  daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+  const { server, proxy } = createProxyMcpServer({
+    proxyConfig: {
+      clientFactory: () => fake,
+      daemonManager,
+      timer,
+      autoStartDaemon: false,
+      daemonAvailabilityProbe: async () => true,
+    },
+  });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const mcpClient = new Client({ name: "cancel-test", version: "1" });
+  await server.connect(serverTransport);
+  await mcpClient.connect(clientTransport);
+  return { server, proxy, mcpClient };
+}
+
 describe("swipeOn lookFor cancellation through the daemon request path (#10151)", () => {
   let timer: FakeTimer;
   let internals: Internals;
@@ -118,6 +137,18 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     release?.();
     await settle();
   };
+
+  beforeAll(async () => {
+    // Pay the SDK's first connection/schema initialization outside test timing. This throwaway
+    // connection is closed; the cancellation test still builds its own client and proxy.
+    const { server, proxy, mcpClient } = await connectProxy(
+      new FakeDaemonClient(),
+      new FakeTimer(),
+    );
+    await mcpClient.close();
+    await server.close();
+    await proxy.close();
+  });
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -198,23 +229,9 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
   });
 
   test("an MCP cancellation notification from the client reaches the loopback signal through the stdio proxy", async () => {
-    const daemonManager = new FakeDaemonManager();
-    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     const fake = new FakeDaemonClient();
     fake.callTool = daemonClient.callTool.bind(daemonClient);
-    const { server, proxy } = createProxyMcpServer({
-      proxyConfig: {
-        clientFactory: () => fake,
-        daemonManager,
-        timer,
-        autoStartDaemon: false,
-        daemonAvailabilityProbe: async () => true,
-      },
-    });
-    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-    const mcpClient = new Client({ name: "cancel-test", version: "1" });
-    await server.connect(serverTransport);
-    await mcpClient.connect(clientTransport);
+    const { server, proxy, mcpClient } = await connectProxy(fake, timer);
     try {
       const controller = new AbortController();
       const call = mcpClient
@@ -243,6 +260,7 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
       expect(await call).toBeInstanceOf(Error);
     } finally {
       await mcpClient.close();
+      await server.close();
       await proxy.close();
     }
   });

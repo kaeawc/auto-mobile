@@ -388,10 +388,13 @@ export function deleteInternalToolParams(params: Record<string, unknown>): void 
   }
 }
 
-/** Copy replayable navigation arguments, excluding request-local metadata. */
+/** Copy replayable navigation arguments, excluding request-local metadata and device routing. */
 export function stripNavigationToolParams(args: Record<string, unknown>): Record<string, unknown> {
   const clean = { ...args };
   deleteInternalToolParams(clean);
+  delete clean.platform;
+  delete clean.deviceId;
+  delete clean.device;
   for (const key of Object.keys(clean)) {
     if (key.startsWith("__") || key === "sessionUuid") {
       delete clean[key];

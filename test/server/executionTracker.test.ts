@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ExecutionTracker, type ExecutionScopeOptions } from "../../src/server/executionTracker";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { ActionableError } from "../../src/models/ActionableError";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
@@ -63,6 +64,93 @@ describe("ExecutionTracker", function () {
     tracker.endExecution(autolock.id);
     expect(await drain).toBe(true);
     expect(tracker.hasActiveDeviceExecutions("emulator-5554")).toBe(true);
+  });
+
+  describe("a session-scoped device cancel refuses later binds to that device (#9958)", () => {
+    const rebound = new ActionableError(
+      "Session session-1 was rebound from device 'emulator-5554'",
+    );
+    const filter = { excludeExecutionId: "caller", onlySessionUuid: "session-1" };
+
+    test("an execution admitted but not yet bound cannot bind afterwards", async () => {
+      const tracker = new ExecutionTracker(
+        new FakeTimer(),
+        new FakeIdGenerator(["pending", "autolock", "caller"]),
+      );
+      const pending = tracker.startExecution("tapOn", undefined, "session-1");
+      const autolock = tracker.startExecution("tapOn");
+      tracker.setResolvedAutolockSessionUuid(autolock.id, "session-1");
+      const caller = tracker.startExecution("setActiveDevice", undefined, "session-1");
+
+      expect(await tracker.cancelDeviceExecutions("emulator-5554", rebound, filter)).toBe(0);
+
+      for (const execution of [pending, autolock]) {
+        expect(() => tracker.bindDeviceExecution(execution.id, "emulator-5554")).toThrow(
+          /Session session-1 was rebound from device 'emulator-5554'/,
+        );
+        expect(tracker.hasActiveDeviceExecutions("emulator-5554")).toBe(false);
+      }
+      // The rebind's own caller keeps the right to bind, and so does any other device.
+      tracker.bindDeviceExecution(caller.id, "emulator-5554");
+      tracker.bindDeviceExecution(pending.id, "emulator-5556");
+      expect(tracker.hasActiveDeviceExecutions("emulator-5556")).toBe(true);
+    });
+
+    test("an execution already cancelled by the rebind cannot re-bind to the old device", async () => {
+      const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["running"]));
+      const running = tracker.startExecution("observe", undefined, "session-1");
+      tracker.bindDeviceExecution(running.id, "emulator-5554");
+
+      expect(await tracker.cancelDeviceExecutions("emulator-5554", rebound, filter)).toBe(1);
+
+      expect(() => tracker.bindDeviceExecution(running.id, "emulator-5554")).toThrow(
+        ActionableError,
+      );
+    });
+
+    test("peer, sessionless and later-admitted work still binds", async () => {
+      const tracker = new ExecutionTracker(
+        new FakeTimer(),
+        new FakeIdGenerator(["peer", "sessionless", "later"]),
+      );
+      const peer = tracker.startExecution("observe", undefined, "session-2");
+      const sessionless = tracker.startExecution("observe");
+
+      await tracker.cancelDeviceExecutions("emulator-5554", rebound, filter);
+      const later = tracker.startExecution("observe", undefined, "session-1");
+
+      for (const execution of [peer, sessionless, later]) {
+        tracker.bindDeviceExecution(execution.id, "emulator-5554");
+      }
+      expect(tracker.hasActiveDeviceExecutions("emulator-5554")).toBe(true);
+    });
+
+    test("kill, ANR and device-loss cancels (no session filter) never refuse a bind", async () => {
+      const tracker = new ExecutionTracker(
+        new FakeTimer(),
+        new FakeIdGenerator(["owned", "sessionless"]),
+      );
+      const owned = tracker.startExecution("observe", undefined, "session-1");
+      const sessionless = tracker.startExecution("observe");
+      tracker.bindDeviceExecution(owned.id, "emulator-5554");
+
+      await tracker.cancelDeviceExecutions("emulator-5554", "device-disconnected:emulator-5554");
+      await tracker.cancelDeviceExecutions("emulator-5554", new Error("System UI ANR"));
+
+      expect(owned.abortController.signal.aborted).toBe(true);
+      tracker.bindDeviceExecution(owned.id, "emulator-5554");
+      tracker.bindDeviceExecution(sessionless.id, "emulator-5554");
+    });
+
+    test("a bind after the execution ended stays a no-op", async () => {
+      const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["gone"]));
+      const gone = tracker.startExecution("observe", undefined, "session-1");
+      await tracker.cancelDeviceExecutions("emulator-5554", rebound, filter);
+      tracker.endExecution(gone.id);
+
+      tracker.bindDeviceExecution(gone.id, "emulator-5554");
+      expect(tracker.hasActiveDeviceExecutions("emulator-5554")).toBe(false);
+    });
   });
 
   test("endExecution removes every device binding and allows drain to finish", async () => {

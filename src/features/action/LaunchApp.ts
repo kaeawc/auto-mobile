@@ -18,6 +18,11 @@ import {
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { InstalledAppsRepository } from "../../db/installedAppsRepository";
+import {
+  confirmAndroidPackageInstalledLive,
+  type InstalledAppsCacheStaleMarker,
+} from "./confirmAndroidPackageInstalledLive";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveIosColdAppCheckKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
@@ -115,6 +120,8 @@ export interface DeviceAppLauncher {
 interface LaunchAppDependencies {
   targetUserDetector?: TargetUserDetector;
   installedAppsProvider?: InstalledAppsProvider;
+  /** Marks the installed-apps cache stale when a live check contradicts it (#9976). */
+  installedAppsCacheStaleMarker?: InstalledAppsCacheStaleMarker;
   performanceTrackerFactory?: () => PerformanceTracker;
   deviceAppLauncher?: DeviceAppLauncher;
   clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
@@ -145,6 +152,7 @@ export class LaunchApp extends BaseVisualChange {
   private deviceAppLauncher: DeviceAppLauncher;
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
+  private installedAppsCacheStaleMarker: InstalledAppsCacheStaleMarker | undefined;
   private performanceTrackerFactory: () => PerformanceTracker;
   private clearAppDataFactory: (
     device: BootedDevice,
@@ -179,6 +187,7 @@ export class LaunchApp extends BaseVisualChange {
     this.installedAppsProvider = dependencies.installedAppsProvider ?? {
       listInstalledApps: (signal?: AbortSignal) => this.listInstalledApps(signal),
     };
+    this.installedAppsCacheStaleMarker = dependencies.installedAppsCacheStaleMarker;
     this.performanceTrackerFactory =
       dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
     this.cacheInvalidator =
@@ -820,6 +829,42 @@ export class LaunchApp extends BaseVisualChange {
     );
   }
 
+  private async isInstalledOrLiveConfirmed(
+    installedApps: string[],
+    packageName: string,
+    userId: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (installedApps.includes(packageName)) {
+      return true;
+    }
+    return perf.track("confirmInstalledLive", () =>
+      this.confirmInstalledLive(packageName, userId, signal),
+    );
+  }
+
+  /**
+   * A listing may be served from the installed-apps cache, which an out-of-band
+   * install (adb, Gradle) does not invalidate. Confirm a negative with one live
+   * read before telling the caller the app is absent (#9976).
+   */
+  private async confirmInstalledLive(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    this.installedAppsCacheStaleMarker ??= new InstalledAppsRepository();
+    return confirmAndroidPackageInstalledLive({
+      adb: this.adb,
+      deviceId: this.device.deviceId,
+      packageName,
+      userId,
+      staleMarker: this.installedAppsCacheStaleMarker,
+      signal,
+    });
+  }
+
   private async detectTargetUserId(
     packageName: string,
     userId?: number,
@@ -931,7 +976,15 @@ export class LaunchApp extends BaseVisualChange {
     logger.info(`[LaunchApp] Found ${installedApps.length} installed app(s)`);
     logger.info(`[LaunchApp] Looking for package: ${packageName}`);
     logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);
-    if (!installedApps.includes(packageName)) {
+    if (
+      !(await this.isInstalledOrLiveConfirmed(
+        installedApps,
+        packageName,
+        targetUserId,
+        perf,
+        signal,
+      ))
+    ) {
       logger.error(`[LaunchApp] App ${packageName} is not installed`);
       logger.error(`[LaunchApp] DEBUG: installedApps.length = ${installedApps.length}`);
       logger.error(`[LaunchApp] DEBUG: installedApps = [${installedApps.join(", ")}]`);

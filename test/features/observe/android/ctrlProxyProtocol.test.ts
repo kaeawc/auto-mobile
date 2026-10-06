@@ -290,6 +290,15 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
     },
     {
+      builder: "showOverlay",
+      name: "explicit displayId (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.showOverlay({ requestId: "r1", spec: overlaySpec, displayId: 2 }),
+      ),
+      expected:
+        '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"displayId":2}',
+    },
+    {
       builder: "updateOverlay",
       name: "replacement (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(

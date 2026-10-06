@@ -536,6 +536,41 @@ describe("Explore", () => {
       }
     });
 
+    test("an initial relaunch landing on a screen reached only by recorded Back edges marks a root", async () => {
+      const run = rootRun(undefined, "Home", launcher);
+      // The loader yields edgeType "tool" for a recorded Back (never "back"): Back from
+      // Detail landing on Home makes Detail a descendant, not an in-app parent.
+      fakeGraph.addEdge({
+        from: "Detail",
+        to: "Home",
+        timestamp: 0,
+        edgeType: "tool",
+        interaction: { toolName: "pressButton", args: { button: "back" }, timestamp: 0 },
+      });
+      run.launch.mockImplementation(async () => {
+        run.actions.push("launch");
+        run.setForeground(target);
+        run.setScreen("Home");
+        return { success: true, packageName: target };
+      });
+      const seams = explore as unknown as {
+        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
+        handleDeadEnd: () => Promise<void>;
+      };
+      try {
+        await seams.enforceTargetApp(
+          { activeWindow: { appId: launcher } } as ObserveResult,
+          target,
+        );
+        await seams.enforceTargetApp({ activeWindow: { appId: target } } as ObserveResult, target);
+        await seams.handleDeadEnd();
+        expect(run.actions).toEqual(["launch"]);
+        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set(["Home"]));
+      } finally {
+        run.restore();
+      }
+    });
+
     test("a null relaunch screen marks no root and unresolved dead ends still press Back", async () => {
       const run = rootRun(undefined, "Login", launcher);
       const seams = explore as unknown as {

@@ -85,6 +85,7 @@ import {
   resolveEdgeTarget,
   markEdgeSkipped,
   validateNavigation,
+  isRecordedBackEdge,
 } from "./ExploreValidateMode";
 
 export const DEFAULT_MAX_INTERACTIONS = 200;
@@ -1034,8 +1035,11 @@ export class Explore extends BaseVisualChange {
       return;
     }
     const incomingEdges = await this.navigationManager.getEdgesTo(currentScreen);
+    // A recorded Back edge Child -> Screen only says Back from Child lands here, so
+    // Child is a descendant, not a parent. The loader's edgeType is only "tool" or
+    // "unknown", so the Back press is identified by its recorded interaction.
     const hasInAppParent = incomingEdges.some(
-      (edge) => edge.from !== currentScreen && edge.edgeType !== "back",
+      (edge) => edge.from !== currentScreen && !isRecordedBackEdge(edge),
     );
     if (!hasInAppParent) {
       this.rootScreens.add(currentScreen);

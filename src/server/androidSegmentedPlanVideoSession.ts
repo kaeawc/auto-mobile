@@ -70,6 +70,13 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
    * hook removes by session identity.
    */
   onFinalized?: () => void;
+  /**
+   * Invoked with the finalize result when the {@link maxDurationSeconds} auto-stop (not a
+   * caller-driven stop, whose caller already holds the result) finalizes the session, so
+   * the owner can persist what a caller-driven stop would — notably the `segments.json`
+   * manifest. A rejection is logged and never fails the auto-stop.
+   */
+  onAutoStopped?: (result: SegmentedSessionResult) => Promise<void> | void;
   startVideoRecording?: (
     request: Parameters<typeof defaultStartVideoRecording>[0],
   ) => Promise<ActiveVideoRecording>;
@@ -125,6 +132,10 @@ export class AndroidSegmentedPlanVideoSession {
   private timerDriven = false;
 
   private readonly onFinalized: (() => void) | undefined;
+
+  private readonly onAutoStopped:
+    | ((result: SegmentedSessionResult) => Promise<void> | void)
+    | undefined;
 
   /** Guards {@link onFinalized} so a second (no-op) {@link stop} does not re-notify. */
   private finalizedNotified = false;
@@ -193,6 +204,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.display = options.display;
     this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
+    this.onAutoStopped = options.onAutoStopped;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
     this.getVideoRecordingMetadataFn =
@@ -284,12 +296,28 @@ export class AndroidSegmentedPlanVideoSession {
       logger.info(
         `[SegmentedPlanVideo] Session reached maxDurationSeconds=${this.maxDurationSeconds}, auto-stopping`,
       );
-      this.stop().catch((error) => {
-        logger.warn(
-          `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`,
-        );
-      });
+      void this.autoStop();
     }, this.maxDurationSeconds * 1000);
+  }
+
+  private async autoStop(): Promise<void> {
+    let result: SegmentedSessionResult;
+    try {
+      result = await this.stop();
+    } catch (error) {
+      logger.warn(
+        `[SegmentedPlanVideo] Auto-stop at maxDurationSeconds failed: ${errorMessage(error)}`,
+      );
+      return;
+    }
+    try {
+      await this.onAutoStopped?.(result);
+    } catch (error) {
+      logger.warn(
+        `[SegmentedPlanVideo] Persisting the auto-stopped session result failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   /**

@@ -794,6 +794,10 @@ async function runRetentionSweepWithDependencies(
  * (iOS `simctl recordVideo` runs up to an hour) could fill the disk before any
  * eviction — which only ever considers *other completed* recordings — could run.
  * `capBytes <= 0` disables the monitor for that recording.
+ *
+ * `filePath` is the file the capture is writing right now: the backend's
+ * `liveCapturePath` when it reports one (iOS Simulator's raw `.mov`, since the
+ * final `.mp4` only exists after stop's post-process), else the output path.
  */
 function scheduleInProgressSizeCap(
   recordingId: string,
@@ -861,7 +865,17 @@ async function rearmRetainedRecordingSafety(
 
   const capBytes = Math.floor((record.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
   clearInProgressSizeCap(recordingId);
-  scheduleInProgressSizeCap(recordingId, record.filePath, capBytes, deps);
+  scheduleInProgressSizeCap(
+    recordingId,
+    sizeMonitorPath(deps.videoRecorderService.getLiveCapturePath(recordingId), record.filePath),
+    capBytes,
+    deps,
+  );
+}
+
+/** The file to stat for the size cap: the live capture file if reported, else the output. */
+function sizeMonitorPath(liveCapturePath: string | undefined, outputPath: string): string {
+  return liveCapturePath ?? outputPath;
 }
 
 async function enforceInProgressSizeCap(
@@ -1282,7 +1296,12 @@ export async function startVideoRecording(
     scheduleAutoStop(active.recordingId, maxDurationSeconds, deps);
 
     const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
-    scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+    scheduleInProgressSizeCap(
+      active.recordingId,
+      sizeMonitorPath(active.liveCapturePath, active.outputPath),
+      capBytes,
+      deps,
+    );
     start.abortSignal.throwIfAborted();
     return active;
   } catch (error) {

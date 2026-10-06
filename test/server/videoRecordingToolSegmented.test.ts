@@ -2,7 +2,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
-import { promises as fsPromises } from "node:fs";
+import { existsSync, promises as fsPromises, statSync } from "node:fs";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -979,7 +979,10 @@ describe("videoRecording tool segmentation branch", () => {
         const id = recordingId ?? `segment-${segmentStops.length}`;
         segmentStops.push(id);
         return {
-          metadata: makeSegmentMetadata(id),
+          metadata: {
+            ...makeSegmentMetadata(id),
+            ...(segmentStops.length === 2 && { warnings: ["segment 1 warning"] }),
+          },
           evictedRecordingIds: [],
         };
       },
@@ -1011,6 +1014,30 @@ describe("videoRecording tool segmentation branch", () => {
 
     // Auto-stop cleared the session's timers and removed it from the registry.
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+
+    // The auto-stop persists the same manifest a caller-driven stop would (#10018): both
+    // segments in order, with the warning the second segment carried.
+    const manifestPath = path.join(fakeSegmentDir, "segments.json");
+    // A real file write needs event-loop turns, which a microtask-only waitFor never yields.
+    // (Non-empty, not just present: the file is created before its bytes land.)
+    for (
+      let turn = 0;
+      turn < 200 && !(existsSync(manifestPath) && statSync(manifestPath).size > 0);
+      turn++
+    ) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(await fsPromises.readFile(manifestPath, "utf8")) as {
+      sessionId: string;
+      segmentCount: number;
+      segments: Array<{ index: number; recordingId: string; warnings?: string[] }>;
+    };
+    expect(manifest.sessionId).toBe("first");
+    expect(manifest.segmentCount).toBe(2);
+    expect(manifest.segments.map((segment) => segment.index)).toEqual([0, 1]);
+    expect(manifest.segments[0].recordingId).toBe("first");
+    expect(manifest.segments[1].warnings).toEqual(["segment 1 warning"]);
 
     // A new recording starts on the SAME device (the QA runner's next test case).
     await handler()(androidDevice, {

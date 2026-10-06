@@ -37,7 +37,55 @@ const NO_SCREENSHOT_REASON = "no screenshot for this observation";
 type AuditHierarchyOptions = {
   density?: number;
   windows?: ViewHierarchyWindowInfo[];
+  /**
+   * Clickable elements whose accessible label is merged from descendant text or
+   * content descriptions (see `projectAuditElements`). They are not flagged as
+   * `missing-content-description`: TalkBack announces the merged child text.
+   */
+  descendantLabelled?: ReadonlySet<Element>;
 };
+
+/**
+ * Upper bound on emitted `violations`. Each entry carries a full element and
+ * explanation, and a screen with hundreds of small touch targets or contrast
+ * failures would otherwise return every one on every observation (the same
+ * concern `MAX_LAYOUT_WARNINGS` bounds for `layoutWarnings`). Real screens stay
+ * far below this; when it trims, `violationsTruncated` reports the counts.
+ */
+export const MAX_ACCESSIBILITY_VIOLATIONS = 50;
+
+const SEVERITY_RANK: Record<WcagViolation["severity"], number> = { error: 0, warning: 1, info: 2 };
+
+/**
+ * Cap `result.violations` at {@link MAX_ACCESSIBILITY_VIOLATIONS}, keeping the
+ * most severe first (stable within a severity, so detection order is kept) and
+ * reporting the pre-cap total and the omitted count per rule in
+ * `violationsTruncated`. At or under the cap the result is returned unchanged.
+ * `summary` is untouched: it already counts the full set. Applied where the
+ * result is attached to an observation, not inside `audit`, so a result handed
+ * to `saveBaseline` is never silently truncated.
+ */
+export function capAccessibilityViolations(
+  result: AccessibilityAuditResult,
+): AccessibilityAuditResult {
+  const total = result.violations.length;
+  if (total <= MAX_ACCESSIBILITY_VIOLATIONS) {
+    return result;
+  }
+  const ranked = [...result.violations].sort(
+    (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
+  );
+  const kept = ranked.slice(0, MAX_ACCESSIBILITY_VIOLATIONS);
+  const omittedByType: Partial<Record<ViolationType, number>> = {};
+  for (const violation of ranked.slice(MAX_ACCESSIBILITY_VIOLATIONS)) {
+    omittedByType[violation.type] = (omittedByType[violation.type] ?? 0) + 1;
+  }
+  return {
+    ...result,
+    violations: kept,
+    violationsTruncated: { total, omitted: total - kept.length, omittedByType },
+  };
+}
 
 function promotedWindowRoot(owned: ViewHierarchyNode): ViewHierarchyNode {
   if (nodeAttributes(owned).class || !owned.node) {
@@ -106,10 +154,12 @@ export class WcagAudit {
     const density =
       typeof densityOrOptions === "number" ? densityOrOptions : densityOrOptions?.density;
     const windows = typeof densityOrOptions === "number" ? undefined : densityOrOptions?.windows;
+    const descendantLabelled =
+      typeof densityOrOptions === "number" ? undefined : densityOrOptions?.descendantLabelled;
     const violations: WcagViolation[] = [];
 
     // Check for missing content descriptions
-    violations.push(...this.checkMissingContentDescriptions(elements));
+    violations.push(...this.checkMissingContentDescriptions(elements, descendantLabelled));
 
     // Check for insufficient contrast ratios (if screenshot available)
     if (screenshotPath) {
@@ -178,12 +228,21 @@ export class WcagAudit {
   /**
    * Check for clickable/focusable elements without content descriptions
    */
-  private checkMissingContentDescriptions(elements: Element[]): WcagViolation[] {
+  private checkMissingContentDescriptions(
+    elements: Element[],
+    descendantLabelled?: ReadonlySet<Element>,
+  ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
     for (const element of elements) {
       // Skip if element has text or content-desc
       if (element.text || element["content-desc"]) {
+        continue;
+      }
+
+      // A clickable container is labelled by its descendants' text/content-desc
+      // (the accessibility service announces the merged child text).
+      if (descendantLabelled?.has(element)) {
         continue;
       }
 

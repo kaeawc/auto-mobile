@@ -3102,6 +3102,27 @@ describe("AndroidCtrlProxyClient", function () {
       }
     });
 
+    test("a navigation event is handed to the graph stamped with this client's device (#10195)", async function () {
+      const record = spyOn(navHarness.manager, "recordNavigationEvent");
+      const { resultPromise, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(record).toHaveBeenCalledTimes(1);
+        expect(record.mock.calls[0][0]).toMatchObject({
+          destination: "SdkHome",
+          applicationId: "com.example.sdk",
+          deviceId: testDevice.deviceId,
+        });
+      } finally {
+        record.mockRestore();
+        await testClient.close();
+      }
+    });
+
     test("an SDK app's hierarchy update after another app was in front restores its screen (#10193)", async function () {
       const { navManager, resultPromise, socket, testClient, testTimer } =
         await startSdkNavigationHierarchyInterleaving();

@@ -12,6 +12,12 @@ export interface NavigationEvent {
   applicationId?: string;
   /** The interaction that triggered this navigation (set by CtrlProxyClient) */
   triggeringInteraction?: { type: string; elementText?: string; elementResourceId?: string } | null;
+  /**
+   * The device whose client received the event (#10195). Set by that client so the navigation
+   * telemetry record is stamped with the device that navigated, not whichever device last set
+   * the telemetry recorder's ambient context.
+   */
+  deviceId?: string;
 }
 
 /**

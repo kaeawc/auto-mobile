@@ -1231,20 +1231,26 @@ export class NavigationGraphManager implements NavigationGraphService {
     this.notifyGraphUpdated();
 
     // Push to telemetry dashboard via TelemetryRecorder (has device context for subscriber filtering)
+    // The device comes with the event from the client that received it: the recorder's
+    // ambient context is whichever device last set it, which is another device's with two
+    // attached (#10195).
     TelemetryRecorder.getInstance()
-      .recordNavigationEvent({
-        timestamp,
-        applicationId: appId,
-        destination: screenName,
-        source: event.source ?? null,
-        arguments: event.arguments ?? null,
-        metadata: event.metadata ?? null,
-        triggeringInteraction: event.triggeringInteraction ?? null,
-        // Scope to `appId` (== the app that just navigated): this URI is pushed live
-        // to telemetry-dashboard subscribers, which may be foregrounding a different
-        // app when they follow it, so an unscoped form would resolve cross-app (#5600).
-        screenshotUri: buildNavigationNodeScreenshotUri(node.id, appId),
-      })
+      .recordNavigationEvent(
+        {
+          timestamp,
+          applicationId: appId,
+          destination: screenName,
+          source: event.source ?? null,
+          arguments: event.arguments ?? null,
+          metadata: event.metadata ?? null,
+          triggeringInteraction: event.triggeringInteraction ?? null,
+          // Scope to `appId` (== the app that just navigated): this URI is pushed live
+          // to telemetry-dashboard subscribers, which may be foregrounding a different
+          // app when they follow it, so an unscoped form would resolve cross-app (#5600).
+          screenshotUri: buildNavigationNodeScreenshotUri(node.id, appId),
+        },
+        { deviceId: event.deviceId },
+      )
       .catch((error) => {
         logger.warn(
           `[NAVIGATION_GRAPH] Navigation telemetry failed: ${errorMessage(error)}`,

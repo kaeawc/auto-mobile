@@ -6685,8 +6685,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private enqueueNavigationGraphWrite(event: NavigationEvent): Promise<void> {
+  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
     const navigationGraphManager = this.getNavigationGraphManager();
+    // Stamp the device that received the event: the manager's telemetry must not read the
+    // recorder's ambient context, which another device's client may have set (#10195).
+    const event: NavigationEvent = { ...received, deviceId: this.device.deviceId };
     const navWrite = this.navigationWriteTail.then(
       () => navigationGraphManager.recordNavigationEvent(event),
       () => navigationGraphManager.recordNavigationEvent(event),

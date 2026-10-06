@@ -14,6 +14,7 @@ import { logger } from "../../utils/logger";
 import type { TapEffect } from "../../models/TapOnElementResult";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
+import { boundsArea, intersectBounds } from "../../utils/bounds";
 import { UIStateExtractor } from "./UIStateExtractor";
 
 interface VisualSelectionConfig {
@@ -29,6 +30,14 @@ const DEFAULT_VISUAL_SELECTION_CONFIG: Required<VisualSelectionConfig> = {
   pixelmatchThreshold: 0.1,
   confidenceScale: 5,
 };
+
+/**
+ * How much of the tapped element's pre-tap bounds a post-tap node must cover to count as the same
+ * element. Selection styling can nudge or resize a tab or row by a few pixels, so this is not
+ * exact equality; a same-text node elsewhere (a screen title that repeats the row's label) covers
+ * none of it.
+ */
+const MIN_TAPPED_BOUNDS_OVERLAP_FRACTION = 0.75;
 
 interface SelectionStateDetectorOptions {
   screenshotUtils?: ScreenshotUtils;
@@ -62,6 +71,16 @@ export function tapNavigatedAwayFromScreen(effect: TapEffect | undefined): boole
 /** An identifier the tapped element does not have constrains nothing; one it has must match. */
 function identifierMatches(expected: string | undefined, actual: string | undefined): boolean {
   return !expected || expected === actual;
+}
+
+/** A node without bounds cannot be placed, so it is not evidence the tapped element stayed. */
+function coversMostOfTappedBounds(tapped: ElementBounds, node: ElementBounds | undefined): boolean {
+  const tappedArea = boundsArea(tapped);
+  if (!node || tappedArea <= 0) {
+    return false;
+  }
+  const shared = intersectBounds(tapped, node);
+  return shared !== null && boundsArea(shared) / tappedArea >= MIN_TAPPED_BOUNDS_OVERLAP_FRACTION;
 }
 
 export interface SelectionStateDetectorLike {
@@ -127,6 +146,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
 
     const skipReason = this.visualFallbackSkipReason(
       selectedElement,
+      tappedElement.bounds,
       context.tapEffect,
       currentObservation.viewHierarchy,
     );
@@ -173,13 +193,14 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
    */
   private visualFallbackSkipReason(
     selectedElement: SelectedElement,
+    bounds: ElementBounds,
     tapEffect: TapEffect | undefined,
     viewHierarchy: ViewHierarchyResult | undefined,
   ): string | null {
     if (tapNavigatedAwayFromScreen(tapEffect)) {
       return `tap navigated (${tapEffect?.basis})`;
     }
-    if (!this.isStillPresent(selectedElement, viewHierarchy)) {
+    if (!this.isStillPresent(selectedElement, bounds, viewHierarchy)) {
       return `${this.describeElement(selectedElement)} is not in the post-tap hierarchy`;
     }
     return null;
@@ -212,10 +233,14 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
   /**
    * Whether a node carrying every identifier the tapped element has (text, resource-id,
    * content-desc — the identity SelectedElement and the navigation graph use across observations)
-   * exists in the post-tap hierarchy. Bounds are not identity: new content can sit at old bounds.
+   * exists in the post-tap hierarchy AND sits where the tapped element was. Bounds alone are not
+   * identity (new content can sit at old bounds), nor are identifiers alone: a text-only row that
+   * navigated to a screen titled with the same text matches by identifier, but that node is
+   * elsewhere. Apps that keep one activity across navigation give the tap flow no other signal.
    */
   private isStillPresent(
     identity: SelectedElement,
+    tappedBounds: ElementBounds,
     viewHierarchy: ViewHierarchyResult | undefined,
   ): boolean {
     if (!viewHierarchy) {
@@ -225,10 +250,11 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       resolveViewHierarchyForSearch(viewHierarchy) ?? viewHierarchy,
     );
     return nodes.some(
-      ({ properties }) =>
+      ({ properties, bounds }) =>
         identifierMatches(identity.text, properties.text) &&
         identifierMatches(identity.resourceId, properties["resource-id"]) &&
-        identifierMatches(identity.contentDesc, properties["content-desc"]),
+        identifierMatches(identity.contentDesc, properties["content-desc"]) &&
+        coversMostOfTappedBounds(tappedBounds, bounds),
     );
   }
 

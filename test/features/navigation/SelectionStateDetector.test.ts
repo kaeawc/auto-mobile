@@ -238,5 +238,68 @@ describe("SelectionStateDetector", () => {
       expect(selected[0].selectedState?.method).toBe("accessibility");
       expect(screenshotUtils.wasMethodCalled("compareImages")).toBe(false);
     });
+
+    describe("same-text nodes elsewhere on screen", () => {
+      // Real capture: two text-only "Go" buttons in the right column, at (160,10,280,60) and
+      // (160,100,280,150), and no node in the left column with that text. Compose and other
+      // single-activity apps keep the same app and activity across in-app navigation, so the
+      // tap flow reports no screen change and only the element's place tells it apart.
+      const siblingTargetsScreen = {
+        ...createObservation(siblingTargetsCapture.viewHierarchy as ViewHierarchyResult),
+        screenSize,
+      };
+      const goButton = (bounds: Element["bounds"]): Element => ({ bounds, text: "Go" });
+
+      test("a row that navigated to a screen showing the same text elsewhere is not selected", async () => {
+        const { screenshotUtils, detect } = setup();
+
+        const selected = await detect({
+          currentObservation: siblingTargetsScreen,
+          tappedElement: goButton({ left: 10, top: 10, right: 140, bottom: 60 }),
+          tapEffect: { screenChanged: true, basis: "viewHierarchy changed" },
+        });
+
+        expect(selected).toEqual([]);
+        expect(screenshotUtils.wasMethodCalled("compareImages")).toBe(false);
+      });
+
+      test("a node that only partly overlaps the tapped bounds is not the tapped element", async () => {
+        const { detect } = setup();
+
+        // Half of the tapped (220,10)-(340,60) bounds is covered by the "Go" node.
+        const selected = await detect({
+          currentObservation: siblingTargetsScreen,
+          tappedElement: goButton({ left: 220, top: 10, right: 340, bottom: 60 }),
+        });
+
+        expect(selected).toEqual([]);
+      });
+
+      test("an element that stays in place and changes visually is still selected", async () => {
+        const { detect } = setup();
+
+        const selected = await detect({
+          currentObservation: siblingTargetsScreen,
+          tappedElement: goButton({ left: 160, top: 10, right: 280, bottom: 60 }),
+          tapEffect: { screenChanged: true, basis: "viewHierarchy changed" },
+        });
+
+        expect(selected).toHaveLength(1);
+        expect(selected[0].text).toBe("Go");
+        expect(selected[0].selectedState?.method).toBe("visual");
+      });
+
+      test("selection styling that nudges the node a few pixels still counts as the same element", async () => {
+        const { detect } = setup();
+
+        const selected = await detect({
+          currentObservation: siblingTargetsScreen,
+          tappedElement: goButton({ left: 156, top: 6, right: 276, bottom: 56 }),
+        });
+
+        expect(selected).toHaveLength(1);
+        expect(selected[0].selectedState?.method).toBe("visual");
+      });
+    });
   });
 });

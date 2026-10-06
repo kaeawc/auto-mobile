@@ -24,6 +24,24 @@ describe("OverlayEventCoordinator", () => {
   afterEach(() => coordinator.dispose());
   const awaitEvent = (options = {}) => coordinator.awaitEvent(scope, "panel", client, options);
 
+  test("accepted events record telemetry once with their owning scope", () => {
+    const recorded: { scope: typeof scope; event: ReturnType<typeof event> }[] = [];
+    coordinator = new OverlayEventCoordinator(timer, store, {
+      recordOverlayEvent: (origin, pushed) => recorded.push({ scope: origin, event: pushed }),
+    });
+    coordinator.show(scope, "panel", client);
+    client.emitOverlayEvent(event(1, "unknown"));
+    client.emitOverlayEvent(event(2));
+    client.emitOverlayEvent(event(2));
+    client.emitOverlayEvent(event(1));
+    client.emitOverlayEvent(event(3, "panel", "dismissed"));
+    client.emitOverlayEvent(event(4));
+    expect(recorded).toEqual([
+      { scope, event: event(2) },
+      { scope, event: event(3, "panel", "dismissed") },
+    ]);
+  });
+
   test("event before call returns at once and preserves reconnect high-water after consumption", async () => {
     coordinator.show(scope, "panel", client);
     client.emitOverlayEvent(event(1));

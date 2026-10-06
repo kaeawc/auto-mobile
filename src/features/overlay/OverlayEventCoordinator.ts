@@ -18,6 +18,9 @@ export { DEFAULT_OVERLAY_EVENT_TIMEOUT_MS, MAX_OVERLAY_EVENT_TIMEOUT_MS };
 export interface OverlayEventSource {
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void;
 }
+export interface OverlayEventTelemetry {
+  recordOverlayEvent(scope: OverlayScope, event: OverlayEvent): void;
+}
 export interface OverlayAwaitResult extends OverlayEventCounts {
   event?: Omit<OverlayEvent, "type">;
   timedOut?: true;
@@ -45,6 +48,7 @@ export class OverlayEventCoordinator {
   constructor(
     private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
     private readonly store: OverlayStatusStore,
+    private readonly telemetry?: OverlayEventTelemetry,
   ) {}
 
   /** Subscribe before show dispatch so a push during the request cannot be lost. */
@@ -64,6 +68,7 @@ export class OverlayEventCoordinator {
     // reject the new showing's events. Pushes carry only id/sequence/timestamp (no show
     // generation), so a late event from the PREVIOUS showing cannot be told apart from the
     // new showing's events and is accepted if it arrives after this reset.
+    this.store.startShow(scope);
     entry.buffer.startEpoch();
     entry.shown = true;
     entry.terminal = false;
@@ -188,6 +193,8 @@ export class OverlayEventCoordinator {
     if (!entry || entry.terminal || !entry.buffer.push(event)) {
       return;
     }
+    this.store.recordEvent(entry.scope, event);
+    this.telemetry?.recordOverlayEvent(entry.scope, event);
     if (event.kind === "dismissed") {
       entry.shown = false;
       entry.terminal = true;

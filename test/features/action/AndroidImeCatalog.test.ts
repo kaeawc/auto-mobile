@@ -3,6 +3,8 @@ import {
   AndroidImeCatalog,
   AUTO_MOBILE_IME_ID,
   imeCapabilities,
+  createForegroundUserSource,
+  pinnedUser,
   parseAdvertisedImeSubtypes,
   parsePackageVersionName,
   parseSelectedImeSubtype,
@@ -12,6 +14,7 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeMultiUserImeAdb } from "../../fakes/FakeMultiUserImeAdb";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const gboard =
@@ -26,7 +29,7 @@ function fixture(deviceId = "test-device") {
     stdout: `${gboard}\n`,
     stderr: "",
   });
-  return { adb, catalog: new AndroidImeCatalog(adb, deviceId) };
+  return { adb, catalog: new AndroidImeCatalog(adb, deviceId, pinnedUser(0)) };
 }
 
 test("explicit selection recovers quarantine only after verified IME readback", async () => {
@@ -140,6 +143,7 @@ test("quarantined explicit selection holds the lock until readback before an ord
       },
     },
     deviceId,
+    pinnedUser(0),
   );
   quarantineAndroidIme(deviceId);
   const selection = catalog.select(samsung);
@@ -256,6 +260,7 @@ test("reports the verified IME after cancellation following set dispatch", async
       },
     },
     "dispatch-cancel-device",
+    pinnedUser(0),
   );
 
   expect((await catalog.selectWithinLock(samsung, controller.signal)).activeImeId).toBe(samsung);
@@ -278,6 +283,7 @@ test("reports a genuine set failure after cancellation following dispatch", asyn
       },
     },
     "dispatch-failure-device",
+    pinnedUser(0),
   );
   adb.setCommandResponse(`shell ime set ${samsung}`, { stdout: "", stderr: "permission denied" });
 
@@ -313,6 +319,7 @@ test("cancels set before dispatch without changing the active IME", async () => 
       },
     },
     "queued-cancel-device",
+    pinnedUser(0),
   );
 
   const selection = catalog.selectWithinLock(samsung, controller.signal);
@@ -462,4 +469,115 @@ test("rejects a subtype that is no longer advertised before writing it", async (
         command.startsWith("shell settings put secure selected_input_method_subtype"),
       ),
   ).toBe(false);
+});
+
+function multiUser(foreground: number) {
+  const adb = new FakeMultiUserImeAdb(foreground, [gboard, samsung]);
+  adb.seedUser(0, { active: gboard });
+  adb.seedUser(foreground, { active: gboard, enabled: [gboard, samsung] });
+  const catalog = new AndroidImeCatalog(adb, `multi-user-${foreground}`, pinnedUser(foreground));
+  return { adb, catalog };
+}
+
+function everyTargetsUser(calls: string[][], userId: number): boolean {
+  return calls.every((args) => args.join(" ").includes(` --user ${userId}`));
+}
+
+test("a non-zero foreground user: list reads that user's active and enabled IMEs", async () => {
+  const { adb, catalog } = multiUser(10);
+  adb.state(0).active = "com.other/.UserZeroIme";
+
+  const state = await catalog.list();
+
+  expect(state.activeImeId).toBe(gboard);
+  expect(state.installed.find((ime) => ime.id === samsung)?.enabled).toBe(true);
+  expect(everyTargetsUser(adb.calls, 10)).toBe(true);
+});
+
+test("a non-zero foreground user: select applies and verifies the same user", async () => {
+  const { adb, catalog } = multiUser(10);
+
+  const state = await catalog.select(samsung);
+
+  expect(state.activeImeId).toBe(samsung);
+  expect(adb.state(10).active).toBe(samsung);
+  expect(adb.state(0).active).toBe(gboard);
+  expect(adb.calls).toContainEqual(["shell", "ime", "set", "--user", "10", samsung]);
+  expect(everyTargetsUser(adb.calls, 10)).toBe(true);
+});
+
+test("a non-zero foreground user: scoped restore sends ime set when the temporary IME is active", async () => {
+  const { adb, catalog } = multiUser(10);
+  adb.state(10).active = samsung;
+
+  const state = await catalog.selectWithinLock(gboard);
+
+  expect(state.activeImeId).toBe(gboard);
+  expect(adb.state(10).active).toBe(gboard);
+});
+
+test("a non-zero foreground user: subtype read and restore address that user only", async () => {
+  const { adb, catalog } = multiUser(10);
+  adb.state(10).subtype = "42";
+  adb.state(0).subtype = "7";
+
+  expect((await catalog.readSubtype(gboard)).id).toBe(42);
+  await catalog.restoreSubtypeWithinLock(gboard, { id: null });
+
+  expect(adb.state(10).subtype).toBeNull();
+  expect(adb.state(0).subtype).toBe("7");
+  expect(adb.calls).toContainEqual([
+    "shell",
+    "settings",
+    "--user",
+    "10",
+    "delete",
+    "secure",
+    "selected_input_method_subtype",
+  ]);
+});
+
+test("foreground user 0 keeps the exact pre-existing commands without --user", async () => {
+  const { adb, catalog } = multiUser(0);
+  adb.state(0).active = samsung;
+
+  await catalog.selectWithinLock(gboard);
+  await catalog.restoreSubtypeWithinLock(gboard, { id: 3 });
+
+  expect(adb.calls.map((args) => args.join(" "))).toEqual([
+    "shell ime list -a -s",
+    "shell ime list -s",
+    "shell settings get secure default_input_method",
+    `shell ime set ${gboard}`,
+    "shell ime list -a -s",
+    "shell ime list -s",
+    "shell settings get secure default_input_method",
+    "shell dumpsys input_method",
+    "shell settings put secure selected_input_method_subtype 3",
+    "shell settings get secure selected_input_method_subtype",
+  ]);
+});
+
+test("pinForeground keeps one user even if the foreground user changes afterwards", async () => {
+  const adb = new FakeMultiUserImeAdb(10, [gboard, samsung]);
+  adb.seedUser(10, { active: gboard, enabled: [gboard, samsung] });
+  adb.seedUser(11, { active: gboard, enabled: [gboard, samsung] });
+  let foreground = 10;
+  const catalog = new AndroidImeCatalog(adb, "pin-device", {
+    foregroundUserId: async () => foreground,
+  });
+
+  const pinned = await catalog.pinForeground();
+  foreground = 11;
+  await pinned.selectWithinLock(samsung);
+
+  expect(adb.state(10).active).toBe(samsung);
+  expect(adb.state(11).active).toBe(gboard);
+});
+
+test("foreground user comes from the shared resolver's current-user read", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+
+  expect(await createForegroundUserSource(adb).foregroundUserId()).toBe(10);
 });

@@ -9,7 +9,7 @@ import { executeAndroidSearchDrag } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
-import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
+import { runBoomerangReturnLeg, throwIfAbortedKeepingForwardNote } from "./boomerangReturnLeg";
 import { isDeviceLostError } from "../../../models/DeviceLostError";
 import {
   withStaleDisplay,
@@ -1029,7 +1029,7 @@ export class SwipeOn extends BaseVisualChange {
               );
         }
       } catch (error) {
-        throwIfAborted(signal);
+        throwIfAbortedKeepingForwardNote(signal, error);
         if (error instanceof Error && error.name === "AbortError") {
           throw error;
         }
@@ -1210,7 +1210,7 @@ export class SwipeOn extends BaseVisualChange {
       return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
     } catch (error) {
       perf.end();
-      throwIfAborted(signal);
+      throwIfAbortedKeepingForwardNote(signal, error);
 
       logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
       if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
@@ -1388,10 +1388,14 @@ export class SwipeOn extends BaseVisualChange {
     diagnostics: { boomerang?: BoomerangConfig },
   ): Promise<SwipeOnResult> {
     let previous: ObserveResult | null = null;
-    const result: SwipeOnResult = await this.observedInteraction(async (observation, fence) => {
-      previous = observation;
-      return block(observation, fence);
-    }, options);
+    const result: SwipeOnResult = await this.observedInteraction(
+      async (observation, fence) => {
+        previous = observation;
+        return block(observation, fence);
+      },
+      // A boomerang whose return leg failed has moved the content: observe it on iOS too.
+      { ...options, observePartialApplication: true },
+    );
     if (this.device.platform !== "android") {
       return result;
     }

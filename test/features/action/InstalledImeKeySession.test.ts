@@ -8,11 +8,14 @@ import {
 import { KeyboardOpenIndeterminateError } from "../../../src/features/action/Keyboard";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeMultiUserImeAdb } from "../../fakes/FakeMultiUserImeAdb";
 import {
   AndroidImeCatalog,
+  pinnedUser,
   AUTO_MOBILE_IME_ID,
   imeCapabilities,
 } from "../../../src/features/action/AndroidImeCatalog";
+import { withAndroidImeLock } from "../../../src/features/action/androidImeLock";
 
 const original = "com.example.original/.Ime";
 const target = "com.example.keyboard/.Ime";
@@ -81,53 +84,57 @@ function fixture(
   let subtypeRestoreError: string | undefined;
   const enabledIds = new Set([original, selectedIme]);
   const installedIds = new Set(enabledIds);
-  const session = new InstalledImeKeySession(deviceId, {
-    catalog: {
-      list: async () => ({
+  const fakeCatalog: Pick<
+    AndroidImeCatalog,
+    "list" | "selectWithinLock" | "readSubtype" | "restoreSubtypeWithinLock" | "identity"
+  > = {
+    list: async () => ({
+      activeImeId: active,
+      installed: [...installedIds].map((id) => ({
+        id,
+        enabled: enabledIds.has(id),
+        active: id === active,
+        capabilities: imeCapabilities(id),
+      })),
+    }),
+    selectWithinLock: async (id, signal) => {
+      events.push(`select:${id}:${signal ? "signaled" : "cleanup"}`);
+      if (id === original && restoreError) {
+        throw new Error(restoreError);
+      }
+      active = id;
+      if (id === selectedIme) {
+        selectionSettled?.();
+      }
+      return {
         activeImeId: active,
-        installed: [...installedIds].map((id) => ({
-          id,
-          enabled: enabledIds.has(id),
-          active: id === active,
-          capabilities: imeCapabilities(id),
+        installed: [...installedIds].map((item) => ({
+          id: item,
+          enabled: enabledIds.has(item),
+          active: item === active,
+          capabilities: imeCapabilities(item),
         })),
-      }),
-      selectWithinLock: async (id, signal) => {
-        events.push(`select:${id}:${signal ? "signaled" : "cleanup"}`);
-        if (id === original && restoreError) {
-          throw new Error(restoreError);
-        }
-        active = id;
-        if (id === selectedIme) {
-          selectionSettled?.();
-        }
-        return {
-          activeImeId: active,
-          installed: [...installedIds].map((item) => ({
-            id: item,
-            enabled: enabledIds.has(item),
-            active: item === active,
-            capabilities: imeCapabilities(item),
-          })),
-        };
-      },
-      readSubtype: async (id) => {
-        void id;
-        return { id: subtype, ...(subtype === null ? {} : { locale: "en_US" }) };
-      },
-      restoreSubtypeWithinLock: async (id, snapshot) => {
-        events.push(`restoreSubtype:${id}:${snapshot.id ?? "unset"}`);
-        if (subtypeRestoreError) {
-          throw new Error(subtypeRestoreError);
-        }
-        subtype = snapshot.id;
-      },
-      identity: async (id, snapshot) => ({
-        component: id,
-        package: id.split("/")[0],
-        ...(snapshot?.locale ? { subtype: snapshot.locale } : {}),
-      }),
+      };
     },
+    readSubtype: async (id) => {
+      void id;
+      return { id: subtype, ...(subtype === null ? {} : { locale: "en_US" }) };
+    },
+    restoreSubtypeWithinLock: async (id, snapshot) => {
+      events.push(`restoreSubtype:${id}:${snapshot.id ?? "unset"}`);
+      if (subtypeRestoreError) {
+        throw new Error(subtypeRestoreError);
+      }
+      subtype = snapshot.id;
+    },
+    identity: async (id, snapshot) => ({
+      component: id,
+      package: id.split("/")[0],
+      ...(snapshot?.locale ? { subtype: snapshot.locale } : {}),
+    }),
+  };
+  const session = new InstalledImeKeySession(deviceId, {
+    catalog: { ...fakeCatalog, pinForeground: async () => fakeCatalog },
     keyboard: {
       execute: async (_action, signal) => {
         openCount++;
@@ -889,6 +896,7 @@ test("persistent selection waits for the session's subtype restore under the sam
       },
     },
     deviceId,
+    pinnedUser(0),
   );
   const selection = catalog.select(original);
   await Promise.resolve();
@@ -899,4 +907,28 @@ test("persistent selection waits for the session's subtype restore under the sam
   expect(events.indexOf(`restoreSubtype:${original}:7`)).toBeLessThan(
     events.findIndex((event) => event.startsWith("persistent:")),
   );
+});
+
+test("a non-zero foreground user: a failed tap restores that user's keyboard without quarantine", async () => {
+  const adb = new FakeMultiUserImeAdb(10, [original, target]);
+  adb.seedUser(0, { active: original });
+  adb.seedUser(10, { active: original, enabled: [original, target] });
+  const deviceId = `native-session-multi-user-${++fixtureNumber}`;
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const session = new InstalledImeKeySession(deviceId, {
+    catalog: new AndroidImeCatalog(adb, deviceId, pinnedUser(10)),
+    keyboard: { execute: async () => ({ success: true }) },
+    hierarchy: { read: async () => focused },
+    tap: { execute: async () => ({ success: false, error: "tap failed" }) },
+    timer,
+  });
+
+  await expect(session.tapKey(target, "a")).rejects.toThrow();
+
+  expect(adb.state(10).active).toBe(original);
+  expect(adb.state(0).active).toBe(original);
+  expect(adb.calls).toContainEqual(["shell", "ime", "set", "--user", "10", target]);
+  expect(adb.calls).toContainEqual(["shell", "ime", "set", "--user", "10", original]);
+  expect(await withAndroidImeLock(deviceId, async () => "usable")).toBe("usable");
 });

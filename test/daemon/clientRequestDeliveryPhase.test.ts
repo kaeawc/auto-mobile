@@ -68,3 +68,45 @@ describe("DaemonClient request delivery phase", () => {
     expect(error).not.toBeInstanceOf(DaemonRequestNotDeliveredError);
   });
 });
+
+// A throw between scheduling the request timeout and writing the frame used to
+// leave the timer and pending entry behind until the timeout fired.
+describe("DaemonClient request that fails before the frame is written", () => {
+  function createTimedClient() {
+    const timer = new FakeTimer();
+    const client = new DaemonClient("/fake/socket", 1_000, timer, {}, null, undefined, "win32");
+    return { client, timer };
+  }
+
+  test("a synchronous socket write failure clears the timer and is typed as not delivered", async () => {
+    const { client, timer } = createTimedClient();
+    await client.connect();
+    const baselineTimers = timer.getPendingTimeouts().length;
+    createdSocket!.write = () => {
+      throw new Error("write exploded");
+    };
+
+    const error = await client.callTool("tapOn", { text: "Submit" }).then(
+      () => undefined,
+      (rejection: unknown) => rejection,
+    );
+
+    expect(error).toBeInstanceOf(DaemonRequestNotDeliveredError);
+    expect(timer.getPendingTimeouts()).toHaveLength(baselineTimers);
+  });
+
+  test("an unserializable argument rejects with its own error and schedules nothing", async () => {
+    const { client, timer } = createTimedClient();
+    await client.connect();
+    const baselineTimers = timer.getPendingTimeouts().length;
+
+    const error = await client.callTool("tapOn", { count: BigInt(1) }).then(
+      () => undefined,
+      (rejection: unknown) => rejection,
+    );
+
+    expect(error).toBeInstanceOf(TypeError);
+    expect(createdSocket!.writes).toEqual([]);
+    expect(timer.getPendingTimeouts()).toHaveLength(baselineTimers);
+  });
+});

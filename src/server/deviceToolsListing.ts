@@ -29,6 +29,7 @@ import {
   listDevicePayloads,
 } from "./deviceTools";
 import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
+import { AndroidTransportAliases } from "../utils/androidSerial";
 
 function selectBootedDevices(
   booted: BootedDevice[],
@@ -125,6 +126,8 @@ export function createListingHandlers() {
     const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deps = getDeviceToolsDependencies();
     const deviceManager = deps.deviceManagerFactory();
+    const pool = initializedDevicePool();
+    const directAliases = new AndroidTransportAliases(deps.androidAdbFactory);
     let booted: BootedDevice[] = [];
     // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
     // `[]`, so a transient tooling failure is indistinguishable from a genuinely
@@ -147,8 +150,14 @@ export function createListingHandlers() {
       });
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "listDevices");
-      booted = discovery.devices;
+      booted = pool
+        ? await pool.normalizeAndroidDiscovery(discovery.devices)
+        : directAliases.fold(
+            discovery.devices,
+            await directAliases.prepare(discovery.devices),
+            new Set(),
+          );
+      await reconcileDiscoveryObservation(booted, "listDevices");
       succeededPlatforms = discovery.succeededPlatforms;
       succeededSources = discovery.succeededSources;
       discoveryErrors = discovery.discoveryErrors;
@@ -182,7 +191,13 @@ export function createListingHandlers() {
       matchingBooted,
       deps.timer,
     );
-    const devices = listDevicePayloads(matchingBooted, initializedDevicePool(), configured.images);
+    const devices = listDevicePayloads(
+      matchingBooted,
+      pool,
+      configured.images,
+      (deviceId) => pool?.getAndroidTransportAliases(deviceId) ?? directAliases.aliases(deviceId),
+      (deviceId) => pool?.getAndroidTransportAvdName(deviceId) ?? directAliases.avdName(deviceId),
+    );
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({

@@ -1,4 +1,5 @@
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
+import type { AndroidTransportRouting } from "../androidSerial";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -217,6 +218,7 @@ export class AdbClient implements AdbExecutor {
     private readonly consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
     private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
     hostProcessExecutor: HostProcessExecutor = adbHostProcessExecutor,
+    private readonly transportRouting?: AndroidTransportRouting,
   ) {
     this.device = device;
     this.hostProcessExecutor = hostProcessExecutor;
@@ -560,12 +562,12 @@ export class AdbClient implements AdbExecutor {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<{ adbPath: string; baseArgs: string[] }> {
-    const deviceId = this.device?.deviceId;
     const adbPath = await this.ensureAdbPath(timeoutMs, signal);
+    const deviceId = this.device?.deviceId;
     const baseArgs: string[] = [];
 
     if (deviceId) {
-      baseArgs.push("-s", deviceId);
+      baseArgs.push("-s", this.transportRouting?.resolveTransport(deviceId) ?? deviceId);
     }
 
     return { adbPath, baseArgs };

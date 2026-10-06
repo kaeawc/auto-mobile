@@ -46,6 +46,9 @@ export interface MissingDeviceEvictionOptions {
 
 /** The pool's mutable state is read when used, including after every await. */
 export interface MissingDeviceLivenessPoolPort {
+  needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
+  normalizeAndroidDiscovery?(devices: readonly BootedDevice[]): Promise<BootedDevice[]>;
+  isTransportEmulator?(deviceId: string): boolean;
   getDevices(): Map<string, PooledDevice>;
   getRefreshMissingDeviceMisses(): Map<string, number>;
   getAssignmentMutex(): Mutex;
@@ -216,13 +219,17 @@ export class MissingDeviceLiveness {
    *
    * Emulator console ports are the reused identifiers: `emulator-5554` is handed
    * to whichever AVD boots into that console slot next, so a serial that is
-   * present still has to prove it is the same runtime. A handset serial is
-   * globally unique and never reassigned, so presence is the whole question
-   * there — and its name (`ro.product.model`) is not identity, so running it
+   * present still has to prove it is the same runtime. Transport aliases of an
+   * emulator need the same reconciliation. A hardware handset serial's name
+   * (`ro.product.model`) is not identity, so running it
    * through identity reconciliation could only produce false replacements.
    */
   hasReusableSerial(device: PooledDevice): boolean {
-    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
+    return (
+      device.platform === "android" &&
+      (consolePortFromSerial(device.id) !== null ||
+        this.pool.isTransportEmulator?.(device.id) === true)
+    );
   }
 
   /** Confirm a pooled device is present, reconciling a reused serial when needed. */
@@ -312,9 +319,13 @@ export class MissingDeviceLiveness {
   async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
     resetBootedDevicesResourceCache();
     resetAndroidDeviceImageResourceCache();
-    return await this.pool
+    const discovery = await this.pool
       .getDeviceManager()
       .getBootedDevicesDetailed(platform, { bypassAndroidDeviceListCache: true });
+    return this.pool.normalizeAndroidDiscovery &&
+      this.pool.needsAndroidTransportNormalization?.(discovery.devices)
+      ? { ...discovery, devices: await this.pool.normalizeAndroidDiscovery(discovery.devices) }
+      : discovery;
   }
 
   /**

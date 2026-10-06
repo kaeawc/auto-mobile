@@ -28,27 +28,18 @@ export interface AdbClientFactory {
  */
 class DefaultAdbClientFactory implements AdbClientFactory {
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
-    if (retryExecutor) {
-      return new AdbClient(
-        device ?? null,
-        null,
-        null,
-        retryExecutor,
-        undefined,
-        undefined,
-        undefined,
-        defaultEmulatorConsoleBusyRegistry,
-      );
-    }
     return new AdbClient(
       device ?? null,
       null,
       null,
-      undefined,
+      retryExecutor,
       undefined,
       undefined,
       undefined,
       defaultEmulatorConsoleBusyRegistry,
+      undefined,
+      undefined,
+      daemonDeviceAdmissionGate.getAndroidTransportRouting?.(),
     );
   }
 }

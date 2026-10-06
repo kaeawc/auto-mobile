@@ -323,9 +323,13 @@ describe("device-addressed admission gate (issue #6863)", () => {
   test("only the identity, lifecycle and teardown machinery is below the seam", () => {
     // Discovery reading the AVD name on a quarantined serial is the only event
     // that can LIFT the quarantine, and `emu kill` is how the pool settles a
-    // serial it can no longer identify. Everything else in src/ binds through
-    // the gated factory.
+    // serial it can no longer identify. Pool/listing transport identity probes
+    // also need to read getprop before admission can trust the pooled label.
+    // Their injected factory is consumed only by AndroidTransportAliases;
+    // device-addressed feature actions still bind through the gated factory.
     expect(unadmittedFactoryUsers).toEqual([
+      "src/daemon/devicePool.ts",
+      "src/server/deviceTools.ts",
       "src/utils/android-cmdline-tools/AdbClientFactory.ts",
       "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",
     ]);

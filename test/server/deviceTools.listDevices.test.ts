@@ -213,6 +213,66 @@ describe("listDevices tool (#5870)", () => {
     }
   });
 
+  test.each([
+    ["R5CT1234ABC", "adb-R5CT1234ABC-AbCdEf._adb-tls-connect._tcp", undefined],
+    ["emulator-5554", "localhost:5555", "Pixel_9_API_36"],
+  ])("listDevices reports %s once with its alias %s", async (canonical, alias, avd) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("getprop ro.serialno", createExecResult(canonical, ""));
+    adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult(avd ? "1" : "0", ""));
+    if (avd) {
+      adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(avd, ""));
+    }
+    setDeviceToolsDependencies({ androidAdbFactory: new FakeAdbClientFactory(adb) });
+    fakeDeviceUtils.setBootedDevices("android", [
+      { platform: "android", name: alias, deviceId: alias },
+      { platform: "android", name: avd ?? canonical, deviceId: canonical },
+    ]);
+    const payload = await callListDevices({ platform: "android" });
+    expect(payload.count).toBe(1);
+    expect(payload.devices[0].runtime.deviceId).toBe(canonical);
+    expect(payload.devices[0].transportAliases).toEqual([alias]);
+  });
+
+  test("listDevices keeps a held wireless canonical through USB arrival and wireless-only failover", async () => {
+    const canonical = "adb-R5CT1234ABC-AbCdEf._adb-tls-connect._tcp";
+    const usb = "R5CT1234ABC";
+    const device: BootedDevice = { platform: "android", name: "Phone", deviceId: canonical };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    const factory = new FakeAdbClientFactory(adb);
+    const timer = new FakeTimer();
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "listing-alias-daemon", {
+        timer,
+        deviceManager: fakeDeviceUtils,
+        androidAdbFactory: factory,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      }),
+    );
+    fakeDeviceUtils.setBootedDevices("android", [device]);
+    await pool.refreshDevices();
+    await pool.assignDeviceToSession("owner", "android");
+    DaemonState.getInstance().initialize(sessions, pool);
+    try {
+      for (const devices of [[{ ...device, deviceId: usb }, device], [device]]) {
+        fakeDeviceUtils.setBootedDevices("android", devices);
+        await pool.refreshDevices();
+        const payload = await callListDevices({ platform: "android" });
+        expect(payload.count).toBe(1);
+        expect(payload.devices[0].runtime.deviceId).toBe(canonical);
+        expect(payload.devices[0].transportAliases).toEqual([usb]);
+        expect(pool.getDevice(canonical)?.sessionId).toBe("owner");
+      }
+    } finally {
+      DaemonState.getInstance().reset();
+      sessions.stopCleanupTimer();
+      timer.reset();
+    }
+  });
+
   test("returns the actual booted devices instead of prose", async () => {
     const payload = await callListDevices();
 

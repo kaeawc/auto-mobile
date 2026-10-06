@@ -42,6 +42,12 @@ export function deviceListRefreshFailureMessage(failure: string): string {
 
 /** Live pool state is read at each use, including after awaits. */
 export interface DevicePoolRefreshPort {
+  needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
+  normalizeAndroidDiscovery?(
+    devices: readonly BootedDevice[],
+    assignmentLockHeld: boolean,
+    isCurrent: () => boolean,
+  ): Promise<BootedDevice[]>;
   getTimer(): Timer;
   getDeviceManager(): PlatformDeviceManager;
   getDevices(): Map<string, PooledDevice>;
@@ -129,10 +135,7 @@ export class DevicePoolRefresh {
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
 
-      // Log environment for debugging CI issues
-      const androidHome = process.env.ANDROID_HOME || "(not set)";
-      const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
-      logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
+      this.logDiscoveryEnvironment();
 
       perf.startOperation("deviceDiscovery");
       const discovery = await this.pool.getDeviceManager().getBootedDevicesDetailed("either", {
@@ -140,7 +143,13 @@ export class DevicePoolRefresh {
         bypassIosDeviceListCache: true,
       });
       perf.endOperation("deviceDiscovery");
-      const bootedDevices = discovery.devices;
+      const bootedDevices = this.discoveryNeedsTransportNormalization(discovery.devices)
+        ? await this.pool.normalizeAndroidDiscovery!(
+            discovery.devices,
+            assignmentLockHeld,
+            () => refreshGeneration === this.refreshGeneration,
+          )
+        : discovery.devices;
       const discoveryTime = this.pool.getTimer().now() - startTime;
       logger.info(
         `Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`,
@@ -255,6 +264,19 @@ export class DevicePoolRefresh {
       this.inFlightRefreshFloors.delete(refreshGeneration);
       this.pruneDeviceRemovalStamps();
     }
+  }
+
+  private logDiscoveryEnvironment(): void {
+    const androidHome = process.env.ANDROID_HOME || "(not set)";
+    const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
+    logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
+  }
+
+  private discoveryNeedsTransportNormalization(devices: readonly BootedDevice[]): boolean {
+    return (
+      this.pool.normalizeAndroidDiscovery !== undefined &&
+      this.pool.needsAndroidTransportNormalization?.(devices) === true
+    );
   }
 
   private currentRefreshCompleteness(

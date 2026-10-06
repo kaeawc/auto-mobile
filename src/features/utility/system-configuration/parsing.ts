@@ -170,6 +170,41 @@ function caseCorrectedTimeZone(zoneId: string, resolved: string): string | null 
 }
 
 /**
+ * Java's custom time zone ids: `GMT[+-]h[h][:mm]` and `GMT[+-]h[h]mm`. Hours are
+ * one or two digits and minutes exactly two (`GMT+5`, `GMT-08:00`, `GMT+0530`).
+ */
+const JAVA_CUSTOM_ZONE_ID = /^GMT([+-])(\d{1,2})(?::(\d{2})|(\d{2}))?$/;
+
+/** Java's documented ranges for a custom id: hours 0-23, minutes 00-59. */
+function isJavaCustomZoneId(zoneId: string): boolean {
+  const match = JAVA_CUSTOM_ZONE_ID.exec(zoneId);
+  if (!match) {
+    return false;
+  }
+  const hours = Number(match[2]);
+  const minutes = Number(match[3] ?? match[4] ?? "0");
+  return hours <= 23 && minutes <= 59;
+}
+
+/**
+ * The shape of an IANA name, `Area/Location[/Sub]`: two or three components, each
+ * starting with a capital letter (every tzdata area and location does) and made of
+ * letters, digits and `_ . + -`. It says nothing about whether the zone exists.
+ */
+const IANA_ZONE_SHAPE = /^[A-Z][A-Za-z0-9._+-]*(?:\/[A-Z][A-Za-z0-9._+-]*){1,2}$/;
+
+/** Which device the id is for; only Android resolves Java custom ids. */
+export type TimeZoneIdPlatform = "android" | "ios";
+
+/** A time zone id check: the reason it is refused, or a caveat about sending it. */
+export interface TimeZoneIdCheck {
+  /** Set when the id is refused: names the id and why. */
+  error: string | null;
+  /** Set when the id is allowed but the host could not vouch for it. */
+  note?: string;
+}
+
+/**
  * Check, before anything is sent to a device, that a time zone id is one a
  * device can resolve. Android and the iOS simulator both store whatever string
  * they are given (`setprop persist.sys.timezone`, `defaults write AppleTimeZone`)
@@ -184,31 +219,55 @@ function caseCorrectedTimeZone(zoneId: string, resolved: string): string | null 
  * Accepts `America/Los_Angeles`, `UTC`, `GMT`, the fixed-offset tzdata zones
  * (`Etc/GMT+5`, `Etc/GMT-14`), the tzdata rule zones (`EST5EDT`, `PST8PDT`) and
  * legacy aliases (`US/Pacific`, `Asia/Calcutta`): each is a name in the tz
- * database that Android and Foundation ship. Rejects an unknown id
- * (`Pacific/Los_Angeles`, `America/Los Angeles`, `PST8`, `GMT+5`), a case
- * variant (the device lookup is case-sensitive), and a bare UTC offset
- * (`+05:00`, `-0800`): the runtime accepts those as offset ids but neither
- * device's database has an entry for them, so the device would fall back to GMT.
- * A case variant of a legacy alias the runtime lists nowhere (`us/pacific`) is
- * not detectable and is left for the device's read-back to judge.
+ * database that Android and Foundation ship. On Android it also accepts Java's
+ * custom ids (`GMT+5`, `GMT-08:00`, `GMT+0530`; hours 0-23, minutes 00-59), which
+ * `TimeZone` documents as valid and which this runtime does not list. Rejects a
+ * case variant (the device lookup is case-sensitive), a bare UTC offset
+ * (`+05:00`, `-0800`: the runtime accepts those as offset ids but neither
+ * device's database has an entry for them, so the device would fall back to GMT),
+ * an id that is not shaped like an IANA name (`America/Los Angeles`, `PST8`,
+ * `UTC+5`), and, on iOS, a Java custom id. A case variant of a legacy alias the
+ * runtime lists nowhere (`us/pacific`) is not detectable and is left for the
+ * device's read-back to judge.
  *
- * Returns an error message naming the id and the reason when it is rejected,
- * otherwise `null`.
+ * An id that is shaped like an IANA name but unknown to THIS runtime is allowed
+ * with a `note`: the device's tzdata may be newer than the host's ICU, so the host
+ * cannot say the device does not know it. Only the device's read-back then judges it.
  */
-export function validateTimeZoneId(zoneId: string): string | null {
+export function checkTimeZoneId(zoneId: string, platform?: TimeZoneIdPlatform): TimeZoneIdCheck {
+  if (platform === "android" && isJavaCustomZoneId(zoneId)) {
+    return { error: null };
+  }
   const expected = 'e.g. "America/Los_Angeles", "Asia/Kolkata" or "UTC"';
   if (/^[+-]/.test(zoneId)) {
-    return `Invalid time zone "${zoneId}": a bare UTC offset is not a zone id and the device has no entry for it. Use an IANA id (${expected}) or a fixed-offset zone such as "Etc/GMT-5" (the sign is inverted: Etc/GMT-5 is UTC+5).`;
+    return {
+      error: `Invalid time zone "${zoneId}": a bare UTC offset is not a zone id and the device has no entry for it. Use an IANA id (${expected}) or a fixed-offset zone such as "Etc/GMT-5" (the sign is inverted: Etc/GMT-5 is UTC+5).`,
+    };
   }
   const resolved = resolveTimeZone(zoneId);
   if (resolved === null) {
-    return `Invalid time zone "${zoneId}": not an IANA time zone id (${expected}).`;
+    return IANA_ZONE_SHAPE.test(zoneId)
+      ? {
+          error: null,
+          note: `Time zone "${zoneId}" could not be validated: it is not in the host's time zone database, which may be older than the device's. It was sent as given and the device stores any string, so only its read-back vouches for it; check the spelling if the zone is not in effect.`,
+        }
+      : { error: `Invalid time zone "${zoneId}": not an IANA time zone id (${expected}).` };
   }
   const corrected = caseCorrectedTimeZone(zoneId, resolved);
   if (corrected !== null) {
-    return `Invalid time zone "${zoneId}": zone ids are case-sensitive on the device; did you mean "${corrected}"?`;
+    return {
+      error: `Invalid time zone "${zoneId}": zone ids are case-sensitive on the device; did you mean "${corrected}"?`,
+    };
   }
-  return null;
+  return { error: null };
+}
+
+/**
+ * The reason a time zone id is refused (see `checkTimeZoneId`), or `null` when it
+ * may be sent. Without a platform, Java custom ids are not accepted.
+ */
+export function validateTimeZoneId(zoneId: string, platform?: TimeZoneIdPlatform): string | null {
+  return checkTimeZoneId(zoneId, platform).error;
 }
 
 /**

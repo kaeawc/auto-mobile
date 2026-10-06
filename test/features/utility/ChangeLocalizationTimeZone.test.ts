@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { SystemConfigurationManager } from "../../../src/features/utility/SystemConfigurationManager";
 import {
+  checkTimeZoneId,
   timeZoneIdsEquivalent,
   validateTimeZoneId,
 } from "../../../src/features/utility/system-configuration/parsing";
@@ -26,20 +27,77 @@ const IOS: BootedDevice = {
 
 const INVALID_IDS: ReadonlyArray<readonly [id: string, reasonFragment: string]> = [
   ["America/Los Angeles", "not an IANA time zone id"],
-  ["Pacific/Los_Angeles", "not an IANA time zone id"],
   ["PST8", "not an IANA time zone id"],
   ["PST", "not an IANA time zone id"],
-  ["GMT+5", "not an IANA time zone id"],
   ["UTC+5", "not an IANA time zone id"],
-  ["Etc/GMT+15", "not an IANA time zone id"],
   ["Z", "not an IANA time zone id"],
-  ["Not/AZone", "not an IANA time zone id"],
+  ["america/foo_bar", "not an IANA time zone id"],
+  ["Pacific/Los_Angeles/", "not an IANA time zone id"],
+  ["/Pacific/Los_Angeles", "not an IANA time zone id"],
+  ["Pacific//Los_Angeles", "not an IANA time zone id"],
+  ["A/B/C/D", "not an IANA time zone id"],
+  ["Pacific/Los_Angeles; reboot", "not an IANA time zone id"],
+  // Java custom ids are GMT-only and case-sensitive.
+  ["gmt+5", "not an IANA time zone id"],
   ["+05:00", "bare UTC offset"],
   ["+0500", "bare UTC offset"],
   ["-08:00", "bare UTC offset"],
   ["america/los_angeles", 'did you mean "America/Los_Angeles"'],
   ["utc", 'did you mean "UTC"'],
   ["America/los_angeles", 'did you mean "America/Los_Angeles"'],
+];
+
+/**
+ * Java's custom ids (`GMT[+-]h[h][:mm]`, `GMT[+-]h[h]mm`) are valid for `TimeZone`, and
+ * main passed them to Android unchanged (the read-back matched the stored string). The
+ * host's ICU does not list them, so the Android path accepts the Java grammar itself.
+ */
+const ANDROID_CUSTOM_IDS: readonly string[] = [
+  "GMT+5",
+  "GMT-5",
+  "GMT+05",
+  "GMT+5:30",
+  "GMT-08:00",
+  "GMT+0530",
+  "GMT+530",
+  "GMT+00:00",
+  "GMT+23:59",
+  "GMT-23",
+];
+
+/** Well-formed GMT custom ids whose numbers Java rejects (hours 0-23, minutes 00-59). */
+const ANDROID_OUT_OF_RANGE_CUSTOM_IDS: readonly string[] = [
+  "GMT+24",
+  "GMT+24:00",
+  "GMT+2400",
+  "GMT+99",
+  "GMT+05:60",
+  "GMT+0560",
+  "GMT-12:99",
+];
+
+/** Not the grammar at all, so refused on Android too. */
+const ANDROID_MALFORMED_CUSTOM_IDS: readonly string[] = [
+  "GMT+",
+  "GMT+5:3",
+  "GMT+5:300",
+  "GMT+05:30:00",
+  "GMT 5",
+  "GMT+a",
+  "GMT++5",
+  "GMT+1234567",
+];
+
+/**
+ * IANA-shaped (`Area/Location[/Sub]`) but not in the host's tz database: the device may
+ * know it (newer tzdata) or not, so it is sent and the device's read-back decides.
+ */
+const HOST_UNKNOWN_WELL_FORMED_IDS: readonly string[] = [
+  "Pacific/Los_Angeles",
+  "Not/AZone",
+  "Etc/GMT+15",
+  "Antarctica/Futurezone",
+  "America/Argentina/Nowhere",
 ];
 
 const VALID_IDS: readonly string[] = [
@@ -78,6 +136,48 @@ describe("validateTimeZoneId (#10190)", () => {
       expect(validateTimeZoneId(id)).toBeNull();
     });
   }
+
+  it("refuses the Java custom ids by default and for iOS (no platform accepts them but Android)", () => {
+    for (const id of ANDROID_CUSTOM_IDS) {
+      expect(validateTimeZoneId(id)).toContain(`Invalid time zone "${id}"`);
+      expect(validateTimeZoneId(id, "ios")).toContain("not an IANA time zone id");
+    }
+  });
+
+  for (const id of ANDROID_CUSTOM_IDS) {
+    it(`accepts the Java custom id ${JSON.stringify(id)} on Android without a note`, () => {
+      expect(validateTimeZoneId(id, "android")).toBeNull();
+      expect(checkTimeZoneId(id, "android")).toEqual({ error: null });
+    });
+  }
+
+  for (const id of [...ANDROID_OUT_OF_RANGE_CUSTOM_IDS, ...ANDROID_MALFORMED_CUSTOM_IDS]) {
+    it(`refuses ${JSON.stringify(id)} on Android`, () => {
+      expect(validateTimeZoneId(id, "android")).toContain(`Invalid time zone "${id}"`);
+    });
+  }
+
+  it("still refuses a bare offset on Android, with or without the GMT spelling hint", () => {
+    expect(validateTimeZoneId("+05:00", "android")).toContain("bare UTC offset");
+    expect(validateTimeZoneId("-0800", "android")).toContain("bare UTC offset");
+    expect(validateTimeZoneId("5", "android")).toContain("not an IANA time zone id");
+  });
+
+  for (const id of HOST_UNKNOWN_WELL_FORMED_IDS) {
+    for (const platform of ["android", "ios"] as const) {
+      it(`lets the device decide on ${JSON.stringify(id)} (${platform}), with a note`, () => {
+        const check = checkTimeZoneId(id, platform);
+        expect(check.error).toBeNull();
+        expect(check.note).toContain(`"${id}"`);
+        expect(check.note).toContain("could not be validated");
+        expect(validateTimeZoneId(id, platform)).toBeNull();
+      });
+    }
+  }
+
+  it("gives no note for an id the host knows", () => {
+    expect(checkTimeZoneId("Asia/Kolkata", "ios")).toEqual({ error: null });
+  });
 
   it("accepts a sample of the runtime's canonical ids", () => {
     const canonical = Intl.supportedValuesOf("timeZone");
@@ -159,6 +259,55 @@ describe("Android changeLocalization time zone (#10190)", () => {
       expect(setprops()).toEqual([`shell setprop persist.sys.timezone '${id}'`]);
     });
   }
+
+  for (const id of ANDROID_CUSTOM_IDS) {
+    it(`sends the Java custom id ${id} and matches it on read-back`, async () => {
+      adb.setCommandResultSequence(GET, ["America/New_York", id]);
+
+      const result = await manager.setTimeZone(id);
+
+      expect(result).toMatchObject({
+        success: true,
+        zoneId: id,
+        previousZoneId: "America/New_York",
+      });
+      expect(result.warning).not.toContain("could not be validated");
+      expect(setprops()).toEqual([`shell setprop persist.sys.timezone '${id}'`]);
+    });
+  }
+
+  for (const id of [...ANDROID_OUT_OF_RANGE_CUSTOM_IDS, ...ANDROID_MALFORMED_CUSTOM_IDS]) {
+    it(`refuses ${JSON.stringify(id)} without issuing any command`, async () => {
+      const result = await manager.setTimeZone(id);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(`Invalid time zone "${id}"`);
+      expect(adb.getAllCommands()).toEqual([]);
+    });
+  }
+
+  it("sends a well-formed id the host does not know and reports it as unvalidated", async () => {
+    adb.setCommandResultSequence(GET, ["America/New_York", "Antarctica/Futurezone"]);
+
+    const result = await manager.setTimeZone("Antarctica/Futurezone");
+
+    expect(result).toMatchObject({ success: true, zoneId: "Antarctica/Futurezone" });
+    expect(result.warning).toContain("does not confirm the zone is in effect");
+    expect(result.warning).toContain('"Antarctica/Futurezone" could not be validated');
+    expect(setprops()).toEqual(["shell setprop persist.sys.timezone 'Antarctica/Futurezone'"]);
+  });
+
+  it("lets the read-back refuse a host-unknown id the device did not keep", async () => {
+    adb.setCommandResultSequence(GET, ["America/New_York", "UTC", "America/New_York"]);
+
+    const result = await manager.setTimeZone("Antarctica/Futurezone");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(
+      'Read-back verification failed: expected "Antarctica/Futurezone" but got "UTC"',
+    );
+    expect(result.error).toContain('"Antarctica/Futurezone" could not be validated');
+  });
 
   it("marks a successful change as stored, not confirmed applied", async () => {
     adb.setCommandResultSequence(GET, ["America/New_York", "Asia/Tokyo"]);
@@ -356,6 +505,27 @@ describe("iOS simulator changeLocalization time zone (#10190)", () => {
       expect(defaults.values.get(AUTO)).toBe("1");
     });
   }
+
+  for (const id of ANDROID_CUSTOM_IDS) {
+    it(`keeps refusing the Java custom id ${id} on the simulator`, async () => {
+      const result = await manager.setTimeZone(id);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not an IANA time zone id");
+      expect(executor.getExecutedCommands()).toEqual([]);
+    });
+  }
+
+  it("sends a well-formed id the host does not know and reports it as unvalidated", async () => {
+    const result = await manager.setTimeZone("Antarctica/Futurezone");
+
+    expect(result).toMatchObject({ success: true, zoneId: "Antarctica/Futurezone" });
+    expect(result.warning).toContain('"Antarctica/Futurezone" could not be validated');
+    expect(mutations()).toEqual([
+      writeCmd(AUTO, "-bool", "NO"),
+      writeCmd(ZONE, "Antarctica/Futurezone"),
+    ]);
+  });
 
   it("accepts a legacy alias, matches it on read-back and leaves automatic time zone off", async () => {
     const result = await manager.setTimeZone("US/Pacific");

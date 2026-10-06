@@ -29,6 +29,42 @@ describe("ExecutionTracker", function () {
     expect(other.abortController.signal.aborted).toBe(false);
   });
 
+  test("onlySessionUuid cancels and drains just the session's work on a shared device (#9944)", async () => {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(
+      timer,
+      new FakeIdGenerator(["owned", "autolock", "provisional", "peer", "sessionless", "caller"]),
+    );
+    const owned = tracker.startExecution("observe", undefined, "session-1");
+    const autolock = tracker.startExecution("tapOn");
+    tracker.setResolvedAutolockSessionUuid(autolock.id, "session-1");
+    const provisional = tracker.startExecution("swipeOn");
+    const peer = tracker.startExecution("observe", undefined, "session-2");
+    const sessionless = tracker.startExecution("observe");
+    const caller = tracker.startExecution("setActiveDevice", undefined, "session-1");
+    for (const execution of [owned, autolock, provisional, peer, sessionless, caller]) {
+      tracker.bindDeviceExecution(execution.id, "emulator-5554");
+    }
+    tracker.endExecution(provisional.id);
+
+    const reason = new Error("rebound");
+    const filter = { excludeExecutionId: caller.id, onlySessionUuid: "session-1" };
+    expect(await tracker.cancelDeviceExecutions("emulator-5554", reason, filter)).toBe(2);
+
+    expect(owned.abortController.signal.reason).toBe(reason);
+    expect(autolock.abortController.signal.aborted).toBe(true);
+    expect(peer.abortController.signal.aborted).toBe(false);
+    expect(sessionless.abortController.signal.aborted).toBe(false);
+    expect(caller.abortController.signal.aborted).toBe(false);
+
+    // Peer and sessionless work stay running and must not hold up the drain.
+    const drain = tracker.waitForDeviceExecutionsToEnd("emulator-5554", 100, filter);
+    tracker.endExecution(owned.id);
+    tracker.endExecution(autolock.id);
+    expect(await drain).toBe(true);
+    expect(tracker.hasActiveDeviceExecutions("emulator-5554")).toBe(true);
+  });
+
   test("endExecution removes every device binding and allows drain to finish", async () => {
     const timer = new FakeTimer();
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["work"]));

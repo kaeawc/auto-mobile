@@ -79,6 +79,8 @@ export async function runBootDeviceCommand(args: string[]): Promise<void> {
     deviceProvisioner: ciConfiguration?.deviceProvisioner ?? createDefaultDeviceProvisioner(),
     matchingStrategy: DEVICE_POOL_MATCHING,
     bootRecovery: ciConfiguration?.recovery,
+    // Deliberately no `cleanupMayOutliveRequest`: the process exits as soon as boot
+    // rejects, so a failed boot must finish SIGKILLing its emulator before it returns.
   });
   const result = await service.boot(ciConfiguration?.request ?? parsedRequest);
   console.log(

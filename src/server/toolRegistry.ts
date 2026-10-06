@@ -1195,12 +1195,22 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "sendKeys",
 ]);
 
-/** Tools that always end an app's process. */
+/**
+ * Tools that always end an app's process. `appLifecycle` `killBackgrounded` is deliberately not
+ * here: it is the state-preserving kill, so the app comes back on the screen it was left on.
+ */
 const APP_STOPPING_TOOLS: ReadonlySet<string> = new Set([
   "terminateApp",
   "crashApp",
   "uninstallApp",
 ]);
+
+/**
+ * Tools that replace a process without naming the app in their arguments: `installApp` takes an
+ * artifact path, and installing over a running app restarts it, so every remembered screen is
+ * forgotten rather than guessing which app it was (#10206 review).
+ */
+const PROCESS_REPLACING_TOOLS: ReadonlySet<string> = new Set(["installApp"]);
 
 /**
  * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
@@ -1226,6 +1236,9 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
     if (stoppedApp) {
       this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
     }
+    if (PROCESS_REPLACING_TOOLS.has(name)) {
+      this.navigationManager(sessionUuid).forgetAllAppScreens();
+    }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
     if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
@@ -1239,6 +1252,7 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
       name,
       stripNavigationInternalParams(args),
       uiState,
+      device?.deviceId,
     );
   }
 

@@ -141,6 +141,73 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
     ]);
   });
 
+  describe("an edge with no tool call and depth evidence of Back (#10196)", () => {
+    /** Home at depth `homeDepth`, Detail at `detailDepth`, ending on Detail with tool-less edges both ways. */
+    async function recordWithDepths(homeDepth: number | null, detailDepth: number | null) {
+      const now = Date.now();
+      const depth = async (value: number | null) => {
+        if (value !== null) {
+          await manager.recordBackStack({ depth: value, activities: [], tasks: [] });
+        }
+      };
+      await manager.recordNavigationEvent(createEvent("Home", now));
+      await depth(homeDepth);
+      await manager.recordNavigationEvent(createEvent("Detail", now + 100));
+      await depth(detailDepth);
+      await manager.recordNavigationEvent(createEvent("Home", now + 200));
+      await manager.recordNavigationEvent(createEvent("Detail", now + 300));
+    }
+
+    test("a target shallower than its source is replayable as Back", async () => {
+      await recordWithDepths(1, 2);
+
+      const result = await manager.findPath("Home");
+
+      expect(result.found).toBe(true);
+      expect(result.path.map((edge) => [edge.from, edge.to, edge.edgeType])).toEqual([
+        ["Detail", "Home", "back"],
+      ]);
+      expect(result.path[0].interaction).toBeUndefined();
+    });
+
+    test("the opposite edge, to a deeper screen, stays unreplayable and is reported", async () => {
+      await recordWithDepths(1, 2);
+      await manager.recordNavigationEvent(createEvent("Home", Date.now() + 400));
+
+      const result = await manager.findPath("Detail");
+
+      expect(result.found).toBe(false);
+      // Home -> Detail twice; the Detail -> Home edge is the replayable one.
+      expect(result.unreplayableEdges).toBe(2);
+    });
+
+    test.each([
+      ["the same depth", 2, 2],
+      ["unknown depths", null, null],
+      ["only the target's depth known", 1, null],
+      ["only the source's depth known", null, 2],
+    ])("%s is no evidence: the edge is not offered", async (_label, homeDepth, detailDepth) => {
+      await recordWithDepths(homeDepth, detailDepth);
+
+      const result = await manager.findPath("Home");
+
+      expect(result.found).toBe(false);
+      expect(result.unreplayableEdges).toBe(3);
+    });
+
+    test("a recorded tool edge for the pair is still preferred when the Back edge is older", async () => {
+      await recordWithDepths(1, 2);
+      manager.recordToolCall("pressButton", { button: "back" });
+      await manager.recordNavigationEvent(createEvent("Home", Date.now() + 400));
+      await manager.recordNavigationEvent(createEvent("Detail", Date.now() + 500));
+
+      const result = await manager.findPath("Home");
+
+      expect(result.path[0].edgeType).toBe("tool");
+      expect(result.path[0].interaction?.toolName).toBe("pressButton");
+    });
+  });
+
   test("an edge recorded as a Back press is found (#10196)", async () => {
     const now = Date.now();
     await manager.recordNavigationEvent(createEvent("Home", now));

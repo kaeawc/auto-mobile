@@ -600,6 +600,14 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(recorder.navigation).toHaveLength(0);
   });
 
+  test("the navigation graph write gets the SDK time for telemetry only, not for correlation", async () => {
+    await ingestor.recordSdkEvent(event("navigation", { destination: "Home" }, 424242), "com.app");
+
+    expect(navSink.recorded[0].telemetryTimestamp).toBe(424242);
+    // Graph correlation stays on host time: the SDK clock is not the hierarchy detector's.
+    expect(navSink.recorded[0].timestamp).toBeUndefined();
+  });
+
   test.each(["none", "capture", "update"] as const)(
     "navigation keeps awaited side-effect order when %s fails",
     async (failure) => {

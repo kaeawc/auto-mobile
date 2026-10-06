@@ -59,8 +59,9 @@ type IsReplayFailed = (edge: DBNavigationEdge) => boolean;
 
 /**
  * Whether `candidate` should replace `existing` as the edge used for a screen
- * pair during path finding (#9990, #10031). Both carry a tool call (an edge with
- * none is not replayable and never reaches here, #10196). Order of preference:
+ * pair during path finding (#9990, #10031). Each carries a tool call or is a
+ * Back edge (any other edge with none is not replayable and never reaches here,
+ * #10196). Order of preference:
  * 1. an edge whose replay has not failed over one remembered as failing, so a
  *    bad tool edge cannot shadow a working edge (including a recorded Back);
  * 2. the most recent row. Row id decides before the device event timestamp:
@@ -81,23 +82,43 @@ function isPreferredPathEdge(
   return candidate.timestamp > existing.timestamp;
 }
 
+/** Recorded back-stack depth per screen name; a screen never observed with one is absent. */
+type BackStackDepths = ReadonlyMap<string, number>;
+
+/**
+ * Whether an edge with no tool call is evidence of a Back press (#10196): its target was
+ * recorded at a shallower back-stack depth than its source, which is what popping one entry
+ * does (the same signal `shouldUseBackButton` acts on). Unknown depths (iOS, never observed
+ * with a back stack), or the same or a deeper target, say nothing about what caused the edge.
+ */
+function isBackEdge(edge: DBNavigationEdge, depths: BackStackDepths): boolean {
+  if (edge.tool_name !== null) {
+    return false;
+  }
+  const sourceDepth = depths.get(edge.from_screen);
+  const targetDepth = depths.get(edge.to_screen);
+  return sourceDepth !== undefined && targetDepth !== undefined && targetDepth < sourceDepth;
+}
+
 /**
  * Index the replayable edges by source screen, keeping one edge per (from, to)
  * pair: every traversal inserts a new row. See #9990.
  *
- * An edge with no tool call is not replayable (#10196). Nothing says what caused
- * it, so replaying it as a Back press would be a guess: only an edge recorded as
- * `pressButton { button: "back" }` is replayed as Back. Such an edge is skipped
- * here, so path finding routes around it, and counted so a failed search can say so.
+ * An edge with no tool call is replayable only as Back, and only with evidence that Back
+ * caused it (#10196): a target shallower than its source in the recorded back-stack depth.
+ * Without that, nothing says what caused it and replaying a Back press would be a guess, so
+ * the edge is skipped here, path finding routes around it, and it is counted so a failed
+ * search can say so.
  */
 function indexPathEdgesBySource(
   dbEdges: DBNavigationEdge[],
   isReplayFailed: IsReplayFailed,
+  backDepths: BackStackDepths,
 ): { edgesBySource: Map<string, Map<string, DBNavigationEdge>>; unreplayableEdges: number } {
   const edgesBySource = new Map<string, Map<string, DBNavigationEdge>>();
   let unreplayableEdges = 0;
   for (const edge of dbEdges) {
-    if (edge.tool_name === null) {
+    if (edge.tool_name === null && !isBackEdge(edge, backDepths)) {
       unreplayableEdges++;
       continue;
     }
@@ -218,6 +239,7 @@ export interface NavigationGraphService
     toolName: string,
     args: Record<string, any>,
     uiState?: UIState,
+    deviceId?: string,
   ): NavigationToolCallHandle;
   updateScrollPosition(scrollPosition: ScrollPosition): void;
 
@@ -447,6 +469,15 @@ export class NavigationGraphManager implements NavigationGraphService {
   private timer: Timer;
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
+  // Whether `currentScreen` is evidence or only a hint. A screen restored from `lastKnownScreens`
+  // is a hint for "where am I" (so navigateTo works after a warm return): the app's process may
+  // have died unseen since, so no edge may START from it. An SDK event, or a fingerprint that
+  // names a screen, confirms or replaces it (#10193 review).
+  private currentScreenConfirmed = true;
+  // The device whose SDK event (or applied foreground signal) last set the current app. On the
+  // unattributed global manager two devices share this state, so another device's hierarchy tick
+  // must not drive it, and a switch seen on one device must not retire the other's tool calls.
+  private currentDeviceId: string | null = null;
   // The screen each app was on when another app came to the foreground (#10193). An SDK app
   // that returns to the foreground on the screen it was left on sends no navigation event (the
   // SDK emits only when the destination changes), so without this the manager would resume with
@@ -851,7 +882,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   private async setCurrentAppUnlocked(
     appId: string,
     epoch: number,
-    options: { restoreScreen: boolean; observedAt?: number },
+    options: { restoreScreen: boolean; observedAt?: number; deviceId?: string },
   ): Promise<boolean> {
     if (this.currentAppId === appId) {
       return false;
@@ -864,13 +895,19 @@ export class NavigationGraphManager implements NavigationGraphService {
     await this.repository.getOrCreateApp(appId);
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     const switchedFromApp = this.currentAppId !== null;
+    // Another device's signal moves the manager to that device; it is not an app switch on the
+    // device the tool calls were made on, so it retires none of them.
+    const sameDevice = !this.isOtherDevice(options.deviceId);
     this.rememberCurrentScreen();
     this.currentAppId = appId;
     this.currentScreen = options.restoreScreen ? (this.lastKnownScreens.get(appId) ?? null) : null;
+    // A restored screen is only a hint (#10193 review); an unknown one has nothing to confirm.
+    this.currentScreenConfirmed = !this.currentScreen;
     this.activeNavigation = null;
-    if (switchedFromApp && options.observedAt !== undefined) {
-      this.dropToolCallsRecordedThrough(options.observedAt);
+    if (switchedFromApp && options.observedAt !== undefined && sameDevice) {
+      this.dropToolCallsRecordedThrough(options.observedAt, options.deviceId);
     }
+    this.followDevice(options.deviceId);
     logger.info(
       `[NAVIGATION_GRAPH] Set current app: ${appId}` +
         (this.currentScreen ? ` (resumed on ${this.currentScreen})` : ""),
@@ -899,16 +936,44 @@ export class NavigationGraphManager implements NavigationGraphService {
    * screen it was left on and the client skips hierarchy updates for SDK apps, so this is the
    * only signal that brings back the remembered screen (#10193). Cheap when nothing changed.
    */
-  public async recordAppForeground(appId: string): Promise<void> {
+  public async recordAppForeground(appId: string, deviceId?: string): Promise<void> {
     const trimmed = appId.trim();
+    if (!trimmed || this.isOtherDevice(deviceId)) {
+      return;
+    }
     // A queued app switch may not have landed, so only a quiet queue proves nothing changed.
-    if (!trimmed || (trimmed === this.currentAppId && this.navigationWriteState.pending === 0)) {
+    if (trimmed === this.currentAppId && this.navigationWriteState.pending === 0) {
+      this.followDevice(deviceId);
       return;
     }
     const observedAt = this.timer.now();
-    await this.enqueueNavigationWrite("recordAppForeground", (epoch) =>
-      this.setCurrentAppUnlocked(trimmed, epoch, { restoreScreen: true, observedAt }),
+    await this.enqueueNavigationWrite("recordAppForeground", async (epoch) => {
+      // Re-checked where the queued write runs: an SDK event from the other device may have
+      // landed first, and the manager then follows that device, not this one.
+      if (this.isOtherDevice(deviceId)) {
+        return false;
+      }
+      const switched = await this.setCurrentAppUnlocked(trimmed, epoch, {
+        restoreScreen: true,
+        observedAt,
+        deviceId,
+      });
+      this.followDevice(deviceId);
+      return switched;
+    });
+  }
+
+  /** A signal from a device other than the one whose app is current (unknown devices match). */
+  private isOtherDevice(deviceId: string | undefined): boolean {
+    return (
+      deviceId !== undefined && this.currentDeviceId !== null && deviceId !== this.currentDeviceId
     );
+  }
+
+  private followDevice(deviceId: string | undefined): void {
+    if (deviceId !== undefined) {
+      this.currentDeviceId = deviceId;
+    }
   }
 
   /**
@@ -924,8 +989,24 @@ export class NavigationGraphManager implements NavigationGraphService {
     }
   }
 
-  private dropToolCallsRecordedThrough(observedAt: number): void {
-    this.retireToolCalls((tc) => tc.timestamp <= observedAt);
+  /**
+   * Forget every remembered screen, for a tool that replaces processes without naming the app
+   * (an `installApp` of an artifact, a device kill): which app died is unknown, and a lost hint
+   * only leaves the screen unknown until the next event, while a stale one writes a bogus edge.
+   */
+  public forgetAllAppScreens(): void {
+    this.lastKnownScreens.clear();
+    this.currentScreen = null;
+    this.activeNavigation = null;
+  }
+
+  /** Retire calls recorded up to `observedAt`; with a device, only that device's (or unattributed) calls. */
+  private dropToolCallsRecordedThrough(observedAt: number, deviceId?: string): void {
+    this.retireToolCalls(
+      (tc) =>
+        tc.timestamp <= observedAt &&
+        (deviceId === undefined || tc.deviceId === undefined || tc.deviceId === deviceId),
+    );
   }
 
   /**
@@ -1026,6 +1107,13 @@ export class NavigationGraphManager implements NavigationGraphService {
       logger.debug(`[NAVIGATION_GRAPH] Cannot record back stack - no current app or screen`);
       return;
     }
+    if (!this.currentScreenConfirmed) {
+      // The depth belongs to whatever is on screen, which a restored hint may not be.
+      logger.debug(
+        `[NAVIGATION_GRAPH] Not recording back stack on unconfirmed ${this.currentScreen}`,
+      );
+      return;
+    }
 
     const appId = this.currentAppId;
     const screenName = this.currentScreen;
@@ -1076,10 +1164,12 @@ export class NavigationGraphManager implements NavigationGraphService {
       await this.setCurrentAppUnlocked(event.applicationId, epoch, {
         restoreScreen: true,
         observedAt: receivedAt,
+        deviceId: event.deviceId,
       });
     }
 
     assertNavigationWriteCurrent(epoch, this.navigationWriteState);
+    this.followDevice(event.deviceId);
 
     if (!this.currentAppId) {
       logger.warn(`[NAVIGATION_GRAPH] Cannot record event - no current app set`);
@@ -1094,11 +1184,15 @@ export class NavigationGraphManager implements NavigationGraphService {
     // in-memory field assignments below only happen AFTER the transaction commits,
     // so on rollback `this.currentScreen` stays the previous screen and the next
     // event still computes the correct edge.
-    const previousScreen = this.currentScreen;
+    const { screen: previousScreen, unconfirmed: sourceUnconfirmed } = this.edgeSource();
 
     // Get modal stack from the most recent tool call (if any)
     const recentToolCall = this.findCorrelatedToolCall(receivedAt);
-    let edgeInteraction: ToolCallInteraction | undefined;
+    // The call this event consumes. An event that confirms a restored hint writes no edge, but it
+    // is still the navigation the call caused: consume it so it cannot label the next one.
+    let edgeInteraction: ToolCallInteraction | undefined = sourceUnconfirmed
+      ? recentToolCall
+      : undefined;
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
     // Snapshot provenance ONCE for this transition so the node and edge observations
@@ -1228,16 +1322,30 @@ export class NavigationGraphManager implements NavigationGraphService {
     };
 
     this.currentScreen = screenName;
+    this.currentScreenConfirmed = true;
     this.notifyGraphUpdated();
 
-    // Push to telemetry dashboard via TelemetryRecorder (has device context for subscriber filtering)
+    this.pushNavigationTelemetry(event, { appId, nodeId: node.id, screenName, timestamp });
+  }
+
+  /**
+   * Push to the telemetry dashboard via TelemetryRecorder (has device context for subscriber
+   * filtering), fire-and-forget after the graph write committed.
+   */
+  private pushNavigationTelemetry(
+    event: NavigationEvent,
+    written: { appId: string; nodeId: number; screenName: string; timestamp: number },
+  ): void {
+    const { appId, nodeId, screenName, timestamp } = written;
     // The device comes with the event from the client that received it: the recorder's
     // ambient context is whichever device last set it, which is another device's with two
     // attached (#10195).
     TelemetryRecorder.getInstance()
       .recordNavigationEvent(
         {
-          timestamp,
+          // SDK time when the client supplied it (iOS), so this record sorts with the device's
+          // other telemetry; the graph write above keeps its own `timestamp`.
+          timestamp: event.telemetryTimestamp ?? timestamp,
           applicationId: appId,
           destination: screenName,
           source: event.source ?? null,
@@ -1247,7 +1355,7 @@ export class NavigationGraphManager implements NavigationGraphService {
           // Scope to `appId` (== the app that just navigated): this URI is pushed live
           // to telemetry-dashboard subscribers, which may be foregrounding a different
           // app when they follow it, so an unscoped form would resolve cross-app (#5600).
-          screenshotUri: buildNavigationNodeScreenshotUri(node.id, appId),
+          screenshotUri: buildNavigationNodeScreenshotUri(nodeId, appId),
         },
         { deviceId: event.deviceId },
       )
@@ -1257,6 +1365,18 @@ export class NavigationGraphManager implements NavigationGraphService {
           error,
         );
       });
+  }
+
+  /**
+   * The screen an edge may start from. An edge starts only from a screen the manager has
+   * evidence for: a screen restored after the app returned is a hint, and the process may have
+   * died and relaunched since, so it yields no source (#10193 review).
+   */
+  private edgeSource(): { screen: string | null; unconfirmed: boolean } {
+    if (this.currentScreenConfirmed || this.currentScreen === null) {
+      return { screen: this.currentScreen, unconfirmed: false };
+    }
+    return { screen: null, unconfirmed: true };
   }
 
   /**
@@ -1409,6 +1529,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       // ---- Post-commit side effects (never inside the transaction) ----
       // Update current screen to the named screen
       this.currentScreen = existingNode.screen_name;
+      this.currentScreenConfirmed = true;
 
       logger.debug(
         `[NAVIGATION_GRAPH] Hierarchy fingerprint matched node: ${existingNode.screen_name}`,
@@ -1590,6 +1711,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     toolName: string,
     args: Record<string, any>,
     uiState?: UIState,
+    deviceId?: string,
   ): NavigationToolCallHandle {
     const timestamp = this.timer.now();
 
@@ -1598,6 +1720,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       args,
       timestamp,
       uiState,
+      ...(deviceId !== undefined ? { deviceId } : {}),
     };
     this.toolCallHistory.push(interaction);
 
@@ -1622,7 +1745,10 @@ export class NavigationGraphManager implements NavigationGraphService {
     if (this.retiredToolCalls.has(interaction)) {
       return;
     }
-    interaction.dispatchedAt = Math.max(this.timer.now(), interaction.timestamp);
+    // The first report is the earliest the gesture could take effect; a later one (a retry, or
+    // a report made after the command returned) must not move the window past an event the
+    // gesture already caused.
+    interaction.dispatchedAt ??= Math.max(this.timer.now(), interaction.timestamp);
     // A call that waited longer than the TTL for its target was pruned while still in flight.
     if (!this.toolCallHistory.includes(interaction)) {
       this.toolCallHistory.push(interaction);
@@ -1762,8 +1888,11 @@ export class NavigationGraphManager implements NavigationGraphService {
     const dbEdges = await this.repository.getEdges(this.currentAppId);
 
     const appId = this.currentAppId;
-    const { edgesBySource, unreplayableEdges } = indexPathEdgesBySource(dbEdges, (edge) =>
-      this.isEdgeReplayFailed(appId, edge),
+    const backDepths = await this.loadBackStackDepths(appId, dbEdges);
+    const { edgesBySource, unreplayableEdges } = indexPathEdgesBySource(
+      dbEdges,
+      (edge) => this.isEdgeReplayFailed(appId, edge),
+      backDepths,
     );
 
     // BFS to find shortest path
@@ -1781,6 +1910,7 @@ export class NavigationGraphManager implements NavigationGraphService {
           predecessor.set(edge.to_screen, edge);
           const pathEdges = await this.convertDBEdgesToNavigationEdges(
             this.reconstructPath(startScreen, targetScreen, predecessor),
+            backDepths,
           );
 
           // Found the target
@@ -1808,6 +1938,26 @@ export class NavigationGraphManager implements NavigationGraphService {
       targetScreen,
       ...(unreplayableEdges > 0 ? { unreplayableEdges } : {}),
     };
+  }
+
+  /**
+   * The recorded back-stack depth of each screen, read only when an edge with no tool call
+   * needs it: those edges are replayable as Back only with depth evidence (#10196).
+   */
+  private async loadBackStackDepths(
+    appId: string,
+    dbEdges: DBNavigationEdge[],
+  ): Promise<BackStackDepths> {
+    const depths = new Map<string, number>();
+    if (!dbEdges.some((edge) => edge.tool_name === null)) {
+      return depths;
+    }
+    for (const node of await this.repository.getNodes(appId)) {
+      if (node.back_stack_depth !== null) {
+        depths.set(node.screen_name, node.back_stack_depth);
+      }
+    }
+    return depths;
   }
 
   /**
@@ -1877,6 +2027,8 @@ export class NavigationGraphManager implements NavigationGraphService {
    */
   private async convertDBEdgesToNavigationEdges(
     dbEdges: DBNavigationEdge[],
+    // Present only for a path found by findPath: it names the edges replayable as Back.
+    backDepths?: BackStackDepths,
   ): Promise<NavigationEdge[]> {
     const edges: NavigationEdge[] = [];
 
@@ -1885,7 +2037,11 @@ export class NavigationGraphManager implements NavigationGraphService {
         from: dbEdge.from_screen,
         to: dbEdge.to_screen,
         timestamp: dbEdge.timestamp,
-        edgeType: dbEdge.tool_name ? "tool" : "unknown",
+        edgeType: dbEdge.tool_name
+          ? "tool"
+          : backDepths && isBackEdge(dbEdge, backDepths)
+            ? "back"
+            : "unknown",
       };
 
       if (dbEdge.tool_name) {

@@ -74,28 +74,116 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     expect(manager.getCurrentScreen()).toBeNull();
   }
 
-  test("the next transition after a warm return is stored as an edge from the remembered screen", async () => {
+  test("a warm return puts the remembered screen back as a hint, so navigateTo can start from it", async () => {
     await homeThenLauncher();
 
     // Warm return: the SDK app is in front again and sends no navigation event.
     timer.setCurrentTime(T0 + 8000);
     await manager.recordAppForeground(APP);
+
     expect(manager.getCurrentAppId()).toBe(APP);
     expect(manager.getCurrentScreen()).toBe("Home");
+  });
+
+  test("the first event after a warm return confirms the screen without an edge from the hint", async () => {
+    await homeThenLauncher();
+    timer.setCurrentTime(T0 + 8000);
+    await manager.recordAppForeground(APP);
 
     timer.setCurrentTime(T0 + 9000);
     manager.recordToolCall("tapOn", { selector: { text: "Settings" } });
     await sdkEvent("Settings", T0 + 9300);
+    expect(await edges()).toEqual([]);
+    expect(manager.getCurrentScreen()).toBe("Settings");
 
-    expect(await edges()).toEqual([["Home", "Settings", "tapOn"]]);
+    // Confirmed now: the next transition is an edge, and the tap was spent on the first event.
+    await sdkEvent("Details", T0 + 9600);
+    expect(await edges()).toEqual([["Settings", "Details", null]]);
   });
 
-  test("a screen change delivered before any foreground signal still stores the edge", async () => {
+  test("a screen change delivered before any foreground signal writes no edge from the hint either", async () => {
     await homeThenLauncher();
 
     await sdkEvent("Settings", T0 + 9300);
 
-    expect((await edges()).map(([from, to]) => [from, to])).toEqual([["Home", "Settings"]]);
+    expect(await edges()).toEqual([]);
+    expect(manager.getCurrentScreen()).toBe("Settings");
+  });
+
+  test("an app whose process died unseen gets no edge from its stale screen on relaunch", async () => {
+    // Remembered on Detail, then killed (swipe from recents, system kill, an update).
+    await sdkEvent("Home", T0);
+    await sdkEvent("Detail", T0 + 1000);
+    await launcherInFront(T0 + 5000);
+    timer.setCurrentTime(T0 + 8000);
+    await manager.recordAppForeground(APP);
+    expect(manager.getCurrentScreen()).toBe("Detail");
+
+    // The fresh process starts on Home.
+    await sdkEvent("Home", T0 + 8500);
+
+    expect(await edges()).toEqual([["Home", "Detail", null]]);
+    expect(manager.getCurrentScreen()).toBe("Home");
+
+    // Home is confirmed, so a real transition from it is recorded.
+    await sdkEvent("Settings", T0 + 9500);
+    expect(await edges()).toEqual([
+      ["Home", "Detail", null],
+      ["Home", "Settings", null],
+    ]);
+  });
+
+  test("a tap made after the restore cannot attach to an edge from the stale screen", async () => {
+    await sdkEvent("Home", T0);
+    await sdkEvent("Detail", T0 + 1000);
+    await launcherInFront(T0 + 5000);
+    timer.setCurrentTime(T0 + 8000);
+    await manager.recordAppForeground(APP);
+
+    timer.setCurrentTime(T0 + 8200);
+    manager.recordToolCall("tapOn", { selector: { text: "Open" } });
+    await sdkEvent("Home", T0 + 8500);
+    await sdkEvent("Settings", T0 + 9000);
+
+    expect(await edges()).toEqual([
+      ["Home", "Detail", null],
+      ["Home", "Settings", null],
+    ]);
+  });
+
+  test("a fingerprint that names the restored screen confirms it", async () => {
+    await sdkEvent("Home", T0);
+    await manager.recordHierarchyNavigation({
+      packageName: APP,
+      fromFingerprint: null,
+      toFingerprint: "home-hash",
+      timestamp: T0 + 500,
+    });
+    await launcherInFront(T0 + 5000);
+    timer.setCurrentTime(T0 + 8000);
+    await manager.recordAppForeground(APP);
+
+    timer.setCurrentTime(T0 + 8500);
+    await manager.recordHierarchyNavigation({
+      packageName: APP,
+      fromFingerprint: null,
+      toFingerprint: "home-hash",
+      timestamp: T0 + 8500,
+    });
+    await sdkEvent("Settings", T0 + 9000);
+
+    expect(await edges()).toEqual([["Home", "Settings", null]]);
+  });
+
+  test("back-stack depth is not recorded on a restored hint", async () => {
+    await sdkEvent("Home", T0);
+    await launcherInFront(T0 + 5000);
+    timer.setCurrentTime(T0 + 8000);
+    await manager.recordAppForeground(APP);
+
+    await manager.recordBackStack({ depth: 4, activities: [], tasks: [] });
+
+    expect((await repository.getNode(APP, "Home"))?.back_stack_depth).toBeNull();
   });
 
   test("a tool call from before the app switch cannot label the first edge after it", async () => {
@@ -106,16 +194,15 @@ describe("NavigationGraphManager app resume (#10193)", () => {
 
     // Returns and navigates within the 2 s window of the stale call.
     await sdkEvent("Settings", T0 + 6000);
+    await sdkEvent("Details", T0 + 6500);
 
-    expect(await edges()).toEqual([["Home", "Settings", null]]);
+    // The stale call was retired by the switch, so it labels nothing.
+    expect(await edges()).toEqual([["Settings", "Details", null]]);
     expect((await manager.getStats()).toolCallHistorySize).toBe(0);
   });
 
-  test("an unconsumed tool call no longer labels the transition after the one it caused", async () => {
-    await homeThenLauncher();
-    timer.setCurrentTime(T0 + 8000);
-    await manager.recordAppForeground(APP);
-
+  test("a call consumed by an edge no longer labels the transition after the one it caused", async () => {
+    await sdkEvent("Home", T0);
     timer.setCurrentTime(T0 + 9000);
     manager.recordToolCall("tapOn", { selector: { text: "Settings" } });
     await sdkEvent("Settings", T0 + 9300);
@@ -186,6 +273,17 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     manager.forgetAppScreen(APP);
     await sdkEvent("Settings", T0 + 1000);
 
+    expect(await edges()).toEqual([]);
+  });
+
+  test("forgetting every app's screen leaves the returning app on an unknown screen", async () => {
+    await homeThenLauncher();
+
+    manager.forgetAllAppScreens();
+    await manager.recordAppForeground(APP);
+
+    expect(manager.getCurrentScreen()).toBeNull();
+    await sdkEvent("Settings", T0 + 9300);
     expect(await edges()).toEqual([]);
   });
 

@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import type { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
+import type { PathOptimizer } from "../../../src/features/navigation/interfaces/PathOptimizer";
 import type {
   ForegroundObservation,
   ForegroundObserver,
@@ -37,6 +38,8 @@ describe("navigateTo edge fallback (#10031)", () => {
   /** What a replayed tapOn does, keyed by the selector text it targets. */
   let tapBehaviour: Record<string, "navigates" | "no-effect" | "tool-error">;
   let backNavigates: boolean;
+  /** The screen a replayed Back press lands on. */
+  let backDestination: string;
   /** What a fresh observation after a failed replay reports; null = the observation fails. */
   let observation: ForegroundObservation | null;
   let observations: number;
@@ -55,6 +58,7 @@ describe("navigateTo edge fallback (#10031)", () => {
     dispatched = [];
     tapBehaviour = {};
     backNavigates = true;
+    backDestination = "Settings";
     observation = {};
     observations = 0;
     await manager.setCurrentApp(APP_ID);
@@ -106,7 +110,7 @@ describe("navigateTo edge fallback (#10031)", () => {
     ToolRegistry.register("pressButton", "Fake press", z.object({}), async () => {
       dispatched.push("pressButton");
       if (backNavigates) {
-        await go("Settings");
+        await go(backDestination);
       }
       return { success: true };
     });
@@ -211,6 +215,36 @@ describe("navigateTo edge fallback (#10031)", () => {
     expect(result.error).toContain('No known path from "Home" to "Settings"');
     expect(result.error).toContain("cannot be replayed");
     expect(dispatched).toEqual([]);
+  });
+
+  test("a transition with no recorded action but a shallower target is replayed as Back", async () => {
+    await go("Home");
+    await manager.recordBackStack({ depth: 1, activities: [], tasks: [] });
+    await go("Settings");
+    await manager.recordBackStack({ depth: 2, activities: [], tasks: [] });
+    await go("Home");
+    await go("Settings");
+    backDestination = "Home";
+    // The back-stack optimizer declines, so the recorded edge itself is replayed.
+    const optimizer: PathOptimizer = {
+      shouldUseBackButton: async () => ({ shouldUseBack: false, backPresses: 0, reason: "test" }),
+    };
+
+    const result = await new NavigateTo(
+      device,
+      new FakeAdbClientFactory(),
+      noSetup,
+      { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+      manager,
+      new FakeTimer(),
+      optimizer,
+      undefined,
+      () => observer,
+    ).execute({ targetScreen: "Home", platform: "ios" });
+
+    expect(result.success).toBe(true);
+    expect(result.path).toEqual(["pressButton(back)"]);
+    expect(dispatched).toEqual(["pressButton"]);
   });
 
   test("a failed tool edge is not retried through an unrecorded edge as Back (#10196)", async () => {

@@ -115,6 +115,30 @@ describe("NavigationGraphManager tool-call dispatch window (#10196)", () => {
     expect(await tools()).toEqual([null, "tapOn"]);
   });
 
+  test("a later dispatch report never moves the window past an event the gesture already caused", async () => {
+    const call = startTap();
+    timer.setCurrentTime(T0 + 100);
+    call.markDispatched?.();
+
+    // The app's navigation event is received, but its graph write is still queued when the tap
+    // command returns and the action reports again.
+    timer.setCurrentTime(T0 + 300);
+    const event = manager.recordNavigationEvent({
+      applicationId: APP,
+      destination: "Home",
+      source: "sdk",
+      arguments: {},
+      metadata: {},
+      timestamp: T0 + 300,
+      sequenceNumber: 0,
+    });
+    timer.setCurrentTime(T0 + 500);
+    call.markDispatched?.();
+    await event;
+
+    expect(await tools()).toEqual(["tapOn"]);
+  });
+
   test("a withdrawn call never labels anything, even if its dispatch is reported late", async () => {
     const call = startTap();
     call();

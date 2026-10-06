@@ -130,6 +130,8 @@ test("SDK navigation batch preserves every encoded field through client decode a
       metadata: { origin: "fixture" },
       triggeringInteraction: null,
       deviceId: "fixture-device",
+      // The SDK time rides along for the telemetry record only.
+      telemetryTimestamp: 1_700_000_000_001,
     },
   ]);
   // The graph manager owns the navigation telemetry record (#10195): the ingestor records none

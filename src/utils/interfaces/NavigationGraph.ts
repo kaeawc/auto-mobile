@@ -15,9 +15,17 @@ export interface NavigationEvent {
   /**
    * The device whose client received the event (#10195). Set by that client so the navigation
    * telemetry record is stamped with the device that navigated, not whichever device last set
-   * the telemetry recorder's ambient context.
+   * the telemetry recorder's ambient context. The manager also uses it to tell which device a
+   * signal came from, so another device's signal does not retire this device's tool calls.
    */
   deviceId?: string;
+  /**
+   * When the SDK says the navigation happened, for the telemetry record ONLY (#10206 review):
+   * the iOS ingestor keeps every other telemetry event on SDK time, so one device's timeline
+   * sorts consistently. Graph correlation and `timestamp` are unaffected, because the SDK clock
+   * is not the clock the hierarchy detector and tool calls are measured against.
+   */
+  telemetryTimestamp?: number;
 }
 
 /**
@@ -96,6 +104,8 @@ export interface ToolCallInteraction {
   toolName: string;
   args: Record<string, any>;
   timestamp: number; // milliseconds
+  /** The device the call ran on, when the tool call carried one (#10206 review). */
+  deviceId?: string;
   /**
    * When the call's gesture was actually dispatched, if the action reported it (#10196).
    * `timestamp` is when the tool started, which can be seconds earlier for a `tapOn` that
@@ -490,6 +500,7 @@ export interface NavigationGraph {
     toolName: string,
     args: Record<string, any>,
     uiState?: UIState,
+    deviceId?: string,
   ): NavigationToolCallHandle;
 
   /** Get the current screen name */

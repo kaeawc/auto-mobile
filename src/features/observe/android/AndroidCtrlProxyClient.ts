@@ -6173,10 +6173,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
     } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
-      // The app may be back in front without a navigation event (#10193).
+      // The app may be back in front without a navigation event (#10193). The signal names this
+      // device: on the shared global manager another device's tick must not switch the app.
       if (navigationPackage) {
         this.getNavigationGraphManager()
-          .recordAppForeground(navigationPackage)
+          .recordAppForeground(navigationPackage, this.device.deviceId)
           .catch((error) =>
             logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
           );

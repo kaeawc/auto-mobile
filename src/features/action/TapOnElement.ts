@@ -3647,6 +3647,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ...context,
       onWarning: (warning) => displayWarnings.push(warning),
     });
+    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
+    // earliest moment the gesture can take effect: reporting once it returns could put the
+    // dispatch after the navigation event it caused (#10196).
+    reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -3842,7 +3846,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             talkBack,
             onDispatched: () => {
               tapTimestamp = this.timer.now();
-              reportToolDispatched();
             },
           });
           if (tapTimestamp !== undefined) {

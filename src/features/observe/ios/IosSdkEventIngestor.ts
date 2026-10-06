@@ -296,7 +296,9 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     if (applicationId && destination) {
       // The graph manager owns this event's telemetry record, as it does on Android, so it is
       // recorded once and stamped with this device (#10195). The graph write keeps host time:
-      // the SDK timestamp is not in the clock the hierarchy detector correlates against.
+      // the SDK timestamp is not in the clock the hierarchy detector correlates against. The
+      // telemetry record alone carries the SDK time, as every other iOS event does, so this
+      // device's timeline sorts consistently.
       // Barrier-tracked via trackExisting so graceful shutdown drains this
       // fire-and-forget write without a track() await hop perturbing the
       // nav-event↔hierarchy-update ordering (issue #2885); a mid-flight
@@ -309,6 +311,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         metadata: navMeta ?? {},
         triggeringInteraction: null,
         deviceId: this.deviceId,
+        telemetryTimestamp: ts,
       } as NavigationEvent);
       void getDbWriteBarrier().trackExisting(navWrite);
       await navWrite;

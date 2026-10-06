@@ -235,6 +235,8 @@ describe("navigation recorder handler outcomes", () => {
       ["uninstallApp", { appId: "com.x" }],
       ["launchApp", { appId: "com.x", coldBoot: true }],
       ["launchApp", { appId: "com.x", clearAppData: true }],
+      // installApp names an artifact, not the app: installing over a running app restarts it.
+      ["installApp", { artifactPath: "/tmp/app.apk" }],
     ])("%s %j leaves the next transition without an edge", async (tool, args) => {
       registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
       await registry.getTool(tool)!.handler(args);
@@ -332,5 +334,11 @@ describe("navigation recorder caller arguments", () => {
       sessionUuidX: "keep",
       session: "keep",
     });
+  });
+
+  test("recordToolCall carries the device the tool call runs on", async () => {
+    record.mockClear();
+    await registry.getTool("tapOn")!.handler({ text: "Continue" });
+    expect(record.mock.calls[0][3]).toBe("fake");
   });
 });

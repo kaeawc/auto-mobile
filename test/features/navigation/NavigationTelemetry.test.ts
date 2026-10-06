@@ -140,6 +140,16 @@ describe("navigation telemetry device and count (#10195)", () => {
     expect(TelemetryRecorder.getInstance().getContext().deviceId).toBe(DEVICE_B);
   });
 
+  test("an iOS navigation record keeps the SDK time like the device's other telemetry, not host time", async () => {
+    await iosIngestor().recordSdkEvent(
+      { type: "navigation", timestamp: 2000, payload: { destination: "Settings" } },
+      APP,
+    );
+
+    // The FakeTimer's host clock is not at 2000 here; that value can only have come from the SDK event.
+    expect(records[0].timestamp).toBe(2000);
+  });
+
   test("an iOS navigation with no app is still recorded exactly once", async () => {
     await iosIngestor().recordSdkEvent(
       { type: "navigation", timestamp: 2000, payload: { destination: "Settings" } },

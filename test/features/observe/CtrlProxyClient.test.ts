@@ -3161,6 +3161,34 @@ describe("AndroidCtrlProxyClient", function () {
       }
     });
 
+    test("the foreground signal for an SDK app names this client's device, so another device's tick cannot switch the shared manager", async function () {
+      const { navManager, resultPromise, socket, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+      const foreground = spyOn(navManager, "recordAppForeground");
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "SDK Home", "resource-id": "com.example.sdk:id/home" },
+            },
+          }),
+        );
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(foreground).toHaveBeenCalledWith("com.example.sdk", testDevice.deviceId);
+      } finally {
+        foreground.mockRestore();
+        await testClient.close();
+      }
+    });
+
     test("skips the hierarchy-navigation detector for an SDK app after a navigation_event (#3068)", async function () {
       // Pins the sdkNavigationAppIds skip MECHANISM (layer 1), independent of the
       // NavigationGraphManager early-return (layer 2) that also protects the SDK

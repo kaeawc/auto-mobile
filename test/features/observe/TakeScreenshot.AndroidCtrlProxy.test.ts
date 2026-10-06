@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { mockDevice } from "./takeScreenshotTestHelpers";
@@ -54,7 +55,16 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
 
   test("captures requested PNG on the selected Android display through screencap", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const screenshot = new TakeScreenshot(mockDevice, new FakeAdbClientFactory(fakeAdb));
+    const screenshot = new TakeScreenshot(
+      mockDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new FakeAndroidPhysicalDisplayIdResolver(new Map([[2, "4619827259835644673"]])),
+    );
     const originalGetInstance = AndroidCtrlProxyClient.getInstance;
     let ctrlProxyCalled = false;
     AndroidCtrlProxyClient.getInstance = (() => ({
@@ -75,7 +85,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       expect(ctrlProxyCalled).toBe(false);
       expect(
         fakeAdb.getExecutedCommands().find((command) => command.includes("screencap")),
-      ).toContain("screencap -d 2 -p");
+      ).toContain("screencap -d 4619827259835644673 -p");
     } finally {
       AndroidCtrlProxyClient.getInstance = originalGetInstance;
     }

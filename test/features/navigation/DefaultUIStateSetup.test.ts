@@ -15,6 +15,17 @@ import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { INTERNAL_NO_DIFF_PARAM } from "../../../src/server/internalToolCall";
 import type { ModalState, ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { readFileSync } from "node:fs";
+
+const selectionCapture: { structuredContent: ObserveResult } = JSON.parse(
+  readFileSync(
+    new URL("../../fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json", import.meta.url),
+    "utf8",
+  ),
+);
+const selectionObserve = (): ObserveScreenLike => ({
+  execute: async () => selectionCapture.structuredContent,
+});
 
 const device: BootedDevice = {
   deviceId: "test-device",
@@ -177,7 +188,7 @@ describe("DefaultUIStateSetup", () => {
     });
 
     function setupWithNoSelections(): DefaultUIStateSetup {
-      const setup = makeSetup();
+      const setup = makeSetup(selectionObserve);
       (
         setup as unknown as {
           getCurrentUIState: () => Promise<{ modalStack: ModalState[]; selectedElements: [] }>;
@@ -196,13 +207,13 @@ describe("DefaultUIStateSetup", () => {
 
       const actions = await setup.setupUIState(
         {
-          uiState: { selectedElements: [{ contentDesc: "Open settings" }] },
+          uiState: { selectedElements: [{ contentDesc: "Discover" }] },
         } as NavigationEdge,
         "android",
       );
 
-      expect(capturedArgs?.selector).toEqual({ text: "Open settings" });
-      expect(actions).toEqual(['tapOn({"contentDesc":"Open settings"})']);
+      expect(capturedArgs?.selector).toEqual({ text: "Discover" });
+      expect(actions).toEqual(['tapOn({"contentDesc":"Discover"})']);
     });
 
     test("does not report a selected-element tap when its internal tool response fails", async () => {
@@ -815,17 +826,17 @@ describe("DefaultUIStateSetup cancellation", () => {
       controller.abort();
       return createStructuredToolResponse({ success: true });
     });
-    const setup = makeSetup(emptyModalObserve);
+    const setup = makeSetup(selectionObserve);
     await expect(
       setup.setupUIState(
         {
-          uiState: { selectedElements: [{ text: "First" }, { text: "Second" }] },
+          uiState: { selectedElements: [{ text: "Discover" }, { text: "Files" }] },
         } as NavigationEdge,
         "android",
         controller.signal,
       ),
     ).rejects.toThrow("Operation cancelled");
-    expect(taps).toEqual([{ text: "First" }]);
+    expect(taps).toEqual([{ text: "Discover" }]);
   });
 
   test("cancellation during scroll propagates instead of returning null", async () => {

@@ -259,7 +259,7 @@ for (const condition of ["bun", "require", "default"]) {
     // Restore the intentionally edited metadata to compare all original bytes.
     writeFileSync(
       path.join(root, "node_modules/pkg/package.json"),
-      Buffer.from(before["node_modules/pkg/package.json"]!, "base64"),
+      Buffer.from(before[path.join("node_modules", "pkg", "package.json")]!, "base64"),
     );
     expect(tree(root)).toEqual(before);
   });
@@ -287,7 +287,9 @@ test("empty interrupted backup is removed", () => {
 test("path recovery conflicts name both copies and explain remedy", () => {
   const { root, put } = fixture();
   put(".pack-trim-backup/node_modules/pkg/src/index.ts", "saved");
-  expect(() => restoreBackup(root)).toThrow("node_modules/pkg/src/index.ts. Compare");
+  expect(() => restoreBackup(root)).toThrow(
+    `${path.join("node_modules", "pkg", "src", "index.ts")}. Compare`,
+  );
   expect(() => restoreBackup(root)).toThrow("move one copy aside, then rerun postpack");
   expect(existsSync(path.join(root, ".pack-trim-backup/node_modules/pkg/src/index.ts"))).toBe(true);
 });

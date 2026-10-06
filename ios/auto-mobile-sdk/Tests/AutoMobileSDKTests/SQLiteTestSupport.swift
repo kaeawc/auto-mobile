@@ -71,3 +71,62 @@ final class SQLiteTestFixture {
         }
     }
 }
+
+/// Replaces SQLite's sleep seam while the synchronous operation runs. The first busy sleep releases
+/// the app lock; returning the requested duration advances SQLite's retry budget without real sleep.
+/// Registering a VFS leaves the driver's actual busy handler and configured timeout intact.
+enum SQLiteTestBusySleeper {
+    private final class State {
+        let holder: OpaquePointer
+        var sleeps: [Int32] = []
+
+        init(holder: OpaquePointer) { self.holder = holder }
+    }
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var states: [UInt: State] = [:]
+
+    private static let sleep: @convention(c) (UnsafeMutablePointer<sqlite3_vfs>?, Int32)
+        -> Int32 = { vfs, microseconds in
+            guard let vfs else { return 0 }
+            lock.lock()
+            defer { lock.unlock() }
+            guard let state = states[UInt(bitPattern: vfs)] else { return 0 }
+            state.sleeps.append(microseconds)
+            if state.sleeps.count == 1 {
+                sqlite3_exec(state.holder, "ROLLBACK", nil, nil, nil)
+            }
+            return microseconds
+        }
+
+    static func releasingLockOnBusySleep<T>(holder: OpaquePointer, operation: () throws -> T) throws -> (T, [Int32]) {
+        let original = try XCTUnwrap(sqlite3_vfs_find(nil))
+        let vfs = UnsafeMutablePointer<sqlite3_vfs>.allocate(capacity: 1)
+        vfs.initialize(to: original.pointee)
+        let name = try XCTUnwrap(strdup("sqlite-test-\(UUID().uuidString)"))
+        vfs.pointee.zName = UnsafePointer(name)
+        vfs.pointee.pNext = nil
+        vfs.pointee.xSleep = sleep
+        let state = State(holder: holder)
+        lock.lock()
+        states[UInt(bitPattern: vfs)] = state
+        lock.unlock()
+        defer {
+            sqlite3_vfs_register(original, 1)
+            sqlite3_vfs_unregister(vfs)
+            lock.lock()
+            states.removeValue(forKey: UInt(bitPattern: vfs))
+            lock.unlock()
+            free(name)
+            vfs.deinitialize(count: 1)
+            vfs.deallocate()
+        }
+        let registered = sqlite3_vfs_register(vfs, 1)
+        guard registered == SQLITE_OK else {
+            throw NSError(domain: "SQLiteTestBusySleeper", code: Int(registered))
+        }
+        // Any connections opened by the operation must close before this VFS is unregistered.
+        let result = try operation()
+        return (result, state.sleeps)
+    }
+}

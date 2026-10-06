@@ -121,15 +121,18 @@ final class SQLiteDatabaseBusyTests: XCTestCase {
         defer { patient.closeAll() }
         try holdAppLock()
         let holder = try XCTUnwrap(appConnection)
-        appConnection = nil
-        nonisolated(unsafe) let unsafeHolder = holder
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(80)) {
-            sqlite3_exec(unsafeHolder, "ROLLBACK", nil, nil, nil)
-            sqlite3_close(unsafeHolder)
+        let (_, sleeps) = try SQLiteTestBusySleeper.releasingLockOnBusySleep(holder: holder) {
+            // Close connections before the scoped VFS is unregistered.
+            defer { patient.closeAll() }
+            let result = patient.tablesResult(databasePath: fixture.path)
+            XCTAssertEqual(result.tables, ["t"])
+            XCTAssertNil(result.diagnostic)
+            XCTAssertEqual(
+                patient.executeSQL(databasePath: fixture.path, query: "SELECT timeout FROM pragma_busy_timeout").rows,
+                [["2000"]]
+            )
         }
-
-        let result = patient.tablesResult(databasePath: fixture.path)
-        XCTAssertEqual(result.tables, ["t"])
-        XCTAssertNil(result.diagnostic)
+        XCTAssertEqual(sleeps, [1000], "SQLite must encounter contention and retry after its first 1 ms wait")
+        XCTAssertEqual(sqlite3_get_autocommit(holder), 1, "the busy sleep must have released the app's lock")
     }
 }

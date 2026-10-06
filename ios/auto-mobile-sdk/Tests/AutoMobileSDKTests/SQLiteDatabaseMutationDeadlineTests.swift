@@ -46,33 +46,24 @@ final class SQLiteDatabaseMutationDeadlineTests: XCTestCase {
         let driver = makeDriver(writeMs: 30)
         defer { driver.closeAll() }
         try holdAppWriteLock()
-        let holder = try XCTUnwrap(appConnection)
-        appConnection = nil
-        nonisolated(unsafe) let unsafeHolder = holder
-        let released = DispatchSemaphore(value: 0)
-        // The app commits well after the SDK's wait: the old 5 s wait would have run the INSERT then.
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) {
-            sqlite3_exec(unsafeHolder, "ROLLBACK", nil, nil, nil)
-            sqlite3_close(unsafeHolder)
-            released.signal()
-        }
 
         let result = driver.executeSQL(databasePath: fixture.path, query: "INSERT INTO t (v) VALUES ('dup')")
 
         XCTAssertEqual(result.diagnostic?.code, "busy_lock")
         XCTAssertEqual(result.rowsAffected, 0)
-        XCTAssertEqual(released.wait(timeout: .now() + 5), .success)
+        // Keep the app's lock until the call returns, regardless of runner scheduling.
+        releaseAppLock()
         XCTAssertEqual(try fixture.values(), ["row"], "a mutation reported as busy must not be applied afterwards")
     }
 
     func testMutationAfterItsDeadlineNeverStarts() throws {
-        let driver = makeDriver()
+        let driver = SQLiteDatabaseDriver(searchPaths: [fixture.directoryURL.path], now: { 100 })
         defer { driver.closeAll() }
 
         let late = driver.executeSQL(
             databasePath: fixture.path,
             query: "INSERT INTO t (v) VALUES ('late')",
-            deadline: SdkDatabaseBudget.now() - 1
+            deadline: 99
         )
         XCTAssertEqual(late.diagnostic?.code, "busy_lock")
         XCTAssertEqual(try fixture.values(), ["row"])
@@ -80,41 +71,53 @@ final class SQLiteDatabaseMutationDeadlineTests: XCTestCase {
         let inTime = driver.executeSQL(
             databasePath: fixture.path,
             query: "INSERT INTO t (v) VALUES ('on time')",
-            deadline: SdkDatabaseBudget.now() + 5
+            deadline: 105
         )
         XCTAssertNil(inTime.error)
         XCTAssertEqual(try fixture.values(), ["row", "on time"])
     }
 
     func testReadIgnoresTheMutationDeadline() throws {
-        let driver = makeDriver()
+        let driver = SQLiteDatabaseDriver(searchPaths: [fixture.directoryURL.path], now: { 100 })
         defer { driver.closeAll() }
         let result = driver.executeSQL(
             databasePath: fixture.path,
             query: "SELECT v FROM t",
-            deadline: SdkDatabaseBudget.now() - 1
+            deadline: 99
         )
         XCTAssertEqual(result.rows, [["row"]])
     }
 
     func testDeadlineCutsTheWaitBelowTheWriteBudget() throws {
-        let driver = makeDriver(writeMs: 10000)
+        let readings = ScriptedClock([100, 100, 100, 200, 200, 200])
+        let driver = SQLiteDatabaseDriver(
+            searchPaths: [fixture.directoryURL.path],
+            busyBudget: SQLiteBusyBudget(classifierMs: 5, readMs: 5, writeMs: 10000),
+            now: { readings.next() }
+        )
         defer { driver.closeAll() }
-        try holdAppWriteLock()
 
-        let started = Date()
+        // SQLite exposes the timeout installed on this write connection at step, without measuring
+        // elapsed wall time. 62.5 ms rounds up to 63 ms, far below the 10 s write budget.
+        let observed = driver.executeSQL(
+            databasePath: fixture.path,
+            query: "INSERT INTO t (v) SELECT timeout FROM pragma_busy_timeout",
+            deadline: 100.0625
+        )
+        XCTAssertNil(observed.error)
+        XCTAssertEqual(observed.rowsAffected, 1)
+        XCTAssertEqual(try fixture.values(), ["row", "63"])
+        try holdAppWriteLock()
         let result = driver.executeSQL(
             databasePath: fixture.path,
             query: "INSERT INTO t (v) VALUES ('x')",
-            deadline: SdkDatabaseBudget.now() + 0.05
+            deadline: 200.0625
         )
 
         XCTAssertEqual(result.diagnostic?.code, "busy_lock")
-        XCTAssertLessThan(
-            Date().timeIntervalSince(started),
-            3,
-            "the wait must follow the deadline, not the write budget"
-        )
+        XCTAssertEqual(result.rowsAffected, 0)
+        releaseAppLock()
+        XCTAssertEqual(try fixture.values(), ["row", "63"])
     }
 
     func testRouteBoundsAMutationByTheRelayTimeoutTheRunnerSends() throws {
@@ -184,27 +187,35 @@ final class SQLiteDatabaseMutationDeadlineTests: XCTestCase {
     /// that is left, not another 300 ms. The scripted clock stands in for the time prepare spent,
     /// because a lock that blocks prepare also blocks the classifier that runs before it.
     func testStepWaitsOnlyForWhatPrepareLeftOfTheBudget() throws {
-        let readings = ScriptedClock([100, 100, 100.25])
+        let readings = ScriptedClock([100, 100, 100.25, 200, 200, 200.25])
         let driver = SQLiteDatabaseDriver(
             searchPaths: [fixture.directoryURL.path],
             busyBudget: SQLiteBusyBudget(classifierMs: 5, readMs: 5, writeMs: 300),
             now: { readings.next() }
         )
         defer { driver.closeAll() }
-        try holdAppWriteLock()
 
-        let started = Date()
+        // The INSERT reads its own connection's busy timeout when it steps. This catches a fresh
+        // 300 ms budget (or a missing re-arm after prepare) without a scheduler-dependent threshold.
+        let observed = driver.executeSQL(
+            databasePath: fixture.path,
+            query: "INSERT INTO t (v) SELECT timeout FROM pragma_busy_timeout",
+            deadline: nil
+        )
+        XCTAssertNil(observed.error)
+        XCTAssertEqual(observed.rowsAffected, 1)
+        XCTAssertEqual(try fixture.values(), ["row", "50"])
+        try holdAppWriteLock()
         let result = driver.executeSQL(
             databasePath: fixture.path,
             query: "INSERT INTO t (v) VALUES ('x')",
             deadline: nil
         )
-        let elapsed = Date().timeIntervalSince(started)
 
         XCTAssertEqual(result.diagnostic?.code, "busy_lock")
-        XCTAssertLessThan(elapsed, 0.2, "step waited \(elapsed) s; the budget left after prepare was 0.05 s")
+        XCTAssertEqual(result.rowsAffected, 0)
         releaseAppLock()
-        XCTAssertEqual(try fixture.values(), ["row"])
+        XCTAssertEqual(try fixture.values(), ["row", "50"])
     }
 
     func testStepDoesNotStartOnceThePrepareLeftNothingBeforeTheDeadline() throws {

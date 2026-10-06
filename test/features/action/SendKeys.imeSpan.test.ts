@@ -269,20 +269,90 @@ test("IME, key, IME keeps the IME active while delivering the key", async () => 
   expect(h.selections()).toEqual([activate, restore]);
 });
 
-test("IME, clear, IME keeps the IME active while clearing", async () => {
+test("IME, clear, IME uses the active input connection", async () => {
   const h = harness();
-  const clear = h.client.clear;
+  const commit = h.client.commitViaIme;
   let selectionsAtClear: string[] = [];
-  h.client.clear = async (...args) => {
-    selectionsAtClear = h.selections();
-    return clear(...args);
+  h.client.commitViaIme = async (...args) => {
+    if (args[3] === "clearField") {
+      selectionsAtClear = h.selections();
+    }
+    return commit(...args);
   };
   const result = await h.action.execute([type("a"), { action: "clear" }, type("b")]);
   expect(result.success).toBe(true);
-  expect(h.clientCalls).toEqual(["commit:a", "clear", "commit:b"]);
+  expect(h.clientCalls).toEqual(["commit:a", "clearField", "commit:b"]);
   expect(selectionsAtClear).toEqual([activate]);
   expect(h.selections()).toEqual([activate, restore]);
 });
+
+test.each(["ime", "auto", "imeKeyEvents"] as const)(
+  "clear before a %s type activates the span IME first",
+  async (mode) => {
+    const h = harness();
+    const calls: Parameters<typeof h.client.commitViaIme>[] = [];
+    const commit = h.client.commitViaIme;
+    h.client.commitViaIme = async (...args) => {
+      calls.push(args);
+      expect(h.selections()).toEqual([activate]);
+      return commit(...args);
+    };
+    expect((await h.action.execute([{ action: "clear" }, { ...type("a"), mode }])).success).toBe(
+      true,
+    );
+    expect(calls[0]).toEqual(["", null, undefined, "clearField"]);
+    expect(h.clientCalls).toEqual(["clearField", "commit:a"]);
+    expect(h.selections()).toEqual([activate, restore]);
+  },
+);
+
+test("clear outside an IME span retains accessibility delivery", async () => {
+  const h = harness();
+  expect((await h.action.execute([{ action: "clear" }])).success).toBe(true);
+  expect(h.clientCalls).toEqual(["clear"]);
+  expect(h.selections()).toEqual([]);
+});
+
+test("IME replace clears through the input connection before typing", async () => {
+  const h = harness();
+  expect(
+    (await h.action.execute([{ ...type("new"), operation: "replace", keyboardProfile: "direct" }]))
+      .success,
+  ).toBe(true);
+  expect(h.clientCalls).toEqual(["clearField", "commit:new"]);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test.each([
+  ["quote bold 123 tail", true],
+  ["quote bold 13 tail", false],
+] as const)(
+  "multi-segment IME verification of %s preserves every content digit",
+  async (actual, success) => {
+    const read: SendKeysObserver = {
+      execute: async () => ({
+        ...focused,
+        viewHierarchy: {
+          hierarchy: {
+            node: { $: { focused: "true", class: "android.widget.EditText", text: actual } },
+          },
+        },
+      }),
+    };
+    const h = harness(read);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const executor = new DefaultSendKeysCommandExecutor(h.device, h.adbFactory, read, {
+      textClient: h.client,
+      timer,
+    });
+    const result = await executor.type(type("> quote *bold* 123 tail"));
+    expect(result.success).toBe(success);
+    if (!success) {
+      expect(result.partialApplication).toBe(true);
+    }
+  },
+);
 
 test("non-IME typing restores before a11y delivery; a later IME type reactivates", async () => {
   const h = harness();
@@ -593,4 +663,141 @@ test("cancellation during a failed mode-switch restore retains recovery guidance
   } finally {
     clearAndroidImeQuarantine(h.device.deviceId);
   }
+});
+
+test.each(["", "hint-only"])("IME clear verifies the field after it becomes %j", async (after) => {
+  let value = "old content";
+  const reads: string[] = [];
+  const read: SendKeysObserver = {
+    execute: async () => {
+      reads.push(value);
+      return {
+        ...focused,
+        viewHierarchy: {
+          hierarchy: {
+            node: {
+              $: {
+                focused: "true",
+                class: "android.widget.EditText",
+                text: value,
+                ...(value === "hint-only" ? { "hint-text": value } : {}),
+              },
+            },
+          },
+        },
+      };
+    },
+  };
+  const h = harness(read);
+  const commit = h.client.commitViaIme;
+  h.client.commitViaIme = async (...args) => {
+    if (args[3] === "clearField") {
+      value = after;
+    } else {
+      value = args[0];
+    }
+    return commit(...args);
+  };
+  const result = await h.action.execute([{ action: "clear" }, type("a")]);
+  expect(result.success).toBe(true);
+  expect(result.commands[0].warning).toBeUndefined();
+  expect(reads.slice(0, 2)).toEqual(["old content", after]);
+  expect(h.clientCalls).toEqual(["clearField", "commit:a"]);
+});
+
+test("IME clear retains unchanged-field warning with fake settling", async () => {
+  const read: SendKeysObserver = {
+    execute: async () => ({
+      ...focused,
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: {
+              focused: "true",
+              class: "android.widget.EditText",
+              text: "permanent prefix",
+            },
+          },
+        },
+      },
+    }),
+  };
+  const h = harness(read);
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const executor = new DefaultSendKeysCommandExecutor(h.device, h.adbFactory, read, {
+    textClient: h.client,
+    timer,
+  });
+  const action = new SendKeys(h.device, h.adbFactory, {
+    executor,
+    observer: read,
+    timer,
+    timestampProvider: { now: async () => 1 },
+  });
+  const result = await action.execute([{ action: "clear" }, type("prefix")]);
+  expect(result.success).toBe(true);
+  expect(result.commands[0].warning).toContain("pre-clear text");
+  expect(timer.getSleepHistory()).toEqual([150, 150]);
+});
+
+test("failed IME clear stops replace before text delivery and restores once", async () => {
+  const h = harness();
+  h.client.commitViaIme = async (_text, _prior, _signal, delivery) => {
+    expect(delivery).toBe("clearField");
+    return { success: false, partialApplication: true, error: "IME clear failed" };
+  };
+  expect(await h.action.execute([{ ...type("new"), operation: "replace" }])).toMatchObject({
+    success: false,
+    failedIndex: 0,
+    error: "IME clear failed",
+  });
+  expect(h.committed).toEqual([]);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("unacknowledged IME clear quarantines the span and skips restoration", async () => {
+  const h = harness();
+  h.client.commitViaIme = async (_text, _prior, _signal, delivery) => {
+    expect(delivery).toBe("clearField");
+    return {
+      success: false,
+      sessionUnsafe: true,
+      partialApplication: true,
+      error: "clear unacknowledged",
+    };
+  };
+  try {
+    expect(await h.action.execute([{ action: "clear" }, type("a")])).toMatchObject({
+      success: false,
+      failedIndex: 0,
+    });
+    expect(h.selections()).toEqual([activate]);
+    await expect(withAndroidImeLock(h.device.deviceId, async () => true)).rejects.toThrow(
+      "IME state is unknown",
+    );
+  } finally {
+    clearAndroidImeQuarantine(h.device.deviceId);
+  }
+});
+
+test("IME replacement applies and restores the requested keyboard profile around clear and type", async () => {
+  const h = harness();
+  const profiles: string[] = [];
+  h.client.setKeyboardProfile = async (id) => {
+    profiles.push(id);
+    return { success: true, previousProfileId: "prior-profile" };
+  };
+  const commit = h.client.commitViaIme;
+  const profilesAtCommit: string[][] = [];
+  h.client.commitViaIme = async (...args) => {
+    profilesAtCommit.push([...profiles]);
+    return commit(...args);
+  };
+  expect(
+    (await h.action.execute([{ ...type("new"), operation: "replace", keyboardProfile: "direct" }]))
+      .success,
+  ).toBe(true);
+  expect(profilesAtCommit).toEqual([["direct"], ["direct"]]);
+  expect(profiles).toEqual(["direct", "prior-profile"]);
 });

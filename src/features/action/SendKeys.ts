@@ -399,7 +399,7 @@ export interface SendKeysTextClient {
     text: string,
     priorImeId: string | null,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<TextActionResult>;
 }
 
@@ -436,6 +436,7 @@ export interface SendKeysInputKey {
 
 interface ImeCommitRouting {
   focusedFieldClass?: string | null;
+  delivery?: "clearField";
   signal?: AbortSignal;
   display?: string;
   focusedInputVerified?: boolean;
@@ -445,6 +446,11 @@ export interface SendKeysPlatformDependencies {
   timer?: Timer;
   textClient?: SendKeysTextClient;
   inputKey?: SendKeysInputKey;
+}
+
+interface ImeCommitProgress {
+  result: TextActionResult;
+  safeToRestore: boolean;
 }
 
 interface ActiveImeCommitOptions {
@@ -804,6 +810,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (this.device.platform !== "android") {
       return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
     }
+    if (this.imeSpan) {
+      return this.executeAndroidImeCommit("", "insert", undefined, {
+        signal,
+        display,
+        delivery: "clearField",
+      });
+    }
     const { result: clearResult, unchangedWarning } = await this.clearAndVerifyAndroid(
       signal,
       display,
@@ -835,9 +848,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async clearAndVerifyAndroid(
     signal?: AbortSignal,
     display?: string,
+    clear: () => Promise<TextActionResult> = () => this.textClient.clear(),
   ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
     const preClearText = await this.readTextBeforeClear(signal, display);
-    const result = await this.textClient.clear();
+    this.checkAbort(signal);
+    const result = await clear();
     if (!result.success) {
       return { result };
     }
@@ -1460,6 +1475,35 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return activated;
   }
 
+  private async prepareImeCommitClear(
+    operation: SendKeysOperation,
+    routing: ImeCommitRouting,
+    prior: string | null,
+    priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
+    progress: ImeCommitProgress,
+  ): Promise<{ outcome?: TextActionResult; warning?: string }> {
+    if (operation !== "replace" && routing.delivery !== "clearField") {
+      return {};
+    }
+    const { result, unchangedWarning } = await this.clearAndVerifyAndroid(
+      routing.signal,
+      routing.display,
+      async () => {
+        const cleared = await this.textClient.commitViaIme("", null, routing.signal, "clearField");
+        // Record safety before verification can abort or exhaust the request budget.
+        progress.safeToRestore = this.canRestoreAfterImeCommit(cleared, prior, priorSubtype);
+        if (routing.delivery === "clearField") {
+          progress.result = cleared;
+        }
+        return cleared;
+      },
+    );
+    if (!result.success || !progress.safeToRestore || routing.delivery === "clearField") {
+      return { outcome: this.withTextWarnings(result, [unchangedWarning]) };
+    }
+    return { warning: unchangedWarning };
+  }
+
   private async performImeCommit(
     text: string,
     operation: SendKeysOperation,
@@ -1473,67 +1517,85 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     safeToRestore: boolean;
   }> {
     const { signal } = routing;
-    let safeToRestore = true;
-    let commitResult: TextActionResult = { success: false };
+    const progress: ImeCommitProgress = { result: { success: false }, safeToRestore: true };
     try {
       this.checkAbort(signal);
-      if (operation === "replace") {
-        const clearResult = await this.textClient.clear();
-        this.checkAbort(signal);
-        if (!clearResult.success) {
-          return { outcome: { ...clearResult, resolvedMode: mode }, safeToRestore };
-        }
-      }
+      const cleared = await this.prepareImeCommitClear(
+        operation,
+        routing,
+        prior,
+        priorSubtype,
+        progress,
+      );
       this.checkAbort(signal);
+      if (cleared.outcome) {
+        return {
+          outcome: { ...cleared.outcome, resolvedMode: mode },
+          safeToRestore: progress.safeToRestore,
+        };
+      }
+      const clearWarning = cleared.warning;
       const result = await this.textClient.commitViaIme(
         text,
         this.imeSpan ? null : prior,
         signal,
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
-      safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
-      commitResult = result;
+      progress.safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
+      progress.result = result;
       if (result.success && mode === "ime" && text.length > 0) {
         const verifiedResult = await this.verifyImeCommit(result, text, routing, operation);
         return {
-          outcome: { ...this.describeImeCommitFailure(verifiedResult), resolvedMode: mode },
-          safeToRestore,
+          outcome: {
+            ...this.withTextWarnings(this.describeImeCommitFailure(verifiedResult), [clearWarning]),
+            resolvedMode: mode,
+          },
+          safeToRestore: progress.safeToRestore,
         };
       }
       return {
         outcome: {
-          ...this.describeImeCommitFailure(
-            withImeFailure(
-              operation === "replace" ? markPartialAfterMutation(result) : result,
-              text,
-              "commit",
-              { focusedFieldClass: routing.focusedFieldClass },
+          ...this.withTextWarnings(
+            this.describeImeCommitFailure(
+              withImeFailure(
+                operation === "replace" ? markPartialAfterMutation(result) : result,
+                text,
+                "commit",
+                { focusedFieldClass: routing.focusedFieldClass },
+              ),
             ),
+            [clearWarning],
           ),
           resolvedMode: mode,
         },
-        safeToRestore,
+        safeToRestore: progress.safeToRestore,
       };
     } catch (error) {
-      if (commitResult.success && isSendKeysBudgetExhausted(signal)) {
+      if (progress.result.success && isSendKeysBudgetExhausted(signal)) {
         logger.warn("[SendKeys] Budget expired after IME acknowledgement", error);
         return {
           outcome: {
-            ...commitResult,
+            ...progress.result,
             resolvedMode: mode,
             warning: [
-              commitResult.warning,
+              progress.result.warning,
               "Delivery was acknowledged but not verified before the request budget expired.",
             ]
               .filter(Boolean)
               .join(" "),
           },
-          safeToRestore,
+          safeToRestore: progress.safeToRestore,
         };
       }
       return {
-        ...imeCommitExceptionResult(error, signal, commitResult, text, routing.focusedFieldClass),
-        safeToRestore,
+        ...imeCommitExceptionResult(
+          error,
+          signal,
+          progress.result,
+          text,
+          routing.focusedFieldClass,
+        ),
+        safeToRestore: progress.safeToRestore,
       };
     }
   }

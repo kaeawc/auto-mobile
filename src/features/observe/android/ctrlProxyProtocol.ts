@@ -225,7 +225,12 @@ export interface RequestCommitTextMessage {
   requestId: string;
   text: string;
   priorImeId?: string;
-  delivery?: "keyEvents";
+  /**
+   * `commit` uses realistic typing pauses so editors can react to typed input.
+   * `clearField` clears through the editor connection before realistic typing, preserving
+   * autocomplete, markdown/autoformat shortcuts, and mention chips in a rich-text composer.
+   */
+  delivery?: "commit" | "keyEvents" | "clearField";
   timeoutMs?: number;
 }
 

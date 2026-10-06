@@ -259,7 +259,9 @@ describe("IME failure diagnostics", () => {
 
   test("a failed replace clear is wrapped inside the IME span before any commit", async () => {
     const h = harness("");
-    h.client.clear = async () => ({ success: false, error: "clear rejected" });
+    const commit = h.client.commitViaIme;
+    h.client.commitViaIme = async (...args) =>
+      args[3] === "clearField" ? { success: false, error: "clear rejected" } : commit(...args);
     const result = await h.action.execute([
       { action: "type", text: "@everyone", operation: "replace" },
     ]);
@@ -284,12 +286,13 @@ describe("IME failure diagnostics", () => {
     },
   );
 
-  test("pins multi-segment suffix verification rather than loosening it for separators", async () => {
+  test("accepts multi-segment content in order when the editor adds separators", async () => {
     const h = harness("one bold tail, ");
+    h.client.commitViaIme = async () => ({ success: true, committedUnits: 15 });
     const result = await h.executor.type({ action: "type", text: "one *bold* tail" });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("IME partial commit");
-    expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime", committedUnits: 15 });
+    expect(result).not.toHaveProperty("imeFailure");
+    expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
   test("pins explicit accessibility caret warning and does not call it IME success", async () => {

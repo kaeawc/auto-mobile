@@ -455,6 +455,10 @@ function createTextClient(
       return options.setKeyboardProfile?.(id) ?? { success: true, previousProfileId: "direct" };
     },
     commitViaIme: async (text, priorImeId, _signal, delivery) => {
+      if (delivery === "clearField") {
+        calls.push("clearField");
+        return { success: true };
+      }
       calls.push(`commitViaIme:${text}:${priorImeId ?? "none"}`);
       commitViaImeCalls.push({ text, priorImeId });
       commitDeliveries.push(delivery);
@@ -602,15 +606,27 @@ describe("SendKeys", () => {
       });
       expect(result.error).toContain('the focused field holds ""');
       expect(result.error).not.toContain("Search settings");
-      expect(textClient.calls).toContain("clear");
+      expect(textClient.calls).toContain("clearField");
       expect(textClient.commitViaImeCalls).toHaveLength(1);
       expect(timer.getSleepHistory()).toEqual([150, 150]);
     },
   );
 
   test("default replace still verifies non-hint replacement content", async () => {
-    const observation = focusedAndroidObservation("Q", { "hint-text": "Search settings" }, 0);
-    const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+    let fieldText = "Q";
+    const { executor, timer, textClient } = imeVerificationHarness({
+      execute: async () =>
+        focusedAndroidObservation(fieldText, { "hint-text": "Search settings" }, 0),
+    });
+    const commitViaIme = textClient.client.commitViaIme;
+    textClient.client.commitViaIme = async (...args) => {
+      const result = await commitViaIme(...args);
+      if (result.success) {
+        // Model the device applying both the IME clear and the subsequent commit.
+        fieldText = args[3] === "clearField" ? "" : args[0];
+      }
+      return result;
+    };
     expect(await executor.type({ action: "type", text: "Q", operation: "replace" })).toMatchObject({
       success: true,
       resolvedMode: "ime",
@@ -689,7 +705,7 @@ describe("SendKeys", () => {
         partialApplication: true,
         error: expect.stringContaining("Android event delivery requires a focused editable field"),
       });
-      expect(observer.calls).toBe(1);
+      expect(observer.calls).toBe(operation === "replace" ? 2 : 1);
       expect(textClient.commitViaImeCalls).toHaveLength(1);
     },
   );
@@ -708,7 +724,14 @@ describe("SendKeys", () => {
           reads++;
           return focusedAndroidObservation(
             "",
-            { focused: reads === 1 || (settle && reads === 2) ? "true" : "false" },
+            {
+              focused:
+                reads === 1 ||
+                (operation === "replace" && reads === 2) ||
+                (settle && reads === (operation === "replace" ? 3 : 2))
+                  ? "true"
+                  : "false",
+            },
             0,
           );
         },
@@ -719,8 +742,8 @@ describe("SendKeys", () => {
       expect(result.partialApplication).toBeUndefined();
       expect(result.verified).toBeUndefined(); // Same convention as an unreadable IME field.
       expect(textClient.commitViaImeCalls).toHaveLength(1);
-      expect(textClient.calls.includes("clear")).toBe(operation === "replace");
-      expect(reads).toBe(settle ? 3 : 2);
+      expect(textClient.calls.includes("clearField")).toBe(operation === "replace");
+      expect(reads).toBe((settle ? 3 : 2) + (operation === "replace" ? 1 : 0));
       expect(timer.getSleepHistory()).toEqual(settle ? [150] : []);
     },
   );
@@ -735,7 +758,7 @@ describe("SendKeys", () => {
       partialApplication: true,
       error: expect.stringContaining("Android event delivery requires a focused editable field"),
     });
-    expect(observer.calls).toBe(2);
+    expect(observer.calls).toBe(3);
     expect(textClient.commitViaImeCalls).toHaveLength(1);
   });
 
@@ -2347,16 +2370,18 @@ describe("DefaultSendKeysCommandExecutor", () => {
         { stdout: commitImeId, stderr: "" },
       ]);
       const textClient = createTextClient();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
         createAdbFactory(adb),
         createObserver(focusedAndroidObservation("original")),
-        { textClient: textClient.client },
+        { textClient: textClient.client, timer },
       );
       expect(
         await executor.type({ action: "type", text, operation: "replace", mode: "imeKeyEvents" }),
       ).toMatchObject({ success: true });
-      expect(textClient.calls).toContain("clear");
+      expect(textClient.calls).toContain("clearField");
       expect(textClient.commitDeliveries).toEqual(["keyEvents"]);
     }
   });
@@ -2368,16 +2393,18 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { stdout: commitImeId, stderr: "" },
     ]);
     const textClient = createTextClient();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation("a😀")),
-      { textClient: textClient.client },
+      { textClient: textClient.client, timer },
     );
     expect(
       await executor.type({ action: "type", text: "a😀", operation: "replace", mode: "ime" }),
     ).toMatchObject({ success: true });
-    expect(textClient.calls).toContain("clear");
+    expect(textClient.calls).toContain("clearField");
     expect(textClient.commitViaImeCalls[0]?.text).toBe("a😀");
   });
 
@@ -2514,7 +2541,9 @@ describe("DefaultSendKeysCommandExecutor", () => {
         expect(result.error).toContain(`the focused field holds "${fieldText}"`);
       }
       // Auto also observes once before typing to choose password-safe delivery.
-      expect(observer.calls).toBe((mode === "auto" ? 1 : 0) + (success ? 1 : 3));
+      expect(observer.calls).toBe(
+        (mode === "auto" ? 1 : 0) + (operation === "replace" ? 4 : 0) + (success ? 1 : 3),
+      );
       expect(observer.options.at(-1)).toEqual({
         signal: undefined,
         freshness: "fresh",
@@ -2522,7 +2551,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         hierarchyOnly: true,
       });
       expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
-      expect(textClient.calls.includes("clear")).toBe(operation === "replace");
+      expect(textClient.calls.includes("clearField")).toBe(operation === "replace");
       expect(
         adb.getExecutedCommands().some((command) => command.startsWith("shell input keyevent")),
       ).toBe(false);
@@ -3228,7 +3257,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
 
     expect(result).toMatchObject({ success: false, partialApplication: true });
-    expect(textClient.calls).toContain("clear");
+    expect(textClient.calls).toContain("clearField");
     expect(adb.getExecutedCommands()).toContain(`shell ime set ${priorImeId}`);
   });
 

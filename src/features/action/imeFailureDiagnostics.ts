@@ -7,7 +7,6 @@ import { toSearchable } from "../utility/SearchableNode";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { TextActionResult } from "./SendKeys";
 import {
-  imeCommitSegmentCount,
   imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
 } from "../observe/android/CtrlProxyText";
@@ -179,7 +178,6 @@ export async function verifyImeCommitResult(
   text: string,
   verification: ImeVerification,
 ): Promise<TextActionResult> {
-  const multiSegment = imeCommitSegmentCount(text) > 1;
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       verification.checkAbort();
@@ -203,10 +201,9 @@ export async function verifyImeCommitResult(
         return result;
       }
       const suffixMatches = imeCommitSuffixMatches(observedText, text);
-      if (
-        suffixMatches === undefined ||
-        (multiSegment ? suffixMatches : imeCommitSubsequenceMatches(observedText, text))
-      ) {
+      // Editors can consume markers or add prefixes across multiple segments.
+      // Pre-existing insert content can satisfy this check; replace clears the field first.
+      if (suffixMatches !== false || imeCommitSubsequenceMatches(observedText, text)) {
         return result;
       }
       if (attempt === 2) {

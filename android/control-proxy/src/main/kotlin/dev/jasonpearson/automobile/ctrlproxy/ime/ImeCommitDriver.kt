@@ -48,10 +48,18 @@ data class ImeCommitResult(
   val committedUnits: Int = 0,
 )
 
-class ImeCommitDriver(private val sink: ImeCommitSink) {
+/**
+ * Delivers realistic typing through the editor connection. Commits yield at punctuation and
+ * separators like a person's keystrokes, allowing autocomplete, markdown/autoformat shortcuts, and
+ * mention chips to react to typed input. Letter and digit runs remain synchronous; bounded
+ * conversion waits let a rich-text composer settle before the next input arrives.
+ */
+class ImeCommitDriver(
+  private val sink: ImeCommitSink,
+  private val splitGraphemes: (String) -> List<String> = ImeGraphemes::split,
+) {
   private var completed = false
   private var committedUnits = 0
-  private var settleWaitMs = 0L
   private var completion: ((ImeCommitResult) -> Unit)? = null
   private var restoreId: String? = null
 
@@ -114,19 +122,39 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       return
     }
 
-    val segments = splitInlineFormatSpans(text)
-    fun deadlineExceeded() =
-      deadlineMs < Long.MAX_VALUE - settleWaitMs && sink.nowMs() >= deadlineMs + settleWaitMs
+    CommitSequence(text, deadlineMs, isCancelled).commitSegment(0)
+  }
+
+  /** Realistic typing pauses and conversion state belong to this request's continuations. */
+  private inner class CommitSequence(
+    text: String,
+    private val deadlineMs: Long,
+    private val isCancelled: () -> Boolean,
+  ) {
+    private val segments = splitInlineFormatSpans(text)
+    private val currentLine = StringBuilder()
+    private var settleWaitMs = 0L
+
+    private fun canContinue(): Boolean {
+      if (completed) return false
+      val error =
+        when {
+          isCancelled() -> "IME commit cancelled"
+          deadlineMs < Long.MAX_VALUE - settleWaitMs && sink.nowMs() >= deadlineMs + settleWaitMs ->
+            "IME commit deadline exceeded"
+          else -> return true
+        }
+      complete(failure(error))
+      return false
+    }
+
+    private fun waitForEditor(delayMs: Long, next: () -> Unit) {
+      settleWaitMs += delayMs
+      sink.postDelayed(delayMs) { if (canContinue()) next() }
+    }
+
     fun commitSegment(index: Int) {
-      if (completed) return
-      if (isCancelled()) {
-        complete(failure("IME commit cancelled"))
-        return
-      }
-      if (deadlineExceeded()) {
-        complete(failure("IME commit deadline exceeded"))
-        return
-      }
+      if (!canContinue()) return
       if (index == segments.size) {
         complete(
           if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
@@ -134,67 +162,89 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
         )
         return
       }
-      val segment = segments[index]
-      for (unit in ImeGraphemes.split(segment.text)) {
-        if (completed) return
-        if (isCancelled()) {
-          complete(failure("IME commit cancelled"))
-          return
-        }
-        if (deadlineExceeded()) {
-          complete(failure("IME commit deadline exceeded"))
-          return
-        }
-        // The policy may issue several editor operations for one grapheme. A false return can
-        // follow an applied prefix, so count the unit conservatively before dispatch.
-        committedUnits++
-        if (!sink.commitChar(unit)) {
-          complete(failure("Input connection lost during commit"))
-          return
-        }
-      }
+      commitUnits(index, splitGraphemes(segments[index].text), 0)
+    }
+
+    private fun finishSegment(index: Int) {
       // Composing profiles retain the last word until explicitly finished.
       if (!sink.finishComposing()) {
         complete(failure("Input connection lost while finishing composition"))
         return
       }
-      val literal = segment.trailingSpan
+      val literal = segments[index].trailingSpan
       if (literal != null && index < segments.lastIndex) {
-        fun pollConverted(attempt: Int) {
-          if (completed) return
-          if (isCancelled()) {
-            complete(failure("IME commit cancelled"))
-            return
-          }
-          if (deadlineExceeded()) {
-            complete(failure("IME commit deadline exceeded"))
-            return
-          }
-          val seen = sink.readTextBeforeCursor(literal.length)
-          // A short read of an unconverted literal is its trailing suffix: readTextBeforeCursor
-          // returns the last N chars before the cursor. The full literal is also its own suffix.
-          // Keep waiting on either; any non-empty non-suffix read (full or short) confirms
-          // conversion. Null/empty reads wait to the bounded ceiling.
-          val proceed =
-            (seen != null && seen.isNotEmpty() && !literal.endsWith(seen)) ||
-              attempt >= MAX_POLL_ATTEMPTS
-          if (proceed) {
-            commitSegment(index + 1)
-          } else {
-            settleWaitMs += POLL_INTERVAL_MS
-            sink.postDelayed(POLL_INTERVAL_MS) { pollConverted(attempt + 1) }
-          }
-        }
-        pollConverted(0)
+        pollInlineConversion(literal, 0) { commitSegment(index + 1) }
       } else {
         commitSegment(index + 1)
       }
     }
-    commitSegment(0)
+
+    private fun pollInlineConversion(literal: String, attempt: Int, next: () -> Unit) {
+      if (!canContinue()) return
+      val seen = sink.readTextBeforeCursor(literal.length)
+      // A short unconverted read is a suffix of the literal. Empty/null reads wait to the ceiling.
+      val converted = seen != null && seen.isNotEmpty() && !literal.endsWith(seen)
+      if (converted || attempt >= MAX_POLL_ATTEMPTS) {
+        next()
+      } else {
+        waitForEditor(POLL_INTERVAL_MS) { pollInlineConversion(literal, attempt + 1, next) }
+      }
+    }
+
+    private fun awaitLineStartConversion(literal: String, attempt: Int, next: () -> Unit) {
+      if (!canContinue()) return
+      if (attempt == 0) {
+        // Pause as in realistic typing so the rich-text composer can react to the typed shortcut.
+        waitForEditor(REALISTIC_TYPING_PAUSE_MS) { awaitLineStartConversion(literal, 1, next) }
+        return
+      }
+      val seen = sink.readTextBeforeCursor(literal.length)
+      val converted = seen != null && !seen.endsWith(literal)
+      if (converted || attempt >= MAX_POLL_ATTEMPTS) {
+        waitForEditor(SETTLE_AFTER_CONVERSION_MS, next)
+      } else {
+        waitForEditor(POLL_INTERVAL_MS) { awaitLineStartConversion(literal, attempt + 1, next) }
+      }
+    }
+
+    private fun commitUnits(segmentIndex: Int, units: List<String>, start: Int) {
+      // Word runs stay synchronous without consuming one stack frame per grapheme.
+      for (unitIndex in start until units.size) {
+        if (!canContinue()) return
+        val unit = units[unitIndex]
+        // A false return can follow an applied prefix: count conservatively before dispatch.
+        committedUnits++
+        if (!sink.commitChar(unit)) {
+          complete(failure("Input connection lost during commit"))
+          return
+        }
+        if (unit == "\n") currentLine.setLength(0) else currentLine.append(unit)
+        val hasMore = unitIndex < units.lastIndex || segmentIndex < segments.lastIndex
+        val next = { commitUnits(segmentIndex, units, unitIndex + 1) }
+        when {
+          unit == " " && hasMore && MENTION_BEFORE_SPACE.containsMatchIn(currentLine) -> {
+            waitForEditor(SETTLE_AFTER_MENTION_MS, next)
+            return
+          }
+          hasMore && LINE_START_SHORTCUT.matches(currentLine) -> {
+            awaitLineStartConversion(currentLine.toString(), 0, next)
+            return
+          }
+          unitIndex < units.lastIndex && !isWordUnit(unit) -> {
+            waitForEditor(REALISTIC_TYPING_PAUSE_MS, next)
+            return
+          }
+        }
+      }
+      if (canContinue()) finishSegment(segmentIndex)
+    }
   }
 
+  private fun isWordUnit(unit: String): Boolean =
+    unit.isNotEmpty() && unit.codePoints().allMatch { Character.isLetterOrDigit(it) }
+
   private fun sendKeyEvents(text: String, deadlineMs: Long, isCancelled: () -> Boolean) {
-    val units = ImeGraphemes.split(text)
+    val units = splitGraphemes(text)
     if (!runCatching { sink.supportsKeyEvents(units) }.getOrDefault(false)) {
       complete(failure("IME key events cannot represent this text; use mode ime for text commit"))
       return
@@ -268,5 +318,16 @@ class ImeCommitDriver(private val sink: ImeCommitSink) {
       Regex("```|`[^`\n]+`|\\*\\*[^*\n]+\\*\\*|~~[^~\n]+~~|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")
     const val POLL_INTERVAL_MS = 40L
     const val MAX_POLL_ATTEMPTS = 12
+    // Realistic typing pause: let an autoformatting editor react to punctuation and separators.
+    // Letter and digit runs remain synchronous.
+    const val REALISTIC_TYPING_PAUSE_MS = 45L
+    // Realistic typing gives markdown/autoformat shortcuts and mention chips time to settle
+    // before the next keystroke, preserving the editor's response to typed input.
+    const val SETTLE_AFTER_CONVERSION_MS = 150L
+    // A typed @mention is replaced by a mention token after the space; wait for it like a person.
+    const val SETTLE_AFTER_MENTION_MS = 400L
+    private val MENTION_BEFORE_SPACE = Regex("(^|\\s)@[\\p{L}\\p{N}._-]+ $")
+    // Markdown block shortcuts an autoformatting editor converts when a space is typed.
+    private val LINE_START_SHORTCUT = Regex("^(>|[-*•+]|\\d+[.)]) $")
   }
 }

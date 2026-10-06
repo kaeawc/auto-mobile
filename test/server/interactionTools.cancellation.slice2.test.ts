@@ -346,8 +346,9 @@ describe("slice 2 registered handler cancellation", () => {
       controller.abort();
       await expect(pending).rejects.toThrow("cancelled");
       expect(adb.getExecutedCommands()).toEqual([
+        "emu sensor get acceleration",
         "emu sensor set acceleration 100:100:100",
-        "emu sensor set acceleration 0:0:0",
+        "emu sensor set acceleration 0:9.77622:0",
       ]);
       expect(timer.now()).toBe(0);
       expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -400,7 +401,7 @@ describe("slice 2 registered handler cancellation", () => {
     });
     const dispatch = spyOn(adb, "executeCommand").mockImplementation(
       async (command, timeout, _buffer, _retry, signal) => {
-        if (command.endsWith("0:0:0")) {
+        if (command.endsWith("0:9.77622:0")) {
           expect(getAbortSignal()).toBeUndefined();
           expect(signal).toBeUndefined();
           expect(timeout).toBe(1000);

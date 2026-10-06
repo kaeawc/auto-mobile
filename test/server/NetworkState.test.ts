@@ -284,6 +284,15 @@ describe("NetworkState", () => {
       },
     );
 
+    it("keeps a mocked 200 out of the errors filter but admits a mocked 503", () => {
+      state.setCapture(true);
+      state.setNotifFilter("errors");
+      state.onNetworkEvent(makeNotification({ statusCode: 200, error: "mocked:mock-1" }));
+      expect(state.pendingNotificationCount).toBe(0);
+      state.onNetworkEvent(makeNotification({ statusCode: 503, error: "mocked:mock-1" }));
+      expect(state.pendingNotificationCount).toBe(1);
+    });
+
     it("does not notify when capture is off", () => {
       state.onNetworkEvent(makeNotification());
       timer.advanceTime(200);

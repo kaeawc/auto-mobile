@@ -2,6 +2,7 @@ import { sql, type Kysely } from "kysely";
 import type { Database } from "./types";
 import { getDb, createEventRetentionState, cleanupEventTable } from "./eventRepositoryBase";
 import { truncateBodyText } from "../utils/truncateBodyText";
+import { MOCKED_NETWORK_ERROR_PREFIX } from "../utils/networkRequestOutcome";
 
 export interface RecordNetworkEventInput {
   deviceId: string | null;
@@ -184,12 +185,21 @@ export async function getNetworkEvents(
     // SQLite trim defaults to spaces only; include all ECMAScript trim whitespace.
     const whitespace =
       "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+    // A "mocked:<id>" marker is provenance, not a transport failure: only the status decides.
+    const trimmedError = sql<string>`trim(error, ${whitespace})`;
     q = q.where((eb) =>
       eb.or([
         eb("status_code", ">=", 400),
         eb("status_code", "<=", 0),
         eb("status_code", "is", null),
-        eb(sql<string>`trim(error, ${whitespace})`, "!=", ""),
+        eb.and([
+          eb(trimmedError, "!=", ""),
+          eb(
+            sql<string>`substr(${trimmedError}, 1, ${MOCKED_NETWORK_ERROR_PREFIX.length})`,
+            "!=",
+            MOCKED_NETWORK_ERROR_PREFIX,
+          ),
+        ]),
       ]),
     );
   }

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { nestedElementContainerSchema } from "../../../../src/server/elementSelectorSchemas";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
@@ -47,6 +49,32 @@ function resolve(query = focus) {
 }
 
 describe("nested observe subtree scope", () => {
+  test("failure construction does not classify a not-found message by its wording", () => {
+    const selector = { text: "ambiguous missing container" };
+    const failure = new ElementResolver()["containerFailure"](selector, {
+      chosen: null,
+      candidates: [],
+      matches: [],
+      matchMode: "exact",
+      error: "Target not found: ambiguous missing container",
+      failureReason: "not-found",
+    });
+    expect(failure.containerFailure).toEqual({ level: 1, reason: "not-found", selector });
+    expect(failure.error).toBe("Container level 1 not found: ambiguous missing container");
+  });
+
+  test("missing container text containing ambiguous remains not-found", () => {
+    const query = { ...focus, container: { text: "ambiguous missing container" } };
+    const resolved = resolve(query);
+    expect(resolved.error).toBe("Container level 1 not found: ambiguous missing container");
+    expect(resolved.containerFailure).toEqual({
+      level: 1,
+      reason: "not-found",
+      selector: query.container,
+    });
+    expect(scope(query).observeScope?.focus?.containerFailure).toEqual(resolved.containerFailure);
+  });
+
   test("schema preserves the recursive selector and rejects malformed chains", () => {
     const parsed = observeSchema.parse({ platform: "android", scope: { focus } });
     expect(parsed.scope?.focus).toEqual(focus);
@@ -109,16 +137,14 @@ describe("nested observe subtree scope", () => {
     expect(result.observeScope?.focus?.chain?.at(-1)?.matchCount).toBe(8);
   });
 
-  test("a legacy combined anchor reports the selector that actually matched", () => {
+  test("a legacy combined anchor keeps main metadata", () => {
     const result = applyObserveScopeExperiments(
       observation,
       buildObserveScopeConfig(flags, {
         focus: { resourceId: "missing", text: "Battery" },
       }),
     );
-    expect(result.observeScope?.focus?.chain).toEqual([
-      { selector: { text: "Battery" }, matchCount: 1 },
-    ]);
+    expect(result.observeScope?.focus).toEqual({ by: "anchor", matched: true });
   });
 
   test("leaf missing inside a resolved chain is distinct", () => {
@@ -266,9 +292,308 @@ describe("nested observe subtree scope", () => {
       expect(JSON.parse(JSON.stringify(outcome.containerFailure))).toEqual({
         level: 1,
         reason: "not-found",
-        selector: { elementId: "missing", ...(dsl ? {} : { selectionStrategy: "unique" }) },
+        selector: { elementId: "missing" },
       });
       expect(outcome.timeoutReason).toContain("Container level 1 not found: missing");
+    });
+  }
+});
+
+// Captured by restoring origin/main's schema, scope transform, and model. Hashes
+// pin the complete serialized observation, including absence of new metadata.
+const mainTables = {
+  legacy: [
+    {
+      input: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+      },
+      parsed: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+      },
+      path: "anchor",
+      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+    },
+    {
+      input: {
+        text: "Battery",
+      },
+      parsed: {
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "f75496c7c07b2dd7471d25ba4ec681554a8226215208a24e038f03c1c8cf2dfe",
+    },
+    {
+      input: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        text: "Battery",
+      },
+      parsed: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+    },
+    {
+      input: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        index: 0,
+      },
+      parsed: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+      },
+      path: "anchor",
+      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+    },
+    {
+      input: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        selectionStrategy: "first",
+      },
+      parsed: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+      },
+      path: "anchor",
+      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+    },
+    {
+      input: {
+        text: "Battery",
+        index: 0,
+      },
+      parsed: {
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "f75496c7c07b2dd7471d25ba4ec681554a8226215208a24e038f03c1c8cf2dfe",
+    },
+    {
+      input: {
+        text: "Battery",
+        selectionStrategy: "unique",
+      },
+      parsed: {
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "f75496c7c07b2dd7471d25ba4ec681554a8226215208a24e038f03c1c8cf2dfe",
+    },
+    {
+      input: {
+        text: " x ",
+      },
+      parsed: {
+        text: " x ",
+      },
+      path: "anchor",
+      hash: "92fd88aecd19b4c2b646b52bcf73b72396c102aec05107df01bb8817610aa42d",
+    },
+    {
+      input: {},
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: true,
+      parsed: true,
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: false,
+      parsed: false,
+      path: "off",
+      hash: "cca9a79b558cf28a2efb1a89994893791c60cbd11234e2d47f8de27dca5000d1",
+    },
+    {
+      input: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        text: "Battery",
+        index: 3,
+        selectionStrategy: "unique",
+        extra: {
+          ignored: true,
+        },
+      },
+      parsed: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+    },
+    {
+      input: {
+        index: -1,
+        selectionStrategy: "invalid",
+        extra: true,
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: {
+        text: "Battery",
+        index: "invalid",
+        selectionStrategy: 4,
+      },
+      parsed: {
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "f75496c7c07b2dd7471d25ba4ec681554a8226215208a24e038f03c1c8cf2dfe",
+    },
+  ],
+  nested: [
+    {
+      input: {
+        elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        index: 0,
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: {
+        text: "Battery",
+        container: {
+          elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+          index: 2,
+        },
+      },
+      parsed: {
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "f75496c7c07b2dd7471d25ba4ec681554a8226215208a24e038f03c1c8cf2dfe",
+    },
+    {
+      input: {
+        text: "Battery",
+        elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+      },
+      parsed: {
+        text: "Battery",
+      },
+      path: "anchor",
+      hash: "f75496c7c07b2dd7471d25ba4ec681554a8226215208a24e038f03c1c8cf2dfe",
+    },
+    {
+      input: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        container: {
+          elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        },
+      },
+      parsed: {
+        resourceId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+      },
+      path: "anchor",
+      hash: "e844c5685aa65a5da0d5d341159f2b9b69b5285fd91bf65e82745dd2dc432267",
+    },
+    {
+      input: {
+        elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        container: {
+          text: "Battery",
+          elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        },
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: {
+        container: {
+          elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        },
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: {
+        elementId: "",
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: {
+        elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        container: {
+          text: "ambiguous missing container",
+        },
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+    {
+      input: {
+        elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        container: {
+          elementId: "com.google.android.apps.nexuslauncher:id/widgets_list_header",
+        },
+        selectionStrategy: "unique",
+      },
+      parsed: {},
+      path: "foreground-app",
+      hash: "a3113ed15239d7bd40bcdf5a2df28120823c3a4e13a28d77c955aba07cac9cda",
+    },
+  ],
+};
+function outputHash(result: ObserveResult): string {
+  return createHash("sha256").update(JSON.stringify(result)).digest("hex");
+}
+
+describe("main legacy focus compatibility table", () => {
+  for (const row of mainTables.legacy) {
+    test(JSON.stringify(row.input), () => {
+      const parsed = observeSchema.parse({ platform: "android", scope: { focus: row.input } });
+      expect(parsed.scope?.focus).toEqual(row.parsed);
+      const result = applyObserveScopeExperiments(
+        observation,
+        buildObserveScopeConfig(flags, parsed.scope),
+      );
+      expect(result.observeScope?.focus?.by ?? "off").toBe(row.path);
+      expect(outputHash(result)).toBe(row.hash);
+    });
+  }
+});
+
+describe("new focus discriminator table", () => {
+  for (const row of mainTables.nested) {
+    test(JSON.stringify(row.input), () => {
+      const action = nestedElementContainerSchema.safeParse(row.input);
+      const parsed = observeSchema.safeParse({ platform: "android", scope: { focus: row.input } });
+      expect(parsed.success).toBe(action.success);
+      if (!action.success && !parsed.success) {
+        expect(parsed.error.issues).toEqual(
+          action.error.issues.map((issue) => ({
+            ...issue,
+            path: ["scope", "focus", ...issue.path],
+          })),
+        );
+        return;
+      }
+      if (!action.success || !parsed.success) {
+        throw new Error("Focus schema and action schema disagree");
+      }
+      expect(parsed.data.scope?.focus).toEqual(action.data);
+      const result = applyObserveScopeExperiments(
+        observation,
+        buildObserveScopeConfig(flags, parsed.data.scope),
+      );
+      expect(result.observeScope?.focus?.chain).toBeDefined();
+      expect(outputHash(result)).not.toBe(row.hash);
     });
   }
 });

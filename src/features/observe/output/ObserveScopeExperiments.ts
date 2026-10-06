@@ -195,36 +195,25 @@ function withChildren(node: NodeRecord, children: NodeRecord[]): NodeRecord {
  * FOCUS
  * ------------------------------------------------------------------------ */
 
-/** Preserve legacy depth-first anchor order while counting its matches. */
-function findAnchors(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord[] {
-  const matches: NodeRecord[] = [];
+/** Depth-first search for the first node matching a semantic anchor. */
+function findAnchor(nodes: NodeRecord[], anchor: FocusAnchor): NodeRecord | null {
   for (const node of nodes) {
     if (anchor.resourceId !== undefined && stringAttr(node, "resource-id") === anchor.resourceId) {
-      matches.push(node);
-    } else if (
+      return node;
+    }
+    if (
       anchor.text !== undefined &&
       anchor.text !== "" &&
       stringAttr(node, "text").includes(anchor.text)
     ) {
-      matches.push(node);
+      return node;
     }
-    matches.push(...findAnchors(childrenOf(node), anchor));
+    const found = findAnchor(childrenOf(node), anchor);
+    if (found) {
+      return found;
+    }
   }
-  return matches;
-}
-
-/** Legacy anchors may supply both fields; discovery names the rule that matched. */
-function legacyFocusChain(roots: NodeRecord[], anchor: FocusAnchor, matched?: NodeRecord) {
-  const byId =
-    anchor.resourceId !== undefined &&
-    (!matched || stringAttr(matched, "resource-id") === anchor.resourceId);
-  const discoveryAnchor = byId ? { resourceId: anchor.resourceId } : { text: anchor.text };
-  return [
-    {
-      selector: byId ? { elementId: anchor.resourceId } : { text: anchor.text },
-      matchCount: findAnchors(roots, discoveryAnchor).length,
-    },
-  ];
+  return null;
 }
 
 /**
@@ -339,7 +328,7 @@ function scopeToSelector(
 }
 
 function isResolverFocus(anchor: ObserveFocusSelector): anchor is ElementContainerSelector {
-  return ["elementId", "container", "index", "selectionStrategy"].some((key) => key in anchor);
+  return "elementId" in anchor || "container" in anchor;
 }
 
 /**
@@ -359,8 +348,7 @@ export function scopeToFocus(
   }
   const legacy: FocusAnchor | undefined = anchor;
   if (legacy && (legacy.resourceId !== undefined || legacy.text !== undefined)) {
-    const matches = findAnchors(roots, legacy);
-    const matched = matches[0];
+    const matched = findAnchor(roots, legacy);
     if (matched) {
       setRootNodes(obs, [matched]);
     }
@@ -368,8 +356,7 @@ export function scopeToFocus(
       result: obs,
       focus: {
         by: "anchor",
-        matched: matched !== undefined,
-        chain: legacyFocusChain(roots, legacy, matched),
+        matched: matched !== null,
       },
     };
   }

@@ -97,6 +97,8 @@ export interface ElementResolution {
   scopeChain?: ResolvedScope[];
   containerFailure?: ContainerFailure;
   error?: string;
+  /** Typed failure classification, set where selection fails. */
+  failureReason?: ContainerFailure["reason"];
 }
 
 export function isMissingContainerError(error: string | undefined): boolean {
@@ -328,14 +330,14 @@ export class ElementResolver {
     selector: ResolverSelector,
     result: ElementResolution,
   ): ElementResolution {
-    if (result.error?.startsWith("Container level ")) {
+    if (result.containerFailure) {
       return result;
     }
     let level = 1;
     for (let parent = selector.container; parent; parent = parent.container) {
       level += 1;
     }
-    const ambiguous = /ambiguous/i.test(result.error ?? "");
+    const ambiguous = result.failureReason === "ambiguous";
     return {
       ...result,
       containerFailure: {
@@ -573,13 +575,13 @@ export class ElementResolver {
   }
 
   private prepareMatches(
-    matched: Pick<ElementResolution, "matches" | "matchMode" | "error">,
+    matched: Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason">,
     selector: ResolverSelector,
     snapshot: ResolverSnapshot,
     scope: SearchableEntry | undefined,
     intent: ResolutionIntent,
     preserveTextScope: boolean,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (intent.preferToggle && selector.index === undefined && selector.elementId === undefined) {
       const toggles = this.toggleMatches(matched.matches, snapshot, intent);
       if (toggles.length > 0) {
@@ -652,6 +654,7 @@ export class ElementResolver {
       result.chosen = candidates[0];
       return;
     }
+    result.failureReason = candidates.length === 0 ? "not-found" : "ambiguous";
     result.error =
       candidates.length === 0
         ? `Target not found${result.scope ? " within container" : ""}`
@@ -939,7 +942,9 @@ export class ElementResolver {
     intent: ResolutionIntent,
     snapshot: ResolverSnapshot,
     scope?: SearchableEntry,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> & { usedHintFallback?: boolean } {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> & {
+    usedHintFallback?: boolean;
+  } {
     if (selector.elementId !== undefined) {
       return this.matchId(
         nodes,
@@ -1029,7 +1034,7 @@ export class ElementResolver {
     textQuery: string,
     snapshot: ResolverSnapshot,
     options: { scope?: SearchableEntry; hintFallback?: boolean },
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     const { scope, hintFallback } = options;
     const fields = (node: SearchableEntry) =>
       this.matchableTextFields(node, selector, hintFallback);
@@ -1107,7 +1112,7 @@ export class ElementResolver {
     matchMode: MatchMode,
     intent: ResolutionIntent,
     caseSensitive?: boolean,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (matchMode === "regex") {
       return {
         matches: [],
@@ -1146,6 +1151,7 @@ export class ElementResolver {
       return {
         matches: [],
         matchMode,
+        failureReason: "ambiguous",
         error: `Skeleton element id "${query}" is ambiguous: ${direct.length} id-less nodes share this view-id. Use text with index instead.`,
       };
     }
@@ -1191,6 +1197,7 @@ export class ElementResolver {
       matchMode,
       ...(packages.size > 1
         ? {
+            failureReason: "ambiguous" as const,
             error: `Ambiguous element ID ${query}: ${candidates.map((node) => node.nativeId).join(", ")}. Use a full resource ID.`,
           }
         : {}),

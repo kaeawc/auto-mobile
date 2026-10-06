@@ -28,8 +28,9 @@ export interface FocusAnchor {
  * Each dimension is honored only when its server experiment flag is enabled.
  *
  *  - `focus`: `true` scopes to the foreground app; an anchor object scopes to the
- *    first node matching `resourceId`/`text`; the additive elementId/container form
- *    uses the shared action resolver with per-level index and selectionStrategy.
+ *    first node matching `resourceId`/`text`; only an object with an `elementId`
+ *    or `container` key uses the shared action resolver with per-level index
+ *    and selectionStrategy.
  *  - `region`: `true` crops to the inset content rectangle; a box crops to that
  *    normalized rectangle.
  *  - `overview`: `true` collapses to the container skeleton.
@@ -62,7 +63,7 @@ export interface ObserveScopeMetadata {
     by: "anchor" | "foreground-app";
     matched: boolean;
     packageName?: string;
-    /** Outermost container through the focus target, in client selector vocabulary. */
+    /** New nested form only: outermost container through the focus target. */
     chain?: { selector: ElementContainerSelector; matchCount: number }[];
     /** Resolver message preserved verbatim; container failures also identify the level. */
     error?: string;

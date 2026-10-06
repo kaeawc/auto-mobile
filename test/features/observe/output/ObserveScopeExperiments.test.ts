@@ -340,7 +340,6 @@ describe("scopeToFocus", () => {
     expect(focus).toEqual({
       by: "anchor",
       matched: true,
-      chain: [{ selector: { elementId: LIST }, matchCount: 1 }],
     });
     expect(roots(result)).toHaveLength(1);
     expect(roots(result)[0]["resource-id"]).toBe(LIST);
@@ -353,7 +352,6 @@ describe("scopeToFocus", () => {
     expect(focus).toEqual({
       by: "anchor",
       matched: true,
-      chain: [{ selector: { text: "Title" }, matchCount: 1 }],
     });
     expect(roots(result)).toHaveLength(1);
     expect(roots(result)[0]["resource-id"]).toBe(HEADER);

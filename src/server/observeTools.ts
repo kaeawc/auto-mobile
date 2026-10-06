@@ -535,32 +535,44 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 // (not env). Every dimension is always honored when requested — the focus /
 // region / overview scoping is on by default and applies only when a call sets
 // the matching `scope` field.
+const legacyObserveFocusObjectSchema = z.object({
+  resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+  text: z.string().optional().describe("Anchor by substring text match"),
+});
+const legacyObserveFocusSchema = z.union([z.boolean(), legacyObserveFocusObjectSchema]);
+const routedLegacyObserveFocusSchema = withJsonSchemaOverride(
+  legacyObserveFocusObjectSchema
+    .extend({ elementId: z.never().optional(), container: z.never().optional() })
+    .refine((value) => !("elementId" in value || "container" in value)),
+  (schema) => {
+    const properties = schema.properties as Record<string, unknown>;
+    delete properties.elementId;
+    delete properties.container;
+    schema.not = { anyOf: [{ required: ["elementId"] }, { required: ["container"] }] };
+    schema.additionalProperties = true;
+  },
+);
 const observeScopeFocusSchema = z
-  .union([
-    z.boolean(),
-    nestedElementContainerSchema,
-    z.preprocess(
-      (value, ctx) => {
-        if (
-          value &&
-          typeof value === "object" &&
-          ["elementId", "container", "index", "selectionStrategy"].some((key) => key in value)
-        ) {
-          ctx.addIssue({
-            code: "custom",
-            message: "Use the nested element selector form for scoped queries",
-          });
-        }
-        return value;
-      },
-      z.object({
-        resourceId: z.string().optional().describe("Anchor by exact resource-id"),
-        text: z.string().optional().describe("Anchor by substring text match"),
-      }),
-    ),
-  ])
+  .preprocess(
+    (value, ctx) => {
+      const nested =
+        value !== null &&
+        typeof value === "object" &&
+        ("elementId" in value || "container" in value);
+      const parsed = (nested ? nestedElementContainerSchema : legacyObserveFocusSchema).safeParse(
+        value,
+      );
+      if (!parsed.success) {
+        // Abort before the permissive legacy arm can consume an invalid nested selector.
+        ctx.issues.push(...parsed.error.issues.map((issue) => ({ ...issue, continue: false })));
+        return z.NEVER;
+      }
+      return parsed.data;
+    },
+    z.union([z.boolean(), routedLegacyObserveFocusSchema, nestedElementContainerSchema]),
+  )
   .describe(
-    "Scope to a subtree: true = foreground app; legacy {resourceId|text} anchor, or {elementId|text, container?, index?, selectionStrategy?} recursive selector.",
+    "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
   );
 
 const observeScopeRegionBoxSchema = z
@@ -819,13 +831,25 @@ function containerFailureMetadata(failed: boolean, failure: ContainerFailure | u
 }
 
 /** Record resolver diagnostics without changing predicate matching or other tools. */
-function trackContainerFailure(finder: ConditionResolver) {
+function trackContainerFailure(
+  finder: ConditionResolver,
+  container: ObserveWaitForOptions["container"],
+) {
+  // Resolution may propagate unique; diagnostics keep each client-sent level.
+  const levels: NonNullable<ObserveWaitForOptions["container"]>[] = [];
+  for (let level = container; level; level = level.container) {
+    levels.unshift(level);
+  }
   let failure: ContainerFailure | undefined;
   return {
     finder: {
       resolve: (...args: Parameters<ConditionResolver["resolve"]>) => {
         const result = finder.resolve(...args);
-        failure ??= result.containerFailure;
+        const resolved = result.containerFailure;
+        failure ??= resolved && {
+          ...resolved,
+          selector: levels[resolved.level - 1] ?? resolved.selector,
+        };
         return result;
       },
     } satisfies ConditionResolver,
@@ -974,7 +998,7 @@ const runWaitForConditionDsl = async (
     return applySettledGate(outcome, settle.settled);
   }
 
-  const tracked = trackContainerFailure(new ElementResolver());
+  const tracked = trackContainerFailure(new ElementResolver(), waitFor.container);
   const evaluate = buildConditionPredicate(
     tracked.finder,
     waitFor.for,
@@ -1427,7 +1451,7 @@ const evaluateWaitForObservation = (
     display: observation.viewHierarchy,
   };
   const evaluation: ObserveConditionEvaluation = { matched: false };
-  const tracked = trackContainerFailure(finder);
+  const tracked = trackContainerFailure(finder, waitFor.container);
   finder = tracked.finder;
   const needsHierarchy =
     hasElementPredicate(waitFor) || waitFor.absent !== undefined || waitFor.settled !== undefined;

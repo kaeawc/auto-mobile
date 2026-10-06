@@ -8829,13 +8829,10 @@
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; legacy {resourceId|text} anchor, or {elementId|text, container?, index?, selectionStrategy?} recursive selector.",
+              "description": "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
               "anyOf": [
                 {
                   "type": "boolean"
-                },
-                {
-                  "$ref": "#/$defs/__schema0"
                 },
                 {
                   "type": "object",
@@ -8849,7 +8846,10 @@
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": true
+                },
+                {
+                  "$ref": "#/$defs/__schema0"
                 }
               ]
             },

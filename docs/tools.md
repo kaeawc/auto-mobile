@@ -2035,8 +2035,10 @@ so the final selector can become an action's `container` (for example, tap
 `remove` within that item). Use qualified Android resource IDs when needed.
 No scope metadata is added to an observation that did not request a scope.
 Legacy `{resourceId}` / flat `{text}` anchors retain their exact-ID / substring
-matching and first-node behavior; their metadata additionally reports one level
-and its count. Boolean foreground-app focus keeps its existing metadata.
+matching, first-node behavior, and unchanged metadata without `chain`. An object
+with `elementId` or `container` is a nested selector; every other object keeps
+the flat `resourceId`/`text` anchor, ignoring extra fields. Boolean foreground-app
+focus keeps its existing metadata.
 As before, scope transforms apply to full projection, not the default skeleton.
 
 A failed new selector returns an empty subtree and `observeScope.focus.matched:

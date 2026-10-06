@@ -73,6 +73,7 @@ import { findIosSimulatorAppProcess } from "../features/action/CrashApp";
 import { readAndroidPackageProcesses } from "../utils/android-cmdline-tools/androidProcessState";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import { androidRollbackScript, androidSaveBackupScript } from "./androidFileBackup";
 
 export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
@@ -779,14 +780,6 @@ function androidAppFilePrefix(appTarget: AppContainersTarget, userId: number): s
     : androidRunAsPrefix(appTarget.appId, userId);
 }
 
-/** Delete newly created files and restore overwritten ones, reporting failure if any step fails. */
-function androidRollbackScript(created: string[], restores: string[]): string {
-  const steps = [...(created.length > 0 ? [`rm -f ${created.join(" ")}`] : []), ...restores].map(
-    (step) => `${step} || rc=1`,
-  );
-  return `rc=0; ${steps.join("; ")}; exit $rc`;
-}
-
 class AndroidAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
@@ -1017,8 +1010,7 @@ class AndroidAppFileProvider
     };
     // Save the previous content before it is replaced so a failed batch can restore it.
     const saveBackup = keepPrevious
-      ? `{ if [ -f ${shellQuote(destination)} ]; then ` +
-        `cp ${shellQuote(destination)} ${shellQuote(backup)} && echo ${APP_FILE_BACKUP_MARKER}; fi; } && `
+      ? `${androidSaveBackupScript(destination, backup, APP_FILE_BACKUP_MARKER)} && `
       : "";
     const cleanupCommands = [
       ...(target.kind === "external" ? [] : [`shell rm -f ${shellQuote(staging)}`]),

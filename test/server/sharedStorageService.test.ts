@@ -181,7 +181,7 @@ describe("SharedStorageService", () => {
     const executor = new FakeAdbExecutor();
     const timer = new FakeTimer();
     const controller = new AbortController();
-    executor.abortAfterCommand("second.png", controller);
+    executor.abortAfterCommand("push /fixtures/second.png", controller);
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
     const removed: string[] = [];
     const execute = executor.executeCommand.bind(executor);

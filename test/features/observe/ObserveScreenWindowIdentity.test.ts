@@ -375,10 +375,13 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     const playground = "dev.jasonpearson.automobile.playground";
     const screenBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
 
-    function overlayFocusedHierarchy(windows: ViewHierarchyWindowInfo[]): ViewHierarchyResult {
+    function overlayFocusedHierarchy(
+      windows: ViewHierarchyWindowInfo[],
+      capturedAt: number = now,
+    ): ViewHierarchyResult {
       return createHierarchyForTest({
-        updatedAt: now,
-        receivedAt: now,
+        updatedAt: capturedAt,
+        receivedAt: capturedAt,
         fresh: true,
         screenWidth: 1080,
         screenHeight: 2400,
@@ -446,6 +449,31 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
         overlayFocusedHierarchy(focusedOverlayWindows),
         undefined,
       );
+
+      expect(result.activeWindow?.appId).toBe(CTRL_PROXY_PACKAGE);
+      expect(result.activeWindow?.type).toBeUndefined();
+    });
+
+    test("a stale capture taken while the overlay had focus is not relabelled or exempted", async () => {
+      // Taken a minute ago, while the text-field overlay held focus; the overlay is gone now and
+      // the app is in front. The capture's own window list cannot vouch for itself.
+      const { result } = await observeWith(
+        overlayFocusedHierarchy(focusedOverlayWindows, now - 60_000),
+        playground,
+      );
+
+      expect(result.activeWindow?.appId).toBe(CTRL_PROXY_PACKAGE);
+      expect(result.activeWindow?.type).toBeUndefined();
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.category).toBe("window_identity");
+      expect(hasWrongWindowEvidence(result)).toBe(true);
+    });
+
+    test("a capture without a device timestamp cannot date the overlay claim", async () => {
+      const undated = overlayFocusedHierarchy(focusedOverlayWindows);
+      delete undated.updatedAt;
+      delete undated.receivedAt;
+      const { result } = await observeWith(undated, playground);
 
       expect(result.activeWindow?.appId).toBe(CTRL_PROXY_PACKAGE);
       expect(result.activeWindow?.type).toBeUndefined();

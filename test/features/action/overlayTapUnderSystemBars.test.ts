@@ -1,81 +1,183 @@
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
-import { overlayTapUnderSystemBar } from "../../../src/features/action/overlayTapUnderSystemBars";
-import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
+import {
+  isOwnOverlayNode,
+  resolveOverlayTapUnderSystemBar,
+} from "../../../src/features/action/overlayTapUnderSystemBars";
+import type { ObservationInsets } from "../../../src/models/ObservationInsets";
+import type {
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../../src/models/ViewHierarchyResult";
 
 // Geometry from the #10086 device run: 1080x2400, 136 px status bar, 63 px gesture bar.
-const insets = { top: 136, bottom: 63, left: 0, right: 0 };
 const fullScreen = { left: 0, top: 0, right: 1080, bottom: 2400 };
 
-function capture(
-  windows: NonNullable<ViewHierarchyResult["windows"]>,
-  overrides: Partial<ViewHierarchyResult> = {},
-): ViewHierarchyResult {
+const typedInsets = (visible: { top: number; bottom: number }): ObservationInsets => ({
+  available: true,
+  source: "android-window-metrics",
+  units: "physical-pixels",
+  systemBars: {
+    visible: { ...visible, left: 0, right: 0 },
+    stable: { top: 136, bottom: 63, left: 0, right: 0 },
+  },
+});
+
+function capture(overrides: Partial<ViewHierarchyResult> = {}): ViewHierarchyResult {
   return {
     packageName: "dev.jasonpearson.automobile.playground",
     screenWidth: 1080,
     screenHeight: 2400,
-    systemInsets: insets,
-    windows,
+    systemInsets: { top: 136, bottom: 63, left: 0, right: 0 },
+    insets: typedInsets({ top: 136, bottom: 63 }),
     hierarchy: { node: { bounds: fullScreen } },
     ...overrides,
   } as ViewHierarchyResult;
 }
 
-const ownOverlay = (bounds = fullScreen) => ({
-  id: 2,
-  type: 4,
-  packageName: CTRL_PROXY_PACKAGE,
-  bounds,
-});
+function resolve(
+  point: { x: number; y: number },
+  options: {
+    bounds?: { left: number; top: number; right: number; bottom: number };
+    owned?: boolean;
+    hierarchy?: ViewHierarchyResult | undefined;
+  } = {},
+) {
+  return resolveOverlayTapUnderSystemBar({
+    hierarchy: "hierarchy" in options ? options.hierarchy : capture(),
+    ownedByOverlay: options.owned ?? true,
+    bounds: options.bounds ?? {
+      left: point.x - 40,
+      top: point.y - 20,
+      right: point.x + 40,
+      bottom: point.y + 20,
+    },
+    point,
+  });
+}
 
-describe("overlayTapUnderSystemBar (#10086)", () => {
-  test("a point in the navigation bar band under the fullscreen overlay is named", () => {
-    expect(overlayTapUnderSystemBar(capture([ownOverlay()]), { x: 618, y: 2356 })).toBe(
-      "navigation bar",
-    );
+describe("resolveOverlayTapUnderSystemBar (#10086)", () => {
+  test("a control wholly in the navigation bar band is refused and the bar named", () => {
+    const bounds = { left: 578, top: 2340, right: 658, bottom: 2380 };
+    expect(resolve({ x: 618, y: 2360 }, { bounds })).toEqual({
+      kind: "refuse",
+      bar: "navigation bar",
+    });
   });
 
-  test("a point in the status bar band under a full-height floating overlay is named", () => {
-    const floating = ownOverlay({ left: 120, top: 0, right: 960, bottom: 2400 });
-    expect(overlayTapUnderSystemBar(capture([floating]), { x: 370, y: 44 })).toBe("status bar");
+  test("a control wholly in the status bar band is refused and the bar named", () => {
+    expect(resolve({ x: 370, y: 44 })).toEqual({ kind: "refuse", bar: "status bar" });
   });
 
   test("the strip just above the navigation bar is reachable, the first bar pixel is not", () => {
-    expect(overlayTapUnderSystemBar(capture([ownOverlay()]), { x: 618, y: 2336 })).toBeUndefined();
-    expect(overlayTapUnderSystemBar(capture([ownOverlay()]), { x: 618, y: 2337 })).toBe(
-      "navigation bar",
-    );
+    const point = { x: 618, y: 2336 };
+    expect(resolve(point, { bounds: { left: 578, top: 2336, right: 658, bottom: 2337 } })).toEqual({
+      kind: "proceed",
+      point,
+    });
+    expect(
+      resolve({ x: 618, y: 2337 }, { bounds: { left: 578, top: 2337, right: 658, bottom: 2338 } }),
+    ).toEqual({ kind: "refuse", bar: "navigation bar" });
   });
 
-  test("a point inside the safe area is not flagged", () => {
-    expect(overlayTapUnderSystemBar(capture([ownOverlay()]), { x: 500, y: 1200 })).toBeUndefined();
-    expect(overlayTapUnderSystemBar(capture([ownOverlay()]), { x: 500, y: 136 })).toBeUndefined();
+  test("a point inside the safe area is untouched", () => {
+    expect(resolve({ x: 500, y: 1200 })).toEqual({ kind: "proceed", point: { x: 500, y: 1200 } });
+    expect(
+      resolve({ x: 500, y: 136 }, { bounds: { left: 460, top: 136, right: 540, bottom: 200 } }),
+    ).toEqual({ kind: "proceed", point: { x: 500, y: 136 } });
   });
 
-  test("without an own overlay window covering the point nothing is judged", () => {
-    expect(overlayTapUnderSystemBar(capture([]), { x: 618, y: 2356 })).toBeUndefined();
-    const elsewhere = ownOverlay({ left: 0, top: 600, right: 1080, bottom: 900 });
-    expect(overlayTapUnderSystemBar(capture([elsewhere]), { x: 618, y: 2356 })).toBeUndefined();
+  test("an element that is not the overlay's is never judged", () => {
+    expect(resolve({ x: 618, y: 2356 }, { owned: false })).toEqual({
+      kind: "proceed",
+      point: { x: 618, y: 2356 },
+    });
   });
 
-  test("another package's overlay window and application windows are never judged", () => {
-    const screenReader = {
-      id: 3,
-      type: 4,
-      packageName: "com.example.screenreader",
+  test("a control straddling the bar edge is tapped in the part outside the bar", () => {
+    // Both controls have their own tap point inside a band while a visible part is reachable.
+    const bounds = { left: 460, top: 100, right: 540, bottom: 200 };
+    expect(resolve({ x: 500, y: 100 }, { bounds })).toEqual({
+      kind: "proceed",
+      point: { x: 500, y: 168 },
+    });
+    const bottomEdge = { left: 460, top: 2300, right: 540, bottom: 2400 };
+    expect(resolve({ x: 500, y: 2350 }, { bounds: bottomEdge })).toEqual({
+      kind: "proceed",
+      point: { x: 500, y: 2318 },
+    });
+  });
+
+  test("hidden bars do not count: visible insets are used, not the stable or gesture alias", () => {
+    const hidden = capture({
+      insets: typedInsets({ top: 0, bottom: 0 }),
+      systemInsets: { top: 168, bottom: 84, left: 78, right: 78 },
+    });
+    expect(resolve({ x: 618, y: 2356 }, { hierarchy: hidden })).toEqual({
+      kind: "proceed",
+      point: { x: 618, y: 2356 },
+    });
+    expect(resolve({ x: 370, y: 44 }, { hierarchy: hidden })).toEqual({
+      kind: "proceed",
+      point: { x: 370, y: 44 },
+    });
+  });
+
+  test("without typed visibility a point in the legacy band proceeds with a warning", () => {
+    const legacyOnly = capture({ insets: undefined });
+    const decision = resolve({ x: 618, y: 2356 }, { hierarchy: legacyOnly });
+    expect(decision.kind).toBe("proceed");
+    expect(decision.kind === "proceed" && decision.warning).toContain("does not say whether");
+    const unavailable = capture({
+      insets: { ...typedInsets({ top: 136, bottom: 63 }), available: false },
+    });
+    expect(resolve({ x: 618, y: 2356 }, { hierarchy: unavailable }).kind).toBe("proceed");
+    // Inside the safe area there is nothing to warn about.
+    expect(resolve({ x: 500, y: 1200 }, { hierarchy: legacyOnly })).toEqual({
+      kind: "proceed",
+      point: { x: 500, y: 1200 },
+    });
+  });
+
+  test("a capture without insets or screen height cannot prove a bar", () => {
+    const none = capture({ insets: undefined, systemInsets: undefined });
+    expect(resolve({ x: 618, y: 2356 }, { hierarchy: none })).toEqual({
+      kind: "proceed",
+      point: { x: 618, y: 2356 },
+    });
+    const noHeight = capture({ screenHeight: undefined });
+    expect(resolve({ x: 618, y: 2356 }, { hierarchy: noHeight }).kind).toBe("proceed");
+    expect(resolve({ x: 1, y: 1 }, { hierarchy: undefined }).kind).toBe("proceed");
+  });
+});
+
+describe("isOwnOverlayNode (#10086)", () => {
+  const overlayControl: ViewHierarchyNode = { bounds: fullScreen };
+  const appControl: ViewHierarchyNode = { bounds: fullScreen };
+  const windows = (packageName: string, type = 4) => [
+    {
+      id: 2,
+      type,
+      packageName,
       bounds: fullScreen,
-    };
-    const app = { id: 1, type: 1, packageName: CTRL_PROXY_PACKAGE, bounds: fullScreen };
-    expect(overlayTapUnderSystemBar(capture([screenReader]), { x: 1, y: 2 })).toBeUndefined();
-    expect(overlayTapUnderSystemBar(capture([app]), { x: 1, y: 2 })).toBeUndefined();
+      hierarchy: { node: { bounds: fullScreen, node: [overlayControl] } },
+    },
+  ];
+
+  test("only a node inside an own overlay window's tree belongs to the overlay", () => {
+    const hierarchy = capture({ windows: windows(CTRL_PROXY_PACKAGE) });
+    expect(isOwnOverlayNode(hierarchy, overlayControl)).toBe(true);
+    expect(isOwnOverlayNode(hierarchy, appControl)).toBe(false);
+    expect(isOwnOverlayNode(hierarchy, undefined)).toBe(false);
+    expect(isOwnOverlayNode(undefined, overlayControl)).toBe(false);
   });
 
-  test("a capture without insets, screen height or hierarchy cannot prove a bar", () => {
-    const noInsets = capture([ownOverlay()], { systemInsets: undefined });
-    expect(overlayTapUnderSystemBar(noInsets, { x: 618, y: 2356 })).toBeUndefined();
-    const noHeight = capture([ownOverlay()], { screenHeight: undefined });
-    expect(overlayTapUnderSystemBar(noHeight, { x: 618, y: 2356 })).toBeUndefined();
-    expect(overlayTapUnderSystemBar(undefined, { x: 1, y: 1 })).toBeUndefined();
+  test("another package's overlay window and application windows do not own the node", () => {
+    expect(
+      isOwnOverlayNode(capture({ windows: windows("com.example.screenreader") }), overlayControl),
+    ).toBe(false);
+    expect(
+      isOwnOverlayNode(capture({ windows: windows(CTRL_PROXY_PACKAGE, 1) }), overlayControl),
+    ).toBe(false);
   });
 });

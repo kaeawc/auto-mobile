@@ -2,12 +2,165 @@ import { logger } from "../utils/logger";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
 import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
+import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { DeviceRecoveryPolicy } from "./poolConfig";
 import type { PooledDevice } from "./devicePool";
 import type { EmulatorLossDetectionPath } from "./emulatorLossIncident";
 import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
+import { didSourceSucceedForDevice } from "../utils/discoverySource";
+import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
+
+interface PlanLossTarget {
+  device: PooledDevice;
+  incarnation: number;
+  assignmentCount: number;
+  sessionId: string;
+  planSessionUuid: string;
+}
+
+export interface PlanDeviceLossPort {
+  getDevice(deviceId: string): PooledDevice | null;
+  getPlanSessionUuid(sessionId: string): string;
+  hasPlanExecution(deviceId: string, planSessionUuid: string): boolean;
+  isStartupLeased(deviceId: string): boolean;
+  isShutdownReserved(deviceId: string): Promise<boolean>;
+  discover(): Promise<BootedDeviceDiscovery>;
+  isAdbReset(bootedDeviceIds: ReadonlySet<string>, discovery: BootedDeviceDiscovery): boolean;
+  recordLoss(deviceId: string): Promise<string | undefined>;
+  finishLoss(incidentId: string | undefined): Promise<void>;
+  cancelPlan(deviceId: string, planSessionUuid: string, reason: string): Promise<number>;
+}
+
+/** Confirm plan losses without consuming debounce grace or mutating pool/session ownership. */
+export class PlanDeviceLossMonitor {
+  private readonly reported = new Map<string, PlanLossTarget>();
+
+  constructor(private readonly port: PlanDeviceLossPort) {}
+
+  async check(
+    missingDeviceIds: readonly string[],
+    bootedDeviceIds: ReadonlySet<string>,
+  ): Promise<void> {
+    for (const [deviceId, target] of this.reported) {
+      if (bootedDeviceIds.has(deviceId) || !this.isCurrent(target)) {
+        this.reported.delete(deviceId);
+      }
+    }
+    const targets = await this.collectTargets(missingDeviceIds);
+    if (targets.length === 0) {
+      return;
+    }
+    // One cache-bypassing discovery for this sweep, independent of the miss counter.
+    const discovery = await this.port.discover();
+    const confirmedBootedIds = new Set(discovery.devices.map((device) => device.deviceId));
+    if (this.port.isAdbReset(confirmedBootedIds, discovery)) {
+      return;
+    }
+    for (const target of targets) {
+      await this.confirmTarget(target, confirmedBootedIds, discovery);
+    }
+  }
+
+  private captureTarget(deviceId: string): PlanLossTarget | undefined {
+    const device = this.port.getDevice(deviceId);
+    // Allocation/restart owns booting and shutdown-reserved devices. The global
+    // plan lease alone is not evidence that a plan has begun using this device.
+    if (!device || device.platform !== "android" || device.status !== "busy" || !device.sessionId) {
+      return undefined;
+    }
+    const target: PlanLossTarget = {
+      device,
+      incarnation: device.incarnation,
+      assignmentCount: device.assignmentCount,
+      sessionId: device.sessionId,
+      planSessionUuid: this.port.getPlanSessionUuid(device.sessionId),
+    };
+    return this.reported.has(deviceId) || !this.hasPlanWork(target) ? undefined : target;
+  }
+
+  private async collectTargets(missingDeviceIds: readonly string[]): Promise<PlanLossTarget[]> {
+    const targets: PlanLossTarget[] = [];
+    for (const deviceId of missingDeviceIds) {
+      const target = this.captureTarget(deviceId);
+      if (!target) {
+        continue;
+      }
+      const reserved = await this.port.isShutdownReserved(deviceId);
+      if (!reserved && this.isCurrent(target) && this.hasPlanWork(target)) {
+        targets.push(target);
+      }
+    }
+    return targets;
+  }
+
+  private async confirmTarget(
+    target: PlanLossTarget,
+    bootedDeviceIds: ReadonlySet<string>,
+    discovery: BootedDeviceDiscovery,
+  ): Promise<void> {
+    if (!this.isCurrent(target) || !this.hasPlanWork(target)) {
+      return;
+    }
+    if (bootedDeviceIds.has(target.device.id)) {
+      this.reported.delete(target.device.id);
+      return;
+    }
+    if (!didSourceSucceedForDevice(discovery, "android", target.device.id)) {
+      return;
+    }
+    const reserved = await this.port.isShutdownReserved(target.device.id);
+    if (reserved || !this.isCurrent(target) || !this.hasPlanWork(target)) {
+      return;
+    }
+    await this.reportLoss(target);
+  }
+
+  private isCurrent(target: PlanLossTarget): boolean {
+    const device = this.port.getDevice(target.device.id);
+    return (
+      device === target.device &&
+      device.incarnation === target.incarnation &&
+      device.assignmentCount === target.assignmentCount &&
+      device.sessionId === target.sessionId &&
+      this.port.getPlanSessionUuid(target.sessionId) === target.planSessionUuid
+    );
+  }
+
+  private hasPlanWork(target: PlanLossTarget): boolean {
+    return (
+      target.device.status === "busy" &&
+      !this.port.isStartupLeased(target.device.id) &&
+      this.port.hasPlanExecution(target.device.id, target.planSessionUuid)
+    );
+  }
+
+  private async reportLoss(target: PlanLossTarget): Promise<void> {
+    const incidentId = await this.port.recordLoss(target.device.id);
+    if (!this.isCurrent(target) || !this.hasPlanWork(target)) {
+      await this.port.finishLoss(incidentId);
+      return;
+    }
+    const reserved = await this.port.isShutdownReserved(target.device.id);
+    if (reserved || !this.isCurrent(target) || !this.hasPlanWork(target)) {
+      await this.port.finishLoss(incidentId);
+      return;
+    }
+    // Mark before abort dispatch: listeners may synchronously end the plan.
+    this.reported.set(target.device.id, target);
+    await this.port.cancelPlan(
+      target.device.id,
+      target.planSessionUuid,
+      deviceLossCancellationReason(target.device.id, incidentId),
+    );
+    // Settlement belongs to the captured incident even if cancellation replaced
+    // the device. No pool/session action may follow this await on a stale target.
+    if (!this.isCurrent(target)) {
+      this.reported.delete(target.device.id);
+    }
+    await this.port.finishLoss(incidentId);
+  }
+}
 
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
 /**

@@ -38,6 +38,7 @@ import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
+import { PlanDeviceLossMonitor } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
@@ -2529,6 +2530,8 @@ export class Daemon {
       return;
     }
 
+    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(deviceManager);
+
     const discoverAndReconcile = async ({
       planActive,
       bypassAndroidDeviceListCache = false,
@@ -2648,8 +2651,7 @@ export class Daemon {
           // state untouched. Two inactive ticks can confirm continued absence;
           // a booted device clears the evidence during evaluation.
           if (planActive) {
-            logger.debug("[DisconnectMonitor] Deferring actions — plan execution active");
-            return;
+            return await checkPlanDeviceLoss(disconnectResult, bootedDeviceIds);
           }
 
           for (const deviceId of disconnectResult.disconnected) {
@@ -2695,6 +2697,65 @@ export class Daemon {
       },
     );
     this.deviceDisconnectMonitor.start();
+  }
+
+  private createPlanDeviceLossCheck(
+    deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
+  ): (
+    result: ReturnType<typeof evaluateDeviceDisconnects>,
+    bootedDeviceIds: ReadonlySet<string>,
+  ) => Promise<void> {
+    const monitor = new PlanDeviceLossMonitor({
+      getDevice: (id) => this.devicePool.getDevice(id),
+      getPlanSessionUuid: (id) =>
+        resolveToolSelectionBaseSessionUuid(id, this.sessionManager) ?? id,
+      hasPlanExecution: (id, sessionUuid) =>
+        executionTracker.hasActiveDeviceExecutions(id, {
+          onlySessionUuid: sessionUuid,
+          onlyToolName: "executePlan",
+        }),
+      isStartupLeased: (id) => this.devicePool.isDeviceLeasedForAndroidStartup(id),
+      isShutdownReserved: (id) => this.devicePool.isShutdownReservationHeld(id),
+      discover: () =>
+        deviceManager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+      isAdbReset: (ids, discovery) =>
+        isProcessWideAdbServerReset(
+          ids,
+          discovery.succeededPlatforms,
+          // The plan path has independently observed absence, so a raw ADB error
+          // is not required to protect a wholly vanished owned emulator cohort.
+          new Set(
+            this.devicePool
+              .getAllDevices()
+              .filter((device) => !ids.has(device.id))
+              .map((device) => device.id),
+          ),
+          this.devicePool.getAllDevices(),
+        ),
+      recordLoss: (id) =>
+        this.devicePool.recordEmulatorLossIncident(
+          id,
+          this.forceDisconnectedDeviceIds.has(id)
+            ? "adb-transport-failure"
+            : "device-discovery-miss",
+          undefined,
+          "absent",
+        ),
+      finishLoss: (incidentId) =>
+        this.devicePool.finishEmulatorLossIncident(incidentId, "not-attempted"),
+      cancelPlan: (id, sessionUuid, reason) =>
+        executionTracker.cancelDeviceExecutions(id, reason, {
+          onlySessionUuid: sessionUuid,
+          onlyToolName: "executePlan",
+        }),
+    });
+    return async (result, bootedDeviceIds) => {
+      await monitor.check(
+        result.missed.map(({ deviceId }) => deviceId),
+        bootedDeviceIds,
+      );
+      logger.debug("[DisconnectMonitor] Deferring actions — plan execution active");
+    };
   }
 
   private findMissingAndroidCandidates(

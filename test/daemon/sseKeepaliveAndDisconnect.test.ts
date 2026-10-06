@@ -49,7 +49,7 @@ function planDisconnectMonitorHarness() {
     incarnation: 1,
     assignmentCount: 1,
     sessionId: "plan-session",
-    status: "busy" as const,
+    status: "busy" as "busy" | "booting",
     avdName: "Pixel",
     androidImage: {},
   };
@@ -168,6 +168,7 @@ function planDisconnectMonitorHarness() {
     manager,
     device,
     devices,
+    timer,
     actions,
     recordingsReader,
     async tick() {
@@ -316,6 +317,9 @@ describe("disconnect monitor during plan execution", () => {
   test("counts a newly booting device without reaping it and clears misses when boot completes", async () => {
     const h = planDisconnectMonitorHarness();
     const previous = serverConfig.isPlanExecutionActive();
+    const plan = executionTracker.startExecution("executePlan", undefined, h.device.sessionId);
+    executionTracker.bindDeviceExecution(plan.id, h.device.id);
+    h.device.status = "booting";
     try {
       serverConfig.setPlanExecutionActive(true);
       for (let i = 0; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
@@ -324,7 +328,9 @@ describe("disconnect monitor during plan execution", () => {
       expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
       expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
       expect(h.actions).toEqual([]);
-      expect(h.device.status).toBe("busy");
+      expect(h.device.status).toBe("booting");
+      expect(plan.abortController.signal.aborted).toBe(false);
+      expect(h.timer.getSleepHistory()).toEqual([]);
       expect(h.device.sessionId).toBe("plan-session");
       h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
       // Present observations clear the accumulated absence even during allocation.
@@ -338,6 +344,7 @@ describe("disconnect monitor during plan execution", () => {
       expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(PLAN_DISCONNECT_MISS_CAP);
       h.manager.bootedDevices = [{ deviceId: h.device.id, name: "Pixel", platform: "android" }];
       serverConfig.setPlanExecutionActive(false);
+      h.device.status = "busy";
       await h.tick();
       expect(h.daemon.deviceDisconnectMisses.has(h.device.id)).toBe(false);
       expect(h.daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
@@ -350,6 +357,29 @@ describe("disconnect monitor during plan execution", () => {
       expect(h.actions).not.toContain(`remove:${h.device.id}`);
       expect(h.actions).not.toContain("stop-recording");
     } finally {
+      executionTracker.endExecution(plan.id);
+      serverConfig.setPlanExecutionActive(previous);
+    }
+  });
+
+  test("non-plan sessions retain all three discovery misses of restart grace", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    const stopMonitoring = spyOn(getPerformanceMonitor(), "stopMonitoring").mockImplementation(
+      () => {},
+    );
+    try {
+      serverConfig.setPlanExecutionActive(false);
+      for (let misses = 1; misses < DEVICE_DISCONNECT_MISS_THRESHOLD; misses++) {
+        await h.tick();
+        expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(misses);
+        expect(h.actions).not.toContain("cancel:plan-session");
+      }
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      stopMonitoring.mockRestore();
       serverConfig.setPlanExecutionActive(previous);
     }
   });

@@ -48,6 +48,11 @@ interface RGB {
   b: number;
 }
 
+interface ColorCluster {
+  color: RGB;
+  count: number;
+}
+
 interface RGBA extends RGB {
   a: number;
 }
@@ -445,11 +450,14 @@ export class ContrastChecker {
       return null;
     }
 
-    // Sample text color (from center region of element)
-    const textColor = await this.sampleTextColor(image, element.bounds);
+    // Separate glyphs from the dominant background instead of averaging a gap between letters.
+    const { textColor, backgroundColor: dominantBackground } = this.sampleElementColors(
+      image,
+      element.bounds,
+    );
 
     if (!this.config.useMultiPointSampling) {
-      const backgroundColor = await this.sampleBackgroundEdgeColor(image, element.bounds);
+      const backgroundColor = dominantBackground;
       const ratio = this.getCachedContrast(textColor, backgroundColor);
       const shadowDetected = this.config.detectTextShadows
         ? this.detectTextShadow(image, element.bounds, textColor, backgroundColor)
@@ -496,7 +504,8 @@ export class ContrastChecker {
     );
     const baseGradient = this.config.detectGradients ? this.detectGradient(baseSamples) : null;
 
-    let samples = baseSamples;
+    // Flat backgrounds are judged on the distribution's pair, not a point that missed a glyph.
+    let samples = baseSamples.map((sample) => ({ ...sample, backgroundColor: dominantBackground }));
     let gradient: GradientInfo | undefined;
     if (baseGradient?.isGradient) {
       gradient = baseGradient;
@@ -773,28 +782,93 @@ export class ContrastChecker {
     }
   }
 
-  /**
-   * Sample the text color from the center of the element
-   */
-  private async sampleTextColor(image: RawImage, bounds: Element["bounds"]): Promise<RGB> {
-    const { left, top, right, bottom } = bounds;
-    const centerX = Math.floor((left + right) / 2);
-    const centerY = Math.floor((top + bottom) / 2);
-
-    // Sample a small region around the center
-    const sampleSize = 3;
-    const colors: RGB[] = [];
-
-    for (let x = centerX - sampleSize; x <= centerX + sampleSize; x++) {
-      for (let y = centerY - sampleSize; y <= centerY + sampleSize; y++) {
-        if (x >= left && x < right && y >= top && y < bottom) {
-          colors.push(this.resolvePixelColor(image, x, y));
-        }
+  /** Quantized clusters retain their actual mean colour; anti-aliasing does not dominate a bin. */
+  private colorClusters(colors: RGB[]): ColorCluster[] {
+    const bins = new Map<string, RGB[]>();
+    for (const color of colors) {
+      const key = `${color.r >> 3},${color.g >> 3},${color.b >> 3}`;
+      const bin = bins.get(key);
+      if (bin) {
+        bin.push(color);
+      } else {
+        bins.set(key, [color]);
       }
     }
+    return Array.from(bins.values(), (bin) => ({
+      color: this.averageColor(bin),
+      count: bin.length,
+    })).sort((a, b) => b.count - a.count);
+  }
 
-    // Return average color
-    return this.averageColor(colors);
+  /** At most 4096 evenly spaced pixels, independent of the element's area. */
+  private elementPixels(image: RawImage, bounds: Element["bounds"]): RGB[] {
+    const width = Math.ceil(bounds.right) - Math.ceil(bounds.left);
+    const height = Math.ceil(bounds.bottom) - Math.ceil(bounds.top);
+    const area = width * height;
+    const count = Math.min(area, 4096);
+    return Array.from({ length: count }, (_, i) => {
+      const offset = Math.floor((i * area) / count);
+      return this.resolvePixelColor(
+        image,
+        Math.ceil(bounds.left) + (offset % width),
+        Math.ceil(bounds.top) + Math.floor(offset / width),
+      );
+    });
+  }
+
+  /** A dense glyph/block may occupy most of the box; its surrounding perimeter still owns the background. */
+  private perimeterPixels(image: RawImage, bounds: Element["bounds"]): RGB[] {
+    const colors: RGB[] = [];
+    for (let i = 0; i < 128; i++) {
+      const x = bounds.left + Math.floor(((bounds.right - bounds.left - 1) * i) / 127);
+      const y = bounds.top + Math.floor(((bounds.bottom - bounds.top - 1) * i) / 127);
+      colors.push(this.resolvePixelColor(image, x, bounds.top));
+      colors.push(this.resolvePixelColor(image, x, bounds.bottom - 1));
+      colors.push(this.resolvePixelColor(image, bounds.left, y));
+      colors.push(this.resolvePixelColor(image, bounds.right - 1, y));
+    }
+    return colors;
+  }
+
+  private sampleElementColors(
+    image: RawImage,
+    bounds: Element["bounds"],
+  ): {
+    textColor: RGB;
+    backgroundColor: RGB;
+  } {
+    const pixels = this.elementPixels(image, bounds);
+    const clusters = this.colorClusters(pixels);
+    const backgroundColor = clusters[0].color;
+    const perimeter = this.perimeterPixels(image, bounds);
+    // Only override a dominant interior block when it is absent from the surrounding edge.
+    const edgeSupport = perimeter.filter((color) =>
+      this.isSimilarColor(color, backgroundColor),
+    ).length;
+    if (edgeSupport < perimeter.length * 0.1) {
+      const surrounding = this.perimeterPixels(image, {
+        left: bounds.left - 2,
+        top: bounds.top - 2,
+        right: bounds.right + 2,
+        bottom: bounds.bottom + 2,
+      });
+      return {
+        textColor: backgroundColor,
+        backgroundColor: this.colorClusters(surrounding)[0].color,
+      };
+    }
+    const supported = clusters.filter(
+      (cluster) => cluster.count >= Math.max(2, pixels.length * 0.001),
+    );
+    const text = supported.reduce(
+      (farthest, cluster) =>
+        this.colorDistance(cluster.color, backgroundColor) >
+        this.colorDistance(farthest.color, backgroundColor)
+          ? cluster
+          : farthest,
+      clusters[0],
+    );
+    return { textColor: text.color, backgroundColor };
   }
 
   /**
@@ -858,7 +932,7 @@ export class ContrastChecker {
     for (const radius of searchRadii) {
       const colors = this.backgroundColorsAtRadius(image, bounds, textColor, x, y, radius);
       if (colors.length > 0) {
-        return this.averageColor(colors);
+        return this.colorClusters(colors)[0].color;
       }
     }
 
@@ -1008,6 +1082,10 @@ export class ContrastChecker {
 
     const byAxis = this.calculateGradientAxes(samples);
     const direction = byAxis.direction;
+    // A glyph/anti-aliasing outlier amid a uniform background is not a gradient.
+    if (this.colorDistance(byAxis.startColor, byAxis.endColor) < 20) {
+      return null;
+    }
     return {
       isGradient: true,
       direction,

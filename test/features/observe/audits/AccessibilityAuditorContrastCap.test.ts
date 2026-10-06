@@ -49,6 +49,10 @@ function gboardObservation(observationId: string): ObserveResult {
   const hierarchy = readFixture<ViewHierarchyResult>(
     "android-ime-window/playground-gboard-api36.json",
   );
+  // Repeat captured nodes in memory at high density to exercise the cap using app violations alone (#10243).
+  hierarchy.density = 1600;
+  const nodes = hierarchy.hierarchy.node ?? [];
+  hierarchy.hierarchy.node = Array.from({ length: 3 }, () => structuredClone(nodes)).flat();
   return {
     observationId,
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -163,12 +167,12 @@ describe("contrast violations feed the cap, and summary counts reconcile", () =>
     expect(truncated.total).toBe(
       Object.values(result.summary.byType).reduce((sum, n) => sum + n, 0),
     );
-    // The capped list never claims a clean pass the full set would not: the seven app labels
+    // The capped list never claims a clean pass the full set would not: the repeated app labels
     // under the open keyboard are reported as not evaluated, not measured against keyboard pixels.
     expect(result.summary.notEvaluated).toEqual([
       {
         check: "insufficient-contrast",
-        reason: expect.stringMatching(/^7 text elements are covered by the keyboard/),
+        reason: expect.stringMatching(/^21 text elements are covered by the keyboard/),
       },
     ]);
   });

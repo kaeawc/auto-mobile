@@ -152,6 +152,140 @@ final class PlanParameterSubstitutorTests: XCTestCase {
         )
     }
 
+    // MARK: Compact JSON-style flow maps
+
+    func testCompactFlowMapValueIsEscapedLikeAnyDoubleQuotedScalar() throws {
+        let plan = "steps:\n  - tool: x\n    params: {\"text\":\"${v}\"}"
+        XCTAssertEqual(
+            try sub(plan, ["v": #"C:\new\tab"#]),
+            "steps:\n  - tool: x\n    params: {\"text\":\"C:\\\\new\\\\tab\"}"
+        )
+        XCTAssertEqual(
+            try sub(plan, ["v": #"a"b"#]),
+            "steps:\n  - tool: x\n    params: {\"text\":\"a\\\"b\"}"
+        )
+        XCTAssertEqual(
+            try sub(plan, ["v": "a\nb"]),
+            "steps:\n  - tool: x\n    params: {\"text\":\"a\\nb\"}"
+        )
+    }
+
+    func testCompactFlowMapVariants() throws {
+        XCTAssertEqual(
+            try sub(#"p: {"a":"${x}","b":"${y}"}"#, ["x": #"\"#, "y": #"""#]),
+            #"p: {"a":"\\","b":"\""}"#
+        )
+        XCTAssertEqual(try sub(#"p: {"a" :"${x}"}"#, ["x": #"\"#]), #"p: {"a" :"\\"}"#)
+        XCTAssertEqual(try sub(#"p: [{"a":"${x}"}, {"b":"${x}"}]"#, ["x": #"\"#]), #"p: [{"a":"\\"}, {"b":"\\"}]"#)
+        XCTAssertEqual(try sub("p: {'a':'${x}'}", ["x": "it's"]), "p: {'a':'it''s'}")
+        XCTAssertEqual(try sub("p: {'a':'${x}'}", ["x": "a\nb"]), #"p: {'a':"a\nb"}"#)
+        // The spaced spelling keeps working.
+        XCTAssertEqual(try sub(#"p: {"a": "${x}"}"#, ["x": #"\"#]), #"p: {"a": "\\"}"#)
+    }
+
+    func testUnquotedFlowKeyDirectlyBeforeAQuoteIsRejectedNotGuessed() throws {
+        XCTAssertThrowsError(try sub(#"p: {a:"${x}"}"#, ["x": "v"])) { error in
+            guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+            XCTAssertTrue(message.contains("line 1"), message)
+        }
+        // No placeholder in it: copied through untouched.
+        XCTAssertEqual(try sub(#"p: {a:"x"} # ${x}"#, ["x": "v"]), #"p: {a:"x"} # ${x}"#)
+    }
+
+    // MARK: Plain-scalar continuation lines and flow state
+
+    func testContinuationLineStartingWithAQuoteIsPlainText() throws {
+        let plan = "steps:\n  - tool: x\n    text: hello\n      \"${p}\" more\n    label: ${q}"
+        XCTAssertEqual(
+            try sub(plan, ["p": #"a\b"#, "q": "L"]),
+            "steps:\n  - tool: x\n    text: hello\n      \"a\\b\" more\n    label: L"
+        )
+        let single = "steps:\n  - tool: x\n    text: hello\n      '${p}' more"
+        XCTAssertEqual(
+            try sub(single, ["p": "it's"]),
+            "steps:\n  - tool: x\n    text: hello\n      'it's' more"
+        )
+    }
+
+    func testUnbalancedBracketOnAContinuationLineDoesNotLeakFlowModeIntoTheRestOfTheFile() throws {
+        let plan = "steps:\n  - tool: x\n    text: hello\n      {x ${p}\n    label: ${q}\n    other: ${q}"
+        XCTAssertEqual(
+            try sub(plan, ["p": "v", "q": "a,b"]),
+            "steps:\n  - tool: x\n    text: hello\n      {x v\n    label: a,b\n    other: a,b"
+        )
+        let bracket = "steps:\n  - tool: x\n    text: hello\n      [x ${p}\n    label: ${q}"
+        XCTAssertEqual(
+            try sub(bracket, ["p": "v", "q": "a,b"]),
+            "steps:\n  - tool: x\n    text: hello\n      [x v\n    label: a,b"
+        )
+    }
+
+    func testAFlowCollectionThatIsNeverClosedIsRejectedAtTheLineThatCannotContinueIt() throws {
+        let plan = "steps:\n  - tool: x\n    params: {a: 1\n    label: ${q}"
+        XCTAssertThrowsError(try sub(plan, ["q": "a,b"])) { error in
+            guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+            XCTAssertTrue(message.contains("line 4"), message)
+            XCTAssertTrue(message.contains("line 3"), message)
+        }
+    }
+
+    func testAMultiLineFlowCollectionStillSubstitutes() throws {
+        let plan = "steps:\n  - tool: x\n    textAny: [\n      ${a},\n      ${b}\n    ]\n    label: ${a}"
+        XCTAssertEqual(
+            try sub(plan, ["a": "A", "b": "C"]),
+            "steps:\n  - tool: x\n    textAny: [\n      A,\n      C\n    ]\n    label: A"
+        )
+    }
+
+    func testAMultiLinePlainScalarWhoseFirstLineWasRewrittenAsQuotedIsRejected() throws {
+        let plan = "steps:\n  - tool: x\n    text: ${p}\n      more"
+        XCTAssertThrowsError(try sub(plan, ["p": "a #b"])) { error in
+            guard case AutoMobilePlanExecutor.ExecutorError.invalidPlan = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+        }
+        XCTAssertEqual(
+            try sub(plan, ["p": "ok"]),
+            "steps:\n  - tool: x\n    text: ok\n      more"
+        )
+    }
+
+    // MARK: Folded block scalars
+
+    func testFoldedBlockScalarRejectsAMultiLineValueButTakesASingleLineOne() throws {
+        let plan = "steps:\n  - tool: x\n    text: >\n      before ${p} after\n    label: ${q}"
+        XCTAssertThrowsError(try sub(plan, ["p": "a\nb", "q": "L"])) { error in
+            guard case let AutoMobilePlanExecutor.ExecutorError.invalidPlan(message) = error else {
+                return XCTFail("expected invalidPlan, got \(error)")
+            }
+            XCTAssertTrue(message.contains("line 4"), message)
+        }
+        XCTAssertThrowsError(try sub(plan, ["p": "a\rb", "q": "L"]))
+        XCTAssertEqual(
+            try sub(plan, ["p": "a b", "q": "L"]),
+            "steps:\n  - tool: x\n    text: >\n      before a b after\n    label: L"
+        )
+        // A literal block keeps the line break, so it stays accepted.
+        let literal = "steps:\n  - tool: x\n    text: |\n      before ${p}\n    label: ${q}"
+        XCTAssertEqual(
+            try sub(literal, ["p": "a\nb", "q": "L"]),
+            "steps:\n  - tool: x\n    text: |\n      before a\n      b\n    label: L"
+        )
+    }
+
+    // MARK: Empty string (parity with the Android runner)
+
+    func testAnEmptyParameterIsAnEmptyStringNotNullInEveryUnquotedPosition() throws {
+        XCTAssertEqual(try sub(line("${p}"), ["p": ""]), expected(#""""#))
+        XCTAssertEqual(try sub("textAny: [${p}, OK]", ["p": ""]), #"textAny: ["", OK]"#)
+        XCTAssertEqual(try sub(line(#""${p}""#), ["p": ""]), expected(#""""#))
+        XCTAssertEqual(try sub(line("'${p}'"), ["p": ""]), expected("''"))
+    }
+
     // MARK: Single pass and identity
 
     func testSubstitutedValueIsNotExpandedAgainWhateverTheKeyOrder() throws {

@@ -1426,6 +1426,13 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
  */
 export const PLAN_APP_CLEANUP_CAP_MS = 20_000;
 
+/**
+ * Deadline for one background app-cleanup retry (device-health recovery). The retry is a
+ * full cleanup, so it gets the cleanup's own cap plus a margin: the cap's clean failure
+ * must win the race, and a slow-but-successful retry must be able to clear the marker.
+ */
+export const PLAN_APP_CLEANUP_RETRY_DEADLINE_MS = PLAN_APP_CLEANUP_CAP_MS + 1_000;
+
 /** One device whose app cleanup did not complete; `step` is absent when the service rejected. */
 export interface PlanCleanupFailure {
   deviceId: string;
@@ -1616,14 +1623,18 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     }
     const sessionManager = DaemonState.getInstance().getSessionManager();
     for (const cleanupDevice of devices.filter((d) => dirty.has(d.deviceId))) {
-      sessionManager.markDeviceNeedsAppCleanup(cleanupDevice.deviceId, async () => {
-        const retry = await this.cleanupDevicesShielded([cleanupDevice], cleanupService, config);
-        if (retry.failures.length > 0 || retry.capExceeded) {
-          throw new ActionableError(
-            `App cleanup retry for ${config.appId} did not complete on ${cleanupDevice.deviceId}`,
-          );
-        }
-      });
+      sessionManager.markDeviceNeedsAppCleanup(
+        cleanupDevice.deviceId,
+        async () => {
+          const retry = await this.cleanupDevicesShielded([cleanupDevice], cleanupService, config);
+          if (retry.failures.length > 0 || retry.capExceeded) {
+            throw new ActionableError(
+              `App cleanup retry for ${config.appId} did not complete on ${cleanupDevice.deviceId}`,
+            );
+          }
+        },
+        PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
+      );
     }
   }
 

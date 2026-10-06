@@ -1664,7 +1664,8 @@ exclude devices from available/idle counts and new session allocation. Biometric
 network, and app-cleanup failures get three background recovery opportunities with 1s/2s/4s backoff;
 a live owner is never restored by this recovery. Clock failures retain the existing
 busy quarantine and retry until success or removal. No automatic erase/reboot occurs;
-use `killDevice`/`startDevice` for replacement if recovery is exhausted. Health markers
+use `killDevice`/`startDevice` for replacement if recovery is exhausted (an `app-cleanup` marker that
+exhausts its three attempts is held until then, and the allocation error spells out the `killDevice` call). Health markers
 are in memory only: a daemon restart loses them and does not re-detect dirty state.
 
 `listDevices` filters its booted results. For an unbooted AVD without known display profile metadata, panel and posture

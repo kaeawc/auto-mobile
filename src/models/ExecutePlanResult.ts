@@ -75,6 +75,15 @@ export interface PlanStepToolResult {
   truncated?: boolean;
 }
 
+/**
+ * Marker that the plan's shared `toolResults` budget ran out: later completed steps got no
+ * entry at all (so `getToolResult(i)` is null for them, as for a step that ran without a payload).
+ */
+export interface PlanToolResultsTruncation {
+  /** Completed steps with an object payload whose entry was left out. */
+  omittedSteps: number;
+}
+
 /** A failed optional step that was skipped while execution continued. */
 export interface PlanSkippedStep {
   /** 0-based index of the step in the plan. */
@@ -121,6 +130,8 @@ export interface ExecutePlanResult {
   skippedSteps?: PlanSkippedStep[];
   /** Bounded tool payloads of completed steps in plan step order, reported regardless of captureObserveSteps (issue #10090). */
   toolResults?: PlanStepToolResult[];
+  /** Present only when the plan-wide `toolResults` budget ran out; counts the omitted steps. */
+  toolResultsTruncated?: PlanToolResultsTruncation;
   /** Populated when automatic plan video used multiple Android segments (screenrecord limit). */
   videoFilePaths?: string[];
   videoRecordingIds?: string[];

@@ -1,11 +1,12 @@
-import type { PlanStepToolResult } from "../../models/ExecutePlanResult";
+import type { PlanStepToolResult, PlanToolResultsTruncation } from "../../models/ExecutePlanResult";
 
 /** Largest serialized result kept for one step before it is narrowed to its core fields. */
 export const MAX_STEP_TOOL_RESULT_CHARS = 8 * 1024;
 
 /**
- * Serialized budget for all step results of one plan. Once spent, later steps still get an entry
- * (so `getToolResult(i)` can tell "ran" from "did not run") but only carry `success`.
+ * Hard serialized budget for the whole `toolResults` array of one plan, across every device track
+ * (entries count in full: `stepIndex`, `tool`, `device` and `result`). Once an entry does not fit,
+ * it and every later one is left out and counted in `toolResultsTruncated.omittedSteps`.
  */
 export const MAX_PLAN_TOOL_RESULTS_CHARS = 64 * 1024;
 
@@ -80,31 +81,62 @@ export function boundStepToolResult(
   };
 }
 
-/** Collects bounded per-step tool results for one `executePlan` run. */
+/**
+ * One `toolResults` budget shared by every device track's collector of a plan, so a multi-device
+ * plan cannot return one budget per track. Sticky: after the first entry that does not fit, no
+ * later entry is admitted, so the retained entries are a prefix of what completed.
+ */
+export class PlanToolResultsBudget {
+  private spentChars = 0;
+  private omitted = 0;
+  private exhausted = false;
+
+  constructor(private readonly maxChars: number = MAX_PLAN_TOOL_RESULTS_CHARS) {}
+
+  /** Reserves room for one serialized entry (plus its array separator), or records it omitted. */
+  admit(entry: PlanStepToolResult): boolean {
+    const chars = serializedLength(entry) + 1;
+    if (this.exhausted || this.spentChars + chars > this.maxChars) {
+      this.exhausted = true;
+      this.omitted++;
+      return false;
+    }
+    this.spentChars += chars;
+    return true;
+  }
+
+  /** The `toolResultsTruncated` response field, present only once an entry was omitted. */
+  asField(): { toolResultsTruncated?: PlanToolResultsTruncation } {
+    return this.omitted > 0 ? { toolResultsTruncated: { omittedSteps: this.omitted } } : {};
+  }
+}
+
+/** Collects bounded per-step tool results for one device track (or a single-device plan). */
 export class StepToolResultCollector {
   private readonly entries: PlanStepToolResult[] = [];
-  private spentChars = 0;
+
+  constructor(private readonly budget: PlanToolResultsBudget = new PlanToolResultsBudget()) {}
 
   /**
    * Records a completed step's payload. Anything that is not a JSON object (an image-only
-   * success, say) carries nothing to expose and is skipped.
+   * success, say) carries nothing to expose and is skipped. An entry the shared budget cannot
+   * hold is not recorded; the budget counts it for `toolResultsTruncated`.
    */
   add(stepIndex: number, tool: string, payload: unknown, device?: string): void {
     if (!isPlainObject(payload)) {
       return;
     }
     const bounded = boundStepToolResult(payload);
-    const overBudget =
-      this.spentChars + serializedLength(bounded.result) > MAX_PLAN_TOOL_RESULTS_CHARS;
-    const result = overBudget ? successOnly(payload) : bounded.result;
-    this.spentChars += serializedLength(result);
-    this.entries.push({
+    const entry: PlanStepToolResult = {
       stepIndex,
       tool,
       ...(device ? { device } : {}),
-      result,
-      ...(bounded.truncated || overBudget ? { truncated: true } : {}),
-    });
+      result: bounded.result,
+      ...(bounded.truncated ? { truncated: true } : {}),
+    };
+    if (this.budget.admit(entry)) {
+      this.entries.push(entry);
+    }
   }
 
   /** Entries in plan step order, or undefined when no step produced a result. */
@@ -114,9 +146,12 @@ export class StepToolResultCollector {
       : undefined;
   }
 
-  /** The `toolResults` field of a plan result, omitted when no step produced one. */
-  asField(): { toolResults?: PlanStepToolResult[] } {
+  /** The `toolResults` (and, once the budget ran out, `toolResultsTruncated`) response fields. */
+  asField(): {
+    toolResults?: PlanStepToolResult[];
+    toolResultsTruncated?: PlanToolResultsTruncation;
+  } {
     const toolResults = this.toArray();
-    return toolResults ? { toolResults } : {};
+    return { ...(toolResults ? { toolResults } : {}), ...this.budget.asField() };
   }
 }

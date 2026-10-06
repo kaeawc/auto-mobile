@@ -179,6 +179,7 @@ export function harness({
     interactions,
     talkback,
     voiceover,
+    detector,
     useRealObservedInteraction: () => {
       action.observedInteraction = baseObservedInteraction;
     },

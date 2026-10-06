@@ -1,4 +1,7 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Both coverage tests own the shared repo-relative `coverage/` directory, so
+# they must not run in parallel with each other.
 #
 # Chunked coverage lane (#10213): a few shard processes, each running its files
 # in sequential `bun test --coverage` processes of at most N files so no process
@@ -105,6 +108,7 @@ teardown() {
 
 run_coverage() {
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 "$@" bash "$SCRIPT" coverage
+  printf '%s\n' "$output"
 }
 
 @test "coverage defaults to two shards of 50-file chunks and merges overlapping LCOV and JUnit" {
@@ -235,6 +239,7 @@ EOF
   [ ! -f coverage/shards/shard-13.chunks ]
 
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_COVERAGE_SHARDS=0 bash "$SCRIPT" coverage
+  printf '%s\n' "$output"
   [ "$status" -eq 2 ]
   [[ "$output" == *"AUTOMOBILE_COVERAGE_SHARDS must be a positive integer"* ]]
 }
@@ -261,6 +266,7 @@ exit 124
 EOF
   chmod +x "$STUB_BIN/timeout"
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
+  printf '%s\n' "$output"
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 1/2)"* ]]
   [[ "$output" == *"Coverage test run exceeded its 720s wall-clock budget (shard 2/2)"* ]]
@@ -278,6 +284,7 @@ EOF
   chmod +x "$STUB_BIN/bun"
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_COVERAGE_SHARDS=1 AUTOMOBILE_COVERAGE_CHUNK_FILES=5 \
     AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" coverage
+  printf '%s\n' "$output"
   [ "$status" -eq 124 ]
   [[ "$output" == *"INTERRUPTED: coverage shard 1 chunk 1/3 was running"* ]]
   [[ "$output" == *"chunk started and is stuck"* ]]
@@ -287,6 +294,7 @@ EOF
   stub_find 30
   run env PATH="$STUB_BIN:$PATH" STUB_WRITE_FAILED_CHUNK=2-2 AUTOMOBILE_COVERAGE_CHUNK_FILES=5 \
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
+  printf '%s\n' "$output"
   [ "$status" -eq 0 ]
   [ -f coverage/lcov.info ]
   [ -f coverage/junit.xml ]
@@ -301,6 +309,7 @@ EOF
   run env PATH="$STUB_BIN:$PATH" STUB_WRITE_FAILED_CHUNK=2-2 STUB_REAL_FAIL_CHUNK=1-1 \
     AUTOMOBILE_COVERAGE_CHUNK_FILES=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 \
     bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
+  printf '%s\n' "$output"
   [ "$status" -ne 0 ]
   [ ! -f coverage/lcov.info ]
 }
@@ -310,6 +319,7 @@ EOF
   run env PATH="$STUB_BIN:$PATH" STUB_WRITE_FAILED_CHUNK=2-1 STUB_REMOVE_LOG_CHUNK=1-3 \
     AUTOMOBILE_COVERAGE_CHUNK_FILES=5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 \
     bash scripts/ci/run-ts-coverage.sh "$BATS_TEST_TMPDIR/out.log"
+  printf '%s\n' "$output"
   [ "$status" -ne 0 ]
   [ ! -f coverage/lcov.info ]
 }

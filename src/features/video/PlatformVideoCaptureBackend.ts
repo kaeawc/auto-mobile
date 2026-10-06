@@ -145,13 +145,23 @@ async function waitForStderrDrain(
   }
 }
 
+/** What a start needs from its backend beyond the adb client: time and failed-start cleanup. */
+interface ScreenrecordStartHooks {
+  timer: Timer;
+  /**
+   * Called when the start fails after the recorder was launched, with the device pid the
+   * launch shell reported (possibly still unknown). Best-effort: it must not throw.
+   */
+  cleanupFailedStart(devicePid: DeviceRecorderPid): Promise<void>;
+}
+
 async function startScreenrecordProcess(
   adb: Pick<AdbExecutor, "spawn">,
   screenrecordArgv: string[],
   config: VideoCaptureConfig,
   device: BootedDevice,
   physicalDisplayId: string | undefined,
-  timer: Timer,
+  { timer, cleanupFailedStart }: ScreenrecordStartHooks,
 ): Promise<{
   process: TrackedChildProcess;
   exitState: ProcessExitState;
@@ -221,6 +231,12 @@ async function startScreenrecordProcess(
       warning,
       physicalDisplayId: effectivePhysicalId,
     };
+  } catch (error) {
+    // The recorder runs on the device, so a dead host `adb shell` (a dropped transport, an
+    // adb server restart) does not mean it stopped. No handle is returned, so nothing would
+    // ever stop it or remove its temp file; do it here.
+    await cleanupFailedStart(devicePid);
+    throw error;
   } finally {
     config.abortSignal?.removeEventListener("abort", abortStartup);
   }
@@ -454,7 +470,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
    */
   private async signalDeviceRecorder(
     adb: AdbExecutor,
-    backendHandle: AndroidBackendHandle,
+    backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
     signal: 2 | 9,
   ): Promise<"signalled" | "not-ours"> {
@@ -514,7 +530,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
   private async cleanupDeviceRecording(
     adb: AdbExecutor,
-    backendHandle: AndroidBackendHandle,
+    backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     retainDeviceFile: boolean,
   ): Promise<void> {
     // An empty or still-growing file may have a device-side writer
@@ -857,7 +873,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       devicePid,
       warning,
       physicalDisplayId: effectivePhysicalId,
-    } = await startScreenrecordProcess(adb, args, config, device, physicalDisplayId, this.timer);
+    } = await startScreenrecordProcess(adb, args, config, device, physicalDisplayId, {
+      timer: this.timer,
+      cleanupFailedStart: (pid) => this.cleanupFailedAndroidStart(adb, deviceTempPath, pid),
+    });
 
     const backendHandle: AndroidBackendHandle = {
       kind: "android",
@@ -877,6 +896,36 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       physicalDisplayId: effectivePhysicalId,
       backendHandle,
     };
+  }
+
+  /**
+   * A start that failed after launching the recorder: stop it by its own device pid and
+   * remove its temp file, the same cleanup a discard does. An unknown pid is not answered
+   * with a device-wide `pkill`, which would signal other sessions' recorders; the temp
+   * file is still removed. Best-effort and logged: the start error is what the caller sees.
+   */
+  private async cleanupFailedAndroidStart(
+    adb: AdbExecutor,
+    deviceTempPath: string,
+    devicePid: DeviceRecorderPid,
+  ): Promise<void> {
+    const pid = devicePid.pid;
+    try {
+      if (pid === undefined) {
+        logger.warn(
+          "[VideoCapture] Failed start left no known device pid; not signalling screenrecord by name",
+        );
+      } else {
+        const outcome = await this.signalDeviceRecorder(adb, { deviceTempPath }, pid, 9);
+        logger.info(`[VideoCapture] Failed-start device recorder pid ${pid} SIGKILL: ${outcome}`);
+      }
+    } catch (error) {
+      logger.warn(
+        `[VideoCapture] Could not stop the device recorder after a failed start: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    await this.cleanupDeviceRecording(adb, { deviceTempPath }, false);
   }
 
   private resolveAndroidTimeLimit(maxDurationSeconds?: number): number {

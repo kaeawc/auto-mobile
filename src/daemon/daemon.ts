@@ -198,7 +198,7 @@ import {
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
-  stopVideoRecording,
+  stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -3082,7 +3082,7 @@ export class Daemon {
     }
     this.stoppingRecordings.add(recordingId);
     try {
-      await stopVideoRecording(recordingId);
+      await stopVideoRecordingUnattended(recordingId);
       logger.warn(
         `[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`,
       );

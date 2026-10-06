@@ -26,7 +26,7 @@ import { redactHomeDir } from "../utils/redactPath";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
-import { combineAbortSignals } from "../utils/AbortContext";
+import { combineAbortSignals, runOutsideRequestContext } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   VideoRecordingRepository,
@@ -697,7 +697,7 @@ function scheduleAutoStop(
     if (moduleDependencies !== deps) {
       return;
     }
-    void stopVideoRecordingWithDependencies(deps, recordingId).catch((error) => {
+    void stopUnattendedWithDependencies(deps, recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Failed to auto-stop recording ${recordingId}: ${error}`);
     });
   }, timeoutMs);
@@ -857,7 +857,7 @@ async function rearmRetainedRecordingSafety(
     if (moduleDependencies !== deps) {
       return;
     }
-    void stopVideoRecordingWithDependencies(deps, recordingId).catch((error) => {
+    void stopUnattendedWithDependencies(deps, recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Retained safety stop failed for ${recordingId}: ${error}`);
     });
   }, RETAINED_STOP_RETRY_MS);
@@ -904,7 +904,7 @@ async function enforceInProgressSizeCap(
       `(${sizeBytes} >= ${capBytes} bytes); stopping to protect disk.`,
   );
   clearInProgressSizeCap(recordingId);
-  await stopVideoRecordingWithDependencies(deps, recordingId);
+  await stopUnattendedWithDependencies(deps, recordingId);
 }
 
 function getHighlightSessionByDevice(deviceId: string): VideoRecordingHighlightSession | null {
@@ -1375,6 +1375,27 @@ export async function rollbackVideoRecordingStart(
 export async function stopVideoRecording(recordingId?: string): Promise<StopVideoRecordingResult> {
   const deps = await getVideoRecordingDependencies();
   return stopVideoRecordingWithDependencies(deps, recordingId);
+}
+
+/**
+ * Stop a recording on behalf of nobody's live request: the auto-stop and size-cap timers, a
+ * device disconnect. It runs outside whatever request context is ambient, so the stop is
+ * bounded by its own teardown budget (post-processing) instead of reading the deadline of a
+ * request that may have ended long ago. Only a stop made by a live `videoRecording` stop
+ * request (`stopVideoRecording`) is bounded by that request's remaining time.
+ */
+export async function stopVideoRecordingUnattended(
+  recordingId?: string,
+): Promise<StopVideoRecordingResult> {
+  const deps = await getVideoRecordingDependencies();
+  return stopUnattendedWithDependencies(deps, recordingId);
+}
+
+function stopUnattendedWithDependencies(
+  deps: VideoRecordingManagerDependencies,
+  recordingId?: string,
+): Promise<StopVideoRecordingResult> {
+  return runOutsideRequestContext(() => stopVideoRecordingWithDependencies(deps, recordingId));
 }
 
 async function stopVideoRecordingWithDependencies(

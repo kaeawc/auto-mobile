@@ -109,7 +109,55 @@ describe("PlatformVideoCaptureBackend recorder exit reporting (#10186)", () => {
       // path it echoes are never part of the message.
       expect(message).not.toContain("5000x5000");
       expect(message).not.toContain(DEVICE_FILE);
-      expect(factory.getFakeClient().getSpawnCalls()).toHaveLength(1);
+      // One launch (no retry); the other spawn is the failed start's temp-file cleanup.
+      const launches = factory
+        .getFakeClient()
+        .getSpawnCalls()
+        .filter((argv) => argv.join(" ").includes(LAUNCH));
+      expect(launches).toHaveLength(1);
+    });
+
+    test("a start that fails after the device pid is known stops that recorder and removes its temp file (#10217)", async () => {
+      const client = factory.getFakeClient();
+      client.setSpawnExit(LAUNCH, 1, "adb: device offline\n");
+      client.setSpawnStdout(LAUNCH, "4321\n");
+      client.setCommandResult(PROBE, OUR_CMDLINE);
+
+      const error = await backend.start(config()).catch((caught: unknown) => caught);
+
+      expect((error as Error).message).toContain("code 1");
+      // The host `adb shell` dying does not prove the device recorder did, and no handle
+      // is returned for a later stop to use.
+      expect(commands()).toContain("shell kill -9 4321");
+      expect(commands().some((command) => command.includes("pkill"))).toBe(false);
+      expect(
+        client.getSpawnCalls().some((argv) => argv.join(" ") === `shell rm ${DEVICE_FILE}`),
+      ).toBe(true);
+    });
+
+    test("a start that fails before a pid is known still removes the temp file but never signals by name (#10217)", async () => {
+      const client = factory.getFakeClient();
+      client.setSpawnExit(LAUNCH, 1, "ERROR: unable to configure codec\n");
+
+      await backend.start(config()).catch(() => undefined);
+
+      // `pkill screenrecord` would signal other sessions' recorders on the device.
+      expect(commands().some((command) => command.includes("kill"))).toBe(false);
+      expect(
+        client.getSpawnCalls().some((argv) => argv.join(" ") === `shell rm ${DEVICE_FILE}`),
+      ).toBe(true);
+    });
+
+    test("cleanup that itself fails does not replace the start error (#10217)", async () => {
+      const client = factory.getFakeClient();
+      client.setSpawnExit(LAUNCH, 1, "adb: device offline\n");
+      client.setSpawnStdout(LAUNCH, "4321\n");
+      client.setCommandError(PROBE, new Error("transport lost"));
+
+      const error = await backend.start(config()).catch((caught: unknown) => caught);
+
+      expect((error as Error).message).toContain("code 1");
+      expect((error as Error).message).not.toContain("transport lost");
     });
 
     test("fails when the recorder is killed by a signal inside the settle window", async () => {

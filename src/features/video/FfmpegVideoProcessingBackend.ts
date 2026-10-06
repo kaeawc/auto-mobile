@@ -63,15 +63,22 @@ const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 // The iOS post-process is a stream copy unless a `resolution` was requested; then it is a
 // full decode, scale and re-encode of every frame, which grows with the recording (up to
 // 3600 s). A fixed 60 s SIGKILLed long re-encodes and failed the stop (#10188). The copy
-// keeps the 60 s budget, and that is also the floor for a re-encode. The ratio and ceiling
+// keeps the 60 s budget, and that is also the floor for a re-encode. The ratio and ceilings
 // below are judgment, NOT measured on a host: half a second of budget per recorded second
 // assumes the encoder runs at least twice as fast as real time (hardware encoders and even
-// libx264 ultrafast at a phone-sized frame are expected to be well above that), and 30 min
-// is that ratio at the longest iOS recording. A stop carries no request deadline on this
-// path (the request signal only bounds startup), so the ceiling is the only upper bound.
+// libx264 ultrafast at a phone-sized frame are expected to be well above that).
+//
+// Who bounds a stop decides the ceiling. A stop made by a live tool request is bounded by
+// that request's remaining time (see boundPostProcessBudgetToRequest), with 30 min (the
+// ratio at the longest iOS recording) as the ceiling when the request carries no deadline.
+// A stop that is not driven by a live request (the auto-stop and size-cap timers, a device
+// disconnect, teardown) runs outside any request context and has only its own budget: the
+// ceiling there is 10 min, the ratio at a 20 minute recording, so an unattended stop never
+// holds ffmpeg and the recording's ownership for half an hour.
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
 const FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS = 500;
 const FFMPEG_REENCODE_MAX_BUDGET_MS = 30 * 60 * 1000;
+export const FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS = 10 * 60 * 1000;
 
 /** Whether the iOS post-process can stream-copy the raw capture instead of re-encoding it. */
 function isStreamCopyPostProcess(config: VideoCaptureConfig): boolean {
@@ -85,12 +92,13 @@ function isStreamCopyPostProcess(config: VideoCaptureConfig): boolean {
 export function ffmpegPostProcessBudgetMs(
   config: VideoCaptureConfig,
   recordedSeconds: number | undefined,
+  reencodeCeilingMs: number = FFMPEG_REENCODE_MAX_BUDGET_MS,
 ): number {
   if (isStreamCopyPostProcess(config)) {
     return FFMPEG_POST_PROCESS_TIMEOUT_MS;
   }
   if (recordedSeconds === undefined || !Number.isFinite(recordedSeconds)) {
-    return FFMPEG_REENCODE_MAX_BUDGET_MS;
+    return reencodeCeilingMs;
   }
   // The output is capped at maxDurationSeconds (`-t`), so that is all ffmpeg re-encodes.
   const outputSeconds =
@@ -98,7 +106,7 @@ export function ffmpegPostProcessBudgetMs(
       ? Math.min(recordedSeconds, config.maxDurationSeconds)
       : recordedSeconds;
   return Math.min(
-    FFMPEG_REENCODE_MAX_BUDGET_MS,
+    reencodeCeilingMs,
     Math.max(
       FFMPEG_POST_PROCESS_TIMEOUT_MS,
       Math.ceil(Math.max(0, outputSeconds) * FFMPEG_REENCODE_BUDGET_PER_RECORDED_SECOND_MS),
@@ -112,13 +120,13 @@ const POST_PROCESS_RESPONSE_MARGIN_MS = 5000;
 
 /**
  * Cuts a post-process budget to the time left in the stop request, or returns undefined
- * when it cannot finish there. A stream copy takes whatever is left (it finishes in a
- * small part of its budget); a re-encode needs its full budget, because ffmpeg cut off
- * mid-encode leaves nothing usable. `remainingMs` is undefined when no request deadline
- * is ambient, which leaves the budget as is.
+ * when nothing is left. A stream copy or a re-encode takes whatever is left: the estimate
+ * of a re-encode is a guess, so it is attempted with the time the request has rather than
+ * refused up front (#10217), and only a run that really overruns falls back to the raw
+ * capture. `remainingMs` is undefined when no request deadline is ambient, which leaves the
+ * budget as is.
  */
 export function boundPostProcessBudgetToRequest(
-  config: VideoCaptureConfig,
   budgetMs: number,
   remainingMs: number | undefined,
 ): number | undefined {
@@ -126,11 +134,14 @@ export function boundPostProcessBudgetToRequest(
     return budgetMs;
   }
   const availableMs = remainingMs - POST_PROCESS_RESPONSE_MARGIN_MS;
-  if (availableMs <= 0 || (!isStreamCopyPostProcess(config) && availableMs < budgetMs)) {
-    return undefined;
-  }
-  return Math.min(budgetMs, availableMs);
+  return availableMs <= 0 ? undefined : Math.min(budgetMs, availableMs);
 }
+
+/**
+ * ffmpeg ran out of its time (or the stop request had none left to give it), as opposed to
+ * failing. The raw capture is returned for either, but the warning says which.
+ */
+class PostProcessOutOfTimeError extends ActionableError {}
 
 /** What iOS post-processing produced: the processed output, or the raw capture kept instead. */
 type PostProcessOutcome = { kind: "processed" } | { kind: "kept-raw"; warning: string };
@@ -1329,48 +1340,88 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         // ffmpeg may still be running against the files: nothing is safe to hand back.
         throw error;
       }
-      return this.keepRawCaptureAfterPostProcessFailure(backendHandle, error);
+      return this.keepRawCaptureAfterPostProcessFailure(backendHandle, capturePath, error);
     }
   }
 
   /**
-   * ffmpeg could not produce the processed output (it failed, ran out of its budget, or
-   * left no usable file), but the raw capture is complete and playable. Return it with a
-   * warning instead of failing the stop and discarding the recording (#10188); the partial
-   * output ffmpeg left behind is removed so only one file is offered.
+   * ffmpeg could not produce the processed output (it failed, ran out of its time, or left
+   * no usable file). When the raw capture is itself playable, return it with a warning
+   * instead of failing the stop and discarding the recording (#10188); the partial output
+   * ffmpeg left behind is removed so only one file is offered. A raw capture that is not
+   * playable (the recorder was killed before it wrote the moov atom) is no recording: the
+   * original error is rethrown so the stop reports a finalization failure.
    */
   private async keepRawCaptureAfterPostProcessFailure(
     backendHandle: FfmpegBackendHandle,
+    capturePath: string,
     error: unknown,
   ): Promise<PostProcessOutcome> {
+    await this.removePartialPostProcessOutput(backendHandle.config.outputPath);
+    if (!(await this.isRawCaptureUsable(backendHandle, capturePath))) {
+      logger.warn(
+        `[FfmpegVideo] iOS post-processing failed and the raw capture is not playable: ${errorMessage(error)}`,
+        error,
+      );
+      throw error;
+    }
     logger.warn(
       `[FfmpegVideo] iOS post-processing did not finish; keeping the unprocessed capture: ${errorMessage(error)}`,
       error,
     );
+    const reason = errorMessage(error).split("\n")[0];
+    const what =
+      error instanceof PostProcessOutOfTimeError
+        ? "post-processing ran out of time"
+        : "post-processing failed";
+    return {
+      kind: "kept-raw",
+      warning:
+        `iOS ${what} (${reason}); returning the unprocessed simulator capture, which has not ` +
+        "been remuxed or scaled to the requested resolution.",
+    };
+  }
+
+  private async removePartialPostProcessOutput(outputPath: string): Promise<void> {
     try {
-      await this.captureFileRemover.remove(backendHandle.config.outputPath);
+      await this.captureFileRemover.remove(outputPath);
     } catch (removeError) {
       logger.warn(
         `[FfmpegVideo] Failed to remove the partial post-processed output: ${errorMessage(removeError)}`,
         removeError,
       );
     }
-    const reason = errorMessage(error).split("\n")[0];
-    return {
-      kind: "kept-raw",
-      warning:
-        `iOS post-processing did not finish (${reason}); returning the unprocessed simulator ` +
-        "capture, which has not been scaled to the requested resolution.",
-    };
+  }
+
+  /**
+   * Whether the raw simulator capture can be offered as the recording: the recorder must
+   * have been stopped by its signal rather than killed past its stop timeout (simctl writes
+   * the moov atom at the end, so a killed one leaves nothing playable), and the repo's
+   * container probe must find the video track in it.
+   */
+  private async isRawCaptureUsable(
+    backendHandle: FfmpegBackendHandle,
+    capturePath: string,
+  ): Promise<boolean> {
+    if (backendHandle.captureTracker.exitState.signal === "SIGKILL") {
+      return false;
+    }
+    try {
+      return (await this.codecProbe.codec(capturePath)) !== undefined;
+    } catch (error) {
+      logger.warn(
+        `[FfmpegVideo] Could not probe the raw capture ${capturePath}: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
   }
 
   private async runFfmpegPostProcess(
     backendHandle: FfmpegBackendHandle,
     capturePath: string,
   ): Promise<void> {
-    // Decided before ffmpeg starts: a post-process that cannot finish inside the stop
-    // request would time the request out with an indeterminate result while ffmpeg keeps
-    // running, so it takes the raw-capture fallback now instead.
+    // ffmpeg is attempted with whatever time the stop has (a request with none left skips it).
     const budgetMs = this.requestBoundedPostProcessBudgetMs(backendHandle.config);
     const hwAccel = await this.detectHardwareAccel();
     const ffmpegArgs = await this.buildFfmpegArgs(backendHandle.config, hwAccel, {
@@ -1404,34 +1455,49 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     });
 
     if (isFailedExitState(ffmpegTracker.exitState)) {
+      const { exitCode, signal } = ffmpegTracker.exitState;
       // Nothing else signals ffmpeg here: a SIGKILL is waitForExit escalating past its budget.
-      const summary =
-        ffmpegTracker.exitState.signal === "SIGKILL"
-          ? `FFmpeg post-processing timed out after ${budgetMs}ms`
-          : "FFmpeg post-processing failed";
-      throw new ActionableError(this.buildFfmpegFailureMessage(summary, ffmpegArgs, ffmpegTracker));
+      if (signal === "SIGKILL") {
+        throw new PostProcessOutOfTimeError(
+          this.buildFfmpegFailureMessage(
+            `FFmpeg post-processing timed out after ${budgetMs}ms`,
+            ffmpegArgs,
+            ffmpegTracker,
+          ),
+        );
+      }
+      throw new ActionableError(
+        this.buildFfmpegFailureMessage(
+          `FFmpeg post-processing failed (exit ${exitCode ?? `signal ${signal}`})`,
+          ffmpegArgs,
+          ffmpegTracker,
+        ),
+      );
     }
 
     await this.assertFfmpegOutputReady(backendHandle.config.outputPath, ffmpegArgs, ffmpegTracker);
   }
 
   /**
-   * The post-process budget, cut to what is left of the stop request. Throws when the
-   * request cannot hold the post-process, which the caller turns into the raw-capture
-   * fallback. Without an ambient request deadline the unbounded budget applies.
+   * The post-process budget. A stop made by a live tool request is cut to what is left of
+   * that request; a stop outside any request context (timer-driven, device disconnect,
+   * teardown) has only its own budget, with the lower unattended ceiling. Throws when the
+   * request has no time left, which the caller turns into the raw-capture fallback.
    */
   private requestBoundedPostProcessBudgetMs(config: VideoCaptureConfig): number {
-    const budgetMs = ffmpegPostProcessBudgetMs(config, this.recordedSeconds(config));
-    const deadlineMs = getRequestContext()?.getDeadlineMs?.();
-    const boundedMs = boundPostProcessBudgetToRequest(
+    const request = getRequestContext();
+    const budgetMs = ffmpegPostProcessBudgetMs(
       config,
+      this.recordedSeconds(config),
+      request ? FFMPEG_REENCODE_MAX_BUDGET_MS : FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS,
+    );
+    const deadlineMs = request?.getDeadlineMs?.();
+    const boundedMs = boundPostProcessBudgetToRequest(
       budgetMs,
       deadlineMs === undefined ? undefined : deadlineMs - this.timer.now(),
     );
     if (boundedMs === undefined) {
-      throw new ActionableError(
-        `the stop request does not have the ${Math.round(budgetMs / 1000)} s that post-processing could take`,
-      );
+      throw new PostProcessOutOfTimeError("the stop request has no time left for post-processing");
     }
     return boundedMs;
   }

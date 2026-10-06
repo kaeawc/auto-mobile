@@ -10,6 +10,7 @@ import {
   spyOn,
   test as bunTest,
 } from "bun:test";
+import { AsyncResource } from "node:async_hooks";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -44,6 +45,7 @@ import {
   startVideoRecording,
   stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
+  stopVideoRecordingUnattended,
   type VideoRetentionPolicy,
 } from "../../src/server/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
@@ -67,6 +69,12 @@ import {
 import { createTestDatabase } from "../db/testDbHelper";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
 import { logger } from "../../src/utils/logger";
+import {
+  getRequestContext,
+  runWithAbortSignal,
+  type RequestContext,
+} from "../../src/utils/AbortContext";
+import { TextRequestState } from "../../src/features/action/textTransportTimeout";
 import {
   getLatestVideoRecording,
   getVideoArchiveItem,
@@ -337,6 +345,92 @@ describe("videoRecordingManager", () => {
 
     const recordings = await listVideoRecordings();
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
+  });
+
+  describe("timer-driven stops do not inherit the start request's context (#10217)", () => {
+    // AsyncLocalStorage stores are captured by timers created inside a run() scope (verified
+    // under Bun), so an auto-stop armed during the `start` tool call fires with that call's
+    // long-expired deadline unless the stop runs outside it.
+    const START_REQUEST_MS = 90_000;
+    let contextAtStop: Array<RequestContext | undefined>;
+
+    beforeEach(() => {
+      contextAtStop = [];
+      // FakeTimer fires callbacks in the advancing test's context; a real timer fires them in
+      // the context that was ambient when it was armed. Model the real behaviour.
+      const armTimeout = fakeTimer.setTimeout.bind(fakeTimer);
+      fakeTimer.setTimeout = (callback, ms) => armTimeout(AsyncResource.bind(callback), ms);
+      const armInterval = fakeTimer.setInterval.bind(fakeTimer);
+      fakeTimer.setInterval = (callback, ms) => armInterval(AsyncResource.bind(callback), ms);
+      const realStop = fakeBackend.stop.bind(fakeBackend);
+      fakeBackend.stop = async (handle) => {
+        contextAtStop.push(getRequestContext());
+        return realStop(handle);
+      };
+    });
+
+    const startRequest = (): RequestContext => {
+      const deadlineMs = fakeTimer.now() + START_REQUEST_MS;
+      return { getDeadlineMs: () => deadlineMs, textState: new TextRequestState() };
+    };
+
+    test("the auto-stop timer runs outside the start request's context", async () => {
+      const request = startRequest();
+      const active = await runWithAbortSignal(
+        undefined,
+        () => startVideoRecording({ device: testDevice, maxDurationSeconds: 200 }),
+        request,
+      );
+      const stopCall = fakeBackend.waitForStopCall();
+
+      // Fire the timer well past the start request's deadline.
+      fakeTimer.advanceTime(200_000);
+      await stopCall;
+      await stopVideoRecording(active.recordingId);
+
+      expect(fakeTimer.now()).toBeGreaterThan(request.getDeadlineMs?.() ?? 0);
+      expect(contextAtStop).toEqual([undefined]);
+    });
+
+    test("the in-progress size cap runs its stop outside the start request's context", async () => {
+      await setVideoRecordingManagerDependencies({
+        statFileSize: async () => Number.MAX_SAFE_INTEGER,
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
+      });
+      const active = await runWithAbortSignal(
+        undefined,
+        () => startVideoRecording({ device: testDevice, maxDurationSeconds: 300 }),
+        startRequest(),
+      );
+      const stopCall = fakeBackend.waitForStopCall();
+
+      fakeTimer.advanceTime(1000);
+      await stopCall;
+      await stopVideoRecording(active.recordingId).catch(() => undefined);
+
+      expect(contextAtStop[0]).toBeUndefined();
+    });
+
+    test("stopVideoRecordingUnattended drops the caller's request context", async () => {
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 200 });
+
+      await runWithAbortSignal(
+        undefined,
+        () => stopVideoRecordingUnattended(active.recordingId),
+        startRequest(),
+      );
+
+      expect(contextAtStop).toEqual([undefined]);
+    });
+
+    test("a live stop request keeps its own context so it can bound post-processing", async () => {
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 200 });
+      const request = startRequest();
+
+      await runWithAbortSignal(undefined, () => stopVideoRecording(active.recordingId), request);
+
+      expect(contextAtStop).toEqual([request]);
+    });
   });
 
   test("failed state initialization does not arm retention", async () => {

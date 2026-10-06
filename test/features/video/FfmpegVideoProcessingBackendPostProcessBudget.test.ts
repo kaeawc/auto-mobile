@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { runOutsideRequestContext, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import {
   boundPostProcessBudgetToRequest,
   ffmpegPostProcessBudgetMs,
+  FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS,
   FfmpegVideoProcessingBackend,
   type ProcessTracker,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
@@ -106,26 +107,39 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
     };
   }
 
-  function captureTracker(): ProcessTracker {
+  function captureTracker(recorderSignal: NodeJS.Signals | null = null): ProcessTracker {
     const process = new EventEmitter() as ProcessTracker["process"];
     process.stderr = new EventEmitter() as ProcessTracker["process"]["stderr"];
-    process.exitCode = 0;
-    process.signalCode = null;
+    process.exitCode = recorderSignal ? null : 0;
+    process.signalCode = recorderSignal;
     process.killed = false;
     process.kill = () => true;
-    return { process, exitState: { exitCode: 0 }, exitPromise: Promise.resolve(), stderr: [] };
+    return {
+      process,
+      exitState: recorderSignal ? { exitCode: null, signal: recorderSignal } : { exitCode: 0 },
+      exitPromise: Promise.resolve(),
+      stderr: [],
+    };
+  }
+
+  interface StopOptions {
+    /** What the container probe finds in the raw capture (undefined: no moov atom). */
+    rawCodec?: string | undefined;
+    /** How the simctl recorder ended: null is its own exit after SIGINT. */
+    recorderSignal?: NodeJS.Signals | null;
   }
 
   async function stopIos(
     behavior: EncoderBehavior,
     recording: VideoCaptureConfig,
+    options: StopOptions = { rawCodec: "hevc" },
   ): Promise<RecordingResult> {
     const backend = new FfmpegVideoProcessingBackend(
       undefined,
       undefined,
       startEncoder(behavior),
       () => "win32",
-      { codec: async () => "hevc" },
+      { codec: async (filePath) => (filePath === RAW_PATH ? options.rawCodec : "hevc") },
       timer,
       {
         remove: async (filePath) => {
@@ -141,7 +155,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
       startedAt: recording.startedAt,
       backendHandle: {
         platform: "ios",
-        captureTracker: captureTracker(),
+        captureTracker: captureTracker(options.recorderSignal ?? null),
         capturePath: RAW_PATH,
         config: recording,
       },
@@ -186,7 +200,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
     expect(result.sizeBytes).toBe(4096);
     expect(result.codec).toBe("hevc");
     const warning = result.warnings?.[0] ?? "";
-    expect(warning).toContain("post-processing did not finish");
+    expect(warning).toContain("post-processing ran out of time");
     expect(warning).toMatch(/timed out after 30\d{4}ms/);
     expect(warning).toContain("unprocessed");
     expect(removed).not.toContain(RAW_PATH);
@@ -196,8 +210,59 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
     const result = await stopIos({ kind: "exits", afterMs: SECOND_MS, code: 1 }, config());
 
     expect(result.outputPath).toBe(RAW_PATH);
-    expect(result.warnings?.[0]).toContain("FFmpeg post-processing failed");
+    // Distinguished from running out of time, and it names the exit status.
+    expect(result.warnings?.[0]).toContain(
+      "post-processing failed (FFmpeg post-processing failed (exit 1)",
+    );
+    expect(result.warnings?.[0]).not.toContain("ran out of time");
     expect(removed).toEqual([OUTPUT_PATH]);
+  });
+
+  describe("a failed ffmpeg only keeps a raw capture that is playable (#10217)", () => {
+    test("a raw capture with no moov atom (recorder killed) fails the stop as on main", async () => {
+      const error = await stopIos({ kind: "exits", afterMs: SECOND_MS, code: 1 }, config(), {
+        rawCodec: undefined,
+        recorderSignal: "SIGKILL",
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      const failure = error as VideoCaptureFinalizationError;
+      expect(failure.message).toContain("Capture exited but finalization failed");
+      expect(failure.message).toContain(RAW_PATH);
+      expect(failure.retainedCapturePath).toBe(RAW_PATH);
+      // The partial output goes; the raw bytes stay for recovery.
+      expect(removed).toEqual([OUTPUT_PATH]);
+    });
+
+    test("a recorder killed past its stop timeout is not trusted even if the probe finds a track", async () => {
+      const error = await stopIos({ kind: "exits", afterMs: SECOND_MS, code: 1 }, config(), {
+        rawCodec: "hevc",
+        recorderSignal: "SIGKILL",
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+    });
+
+    test("a timeout over a raw capture with no moov atom also fails the stop", async () => {
+      const error = await stopIos(
+        { kind: "exits", afterMs: 400 * SECOND_MS, code: 0 },
+        config({ resolution: undefined }),
+        { rawCodec: undefined },
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(encoderKills).toEqual(["SIGKILL"]);
+    });
+
+    test("a recorder that exited on its own signal with a readable track is a valid fallback", async () => {
+      const result = await stopIos({ kind: "exits", afterMs: SECOND_MS, code: 1 }, config(), {
+        rawCodec: "h264",
+        recorderSignal: null,
+      });
+
+      expect(result.outputPath).toBe(RAW_PATH);
+      expect(result.codec).toBe("h264");
+    });
   });
 
   test("an ffmpeg that cannot be confirmed gone still fails the stop and offers no raw capture", async () => {
@@ -226,18 +291,43 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
       });
     }
 
-    test("a re-encode that cannot finish inside the request returns the raw capture at once", async () => {
-      // 30 minutes recorded asks for 900 s; the request has 90 s.
+    test("a re-encode whose estimate exceeds the request is still attempted with what is left (#10217)", async () => {
+      // 30 minutes recorded estimates 900 s; the request has 90 s, 85 s after the margin.
+      // Main tried for 60 s and often succeeded; the estimate must not refuse it up front.
       const result = await stopWithinRequest(
         90 * SECOND_MS,
-        { kind: "exits", afterMs: SECOND_MS, code: 0 },
+        { kind: "exits", afterMs: 60 * SECOND_MS, code: 0 },
         config(),
       );
 
-      expect(encoderStarts).toBe(0);
+      expect(encoderStarts).toBe(1);
+      expect(result.outputPath).toBe(OUTPUT_PATH);
+      expect(result.warnings).toBeUndefined();
+    });
+
+    test("a re-encode that really overruns the request falls back: ffmpeg is stopped and its partial output removed", async () => {
+      const result = await stopWithinRequest(
+        90 * SECOND_MS,
+        { kind: "exits", afterMs: 200 * SECOND_MS, code: 0 },
+        config(),
+      );
+
+      expect(encoderStarts).toBe(1);
+      expect(encoderKills).toEqual(["SIGKILL"]);
       expect(result.outputPath).toBe(RAW_PATH);
-      expect(result.warnings?.[0]).toContain("post-processing did not finish");
-      expect(result.warnings?.[0]).toContain("does not have the 900 s");
+      expect(result.warnings?.[0]).toContain("post-processing ran out of time");
+      expect(result.warnings?.[0]).toMatch(/timed out after 8[45]\d{3}ms/);
+      expect(removed).toEqual([OUTPUT_PATH]);
+    });
+
+    test("a re-encode ffmpeg cannot be confirmed to have left still fails the stop", async () => {
+      const error = await stopWithinRequest(
+        90 * SECOND_MS,
+        { kind: "ignores-signals" },
+        config(),
+      ).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
       expect(removed).not.toContain(RAW_PATH);
     });
 
@@ -276,18 +366,57 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
 
       expect(encoderStarts).toBe(0);
       expect(result.outputPath).toBe(RAW_PATH);
+      expect(result.warnings?.[0]).toContain("ran out of time");
+      expect(result.warnings?.[0]).toContain("no time left");
     });
 
     test.each([
-      ["no ambient deadline leaves the budget alone", true, 900_000, undefined, 900_000],
-      ["a re-encode needs its whole budget", false, 300_000, 200_000, undefined],
-      ["a re-encode that fits keeps its budget", false, 60_000, 90_000, 60_000],
-      ["a stream copy takes what is left", true, 60_000, 30_000, 25_000],
-      ["a stream copy never exceeds its budget", true, 60_000, 500_000, 60_000],
-      ["nothing left after the margin", true, 60_000, 5_000, undefined],
-    ])("boundPostProcessBudgetToRequest: %s", (_name, copy, budgetMs, remainingMs, expected) => {
-      const cfg = config(copy ? { resolution: undefined } : {});
-      expect(boundPostProcessBudgetToRequest(cfg, budgetMs, remainingMs)).toBe(expected);
+      ["no ambient deadline leaves the budget alone", 900_000, undefined, 900_000],
+      ["a re-encode takes what is left rather than being refused", 300_000, 200_000, 195_000],
+      ["a budget that fits is kept", 60_000, 90_000, 60_000],
+      ["a stream copy takes what is left", 60_000, 30_000, 25_000],
+      ["a budget never exceeds itself", 60_000, 500_000, 60_000],
+      ["nothing left after the margin", 60_000, 5_000, undefined],
+    ])("boundPostProcessBudgetToRequest: %s", (_name, budgetMs, remainingMs, expected) => {
+      expect(boundPostProcessBudgetToRequest(budgetMs, remainingMs)).toBe(expected);
+    });
+  });
+
+  describe("a stop that is not driven by a live request (#10217)", () => {
+    /** The expired start-request deadline an auto-stop timer would inherit. */
+    function stopFromExpiredStartRequest(
+      behavior: EncoderBehavior,
+      recording: VideoCaptureConfig,
+    ): Promise<RecordingResult> {
+      const expiredMs = timer.now() - 600 * SECOND_MS;
+      return runWithAbortSignal(
+        undefined,
+        () => runOutsideRequestContext(() => stopIos(behavior, recording)),
+        { getDeadlineMs: () => expiredMs, textState: { dispatched: () => () => undefined } },
+      );
+    }
+
+    test("a stream copy still runs and is remuxed, not stored raw", async () => {
+      const result = await stopFromExpiredStartRequest(
+        { kind: "exits", afterMs: 20 * SECOND_MS, code: 0 },
+        config({ resolution: undefined }),
+      );
+
+      expect(encoderStarts).toBe(1);
+      expect(result.outputPath).toBe(OUTPUT_PATH);
+      expect(result.warnings).toBeUndefined();
+    });
+
+    test("a re-encode gets the duration-scaled budget up to the unattended ceiling", async () => {
+      // 40 minutes recorded estimates 1200 s, which the 600 s unattended ceiling cuts.
+      const result = await stopFromExpiredStartRequest(
+        { kind: "exits", afterMs: 900 * SECOND_MS, code: 0 },
+        config({ startedAt: new Date(timer.now() - 40 * MINUTE_MS).toISOString() }),
+      );
+
+      expect(encoderKills).toEqual(["SIGKILL"]);
+      expect(result.outputPath).toBe(RAW_PATH);
+      expect(result.warnings?.[0]).toMatch(/timed out after 60\d{4}ms/);
     });
   });
 
@@ -310,6 +439,19 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
       [7200, 1_800_000],
     ])("a re-encode of %d recorded seconds gets %d ms", (recordedSeconds, expectedMs) => {
       expect(ffmpegPostProcessBudgetMs(reencode(), recordedSeconds)).toBe(expectedMs);
+    });
+
+    test("an unattended stop uses a ceiling well below 30 minutes", () => {
+      expect(FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS).toBe(600_000);
+      expect(
+        ffmpegPostProcessBudgetMs(reencode(), 3600, FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS),
+      ).toBe(600_000);
+      expect(
+        ffmpegPostProcessBudgetMs(reencode(), 300, FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS),
+      ).toBe(150_000);
+      expect(
+        ffmpegPostProcessBudgetMs(copy(), 3600, FFMPEG_UNATTENDED_REENCODE_MAX_BUDGET_MS),
+      ).toBe(60_000);
     });
 
     test("a re-encode of an unknown duration gets the ceiling rather than being cut short", () => {

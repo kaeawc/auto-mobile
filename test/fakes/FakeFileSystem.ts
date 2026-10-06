@@ -209,6 +209,10 @@ export class FakeFileSystem implements FileSystem {
     throw new Error(`File not found: ${normalizedPath}`);
   }
 
+  async readFileHead(filePath: string, byteCount: number): Promise<Buffer> {
+    return (await this.readFileBuffer(filePath)).subarray(0, byteCount);
+  }
+
   async writeFile(filePath: string, content: string, encoding: string = "utf8"): Promise<void> {
     const normalizedPath = this.normalizePath(filePath);
     const parent = this.parentDir(normalizedPath);

@@ -9,6 +9,8 @@ import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDir
 import { logger } from "../utils/logger";
 import { buildToolOutputResourceUri } from "./toolOutputResources";
 import {
+  buildToolOutputArtifactFilename,
+  hasWriterIssuedFilenameShape,
   toolOutputArtifactLedger,
   type ToolOutputArtifactLedger,
 } from "./toolOutputArtifactLedger";
@@ -117,9 +119,13 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       this.pruneOldArtifactsIfDue();
 
       const content = serializeArtifactContent(input);
-      const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
+      const filename = buildToolOutputArtifactFilename(
+        this.timer.now(),
+        input.tool,
+        this.idGenerator.next(),
+      );
       const artifactPath = path.join(this.outputDirectory, filename);
-      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+      this.writeArtifactFile(artifactPath, content);
       // Record provenance (path + content hash) so the resource serves only the
       // exact bytes we wrote: it re-hashes what it reads and rejects any later
       // replacement at that path — symlink, regular-file swap, or inode-reuse
@@ -146,6 +152,28 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
     }
   }
 
+  /**
+   * The validation cache lives for the daemon's lifetime, so the output directory
+   * can be removed underneath it (a cleaned build/scratch dir). A write that fails
+   * with ENOENT re-validates (recreates) the directory and retries once; any other
+   * failure, or a second ENOENT, is reported as before.
+   */
+  private writeArtifactFile(artifactPath: string, content: string): void {
+    try {
+      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+    } catch (error) {
+      if (!isEnoent(error)) {
+        throw error;
+      }
+      logger.warn(`Tool output directory missing, recreating: ${this.outputDirectory}`);
+      this.directoryValidated = false;
+      this.fileSystem.ensureDirectory(this.outputDirectory);
+      this.fileSystem.assertWritableDirectory(this.outputDirectory);
+      this.directoryValidated = true;
+      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+    }
+  }
+
   private pruneOldArtifactsIfDue(): void {
     if (!this.retention) {
       return;
@@ -168,7 +196,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       const nowMs = this.timer.now();
       const candidates = this.fileSystem
         .listFiles(this.outputDirectory)
-        .filter((entry) => entry.isFile && entry.name.endsWith(".json"))
+        .filter((entry) => entry.isFile && this.isIssuedArtifact(entry))
         .sort((a, b) => a.mtimeMs - b.mtimeMs);
       const expired = candidates.filter((entry) => nowMs - entry.mtimeMs > retention.maxAgeMs);
       const expiredPaths = new Set(expired.map((entry) => entry.path));
@@ -188,6 +216,20 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
     } catch (error) {
       logger.warn(`Failed to prune old tool output artifacts: ${error}`, error);
     }
+  }
+
+  /**
+   * Whether the prune may delete this file. The output directory can be one the
+   * user chose and share with other content (`--tool-outputs-dir .`), so an
+   * extension match is not enough (issue #10078): the file must be one this
+   * process recorded in the ledger, or carry the writer's own filename shape
+   * (which covers artifacts a previous daemon process issued).
+   */
+  private isIssuedArtifact(entry: ToolOutputArtifactDirectoryEntry): boolean {
+    return (
+      this.ledger.resolve(entry.name)?.path === entry.path ||
+      hasWriterIssuedFilenameShape(entry.name)
+    );
   }
 
   private deletePrunedFile(filePath: string): void {
@@ -226,9 +268,4 @@ function isEnoent(error: unknown): boolean {
  */
 function serializeArtifactContent(input: ObservationArtifactWriteInput): string {
   return input.serialized ?? JSON.stringify(input.data);
-}
-
-function safeFilenameSegment(value: string): string {
-  const safe = value.replace(/[^A-Za-z0-9._-]/g, "_");
-  return safe.length > 0 ? safe : "artifact";
 }

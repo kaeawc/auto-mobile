@@ -575,9 +575,10 @@ describe("SystemConfigurationAdapter", () => {
       const result = await adapter.setLocale("ja-JP", { appId: "com.example.app" });
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe(
-        'Read-back verification failed for com.example.app: expected "ja-JP" but got "null"',
-      );
+      // The read-back could not be read, so the outcome is indeterminate and
+      // nothing is restored (#10155).
+      expect(result.error).toContain("Locale change outcome is indeterminate");
+      expect(result.error).toContain("could not be read back for com.example.app");
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
     });
 

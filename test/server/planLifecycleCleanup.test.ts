@@ -167,6 +167,8 @@ describe("executePlan cleans every acquired device before release", () => {
     await lifecycle.afterExecution(input());
     expectCleanupBeforeRelease(targets);
     expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(count);
+    // A clean cleanup adds no incomplete-cleanup summary.
+    expect(log.at("warn")).toEqual([]);
   });
 
   test.each(["device-A", "device-B"])(
@@ -192,8 +194,12 @@ describe("executePlan cleans every acquired device before release", () => {
         );
       }
       const warnings = log.at("warn");
-      expect(warnings).toHaveLength(1);
+      expect(warnings).toHaveLength(2);
       expect(warnings[0].message).toContain(failingDeviceId);
+      // One summary says the already-finalized plan result does not cover the failed cleanup.
+      expect(warnings[1].message).toContain("app cleanup for com.example.chat was incomplete");
+      expect(warnings[1].message).toContain(`failed on ${failingDeviceId}`);
+      expect(warnings[1].message).toContain("already finalized and does not report this");
       expect(sessionManager.getSession("base:B")).toBeNull();
       expect(sessionManager.getSession("base:C")).toBeNull();
       expect(sessionManager.getSession("base")).toBeNull();
@@ -294,6 +300,13 @@ describe("executePlan cleans every acquired device before release", () => {
       log.at("warn").some((entry) => entry.message.includes("App cleanup did not finish")),
     ).toBe(true);
     expect(log.at("warn").some((entry) => entry.message.includes("App cleanup failed"))).toBe(true);
+    expect(
+      log
+        .at("warn")
+        .some((entry) =>
+          entry.message.includes(`did not finish within ${PLAN_APP_CLEANUP_CAP_MS}ms`),
+        ),
+    ).toBe(true);
   });
 
   test("skips a pooled device with quarantined runtime identity", async () => {

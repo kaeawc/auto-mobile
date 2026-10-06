@@ -74,6 +74,32 @@ class WebSocketServerTest {
   }
 
   @Test
+  fun `disconnect count captures zero edge before reconnect and carries old observer generation`() =
+    runTest {
+      val changes = mutableListOf<Pair<Int, Int>>()
+      var reconnected: WebSocketServer.ConnectedClient? = null
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = this,
+          onClientDisconnected = { client ->
+            if (client.id == 2) reconnected = server.registerClient(3, RecordingTransport())
+          },
+          onClientCountChanged = { count, session -> changes += count to session },
+        )
+      val first = server.registerClient(1, RecordingTransport())
+      val second = server.registerClient(2, RecordingTransport())
+      server.unregisterClient(first)
+      server.unregisterClient(second)
+      server.unregisterClient(second)
+      assertEquals(listOf(1 to 1, 0 to 1), changes)
+      assertEquals(1, server.getConnectionCount())
+      assertEquals(2, server.observerSessionGeneration())
+      server.unregisterClient(checkNotNull(reconnected))
+      assertEquals(listOf(1 to 1, 0 to 1, 0 to 2), changes)
+    }
+
+  @Test
   fun `display gestures are advertised only on supported Android versions`() {
     for (sdk in listOf(29, 30, 36)) {
       val commands =

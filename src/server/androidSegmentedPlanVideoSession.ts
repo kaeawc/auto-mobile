@@ -15,6 +15,7 @@ import {
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
+import type { ForceStopOptions } from "../features/video";
 import type {
   VideoRecordingConfigInput,
   VideoRecordingHighlightEntry,
@@ -27,10 +28,11 @@ import type { VideoRecordingPanel } from "../models";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 // Spend at most the existing headroom between rotation and screenrecord's hard cap.
-const ROTATION_STOP_TIMEOUT_MS =
+// This is also the product's budget for one whole segment stop-and-pull.
+export const ROTATION_STOP_TIMEOUT_MS =
   ANDROID_SCREENRECORD_MAX_SECONDS * 1000 - ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
 
-interface SegmentedSessionResult {
+export interface SegmentedSessionResult {
   filePaths: string[];
   recordingIds: string[];
   metadata: VideoRecordingMetadata[];
@@ -76,7 +78,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
   getVideoRecordingMetadata?: typeof defaultGetVideoRecordingMetadata;
   getVideoRecordingStatus?: typeof defaultGetVideoRecordingStatus;
-  rollbackVideoRecordingStart?: (recordingId: string) => Promise<void>;
+  rollbackVideoRecordingStart?: (recordingId: string, options?: ForceStopOptions) => Promise<void>;
 }
 
 /**
@@ -173,7 +175,10 @@ export class AndroidSegmentedPlanVideoSession {
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 
-  private readonly rollbackVideoRecordingStartFn: (recordingId: string) => Promise<void>;
+  private readonly rollbackVideoRecordingStartFn: (
+    recordingId: string,
+    options?: ForceStopOptions,
+  ) => Promise<void>;
 
   constructor(options: AndroidSegmentedPlanVideoSessionOptions) {
     this.device = options.device;
@@ -352,6 +357,60 @@ export class AndroidSegmentedPlanVideoSession {
     this.warnings.splice(0);
     this.gapStartedAtMs = undefined;
     this.notifyFinalized();
+  }
+
+  /**
+   * Cancellation after the plan's session handed the device back. The device may now
+   * belong to another session, so nothing here pulls from it or issues a device-wide
+   * command: only the active segment and failed pending stops are discarded (host
+   * reap, our own temp file, and our rows), and completed segments, which are already
+   * on the host, are returned exactly as {@link finalize} would return them.
+   */
+  async finalizeWithoutDevice(): Promise<SegmentedSessionResult> {
+    this.stopping = true;
+    this.timerDriven = false;
+    this.clearTimers();
+    this.sessionAbortController.abort();
+    this.rotationAbortController?.abort();
+    await this.pendingRotation;
+    const discardIds = Array.from(
+      new Set([
+        ...this.pendingStops.keys(),
+        ...(this.activeRecordingId ? [this.activeRecordingId] : []),
+      ]),
+    ).toReversed();
+    const results = await Promise.allSettled(
+      discardIds.map((id) => this.rollbackVideoRecordingStartFn(id, { deviceWide: false })),
+    );
+    results.forEach((result, index) => {
+      this.rememberWarning(
+        result.status === "rejected"
+          ? `Failed to discard segment ${discardIds[index]} after the device was released: ${errorMessage(result.reason)}`
+          : `Segment ${discardIds[index]} was discarded because the plan's device was released; its device-side recorder may run until its own time limit`,
+      );
+    });
+    this.activeRecordingId = undefined;
+    this.pendingStops.clear();
+    this.notifyFinalized();
+    return this.completedResult();
+  }
+
+  /** The segments already stopped and archived on the host, without touching the device. */
+  completedResult(): SegmentedSessionResult {
+    return {
+      filePaths: [...this.completedFilePaths],
+      recordingIds: [...this.completedRecordingIds],
+      metadata: [...this.completedMetadata],
+      highlights:
+        this.completedHighlights.length > 0
+          ? this.completedHighlights.toSorted(
+              (a, b) => a.timeline.appearedAtSeconds - b.timeline.appearedAtSeconds,
+            )
+          : undefined,
+      ...(this.completedMetadata.length === 0 && this.warnings.length > 0
+        ? { warnings: [...this.warnings] }
+        : {}),
+    };
   }
 
   private clearTimers(): void {
@@ -775,19 +834,6 @@ export class AndroidSegmentedPlanVideoSession {
       }
     }
     this.recordGap(this.timer.now());
-    return {
-      filePaths: [...this.completedFilePaths],
-      recordingIds: [...this.completedRecordingIds],
-      metadata: [...this.completedMetadata],
-      highlights:
-        this.completedHighlights.length > 0
-          ? this.completedHighlights.toSorted(
-              (a, b) => a.timeline.appearedAtSeconds - b.timeline.appearedAtSeconds,
-            )
-          : undefined,
-      ...(this.completedMetadata.length === 0 && this.warnings.length > 0
-        ? { warnings: [...this.warnings] }
-        : {}),
-    };
+    return this.completedResult();
   }
 }

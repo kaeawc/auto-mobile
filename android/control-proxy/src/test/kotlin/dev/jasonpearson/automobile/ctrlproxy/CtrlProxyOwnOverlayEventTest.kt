@@ -1,0 +1,71 @@
+package dev.jasonpearson.automobile.ctrlproxy
+
+import android.view.accessibility.AccessibilityWindowInfo
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * CtrlProxy's package also owns its keyboard (an input-method window) and MainActivity, so the
+ * own-package filter in onAccessibilityEvent may drop only events from the overlay's own
+ * accessibility-overlay window. Dropping a keyboard event would leave `frameContext` frozen when
+ * the keyboard changes layer in place, letting a stale token tap old key coordinates.
+ */
+class CtrlProxyOwnOverlayEventTest {
+  private val own = "dev.jasonpearson.automobile.ctrlproxy"
+
+  @Test
+  fun `own package accessibility overlay window is skipped`() {
+    assertTrue(
+      shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+    )
+  }
+
+  @Test
+  fun `own package input method window is processed`() {
+    assertFalse(shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_INPUT_METHOD))
+  }
+
+  @Test
+  fun `own package application window is processed`() {
+    assertFalse(shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_APPLICATION))
+  }
+
+  @Test
+  fun `own package with unknown window type fails open`() {
+    assertFalse(shouldSkipOwnOverlayEvent(own, own, null))
+  }
+
+  @Test
+  fun `own package with other window types is processed`() {
+    for (type in
+      listOf(
+        AccessibilityWindowInfo.TYPE_SYSTEM,
+        AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER,
+      )) {
+      assertFalse("type $type", shouldSkipOwnOverlayEvent(own, own, type))
+    }
+  }
+
+  @Test
+  fun `other package is processed even from an accessibility overlay window`() {
+    assertFalse(
+      shouldSkipOwnOverlayEvent(
+        "com.example.app",
+        own,
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+      )
+    )
+    assertFalse(
+      shouldSkipOwnOverlayEvent("com.example.app", own, AccessibilityWindowInfo.TYPE_APPLICATION)
+    )
+  }
+
+  @Test
+  fun `a missing package such as a windows-changed event is processed`() {
+    assertFalse(
+      shouldSkipOwnOverlayEvent(null, own, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+    )
+    assertFalse(shouldSkipOwnOverlayEvent(null, own, null))
+  }
+}

@@ -176,6 +176,7 @@ function harness(
   );
   return {
     action,
+    executor,
     capture,
     screenshots,
     timer,
@@ -650,13 +651,49 @@ describe("tapOn display verification", () => {
     });
     h.action.observedInteraction = async (run, options) => {
       const result = await run(h.observation());
-      floor = options.observationTimestampProvider?.();
+      floor = options.observationHostTimestampProvider?.();
       expect(options.display).toBe("external");
       return { ...result, observation: h.observation() };
     };
     expect((await h.execute({ ensureChecked: true })).success).toBe(true);
     expect(floor).toBe(200);
   });
+
+  for (const skewMs of [0, -20_000, 5_000]) {
+    test(`ensureChecked floor is the tap time in the device clock with one device read (skew ${skewMs}ms, #9879)`, async () => {
+      const h = harness(true, { checked: false });
+      let deviceClockReads = 0;
+      h.executor.getDeviceTimestampMs = async () => {
+        deviceClockReads++;
+        return h.timer.now() + skewMs;
+      };
+      let tapDeviceStamp = 0;
+      h.onDispatch(() => {
+        h.timer.setCurrentTime(200);
+        tapDeviceStamp = h.timer.now() + skewMs;
+        h.setCurrent(hierarchy({ checked: true }));
+      });
+      let floor: number | undefined;
+      const interaction = h.action.observedInteraction.bind(h.action);
+      h.action.observedInteraction = async (run, options) => {
+        const result = await interaction(run, options);
+        floor = options.observationHostTimestampProvider?.();
+        return result;
+      };
+      const floorsBefore = h.observe.getExecuteMinTimestamps().length;
+
+      expect((await h.execute({ ensureChecked: true })).success).toBe(true);
+
+      // Exactly the action-start read: nothing is read from the device after the tap.
+      expect(deviceClockReads).toBe(1);
+      expect(floor).toBe(200);
+      // The first post-action read is floored at the tap time in the device clock
+      // (host tap time plus the skew measured at action start), so a push stamped
+      // right after the tap (tap + 1) is accepted rather than forcing a fresh wait.
+      const [, postActionFloor] = h.observe.getExecuteMinTimestamps().slice(floorsBefore);
+      expect(postActionFloor).toBe(tapDeviceStamp);
+    });
+  }
 
   test("remaining display options reject before observation or dispatch in original order", async () => {
     const h = harness(false);

@@ -16,6 +16,7 @@ import {
   waitForExit,
 } from "../../utils/ChildProcessTracker";
 import type {
+  ForceStopOptions,
   RecordingHandle,
   RecordingResult,
   VideoCaptureBackend,
@@ -468,7 +469,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     );
   }
 
-  async forceStop(handle: RecordingHandle): Promise<void> {
+  async forceStop(handle: RecordingHandle, options?: ForceStopOptions): Promise<void> {
     const backendHandle = handle.backendHandle as BackendHandle | undefined;
     if (!backendHandle || backendHandle.kind !== "android") {
       throw new Error("Missing backend handle for video recording.");
@@ -488,11 +489,21 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // directly owned adb process. Shutdown has a short outer deadline.
     const adb = this.adbFactory.create(backendHandle.device);
     const failures: string[] = [];
-    try {
-      await adb.executeCommand("shell pkill -9 screenrecord", 8000);
-    } catch (error) {
-      logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
-      failures.push(`screenrecord force-stop failed: ${errorMessage(error)}`);
+    if (options?.deviceWide === false) {
+      // `pkill -9 screenrecord` signals every recorder on the device, and the device may
+      // now belong to another session. The recorder's device-side pid is not tracked, so
+      // skip the kill: the host `adb shell` reap above and our uniquely named temp file's
+      // removal below are the only cleanup we can scope to this recording.
+      logger.warn(
+        `[VideoCapture] Skipping device-wide screenrecord kill for ${handle.recordingId}; the device-side recorder may run until its own time limit`,
+      );
+    } else {
+      try {
+        await adb.executeCommand("shell pkill -9 screenrecord", 8000);
+      } catch (error) {
+        logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
+        failures.push(`screenrecord force-stop failed: ${errorMessage(error)}`);
+      }
     }
     try {
       await adb.execute(["shell", "rm", "-f", backendHandle.deviceTempPath], {

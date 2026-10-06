@@ -154,7 +154,7 @@ export function createListingHandlers() {
         platform === "ios"
           ? discovery.devices
           : pool
-            ? await pool.normalizeAndroidDiscovery(discovery.devices)
+            ? pool.mapAndroidDiscovery(discovery.devices)
             : directAliases.fold(
                 discovery.devices,
                 await directAliases.prepare(discovery.devices),

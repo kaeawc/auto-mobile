@@ -1,5 +1,9 @@
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
-import type { AndroidTransportRouting } from "../androidSerial";
+import {
+  withAndroidTransportId,
+  copyAndroidTransportId,
+  type AndroidTransportRouting,
+} from "../androidSerial";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -1512,17 +1516,21 @@ export class AdbClient implements AdbExecutor {
         if (!deviceId || state !== "device") {
           return [];
         }
-        // `adb devices -l` also reports `transport_id:`, deliberately not read:
-        // it is a per-connection handle, and a device identity that carried it
-        // invited callers to treat "transport unchanged" as proof of an unbroken
-        // connection. The pool's `incarnation` is the one epoch token.
+        const transportId = line
+          .trim()
+          .split(/\s+/)
+          .find((field) => field.startsWith("transport_id:"))
+          ?.slice("transport_id:".length);
         return [
-          {
-            name: deviceId,
-            platform: "android",
-            deviceId,
-            observedAt,
-          } satisfies BootedDevice,
+          withAndroidTransportId(
+            {
+              name: deviceId,
+              platform: "android" as const,
+              deviceId,
+              observedAt,
+            },
+            transportId,
+          ),
         ];
       });
 
@@ -1583,7 +1591,12 @@ export class AdbClient implements AdbExecutor {
       .slice(1)
       .flatMap((line) => {
         const [deviceId, state] = line.trim().split(/\s+/);
-        return deviceId && state ? [{ deviceId, state }] : [];
+        const transportId = line
+          .trim()
+          .split(/\s+/)
+          .find((field) => field.startsWith("transport_id:"))
+          ?.slice("transport_id:".length);
+        return deviceId && state ? [withAndroidTransportId({ deviceId, state }, transportId)] : [];
       });
   }
 
@@ -1596,12 +1609,14 @@ export class AdbClient implements AdbExecutor {
     const observedAt = this.observationSequence.next();
     const devices = states
       .filter((state) => state.state === "device")
-      .map(({ deviceId }) => ({
-        name: deviceId,
-        platform: "android" as const,
-        deviceId,
-        observedAt,
-      }));
+      .map((state) =>
+        copyAndroidTransportId(state, {
+          name: state.deviceId,
+          platform: "android" as const,
+          deviceId: state.deviceId,
+          observedAt,
+        }),
+      );
     this.publishDeviceList(generation, devices);
     return { states, devices };
   }

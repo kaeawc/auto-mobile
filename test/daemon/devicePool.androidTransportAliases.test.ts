@@ -1,3 +1,4 @@
+import { withAndroidTransportId } from "../../src/utils/androidSerial";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
@@ -17,11 +18,15 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 
 const usb = "R5CT1234ABC";
 const wireless = "adb-R5CT1234ABC-AbCdEf._adb-tls-connect._tcp";
-const booted = (deviceId: string, name = deviceId): BootedDevice => ({
-  deviceId,
-  name,
-  platform: "android",
-});
+const booted = (deviceId: string, name = deviceId, transportId = deviceId): BootedDevice =>
+  withAndroidTransportId(
+    {
+      deviceId,
+      name,
+      platform: "android",
+    },
+    transportId,
+  );
 const timers: FakeTimer[] = [];
 afterEach(() => timers.splice(0).forEach((timer) => timer.reset()));
 
@@ -72,6 +77,78 @@ describe("Android transport aliases (#10201)", () => {
       }),
     ).rejects.toThrow("Timed out");
     expect(h.pool.getDevice(canonical)?.sessionId).toBe("owner-a");
+  });
+
+  test("a failed boot_id read on held wireless keeps ownership and route and refuses owner-b", async () => {
+    const h = harness([booted(usb), booted(wireless)]);
+    await h.pool.refreshDevices();
+    expect(await h.pool.assignDeviceToSession("owner-a", "android")).toBe(usb);
+    h.manager.setBootedDevices("android", [booted(wireless)]);
+    await h.pool.refreshDevices();
+    h.adb.setCommandError("boot_id", new Error("timeout"));
+    expect(
+      (await h.pool.normalizeAndroidDiscovery([booted(wireless)])).map((row) => row.deviceId),
+    ).toEqual([usb]);
+    await h.pool.refreshDevices();
+    expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
+    await expect(
+      settleWithFakeTime(h.timer, h.pool.assignDeviceToSession("owner-b", "android"), {
+        stepMs: 1000,
+        maxSteps: 70,
+        description: "transient probe second owner refusal",
+      }),
+    ).rejects.toThrow("Timed out");
+    expect(h.pool.getDevice(usb)?.sessionId).toBe("owner-a");
+  });
+
+  test("unchanged transports perform zero identity probes per refresh", async () => {
+    const h = harness([booted(usb), booted(wireless)]);
+    await h.pool.refreshDevices();
+    const calls = h.adb.getExecutedCommands().length;
+    expect(calls).toBe(6);
+    for (let refresh = 0; refresh < 3; refresh++) {
+      await h.pool.refreshDevices();
+      expect(h.adb.getExecutedCommands()).toHaveLength(calls);
+    }
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a failed first probe stays unassignable", async () => {
+    const h = harness([booted(wireless)]);
+    h.adb.setCommandError("boot_id", new Error("timeout"));
+    expect((await h.pool.refreshDevicesWithOutcome()).failure).toBeUndefined();
+    expect(h.pool.getAllDevices()).toEqual([]);
+    await expect(
+      settleWithFakeTime(h.timer, h.pool.assignDeviceToSession("owner", "android"), {
+        stepMs: 1000,
+        maxSteps: 70,
+        description: "unidentified transport refusal",
+      }),
+    ).rejects.toThrow("No devices in pool");
+  });
+
+  test("a superseded discovery returns the newer applied snapshot including iOS", async () => {
+    const h = harness([]);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+    const execute = h.adb.execute.bind(h.adb);
+    const probe = spyOn(h.adb, "execute").mockImplementationOnce(async () => {
+      entered.resolve();
+      return release.promise;
+    });
+    const old = h.pool.normalizeAndroidDiscovery([booted(wireless)]);
+    await entered.promise;
+    probe.mockImplementation(execute);
+    const ios: BootedDevice = { deviceId: "ios", name: "iPhone", platform: "ios" };
+    const newer = await h.pool.normalizeAndroidDiscovery([
+      booted(usb),
+      booted("host-new:5555"),
+      ios,
+    ]);
+    release.resolve(createExecResult(usb, ""));
+    await expect(old).resolves.toEqual(newer);
+    probe.mockRestore();
   });
 
   test("a held wireless canonical is not re-keyed when USB appears", async () => {
@@ -199,7 +276,7 @@ describe("Android transport aliases (#10201)", () => {
           .getAllDevices()
           .map((device) => device.id)
           .sort(),
-      ).toEqual([usb, wireless, ios.deviceId].sort());
+      ).toEqual([ios.deviceId].sort());
       expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
       expect(
         (await h.liveness!.takeFreshPresenceDiscovery("android")).devices
@@ -213,7 +290,8 @@ describe("Android transport aliases (#10201)", () => {
   test("iOS presence discovery preserves Android routing, and a full empty snapshot prunes aliases", async () => {
     const h = harness([booted(usb), booted(wireless)]);
     await h.pool.refreshDevices();
-    await h.pool.normalizeAndroidDiscovery([booted(wireless)]);
+    h.manager.setBootedDevices("android", [booted(wireless)]);
+    await h.pool.refreshDevices();
     expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
     await h.liveness!.takeFreshPresenceDiscovery("ios");
     expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
@@ -221,6 +299,21 @@ describe("Android transport aliases (#10201)", () => {
     expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
     expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(usb);
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("failed Android discovery preserves routes and connection evidence", async () => {
+    const h = harness([booted(usb), booted(wireless)]);
+    await h.pool.refreshDevices();
+    h.manager.setBootedDevices("android", [booted(wireless)]);
+    await h.pool.refreshDevices();
+    const calls = h.adb.getExecutedCommands().length;
+    h.manager.setAndroidDiscoveryIncomplete();
+    expect((await h.pool.refreshDevicesWithOutcome()).failure).toBeUndefined();
+    expect(h.pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wireless);
+    h.manager.failedPlatforms.delete("android");
+    await h.pool.refreshDevices();
+    expect(h.adb.getExecutedCommands()).toHaveLength(calls);
+    expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([usb]);
   });
 
   test("removing iOS does not supersede Android identity preparation", async () => {

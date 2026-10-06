@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AndroidTransportAliases,
+  withAndroidTransportId,
   isAndroidEmulatorSerial,
   isAndroidTransportAddressSerial,
 } from "../../src/utils/androidSerial";
@@ -71,7 +72,7 @@ describe("Android transport identity", () => {
     expect(aliases.fold(rows, await aliases.prepare(rows), new Set())).toEqual(rows);
   });
 
-  test("a changed console-slot incarnation is reverified for every observation", async () => {
+  test("a changed console-slot connection re-verifies its identity", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("ro.serialno", createExecResult("EMULATOR-SERIAL", ""));
     adb.setCommandResponse("ro.kernel.qemu", createExecResult("1", ""));
@@ -80,7 +81,10 @@ describe("Android transport identity", () => {
     const initial = [device("emulator-5554"), device("localhost:5555")];
     aliases.fold(initial, await aliases.prepare(initial), new Set());
     adb.setCommandResponse("ro.boot.qemu.avd_name", createExecResult("New_AVD", ""));
-    const changed = [device("emulator-5554", "New_AVD"), device("localhost:5555")];
+    const changed = [
+      device("emulator-5554", "New_AVD"),
+      withAndroidTransportId(device("localhost:5555"), "new-connection"),
+    ];
     const result = aliases.fold(
       changed,
       await aliases.prepare(changed),
@@ -122,6 +126,37 @@ describe("Android physical transport evidence", () => {
     return adb;
   };
 
+  test("transport_id change on a continuously present host:port re-probes and un-folds", async () => {
+    const usb = executor("PHONE-A", "boot-a");
+    const wifi = executor("PHONE-A", "boot-a");
+    const aliases = new AndroidTransportAliases({
+      create: (target) => (target?.deviceId === "PHONE-A" ? usb : wifi),
+    });
+    const initial = [
+      withAndroidTransportId(device("PHONE-A"), "1"),
+      withAndroidTransportId(device("host-a:5555"), "2"),
+    ];
+    const pooled = new Set(["PHONE-A"]);
+    expect(aliases.fold(initial, await aliases.prepare(initial), pooled)).toHaveLength(1);
+    const calls = wifi.getExecutedCommands().length;
+    expect(aliases.fold(initial, await aliases.prepare(initial), pooled)).toHaveLength(1);
+    expect(wifi.getExecutedCommands()).toHaveLength(calls);
+    wifi.setCommandResponse("ro.serialno", createExecResult("PHONE-B", ""));
+    wifi.setCommandResponse("boot_id", createExecResult("boot-b", ""));
+    const changed = [initial[0], withAndroidTransportId(device("host-a:5555"), "3")];
+    expect(
+      aliases.fold(changed, await aliases.prepare(changed), pooled).map((row) => row.deviceId),
+    ).toEqual(["PHONE-A", "host-a:5555"]);
+    expect(wifi.getExecutedCommands()).toHaveLength(calls + 3);
+    expect(usb.getExecutedCommands()).toHaveLength(3);
+    expect(aliases.aliases("PHONE-A")).toEqual([]);
+    expect(aliases.resolveTransport("PHONE-A")).toBe("PHONE-A");
+    expect(aliases.mapDiscovery(changed).map((row) => row.deviceId)).toEqual([
+      "PHONE-A",
+      "host-a:5555",
+    ]);
+  });
+
   test.each([true, false])(
     "a DHCP-reused endpoint is reidentified and never routes the old phone to its replacement (observed absence=%s)",
     async (observedAbsence) => {
@@ -139,8 +174,16 @@ describe("Android physical transport evidence", () => {
       }
       wifi.setCommandResponse("ro.serialno", createExecResult("PHONE-B", ""));
       wifi.setCommandResponse("boot_id", createExecResult("boot-b", ""));
-      expect(aliases.fold(initial, await aliases.prepare(initial), pooled)).toHaveLength(2);
-      const onlyReplacement = [device("192.168.1.20:5555")];
+      const replacement = [
+        device("PHONE-A"),
+        withAndroidTransportId(device("192.168.1.20:5555"), "replacement-connection"),
+      ];
+      const calls = wifi.getExecutedCommands().length;
+      expect(aliases.fold(replacement, await aliases.prepare(replacement), pooled)).toHaveLength(2);
+      expect(wifi.getExecutedCommands()).toHaveLength(calls + 3);
+      const onlyReplacement = [
+        withAndroidTransportId(device("192.168.1.20:5555"), "replacement-connection"),
+      ];
       expect(
         aliases
           .fold(onlyReplacement, await aliases.prepare(onlyReplacement), pooled)

@@ -47,7 +47,7 @@ export interface MissingDeviceEvictionOptions {
 /** The pool's mutable state is read when used, including after every await. */
 export interface MissingDeviceLivenessPoolPort {
   needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
-  normalizeAndroidDiscovery?(devices: readonly BootedDevice[]): Promise<BootedDevice[]>;
+  mapAndroidDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
   isTransportEmulator?(deviceId: string): boolean;
   getDevices(): Map<string, PooledDevice>;
   getRefreshMissingDeviceMisses(): Map<string, number>;
@@ -322,9 +322,9 @@ export class MissingDeviceLiveness {
     const discovery = await this.pool
       .getDeviceManager()
       .getBootedDevicesDetailed(platform, { bypassAndroidDeviceListCache: true });
-    return this.pool.normalizeAndroidDiscovery &&
+    return this.pool.mapAndroidDiscovery &&
       this.pool.needsAndroidTransportNormalization?.(discovery.devices)
-      ? { ...discovery, devices: await this.pool.normalizeAndroidDiscovery(discovery.devices) }
+      ? { ...discovery, devices: this.pool.mapAndroidDiscovery(discovery.devices) }
       : discovery;
   }
 

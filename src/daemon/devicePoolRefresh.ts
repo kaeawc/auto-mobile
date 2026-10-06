@@ -47,7 +47,9 @@ export interface DevicePoolRefreshPort {
     devices: readonly BootedDevice[],
     assignmentLockHeld: boolean,
     isCurrent: () => boolean,
+    completeAndroidSnapshot: boolean,
   ): Promise<BootedDevice[]>;
+  isAndroidTransportAssignable?(device: BootedDevice): boolean;
   getTimer(): Timer;
   getDeviceManager(): PlatformDeviceManager;
   getDevices(): Map<string, PooledDevice>;
@@ -148,6 +150,7 @@ export class DevicePoolRefresh {
             discovery.devices,
             assignmentLockHeld,
             () => refreshGeneration === this.refreshGeneration,
+            discovery.succeededPlatforms.has("android"),
           )
         : discovery.devices;
       const discoveryTime = this.pool.getTimer().now() - startTime;
@@ -185,6 +188,9 @@ export class DevicePoolRefresh {
               removalGenerationAtDiscoveryStart,
             )
           ) {
+            return undefined;
+          }
+          if (this.pool.isAndroidTransportAssignable?.(device) === false) {
             return undefined;
           }
           this.pool.clearAutoStartSuppressionForBootedDevice(device);

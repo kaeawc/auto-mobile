@@ -82,7 +82,7 @@ export async function listBootedDevicesForResource(
       platform === "ios"
         ? rawDevices
         : state.isInitialized()
-          ? await state.getDevicePool().normalizeAndroidDiscovery(rawDevices)
+          ? state.getDevicePool().mapAndroidDiscovery(rawDevices)
           : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
     // FUNNEL 1. In daemon mode this can await the identity quarantine, which
     // cancels and drains the owning session's executions — so a cancellation

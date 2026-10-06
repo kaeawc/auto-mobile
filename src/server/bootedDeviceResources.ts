@@ -453,7 +453,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
       const normalized =
         platform === "android"
           ? pool
-            ? await pool.normalizeAndroidDiscovery(discovery.devices)
+            ? pool.mapAndroidDiscovery(discovery.devices)
             : aliases.fold(discovery.devices, await aliases.prepare(discovery.devices), new Set())
           : discovery.devices;
       devices.push(...normalized);
@@ -826,7 +826,7 @@ async function discoverBootedDevicesForPlatform(
       devices:
         platform === "android"
           ? devicePool
-            ? await devicePool.normalizeAndroidDiscovery(rawDiscovery.devices)
+            ? devicePool.mapAndroidDiscovery(rawDiscovery.devices)
             : aliases.fold(
                 rawDiscovery.devices,
                 await aliases.prepare(rawDiscovery.devices),

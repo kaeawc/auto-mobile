@@ -770,6 +770,7 @@ export class DevicePool {
   private androidAliasObservation = 0;
   private androidAliasAppliedObservation = 0;
   private androidAliasRetirement = 0;
+  private androidAliasAppliedDevices: BootedDevice[] = [];
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
@@ -1207,7 +1208,7 @@ export class DevicePool {
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
         this.shouldRebootDisconnectedAndroidDevice(device),
-      normalizeAndroidDiscovery: (devices) => this.normalizeAndroidDiscovery(devices),
+      mapAndroidDiscovery: (devices) => this.androidTransportAliases.mapDiscovery(devices, true),
       needsAndroidTransportNormalization: (devices) =>
         devices.some((device) => device.platform === "android") &&
         this.needsAndroidTransportNormalization(devices),
@@ -1244,8 +1245,9 @@ export class DevicePool {
 
   private createRefreshPort(): DevicePoolRefreshPort {
     return {
-      normalizeAndroidDiscovery: (devices, held, current) =>
-        this.normalizeAndroidDiscovery(devices, held, current),
+      normalizeAndroidDiscovery: (devices, held, current, complete) =>
+        this.normalizeAndroidDiscovery(devices, held, current, complete),
+      isAndroidTransportAssignable: (device) => this.androidTransportAliases.isAssignable(device),
       needsAndroidTransportNormalization: (devices) =>
         this.needsAndroidTransportNormalization(devices),
       getTimer: () => this.timer,
@@ -1666,13 +1668,16 @@ export class DevicePool {
    */
   async initializeWithDevices(devices: BootedDevice[]): Promise<void> {
     if (this.needsAndroidTransportNormalization(devices)) {
-      devices = await this.normalizeAndroidDiscovery(devices);
+      devices = this.mapAndroidDiscovery(devices);
     }
     const now = this.seedLastUsedAt(this.timer.now());
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("populatePool");
     for (const device of devices) {
+      if (!this.androidTransportAliases.isAssignable(device)) {
+        continue;
+      }
       this.clearAutoStartSuppressionForBootedDevice(device);
       // Full: init/reinit replaces the pooled entry and allocates a new incarnation.
       this.notifyDeviceFramesInvalidated(device.deviceId);
@@ -1766,10 +1771,11 @@ export class DevicePool {
     awaitSessionTracking: boolean = true,
     identityEvidence: IdentityEvidence = neutralIdentityEvidence(device),
   ): Promise<void> {
-    // Start/recovery callers may already own assignmentMutex. Only cold identity
-    // probes await here; the fold itself reads current membership synchronously.
-    if (this.needsAndroidTransportNormalization([device])) {
-      device = await this.normalizeSingleAndroidDevice(device);
+    device = this.mapAndroidDiscovery([device])[0];
+    if (!this.androidTransportAliases.isAssignable(device)) {
+      throw new ActionableError(
+        `Android transport '${device.deviceId}' has no proven identity. Refresh devices after reconnecting it.`,
+      );
     }
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
@@ -6529,14 +6535,8 @@ export class DevicePool {
     return this.androidTransportAliases.avdName(deviceId);
   }
 
-  private async normalizeSingleAndroidDevice(device: BootedDevice): Promise<BootedDevice> {
-    const normalized = (await this.normalizeAndroidDiscovery([device], true, () => true, false))[0];
-    if (!normalized) {
-      throw new ActionableError(
-        `Android transport discovery changed while adding '${device.deviceId}'. Retry device discovery.`,
-      );
-    }
-    return normalized;
+  mapAndroidDiscovery(devices: readonly BootedDevice[]): BootedDevice[] {
+    return this.androidTransportAliases.mapDiscovery(devices);
   }
 
   private isPooledAndroidEmulator(deviceId: string): boolean {
@@ -6558,7 +6558,7 @@ export class DevicePool {
   ): Promise<BootedDevice[]> {
     if (
       !this.needsAndroidTransportNormalization(devices) ||
-      (devices.length > 0 && devices.every((device) => device.platform !== "android"))
+      (!completeAndroidSnapshot && devices.every((device) => device.platform !== "android"))
     ) {
       return [...devices];
     }
@@ -6569,21 +6569,21 @@ export class DevicePool {
       if (!isCurrent()) {
         return [];
       }
-      if (
-        observation < this.androidAliasAppliedObservation ||
-        retirement !== this.androidAliasRetirement
-      ) {
-        throw new ActionableError(
-          "Android transport discovery was superseded while resolving aliases. Retry device discovery.",
-        );
+      if (observation < this.androidAliasAppliedObservation) {
+        return [...this.androidAliasAppliedDevices];
+      }
+      if (retirement !== this.androidAliasRetirement) {
+        return this.mapAndroidDiscovery(devices);
       }
       this.androidAliasAppliedObservation = observation;
-      return this.androidTransportAliases.fold(
+      const normalized = this.androidTransportAliases.fold(
         devices,
         evidence,
         new Set(this.devices.keys()),
         completeAndroidSnapshot,
       );
+      this.androidAliasAppliedDevices = normalized;
+      return normalized;
     };
     return assignmentLockHeld ? fold() : this.assignmentMutex.runExclusive(fold);
   }

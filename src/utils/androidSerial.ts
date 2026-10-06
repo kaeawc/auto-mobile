@@ -30,6 +30,24 @@ export interface AndroidTransportRouting {
   resolveTransport(deviceId: string): string;
 }
 
+// Connection metadata travels with discovery rows through enrichment spreads, but
+// is absent from BootedDevice's identity contract and JSON/tool output.
+const adbTransportId = Symbol("adb transport id");
+type AndroidTransportRow = BootedDevice & { [adbTransportId]?: string };
+
+export function withAndroidTransportId<T extends object>(device: T, transportId?: string): T {
+  return transportId ? { ...device, [adbTransportId]: transportId } : device;
+}
+
+/** Preserve private connection metadata when a state row becomes a discovery row. */
+export function copyAndroidTransportId<T extends object>(source: object, target: T): T {
+  return withAndroidTransportId(target, (source as AndroidTransportRow)[adbTransportId]);
+}
+
+function transportIdFor(device: BootedDevice): string | undefined {
+  return (device as AndroidTransportRow)[adbTransportId];
+}
+
 interface TransportIdentity {
   key: string;
   avdName?: string;
@@ -40,6 +58,12 @@ interface TransportGroup {
   name: string;
   serials: Set<string>;
   avdName?: string;
+  transportIds: Map<string, string | undefined>;
+}
+
+interface ConnectionEvidence {
+  transportId?: string;
+  identity: Promise<TransportIdentity | undefined>;
 }
 
 /** Only a loopback adb port identifies a local emulator's console slot. */
@@ -49,10 +73,12 @@ function loopbackConsoleSerial(serial: string): string | undefined {
   return port >= 5554 && port % 2 === 0 && port <= 65534 ? `emulator-${port}` : undefined;
 }
 
-/** Alias groups belong to one pool; transport identity is reverified per observation. */
+/** Alias groups and connection evidence belong to one pool. Presence always comes from rows. */
 export class AndroidTransportAliases implements AndroidTransportRouting {
   private readonly groups = new Map<string, TransportGroup>();
   private readonly routes = new Map<string, string>();
+  private readonly connections = new Map<string, ConnectionEvidence>();
+  private readonly unproven = new Set<string>();
 
   constructor(private readonly adbFactory: AdbClientFactory) {}
 
@@ -145,9 +171,13 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     device: BootedDevice,
     devices: readonly BootedDevice[],
   ): Promise<TransportIdentity | undefined> {
-    // Endpoint strings can be reused without an intervening discovery (DHCP,
-    // adb reconnect, or reboot). Never reuse identity evidence across snapshots.
-    const identity = await this.readIdentity(device);
+    const transportId = transportIdFor(device);
+    let connection = this.connections.get(device.deviceId);
+    if (!connection || connection.transportId !== transportId) {
+      connection = { transportId, identity: this.readIdentity(device) };
+      this.connections.set(device.deviceId, connection);
+    }
+    const identity = await connection.identity;
     if (!identity || this.contradictsEmulatorPeer(identity, devices)) {
       logger.warn(
         `Android transport '${device.deviceId}' could not be identified; leaving it unaliased.`,
@@ -164,10 +194,18 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     pooledIds: ReadonlySet<string>,
     completeSnapshot = true,
   ): BootedDevice[] {
+    if (completeSnapshot) {
+      this.pruneConnectionEvidence(devices);
+    }
     const byIdentity = new Map<string, BootedDevice[]>();
     for (const device of devices) {
       if (device.platform !== "android") {
         continue;
+      }
+      if (!isAndroidEmulatorSerial(device.deviceId) && !evidence.has(device.deviceId)) {
+        this.unproven.add(device.deviceId);
+      } else {
+        this.unproven.delete(device.deviceId);
       }
       const key = evidence.get(device.deviceId)?.key ?? device.deviceId;
       const rows = byIdentity.get(key) ?? [];
@@ -182,6 +220,18 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       result.push(this.foldGroup(key, rows, evidence, pooledIds, completeSnapshot));
     }
     return result;
+  }
+
+  private pruneConnectionEvidence(devices: readonly BootedDevice[]): void {
+    const present = new Set(
+      devices.filter((row) => row.platform === "android").map((row) => row.deviceId),
+    );
+    for (const serial of this.connections.keys()) {
+      if (!present.has(serial)) {
+        this.connections.delete(serial);
+        this.unproven.delete(serial);
+      }
+    }
   }
 
   private pruneDisconnectedTransports(
@@ -236,9 +286,71 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       name,
       serials,
       avdName: avdName ?? previous?.avdName,
+      transportIds: this.connectionIdsFor(rows, previous, completeSnapshot),
     });
     this.routes.set(canonical, live.includes(canonical) ? canonical : live[0]);
     return { ...representative, deviceId: canonical, name };
+  }
+
+  private connectionIdsFor(
+    rows: readonly BootedDevice[],
+    previous: TransportGroup | undefined,
+    completeSnapshot: boolean,
+  ): Map<string, string | undefined> {
+    const ids = new Map(completeSnapshot ? undefined : previous?.transportIds);
+    for (const row of rows) {
+      ids.set(row.deviceId, transportIdFor(row));
+    }
+    return ids;
+  }
+
+  /** Read-only presence mapping: never probe, prune, or update routing on a monitor tick. */
+  mapDiscovery(devices: readonly BootedDevice[], updateRouting = false): BootedDevice[] {
+    const mapped = new Map<string, BootedDevice>();
+    for (const device of devices) {
+      const group =
+        device.platform === "android"
+          ? [...this.groups.values()].find(
+              (entry) =>
+                entry.serials.has(device.deviceId) &&
+                entry.transportIds.get(device.deviceId) === transportIdFor(device),
+            )
+          : undefined;
+      const row = group ? { ...device, deviceId: group.canonical, name: group.name } : device;
+      mapped.set(`${row.platform}:${row.deviceId}`, row);
+    }
+    if (updateRouting) {
+      // A proven live row may change the dispatch route without changing group
+      // membership. This also covers selection's presence sweep after USB removal.
+      for (const group of this.groups.values()) {
+        const live = devices.filter(
+          (row) =>
+            row.platform === "android" &&
+            group.serials.has(row.deviceId) &&
+            group.transportIds.get(row.deviceId) === transportIdFor(row),
+        );
+        if (live.length > 0) {
+          this.routes.set(
+            group.canonical,
+            live.find((row) => row.deviceId === group.canonical)?.deviceId ?? live[0].deviceId,
+          );
+        }
+      }
+    }
+    return [...mapped.values()];
+  }
+
+  isAssignable(device: BootedDevice): boolean {
+    return (
+      device.platform !== "android" ||
+      (!this.unproven.has(device.deviceId) &&
+        (!isAndroidTransportAddressSerial(device.deviceId) ||
+          [...this.groups.values()].some(
+            (group) =>
+              group.canonical === device.deviceId &&
+              [...group.serials].some((serial) => !this.unproven.has(serial)),
+          )))
+    );
   }
 
   resolveTransport(deviceId: string): string {
@@ -260,6 +372,10 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
     for (const [key, group] of this.groups) {
       if (group.canonical !== deviceId) {
         continue;
+      }
+      for (const serial of group.serials) {
+        this.connections.delete(serial);
+        this.unproven.delete(serial);
       }
       this.groups.delete(key);
       retired = true;

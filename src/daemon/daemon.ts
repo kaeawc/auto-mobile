@@ -2539,7 +2539,7 @@ export class Daemon {
       const discovery = await deviceManager.getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache,
       });
-      discovery.devices = await this.devicePool.normalizeAndroidDiscovery(discovery.devices);
+      discovery.devices = this.devicePool.mapAndroidDiscovery(discovery.devices);
       // Reconciliation can quarantine identity and cancel in-flight work. During
       // allocation, discovery supplies only presence evidence for miss counting.
       if (!planActive) {

@@ -1,3 +1,9 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
 import { createExecResult } from "../../src/utils/execResult";
 import type { BootedDevice } from "../../src/models";
@@ -8,7 +14,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   pruneStaleOfflineRecoveryAttempts,
   selectOfflineRecoveryCandidates,
@@ -183,7 +189,7 @@ function monitorHarness(
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
       reconcileDiscoveryObservation: async () => {},
-      normalizeAndroidDiscovery: async (devices: BootedDevice[]) => devices,
+      mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAllDevices: () => [device],
       isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},
@@ -223,8 +229,7 @@ test.each(["emulator-5554", "localhost:5555"])(
       { deviceId: "localhost:5555", name: "Pixel", platform: "android" },
     ];
     aliases.fold(initial, await aliases.prepare(initial), new Set(["emulator-5554"]));
-    daemon.devicePool.normalizeAndroidDiscovery = async (rows: BootedDevice[]) =>
-      aliases.fold(rows, await aliases.prepare(rows), new Set(["emulator-5554"]));
+    daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
     daemon.deviceDisconnectMisses.set("emulator-5554", 2);
     const sweep = monitor.run();
     await entered.promise;
@@ -343,7 +348,9 @@ test.each([
       { deviceId: device.id, name: "Pixel", platform: "android" },
       { deviceId: alias, name: "Pixel", platform: "android" },
     ]);
-    daemon.devicePool.normalizeAndroidDiscovery = normalize;
+    daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
+    const identityCalls = adb.getExecutedCommands().length;
+    adb.setCommandError("boot_id", new Error("timeout"));
     manager.bootedDevices = [{ deviceId: alias, name: "Pixel", platform: "android" }];
     let cleanups = 0;
     daemon.cleanupDisconnectedDevice = async () => {
@@ -358,10 +365,86 @@ test.each([
       expect(offlineProbes).toBe(0);
       expect(recoveries).toBe(0);
       expect(cleanups).toBe(0);
-      expect(aliases.resolveTransport(device.id)).toBe(alias);
+      expect(aliases.resolveTransport(device.id)).toBe(device.id);
+      expect(adb.getExecutedCommands()).toHaveLength(identityCalls);
       expect(daemon.timer.getSleepHistory()).toEqual([]);
     } finally {
       await monitor.stop();
     }
   },
 );
+
+test("concurrent refresh and disconnect monitor do not probe twice or fail discovery", async () => {
+  class AliasManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set<string>();
+    }
+    async recoverAndroidOfflineDevices() {}
+  }
+  const manager = new AliasManager();
+  const { daemon, monitor, device } = monitorHarness(manager);
+  const timer = daemon.timer as FakeTimer;
+  const row = (deviceId: string): BootedDevice => ({
+    deviceId,
+    name: deviceId,
+    platform: "android",
+  });
+  const usb = "PHONE-USB";
+  const wifi = "host-a:5555";
+  manager.bootedDevices = [row(usb), row(wifi)];
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+  adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+  adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+  const pool = new DevicePool(
+    createDevicePoolDependencies(
+      new SessionManager(timer, new FakeDeviceSessionPersistence()),
+      "monitor-alias",
+      {
+        timer,
+        deviceManager: manager,
+        androidAdbFactory: new FakeAdbClientFactory(adb),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      },
+    ),
+  );
+  daemon.devicePool = pool;
+  device.id = usb;
+  await pool.refreshDevices();
+  await pool.assignDeviceToSession("owner-a", "android");
+  manager.bootedDevices = [row(wifi), row("host-new:5555")];
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+  const execute = adb.execute.bind(adb);
+  const probe = spyOn(adb, "execute").mockImplementationOnce(async () => {
+    entered.resolve();
+    return release.promise;
+  });
+  const normalization = spyOn(pool, "normalizeAndroidDiscovery");
+  const refresh = pool.refreshDevicesWithOutcome();
+  let sweep: Promise<void> | undefined;
+  try {
+    await entered.promise;
+    probe.mockImplementation(execute);
+    const calls = adb.getExecutedCommands().length;
+    sweep = monitor.run();
+    await drainMicrotasks(100);
+    expect(normalization).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toHaveLength(calls);
+    expect(daemon.deviceDisconnectMisses.size).toBe(0);
+    release.resolve(createExecResult(usb, ""));
+    await expect(sweep).resolves.toBeUndefined();
+    expect((await refresh).failure).toBeUndefined();
+    expect(pool.getDevice(usb)?.sessionId).toBe("owner-a");
+    expect(pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wifi);
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    release.resolve(createExecResult(usb, ""));
+    await refresh;
+    await sweep;
+    normalization.mockRestore();
+    probe.mockRestore();
+    await monitor.stop();
+    timer.reset();
+  }
+});

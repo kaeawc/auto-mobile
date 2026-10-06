@@ -228,7 +228,13 @@ describe("device-addressed admission gate (issue #6863)", () => {
       readFileSync(join(ROOT, "src/features/observe/android/AndroidCtrlProxyClient.ts"), "utf8"),
     );
     unadmittedFactoryUsers = walkSrc()
-      .filter((file) => readFileSync(file).includes("unadmittedAdbClientFactory"))
+      .filter((file) => {
+        const source = readFileSync(file, "utf8");
+        return (
+          source.includes("unadmittedAdbClientFactory") ||
+          source.includes("androidTransportIdentityAdbFactory")
+        );
+      })
       .map((file) => relative(ROOT, file).split(sep).join("/"))
       .sort();
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
@@ -329,7 +335,9 @@ describe("device-addressed admission gate (issue #6863)", () => {
     // device-addressed feature actions still bind through the gated factory.
     expect(unadmittedFactoryUsers).toEqual([
       "src/daemon/devicePool.ts",
+      "src/server/bootedDeviceResources.ts",
       "src/server/deviceTools.ts",
+      "src/server/resourceDeviceResolver.ts",
       "src/utils/android-cmdline-tools/AdbClientFactory.ts",
       "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",
     ]);

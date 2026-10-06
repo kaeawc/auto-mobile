@@ -95,8 +95,13 @@ export interface GestureEmitter {
 /**
  * Minimal subset of CtrlProxyClient needed by DualTrackRecorder.
  */
-export interface ReceivedInteraction extends Omit<InteractionEvent, "type"> {
+export interface ReceivedInteraction extends Omit<InteractionEvent, "type" | "text"> {
   type: string;
+  /**
+   * CtrlProxy serializes an inputText event for an emptied field as `text: null`
+   * (it encodes defaults), and some platforms report `""` instead.
+   */
+  text?: string | null;
 }
 
 export interface A11ySource {

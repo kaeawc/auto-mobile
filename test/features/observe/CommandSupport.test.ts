@@ -141,7 +141,14 @@ describe("CtrlProxy command support", () => {
     const known = new Set<string>(KNOWN_REQUEST_TYPES);
     const flags = new Set<string>(ANDROID_CAPABILITY_FLAGS);
     expect(ANDROID_CAPABILITY_GATED_COMMANDS).toEqual(
-      new Set([...oldApkAdvertisedCommands, "show_overlay", "update_overlay", "dismiss_overlay"]),
+      new Set([
+        ...oldApkAdvertisedCommands,
+        "show_overlay",
+        "update_overlay",
+        "dismiss_overlay",
+        "put_overlay_asset",
+        "remove_overlay_asset",
+      ]),
     );
     for (const command of ANDROID_CAPABILITY_GATED_COMMANDS) {
       expect(known.has(command) || flags.has(command)).toBe(true);

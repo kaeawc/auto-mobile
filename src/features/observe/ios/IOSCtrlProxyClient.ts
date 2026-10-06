@@ -128,6 +128,14 @@ const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
  * Function type that returns currently booted devices.
  * Injected for testability — avoids coupling to PlatformDeviceManagerFactory in tests.
  */
+/**
+ * Result of pushing the mock-rule set to the iOS SDK: `sent` means the message
+ * was written to the open connection; every other value means the rules were NOT
+ * delivered (no network_mocking capability, mocking disabled, send failed, or the
+ * capability probe was superseded by a newer foreground app).
+ */
+export type IosMockRuleSyncOutcome = "sent" | "noCapability" | "disabled" | "failed" | "superseded";
+
 export type BootedDeviceLister = () => Promise<BootedDevice[]>;
 
 export interface IosCtrlProxyClientOptions {
@@ -2005,24 +2013,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.startScreenshotBackoff();
   }
 
-  private syncNetworkMockRulesToDevice(): void {
+  private syncNetworkMockRulesToDevice(): IosMockRuleSyncOutcome {
     if (
       !this.hasSdkCapability("network_mocking") &&
       !this.isLegacySdkCommandSupported("network_mocking")
     ) {
-      return;
+      return "noCapability";
     }
     if (!serverConfig.isNetworkMockableEnabled()) {
-      return;
+      return "disabled";
     }
 
     try {
       // Always sync mock rules on reconnect. Sending an empty list clears
       // stale rules that may linger in the iOS SDK after a CtrlProxy restart.
       const rules = buildNetworkMockRules(NetworkState.getInstance());
-      this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
+      // sendMessage returns false (and logs) when the socket is not open.
+      return this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }))
+        ? "sent"
+        : "failed";
     } catch (e) {
       logger.warn(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
+      return "failed";
     }
   }
 
@@ -2273,11 +2285,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
-  public async syncNetworkMockRulesIfAvailable(): Promise<void> {
+  /**
+   * Push the current mock rules to the app, reporting whether they were actually
+   * delivered so `mockNetwork`/`clearMockNetwork` can warn like the Android path
+   * (#9918) instead of claiming a sync that never happened.
+   */
+  public async syncNetworkMockRulesIfAvailable(): Promise<IosMockRuleSyncOutcome> {
     try {
       if (await this.ensureSdkCapability("network_mocking")) {
-        this.syncNetworkMockRulesToDevice();
+        return this.syncNetworkMockRulesToDevice();
       }
+      return "noCapability";
     } catch (error) {
       if (!(error instanceof SdkCapabilityProbeSupersededError)) {
         throw error;
@@ -2285,6 +2303,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // Safe to swallow: the generation that superseded this probe runs its own
       // refreshSdkCapabilitiesAndSync, which re-syncs the mock rules to the device.
       logger.debug(`[IOSCtrlProxyClient] mock-rule sync skipped: ${error.message}`);
+      return "superseded";
     }
   }
 

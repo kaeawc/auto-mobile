@@ -20,7 +20,9 @@ import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.PinchResult
+import dev.jasonpearson.automobile.protocol.PutOverlayAsset
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
+import dev.jasonpearson.automobile.protocol.RemoveOverlayAsset
 import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
@@ -492,6 +494,9 @@ class CtrlProxyMessageHandler(
         }
         actions.dismissOverlay(request.requestId, request.id, request.all)
       }
+      is PutOverlayAsset ->
+        actions.putOverlayAsset(request.requestId, request.id, request.mimeType, request.dataBase64)
+      is RemoveOverlayAsset -> actions.removeOverlayAsset(request.requestId, request.id)
       is ListPreferenceFiles -> actions.listPreferenceFiles(request.requestId, request.packageName)
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)

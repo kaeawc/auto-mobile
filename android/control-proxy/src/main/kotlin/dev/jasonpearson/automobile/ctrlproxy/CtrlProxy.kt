@@ -53,6 +53,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.ctrlproxy.overlay.AndroidOverlayDisplays
 import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
@@ -1599,10 +1600,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
           onTransition = { transition ->
             serviceScope.launch {
-              if (
-                ::overlayController.isInitialized && transition.displayId == Display.DEFAULT_DISPLAY
-              ) {
-                overlayController.onConfigurationChanged(transition.change != "removed")
+              if (::overlayController.isInitialized) {
+                overlayController.onDisplayTransition(
+                  transition.displayId,
+                  removed = transition.change == "removed",
+                )
               }
               if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
                 webSocketServer.broadcast(displayTransitionFrame(transition))
@@ -1620,10 +1622,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::overlayController.isInitialized) {
+        val overlayDisplays = AndroidOverlayDisplays(this)
         overlayController =
           OverlayController(
             DefaultInteractiveOverlayHost(
               context = this,
+              displayWindows = overlayDisplays,
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
               onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
@@ -1657,6 +1661,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   }
                 }
               },
+            displays = overlayDisplays,
             clearAssets = { overlayAssets.clear() },
           )
         // Service start: drop anything a previous process left in the cache directory.
@@ -2962,8 +2967,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     handleAddHighlight(requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec) {
-    launchRequestScope(requestId) { overlayController.show(requestId, spec) }
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {
+    launchRequestScope(requestId) { overlayController.show(requestId, spec, displayId) }
   }
 
   override fun updateOverlay(

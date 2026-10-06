@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import dev.jasonpearson.automobile.protocol.OverlayColumnNode
+import dev.jasonpearson.automobile.protocol.OverlayFullscreenPlacement
+import dev.jasonpearson.automobile.protocol.OverlayImageNode
+import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.OverlayWindow
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Runnable
@@ -230,6 +235,85 @@ class OverlayImageCacheTest {
     assertEquals(OverlayImageState.Missing, cache.load("hero", small))
     assertEquals(0, cache.cachedCount)
   }
+
+  @Test
+  fun `a put reaches the cache before it returns, even through a listener that reads the store`() =
+    runTest {
+      val cache = OverlayImageCache(store, decoder, 1_000, dispatcher)
+      var seenByListener: OverlayAssetInfo? = null
+      store.setChangeListener { ids ->
+        seenByListener = ids?.firstOrNull()?.let(store::lookup)
+        cache.invalidate(ids)
+      }
+      upload("hero")
+      cache.load("hero", small)
+      assertEquals(1, cache.cachedCount)
+      val before = cache.version.value
+      upload("hero", size = 32)
+      assertEquals(32, seenByListener?.byteCount)
+      assertTrue(cache.version.value > before)
+      assertEquals(0, cache.cachedCount)
+      assertNull(cache.peek("hero", small))
+    }
+
+  @Test
+  fun `a session change drops the assets, wakes the cache and the next show lists them as missing`() =
+    runTest {
+      var session = 1
+      val sessionStore = OverlayAssetStore(files, session = { session })
+      val cache = OverlayImageCache(sessionStore, decoder, 1_000, dispatcher)
+      sessionStore.setChangeListener(cache::invalidate)
+      val replies = mutableListOf<List<String>>()
+      val sink =
+        object : OverlayResultSink {
+          override suspend fun send(requestId: String?, success: Boolean, error: String?) {
+            replies += emptyList<String>()
+          }
+
+          override suspend fun sendWithMissingAssets(
+            requestId: String?,
+            success: Boolean,
+            error: String?,
+            missingAssets: List<String>,
+          ) {
+            replies += missingAssets
+          }
+        }
+      val controller =
+        OverlayController(
+          FakeInteractiveOverlayHost(),
+          sink,
+          lifecycle = OverlayLifecycle(FakeOverlayTimer()),
+          clearAssets = { sessionStore.clear() },
+          hasAsset = { sessionStore.lookup(it) != null },
+          images = cache,
+        )
+      val spec =
+        OverlaySpec(
+          "panel",
+          OverlayWindow(OverlayFullscreenPlacement()),
+          root =
+            OverlayColumnNode(
+              children = listOf(OverlayImageNode(asset = "a"), OverlayImageNode(asset = "b"))
+            ),
+        )
+      sessionStore.put("a", "image/png", OverlayAssetBytes.png())
+      sessionStore.put("b", "image/png", OverlayAssetBytes.png())
+      cache.load("a", small)
+      cache.load("b", small)
+      controller.show("r1", spec)
+      assertEquals(emptyList<String>(), replies.last())
+      val before = cache.version.value
+
+      session = 2 // The observer reconnected; nothing has touched the store yet.
+      controller.show("r2", spec)
+
+      assertEquals(listOf("a", "b"), replies.last())
+      assertTrue(cache.version.value > before)
+      assertEquals(0, cache.cachedCount)
+      assertEquals(0L, cache.cachedBytes)
+      assertEquals(OverlayImageState.Missing, cache.peek("a", small))
+    }
 
   @Test
   fun `sample size halves while both decoded dimensions stay at least the target`() {

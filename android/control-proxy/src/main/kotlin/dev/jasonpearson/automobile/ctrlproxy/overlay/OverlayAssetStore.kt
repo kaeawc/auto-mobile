@@ -41,8 +41,9 @@ data class OverlayAssetInfo(val id: String, val mimeType: String, val byteCount:
 /**
  * Tells the renderer's decoded-image cache that stored assets changed. [ids] names the assets whose
  * bytes were added, replaced or removed; null means every asset (a clear or a session change).
- * Called while the store monitor is held, so implementations must be quick and must not call back
- * into the store.
+ * Called after the store monitor and the put lock are released, on the thread that made the change,
+ * before that call returns. A listener may therefore call back into the store (`lookup`, `read`)
+ * without deadlocking; it must still be quick, since it runs on the caller's thread.
  */
 fun interface OverlayAssetChangeListener {
   fun onAssetsChanged(ids: Set<String>?)
@@ -97,6 +98,11 @@ sealed interface OverlayAssetPutResult {
  * cannot leave leftovers counting against the caps. A put whose write finishes after a [clear] (or
  * such a session change) discards its file and is rejected instead of resurrecting an asset the
  * session no longer owns.
+ *
+ * Every change (put, remove, [clear], and a session-driven drop) is reported to the change listener
+ * after the monitor and put lock are released, so a listener that reads the store cannot deadlock.
+ * The lock order is therefore store monitor, never listener; the listener's own locks (the image
+ * cache's) are only ever taken with none of the store's locks held.
  */
 class OverlayAssetStore(
   private val files: OverlayAssetFiles,
@@ -127,44 +133,81 @@ class OverlayAssetStore(
   private var orphansPurged = false
   @Volatile private var changeListener: OverlayAssetChangeListener? = null
 
+  /**
+   * What one call changed, collected under the monitor and delivered by [deliver] once every lock
+   * is released. [ids] null means everything.
+   */
+  private class Changes {
+    private var changed = false
+    private var everything = false
+    private val ids = mutableSetOf<String>()
+
+    fun add(id: String) {
+      changed = true
+      ids += id
+    }
+
+    fun addEverything() {
+      changed = true
+      everything = true
+    }
+
+    fun deliver(listener: OverlayAssetChangeListener?) {
+      if (changed) listener?.onAssetsChanged(if (everything) null else ids)
+    }
+  }
+
   override fun setChangeListener(listener: OverlayAssetChangeListener?) {
     changeListener = listener
   }
 
-  private fun notifyChanged(ids: Set<String>?) {
-    changeListener?.onAssetsChanged(ids)
+  /** Runs [block] under the monitor, then reports what it changed with the monitor released. */
+  private inline fun <T> locked(block: (Changes) -> T): T {
+    val changes = Changes()
+    try {
+      return synchronized(this) { block(changes) }
+    } finally {
+      changes.deliver(changeListener)
+    }
   }
 
   val count: Int
-    @Synchronized
-    get() {
-      dropStaleSessionLocked()
-      return entries.size
+    get() = locked { changes ->
+      dropStaleSessionLocked(changes)
+      entries.size
     }
 
   val totalByteCount: Long
-    @Synchronized
-    get() {
-      dropStaleSessionLocked()
-      return totalBytes
+    get() = locked { changes ->
+      dropStaleSessionLocked(changes)
+      totalBytes
     }
 
-  @Synchronized
-  fun ids(): List<String> {
-    dropStaleSessionLocked()
-    return entries.keys.toList()
+  fun ids(): List<String> = locked { changes ->
+    dropStaleSessionLocked(changes)
+    entries.keys.toList()
   }
 
-  fun put(id: String, mimeType: String, bytes: ByteArray): OverlayAssetPutResult =
-    synchronized(putLock) {
-      purgeOrphansLocked()
-      val reservation = reserve(id, mimeType, bytes)
-      reservation.rejection ?: writeAndCommit(reservation, bytes)
+  fun put(id: String, mimeType: String, bytes: ByteArray): OverlayAssetPutResult {
+    val changes = Changes()
+    try {
+      return synchronized(putLock) {
+        purgeOrphansLocked()
+        val reservation = synchronized(this) { reserve(id, mimeType, bytes, changes) }
+        reservation.rejection ?: writeAndCommit(reservation, bytes, changes)
+      }
+    } finally {
+      changes.deliver(changeListener)
     }
+  }
 
-  @Synchronized
-  private fun reserve(id: String, mimeType: String, bytes: ByteArray): Reservation {
-    dropStaleSessionLocked()
+  private fun reserve(
+    id: String,
+    mimeType: String,
+    bytes: ByteArray,
+    changes: Changes,
+  ): Reservation {
+    dropStaleSessionLocked(changes)
     val info = OverlayAssetInfo(id, mimeType, bytes.size)
     val rejection = rejectionFor(id, mimeType, bytes) ?: limitRejection(id, bytes.size)
     return Reservation(generation, "asset-${nextFile++}", info, rejection)
@@ -187,7 +230,11 @@ class OverlayAssetStore(
     }
   }
 
-  private fun writeAndCommit(reservation: Reservation, bytes: ByteArray): OverlayAssetPutResult {
+  private fun writeAndCommit(
+    reservation: Reservation,
+    bytes: ByteArray,
+    changes: Changes,
+  ): OverlayAssetPutResult {
     try {
       files.write(reservation.fileName, bytes)
     } catch (error: IOException) {
@@ -195,14 +242,13 @@ class OverlayAssetStore(
       discardFile(reservation.fileName)
       return rejected(OverlayAssetRejection.STORAGE_FAILURE, "Failed to store overlay asset.")
     }
-    val result = commit(reservation)
+    val result = synchronized(this) { commit(reservation, changes) }
     if (result is OverlayAssetPutResult.Rejected) discardFile(reservation.fileName)
     return result
   }
 
-  @Synchronized
-  private fun commit(reservation: Reservation): OverlayAssetPutResult {
-    dropStaleSessionLocked()
+  private fun commit(reservation: Reservation, changes: Changes): OverlayAssetPutResult {
+    dropStaleSessionLocked(changes)
     if (reservation.generation != generation) {
       return rejected(
         OverlayAssetRejection.SESSION_ENDED,
@@ -216,29 +262,31 @@ class OverlayAssetStore(
     totalBytes += info.byteCount - (replaced?.info?.byteCount ?: 0)
     replaced?.let { discardFile(it.fileName) }
     // Also for a new id: a placeholder drawn while it was missing must now pick it up.
-    notifyChanged(setOf(info.id))
+    changes.add(info.id)
     return OverlayAssetPutResult.Stored(info, replaced != null)
   }
 
   /** Idempotent: returns whether an asset was actually removed. */
-  @Synchronized
-  fun remove(id: String): Boolean {
-    dropStaleSessionLocked()
-    val entry = entries.remove(id) ?: return false
-    totalBytes -= entry.info.byteCount
-    discardFile(entry.fileName)
-    notifyChanged(setOf(id))
-    return true
+  fun remove(id: String): Boolean = locked { changes ->
+    dropStaleSessionLocked(changes)
+    val entry = entries.remove(id)
+    if (entry != null) {
+      totalBytes -= entry.info.byteCount
+      discardFile(entry.fileName)
+      changes.add(id)
+    }
+    entry != null
   }
 
   /**
    * Drops every asset and cancels any put still writing. The in-memory state is reset before this
    * returns, so a following [lookup] is already null; the files go on [fileWorker].
    */
-  @Synchronized
   fun clear() {
-    ownerSession = session()
-    dropAllLocked()
+    locked { changes ->
+      ownerSession = session()
+      dropAllLocked(changes)
+    }
   }
 
   /**
@@ -259,21 +307,21 @@ class OverlayAssetStore(
     }
   }
 
-  private fun dropAllLocked() {
+  private fun dropAllLocked(changes: Changes) {
     generation++
     val names = entries.values.map { it.fileName }
     entries.clear()
     totalBytes = 0
     names.forEach(::discardFile)
-    notifyChanged(null)
+    changes.addEverything()
   }
 
   /** A new observer session starts with an empty store; the previous session's assets are gone. */
-  private fun dropStaleSessionLocked() {
+  private fun dropStaleSessionLocked(changes: Changes) {
     val current = session()
     if (current == ownerSession) return
     ownerSession = current
-    dropAllLocked()
+    dropAllLocked(changes)
   }
 
   private fun discardFile(name: String) {
@@ -287,17 +335,16 @@ class OverlayAssetStore(
   }
 
   /** Renderer lookup: null means the id is unknown, which the renderer shows as a placeholder. */
-  @Synchronized
-  override fun lookup(id: String): OverlayAssetInfo? {
-    dropStaleSessionLocked()
-    return entries[id]?.info
+  override fun lookup(id: String): OverlayAssetInfo? = locked { changes ->
+    dropStaleSessionLocked(changes)
+    entries[id]?.info
   }
 
   /** Stored bytes for [id], or null when unknown or unreadable. Call off the main thread. */
   override fun read(id: String): ByteArray? {
     val fileName =
-      synchronized(this) {
-        dropStaleSessionLocked()
+      locked { changes ->
+        dropStaleSessionLocked(changes)
         entries[id]?.fileName
       } ?: return null
     return try {

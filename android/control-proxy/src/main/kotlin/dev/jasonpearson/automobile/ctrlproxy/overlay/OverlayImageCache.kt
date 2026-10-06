@@ -48,8 +48,9 @@ sealed interface OverlayImageState {
  * copies right away, so a removed asset's pixels do not linger, and bumps [version] so composables
  * showing it reload. A decode that finishes after such a change is discarded and retried.
  *
- * The cache lock is never held while calling [source] or the decoder, and the store may call
- * [invalidate] while holding its own monitor, so the lock order is always store, then cache.
+ * The cache lock is never held while calling [source] or the decoder, and the store calls
+ * [invalidate] only after releasing its own locks, so the two locks are never nested. A decode that
+ * overlaps the window between a store change and its [invalidate] is covered by the epoch check.
  * Evicted bitmaps are not recycled: a composable may still be drawing one.
  */
 class OverlayImageCache(

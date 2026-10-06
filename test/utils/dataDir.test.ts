@@ -8,6 +8,7 @@ import {
   resolveAutoMobileLogsDir,
   getTempDir,
   getSharedAutoMobileDir,
+  assertUnitTestLogsDirIsolated,
   ensureSecureLogsDirSync,
   ensureSecureTempDirSync,
   TEMP_SUBDIRS,
@@ -345,5 +346,33 @@ describe("ensureSecureTempDirSync", () => {
     } finally {
       fs.rmSync(tmpBase, { recursive: true, force: true });
     }
+  });
+});
+
+describe("assertUnitTestLogsDirIsolated", () => {
+  test("throws under NODE_ENV=test when no log or data dir override is set", () => {
+    expect(() => assertUnitTestLogsDirIsolated({ NODE_ENV: "test" })).toThrow(ActionableError);
+  });
+
+  test("treats blank overrides as unset", () => {
+    expect(() =>
+      assertUnitTestLogsDirIsolated({ NODE_ENV: "test", AUTOMOBILE_DATA_DIR: "  " }),
+    ).toThrow(ActionableError);
+  });
+
+  test.each([
+    "AUTOMOBILE_LOG_DIR",
+    "AUTO_MOBILE_LOG_DIR",
+    "AUTOMOBILE_DATA_DIR",
+    "AUTO_MOBILE_DATA_DIR",
+  ])("allows a test that redirects logs with %s", (key) => {
+    expect(() =>
+      assertUnitTestLogsDirIsolated({ NODE_ENV: "test", [key]: "/tmp/redirected" }),
+    ).not.toThrow();
+  });
+
+  test("is inert outside a test context", () => {
+    expect(() => assertUnitTestLogsDirIsolated({})).not.toThrow();
+    expect(() => assertUnitTestLogsDirIsolated({ NODE_ENV: "production" })).not.toThrow();
   });
 });

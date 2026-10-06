@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { republishOwnedIdentity, type IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -150,9 +150,26 @@ function harness(
   };
 }
 
+// Managers that start a (fake) daemon still open a launch log under the resolved
+// AutoMobile data dir; keep it off the developer's real ~/.auto-mobile.
+let isolatedDataDir: string;
+let originalDataDir: string | undefined;
+
+beforeEach(() => {
+  originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+  isolatedDataDir = mkdtempSync(join(tmpdir(), "identity-recovery-data-"));
+  process.env.AUTOMOBILE_DATA_DIR = isolatedDataDir;
+});
+
 afterEach(() => {
   executionTracker.clearDaemonMaintenancePreparation();
   executionTracker.clearDaemonRestartPreparation();
+  if (originalDataDir === undefined) {
+    delete process.env.AUTOMOBILE_DATA_DIR;
+  } else {
+    process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+  }
+  rmSync(isolatedDataDir, { recursive: true, force: true });
 });
 
 describe("provider-owned identity recovery", () => {

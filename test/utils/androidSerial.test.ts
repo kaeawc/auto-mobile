@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidTransportAliases,
   withAndroidTransportId,
@@ -125,6 +125,48 @@ describe("Android physical transport evidence", () => {
     adb.setCommandResponse("boot_id", createExecResult(bootId, ""));
     return adb;
   };
+
+  test("empty evidence retries the same transport_id and caches its later success", async () => {
+    const adb = executor("", "boot-a");
+    const aliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
+    const rows = [withAndroidTransportId(device("host-a:5555"), "1")];
+    aliases.fold(rows, await aliases.prepare(rows), new Set());
+    expect(aliases.isAssignable(rows[0])).toBe(false);
+    expect(adb.getExecutedCommands()).toHaveLength(2);
+    adb.setCommandResponse("ro.serialno", createExecResult("PHONE-A", ""));
+    aliases.fold(rows, await aliases.prepare(rows), new Set());
+    expect(aliases.isAssignable(rows[0])).toBe(true);
+    expect(adb.getExecutedCommands()).toHaveLength(5);
+    await aliases.prepare(rows);
+    expect(adb.getExecutedCommands()).toHaveLength(5);
+  });
+
+  test("an older failed probe cannot evict a replacement transport's successful evidence", async () => {
+    const old = executor("", "boot-a");
+    const replacement = executor("PHONE-A", "boot-a");
+    let current = old;
+    const aliases = new AndroidTransportAliases({ create: () => current });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+    const probe = spyOn(old, "executeCommand").mockImplementationOnce(async () => {
+      entered.resolve();
+      return release.promise;
+    });
+    try {
+      const pending = aliases.prepare([withAndroidTransportId(device("host-a:5555"), "1")]);
+      await entered.promise;
+      current = replacement;
+      const rows = [withAndroidTransportId(device("host-a:5555"), "2")];
+      const evidence = await aliases.prepare(rows);
+      expect(evidence.size).toBe(1);
+      release.resolve(createExecResult("", ""));
+      expect((await pending).size).toBe(0);
+      expect(await aliases.prepare(rows)).toEqual(evidence);
+      expect(replacement.getExecutedCommands()).toHaveLength(3);
+    } finally {
+      probe.mockRestore();
+    }
+  });
 
   test("transport_id change on a continuously present host:port re-probes and un-folds", async () => {
     const usb = executor("PHONE-A", "boot-a");

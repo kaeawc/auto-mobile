@@ -178,6 +178,11 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       this.connections.set(device.deviceId, connection);
     }
     const identity = await connection.identity;
+    // Share an in-flight probe, but retry missing evidence on the next refresh.
+    // An older failure must not evict evidence for a replacement transport_id.
+    if (!identity && this.connections.get(device.deviceId) === connection) {
+      this.connections.delete(device.deviceId);
+    }
     if (!identity || this.contradictsEmulatorPeer(identity, devices)) {
       logger.warn(
         `Android transport '${device.deviceId}' could not be identified; leaving it unaliased.`,
@@ -202,7 +207,7 @@ export class AndroidTransportAliases implements AndroidTransportRouting {
       if (device.platform !== "android") {
         continue;
       }
-      if (!isAndroidEmulatorSerial(device.deviceId) && !evidence.has(device.deviceId)) {
+      if (isAndroidTransportAddressSerial(device.deviceId) && !evidence.has(device.deviceId)) {
         this.unproven.add(device.deviceId);
       } else {
         this.unproven.delete(device.deviceId);

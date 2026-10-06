@@ -43,20 +43,21 @@ function harness(devices: BootedDevice[], serial = usb, avd?: string) {
     adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(avd, ""));
   }
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  const adbFactory = new FakeAdbClientFactory(adb);
   let liveness: MissingDeviceLiveness | undefined;
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "alias-daemon", {
       timer,
       deviceManager: manager,
       installedAppsRepository: new FakeInstalledAppsRepository(),
-      androidAdbFactory: new FakeAdbClientFactory(adb),
+      androidAdbFactory: adbFactory,
       missingDeviceLivenessFactory: (port) => {
         liveness = new MissingDeviceLiveness(port);
         return liveness;
       },
     }),
   );
-  return { pool, timer, manager, adb, liveness };
+  return { pool, timer, manager, adb, adbFactory, liveness };
 }
 
 describe("Android transport aliases (#10201)", () => {
@@ -112,6 +113,78 @@ describe("Android transport aliases (#10201)", () => {
       expect(h.adb.getExecutedCommands()).toHaveLength(calls);
     }
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test.each([true, false])(
+    "failed first probes retry and pool after boot_id recovers (USB present=%s)",
+    async (usbPresent) => {
+      const h = harness(usbPresent ? [booted(usb), booted(wireless)] : [booted(wireless)]);
+      const canonical = usbPresent ? usb : wireless;
+      const callsPerRefresh = usbPresent ? 6 : 3;
+      let probeFails = true;
+      const executeCommand = h.adb.executeCommand.bind(h.adb);
+      const probe = spyOn(h.adb, "executeCommand").mockImplementation(async (...args) => {
+        const result = await executeCommand(...args);
+        if (probeFails && args[0].includes("boot_id")) {
+          throw new Error("boot_id timeout");
+        }
+        return result;
+      });
+      try {
+        await h.pool.refreshDevices();
+        expect(h.adb.getExecutedCommands()).toHaveLength(callsPerRefresh);
+        await h.pool.refreshDevices();
+        expect(h.adb.getExecutedCommands()).toHaveLength(callsPerRefresh * 2);
+        expect(h.pool.getAllDevices().map((device) => device.id)).toEqual(usbPresent ? [usb] : []);
+        expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
+        if (usbPresent) {
+          expect(await h.pool.assignDeviceToSession("owner", "android")).toBe(usb);
+        }
+        probeFails = false;
+        await h.pool.refreshDevices();
+        expect(h.adb.getExecutedCommands()).toHaveLength(callsPerRefresh * 3);
+        expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([canonical]);
+        if (!usbPresent) {
+          expect(await h.pool.assignDeviceToSession("owner", "android")).toBe(canonical);
+        }
+        expect(h.pool.getDevice(canonical)?.sessionId).toBe("owner");
+        expect(h.pool.getAndroidTransportAliases(canonical)).toEqual(usbPresent ? [wireless] : []);
+        await h.pool.refreshDevices();
+        expect(h.adb.getExecutedCommands()).toHaveLength(callsPerRefresh * 3);
+        expect(
+          h.adb.getCommandCalls().every((call) => call.noRetry && call.timeoutMs === 2000),
+        ).toBe(true);
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      } finally {
+        probe.mockRestore();
+      }
+    },
+  );
+
+  test("a generic-serial USB-only phone remains assignable beside an unrelated wireless phone", async () => {
+    const generic = "0123456789ABCDEF";
+    const h = harness([booted(generic), booted(wireless)], generic);
+    const unrelated = new FakeAdbExecutor();
+    unrelated.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+    unrelated.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    unrelated.setCommandResponse("boot_id", createExecResult("unrelated-boot", ""));
+    const factory = spyOn(h.adbFactory, "create").mockImplementation((target) =>
+      target?.deviceId === wireless ? unrelated : h.adb,
+    );
+    try {
+      for (let refresh = 0; refresh < 2; refresh++) {
+        await h.pool.refreshDevices();
+        expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([generic, wireless]);
+        expect(h.pool.getAndroidTransportAliases(generic)).toEqual([]);
+        expect(h.pool.getAndroidTransportRouting().resolveTransport(generic)).toBe(generic);
+      }
+      expect(await h.pool.assignDeviceToSession("owner", "android")).toBe(generic);
+      expect(h.adb.getExecutedCommands()).toHaveLength(4);
+      expect(unrelated.getExecutedCommands()).toHaveLength(3);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      factory.mockRestore();
+    }
   });
 
   test("a failed first probe stays unassignable", async () => {
@@ -276,8 +349,9 @@ describe("Android transport aliases (#10201)", () => {
           .getAllDevices()
           .map((device) => device.id)
           .sort(),
-      ).toEqual([ios.deviceId].sort());
+      ).toEqual([usb, ios.deviceId].sort());
       expect(h.pool.getAndroidTransportAliases(usb)).toEqual([]);
+      expect(await h.pool.assignDeviceToSession("owner", "android")).toBe(usb);
       expect(
         (await h.liveness!.takeFreshPresenceDiscovery("android")).devices
           .map((device) => device.deviceId)

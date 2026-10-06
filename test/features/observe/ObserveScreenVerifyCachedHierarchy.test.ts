@@ -68,13 +68,21 @@ function cachedHit(): ViewHierarchyResult {
   });
 }
 
-function synced(overrides: { label?: string; packageName?: string; fresh?: boolean } = {}) {
+function synced(
+  overrides: {
+    label?: string;
+    packageName?: string;
+    fresh?: boolean;
+    foregroundActivity?: string;
+  } = {},
+) {
   return composeHierarchy({
     updatedAt: CACHED_UPDATED_AT + 40,
     receivedAt: NOW,
     fresh: overrides.fresh ?? true,
     label: overrides.label ?? "Regular Button (pressed)",
     packageName: overrides.packageName,
+    foregroundActivity: overrides.foregroundActivity,
   });
 }
 
@@ -152,7 +160,41 @@ describe("ObserveScreen explicit observe verifies a cached Android hierarchy (#9
     expect(JSON.stringify(result.elements)).toContain("Regular Button (pressed)");
     // Output shape: the side samples taken with the tree are kept, not discarded.
     expect(result.backStack?.currentActivity?.name).toBe(PLAYGROUND_ACTIVITY);
-    expect(result.activeWindow?.appId).toBe(PLAYGROUND);
+    expect(result.activeWindow).toEqual({
+      appId: PLAYGROUND,
+      activityName: PLAYGROUND_ACTIVITY,
+      layoutSeqSum: 0,
+    });
+  });
+
+  test("a same-package A->B move during the verifying read does not publish B under A", async () => {
+    const { screen, hierarchy } = setup([
+      cachedHit(),
+      synced({ foregroundActivity: `${PLAYGROUND}/.DetailActivity`, label: "Detail" }),
+    ]);
+
+    const result = await screen.execute({ ...EXPLICIT_OBSERVE, verifyCachedHierarchy: true });
+
+    // No device read beyond the verifying one.
+    expect(hierarchy.getCallCount()).toBe(2);
+    expect(JSON.stringify(result.elements)).toContain("Detail");
+    expect(result.freshness).toMatchObject({ verified: true, isFresh: true });
+    // Identity from the replaced tree is not carried over: unknown, as the other recapture paths.
+    expect(result.activeWindow).toEqual({ appId: PLAYGROUND, activityName: "", layoutSeqSum: 0 });
+    expect(result.backStack).toBeUndefined();
+  });
+
+  test("a verifying tree that names no activity cannot be compared and is re-correlated", async () => {
+    const { screen } = setup([
+      cachedHit(),
+      synced({ foregroundActivity: `${PLAYGROUND}/android.widget.FrameLayout` }),
+    ]);
+
+    const result = await screen.execute({ ...EXPLICIT_OBSERVE, verifyCachedHierarchy: true });
+
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.activeWindow).toEqual({ appId: PLAYGROUND, activityName: "", layoutSeqSum: 0 });
+    expect(result.backStack).toBeUndefined();
   });
 
   test("an already verified read costs no extra device read", async () => {

@@ -552,6 +552,27 @@ function hierarchyCarriesActivitySignal(hierarchy: ObserveResult["viewHierarchy"
   return typeof foregroundActivity === "string" && !isAccessibilityViewClass(foregroundActivity);
 }
 
+/**
+ * Does the hierarchy itself name the window `activeWindow` already claims? Only an
+ * activity-bearing `foregroundActivity` (not a view class) can say so; anything else
+ * cannot be compared and counts as not the same. No `activeWindow` has nothing to
+ * disagree with.
+ */
+function treeNamesWindow(
+  hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  activeWindow: ObserveResult["activeWindow"],
+): boolean {
+  if (activeWindow === undefined) {
+    return true;
+  }
+  if (!hierarchyCarriesActivitySignal(hierarchy)) {
+    return false;
+  }
+  const [packageName, activity = ""] = (hierarchy.foregroundActivity ?? "").split("/");
+  const activityName = activity.startsWith(".") ? packageName + activity : activity;
+  return activeWindow.appId === packageName && activeWindow.activityName === activityName;
+}
+
 function isActivityInPackage(activityName: string, packageName: string): boolean {
   return activityName === packageName || activityName.startsWith(`${packageName}.`);
 }
@@ -2060,22 +2081,17 @@ export class RealObserveScreen implements ObserveScreen {
    * than its serve window without a device read, which `computeFreshness` reports as
    * unverified, so the next action re-observes in full. Replace such a hit with one
    * synchronous extraction of the same window. Only an unverified same-package tree is
-   * replaced, and nothing sampled alongside it is discarded; when the read fails the
-   * cached tree stays and its freshness verdict keeps saying it was not verified.
+   * replaced. Samples taken alongside the cached tree are kept when the new tree itself
+   * names the same activity as the kept `activeWindow`, and dropped (identity unknown)
+   * when it names another one or cannot be compared. When the read fails the cached
+   * tree stays and its freshness verdict keeps saying it was not verified.
    */
   private async verifyCachedAndroidHierarchy(
     result: ObserveResult,
     options: { signal?: AbortSignal; remainingMs: number; eligible: boolean },
   ): Promise<void> {
     const cached = result.viewHierarchy;
-    if (
-      !options.eligible ||
-      this.device.platform !== "android" ||
-      cached === undefined ||
-      cached.fresh === true ||
-      !hasUsableHierarchy(cached) ||
-      options.remainingMs <= 0
-    ) {
+    if (!cached || !this.needsCachedVerification(cached, options)) {
       return;
     }
     const hierarchy = await this.readIndependentHierarchy(
@@ -2084,14 +2100,44 @@ export class RealObserveScreen implements ObserveScreen {
       options.remainingMs,
       "Cached hierarchy verification",
     );
-    if (
-      hierarchy?.fresh === true &&
+    if (!hierarchy || !this.isVerifyingReplacement(hierarchy, cached)) {
+      return;
+    }
+    const sameWindow = treeNamesWindow(hierarchy, result.activeWindow);
+    this.applyRecapturedHierarchy(result, hierarchy);
+    if (!sameWindow) {
+      // A same-package A->B move between the adb reads and this read would publish
+      // B's tree under A's identity. The kept samples cannot be tied to the new tree,
+      // so re-correlate exactly as the other recapture paths do; no device read.
+      this.recorrelateActiveWindowToRecapture(result, hierarchy);
+      delete result.backStack;
+      delete result.deviceLock;
+    }
+  }
+
+  private needsCachedVerification(
+    cached: NonNullable<ObserveResult["viewHierarchy"]>,
+    options: { eligible: boolean; remainingMs: number },
+  ): boolean {
+    return (
+      options.eligible &&
+      this.device.platform === "android" &&
+      cached.fresh !== true &&
+      hasUsableHierarchy(cached) &&
+      options.remainingMs > 0
+    );
+  }
+
+  private isVerifyingReplacement(
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+    cached: NonNullable<ObserveResult["viewHierarchy"]>,
+  ): boolean {
+    return (
+      hierarchy.fresh === true &&
       hasUsableHierarchy(hierarchy) &&
       hierarchy.packageName === cached.packageName &&
       this.platformValidator.validate(this.device.platform, hierarchy).valid
-    ) {
-      this.applyRecapturedHierarchy(result, hierarchy);
-    }
+    );
   }
 
   /**

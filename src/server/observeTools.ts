@@ -19,6 +19,7 @@ import type { DisplayPanel } from "../models/DisplayPanel";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
+import { stripInternalToolParams } from "./internalToolParams";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
@@ -539,7 +540,6 @@ const legacyObserveFocusObjectSchema = z.object({
   resourceId: z.string().optional().describe("Anchor by exact resource-id"),
   text: z.string().optional().describe("Anchor by substring text match"),
 });
-const legacyObserveFocusSchema = z.union([z.boolean(), legacyObserveFocusObjectSchema]);
 const routedLegacyObserveFocusSchema = withJsonSchemaOverride(
   legacyObserveFocusObjectSchema
     .extend({ elementId: z.never().optional(), container: z.never().optional() })
@@ -555,13 +555,16 @@ const routedLegacyObserveFocusSchema = withJsonSchemaOverride(
 const observeScopeFocusSchema = z
   .preprocess(
     (value, ctx) => {
+      const cleanValue = stripInternalToolParams(value);
       const nested =
-        value !== null &&
-        typeof value === "object" &&
-        ("elementId" in value || "container" in value);
-      const parsed = (nested ? nestedElementContainerSchema : legacyObserveFocusSchema).safeParse(
-        value,
-      );
+        cleanValue !== null &&
+        typeof cleanValue === "object" &&
+        ("elementId" in cleanValue || "container" in cleanValue);
+      const parsed = (
+        nested
+          ? nestedElementContainerSchema
+          : z.union([z.boolean(), legacyObserveFocusObjectSchema])
+      ).safeParse(cleanValue);
       if (!parsed.success) {
         // Abort before the permissive legacy arm can consume an invalid nested selector.
         ctx.issues.push(...parsed.error.issues.map((issue) => ({ ...issue, continue: false })));

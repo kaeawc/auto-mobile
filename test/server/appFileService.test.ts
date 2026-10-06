@@ -113,8 +113,12 @@ describe("AppFileService", () => {
               .filter((args) => args[0] === "push")
               .map((args) => args[2]),
           ).toEqual([
-            "/storage/emulated/0/Download/fixtures/a.txt",
-            "/storage/emulated/0/Download/fixtures/b.png",
+            expect.stringMatching(
+              /^\/storage\/emulated\/0\/Download\/fixtures\/\.automobile-.*\.part$/,
+            ),
+            expect.stringMatching(
+              /^\/storage\/emulated\/0\/Download\/fixtures\/\.automobile-.*\.part$/,
+            ),
           ]);
           expect(
             adb.getExecutedCommands().filter((command) => command.startsWith("shell rm -f")),
@@ -1128,8 +1132,15 @@ describe("AppFileService", () => {
     expect(executor.getExecutedArgv()).toContainEqual([
       "push",
       expect.stringContaining("automobile-app-file-"),
-      "/storage/emulated/12/Download/automobile-media/photo.png",
+      expect.stringMatching(
+        /^\/storage\/emulated\/12\/Download\/automobile-media\/\.automobile-.*\.part$/,
+      ),
     ]);
+    expect(executor.getExecutedCommands()).toContainEqual(
+      expect.stringMatching(
+        /^shell mv -f '[^']*\.automobile-[^']*\.part' '\/storage\/emulated\/12\/Download\/automobile-media\/photo\.png'$/,
+      ),
+    );
     expect(
       executor.getExecutedCommands().some((command) => command.includes("content query")),
     ).toBe(true);
@@ -1138,9 +1149,9 @@ describe("AppFileService", () => {
   test("rolls back earlier media files when writing the third of five fails", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    // Match the push (its destination follows a space) and not the backup probe (it is quoted).
+    // Fail the rename into place (the push goes to a hidden temp), not the backup probe.
     executor.setCommandError(
-      " /storage/emulated/12/Download/automobile-media/third.png",
+      ".part' '/storage/emulated/12/Download/automobile-media/third.png'",
       new Error("index query failed"),
     );
     const sharedStorageService = createSharedStorageServiceForTesting({
@@ -1166,10 +1177,18 @@ describe("AppFileService", () => {
 
     expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
     expect(
-      executor.getExecutedCommands().filter((command) => command.includes("shell rm -f")),
+      executor
+        .getExecutedCommands()
+        .filter((command) => command.includes("shell rm -f") && !command.includes(".part'")),
     ).toEqual([
       "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png' '/storage/emulated/12/Download/automobile-media/first.png'",
     ]);
+    // The failed rename's hidden temp copy is removed too.
+    expect(
+      executor
+        .getExecutedCommands()
+        .filter((command) => command.includes(".part'") && command.includes("shell rm -f")),
+    ).toHaveLength(1);
   });
 
   test("rolls back the staged prefix when MediaStore indexing fails", async () => {
@@ -1239,9 +1258,9 @@ describe("AppFileService", () => {
   test("reports and warns when rolling back a media file fails", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
-    // Match the push (its destination follows a space) and not the backup probe (it is quoted).
+    // Fail the rename into place (the push goes to a hidden temp), not the backup probe.
     executor.setCommandError(
-      " /storage/emulated/12/Download/automobile-media/third.png",
+      ".part' '/storage/emulated/12/Download/automobile-media/third.png'",
       new Error("index query failed"),
     );
     executor.setCommandError(

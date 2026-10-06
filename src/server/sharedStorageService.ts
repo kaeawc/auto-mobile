@@ -218,12 +218,13 @@ class DefaultSharedStorageService implements SharedStorageService {
     destinationDirectory: string;
     userId: number;
     file: PreparedSharedStorageFile;
-    /** Runs immediately before the destination is overwritten. */
-    onBeforePush?: () => void;
+    /** Runs immediately before the staged copy is renamed over the destination. */
+    onBeforeCommit?: () => void;
+    /** Runs once the destination holds the complete new content. */
     onPushed?: () => void;
   }): Promise<StagedSharedStorageFile> {
     const { adb, request, namespace, destinationDirectory, userId, file } = context;
-    const { onBeforePush, onPushed } = context;
+    const { onBeforeCommit, onPushed } = context;
     const destinationPath = file.destinationPath;
     const destination = posix.join(destinationDirectory, destinationPath);
     // Re-check the joined result so future path changes cannot widen the reset namespace.
@@ -231,13 +232,13 @@ class DefaultSharedStorageService implements SharedStorageService {
       throw new ActionableError(`destinationPath escapes shared-storage namespace ${namespace}`);
     }
     await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
-    onBeforePush?.();
-    await executeArgs(
+    await this.pushThroughTemp({
       adb,
-      ["push", file.source.path, destination],
-      request.signal,
-      SHARED_STORAGE_PUSH_TIMEOUT_MS,
-    );
+      request,
+      source: file.source.path,
+      destination,
+      onBeforeCommit,
+    });
     onPushed?.();
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
       ? await indexMediaFile(adb, destination, destinationPath, userId, this.timer, request.signal)
@@ -246,6 +247,43 @@ class DefaultSharedStorageService implements SharedStorageService {
           reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
         };
     return { destinationPath, byteCount: file.source.byteCount, mediaIndexing };
+  }
+
+  /**
+   * Pushes to a hidden name beside the destination, then renames it into place, so the destination
+   * is either its old content or the complete new content. A push cut off mid-transfer (timeout,
+   * cancellation, dropped connection) only ever leaves the temp file, which is removed here.
+   */
+  private async pushThroughTemp(context: {
+    adb: AdbExecutor;
+    request: StageSharedStorageRequest;
+    source: string;
+    destination: string;
+    onBeforeCommit?: () => void;
+  }): Promise<void> {
+    const { adb, request, source, destination, onBeforeCommit } = context;
+    // Dot-prefixed with a non-media extension so MediaStore never lists the in-flight copy.
+    const temp = posix.join(
+      posix.dirname(destination),
+      `.automobile-${this.idGenerator.next()}.part`,
+    );
+    try {
+      await executeArgs(
+        adb,
+        ["push", source, temp],
+        request.signal,
+        SHARED_STORAGE_PUSH_TIMEOUT_MS,
+      );
+      onBeforeCommit?.();
+      await execute(
+        adb,
+        `shell mv -f ${shellQuote(temp)} ${shellQuote(destination)}`,
+        request.signal,
+      );
+    } catch (error) {
+      await discardHiddenFiles(adb, [temp], "unfinished pushes");
+      throw error;
+    }
   }
 
   private async stagePreparedFiles(context: {
@@ -279,8 +317,9 @@ class DefaultSharedStorageService implements SharedStorageService {
           destinationDirectory,
           userId,
           file,
-          onBeforePush: () => {
-            // Tracked before the push so a push that fails midway still restores the original.
+          onBeforeCommit: () => {
+            // Tracked before the rename so a rename whose outcome is unknown still restores the
+            // original. The push itself never touches the destination, so it needs no tracking.
             if (backups.has(file.destinationPath)) {
               markWritten(file.destinationPath);
             }
@@ -295,7 +334,7 @@ class DefaultSharedStorageService implements SharedStorageService {
         stagedFiles.push(staged);
       }
       // The whole batch committed, so the saved previous contents are no longer needed.
-      await discardBackups(adb, [...backups.values()]);
+      await discardHiddenFiles(adb, [...backups.values()], "previous-content backups");
       return stagedFiles;
     } catch (error) {
       if (!request.rollbackOnFailure) {
@@ -438,9 +477,10 @@ async function rollbackStagedFiles(context: {
     return execute(adb, command, signal, timeoutMs);
   });
   // A saved copy of a file this batch never reached still sits beside an untouched original.
-  await discardBackups(
+  await discardHiddenFiles(
     adb,
     [...backups].filter(([path]) => !writtenPaths.includes(path)).map(([, backup]) => backup),
+    "previous-content backups",
   );
   return result;
 }
@@ -479,9 +519,10 @@ async function saveExistingFiles(
     } catch (error) {
       // No destination has been touched yet; only partial copies can linger, and a truncated
       // copy must never be restored, so every candidate is removed rather than registered.
-      await discardBackups(
+      await discardHiddenFiles(
         adb,
         files.map((file) => file.backup),
+        "previous-content backups",
       );
       throw error;
     }
@@ -497,15 +538,15 @@ function copiedBackups(chunk: BackupPlan[], stdout: string): Array<[string, stri
     .map((file) => [file.path, file.backup]);
 }
 
-/** Removes saved previous contents, detached from the caller's cancellation. Never throws. */
-async function discardBackups(adb: AdbExecutor, backups: string[]): Promise<void> {
+/** Removes hidden saved-copy or in-flight files, detached from the caller's cancellation. Never throws. */
+async function discardHiddenFiles(adb: AdbExecutor, paths: string[], what: string): Promise<void> {
   await runWithAbortSignal(undefined, async () => {
     for (
       let offset = 0;
-      offset < backups.length;
+      offset < paths.length;
       offset += SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND
     ) {
-      const chunk = backups.slice(offset, offset + SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND);
+      const chunk = paths.slice(offset, offset + SHARED_STORAGE_ROLLBACK_MAX_PATHS_PER_COMMAND);
       try {
         await execute(
           adb,
@@ -514,12 +555,9 @@ async function discardBackups(adb: AdbExecutor, backups: string[]): Promise<void
           SHARED_STORAGE_ROLLBACK_COMMAND_TIMEOUT_MS,
         );
       } catch (error) {
-        // The write itself already finished or failed on its own terms; a stray hidden backup
+        // The write itself already finished or failed on its own terms; a stray hidden file
         // must not replace that outcome, so it is logged and left for the user to remove.
-        logger.warn(
-          `[SharedStorage] Left previous-content backups behind: ${chunk.join(", ")}`,
-          error,
-        );
+        logger.warn(`[SharedStorage] Left hidden ${what} behind: ${chunk.join(", ")}`, error);
       }
     }
   });
@@ -651,8 +689,18 @@ async function indexMediaFile(
   );
 }
 
+/**
+ * `file://` URI for an absolute device path. Each segment is percent-encoded so a space, `#`, `?`
+ * or `%` in a file name stays part of the path; `/` separators are kept. A lone surrogate cannot be
+ * encoded (it throws), so it becomes U+FFFD first.
+ */
+function fileUriFor(absolutePath: string): string {
+  const segments = absolutePath.split("/");
+  return `file://${segments.map((segment) => encodeURIComponent(segment.toWellFormed())).join("/")}`;
+}
+
 function mediaScanCommand(userId: number, destination: string): string {
-  return `am broadcast --user ${userId} -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(`file://${destination}`)}`;
+  return `am broadcast --user ${userId} -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(fileUriFor(destination))}`;
 }
 
 async function executeResult(adb: AdbExecutor, command: string, signal?: AbortSignal) {

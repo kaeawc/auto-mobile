@@ -4594,6 +4594,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           currentObservation: result.observation,
           previousObservation: previousObserveResult,
           element: result.element,
+          effect: postTap.effect,
           signal,
         });
         if (selectedElements.length > 0) {

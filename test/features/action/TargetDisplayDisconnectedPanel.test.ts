@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { Posture } from "../../../src/models/DisplayPanel";
 import { ActionableError } from "../../../src/models/ActionableError";
+import type { BaseActionResult } from "../../../src/models/BaseActionResult";
+import { withStaleDisplay } from "../../../src/models/StaleDisplayError";
+import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
+import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
+import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import * as targetDisplayAction from "../../../src/features/action/TargetDisplayAction";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
@@ -268,5 +275,153 @@ describe("Android disconnected action panel", () => {
 
   test("disconnected rejection is structured", async () => {
     await expect(harness().prepare()).rejects.toBeInstanceOf(ActionableError);
+  });
+});
+
+type DisconnectedCall = (h: ReturnType<typeof harness>) => Promise<BaseActionResult>;
+const noopTapClient = new FakeTapClient();
+// Every action fails in the pre-dispatch panel check, before any input or capture.
+const disconnectedActions: Array<[string, DisconnectedCall]> = [
+  [
+    "tapAt",
+    (h) => {
+      const action = new TapAtCoordinate(h.targetDevice, h.adb, {
+        timer: new FakeTimer(),
+        androidClient: noopTapClient,
+        iosClient: noopTapClient,
+        lastRenderedObservation: h.previous,
+        displayTransitions: h.transitions,
+      });
+      action.observeScreen = h.observe;
+      return action.execute({ x: 300, y: 900, display: "inner" });
+    },
+  ],
+  [
+    "tapOn",
+    (h) => {
+      const action = new TapOnElement(h.targetDevice, h.adb, {
+        timer: new FakeTimer(),
+        lastRenderedObservation: h.previous,
+        displayTransitions: h.transitions,
+      });
+      action.observeScreen = h.observe;
+      return action.execute({ action: "tap", text: "x", display: "inner" });
+    },
+  ],
+  [
+    "swipeOn",
+    (h) => {
+      const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+        timer: new FakeTimer(),
+        lastRenderedObservation: h.previous,
+        displayTransitions: h.transitions,
+      });
+      action.observeScreen = h.observe;
+      return action.execute({ direction: "up", display: "inner" });
+    },
+  ],
+  [
+    "dragAndDrop",
+    (h) => {
+      const action = new DragAndDrop(
+        h.targetDevice,
+        h.adb as unknown as AdbClient,
+        new FakeTimer(),
+        { lastRenderedObservation: h.previous, displayTransitions: h.transitions },
+      );
+      action.observeScreen = h.observe;
+      return action.execute({
+        source: { text: "Source" },
+        target: { text: "Target" },
+        display: "inner",
+      });
+    },
+  ],
+];
+
+describe("disconnected action panel pinnedDisplay details", () => {
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+  beforeEach(() => {
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  const pinned = (h: ReturnType<typeof harness>) => ({
+    pin: "inner",
+    inventory: h.targetDevice.displays,
+  });
+  async function pinnedRejection(h: ReturnType<typeof harness>): Promise<unknown> {
+    return runWithSelectedDisplayPin(pinned(h), async () => {
+      try {
+        await h.prepare();
+      } catch (caught) {
+        return caught;
+      }
+      throw new Error("expected a rejection");
+    });
+  }
+
+  test("withStaleDisplay attaches the documented shape for a pinned disconnected panel", async () => {
+    const h = harness();
+    const error = await pinnedRejection(h);
+    expect(error).toBeInstanceOf(DisplaySelectionError);
+    const result = runWithSelectedDisplayPin(pinned(h), () =>
+      withStaleDisplay({ success: false }, error),
+    );
+    expect(result).toEqual({
+      success: false,
+      error: foldedMessage + pinRemedy,
+      pinnedDisplay: { pin: "inner", availablePanels: [{ key: cover, role: "cover" }] },
+    });
+  });
+
+  for (const [name, run] of disconnectedActions) {
+    test(`${name}: a pinned disconnected panel reports pinnedDisplay with the unchanged message`, async () => {
+      const h = harness();
+      const result = await runWithSelectedDisplayPin(pinned(h), () => run(h));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(foldedMessage + pinRemedy);
+      expect(result.pinnedDisplay).toEqual({
+        pin: "inner",
+        availablePanels: [{ key: cover, role: "cover" }],
+      });
+      expect(Object.hasOwn(result, "staleDisplay")).toBe(false);
+      expect(h.observe.getExecuteOptions()).toEqual([]);
+      expect(h.adb.wasCommandExecuted("input")).toBe(false);
+    });
+
+    test(`${name}: an explicit disconnected display keeps the plain error without pinnedDisplay`, async () => {
+      const h = harness();
+      const result = await run(h);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(foldedMessage);
+      expect(result.error).not.toContain("Clear the pin");
+      expect(Object.hasOwn(result, "pinnedDisplay")).toBe(false);
+    });
+  }
+
+  test("a connected panel raises no error", async () => {
+    const h = harness("opened", inner);
+    await expect(runWithSelectedDisplayPin(pinned(h), () => h.prepare())).resolves.toMatchObject({
+      displayId: 0,
+    });
+  });
+
+  test("an unlisted connected panel keeps a valid schema role in pinnedDisplay", async () => {
+    const h = harness();
+    h.adb.setCommandResponse("cmd display get-displays", {
+      stdout: 'Display id 0: DisplayInfo{uniqueId "local:unlisted" type INTERNAL, real 100 x 100}',
+      stderr: "",
+    });
+    const error = await pinnedRejection(h);
+    const result = runWithSelectedDisplayPin(pinned(h), () =>
+      withStaleDisplay({ success: false }, error),
+    );
+    expect(result.pinnedDisplay).toEqual({
+      pin: "inner",
+      availablePanels: [{ key: "unlisted", role: "unknown" }],
+    });
   });
 });

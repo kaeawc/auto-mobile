@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -1013,17 +1014,17 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       });
       const element = makeElement();
 
-      await expect(
-        (tapOnElement as any).executeAndroidTapWithAccessibility(
-          "longPress",
-          50,
-          50,
-          element,
-          1000,
-          {},
-          undefined,
-        ),
-      ).rejects.toThrow("Semantic long press failed");
+      const failure = await (tapOnElement as any)
+        .executeAndroidTapWithAccessibility("longPress", 50, 50, element, 1000, {}, undefined)
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(failure).toBeInstanceOf(ActionableError);
+      expect((failure as ActionableError).message).toBe(
+        "Semantic long press failed for the selected element: performAction returned false",
+      );
 
       expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();

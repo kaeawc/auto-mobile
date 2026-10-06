@@ -61,6 +61,7 @@ import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/s
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { annotateSearchCancellation, type SwipeCounter } from "./searchCancellation";
 import { DefaultObserveElementCollector } from "../../observe/ObserveElementCollector";
 import {
   getImeOccluderForElement,
@@ -138,6 +139,11 @@ export interface ScrollUntilVisibleStrategy {
     holdDurationMs?: number;
     onSearchFallback?: () => void;
     searchDragState?: AndroidSearchDragState;
+    /**
+     * Called when the gesture is handed to the device, never before the strategy's own
+     * pre-send checks; a strategy that cannot see its send point calls it as it begins the send.
+     */
+    onDispatched?: () => void;
   }) => Promise<SwipeOnResult & { observation: ObserveResult }>;
 }
 
@@ -156,6 +162,7 @@ interface SearchSwipeDispatchOptions {
   signal?: AbortSignal;
   onSearchFallback: () => void;
   searchDragState: AndroidSearchDragState;
+  swipes: SwipeCounter;
 }
 
 export class ScrollUntilVisible {
@@ -227,7 +234,13 @@ export class ScrollUntilVisible {
     signal?: AbortSignal;
     strategy?: ScrollUntilVisibleStrategy;
   }): Promise<SwipeOnResult> {
-    return withSwipeObservationReadScope(() => this.executeSearch(args));
+    const swipes: SwipeCounter = { dispatched: 0 };
+    try {
+      return await withSwipeObservationReadScope(() => this.executeSearch({ ...args, swipes }));
+    } catch (error) {
+      // A search cancelled after it moved the screen must say so (#10151).
+      throw annotateSearchCancellation(error, args.signal, swipes);
+    }
   }
 
   private async executeSearch({
@@ -236,12 +249,14 @@ export class ScrollUntilVisible {
     perf = new NoOpPerformanceTracker(),
     signal,
     strategy,
+    swipes,
   }: {
     options: SwipeOnResolvedOptions;
     progress?: ProgressCallback;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
     strategy?: ScrollUntilVisibleStrategy;
+    swipes: SwipeCounter;
   }): Promise<SwipeOnResult> {
     const observe =
       strategy?.observe ??
@@ -466,6 +481,7 @@ export class ScrollUntilVisible {
         signal,
         onSearchFallback,
         searchDragState,
+        swipes,
       });
       throwIfAborted(signal);
 
@@ -604,6 +620,7 @@ export class ScrollUntilVisible {
             signal,
             onSearchFallback,
             searchDragState,
+            swipes,
           },
           onRecovery: () => {
             recoveryAttempted = true;
@@ -943,6 +960,7 @@ export class ScrollUntilVisible {
     signal,
     onSearchFallback,
     searchDragState,
+    swipes,
   }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
     const { startX, startY, endX, endY } = coordinates;
     const activeDuration = duration;
@@ -960,6 +978,19 @@ export class ScrollUntilVisible {
 
     // Execute swipe with observedInteraction
     let iosDispatchTimestamp: number | undefined;
+    if (strategy) {
+      // The caller's loop and recoveries check the signal, but not between that check and here.
+      throwIfAborted(signal);
+    }
+    // The strategy sits behind observedInteraction's own awaits and abort checks, so a swipe is
+    // counted only when it reports the gesture reached the device, once per swipe.
+    let counted = false;
+    const onDispatched = () => {
+      if (!counted) {
+        counted = true;
+        swipes.dispatched++;
+      }
+    };
     return strategy
       ? await strategy.swipe({
           x1: Math.floor(startX),
@@ -971,6 +1002,7 @@ export class ScrollUntilVisible {
           onSearchFallback,
           searchDragState,
           previousObservation: lastObservation,
+          onDispatched,
         })
       : await this.deps.observedInteraction(
           async (_observeResult, fence) => {
@@ -981,6 +1013,7 @@ export class ScrollUntilVisible {
               },
             };
             throwIfAborted(signal);
+            swipes.dispatched++;
             const swipeRunner =
               this.deps.device.platform === "ios"
                 ? this.deps.voiceOverExecutor

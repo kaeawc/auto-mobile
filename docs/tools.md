@@ -1978,6 +1978,17 @@ For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public
 tool selection, see [Dynamic Tools](using/dynamic-tools.md).
 
+### Android SharedPreferences user targeting
+
+For `scope: "sharedPreferences"`, `getPreference` and `setPreference` accept an optional
+`userId` (for example a work profile). It is passed to `adb shell run-as <pkg> --user <id>`
+for nonzero users; user 0 keeps the unscoped `run-as <pkg>` command. When omitted, user 0 is
+used whenever the package is installed for it. Another user is used only when the package is
+not installed for user 0 and is installed for exactly one other running user; if several such
+users have it, the call fails and asks for `userId`. If the device's users cannot be listed,
+user 0 is used (with a warning). The result always reports the `userId` that was read or
+written. `userId` is rejected for other scopes.
+
 ### iOS UserDefaults preferences
 
 `getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),

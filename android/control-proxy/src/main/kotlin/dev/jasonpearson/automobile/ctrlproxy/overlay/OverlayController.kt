@@ -28,6 +28,13 @@ class OverlayController(
   private val clock: () -> Long = System::currentTimeMillis,
   private val lifecycle: OverlayLifecycle = OverlayLifecycle(CoroutineOverlayScheduler()),
   private val render: (OverlaySpec) -> InteractiveOverlayRequest = { mapOverlaySpec(it).request() },
+  /**
+   * Drops every uploaded asset when the overlay session ends: any dismissal or abandonment, unbind,
+   * destroy, a dismiss-all with nothing showing, and the last client disconnecting (even with
+   * nothing showing, since assets are uploaded before the overlay that uses them). Not called for a
+   * show replacement or a temporary lock-screen hide.
+   */
+  private val clearAssets: () -> Unit = {},
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -86,6 +93,7 @@ class OverlayController(
       else {
         check(host.dismiss()) { "Overlay host failed to dismiss window" }
         notifyDetached()
+        releaseAssets()
       }
     }
 
@@ -148,6 +156,7 @@ class OverlayController(
     activeRequest = null
     lifecycle.cancel()
     notifyDetached()
+    releaseAssets()
     return true
   }
 
@@ -157,6 +166,15 @@ class OverlayController(
     } catch (error: Exception) {
       // Removal succeeded; ancillary highlight cleanup must not suppress a terminal overlay event.
       Log.w("OverlayController", "Overlay highlight cleanup failed", error)
+    }
+  }
+
+  /** Asset cleanup is ancillary: it must never suppress a dismissal, event or lifecycle step. */
+  private fun releaseAssets() {
+    try {
+      clearAssets()
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay asset cleanup failed", error)
     }
   }
 
@@ -242,6 +260,9 @@ class OverlayController(
       // A delayed disconnect from a previous observer session cannot dismiss a newly shown overlay.
       if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
         activeRuntime?.let { dismissForDisconnect(it) }
+      // Assets outlive no client, shown or not; a stale disconnect must not drop a new session's.
+      if (count == 0 && (observerSession == null || observerSession == lifecycle.observerSession()))
+        releaseAssets()
     }
 
   /**
@@ -285,6 +306,7 @@ class OverlayController(
     activeRequest = null
     lifecycle.cancel()
     notifyDetached()
+    releaseAssets()
     runtime.finishDismissal(OverlayDismissReason.TEARDOWN)
   }
 
@@ -293,6 +315,7 @@ class OverlayController(
    * Android can rebind the same service instance before onDestroy. Failed removal stays retryable.
    */
   suspend fun dismissForUnbind() = signal {
+    releaseAssets()
     val runtime = activeRuntime
     if (runtime != null) runtime.dismiss(OverlayDismissReason.TEARDOWN)
     else if (host.isShowing) {
@@ -329,6 +352,7 @@ class OverlayController(
       val runtime = activeRuntime
       activeRuntime = null
       activeRequest = null
+      releaseAssets()
       // Allocate the terminal sequence even when the last socket or service sink is gone.
       try {
         runtime?.finishDismissal(OverlayDismissReason.TEARDOWN)

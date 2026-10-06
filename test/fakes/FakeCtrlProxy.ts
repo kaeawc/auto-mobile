@@ -15,7 +15,10 @@ import {
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
 import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
+import type { OverlayAssetUpload } from "../../src/features/overlay/overlayAssets";
+import type { OverlayAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyOverlays";
 import type {
+  OverlayAssetResult,
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
@@ -141,6 +144,42 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.checkFailure("requestDismissOverlay");
     this.overlayHistory.push({ method: "dismiss", target, timeoutMs, perf });
     return this.overlayResult;
+  }
+
+  private overlayAssetResult: OverlayAssetResult = {
+    success: true,
+    dispatched: true,
+    acknowledged: true,
+  };
+  private readonly overlayAssetHistory: Array<
+    | { method: "put"; asset: OverlayAssetUpload; options?: OverlayAssetRequestOptions }
+    | { method: "remove"; id: string; options?: OverlayAssetRequestOptions }
+  > = [];
+
+  setOverlayAssetResult(result: OverlayAssetResult): void {
+    this.overlayAssetResult = result;
+  }
+
+  getOverlayAssetHistory() {
+    return [...this.overlayAssetHistory];
+  }
+
+  async requestPutOverlayAsset(
+    asset: OverlayAssetUpload,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    this.checkFailure("requestPutOverlayAsset");
+    this.overlayAssetHistory.push({ method: "put", asset, options });
+    return this.overlayAssetResult;
+  }
+
+  async requestRemoveOverlayAsset(
+    id: string,
+    options?: OverlayAssetRequestOptions,
+  ): Promise<OverlayAssetResult> {
+    this.checkFailure("requestRemoveOverlayAsset");
+    this.overlayAssetHistory.push({ method: "remove", id, options });
+    return this.overlayAssetResult;
   }
 
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {

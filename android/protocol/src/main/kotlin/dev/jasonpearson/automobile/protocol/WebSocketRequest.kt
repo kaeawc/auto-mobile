@@ -453,6 +453,30 @@ data class DismissOverlay(
   val all: Boolean? = null,
 ) : WebSocketRequest()
 
+/**
+ * Uploads one overlay image asset, replacing any asset with the same [id]. [dataBase64] is the
+ * encoded image (PNG, JPEG or WebP) in standard base64 without line breaks. Answered by one
+ * `overlay_result`. [toString] never renders the payload, so a stray log line cannot dump bytes.
+ */
+@Serializable
+@SerialName("put_overlay_asset")
+data class PutOverlayAsset(
+  override val requestId: String? = null,
+  val id: String,
+  val mimeType: String,
+  val dataBase64: String,
+) : WebSocketRequest() {
+  override fun toString(): String =
+    "PutOverlayAsset(requestId=$requestId, id=$id, mimeType=$mimeType, " +
+      "dataBase64=<${dataBase64.length} chars>)"
+}
+
+/** Removes one overlay asset. Idempotent: removing an unknown [id] still succeeds. */
+@Serializable
+@SerialName("remove_overlay_asset")
+data class RemoveOverlayAsset(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
 // =============================================================================
 // Storage Requests
 // =============================================================================

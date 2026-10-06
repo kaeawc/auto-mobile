@@ -342,6 +342,10 @@ interface CtrlProxyActions {
 
   fun dismissOverlay(requestId: String?, id: String?, all: Boolean?)
 
+  fun putOverlayAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
+
+  fun removeOverlayAsset(requestId: String?, id: String)
+
   fun listPreferenceFiles(requestId: String?, packageName: String)
 
   fun getPreferences(requestId: String?, packageName: String, fileName: String)

@@ -75,8 +75,17 @@ class IcuRegexCompatibilityTest {
     val sources = mainSourceFiles()
     val found = sources.flatMap { file -> RegexLiteralScanner.scan(file.readText(), file.path) }
     // Scanner-rot guard: if extraction silently stops finding patterns this test would pass
-    // vacuously. There were 17 literals when this was written; the floor is deliberately below it.
-    assertTrue("only found ${found.size} regex literals; did the scanner break?", found.size >= 14)
+    // vacuously. Rather than an exact count (which breaks whenever a regex is legitimately
+    // removed), require the scanner to still see literals in a few files that are known to hold
+    // them. If you remove the last regex from one of these files, drop it from this list.
+    val anchorFiles = listOf("LogcatReader.kt", "ElementBounds.kt", "OverlaySpecValidator.kt")
+    anchorFiles.forEach { name ->
+      assertTrue(
+        "Scanner found no regex literal in $name (found ${found.size} overall). Either the " +
+          "scanner broke, or $name no longer builds a regex: update anchorFiles in this test.",
+        found.any { it.location.substringBefore(':').endsWith("/$name") },
+      )
+    }
 
     val violations = found.flatMap { site ->
       val problems = site.pattern?.let(IcuRegexSyntax::problems) ?: listOf(site.reason)

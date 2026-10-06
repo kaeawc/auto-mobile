@@ -181,6 +181,8 @@ import type {
   ClipboardArgs,
 } from "./interactionToolTypes";
 
+import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+
 import {
   SystemTrayObserver,
   SystemTrayAdb,
@@ -190,6 +192,7 @@ import {
   getSystemTrayDependencies,
   waitForNotificationMatch,
   listSystemTrayNotifications,
+  NotificationShadeNotOpenError,
   readActiveNotificationKeysForApp,
   resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
@@ -2841,6 +2844,7 @@ export function registerInteractionTools() {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    let restoreFailedClearAll: (() => Promise<void>) | undefined;
     try {
       throwIfAborted(signal);
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
@@ -3126,6 +3130,30 @@ export function registerInteractionTools() {
         throw new ActionableError(`Unknown systemTray action: ${args.action}`);
       }
 
+      const clearDetector =
+        device.platform === "android"
+          ? createNotificationUIDetector(device, getSystemTrayDependencies, signal)
+          : undefined;
+      if (clearDetector) {
+        const initialObservation = await awaitWhileRequestIsLive(
+          getSystemTrayDependencies()
+            .observeScreenFactory(device)
+            .execute({
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+              skipPerformanceAudit: true,
+              minTimestamp: await clearDetector.getObservationTimestamp(),
+              signal,
+            }),
+          signal,
+        );
+        const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
+        // Use statusbar commands directly: an unreadable hierarchy must not
+        // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
+        restoreFailedClearAll = () =>
+          initiallyOpen ? clearDetector.expandTray() : clearDetector.collapseTray();
+      }
+
       let swipeCount = 0;
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
@@ -3164,7 +3192,7 @@ export function registerInteractionTools() {
       const { timer } = getSystemTrayDependencies();
 
       for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-        const { match } = await waitForNotificationMatch(
+        const { observation, match } = await waitForNotificationMatch(
           device,
           notification,
           clearMatchTexts,
@@ -3179,6 +3207,13 @@ export function registerInteractionTools() {
           signal,
         );
 
+        if (!match && clearDetector && !clearDetector.isTrayOpen(observation.viewHierarchy)) {
+          throw new ActionableError(
+            observation.viewHierarchy
+              ? "Could not clear notifications: shade not readable (shade not detected open)."
+              : "Could not clear notifications: shade not readable (view hierarchy missing).",
+          );
+        }
         if (!match) {
           break;
         }
@@ -3202,6 +3237,16 @@ export function registerInteractionTools() {
           ? undefined
           : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
 
+      const result = formatClearAllResult(
+        notification.appId,
+        swipeCount,
+        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
+      );
+      if (!result.success && restoreFailedClearAll) {
+        await restoreFailedClearAll();
+        restoreFailedClearAll = undefined;
+      }
+
       const { observeScreenFactory } = getSystemTrayDependencies();
       const observeScreen = observeScreenFactory(device);
       throwIfAborted(signal);
@@ -3216,17 +3261,30 @@ export function registerInteractionTools() {
       );
       await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
-      const result = formatClearAllResult(
-        notification.appId,
-        swipeCount,
-        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
-      );
-      return createJSONToolResponse({
+      restoreFailedClearAll = undefined;
+      const response = createJSONToolResponse({
         ...result,
         observation: nextObservation,
       });
+      return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throwIfAborted(signal);
+      if (restoreFailedClearAll) {
+        try {
+          await restoreFailedClearAll();
+        } catch (restoreError) {
+          logger.warn(
+            `Failed to restore notification shade: ${errorMessage(restoreError)}`,
+            restoreError,
+          );
+        }
+      }
+      if (args.action === "clearAll" && error instanceof NotificationShadeNotOpenError) {
+        throw new ActionableError(
+          "Could not clear notifications: shade not readable (shade not detected open during list).",
+          { cause: error },
+        );
+      }
       if (error instanceof ActionableError) {
         throw error;
       }

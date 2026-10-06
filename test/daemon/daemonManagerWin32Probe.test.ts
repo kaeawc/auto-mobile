@@ -40,6 +40,7 @@ function spawnedSocketPath(manager: SafeDaemonManager): string {
 
 describe("default Windows namespace owner probe", () => {
   const tempDirs: string[] = [];
+  const originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
 
   function createManager(
     timer: FakeTimer,
@@ -48,6 +49,9 @@ describe("default Windows namespace owner probe", () => {
   ): ReadyWin32Manager {
     const dir = mkdtempSync(join(tmpdir(), "daemon-win32-probe-"));
     tempDirs.push(dir);
+    // The launch log is opened under the resolved AutoMobile data dir; keep it
+    // off the developer's real ~/.auto-mobile.
+    process.env.AUTOMOBILE_DATA_DIR = dir;
     return new ReadyWin32Manager(
       () => {
         throw new Error("Unit tests must not create a real daemon client");
@@ -74,6 +78,11 @@ describe("default Windows namespace owner probe", () => {
 
   afterEach(() => {
     mock.restore();
+    if (originalDataDir === undefined) {
+      delete process.env.AUTOMOBILE_DATA_DIR;
+    } else {
+      process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+    }
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }

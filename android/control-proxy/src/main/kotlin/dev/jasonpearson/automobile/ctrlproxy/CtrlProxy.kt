@@ -151,6 +151,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
@@ -501,6 +502,44 @@ internal fun navigationEventResponse(event: TimestampedNavigationEvent): Navigat
         sequenceNumber = event.sequenceNumber,
       ),
   )
+
+/** Android multi-user range: a package uid is `userId * PER_USER_RANGE + appId`. */
+internal const val PACKAGE_EVENT_USER_ID_RANGE = 100_000
+
+/**
+ * The Android user id for a package broadcast's `Intent.EXTRA_UID` (#10067). The extra is the
+ * package's kernel uid (e.g. 10234 for user 0, 1010234 for user 10), not a user id; an absent extra
+ * (`-1`) means the primary user.
+ */
+internal fun packageEventUserId(uid: Int): Int =
+  if (uid >= 0) uid / PACKAGE_EVENT_USER_ID_RANGE else 0
+
+/**
+ * The `package_event` payload. `userId` is the Android user id; `uid` carries the raw package uid
+ * when known and doubles as the marker that `userId` is a real user id: APKs that predate #10067
+ * sent the uid in `userId` and no `uid`, which the host converts itself.
+ */
+internal fun packageEventJson(
+  action: String,
+  packageName: String,
+  userId: Int,
+  uid: Int?,
+  isSystem: Boolean?,
+  removedForAllUsers: Boolean,
+): JsonObject = buildJsonObject {
+  put("action", action)
+  put("packageName", packageName)
+  put("userId", userId)
+  if (uid != null) {
+    put("uid", uid)
+  }
+  if (isSystem != null) {
+    put("isSystem", isSystem)
+  }
+  if (removedForAllUsers) {
+    put("removedForAllUsers", true)
+  }
+}
 
 internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
   if (reportedMs > 0) reportedMs else nowMs
@@ -1292,7 +1331,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
         val packageName = intent.data?.schemeSpecificPart ?: return
         val uid = intent.getIntExtra(Intent.EXTRA_UID, -1)
-        val userId = if (uid >= 0) uid else 0
+        val userId = packageEventUserId(uid)
         val isReplacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
         // EXTRA_REMOVED_FOR_ALL_USERS may not be available in all SDK versions, use string
         // literal
@@ -1320,7 +1359,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
 
         serviceScope.launch {
-          broadcastPackageEvent(eventAction, packageName, userId, isSystem, removedForAllUsers)
+          broadcastPackageEvent(
+            eventAction,
+            packageName,
+            userId,
+            uid.takeIf { it >= 0 },
+            isSystem,
+            removedForAllUsers,
+          )
         }
       }
     }
@@ -3546,6 +3592,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     packageName: String,
     userId: Int,
+    uid: Int?,
     isSystem: Boolean?,
     removedForAllUsers: Boolean,
   ) {
@@ -3560,17 +3607,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         webSocketFrameJson("package_event", timestamp = timestamp) {
           put(
             "event",
-            buildJsonObject {
-              put("action", action)
-              put("packageName", packageName)
-              put("userId", userId)
-              if (isSystem != null) {
-                put("isSystem", isSystem)
-              }
-              if (removedForAllUsers) {
-                put("removedForAllUsers", true)
-              }
-            },
+            packageEventJson(action, packageName, userId, uid, isSystem, removedForAllUsers),
           )
         }
       webSocketServer.broadcast(message)

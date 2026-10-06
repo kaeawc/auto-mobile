@@ -76,6 +76,27 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `serialize handled exception message under the message key`() {
+    val handled: WebSocketResponse =
+      HandledExceptionEvent(
+        timestamp = 1700000001000L,
+        event =
+          HandledExceptionData(
+            exceptionClass = "java.lang.IllegalStateException",
+            message = "cart is empty",
+            stackTrace = "at com.example.Main.run(Main.java:42)",
+            packageName = "com.example.app",
+            deviceInfo = DeviceInfo("Pixel 7", "Google", "14", 34),
+          ),
+      )
+
+    assertEquals(
+      """{"type":"handled_exception_event","timestamp":1700000001000,"event":{"exceptionClass":"java.lang.IllegalStateException","message":"cart is empty","stackTrace":"at com.example.Main.run(Main.java:42)","customMessage":null,"currentScreen":null,"packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34},"applicationId":null}}""",
+      json.encodeToString(WebSocketResponse.serializer(), handled),
+    )
+  }
+
+  @Test
   fun `serialize swipe_result`() {
     val response: WebSocketResponse =
       SwipeResult(

@@ -1,6 +1,7 @@
 import { expect, describe, test } from "bun:test";
 import { DefaultPathOptimizer } from "../../../src/features/navigation/DefaultPathOptimizer";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import type { NavigationEdgeTarget } from "../../../src/db/navigationRepository";
 import type {
   NavigationNode,
   NavigationEdge,
@@ -8,10 +9,13 @@ import type {
 } from "../../../src/utils/interfaces/NavigationGraph";
 
 /**
- * DefaultPathOptimizer only depends on two NavigationGraphManager methods:
- * getNode(screen) and findPath(target). We inject a narrow stub exposing exactly
- * those so the back-button heuristic is exercised in isolation without touching a
- * real graph/DB (issue #3067) and with fully deterministic node/path fixtures.
+ * DefaultPathOptimizer only depends on three NavigationGraphManager methods:
+ * getNode(screen), getEdgeTargetsFrom(screen) (back-button verification walks forward
+ * edges from the target to the current screen) and findPath(target) (forward
+ * recommendation). We inject a narrow stub exposing exactly those so the heuristic
+ * is exercised in isolation without touching a real graph/DB (issue #3067) and with
+ * fully deterministic node/edge fixtures. DefaultPathOptimizer.realGraph.test.ts
+ * covers the same heuristic against the real manager.
  */
 function makeNode(overrides: Partial<NavigationNode> & { screenName: string }): NavigationNode {
   return {
@@ -29,12 +33,19 @@ function edge(from: string, to: string): NavigationEdge {
 function makeStub(config: {
   nodes?: Record<string, NavigationNode | undefined>;
   paths?: Record<string, PathResult>;
+  edges?: NavigationEdge[];
 }): NavigationGraphManager {
   const nodes = config.nodes ?? {};
   const paths = config.paths ?? {};
+  const edges = config.edges ?? [];
   const stub = {
     async getNode(screen: string): Promise<NavigationNode | undefined> {
       return nodes[screen];
+    },
+    async getEdgeTargetsFrom(screen: string): Promise<NavigationEdgeTarget[]> {
+      return edges
+        .filter((candidate) => candidate.from === screen)
+        .map((candidate) => ({ toScreen: candidate.to, toolName: null, toolArgs: null }));
     },
     async findPath(target: string): Promise<PathResult> {
       return (
@@ -58,7 +69,7 @@ describe("DefaultPathOptimizer", function () {
       targetScreen: string;
       currentDepth: number;
       node?: NavigationNode;
-      path?: PathResult;
+      edges?: NavigationEdge[];
       expectedUseBack: boolean;
       expectedBackPresses: number;
       reasonPattern: RegExp;
@@ -111,7 +122,6 @@ describe("DefaultPathOptimizer", function () {
         targetScreen: "A",
         currentDepth: 2,
         node: makeNode({ screenName: "A", backStackDepth: 1 }),
-        path: { found: false, path: [], startScreen: "", targetScreen: "A" },
         expectedUseBack: true,
         expectedBackPresses: 1,
         reasonPattern: /Depth difference is 1/,
@@ -124,7 +134,6 @@ describe("DefaultPathOptimizer", function () {
         targetScreen: "A",
         currentDepth: 3,
         node: makeNode({ screenName: "A", backStackDepth: 1 }),
-        path: { found: false, path: [], startScreen: "", targetScreen: "A" },
         expectedUseBack: false,
         expectedBackPresses: 0,
         reasonPattern: /No known navigation path to verify safety/,
@@ -135,12 +144,7 @@ describe("DefaultPathOptimizer", function () {
         targetScreen: "A",
         currentDepth: 3,
         node: makeNode({ screenName: "A", backStackDepth: 1 }),
-        path: {
-          found: true,
-          path: [edge("A", "B"), edge("B", "C")],
-          startScreen: "A",
-          targetScreen: "A",
-        },
+        edges: [edge("A", "B"), edge("B", "C")],
         expectedUseBack: true,
         expectedBackPresses: 2,
         reasonPattern: /matches depth difference/,
@@ -151,15 +155,32 @@ describe("DefaultPathOptimizer", function () {
         targetScreen: "A",
         currentDepth: 3,
         node: makeNode({ screenName: "A", backStackDepth: 1 }),
-        path: {
-          found: true,
-          path: [edge("A", "C")],
-          startScreen: "A",
-          targetScreen: "A",
-        },
+        edges: [edge("A", "C")],
         expectedUseBack: false,
         expectedBackPresses: 0,
         reasonPattern: /doesn't match depth difference/,
+      },
+      {
+        name: "ignores a current-to-target path: only target-to-current evidence counts",
+        currentScreen: "C",
+        targetScreen: "A",
+        currentDepth: 3,
+        node: makeNode({ screenName: "A", backStackDepth: 1 }),
+        edges: [edge("C", "B"), edge("B", "A")],
+        expectedUseBack: false,
+        expectedBackPresses: 0,
+        reasonPattern: /No known navigation path to verify safety/,
+      },
+      {
+        name: "does not search past the depth difference for a longer forward path",
+        currentScreen: "C",
+        targetScreen: "A",
+        currentDepth: 3,
+        node: makeNode({ screenName: "A", backStackDepth: 1 }),
+        edges: [edge("A", "X"), edge("X", "Y"), edge("Y", "C")],
+        expectedUseBack: false,
+        expectedBackPresses: 0,
+        reasonPattern: /No known navigation path to verify safety/,
       },
     ];
 
@@ -167,7 +188,7 @@ describe("DefaultPathOptimizer", function () {
       const optimizer = new DefaultPathOptimizer(
         makeStub({
           nodes: { [row.targetScreen]: row.node },
-          paths: row.path ? { [row.targetScreen]: row.path } : {},
+          edges: row.edges,
         }),
       );
 

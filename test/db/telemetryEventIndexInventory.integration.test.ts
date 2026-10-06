@@ -78,6 +78,9 @@ const CANONICAL_INDEXES: Record<string, Record<string, string[]>> = {
     // per-insert previous-value lookup
     // (WHERE device_id=? AND file_name=? AND key=? ORDER BY timestamp DESC LIMIT 1).
     idx_storage_events_key_lookup: ["device_id", "file_name", "key", "timestamp"],
+    // Insertion-order variant of the same lookup (ORDER BY id DESC LIMIT 1): the
+    // implicit rowid suffix orders by id, so no temp B-tree sort.
+    idx_storage_events_key_lookup_id: ["device_id", "file_name", "key"],
   },
   layout_events: {
     idx_layout_events_timestamp: ["timestamp"],

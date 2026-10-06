@@ -1252,7 +1252,11 @@ false; Android only).
 when opening the URL displays an intent chooser.
 
 `sqlQuery.databasePath` selects the database path; for iOS SDK databases, use the
-absolute registered path reported by the App Databases resource.
+absolute registered path reported by the App Databases resource. On Android,
+`sqlQuery` rows and the table-data resource return integers within ±(2^53 - 1) as
+JSON numbers; an integer outside that range is returned as its exact decimal
+string, and the response lists the zero-based columns that hold such strings in
+`bigIntegerColumns` so they can be told apart from TEXT.
 `getDataStore.adapterName` and `listDataStores.adapterName` select the name under
 which the host app registered its AutoMobile SDK DataStore adapter.
 

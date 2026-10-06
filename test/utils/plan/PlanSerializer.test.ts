@@ -109,8 +109,9 @@ describe("YamlPlanSerializer", () => {
       // `text` under `selector` for the v0.0.30 tapOn schema.
       expect(plan.steps[0].params).toEqual({ selector: { text: "Hello" }, action: "tap" });
       expect(plan.steps[1].tool).toBe("sendKeys");
+      // No platform in the YAML or the import call: the non-destructive insert (#10130).
       expect(plan.steps[1].params).toEqual({
-        commands: [{ action: "type", text: "World", operation: "replace" }],
+        commands: [{ action: "type", text: "World", operation: "insert" }],
       });
     });
 
@@ -301,6 +302,35 @@ describe("YamlPlanSerializer", () => {
       expect(plan.devices).toEqual(["A", "B"]);
       expect(plan.steps[0].params.device).toBe("A");
       expect(plan.steps[1].params.device).toBe("B");
+    });
+
+    describe("legacy inputText platform (#10130)", () => {
+      const legacyYaml = [
+        "name: add-note",
+        "steps:",
+        "  - tool: tapOn",
+        '    text: "Notes"',
+        "  - tool: inputText",
+        '    text: " — follow up"',
+        "",
+      ].join("\n");
+      const typeOperation = (options?: { platform?: string }) =>
+        serializer.importPlanFromYaml(legacyYaml, options).steps[1].params.commands[0].operation;
+
+      test.each([
+        ["ios", "insert"],
+        ["android", "replace"],
+        [undefined, "insert"],
+      ])("importing for platform %s migrates to operation %s", (platform, operation) => {
+        expect(typeOperation(platform ? { platform } : undefined)).toBe(operation);
+      });
+
+      test("the platform in the YAML wins over the import platform", () => {
+        const plan = serializer.importPlanFromYaml(`platform: android\n${legacyYaml}`, {
+          platform: "ios",
+        });
+        expect(plan.steps[1].params.commands[0].operation).toBe("replace");
+      });
     });
 
     test("handles plan with step labels", () => {

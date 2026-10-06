@@ -58,23 +58,43 @@ const isRecord = (value: unknown): value is Record<string, any> => {
 const isPlatform = (value: unknown): value is "android" | "ios" =>
   value === "android" || value === "ios";
 
+/**
+ * Where a migration can learn which platform a step runs on, most specific first: the step's own
+ * `platform`, its device label's declared platform in `plan.devices`, the plan's own `platform:`
+ * hint, and finally `requestPlatform` — the platform the caller is executing the plan on (the
+ * required `executePlan` argument, #10130), which the YAML itself need not repeat.
+ */
+type PlatformContext = {
+  planPlatform?: unknown;
+  planDevices?: unknown;
+  requestPlatform?: unknown;
+};
+
+/** Caller-supplied facts a migration may use that the plan document does not carry. */
+export type PlanMigrationOptions = {
+  /** The platform the plan is being executed on; used only after the plan's own signals. */
+  platform?: unknown;
+};
+
 const resolveStepPlatform = (
   params: Record<string, any>,
-  planPlatform: unknown,
-  planDevices: unknown,
+  context: PlatformContext,
 ): "android" | "ios" | undefined => {
   if (isPlatform(params.platform)) {
     return params.platform;
   }
-  if (typeof params.device === "string" && Array.isArray(planDevices)) {
-    const device = planDevices.find(
+  if (typeof params.device === "string" && Array.isArray(context.planDevices)) {
+    const device = context.planDevices.find(
       (entry: unknown) => isRecord(entry) && entry.label === params.device,
     );
     if (isRecord(device) && isPlatform(device.platform)) {
       return device.platform;
     }
   }
-  return isPlatform(planPlatform) ? planPlatform : undefined;
+  if (isPlatform(context.planPlatform)) {
+    return context.planPlatform;
+  }
+  return isPlatform(context.requestPlatform) ? context.requestPlatform : undefined;
 };
 
 const recordWarning = (warnings: MigrationWarning[], message: string, stepIndex?: number): void => {
@@ -201,8 +221,7 @@ const migrateInputTextParams = (
   mergedParams: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
+  platformContext: PlatformContext,
 ): void => {
   if (mergedParams.value !== undefined) {
     if (mergedParams.text === undefined) {
@@ -212,11 +231,16 @@ const migrateInputTextParams = (
     recordWarning(warnings, "Renamed inputText.value to text.", stepIndex);
   }
 
+  // Only a step known to run on Android keeps the legacy clear-then-type. iOS inputText inserted at
+  // the caret, and when no signal says which platform runs the step (a plan imported with neither a
+  // YAML platform nor a caller platform) the non-destructive insert is the safe side: a wrongly
+  // appended Android field fails a visible assertion, a wrongly cleared field silently loses text
+  // (#7861, #10130).
   const typeCommand: Record<string, unknown> = {
     action: "type",
     text: mergedParams.text,
     operation:
-      resolveStepPlatform(mergedParams, planPlatform, planDevices) === "ios" ? "insert" : "replace",
+      resolveStepPlatform(mergedParams, platformContext) === "android" ? "replace" : "insert",
   };
   delete mergedParams.text;
   if (mergedParams.mode !== undefined) {
@@ -247,8 +271,7 @@ const migrateToolName = (
   mergedParams: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
+  platformContext: PlatformContext,
 ): { normalizedTool: string; changed: boolean } => {
   let changed = false;
   let normalizedTool = toolName;
@@ -280,7 +303,7 @@ const migrateToolName = (
     changed = true;
   }
   if (toolName === "inputText") {
-    migrateInputTextParams(mergedParams, stepIndex, warnings, planPlatform, planDevices);
+    migrateInputTextParams(mergedParams, stepIndex, warnings, platformContext);
     normalizedTool = "sendKeys";
     changed = true;
   }
@@ -551,8 +574,7 @@ const migrateStepFields = (
   step: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
+  platformContext: PlatformContext,
 ): boolean => {
   let changed = migrateStepMetadata(step, stepIndex, warnings);
 
@@ -583,8 +605,7 @@ const migrateStepFields = (
     mergedParams,
     stepIndex,
     warnings,
-    planPlatform,
-    planDevices,
+    platformContext,
   );
   const normalizedTool = migratedTool.normalizedTool;
   changed = migratedTool.changed || changed;
@@ -613,12 +634,16 @@ export const migratePlanStep = (
     return step;
   }
   const copy = structuredClone(step);
-  migrateStepFields(copy, stepIndex, [], context.platform, context.devices);
+  migrateStepFields(copy, stepIndex, [], {
+    planPlatform: context.platform,
+    planDevices: context.devices,
+  });
   return copy;
 };
 
 export const migratePlan = (
   rawPlan: unknown,
+  options: PlanMigrationOptions = {},
 ): { plan: Record<string, any>; report: PlanMigrationReport } => {
   if (!isRecord(rawPlan)) {
     throw new Error("Plan is not a valid object");
@@ -650,7 +675,11 @@ export const migratePlan = (
       if (!isRecord(step)) {
         return step;
       }
-      const stepChanged = migrateStepFields(step, index, warnings, plan.platform, plan.devices);
+      const stepChanged = migrateStepFields(step, index, warnings, {
+        planPlatform: plan.platform,
+        planDevices: plan.devices,
+        requestPlatform: options.platform,
+      });
       stepsChanged = stepsChanged || stepChanged;
       return step;
     });

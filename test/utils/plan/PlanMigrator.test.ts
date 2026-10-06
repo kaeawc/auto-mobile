@@ -397,7 +397,7 @@ describe("PlanMigrator", () => {
               {
                 action: "type",
                 text: "hello",
-                operation: "replace",
+                operation: "insert",
                 mode: "eventAll",
               },
               { action: "key", key: "done" },
@@ -498,15 +498,95 @@ describe("PlanMigrator", () => {
         ]);
       });
 
-      test("keeps replace when inputText has no platform signal", () => {
+      // With no signal anywhere, the non-destructive insert wins over a silent field clear (#10130).
+      test("uses insert when inputText has no platform signal", () => {
         const { plan } = migratePlan({
           name: "Plan",
           steps: [{ tool: "inputText", params: { text: "tail" } }],
         });
 
         expect(plan.steps[0].params.commands).toEqual([
-          { action: "type", text: "tail", operation: "replace" },
+          { action: "type", text: "tail", operation: "insert" },
         ]);
+      });
+
+      describe("inputText platform from the executePlan argument (#10130)", () => {
+        const legacyPlan = (extra: Record<string, unknown> = {}, params = {}) => ({
+          name: "add-note",
+          ...extra,
+          steps: [
+            { tool: "tapOn", text: "Notes" },
+            { tool: "inputText", text: " — follow up", ...params },
+          ],
+        });
+        const operationOf = (plan: Record<string, any>) =>
+          plan.steps[1].params.commands[0].operation;
+
+        test("an iOS call platform inserts when the YAML names no platform", () => {
+          const { plan } = migratePlan(legacyPlan(), { platform: "ios" });
+          expect(operationOf(plan)).toBe("insert");
+        });
+
+        test("an Android call platform keeps the legacy replace", () => {
+          const { plan } = migratePlan(legacyPlan(), { platform: "android" });
+          expect(operationOf(plan)).toBe("replace");
+        });
+
+        test("the YAML's own platform hint wins over the call platform", () => {
+          expect(
+            operationOf(migratePlan(legacyPlan({ platform: "android" }), { platform: "ios" }).plan),
+          ).toBe("replace");
+          expect(
+            operationOf(migratePlan(legacyPlan({ platform: "ios" }), { platform: "android" }).plan),
+          ).toBe("insert");
+        });
+
+        test("a step's own platform wins over the call platform", () => {
+          const { plan } = migratePlan(legacyPlan({}, { platform: "android" }), {
+            platform: "ios",
+          });
+          expect(operationOf(plan)).toBe("replace");
+        });
+
+        test("a per-step device label's declared platform wins over the call platform", () => {
+          const devices = [
+            { label: "a", platform: "android" },
+            { label: "b", platform: "ios" },
+          ];
+          expect(
+            operationOf(
+              migratePlan(legacyPlan({ devices }, { device: "a" }), { platform: "ios" }).plan,
+            ),
+          ).toBe("replace");
+          expect(
+            operationOf(
+              migratePlan(legacyPlan({ devices }, { device: "b" }), { platform: "android" }).plan,
+            ),
+          ).toBe("insert");
+        });
+
+        test("a plain-string device label has no platform of its own and takes the call platform", () => {
+          const { plan } = migratePlan(legacyPlan({ devices: ["a"] }, { device: "a" }), {
+            platform: "ios",
+          });
+          expect(operationOf(plan)).toBe("insert");
+        });
+
+        test("an unrecognised call platform is treated as unknown and inserts", () => {
+          expect(operationOf(migratePlan(legacyPlan(), { platform: "windows" }).plan)).toBe(
+            "insert",
+          );
+        });
+
+        test("a second migration of the migrated plan changes nothing", () => {
+          const first = migratePlan(legacyPlan(), { platform: "ios" });
+          const snapshot = structuredClone(first.plan);
+          const second = migratePlan(first.plan, { platform: "ios" });
+          expect(second.plan).toEqual(snapshot);
+          expect(second.plan.steps[1].tool).toBe("sendKeys");
+          // The platform the second pass is given cannot flip an already-migrated step.
+          expect(operationOf(migratePlan(first.plan, { platform: "android" }).plan)).toBe("insert");
+        });
       });
 
       test("falls through a plain-string device label to the top-level platform hint", () => {

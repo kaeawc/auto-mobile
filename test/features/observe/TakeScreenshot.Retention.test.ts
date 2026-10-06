@@ -93,6 +93,29 @@ test("returned old-mtime path survives the next size sweep", async () => {
   await sweep();
   expect(files.existsSync(path)).toBe(true);
 });
+
+test("constructing multiple screenshot services sweeps a cache directory once", async () => {
+  const sweepSpy = spyOn(protection, "sweep").mockResolvedValue(undefined);
+  const cacheDir = "/screenshots/once-per-process-retention-test";
+  const create = () =>
+    new TakeScreenshot(
+      androidDevice("retention"),
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      timer,
+      new CountingIdGenerator(),
+      new FakeScreenshotFileWriter(),
+      files,
+      () => cacheDir,
+      undefined,
+      true,
+      { pathProtection: protection },
+    );
+
+  create();
+  create();
+  await Promise.resolve();
+  expect(sweepSpy).toHaveBeenCalledTimes(1);
+});
 test("an equivalent protected spelling survives an over-budget sweep", async () => {
   timer.advanceTime(60_000);
   const path = files.add("screenshot_0_device_equivalent.png", 129 * 1024 * 1024, 0);

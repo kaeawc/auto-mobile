@@ -69,6 +69,7 @@ import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
+const initialCleanupDirectories = new Set<string>();
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
@@ -311,8 +312,19 @@ export class TakeScreenshot implements ScreenshotService {
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
     this.pathProtection.start(this.cacheDirResolver(), { fileSystem: this.fileSystem });
     if (cleanupOnCreate) {
-      void this.cleanupCache();
+      this.cleanupCacheOnce();
     }
+  }
+
+  private cleanupCacheOnce(): void {
+    const cacheDir = this.cacheDirResolver();
+    if (initialCleanupDirectories.has(cacheDir)) {
+      return;
+    }
+    initialCleanupDirectories.add(cacheDir);
+    void this.cleanupCache().catch((error: unknown) => {
+      logger.warn(`[SCREENSHOT] Initial cache cleanup failed: ${errorMessage(error)}`);
+    });
   }
 
   private async cleanupCache(): Promise<void> {

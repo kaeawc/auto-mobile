@@ -4,7 +4,10 @@ import type { ViewHierarchyResult } from "../../../../src/models";
 import { viewHierarchyResultSchema } from "../../../../src/server/toolOutputSchemas";
 import { diffObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { isIosKeyboardClass } from "../../../../src/features/observe/ios/IosScreenIdentity";
-import { iosKeyboardVisibleHierarchy } from "../../../fixtures/observe/iosKeyboardStates";
+import {
+  iosKeyboardMinimizedHierarchy,
+  iosKeyboardVisibleHierarchy,
+} from "../../../fixtures/observe/iosKeyboardStates";
 import androidPreTap from "../../../fixtures/android-focus/playground-text-field-pre-tap.json";
 import androidPostTap from "../../../fixtures/android-focus/playground-text-field-post-tap.json";
 
@@ -177,6 +180,32 @@ describe("diffObserveResult — iOS keyboard collapse (#9980)", () => {
     );
     const diff = diffObserveResult(iosHidden, observation(edited, "ios"), COLLAPSE);
     expect(diff.added.length + diff.removed.length + diff.changed.length).toBeGreaterThan(0);
+  });
+});
+
+describe("diffObserveResult — a parked iOS keyboard is not collapsed (#10027)", () => {
+  // The minimized capture parks the UIKeyboard at [0,918,402,1144]; the baseline is
+  // the same capture with that subtree pruned, so they differ by the keyboard alone.
+  const parkedWithoutKeyboard = observation(
+    mapHierarchy(iosKeyboardMinimizedHierarchy, (node) =>
+      node.className === IOS_KEYBOARD_CLASS ? undefined : node,
+    ),
+    "ios",
+  );
+  const parked = observation(iosKeyboardMinimizedHierarchy, "ios");
+
+  test("the parked keyboard has no <ime> row, so its nodes diff like any other", () => {
+    const diff = diffObserveResult(parkedWithoutKeyboard, parked, { collapseKeyboard: true });
+    expect(diff.added.some((row) => row.attributes.className === IOS_KEYBOARD_CLASS)).toBe(true);
+    // ...whereas the visible keyboard's container never shows up under the same flag.
+    const visible = diffObserveResult(iosHidden, iosVisible, { collapseKeyboard: true });
+    expect(visible.added.some((row) => row.attributes.className === IOS_KEYBOARD_CLASS)).toBe(
+      false,
+    );
+  });
+
+  test("the same keyboard on screen still collapses (visible rule shared with the skeleton)", () => {
+    expectNoKeyboardRows(diffObserveResult(iosHidden, iosVisible, COLLAPSE));
   });
 });
 

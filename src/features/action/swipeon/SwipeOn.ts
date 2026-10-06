@@ -115,6 +115,11 @@ const DISPLAY_SWIPE_OPTIONS = [
 type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
+/** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
+function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
+  return result.success || result.outcomeIndeterminate === true;
+}
+
 function withUnknownTalkBackWarning(result: SwipeOnResult, warning?: string): SwipeOnResult {
   if (!warning || result.warnings?.includes(warning)) {
     return result;
@@ -1459,7 +1464,8 @@ export class SwipeOn extends BaseVisualChange {
           throw new ActionableError(swipeResult.error ?? "iOS lock-screen swipe failed");
         }
         throwIfAborted(signal);
-        if (this.device.platform === "ios" && swipeResult.success) {
+        // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+        if (this.device.platform === "ios" && swipeMayHaveMoved(swipeResult)) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
         }
@@ -1580,7 +1586,8 @@ export class SwipeOn extends BaseVisualChange {
               ),
         );
         throwIfAborted(signal);
-        if (this.device.platform === "ios" && swipeResult.success) {
+        // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+        if (this.device.platform === "ios" && swipeMayHaveMoved(swipeResult)) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
         }

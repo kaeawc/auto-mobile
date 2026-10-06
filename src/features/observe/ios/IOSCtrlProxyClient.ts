@@ -412,7 +412,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
-  ): Promise<CtrlProxySwipeResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   requestTapCoordinates(
     x: number,
@@ -3707,7 +3708,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
-  ): Promise<CtrlProxySwipeResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
     return this.gestures.requestSwipe(
       x1,
       y1,
@@ -3717,7 +3719,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeoutMs,
       perf,
       contextOptions,
-      undefined,
+      onDispatch,
       signal,
     );
   }

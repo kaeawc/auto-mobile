@@ -3987,7 +3987,8 @@ describe("IOSCtrlProxyClient", function () {
         // Register an in-flight request over the live socket. A long timeout keeps
         // it pending so it can only settle via the port-change cancellation, never
         // by timing out during the test.
-        const inFlight = testClient.requestSwipe(0, 0, 10, 10, 300, 60000);
+        // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
+        const inFlight = testClient.requestDrag(0, 0, 10, 10, 0, 300, 0, 60000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);

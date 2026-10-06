@@ -171,6 +171,60 @@ describe("buildNetworkGraph", () => {
     expect(paths["rare[GET]"]).toBeUndefined();
   });
 
+  // Issue #9917: minRequests was applied per raw URL before `{id}` collapse.
+  it("applies minRequests to the collapsed parameterized endpoint", () => {
+    const events = [1, 2, 3].map((n) =>
+      makeEvent({
+        id: n,
+        url: `https://api.example.com/users/${n}`,
+        path: `/users/${n}`,
+        durationMs: 100 * n,
+      }),
+    );
+
+    const result = buildNetworkGraph(events, { minRequests: 2 });
+    const users = result.graph[0].paths["users"] as GraphBranch;
+    const idNode = users.paths["{id}[GET]"] as GraphLeaf;
+
+    expect(idNode.success).toBe(3);
+    expect(idNode.p50).toBe(200);
+    expect(users.parameterized).toBeUndefined();
+    expect(Object.keys(idNode)).not.toContain("_durations");
+  });
+
+  it("still drops a collapsed endpoint that stays under minRequests and prunes empty branches", () => {
+    const events = [
+      makeEvent({ id: 1, url: "https://api.example.com/users/1", path: "/users/1" }),
+      makeEvent({ id: 2, url: "https://api.example.com/users/2", path: "/users/2" }),
+      makeEvent({ id: 3, path: "/popular" }),
+      makeEvent({ id: 4, path: "/popular" }),
+    ];
+
+    const { graph } = buildNetworkGraph(events, { minRequests: 3 });
+    expect(graph).toHaveLength(0);
+
+    const kept = buildNetworkGraph(events, { minRequests: 2 }).graph[0].paths;
+    expect(Object.keys(kept).sort()).toEqual(["popular[GET]", "users"]);
+  });
+
+  it("keeps deeper collapsed endpoints when a sibling leaf on the parent path is under minRequests", () => {
+    const events = [
+      makeEvent({ id: 1, path: "/users" }),
+      ...[1, 2].map((n) =>
+        makeEvent({
+          id: 10 + n,
+          url: `https://api.example.com/users/${n}/posts`,
+          path: `/users/${n}/posts`,
+        }),
+      ),
+    ];
+
+    const users = buildNetworkGraph(events, { minRequests: 2 }).graph[0].paths;
+    expect(users["users[GET]"]).toBeUndefined();
+    const idBranch = (users["users"] as GraphBranch).paths["{id}"] as GraphBranch;
+    expect((idBranch.paths["posts[GET]"] as GraphLeaf).success).toBe(2);
+  });
+
   it("separates schemes", () => {
     const events = [
       makeEvent({ url: "https://api.example.com/a", host: "api.example.com", path: "/a" }),

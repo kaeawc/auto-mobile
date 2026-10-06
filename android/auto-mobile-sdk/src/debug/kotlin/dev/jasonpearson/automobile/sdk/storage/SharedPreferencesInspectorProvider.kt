@@ -406,6 +406,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
       StorageResponse.SubscriptionResult(
         fileName = fileName,
         subscribed = true,
+        processToken = driverImpl.processToken,
       )
     return StorageProtocolSerializer.responseToJson(response)
   }
@@ -474,6 +475,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
       StorageResponse.Changes(
         fileName = fileName,
         changes = protocolChanges,
+        processToken = driverImpl.processToken,
       )
     return StorageProtocolSerializer.responseToJson(response)
   }

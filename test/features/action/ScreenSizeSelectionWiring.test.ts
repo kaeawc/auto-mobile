@@ -28,6 +28,19 @@ let navigation: InMemoryNavManagerHarness;
 const restores: Array<() => void> = [];
 beforeAll(async () => {
   navigation = await installInMemoryNavManager();
+  // Pay the one-time cold-start cost of the tap/settle path (lazy parse + first JIT, ~10 ms) here,
+  // outside the 100 ms per-test budget, with a throwaway tap whose result nothing asserts.
+  const { tap } = tapHarness(observation(androidCapture(true)));
+  await tap.execute({
+    text: "Screen size target",
+    action: "tap",
+    selectionStrategy: "first",
+    searchUntil: { duration: 100 },
+    retryIfNoChange: false,
+  });
+  for (const restore of restores.splice(0)) {
+    restore();
+  }
 });
 afterEach(() => {
   for (const restore of restores.splice(0)) {
@@ -73,7 +86,16 @@ function observation(viewHierarchy: ViewHierarchyResult): ObserveResult {
   };
 }
 
-function tapHarness(initial: ObserveResult, refreshed = initial.viewHierarchy!) {
+function tapHarness(initial: ObserveResult, capturedAfterTap = initial.viewHierarchy!) {
+  // The post-tap settle only accepts a capture whose device timestamp is strictly newer than the
+  // one it started from. Reads that all carry the fixture's identical timestamp never settle, so
+  // the settle polled out its full 2.5 s fake-time budget (17 polls, ~5 ms real) in the first test.
+  const baseUpdatedAt = initial.viewHierarchy?.updatedAt ?? 0;
+  const capturedAt = (index: number): ViewHierarchyResult => ({
+    ...capturedAfterTap,
+    updatedAt: baseUpdatedAt + index,
+  });
+  const refreshed = capturedAt(1);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const observe = new FakeObserveScreen();
@@ -84,7 +106,7 @@ function tapHarness(initial: ObserveResult, refreshed = initial.viewHierarchy!) 
           ...initial,
           observationId: "after-tap",
           updatedAt: 2,
-          viewHierarchy: refreshed,
+          viewHierarchy: capturedAt(index),
           activeWindow: { appId: "fixture", activityName: "After", layoutSeqSum: 2 },
         },
   );

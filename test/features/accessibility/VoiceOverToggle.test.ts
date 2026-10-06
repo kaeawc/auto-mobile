@@ -372,6 +372,88 @@ describe("VoiceOverToggle", () => {
     });
   });
 
+  describe("previous state hook (#10146)", () => {
+    const writes = () =>
+      fakeExec.getExecutedCommands().filter((c) => c.includes("VoiceOverTouchEnabled"));
+
+    test("reports the state VoiceOver was in before anything is written", async () => {
+      const order: string[] = [];
+      fakeDetector.enqueueResolvedStateResults(false);
+      fakeDetector.setVoiceOverEnabled(true);
+
+      await makeSimulatorToggle().toggle(true, {
+        beforeChange: (previous) => {
+          order.push(`previous=${previous} writes=${writes().length}`);
+        },
+      });
+
+      expect(order).toEqual(["previous=false writes=0"]);
+      expect(writes()).toHaveLength(1);
+    });
+
+    test("reports the physical device's state before the Settings runner is driven", async () => {
+      const fakeClient = new FakeIOSCtrlProxy();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      fakeDetector.enqueueResolvedStateResults(true);
+      const previous: boolean[] = [];
+
+      await new VoiceOverToggle(
+        PHYSICAL_DEVICE,
+        fakeDetector,
+        fakeExec,
+        timer,
+        () => fakeClient,
+      ).toggle(false, {
+        beforeChange: (value) => {
+          previous.push(value);
+          expect(fakeClient.getSetVoiceOverEnabledHistory()).toEqual([]);
+        },
+      });
+
+      expect(previous).toEqual([true]);
+      expect(fakeClient.getSetVoiceOverEnabledHistory()).toEqual([false]);
+    });
+
+    test("does not report a change when VoiceOver is already in the requested state", async () => {
+      fakeDetector.enqueueResolvedStateResults(true);
+      fakeDetector.setVoiceOverEnabled(true);
+      const previous: boolean[] = [];
+
+      await makeSimulatorToggle().toggle(true, {
+        beforeChange: (value) => void previous.push(value),
+      });
+
+      expect(previous).toEqual([]);
+    });
+
+    test("reports nothing, and still toggles, when the previous state cannot be read", async () => {
+      fakeDetector.enqueueResolvedStateResults(null);
+      fakeDetector.setVoiceOverEnabled(true);
+      const previous: boolean[] = [];
+
+      const result = await makeSimulatorToggle().toggle(true, {
+        beforeChange: (value) => void previous.push(value),
+      });
+
+      expect(previous).toEqual([]);
+      expect(result.applied).toBe(true);
+      expect(writes()).toHaveLength(1);
+    });
+
+    test("does not read the state at all without a hook", async () => {
+      fakeDetector.setVoiceOverEnabled(true);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const before = fakeDetector.getInvalidatedDevices().length;
+
+      await makeSimulatorToggle(timer).toggle(true);
+
+      // Only the post-apply confirmation invalidates: no extra pre-change read.
+      expect(fakeDetector.getInvalidatedDevices().length - before).toBe(1);
+    });
+  });
+
   describe("cache invalidation", () => {
     test("invalidates detector cache after applying", async () => {
       fakeDetector.setVoiceOverEnabled(true);

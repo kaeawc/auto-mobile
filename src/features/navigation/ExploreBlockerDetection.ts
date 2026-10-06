@@ -18,6 +18,13 @@ import { defaultTimer, Timer } from "../../utils/SystemTimer";
  * Minimal tap-action seam consumed by the blocker handlers. They inspect the
  * result's `success` field to distinguish a completed tap from a failed one.
  * `TapOnElement` satisfies it directly.
+ *
+ * Blocker and permission-dialog taps are deliberately NOT recorded as navigation
+ * tool calls (unlike Explore's own taps, which go through `runRecorded`). A
+ * permission prompt is system UI the SDK never reports as a screen and a rating
+ * prompt appears only sometimes, so neither is a step `navigateTo` should replay.
+ * An unconsumed record would also sit in the correlation window and could be
+ * attributed to the next app navigation event.
  */
 export interface DialogTapAction {
   execute(options: TapOnElementOptions, progress?: ProgressCallback): Promise<BaseActionResult>;

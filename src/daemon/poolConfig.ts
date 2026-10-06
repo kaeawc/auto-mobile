@@ -145,9 +145,8 @@ export const DEVICE_POOL_MATCHING: MatchingStrategy =
  * auto-released after an idle timeout. Read at call time so the daemon
  * picks up env changes without a restart.
  */
-export function isDevicePoolAutolockEnabled(): boolean {
-  const override =
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ?? process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+export function isDevicePoolAutolockEnabled(env: Environment = process.env): boolean {
+  const override = env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ?? env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
   return override === "1";
 }
 

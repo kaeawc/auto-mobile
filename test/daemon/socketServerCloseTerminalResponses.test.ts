@@ -6,6 +6,7 @@ import {
   daemonShuttingDownFailureFromToolResult,
   daemonShuttingDownMcpOutcome,
 } from "../../src/daemon/daemonShutdownOutcome";
+import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -75,6 +76,16 @@ class TerminalSocket extends EventEmitter {
       this.emit("close", false);
     }
     return this;
+  }
+
+  /** Opt in to notifications so quiesce keeps this socket open, as a bound proxy's is. */
+  subscribe(): void {
+    const frame = {
+      id: "subscribe",
+      type: "mcp_request",
+      method: DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+    };
+    this.emit("data", Buffer.from(`${JSON.stringify(frame)}\n`));
   }
 
   send(id: string): void {
@@ -196,6 +207,51 @@ test("a queued successor gets one undispatched shutdown frame without reaching i
   await Promise.all(handlers);
   expect(refreshStarts()).toBe(1);
   expect(socket.responses).toHaveLength(2);
+});
+
+test("a request queued before quiesce is refused as undispatched when the earlier request ends", async () => {
+  const { server, internals, socket, timer, started, refresh, refreshStarts } = createHarness();
+  socket.subscribe();
+  socket.send("running");
+  await started.promise;
+  socket.send("queued");
+  const handlers = [...internals.activeRequestHandlers];
+  const quiesce = server.quiesce();
+  // The drain bound passes with the first request still running, as when session
+  // release is about to cancel it.
+  timer.advanceTime(REQUEST_DRAIN_MS);
+  await quiesce;
+  // The earlier request ending frees the queue; the queued one must not start now.
+  refresh.resolve(1);
+  await Promise.all(handlers);
+
+  expectShutdown(socket, "queued", false);
+  expect(refreshStarts()).toBe(1);
+  expect(socket.responses.filter((response) => response.id === "queued")).toHaveLength(1);
+  expect(socket.responses.find((response) => response.id === "running")).toMatchObject({
+    success: true,
+    result: expect.objectContaining({ addedDevices: 1 }),
+  });
+
+  // close() later must not answer the refused request a second time or flag it dispatched.
+  await server.close();
+  expect(socket.responses.filter((response) => response.id === "queued")).toHaveLength(1);
+  expectShutdown(socket, "queued", false);
+});
+
+test("a request already running when quiesce begins still completes with its real response", async () => {
+  const { server, socket, started, refresh } = createHarness();
+  socket.subscribe();
+  socket.send("running");
+  await started.promise;
+  const quiesce = server.quiesce();
+  refresh.resolve(3);
+  await quiesce;
+
+  expect(socket.responses.find((response) => response.id === "running")).toMatchObject({
+    success: true,
+    result: expect.objectContaining({ addedDevices: 3 }),
+  });
 });
 
 test("a request arriving during close is refused as undispatched without reaching its handler", async () => {

@@ -192,6 +192,42 @@ describe("storageResources", () => {
     ]);
   });
 
+  test("an app on several non-zero users reports that a resource read cannot choose one (#10021)", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([
+      { userId: 0, name: "Owner", flags: 0x4c13, running: true },
+      { userId: 10, name: "Work profile", flags: 0x1030, running: true },
+      { userId: 11, name: "Second", flags: 0x1030, running: true },
+    ]);
+    adb.setCommandResponse("shell pm list packages --user 0", createExecResult("", ""));
+    for (const user of [10, 11]) {
+      adb.setCommandResponse(
+        `shell pm list packages --user ${user}`,
+        createExecResult("package:com.example.app", ""),
+      );
+    }
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => {
+        throw new ProviderUnavailableError(
+          "Unknown authority com.example.app.automobile.sharedprefs",
+        );
+      },
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+    );
+    const message = String(JSON.parse(content.text ?? "{}").error);
+
+    expect(message).toContain("installed for several users (10, 11)");
+    expect(message).toContain("no userId parameter");
+    expect(message).not.toContain("Pass userId");
+  });
+
   test("run-as entries match the CtrlProxy encoding for every SharedPreferences type", async () => {
     PlatformDeviceManagerFactory.setInstance(
       new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),

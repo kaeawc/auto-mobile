@@ -1,4 +1,5 @@
 import { PNG } from "pngjs";
+import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { ImageBackend } from "../image/backend/ImageBackend";
@@ -10,12 +11,25 @@ async function getPixelmatch() {
   return pixelmatch;
 }
 
-export interface ScreenshotComparisonResult {
+/** The comparison ran; `similarity` is a real measurement (0 means "completely different"). */
+export interface ScreenshotComparisonSuccess {
+  compared: true;
   similarity: number; // 0-100 percentage
   pixelDifference: number;
   totalPixels: number;
   filePath?: string;
 }
+
+/**
+ * The comparison could not run (decode failure, backend error, missing pixelmatch). It carries
+ * no similarity on purpose: callers must treat it as "unknown", never as changed or unchanged.
+ */
+export interface ScreenshotComparisonFailure {
+  compared: false;
+  error: string;
+}
+
+export type ScreenshotComparisonResult = ScreenshotComparisonSuccess | ScreenshotComparisonFailure;
 
 export class ScreenshotComparator {
   private static readonly PNG_HEADER = Buffer.from([
@@ -235,19 +249,18 @@ export class ScreenshotComparator {
       );
 
       return {
+        compared: true,
         similarity,
         pixelDifference,
         totalPixels,
       };
     } catch (error) {
       const comparisonTime = timer.now() - comparisonStart;
-      logger.warn(`Image comparison failed after ${comparisonTime}ms: ${(error as Error).message}`);
+      const message = errorMessage(error);
+      logger.warn(`Image comparison failed after ${comparisonTime}ms: ${message}`, error);
 
-      return {
-        similarity: 0,
-        pixelDifference: -1,
-        totalPixels: 0,
-      };
+      // Typed failure, not similarity 0: 0 is a legitimate "completely different" measurement.
+      return { compared: false, error: message };
     }
   }
 }

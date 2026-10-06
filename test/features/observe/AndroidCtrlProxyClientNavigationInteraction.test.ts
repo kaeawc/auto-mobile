@@ -70,6 +70,10 @@ describe("AndroidCtrlProxyClient navigation interaction attribution", () => {
       }),
     );
     await hierarchyPromise;
+    // Pay the one-time cold-start cost of the first navigation event (recorder, in-memory DB write
+    // barrier, lazy parse; ~4 ms, far more on a loaded runner) here, outside the per-test budget.
+    // It uses its own destination and app so no test sees it as an attribution candidate.
+    await sendNavigation("WarmupDestination", "dev.jasonpearson.automobile.warmup");
   });
 
   afterAll(async () => {

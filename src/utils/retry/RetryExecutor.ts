@@ -1,5 +1,6 @@
 import { type BackoffInput, delayForAttempt } from "../Backoff";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { logger } from "../logger";
 
 /**
  * Configuration for retry behavior.
@@ -37,6 +38,13 @@ interface RetryOptions {
    * Optional callback invoked before each retry.
    */
   onRetry?: (error: Error, attempt: number, delay: number) => void;
+
+  /** Expected terminal outcomes log at debug, with the caller's reason. */
+  expectedFailure?: {
+    reason: string;
+    /** Omit to treat every non-abort terminal failure as expected. */
+    matches?: (error: Error) => boolean;
+  };
 }
 
 /**
@@ -84,7 +92,7 @@ export interface RetryExecutor {
  * Default retry options.
  */
 export const DEFAULT_RETRY_OPTIONS: Required<
-  Omit<RetryOptions, "signal" | "shouldRetry" | "onRetry">
+  Omit<RetryOptions, "signal" | "shouldRetry" | "onRetry" | "expectedFailure">
 > = {
   maxAttempts: 3,
   delays: 1000,
@@ -127,10 +135,13 @@ export class DefaultRetryExecutor implements RetryExecutor {
 
     const startTime = this.timer.now();
     let lastError: Error | undefined;
+    let caughtError: unknown;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Check for abort
       if (signal?.aborted) {
+        // Caller cancellation is an expected control-flow outcome.
+        logger.debug("Retry operation aborted before an attempt: caller requested cancellation");
         return {
           success: false,
           error: retryAbortError(signal),
@@ -148,53 +159,89 @@ export class DefaultRetryExecutor implements RetryExecutor {
           totalTimeMs: this.timer.now() - startTime,
         };
       } catch (err) {
+        // Capture the error; classify and log the terminal outcome below.
+        // Cancellation and caller-declared expected failures are safe at debug.
         lastError = retryOperationError(err);
-        // The operation can reject at the same instant its signal aborts.
-        // Preserve the cancellation reason before shouldRetry classifies the
-        // stale operation error as terminal.
-        if (signal?.aborted) {
-          return {
-            success: false,
-            error: retryAbortError(signal),
-            attempts: attempt,
-            totalTimeMs: this.timer.now() - startTime,
-          };
-        }
+        caughtError = err;
+      }
 
-        // Check if we should retry
-        if (!(attempt < maxAttempts)) {
-          continue;
-        }
-        if (!shouldRetry(lastError, attempt)) {
-          // shouldRetry returned false - stop retrying
-          return {
-            success: false,
-            error: lastError,
-            attempts: attempt,
-            totalTimeMs: this.timer.now() - startTime,
-          };
-        }
+      // Cancellation wins over classification of the stale operation error.
+      if (signal?.aborted) {
+        logger.debug(
+          "Retry operation aborted after an attempt failed: caller requested cancellation",
+          caughtError,
+        );
+        return {
+          success: false,
+          error: retryAbortError(signal),
+          attempts: attempt,
+          totalTimeMs: this.timer.now() - startTime,
+        };
+      }
 
-        const delay = delayForAttempt(delays, attempt);
-        onRetry?.(lastError, attempt, delay);
+      if (!(attempt < maxAttempts)) {
+        continue;
+      }
+      if (!shouldRetry(lastError, attempt)) {
+        this.logTerminalFailure(
+          "Retry operation stopped after a non-retryable failure",
+          lastError,
+          caughtError,
+          options,
+        );
+        return {
+          success: false,
+          error: lastError,
+          attempts: attempt,
+          totalTimeMs: this.timer.now() - startTime,
+        };
+      }
 
-        if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
-          return {
-            success: false,
-            error: retryAbortError(signal),
-            attempts: attempt,
-            totalTimeMs: this.timer.now() - startTime,
-          };
-        }
+      const delay = delayForAttempt(delays, attempt);
+      onRetry?.(lastError, attempt, delay);
+
+      if (delay > 0 && (await this.sleepUnlessAborted(delay, signal))) {
+        // Waiting ends normally when the caller cancels the request.
+        logger.debug(
+          "Retry operation aborted while waiting to retry: caller requested cancellation",
+          caughtError,
+        );
+        return {
+          success: false,
+          error: retryAbortError(signal),
+          attempts: attempt,
+          totalTimeMs: this.timer.now() - startTime,
+        };
       }
     }
 
+    this.logTerminalFailure(
+      "Retry operation exhausted all attempts",
+      lastError,
+      lastError,
+      options,
+    );
     return {
       success: false,
       error: lastError,
       attempts: maxAttempts,
       totalTimeMs: this.timer.now() - startTime,
     };
+  }
+
+  private logTerminalFailure(
+    message: string,
+    error: Error | undefined,
+    caughtError: unknown,
+    options?: RetryOptions,
+  ): void {
+    const expected = options?.expectedFailure;
+    if (expected && error && (expected.matches?.(error) ?? true)) {
+      // The caller documents why this terminal outcome is safe to handle normally.
+      logger.debug(`${message}: ${expected.reason}`, caughtError);
+    } else {
+      logger.warn(message, caughtError);
+    }
   }
 
   /**

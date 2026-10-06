@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../src/models";
+import type { DisplayInventorySource } from "../../src/devices/DisplayInventoryProvider";
 import {
   CachingDisplayInventoryProvider,
   createDisplayInventoryProvider,
@@ -143,6 +144,120 @@ describe("CachingDisplayInventoryProvider", () => {
     expect(Object.hasOwn(single, "displays")).toBe(false);
     await provider.hydrate(device, "1");
     expect(source.reads).toBe(2);
+  });
+
+  describe("a display event that invalidates the inventory during its read", () => {
+    type ReadResult = Awaited<ReturnType<DisplayInventorySource["read"]>>;
+    function scriptedSource(script: (read: number) => ReadResult | Error) {
+      const gates: Array<() => void> = [];
+      let reads = 0;
+      const source: DisplayInventorySource = {
+        read: () => {
+          const read = ++reads;
+          return new Promise<ReadResult>((resolve, reject) => {
+            gates.push(() => {
+              const outcome = script(read);
+              if (outcome instanceof Error) {
+                reject(outcome);
+              } else {
+                resolve(outcome);
+              }
+            });
+          });
+        },
+      };
+      return {
+        source,
+        reads: () => reads,
+        release: async (read: number) => {
+          // Reads start a microtask after hydrate, so let the loop reach the gate first.
+          for (let i = 0; i < 5 && gates.length < read; i++) {
+            await Promise.resolve();
+          }
+          gates[read - 1]();
+        },
+      };
+    }
+
+    test("re-reads so the call still gets the inventory", async () => {
+      const fake = scriptedSource((read) =>
+        read === 1 ? { degraded: false } : { displays, degraded: false },
+      );
+      const provider = new CachingDisplayInventoryProvider(
+        fake.source,
+        fake.source,
+        new FakeTimer(),
+      );
+      const call = provider.hydrate(device, "1");
+      await fake.release(1);
+      provider.invalidate(device.deviceId);
+      await fake.release(2);
+      expect((await call).displays).toBe(displays);
+      expect(fake.reads()).toBe(2);
+      // The re-read is cached for the next call.
+      expect((await provider.hydrate(device, "1")).displays).toBe(displays);
+      expect(fake.reads()).toBe(2);
+    });
+
+    test("concurrent callers share the re-read", async () => {
+      const fake = scriptedSource((read) =>
+        read === 1 ? { degraded: false } : { displays, degraded: false },
+      );
+      const provider = new CachingDisplayInventoryProvider(
+        fake.source,
+        fake.source,
+        new FakeTimer(),
+      );
+      const callers = [provider.hydrate(device, "1"), provider.hydrate(device, "1")];
+      provider.invalidate(device.deviceId);
+      await fake.release(1);
+      await fake.release(2);
+      const results = await Promise.all(callers);
+      expect(results.map((result) => result.displays)).toEqual([displays, displays]);
+      expect(fake.reads()).toBe(2);
+    });
+
+    test("an event storm is bounded and falls back to the last successful read", async () => {
+      const fake = scriptedSource((read) =>
+        read === 1 ? { displays, degraded: false } : new Error(`read ${read} failed`),
+      );
+      const provider = new CachingDisplayInventoryProvider(
+        fake.source,
+        fake.source,
+        new FakeTimer(),
+      );
+      const call = provider.hydrate(device, "1");
+      for (const read of [1, 2, 3]) {
+        await fake.release(read);
+        if (read < 3) {
+          provider.invalidate(device.deviceId);
+        }
+      }
+      const result = await call;
+      expect(fake.reads()).toBe(3);
+      expect(result.displays).toBe(displays);
+      expect(result[displayInventoryOutcome]).toEqual({ kind: "multi" });
+    });
+
+    test("an unreadable-only storm still reports unreadable rather than no outcome", async () => {
+      const fake = scriptedSource((read) => new Error(`read ${read} failed`));
+      const provider = new CachingDisplayInventoryProvider(
+        fake.source,
+        fake.source,
+        new FakeTimer(),
+      );
+      const call = provider.hydrate(device, "1");
+      for (const read of [1, 2, 3]) {
+        await fake.release(read);
+        provider.invalidate(device.deviceId);
+      }
+      const result = await call;
+      expect(fake.reads()).toBe(3);
+      expect(result[displayInventoryOutcome]).toEqual({
+        kind: "unreadable",
+        reason: "read 3 failed",
+      });
+    });
   });
 
   test("serial reuse and explicit invalidation refetch", async () => {

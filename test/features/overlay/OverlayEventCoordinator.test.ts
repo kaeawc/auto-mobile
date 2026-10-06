@@ -8,6 +8,7 @@ import { OVERLAY_EVENT_BUFFER_CAPACITY } from "../../../src/features/overlay/Ove
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { event } from "../../helpers/overlayTestEvent";
+import { logger } from "../../../src/utils/logger";
 
 const scope = { sessionUuid: "one", deviceId: "device" };
 describe("OverlayEventCoordinator", () => {
@@ -23,6 +24,50 @@ describe("OverlayEventCoordinator", () => {
   });
   afterEach(() => coordinator.dispose());
   const awaitEvent = (options = {}) => coordinator.awaitEvent(scope, "panel", client, options);
+
+  test("accepted events record telemetry once with their owning scope", () => {
+    const recorded: { scope: typeof scope; event: ReturnType<typeof event> }[] = [];
+    coordinator = new OverlayEventCoordinator(timer, store, {
+      recordOverlayEvent: (origin, pushed) => recorded.push({ scope: origin, event: pushed }),
+    });
+    coordinator.show(scope, "panel", client);
+    client.emitOverlayEvent(event(1, "unknown"));
+    client.emitOverlayEvent(event(2));
+    client.emitOverlayEvent(event(2));
+    client.emitOverlayEvent(event(1));
+    client.emitOverlayEvent(event(3, "panel", "dismissed"));
+    client.emitOverlayEvent(event(4));
+    expect(recorded).toEqual([
+      { scope, event: event(2) },
+      { scope, event: event(3, "panel", "dismissed") },
+    ]);
+  });
+
+  test("telemetry failures do not prevent dismissed bookkeeping or waiter delivery", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      coordinator = new OverlayEventCoordinator(timer, store, {
+        recordOverlayEvent: () => {
+          throw new Error("telemetry unavailable");
+        },
+      });
+      coordinator.show(scope, "panel", client);
+      store.record(scope, "show", { id: "panel" }, { success: true });
+      const waiting = awaitEvent();
+      client.emitOverlayEvent(event(1, "panel", "dismissed"));
+      expect(store.status(scope).overlays).toEqual([]);
+      expect((await waiting).event?.kind).toBe("dismissed");
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      coordinator.show(scope, "panel", client);
+      const nonTerminalWaiting = awaitEvent();
+      client.emitOverlayEvent(event(2));
+      expect((await nonTerminalWaiting).event?.sequence).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 
   test("event before call returns at once and preserves reconnect high-water after consumption", async () => {
     coordinator.show(scope, "panel", client);

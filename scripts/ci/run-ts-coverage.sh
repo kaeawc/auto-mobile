@@ -4,6 +4,10 @@
 # written to a log file instead of streamed live because Bun can hit WriteFailed
 # when GitHub Actions receives the large coverage table.
 #
+# scripts/test-ts.sh runs the suite as a few shard processes, each recycling its
+# Bun process every chunk of files (#10213). Every chunk has its own log, lcov
+# directory and JUnit report under coverage/shards/shard-N-chunk-M.*.
+#
 # Usage:
 #   scripts/ci/run-ts-coverage.sh [log-file]
 
@@ -12,6 +16,16 @@ set -euo pipefail
 log_file="${1:-ci-logs/ts-coverage.log}"
 mkdir -p "$(dirname "${log_file}")"
 rm -rf coverage
+
+# A chunk log is clean only when it reports zero failures and no non-zero count.
+# Store the result instead of returning it so callers stay outside conditionals
+# and set -e keeps its normal behavior for the helper invocation.
+log_is_clean() {
+  log_clean=0
+  if grep -Eq '(^|[^0-9])0 fail' "$1" && ! grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "$1"; then
+    log_clean=1
+  fi
+}
 
 set +e
 bash scripts/test-ts.sh coverage > "${log_file}" 2>&1
@@ -24,30 +38,44 @@ if [[ "${status}" -eq 0 ]]; then
   exit 0
 fi
 
-shard_logs=(coverage/shards/shard-*.log)
-if [[ -f "${shard_logs[0]:-}" ]]; then
+# Per-chunk logs when the chunked path ran; otherwise whatever per-shard logs exist.
+unit_logs=(coverage/shards/shard-*-chunk-*.log)
+if [[ ! -f "${unit_logs[0]:-}" ]]; then
+  unit_logs=(coverage/shards/shard-*.log)
+fi
+if [[ -f "${unit_logs[0]:-}" ]]; then
   tolerated=1
   saw_write_failed=0
   coverage_lcov_files=()
   coverage_junit_files=()
-  for shard_log in "${shard_logs[@]}"; do
-    if grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${shard_log}"; then
+  # A chunk that never started (the shard budget fired first) has no log, so a
+  # tolerated run must still account for every chunk its shard planned.
+  for manifest in coverage/shards/shard-*.chunks; do
+    [[ -f "${manifest}" ]] || continue
+    planned="$(< "${manifest}")"
+    for ((chunk = 1; chunk <= planned; chunk += 1)); do
+      if [[ ! -f "${manifest%.chunks}-chunk-${chunk}.log" ]]; then
+        tolerated=0
+      fi
+    done
+  done
+  for unit_log in "${unit_logs[@]}"; do
+    if grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${unit_log}"; then
       saw_write_failed=1
     fi
-    if ! grep -Eq '(^|[^0-9])0 fail' "${shard_log}" || grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "${shard_log}"; then
+    log_is_clean "${unit_log}"
+    if [[ "${log_clean}" -eq 0 ]]; then
       tolerated=0
       break
     fi
   done
   if [[ "${tolerated}" -eq 1 && "${saw_write_failed}" -eq 1 ]]; then
-    for shard_log in "${shard_logs[@]}"; do
-      shard_dir="${shard_log%.log}"
-      bash scripts/ci/verify-ts-coverage-output.sh "${shard_dir}"
-      coverage_lcov_files+=("${shard_dir}/lcov.info")
-      shard_number="${shard_dir##*-}"
-      shard_junit="coverage/shards/shard-${shard_number}.xml"
-      if [[ -f "${shard_junit}" ]]; then
-        coverage_junit_files+=("${shard_junit}")
+    for unit_log in "${unit_logs[@]}"; do
+      unit_dir="${unit_log%.log}"
+      bash scripts/ci/verify-ts-coverage-output.sh "${unit_dir}"
+      coverage_lcov_files+=("${unit_dir}/lcov.info")
+      if [[ -f "${unit_dir}.xml" ]]; then
+        coverage_junit_files+=("${unit_dir}.xml")
       fi
     done
     echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
@@ -75,7 +103,20 @@ echo "::group::Failing tests"
 bash "$(dirname "${BASH_SOURCE[0]}")/summarize-bun-failures.sh" "${log_file}" || true
 echo "::endgroup::"
 tail -n 200 "${log_file}"
-if [[ "${status}" -eq 124 ]]; then
-  { grep -h 'wall-clock budget' "${log_file}" || true; } | sed 's/^/::error::coverage: /' >&2
+# The combined log holds every shard and chunk, so its tail shows only the last
+# one. Print the tail of each chunk (or shard) that did not finish clean.
+if [[ -f "${unit_logs[0]:-}" ]]; then
+  for unit_log in "${unit_logs[@]}"; do
+    log_is_clean "${unit_log}"
+    if [[ "${log_clean}" -eq 0 ]]; then
+      echo "::group::Unclean coverage log: ${unit_log}"
+      tail -n 60 "${unit_log}"
+      echo "::endgroup::"
+    fi
+  done
 fi
+# Every watchdog, interrupted-chunk and failed-chunk line, not just the last
+# shard's: with several shards each can fail for a different reason.
+{ grep -hE 'wall-clock budget|^WATCHDOG:|^INTERRUPTED:|^FAIL: coverage' "${log_file}" || true; } |
+  sed 's/^/::error::coverage: /' >&2
 exit "${status}"

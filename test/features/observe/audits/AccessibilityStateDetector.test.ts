@@ -6,6 +6,8 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../../../src/utils/constants";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeIosVoiceOverDetector } from "../../../fakes/FakeIosVoiceOverDetector";
+import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
 import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { invalidateReadinessForDisabledAccessibility } from "../../../../src/server/observeTools";
 
@@ -36,6 +38,40 @@ describe("AccessibilityStateDetector", () => {
       accessibilityDetector: detector,
     }).run(result, new NoOpPerformanceTracker());
     expect(result.accessibilityState).toBeUndefined();
+  });
+
+  describe("iOS VoiceOver (#10038)", () => {
+    const iosDevice: BootedDevice = { deviceId: "ios-1", name: "iphone", platform: "ios" };
+
+    async function runIos(voiceOver: boolean | null) {
+      const iosVoiceOverDetector = new FakeIosVoiceOverDetector();
+      iosVoiceOverDetector.setPersistentResolvedState(voiceOver);
+      const iosClient = new FakeIOSCtrlProxy(new FakeTimer());
+      const result = makeResult();
+      // Stale prior value must be cleared, not left in place, when the probe is unreadable.
+      result.accessibilityState = { enabled: true, service: "voiceover" };
+      await new AccessibilityStateDetector({
+        device: iosDevice,
+        adb: new FakeAdbExecutor(),
+        featureFlags: { isEnabled: () => true } as FeatureFlagService,
+        iosVoiceOverDetector,
+        iosClient,
+      }).run(result, new NoOpPerformanceTracker());
+      return { result };
+    }
+
+    test("omits accessibilityState when the VoiceOver probe is unreadable", async () => {
+      const { result } = await runIos(null);
+      expect(result.accessibilityState).toBeUndefined();
+    });
+
+    test.each([
+      { voiceOver: true, expected: { enabled: true, service: "voiceover" } },
+      { voiceOver: false, expected: { enabled: false, service: "unknown" } },
+    ])("publishes a confirmed probe ($voiceOver)", async ({ voiceOver, expected }) => {
+      const { result } = await runIos(voiceOver);
+      expect(result.accessibilityState).toEqual(expected);
+    });
   });
 
   test("marks a disabled auto-detect result synthetic without querying a functioning service", async () => {

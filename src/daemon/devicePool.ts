@@ -22,6 +22,7 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -435,6 +436,9 @@ export interface ShutdownIdentityReservation {
 }
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
+
+/** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
+const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
 
 /** Evidence belongs only to the entry captured before this target's discovery. */
 export interface TargetDeviceDiscoverySnapshot {
@@ -1103,21 +1107,24 @@ export class DevicePool {
 
   private registerSessionReleaseHandlers(): void {
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) => {
+      release: (sessionId, reason, attempt, options) => {
         const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
           sessionId,
           reason,
           attempt,
+          options,
         );
         if (recoveryRelease) {
+          options.deviceReleaseManaged = true;
           return recoveryRelease;
         }
         const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
         if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
           return undefined;
         }
-        // A retained explicit-release fence upgrades the expiry reason, so its
-        // notification captures ownership instead of freeing the device below.
+        // This handler returns the device after the attempt, including when a
+        // retained terminal fence upgrades the expiry's diagnostic reason.
+        options.deviceReleaseManaged = true;
         let releasedDeviceId: string | null = null;
         return releaseSessionAndDevice(
           this.sessionManager,
@@ -1139,9 +1146,10 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // connection ownership and autolock metadata are removed when their session
     // ends.
-    this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
       this.clearMcpSessionOwnership(sessionId);
-      if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
+      // An expiry handler that owns the ordered release consumes its capture after the attempt.
+      if (options.expiryOrigin && !options.deviceReleaseManaged) {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
         this.captureReleasedDevice(sessionId, deviceId);
@@ -1243,6 +1251,8 @@ export class DevicePool {
           sources,
         ),
       notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+      liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
+        this.recoveryCoordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
     };
   }
 
@@ -1313,6 +1323,11 @@ export class DevicePool {
 
   private createRecoveryCoordinator(): DeviceRecoveryCoordinator {
     return new DeviceRecoveryCoordinator({
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
+      getAndroidOfflineDeviceIds: async (deviceIds) =>
+        (await this.deviceManager.getAndroidOfflineDeviceIds?.(deviceIds, {
+          timeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+        })) ?? new Set<string>(),
       getRecoveringSessionLosses: () => this.recoveringSessionLosses,
       getPooledDevice: (id) => this.devices.get(id),
       getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
@@ -1451,12 +1466,13 @@ export class DevicePool {
           this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
         clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
           this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
-        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
+        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner, lateShutdown) =>
           this.recoveryCoordinator.finishAndroidRecoveryAttempt(
             avdName,
             deviceIds,
             retainImage,
             owner,
+            lateShutdown,
           ),
         stopAndroidEmulatorForRecovery: (
           ...[
@@ -1871,6 +1887,7 @@ export class DevicePool {
     this.notifyDeviceFramesInvalidated(deviceId);
     this.sessionManager.retireClockRestoration(deviceId);
     this.sessionManager.retireRotationRestoration(deviceId);
+    this.sessionManager.retireScreenReaderRestoration(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);
@@ -2741,8 +2758,11 @@ export class DevicePool {
           return undefined;
         }
       }
-      const childProcess = await runWithAbortSignal(signal, () =>
-        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      const childProcess = await this.startCoordinatedDeviceProcess(
+        device,
+        deadlineMs,
+        signal,
+        retainLeaseUntil,
       );
       return await action(childProcess, signal, retainLeaseUntil);
     } finally {
@@ -2755,6 +2775,29 @@ export class DevicePool {
         lifecycleLease.release();
       }
       this.timer.clearTimeout(timeoutHandle);
+    }
+  }
+
+  /**
+   * Starts the device under the coordinated lease. A launch cancelled after the
+   * emulator spawned carries its child on the error; stop it here so the lease is
+   * held until the exit is confirmed (#10075), since `action` never runs for it.
+   */
+  private async startCoordinatedDeviceProcess(
+    device: DeviceInfo,
+    deadlineMs: number,
+    signal: AbortSignal,
+    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await runWithAbortSignal(signal, () =>
+        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        await this.cancelCoordinatedDeviceStart(device, error.process, retainLeaseUntil);
+      }
+      throw error;
     }
   }
 
@@ -3327,6 +3370,8 @@ export class DevicePool {
     return deferredUntil !== undefined && this.timer.now() >= deferredUntil;
   }
 
+  // rebindSameAvdReplacementSession and the recovery ports may have already
+  // detached the entry: their session fence does not require pooled-entry identity.
   private isPreservedSessionCurrent(session: Session, deviceId: string): boolean {
     return this.sessionManager.isCurrentSession(session) && session.assignedDevice === deviceId;
   }
@@ -3877,7 +3922,14 @@ export class DevicePool {
         }
         const matchingAvd = matchingAvds[0];
         if (!matchingAvd) {
-          return "stopped";
+          return await this.stopRecoveryTargetMissingFromOnlineList({
+            avdName,
+            deviceId: disconnectedDevice.id,
+            adoptOnly,
+            discover,
+            signal,
+            deadlineMs,
+          });
         }
         if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
           if (matchingAvd.deviceId === disconnectedDevice.id) {
@@ -3913,20 +3965,13 @@ export class DevicePool {
           signal,
         });
         signal.throwIfAborted();
-        for (;;) {
-          const devices = await discover();
-          // A same-AVD replacement still holds the image's locks; a different
-          // AVD reusing the old serial must be preserved without another kill.
-          const stillPresent = devices.some((device) => device.name === avdName);
-          if (!stillPresent) {
-            logger.info(
-              `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
-            );
-            return "stopped";
-          }
-          await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
-          signal.throwIfAborted();
-        }
+        return await this.confirmRecoveryStop(
+          avdName,
+          matchingAvd.deviceId,
+          discover,
+          signal,
+          deadlineMs,
+        );
       }));
     try {
       return await raceWithDeadline(startShutdown, {
@@ -3946,6 +3991,110 @@ export class DevicePool {
         retainLeaseUntil(shutdown);
       }
       throw new UnconfirmedRecoveryShutdownError(avdName, error);
+    }
+  }
+
+  /**
+   * The AVD is absent from the online-only list before any kill. That is not proof
+   * its emulator stopped: a transport that dropped to adb `offline` leaves the
+   * process running and holding the AVD (#10074, #10100). When the recovery's own
+   * serial is still listed `offline`, send the console kill through the client's
+   * offline handling (`force` is what makes it dispatch to a serial that is attached
+   * but not online; the serial was just probed, so the only residual is a replacement
+   * taking it inside that window), then confirm the exit like any other kill. An
+   * adopt-only recovery never kills: its tracked process already exited. A serial
+   * absent from adb, or an unavailable probe, keeps the earlier answer.
+   */
+  private async stopRecoveryTargetMissingFromOnlineList(options: {
+    avdName: string;
+    deviceId: string;
+    adoptOnly: boolean;
+    discover: () => Promise<BootedDevice[]>;
+    signal: AbortSignal;
+    deadlineMs: number;
+  }): Promise<"stopped"> {
+    const { avdName, deviceId, adoptOnly, discover, signal, deadlineMs } = options;
+    if (
+      adoptOnly ||
+      !(await this.isAndroidSerialHeldOffline(avdName, deviceId, signal, deadlineMs))
+    ) {
+      return "stopped";
+    }
+    await this.deviceManager.killDevice(
+      { deviceId, name: avdName, platform: "android" },
+      { timeoutMs: Math.max(1, deadlineMs - this.timer.now()), signal, force: true },
+    );
+    signal.throwIfAborted();
+    return await this.confirmRecoveryStop(avdName, deviceId, discover, signal, deadlineMs);
+  }
+
+  private async confirmRecoveryStop(
+    avdName: string,
+    deviceId: string,
+    discover: () => Promise<BootedDevice[]>,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<"stopped"> {
+    for (;;) {
+      const devices = await discover();
+      // A same-AVD replacement still holds the image's locks; a different
+      // AVD reusing the old serial must be preserved without another kill.
+      const stillPresent = devices.some((device) => device.name === avdName);
+      // The online-only list also lacks an emulator that dropped to adb `offline`
+      // mid-kill while its process still runs (#10100).
+      if (
+        !stillPresent &&
+        !(await this.isAndroidSerialHeldOffline(avdName, deviceId, signal, deadlineMs))
+      ) {
+        logger.info(
+          `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
+        );
+        return "stopped";
+      }
+      await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
+      signal.throwIfAborted();
+    }
+  }
+
+  /**
+   * Whether adb still lists the killed emulator's serial as `offline` (or its
+   * state could not be read), so its absence from the online-only discovery does
+   * not yet confirm the AVD stopped. The same "offline or probe failed means
+   * unconfirmed" rule as the recovery-reservation lift (#10076).
+   */
+  private async isAndroidSerialHeldOffline(
+    avdName: string,
+    deviceId: string,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<boolean> {
+    const probe = this.deviceManager.getAndroidOfflineDeviceIds?.bind(this.deviceManager);
+    if (!probe) {
+      return false;
+    }
+    try {
+      const offline = await probe([deviceId], {
+        signal,
+        timeoutMs: Math.max(
+          1,
+          Math.min(ANDROID_OFFLINE_PROBE_TIMEOUT_MS, deadlineMs - this.timer.now()),
+        ),
+      });
+      signal.throwIfAborted();
+      if (offline.has(deviceId)) {
+        logger.info(
+          `[DevicePool] Android AVD '${avdName}' is absent from the booted list but adb still lists ${deviceId} as offline; shutdown not yet confirmed`,
+        );
+      }
+      return offline.has(deviceId);
+    } catch (error) {
+      signal.throwIfAborted();
+      // An unreadable state list cannot prove the serial left `adb devices`.
+      logger.warn(
+        `[DevicePool] adb device-state probe failed while confirming '${avdName}' stopped: ${errorMessage(error)}`,
+        error,
+      );
+      return true;
     }
   }
 
@@ -4591,9 +4740,14 @@ export class DevicePool {
     return result;
   }
 
+  private isPooledEntryCurrent(device: PooledDevice): boolean {
+    return this.devices.get(device.id) === device;
+  }
+
+  // selectAssignableIdleDevice additionally requires eligibility and resolved identity.
   private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === null &&
       this.selectIdleDevice([device]) === device &&
       this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
@@ -4990,9 +5144,11 @@ export class DevicePool {
     }
   }
 
+  // createSessionOrRestore / DeviceAutolockManager check the session object and busy
+  // assignment, including a held suspect session; automation admission is separate.
   private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === session.sessionId &&
       device.status === "busy" &&
       this.sessionManager.getSession(session.sessionId) === session
@@ -5098,13 +5254,15 @@ export class DevicePool {
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
   }
 
+  // releaseCapturedDevice checks assignment generation, but permits release after
+  // the session has left SessionManager and does not require a busy status.
   private isCapturedReleaseCurrent(
     device: PooledDevice,
     expectedSessionId: string,
     expectedAssignmentCount: number,
   ): boolean {
     const deviceId = device.id;
-    if (this.devices.get(deviceId) !== device) {
+    if (!this.isPooledEntryCurrent(device)) {
       logger.debug(`Ignoring stale release for replacement device ${deviceId}`);
       return false;
     }

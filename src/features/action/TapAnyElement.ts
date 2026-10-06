@@ -1,3 +1,4 @@
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -5,7 +6,10 @@ import {
 } from "../observe/observationReadScope";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { freshTapHierarchy } from "./freshTapHierarchy";
-import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
+import {
+  isSemanticActionRejected,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
   resolveTalkBackStateConfirmation,
@@ -695,7 +699,17 @@ export class TapAnyElement extends BaseVisualChange {
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      const rejected = await isSemanticActionRejected({
+        advertised: hasAccessibilityAction(element.actions, "long_click"),
+        error: result.error,
+        needsNodeSelector,
+        selected: element,
+        // A forced fresh capture: the tree the element came from may predate the lookup miss.
+        readHierarchy: () =>
+          this.refreshViewHierarchy(DEFAULT_HIERARCHY_READ_TIMEOUT_MS, undefined, signal, true),
+      });
+      throwIfAborted(signal);
+      if (rejected) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );
@@ -806,7 +820,7 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
     const options = fenceOptions.selectionOptions;
-    if (options && (options.container || options.selectionStrategy === "unique")) {
+    if (options && isStrictlyScoped(options, "any-container")) {
       const capture = identifyObservedHierarchy(
         this.device.platform,
         probe.hierarchy,
@@ -1670,7 +1684,7 @@ export class TapAnyElement extends BaseVisualChange {
     const target = {
       element,
       capture: selectedCapture,
-      scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+      scoped: isStrictlyScoped(options),
       talkBackState,
     };
     const action = options.action;

@@ -10,6 +10,11 @@ import {
   MAX_OVERLAY_EVENT_TIMEOUT_MS,
 } from "../features/overlay/overlayEventTimeout";
 import {
+  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+  MAX_OVERLAY_ASSET_COUNT,
+} from "../features/overlay/overlayAssets";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../server/observationResourceUris";
+import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
   DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
@@ -396,10 +401,84 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
   );
 }
 
+/** Default device request timeout of a show/update, mirrored from the overlay tool. */
+const OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
+
+function countObservationAssets(assets: readonly unknown[], count: number): number {
+  let observations = 0;
+  for (let index = 0; index < count; index += 1) {
+    const entry = asRecord(assets[index]);
+    if (entry !== undefined && typeof entry.observation === "string") {
+      observations += 1;
+    }
+  }
+  return observations;
+}
+
+/**
+ * Worst-case time of a show/update before any wait: the asset uploads and the send, or the send
+ * alone. Uploads run one at a time, each with its own transport timeout, before the show/update
+ * request itself. `assetCount` is the number of entries the tool will process (<= its maximum).
+ */
+function resolveOverlayStageBudgetMs(args: Record<string, unknown>, assetCount: number): number {
+  const mutationMs = positiveFiniteNumber(args.timeoutMs) ?? OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS;
+  if (assetCount === 0) {
+    return mutationMs;
+  }
+  // An observation source may wait for its screenshot capture before anything is uploaded.
+  const captureWaitMs =
+    countObservationAssets(Array.isArray(args.assets) ? args.assets : [], assetCount) *
+    OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS;
+  // The tool re-uploads assets the device reports missing and re-sends the overlay once, so the
+  // upload-and-send pair is budgeted twice (the retry uploads at most the same assets).
+  return captureWaitMs + 2 * (assetCount * DEFAULT_OVERLAY_ASSET_TIMEOUT_MS + mutationMs);
+}
+
+function overlayAssetCount(args: Record<string, unknown>): number {
+  // Count entries without visiting more than the tool's maximum.
+  return Array.isArray(args.assets) ? Math.min(args.assets.length, MAX_OVERLAY_ASSET_COUNT) : 0;
+}
+
+function resolveOverlayAssetUploadBudgetMs(args: Record<string, unknown>): number {
+  const count = overlayAssetCount(args);
+  return count === 0
+    ? 0
+    : resolveArgumentTimeoutBudgetMs(
+        resolveOverlayStageBudgetMs(args, count),
+        DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+        WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+      );
+}
+
+/**
+ * showVariants is a show followed by an optional selection wait: the show stage (uploads, send
+ * and the single missing-asset retry, as for `show`) plus the default event wait, plus headroom.
+ * The wait is always the default one, independent of the show's `timeoutMs`.
+ */
+function resolveOverlayVariantsBudgetMs(args: Record<string, unknown>): number {
+  const count = overlayAssetCount(args);
+  const waitMs = args.waitForSelection === true ? DEFAULT_OVERLAY_EVENT_TIMEOUT_MS : 0;
+  if (count === 0 && waitMs === 0) {
+    return 0;
+  }
+  return resolveArgumentTimeoutBudgetMs(
+    resolveOverlayStageBudgetMs(args, count) + waitMs,
+    DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
+    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
 function resolveOverlayAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits; every other overlay action keeps the default deadline. The
-  // tool's own maximum bounds the wait, so a larger value (rejected by its schema anyway)
-  // cannot inflate the deadline past that maximum plus headroom.
+  // Only `awaitEvent` waits, `showVariants` with `waitForSelection: true` waits after its show,
+  // and only `show`/`update`/`showVariants` with `assets` upload; every other overlay action
+  // keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
+  // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
+  if (args.action === "show" || args.action === "update") {
+    return resolveOverlayAssetUploadBudgetMs(args);
+  }
+  if (args.action === "showVariants") {
+    return resolveOverlayVariantsBudgetMs(args);
+  }
   if (args.action !== "awaitEvent") {
     return 0;
   }

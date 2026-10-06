@@ -147,8 +147,9 @@ describe("ContrastChecker", function () {
         text: "Large",
       };
 
-      const smallResult = await checker.checkContrast(screenshotPath, smallTextElement, "AA");
-      const largeResult = await checker.checkContrast(screenshotPath, largeTextElement, "AA");
+      // Density 160 (mdpi): 1px == 1dp, so the 24dp large-text cutoff is 24px.
+      const smallResult = await checker.checkContrast(screenshotPath, smallTextElement, "AA", 160);
+      const largeResult = await checker.checkContrast(screenshotPath, largeTextElement, "AA", 160);
 
       expect(smallResult).not.toBeNull();
       expect(largeResult).not.toBeNull();
@@ -213,7 +214,7 @@ describe("ContrastChecker", function () {
         text: "Large Text",
       };
 
-      const result = await checker.checkContrast(screenshotPath, element, "AA");
+      const result = await checker.checkContrast(screenshotPath, element, "AA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.requiredRatio).toEqual(3.0);
@@ -239,7 +240,7 @@ describe("ContrastChecker", function () {
         text: "Large Text",
       };
 
-      const result = await checker.checkContrast(screenshotPath, element, "AAA");
+      const result = await checker.checkContrast(screenshotPath, element, "AAA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.requiredRatio).toEqual(4.5);
@@ -263,14 +264,15 @@ describe("ContrastChecker", function () {
 
     it("should correctly evaluate AAA compliance for borderline contrast", async function () {
       const screenshotPath = path.join(fixturesDir, "wcag-aa-large-text.png");
-      // Use full image bounds - height 50 makes it "large text"
+      // Use full image bounds; the 50px reported text size makes it "large text"
       // Large text requires 4.5:1 for AAA, but this image only has 3.0:1
       const element: Element = {
-        bounds: { left: 0, top: 0, right: 100, bottom: 50 }, // Height >= 24 = large text
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Large Text",
+        textSize: 50, // >= 24dp at density 160 = large text
       };
 
-      const result = await checker.checkContrast(screenshotPath, element, "AAA");
+      const result = await checker.checkContrast(screenshotPath, element, "AAA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.ratio).toBeLessThan(4.5);
@@ -327,8 +329,8 @@ describe("ContrastChecker", function () {
     it("should handle elements larger than screenshot", async function () {
       const screenshotPath = path.join(fixturesDir, "small-element.png");
 
-      // Element bounds larger than the image: pixel sampling edge-clamps rather
-      // than throwing, so this must still produce a finite ratio >= 1.
+      // Element bounds larger than the image: the pixels are not the element's, so nothing is
+      // measured (an edge-clamped read would invent a colour, #10220).
       const oversizedElement: Element = {
         bounds: { left: 0, top: 0, right: 200, bottom: 100 },
         text: "Oversized",
@@ -336,16 +338,14 @@ describe("ContrastChecker", function () {
 
       const result = await checker.checkContrast(screenshotPath, oversizedElement, "AA");
 
-      expect(result).not.toBeNull();
-      expect(Number.isFinite(result!.ratio)).toBe(true);
-      expect(result!.ratio).toBeGreaterThanOrEqual(1);
+      expect(result).toBeNull();
     });
   });
 
   describe("Color Sampling", function () {
-    it("should sample text color from center region", async function () {
+    it("should identify the dense text colour inside the surrounding background", async function () {
       const screenshotPath = path.join(fixturesDir, "black-on-white.png");
-      // Use full image bounds - center will have text color (black from 5-95)
+      // The dense black block occupies most of the box, but its perimeter is white.
       const element: Element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         text: "Center",
@@ -354,7 +354,7 @@ describe("ContrastChecker", function () {
       const result = await checker.checkContrast(screenshotPath, element, "AA");
 
       expect(result).not.toBeNull();
-      // Should detect black text in center (center at 50,25 is in the text region 5-95)
+      // The block is foreground even though it occupies more pixels than the perimeter.
       expect(result!.textColor.r).toBeLessThan(50);
       expect(result!.textColor.g).toBeLessThan(50);
       expect(result!.textColor.b).toBeLessThan(50);
@@ -431,7 +431,7 @@ describe("ContrastChecker", function () {
         text: "Shadow",
       };
 
-      const result = await shadowChecker.checkContrast(screenshotPath, element, "AAA");
+      const result = await shadowChecker.checkContrast(screenshotPath, element, "AAA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.shadowDetected).toBe(true);
@@ -461,27 +461,35 @@ describe("ContrastChecker", function () {
       expect(backend.rawPixelsCalls[0]).toBe(screenshotBytes);
     });
 
-    it("tolerates element bounds beyond the image via edge clamping", async function () {
+    it("does not measure element bounds beyond the image, and reports them in batch", async function () {
       const backend = new FakeImageBackend();
       backend.setRawPixelsResult(uniformRaw(20, 20, 0, 0, 0));
       const seamChecker = new ContrastChecker({}, undefined, backend, {
         readFile: async () => Buffer.from("synthetic screenshot"),
       });
-      // Bounds extend past the 20x20 image; jimp getPixelColor edge-extends, so
-      // sampling must not throw and should resolve to the (uniform black) edge.
-      const element: Element = {
+      // Bounds extend past the 20x20 image: no edge-clamped read, no result (#10220).
+      const outside: Element = {
         bounds: { left: 10, top: 10, right: 40, bottom: 40 },
         text: "Sample",
       };
+      const inside: Element = { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Fits" };
 
-      const result = await seamChecker.checkContrast(syntheticScreenshotPath, element, "AA");
+      expect(await seamChecker.checkContrast(syntheticScreenshotPath, outside, "AA")).toBeNull();
+      const batch = await seamChecker.checkContrastBatchWithCoverage(
+        syntheticScreenshotPath,
+        [outside, inside],
+        "AA",
+      );
 
-      expect(result).not.toBeNull();
+      expect(batch.outsideImage).toEqual([outside]);
+      expect(batch.results.has(outside)).toBe(false);
+      expect(batch.results.get(inside)).not.toBeNull();
     });
   });
 
   describe("Required ratio (parameterized)", function () {
-    // getRequiredContrastRatio keys off isLargeText (height >= 24) and the level.
+    // getRequiredContrastRatio keys off isLargeText (height >= 24dp, density 160
+    // here so 1px == 1dp) and the level.
     // 23/24/25 straddle the large-text boundary; level "A" falls through to the
     // same ratios as AA. requiredRatio is independent of the sampled contrast,
     // so a uniform fake image is sufficient and keeps this fast.
@@ -512,10 +520,116 @@ describe("ContrastChecker", function () {
         syntheticScreenshotPath,
         element,
         level as "A" | "AA" | "AAA",
+        160,
       );
 
       expect(result).not.toBeNull();
       expect(result!.requiredRatio).toBe(expected as number);
+    });
+
+    // #10039: sizes are physical px. A 50px text size is large text at mdpi
+    // (50dp) but only ~16.7dp on xxhdpi (480), where it must get the strict ratio.
+    // The 71/72 rows straddle the cutoff: 24dp * 480/160 = 72px.
+    it.each([
+      [50, 160, "AA", 3.0],
+      [50, 480, "AA", 4.5],
+      [50, 420, "AA", 4.5],
+      [71, 480, "AA", 4.5],
+      [72, 480, "AA", 3.0],
+      [50, 480, "AAA", 7.0],
+      [72, 480, "AAA", 4.5],
+      [50, undefined, "AA", 4.5],
+      [50, 0, "AA", 4.5],
+      [500, undefined, "AAA", 7.0],
+    ])(
+      "text size %ipx at density %s, level %s requires %f:1",
+      async function (textSize, density, level, expected) {
+        const element: Element = {
+          bounds: { left: 0, top: 0, right: 100, bottom: 20 },
+          text: "Sample",
+          textSize: textSize as number,
+        };
+        const result = await ratioChecker().checkContrast(
+          syntheticScreenshotPath,
+          element,
+          level as "A" | "AA" | "AAA",
+          density as number | undefined,
+        );
+
+        expect(result).not.toBeNull();
+        expect(result!.requiredRatio).toBe(expected as number);
+      },
+    );
+
+    // Without a reported text size the box height only counts when it fits a single
+    // line: at mdpi (1px == 1dp) that is [24dp, 40dp). A 48dp button or a taller
+    // (multi-line) box is normal text, the conservative ratio.
+    it.each([
+      [23, 4.5],
+      [24, 3.0],
+      [39, 3.0],
+      [40, 4.5],
+      [48, 4.5],
+      [50, 4.5],
+      [96, 4.5],
+    ])("box-only height %ipx at mdpi requires %f:1", async function (height, expected) {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: height as number },
+        text: "Sample",
+      };
+      const result = await ratioChecker().checkContrast(
+        syntheticScreenshotPath,
+        element,
+        "AA",
+        160,
+      );
+
+      expect(result!.requiredRatio).toBe(expected as number);
+    });
+
+    it("trusts the reported text size over the box in both directions", async function () {
+      const small: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 48 },
+        text: "Sample",
+        textSize: 16,
+      };
+      const large: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 24 },
+        text: "Sample",
+        textSize: 30,
+      };
+      const checker = ratioChecker();
+
+      expect(
+        (await checker.checkContrast(syntheticScreenshotPath, small, "AA", 160))!.requiredRatio,
+      ).toBe(4.5);
+      expect(
+        (await checker.checkContrast(syntheticScreenshotPath, large, "AA", 160))!.requiredRatio,
+      ).toBe(3.0);
+    });
+
+    it("does not reuse a cached result across different densities", async function () {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        text: "Sample",
+        textSize: 50,
+      };
+      const sharedChecker = ratioChecker();
+      const mdpi = await sharedChecker.checkContrastBatch(
+        syntheticScreenshotPath,
+        [element],
+        "AA",
+        160,
+      );
+      const xxhdpi = await sharedChecker.checkContrastBatch(
+        syntheticScreenshotPath,
+        [element],
+        "AA",
+        480,
+      );
+
+      expect(mdpi.get(element)!.requiredRatio).toBe(3.0);
+      expect(xxhdpi.get(element)!.requiredRatio).toBe(4.5);
     });
   });
 

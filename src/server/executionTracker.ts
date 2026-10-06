@@ -1,7 +1,9 @@
+import { isDeviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { errorMessage } from "../utils/describeUnknownError";
+import { ActionableError } from "../models/ActionableError";
 import {
   deviceLostErrorFromCancellationReason,
   isDeviceLostError,
@@ -28,6 +30,11 @@ interface ActiveExecution {
    * observability is unreliable on some runtimes under load (macOS CI Bun flake, issue #3909).
    */
   cancelReason?: Error;
+  /**
+   * Devices this execution's session has left (a `setActiveDevice` rebind), with the rebind
+   * reason. Binding the execution to one of them is refused (#9958).
+   */
+  revokedDeviceBindings?: Map<string, Error>;
 }
 
 export type ExecutionScope = "session" | "global";
@@ -318,11 +325,24 @@ export class ExecutionTracker {
     );
   }
 
-  /** Bind at admission, including sessionless calls and multi-device fan-out. */
+  /**
+   * Bind at admission, including sessionless calls and multi-device fan-out.
+   *
+   * Throws the recorded rebind error when a `setActiveDevice` rebind already
+   * revoked this execution's session from `deviceId` (#9958): a call admitted
+   * before the rebind but not yet bound to the old device is absent from the
+   * device index, so the rebind cancel could not abort it, and binding now
+   * would drive a device the session has left. Other aborts (device loss,
+   * kill, ANR) never refuse a bind, so their cleanup paths are unaffected.
+   */
   bindDeviceExecution(executionId: string, deviceId: string): void {
     const execution = this.executions.get(executionId);
     if (!execution) {
       return;
+    }
+    const revocation = execution.revokedDeviceBindings?.get(deviceId);
+    if (revocation) {
+      throw new ActionableError(revocation.message, { cause: revocation });
     }
     execution.deviceIds ??= new Set();
     execution.deviceIds.add(deviceId);
@@ -336,6 +356,9 @@ export class ExecutionTracker {
     reason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
+    if (options.onlySessionUuid !== undefined) {
+      this.revokeSessionDeviceBindings(deviceId, reason, options);
+    }
     return this.cancelExecutionIds(
       this.deviceExecutions.get(deviceId),
       "deviceId",
@@ -343,6 +366,29 @@ export class ExecutionTracker {
       reason,
       options,
     );
+  }
+
+  /**
+   * A session-scoped device cancel means the session has left `deviceId`. Every
+   * live execution of that session — bound to the device or still racing toward
+   * it — may no longer bind to it, so a call admitted but not yet bound cannot
+   * slip past the cancel (#9958).
+   */
+  private revokeSessionDeviceBindings(
+    deviceId: string,
+    reason: ExecutionCancellationReason,
+    options: ExecutionCancellationOptions,
+  ): void {
+    const revocation = reason instanceof Error ? reason : new ActionableError(reason);
+    for (const execution of this.executions.values()) {
+      if (
+        execution.id !== options.excludeExecutionId &&
+        this.belongsToSessionFilter(execution, options.onlySessionUuid)
+      ) {
+        execution.revokedDeviceBindings ??= new Map();
+        execution.revokedDeviceBindings.set(deviceId, revocation);
+      }
+    }
   }
 
   hasActiveDeviceExecutions(deviceId: string, query?: ActiveExecutionQuery): boolean {
@@ -666,7 +712,7 @@ export class ExecutionTracker {
     execution: ActiveExecution,
     cancelReason: ExecutionCancellationReason,
   ): void {
-    if (typeof cancelReason === "string" && cancelReason.startsWith("device-disconnected:")) {
+    if (isDeviceLossCancellationReason(cancelReason)) {
       // Record the reason on the execution *before* aborting, so the tracker's own
       // authoritative `cancelReason` is set synchronously with the counted cancellation
       // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same

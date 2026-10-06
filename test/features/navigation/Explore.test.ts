@@ -38,6 +38,13 @@ import { DefaultElementSelector } from "../../../src/features/utility/DefaultEle
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
+import {
+  pressButtonSchema,
+  swipeOnSchema,
+  tapAtSchema,
+  tapOnSchema,
+} from "../../../src/server/interactionTools";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
@@ -47,6 +54,7 @@ import { registerNavigationTools } from "../../../src/server/navigationTools";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../../src/utils/logger";
+import { reportToolDispatched } from "../../../src/utils/ToolDispatchContext";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 
@@ -529,6 +537,41 @@ describe("Explore", () => {
       }
     });
 
+    test("an initial relaunch landing on a screen reached only by recorded Back edges marks a root", async () => {
+      const run = rootRun(undefined, "Home", launcher);
+      // The loader yields edgeType "tool" for a recorded Back (never "back"): Back from
+      // Detail landing on Home makes Detail a descendant, not an in-app parent.
+      fakeGraph.addEdge({
+        from: "Detail",
+        to: "Home",
+        timestamp: 0,
+        edgeType: "tool",
+        interaction: { toolName: "pressButton", args: { button: "back" }, timestamp: 0 },
+      });
+      run.launch.mockImplementation(async () => {
+        run.actions.push("launch");
+        run.setForeground(target);
+        run.setScreen("Home");
+        return { success: true, packageName: target };
+      });
+      const seams = explore as unknown as {
+        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
+        handleDeadEnd: () => Promise<void>;
+      };
+      try {
+        await seams.enforceTargetApp(
+          { activeWindow: { appId: launcher } } as ObserveResult,
+          target,
+        );
+        await seams.enforceTargetApp({ activeWindow: { appId: target } } as ObserveResult, target);
+        await seams.handleDeadEnd();
+        expect(run.actions).toEqual(["launch"]);
+        expect(Reflect.get(explore, "rootScreens")).toEqual(new Set(["Home"]));
+      } finally {
+        run.restore();
+      }
+    });
+
     test("a null relaunch screen marks no root and unresolved dead ends still press Back", async () => {
       const run = rootRun(undefined, "Login", launcher);
       const seams = explore as unknown as {
@@ -794,12 +837,84 @@ describe("Explore", () => {
       const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
       try {
         const result = await explore.execute({ timeoutMs: 1000 });
-        expect(back).toHaveBeenCalledWith("back");
+        expect(back.mock.calls[0][0]).toBe("back");
         expect(launch).not.toHaveBeenCalled();
         expect(result.stopReason).toBe("Reached timeout limit (1000ms)");
       } finally {
         back.mockRestore();
         launch.mockRestore();
+      }
+    });
+
+    test("a run that only re-traverses known transitions reports no edges added (#10194)", async () => {
+      const initialGraph = seedTargetGraph();
+      // Re-traversal appends rows to the log; the distinct transitions are unchanged.
+      const retraversed = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue({
+        ...initialGraph,
+        edges: [...initialGraph.edges, ...initialGraph.edges, ...initialGraph.edges],
+      });
+      try {
+        const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
+        expect(result.edgesAdded).toBe(0);
+      } finally {
+        retraversed.mockRestore();
+      }
+    });
+
+    test("a cancel that lands after the loop's check does not press Back for the dead end (#10151)", async () => {
+      const controller = new AbortController();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => {
+          controller.abort();
+          return createMockObservation([], "");
+        },
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        const result = await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
+        expect(back).not.toHaveBeenCalled();
+        expect(result.cancelled).toBe(true);
+        expect(result.stopReason).toBe("Operation cancelled");
+      } finally {
+        back.mockRestore();
+      }
+    });
+
+    test("forwards the exploration signal into the dead-end Back press (#10151)", async () => {
+      const controller = new AbortController();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => createMockObservation([], ""),
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
+        expect(back).toHaveBeenCalledWith("back", undefined, undefined, controller.signal);
+      } finally {
+        back.mockRestore();
+      }
+    });
+
+    test("a cancel during the dead-end Back press is a cancelled run, not a failed recovery (#10151)", async () => {
+      const controller = new AbortController();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => createMockObservation([], ""),
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockImplementation(async () => {
+        controller.abort();
+        throw new Error("Operation cancelled");
+      });
+      try {
+        const result = await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
+        expect(result.cancelled).toBe(true);
+        expect(result.stopReason).toBe("Operation cancelled");
+      } finally {
+        back.mockRestore();
       }
     });
 
@@ -950,7 +1065,8 @@ describe("Explore", () => {
           to: "B",
           timestamp: 0,
           edgeType: "tool",
-          uiState: { selectedElements: [{ text: "Settings" }] },
+          interaction: { toolName: "tapOn", args: { text: "Settings" }, timestamp: 0 },
+          uiState: { selectedElements: [{ text: "Home tab" }] },
         });
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
         spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
@@ -1595,6 +1711,663 @@ describe("Explore", () => {
     });
   });
 
+  describe("performInteraction records the replayable tool call (#9989)", () => {
+    type Perform = (element: Element, observation: ObserveResult) => Promise<boolean>;
+    const rowId = "com.test:id/row_title";
+
+    function perform(): Perform {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      return Reflect.get(explore, "performInteraction").bind(explore);
+    }
+
+    function recorded(index = 0): { toolName: string; args: unknown } {
+      const [toolName, args] = fakeGraph.getMethodCallArgs("recordToolCall", index) ?? [];
+      return { toolName, args };
+    }
+
+    async function historySize(): Promise<number> {
+      return (await fakeGraph.getStats()).toolCallHistorySize;
+    }
+
+    test("a selector tap records tapOn with the public selector form, replayable through the tool schema", async () => {
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+      try {
+        expect(
+          await perform()(
+            createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+            createMockObservation(),
+          ),
+        ).toBe(true);
+      } finally {
+        tap.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      const { toolName, args } = recorded();
+      expect(toolName).toBe("tapOn");
+      expect(args).toEqual({ selector: { elementId: "com.test:id/settings_btn" }, action: "tap" });
+      expect(tapOnSchema.safeParse(args).success).toBe(true);
+      expect(await historySize()).toBe(1);
+    });
+
+    test("a dispatch the tap reports reaches the recorded call (#10196)", async () => {
+      const dispatched: number[] = [];
+      const record = spyOn(fakeGraph, "recordToolCall").mockImplementation(() =>
+        Object.assign(() => {}, { markDispatched: () => dispatched.push(1) }),
+      );
+      const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async () => {
+        reportToolDispatched();
+        return { success: true };
+      });
+      try {
+        await perform()(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+      } finally {
+        tap.mockRestore();
+        record.mockRestore();
+      }
+
+      expect(dispatched).toEqual([1]);
+    });
+
+    test("a repeated control records the occurrence index beside the selector", async () => {
+      const row = (text: string, top: number) => ({
+        $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
+        bounds: { left: 0, top, right: 100, bottom: top + 50 },
+      });
+      const observation = {
+        viewHierarchy: {
+          hierarchy: { node: [row("Beta", 0), row("Beta", 50)] },
+          packageName: "com.test.app",
+          screenWidth: 100,
+          screenHeight: 200,
+        },
+      } as unknown as ObserveResult;
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+      try {
+        await perform()(
+          createMockElement({
+            text: "Beta",
+            "resource-id": rowId,
+            bounds: { left: 0, top: 50, right: 100, bottom: 100 },
+          }),
+          observation,
+        );
+      } finally {
+        tap.mockRestore();
+      }
+
+      const { toolName, args } = recorded();
+      expect(toolName).toBe("tapOn");
+      expect(args).toEqual({ selector: { elementId: rowId }, index: 1, action: "tap" });
+      expect(tapOnSchema.safeParse(args).success).toBe(true);
+    });
+
+    test("the recorded call becomes the edge interaction navigateTo replays, not a Back press", async () => {
+      const event = (destination: string) => ({
+        destination,
+        source: "TEST" as const,
+        arguments: {},
+        metadata: {},
+        timestamp: 1,
+        sequenceNumber: 0,
+        applicationId: "com.test.app",
+      });
+      fakeGraph.recordNavigationEvent(event("Home"));
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+      try {
+        await perform()(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+      } finally {
+        tap.mockRestore();
+      }
+      fakeGraph.recordNavigationEvent(event("Settings"));
+
+      const [edge] = fakeGraph.getEdgesFrom("Home");
+      expect(edge.interaction?.toolName).toBe("tapOn");
+      expect(edge.interaction?.args).toEqual({
+        selector: { elementId: "com.test:id/settings_btn" },
+        action: "tap",
+      });
+    });
+
+    test("a failed tap withdraws its record", async () => {
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({
+        success: false,
+        error: "not found",
+      });
+      try {
+        expect(await perform()(createMockElement(), createMockObservation())).toBe(false);
+      } finally {
+        tap.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      expect(await historySize()).toBe(0);
+    });
+
+    test("a tap that throws withdraws its record and still reports failure", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const tap = spyOn(TapOnElement.prototype, "execute").mockRejectedValue(new Error("boom"));
+      try {
+        expect(await perform()(createMockElement(), createMockObservation())).toBe(false);
+      } finally {
+        tap.mockRestore();
+        warn.mockRestore();
+      }
+
+      expect(await historySize()).toBe(0);
+    });
+
+    test("a coordinate-only tap records tapAt with absolute coordinates the tool schema accepts", async () => {
+      const tap = spyOn(TapAtCoordinate.prototype, "execute").mockResolvedValue({ success: true });
+      try {
+        await perform()(
+          createMockElement({ text: "", "resource-id": "", class: "" }),
+          createMockObservation(),
+        );
+      } finally {
+        tap.mockRestore();
+      }
+
+      const { toolName, args } = recorded();
+      expect(toolName).toBe("tapAt");
+      expect(args).toEqual({ x: 50, y: 25, action: "tap" });
+      expect(tapAtSchema.safeParse(args).success).toBe(true);
+      expect(await historySize()).toBe(1);
+    });
+
+    test("an element with no tap target records nothing", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await perform()(
+          createMockElement({
+            text: "",
+            "resource-id": "",
+            class: "",
+            bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+          }),
+          createMockObservation(),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(0);
+    });
+
+    test("a scrollable container swipe records swipeOn with the container selector", async () => {
+      const swipe = spyOn(SwipeOnElement.prototype, "execute").mockResolvedValue({
+        success: true,
+      } as never);
+      try {
+        expect(
+          await perform()(
+            createMockElement({ scrollable: true, "resource-id": "com.test:id/list" }),
+            createMockObservation(),
+          ),
+        ).toBe(true);
+      } finally {
+        swipe.mockRestore();
+      }
+
+      const { toolName, args } = recorded();
+      expect(toolName).toBe("swipeOn");
+      expect(args).toEqual({
+        container: { elementId: "com.test:id/list" },
+        direction: "up",
+        speed: "slow",
+      });
+      expect(swipeOnSchema.safeParse(args).success).toBe(true);
+      expect(await historySize()).toBe(1);
+    });
+
+    describe("a gesture that caused no navigation", () => {
+      const navigate = (destination: string) =>
+        fakeGraph.recordNavigationEvent({
+          destination,
+          source: "TEST",
+          arguments: {},
+          metadata: {},
+          timestamp: 1,
+          sequenceNumber: 0,
+          applicationId: "com.test.app",
+        });
+
+      async function swipeWithoutNavigation(): Promise<Explore> {
+        navigate("Home");
+        const swipe = spyOn(SwipeOnElement.prototype, "execute").mockResolvedValue({
+          success: true,
+        } as never);
+        try {
+          await perform()(
+            createMockElement({ scrollable: true, "resource-id": "com.test:id/list" }),
+            createMockObservation(),
+          );
+        } finally {
+          swipe.mockRestore();
+        }
+        expect(await historySize()).toBe(1);
+        return explore;
+      }
+
+      function unrecordedPress(destination: string) {
+        return spyOn(PressButton.prototype, "press").mockImplementation(async () => {
+          navigate(destination);
+          return { success: true };
+        });
+      }
+
+      test("the dead-end Back edge carries the Back itself, never the withdrawn swipe", async () => {
+        const dead = await swipeWithoutNavigation();
+        const press = unrecordedPress("Previous");
+        try {
+          await Reflect.get(dead, "handleDeadEnd").call(dead);
+        } finally {
+          press.mockRestore();
+        }
+
+        // Two records were made (swipe, then Back); the swipe's was withdrawn before the
+        // Back was recorded, so the edge the Back created is stamped pressButton back.
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
+        expect(
+          fakeGraph
+            .getEdgesFrom("Home")
+            .map((edge) => [edge.interaction?.toolName, edge.interaction?.args]),
+        ).toEqual([["pressButton", { button: "back" }]]);
+        // Only the Back's own record is held (the fake does not consume on navigation).
+        expect(await historySize()).toBe(1);
+      });
+
+      test("is not attributed to resetToHome navigation", async () => {
+        const reset = await swipeWithoutNavigation();
+        const press = unrecordedPress("Launcher");
+        try {
+          await Reflect.get(reset, "resetToHome").call(reset);
+        } finally {
+          press.mockRestore();
+        }
+
+        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual(
+          [],
+        );
+        expect(await historySize()).toBe(0);
+      });
+
+      test("is withdrawn when the next action is recorded", async () => {
+        await swipeWithoutNavigation();
+        const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+        try {
+          const next: Perform = Reflect.get(explore, "performInteraction").bind(explore);
+          await next(createMockElement({ text: "Settings" }), createMockObservation());
+        } finally {
+          tap.mockRestore();
+        }
+
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
+        expect(await historySize()).toBe(1);
+        navigate("Settings");
+        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual([
+          "tapOn",
+        ]);
+      });
+    });
+
+    test("a tap that navigates keeps its edge interaction after explore moves on", async () => {
+      const navigate = (destination: string) =>
+        fakeGraph.recordNavigationEvent({
+          destination,
+          source: "TEST",
+          arguments: {},
+          metadata: {},
+          timestamp: 1,
+          sequenceNumber: 0,
+          applicationId: "com.test.app",
+        });
+      navigate("Home");
+      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        await perform()(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+        navigate("Settings");
+        await Reflect.get(explore, "handleDeadEnd").call(explore);
+      } finally {
+        tap.mockRestore();
+        press.mockRestore();
+      }
+
+      const [edge] = fakeGraph.getEdgesFrom("Home");
+      expect(edge.interaction?.toolName).toBe("tapOn");
+      // The tap's record was withdrawn when the dead end began; only the Back's own
+      // record is held (the fake does not consume records on navigation).
+      expect(fakeGraph.getMethodCallArgs("recordToolCall", 1)?.[0]).toBe("pressButton");
+      expect(await historySize()).toBe(1);
+    });
+
+    test("a failed swipe withdraws its record, and a selector-less container records nothing", async () => {
+      const swipe = spyOn(SwipeOnElement.prototype, "execute").mockResolvedValue({
+        success: false,
+      } as never);
+      try {
+        const run = perform();
+        expect(
+          await run(
+            createMockElement({ scrollable: true, "resource-id": "com.test:id/list" }),
+            createMockObservation(),
+          ),
+        ).toBe(false);
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+        expect(await historySize()).toBe(0);
+
+        await run(
+          createMockElement({ scrollable: true, text: "", "resource-id": "", class: "" }),
+          createMockObservation(),
+        );
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      } finally {
+        swipe.mockRestore();
+      }
+    });
+  });
+
+  describe("dead-end Back and blocker taps are recorded as what they are (#9989 follow-up)", () => {
+    const event = (destination: string) => ({
+      destination,
+      source: "TEST" as const,
+      arguments: {},
+      metadata: {},
+      timestamp: 1,
+      sequenceNumber: 0,
+      applicationId: "com.test.app",
+    });
+
+    async function historySize(): Promise<number> {
+      return (await fakeGraph.getStats()).toolCallHistorySize;
+    }
+
+    function backSeam(): (progress?: undefined, observation?: ObserveResult) => Promise<void> {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      return Reflect.get(explore, "handleDeadEnd").bind(explore);
+    }
+
+    test("the dead-end Back records pressButton back, and the edge it creates replays as that Back", async () => {
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        fakeGraph.recordNavigationEvent(event("Settings"));
+        await backSeam()(undefined, createMockObservation());
+        fakeGraph.recordNavigationEvent(event("Home"));
+      } finally {
+        press.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      const [toolName, args] = fakeGraph.getMethodCallArgs("recordToolCall", 0) ?? [];
+      expect(toolName).toBe("pressButton");
+      expect(args).toEqual({ button: "back" });
+      expect(pressButtonSchema.safeParse(args).success).toBe(true);
+      const [edge] = fakeGraph.getEdgesFrom("Settings");
+      expect(edge.to).toBe("Home");
+      expect(edge.interaction?.toolName).toBe("pressButton");
+      expect(edge.interaction?.args).toEqual({ button: "back" });
+    });
+
+    test("a Back that fails withdraws its record", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({
+        success: false,
+        error: "no keyevent",
+      });
+      try {
+        await backSeam()();
+      } finally {
+        press.mockRestore();
+        warn.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      expect(await historySize()).toBe(0);
+      expect(Reflect.get(explore, "stopReason")).toContain("no keyevent");
+    });
+
+    test("the iOS dead-end Back records pressButton back and withdraws it when the tool fails", async () => {
+      const ios = { deviceId: "ios-1", platform: "ios", source: "local" } as BootedDevice;
+      let succeed = true;
+      ToolRegistry.register("pressButton", "pressButton", {}, async () =>
+        succeed ? { success: true } : { success: false, error: "boom" },
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        explore = new Explore(ios, mockAdb, fakeTimer, fakeGraph);
+        const run = Reflect.get(explore, "handleDeadEnd").bind(explore) as () => Promise<void>;
+        await run();
+        expect(fakeGraph.getMethodCallArgs("recordToolCall", 0)).toEqual([
+          "pressButton",
+          { button: "back" },
+          undefined,
+        ]);
+        expect(await historySize()).toBe(1);
+
+        succeed = false;
+        await run();
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
+        // The first Back caused no navigation, so the next dead end withdraws it
+        // (#9989 review); the failed second Back withdraws itself. Nothing is pending.
+        expect(await historySize()).toBe(0);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a root-screen dead end presses no Back and records nothing", async () => {
+      fakeGraph.setCurrentScreenValue("Home");
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      Reflect.get(explore, "rootScreens").add("Home");
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        await (Reflect.get(explore, "handleDeadEnd") as () => Promise<void>).call(explore);
+      } finally {
+        press.mockRestore();
+      }
+
+      expect(press).not.toHaveBeenCalled();
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(0);
+    });
+
+    // Decision: blocker handling is device/app state interference, not navigation
+    // a later navigateTo should replay (a permission prompt is system UI the SDK
+    // never reports; a rating prompt appears only sometimes). Recording the tap
+    // would leave an unconsumed record that the next navigation event inside the
+    // correlation window could be attributed to, so the handlers record nothing.
+    const blockerDialogs = {
+      permission: () =>
+        createMockObservation([
+          createMockViewHierarchyNode({
+            text: "Allow",
+            "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+          }),
+          createMockViewHierarchyNode({
+            class: "android.widget.TextView",
+            text: "This app needs camera permission",
+            clickable: "false",
+          }),
+        ]),
+      rating: () =>
+        createMockObservation([
+          createMockViewHierarchyNode({
+            text: "Not now",
+            "resource-id": "com.test:id/rating_not_now",
+          }),
+          createMockViewHierarchyNode({
+            class: "android.widget.TextView",
+            text: "Rate this app",
+            "resource-id": "com.test:id/rating_title",
+            clickable: "false",
+          }),
+        ]),
+    };
+
+    for (const kind of ["permission", "rating"] as const) {
+      test(`a ${kind} dialog dismissal records no tool call, so no later edge can be attributed to it`, async () => {
+        const fakeTap = new FakeDialogTapAction();
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+        const dialog = blockerDialogs[kind]();
+        const normal = createMockObservation();
+        let observeCount = 0;
+        spyOn(explore.observeScreen, "execute").mockImplementation(async () =>
+          ++observeCount === 1 ? dialog : normal,
+        );
+        Reflect.set(explore, "performInteraction", async () => true);
+
+        await explore.execute({ maxInteractions: 1, timeoutMs: 5000, packageName: "com.test.app" });
+
+        expect(fakeTap.calls).toHaveLength(1);
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(0);
+        expect(await historySize()).toBe(0);
+      });
+    }
+
+    describe("validate mode replays a recorded Back", () => {
+      const completionReason = "All edges in navigation graph have been traversed";
+
+      function addBackEdge(from: string, to: string): void {
+        fakeGraph.addEdge({
+          from,
+          to,
+          edgeType: "tool",
+          timestamp: fakeTimer.now(),
+          interaction: {
+            toolName: "pressButton",
+            args: { button: "back" },
+            timestamp: fakeTimer.now(),
+          },
+        });
+      }
+
+      function setup(start: string, backLandsOn: string | null, success = true) {
+        fakeGraph.setCurrentScreenValue(start);
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        const observation = spyOn(explore.observeScreen, "execute").mockResolvedValue(
+          createMockObservation(),
+        );
+        const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async (args) => {
+          fakeGraph.setCurrentScreenValue(
+            args.elementId === "com.test:id/settings_btn" ? "B" : "C",
+          );
+          return { success: true, action: "tap", element: createMockElement() };
+        });
+        const back = spyOn(PressButton.prototype, "press").mockImplementation(async (button) => {
+          if (success) {
+            fakeGraph.setCurrentScreenValue(backLandsOn);
+            return { success: true, button, keyCode: 4 };
+          }
+          return { success: false, button, error: "keyevent rejected" };
+        });
+        return {
+          tap,
+          back,
+          restore: () => {
+            observation.mockRestore();
+            tap.mockRestore();
+            back.mockRestore();
+          },
+        };
+      }
+
+      test("presses Back, records it, and validates the screen it lands on", async () => {
+        addBackEdge("B", "A");
+        const run = setup("B", "A");
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toBe(completionReason);
+          expect(result.graphTraversal?.edgesTraversed).toBe(1);
+          expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+            success: true,
+            actualTo: "A",
+          });
+          expect(result.graphTraversal?.edgeValidationResults[0]?.skipped).toBeUndefined();
+          expect(run.back).toHaveBeenCalledTimes(1);
+          expect(run.tap).not.toHaveBeenCalled();
+          expect(fakeGraph.getMethodCallArgs("recordToolCall", 0)?.slice(0, 2)).toEqual([
+            "pressButton",
+            { button: "back" },
+          ]);
+          expect(fakeTimer.getSleepHistory()).toEqual([500]);
+        } finally {
+          run.restore();
+        }
+      });
+
+      test("validates a tap edge and then the Back edge that returns from it", async () => {
+        fakeGraph.addEdge({
+          from: "A",
+          to: "B",
+          edgeType: "tool",
+          timestamp: fakeTimer.now(),
+          interaction: { toolName: "tapOn", args: { text: "Settings" }, timestamp: 0 },
+        });
+        addBackEdge("B", "A");
+        const run = setup("A", "A");
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toBe(completionReason);
+          expect(result.graphTraversal?.edgesTraversed).toBe(2);
+          expect(result.graphTraversal?.edgeValidationResults.every((edge) => edge.success)).toBe(
+            true,
+          );
+          expect(run.tap).toHaveBeenCalledTimes(1);
+          expect(run.back).toHaveBeenCalledTimes(1);
+          expect(Reflect.get(explore, "consecutiveBackCount")).toBe(0);
+        } finally {
+          run.restore();
+        }
+      });
+
+      test("reports divergence when Back lands on a different screen than the recorded one", async () => {
+        addBackEdge("B", "A");
+        const run = setup("B", "Elsewhere");
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toContain('Expected to reach "A", but reached "Elsewhere"');
+          expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+            success: false,
+            actualTo: "Elsewhere",
+          });
+        } finally {
+          run.restore();
+        }
+      });
+
+      test("a Back that cannot be pressed fails the edge instead of skipping it", async () => {
+        addBackEdge("B", "A");
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const run = setup("B", null, false);
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toContain("Back press failed for edge B->A");
+          expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+            success: false,
+            error: "Back press failed",
+          });
+          expect(result.graphTraversal?.edgeValidationResults[0]?.skipped).toBeUndefined();
+        } finally {
+          run.restore();
+          warn.mockRestore();
+        }
+      });
+    });
+  });
+
   describe("periodic reset to home", () => {
     // resetToHome is gated on interactionCount, which only advances on a
     // successful interaction, so the gate must not re-fire while the count sits
@@ -2105,7 +2878,9 @@ describe("Explore", () => {
         to,
         edgeType: "tool",
         timestamp: fakeTimer.now(),
-        uiState: { selectedElements: [{ text }] },
+        interaction: { toolName: "tapOn", args: { text }, timestamp: fakeTimer.now() },
+        // Pre-action state (the active tab); validate must target the interaction, not this.
+        uiState: { selectedElements: [{ text: "Home tab" }] },
       });
     }
 
@@ -2213,6 +2988,69 @@ describe("Explore", () => {
         expect(result.graphTraversal?.edgeValidationResults[0]?.success).toBe(false);
         expect(run.backStopReasons).toEqual([]);
         expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        run.restore();
+      }
+    });
+
+    function addUnrecordedEdge(from: string, to: string): void {
+      fakeGraph.addEdge({
+        from,
+        to,
+        edgeType: "unknown",
+        timestamp: fakeTimer.now(),
+        uiState: { selectedElements: [{ text: "Settings" }] },
+      });
+    }
+
+    test("validate regression: an edge with no recorded interaction is skipped, not reported as divergence", async () => {
+      addUnrecordedEdge("A", "B");
+      addValidateEdge("A", "C", "Profile");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toBe(completionReason);
+        expect(result.stopReason).not.toContain("diverged");
+        expect(result.graphTraversal?.edgesTraversed).toBe(1);
+        const results = result.graphTraversal?.edgeValidationResults ?? [];
+        expect(results.find((edge) => edge.skipped)?.expectedTo).toBe("B");
+        expect(results.find((edge) => edge.skipped)?.error).toContain(
+          "no interaction was recorded",
+        );
+        expect(results.find((edge) => !edge.skipped)?.success).toBe(true);
+        expect(fakeGraph.getCurrentScreen()).toBe("C");
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("validate regression: a graph of only unrecorded edges completes without tapping or Back", async () => {
+      addUnrecordedEdge("A", "B");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toBe(completionReason);
+        expect(result.graphTraversal?.edgesTraversed).toBe(0);
+        expect(result.graphTraversal?.edgeValidationResults[0]?.skipped).toBe(true);
+        expect(result.graphTraversal?.edgeValidationResults[0]?.success).toBe(false);
+        expect(run.backStopReasons).toEqual([]);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("validate regression: a skipped edge does not mask a real divergence in the summary", async () => {
+      addUnrecordedEdge("A", "B");
+      addValidateEdge("A", "C", "Missing button");
+      addValidateEdge("X", "Y", "Profile");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toContain("Cannot find element matching edge A->C");
+        expect(result.stopReason).toContain("1 failed validation");
+        expect(result.stopReason).toContain("1 skipped (not replayable)");
+        expect(result.stopReason).toContain("1 remain pending");
       } finally {
         run.restore();
       }

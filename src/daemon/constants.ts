@@ -388,10 +388,13 @@ export function deleteInternalToolParams(params: Record<string, unknown>): void 
   }
 }
 
-/** Copy replayable navigation arguments, excluding request-local metadata. */
+/** Copy replayable navigation arguments, excluding request-local metadata and device routing. */
 export function stripNavigationToolParams(args: Record<string, unknown>): Record<string, unknown> {
   const clean = { ...args };
   deleteInternalToolParams(clean);
+  delete clean.platform;
+  delete clean.deviceId;
+  delete clean.device;
   for (const key of Object.keys(clean)) {
     if (key.startsWith("__") || key === "sessionUuid") {
       delete clean[key];
@@ -475,6 +478,16 @@ export const CLI_SESSION_LIVENESS_POLICY = "cli";
  * daemon restores strict liveness for that backward-compatible wire shape too.
  */
 export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
+
+/**
+ * Optional `daemon/heartbeat` parameter naming the kind of liveness owner behind the request.
+ *
+ * The external `--daemon heartbeat` keeper sends {@link CLI_KEEPER_LIVENESS_OWNER_KIND} so the
+ * daemon can tell it apart from a one-shot `--cli` proxy, whose declaration carries the same
+ * `cli` policy, token and claim (#10054). A keeper is for one-shot CLI sessions only and is
+ * refused a session a stdio/HTTP proxy owns. Absent for every proxy.
+ */
+export const CLI_KEEPER_LIVENESS_OWNER_KIND = "cli-keeper";
 
 /**
  * Default wall-clock idle timeout for a CLI-owned session (issue #6870).

@@ -1,3 +1,4 @@
+import { event as overlayEvent } from "../../helpers/overlayTestEvent";
 import { FakeTelemetryRepository as FakeRepository } from "../../fakes/FakeTelemetryRepository";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
@@ -41,6 +42,57 @@ describe("TelemetryRecorder", () => {
 
   afterEach(() => {
     NetworkState.resetInstance();
+  });
+
+  it("pushes overlay telemetry with explicit ownership and no persistence", () => {
+    recorder.setContext("unrelated-device", "unrelated-session");
+    repo.shouldThrow = true;
+    const pushed = overlayEvent(7);
+    recorder.recordOverlayEvent(
+      { deviceId: "overlay-device", sessionUuid: "overlay-session" },
+      pushed,
+    );
+    recorder.recordOverlayEvent({ deviceId: "overlay-device" }, pushed);
+    expect(pushTarget.pushedEvents).toEqual([
+      {
+        category: "overlay",
+        timestamp: 7,
+        deviceId: "overlay-device",
+        sessionId: "overlay-session",
+        data: {
+          id: "panel",
+          sequence: 7,
+          kind: "emit",
+          name: "save",
+          pages: {},
+          state: { title: "Hello" },
+        },
+      },
+      {
+        category: "overlay",
+        timestamp: 7,
+        deviceId: "overlay-device",
+        sessionId: null,
+        data: {
+          id: "panel",
+          sequence: 7,
+          kind: "emit",
+          name: "save",
+          pages: {},
+          state: { title: "Hello" },
+        },
+      },
+    ]);
+    expect(
+      [
+        repo.networkEvents,
+        repo.logEvents,
+        repo.osEvents,
+        repo.navigationEvents,
+        repo.storageEvents,
+        repo.layoutEvents,
+      ].every((events) => events.length === 0),
+    ).toBe(true);
   });
 
   it("records network event to repository with context", async () => {

@@ -460,6 +460,12 @@ export interface OverlayResult {
   error?: string | null;
   requestId?: string;
   timestamp?: number;
+  /**
+   * Warning, not a failure: after a successful show_overlay or update_overlay, the asset ids the
+   * spec references that the device has no copy of (never uploaded, or cleared since), so the
+   * host can re-upload them. Absent when nothing is missing and on devices that predate it.
+   */
+  missingAssets?: string[];
 }
 
 /**
@@ -705,6 +711,7 @@ export interface RequestLaunchIntentMessage {
 
 // =============================================================================
 // Recording Requests (no requestId on the wire)
+// Both commands are kept for wire compatibility and currently have no effect on the device.
 // =============================================================================
 
 /** `@SerialName("start_recording")` → `StartRecording` (sent without requestId) */

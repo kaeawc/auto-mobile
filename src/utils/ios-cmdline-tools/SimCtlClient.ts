@@ -16,6 +16,7 @@ import {
   type HostProcessExecutor,
 } from "../HostCommandExecutor";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
+import { DeviceAlreadyRunningError } from "../../models/DeviceAlreadyRunningError";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import {
@@ -38,6 +39,7 @@ import { compareStrictNumericVersions } from "../deviceMatcher";
 import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";
 import { fixedBackoff } from "../Backoff";
 import { DefaultSimulatorAppPresenter, type SimulatorAppPresenter } from "./SimulatorAppPresenter";
+import { SimctlCommandTimeoutError } from "./SimctlCommandTimeoutError";
 import {
   SimCtlSimulatorDeviceTypeProfiles,
   type SimulatorDeviceTypeProfile,
@@ -341,21 +343,33 @@ export interface SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise that resolves when termination is complete
    */
-  terminateApp(bundleId: string, deviceId?: string): Promise<void>;
+  terminateApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * Install an app on the simulator
    * @param appPath - Path to the .app bundle
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
+   * @param options - `timeoutMs` is the explicit bound for this install (it kills the child). Without
+   *   one, the default command budget applies only when no request signal is in scope.
    */
-  installApp(appPath: string, deviceId?: string): Promise<void>;
+  installApp(appPath: string, deviceId?: string, options?: { timeoutMs?: number }): Promise<void>;
 
   /**
    * Uninstall an app from the simulator
    * @param bundleId - The bundle identifier of the app to uninstall
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
+   * @param options - `timeoutMs` kills the child and rejects with a SimctlCommandTimeoutError;
+   *   `signal` kills it on cancellation. Without a `timeoutMs` the default command budget applies.
    */
-  uninstallApp(bundleId: string, deviceId?: string): Promise<void>;
+  uninstallApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void>;
 
   /**
    * Get the screen size of the simulator
@@ -904,7 +918,9 @@ export class SimCtlClient implements SimCtl {
           timeoutMs,
           label: "simctl command",
           timeoutError: () =>
-            (timeoutError = new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
+            (timeoutError = new SimctlCommandTimeoutError(
+              `Command timed out after ${timeoutMs}ms: ${fullCommand}`,
+            )),
           onTimeout: () => controller.abort(timeoutError),
         });
         const duration = this.timer.now() - startTime;
@@ -1082,7 +1098,11 @@ export class SimCtlClient implements SimCtl {
           )
         ).some((simulator) => simulator.deviceId === udid);
         if (simulatorStillBooted) {
-          throw new ActionableError(`iOS simulator ${udid} is already running`);
+          throw new DeviceAlreadyRunningError(
+            `iOS simulator ${udid} is already running`,
+            "ios",
+            udid,
+          );
         }
         lease.state.lastBootSucceeded = false;
         lease.state.ownerToken = undefined;
@@ -1259,7 +1279,11 @@ export class SimCtlClient implements SimCtl {
         lease.state.ownerToken = undefined;
       }
       if (lease.state.lastBootSucceeded && ownsBoot) {
-        throw new ActionableError(`iOS simulator ${udid} is already running`);
+        throw new DeviceAlreadyRunningError(
+          `iOS simulator ${udid} is already running`,
+          "ios",
+          udid,
+        );
       }
       const result = ownsBoot ? await this.runOwnedBoot(udid, operation) : await operation();
       lease.state.lastBootSucceeded = true;
@@ -2726,28 +2750,48 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise that resolves when termination is complete
    */
-  async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
+  async terminateApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Terminating app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
-      await this.executeCommandArgs(["terminate", targetDevice, bundleId]);
+      await this.executeCommandArgs(
+        ["terminate", targetDevice, bundleId],
+        options?.timeoutMs,
+        options?.signal,
+      );
     } catch (error) {
       logger.warn(`Failed to terminate iOS app ${bundleId}: ${error}`);
       throw error;
     }
   }
 
-  async installApp(appPath: string, deviceId?: string): Promise<void> {
+  async installApp(
+    appPath: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number },
+  ): Promise<void> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Installing app ${appPath} on iOS simulator ${targetDevice}`);
-    await this.executeCommandArgs(["install", targetDevice, appPath]);
+    await this.executeCommandArgs(["install", targetDevice, appPath], options?.timeoutMs);
   }
 
-  async uninstallApp(bundleId: string, deviceId?: string): Promise<void> {
+  async uninstallApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
     const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Uninstalling app ${bundleId} from iOS simulator ${targetDevice}`);
-    await this.executeCommandArgs(["uninstall", targetDevice, bundleId]);
+    await this.executeCommandArgs(
+      ["uninstall", targetDevice, bundleId],
+      options?.timeoutMs,
+      options?.signal,
+    );
   }
 
   /**

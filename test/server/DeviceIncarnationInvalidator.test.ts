@@ -78,13 +78,7 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
       },
     };
     const installedApps = new FakeInstalledAppsRepository();
-    await installedApps.upsertInstalledApp(
-      ANDROID_DEVICE.deviceId,
-      0,
-      "com.example.app",
-      false,
-      123,
-    );
+    await installedApps.seedInstalledApp(ANDROID_DEVICE.deviceId, 0, "com.example.app", false, 123);
     const barrier = new FakeDbWriteBarrier();
     const calls: string[] = [];
     const markDeviceStale = installedApps.markDeviceStale.bind(installedApps);

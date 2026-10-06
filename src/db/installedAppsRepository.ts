@@ -82,9 +82,20 @@ export class InstalledAppsRepository implements InstalledAppsStore {
 
   /**
    * Patches a single (device, user, package) row from a CtrlProxy package
-   * broadcast. This verifies only the row it touches — device-wide freshness
-   * is read with {@link getCacheVerifiedAt}, which is deliberately a MINIMUM so
-   * this write cannot vouch for rows it never looked at (issue #6639).
+   * broadcast or a work-profile refresh. This verifies only the row it touches
+   * — device-wide freshness is read with {@link getCacheVerifiedAt}, which is
+   * deliberately a MINIMUM so this write cannot vouch for rows it never looked
+   * at (issue #6639).
+   *
+   * It patches an existing snapshot and never creates one (#10041). A device
+   * with no rows has no snapshot — it was never listed, or
+   * `clearOldDaemonSessions` / `clearDeviceSession` wiped it — and the only
+   * writer of a first row set is the full rebuild in `replaceInstalledApps`.
+   * Inserting into an empty row set would make one package (or one work
+   * profile's packages) pass the freshness check as the device's whole app
+   * list, so on an empty set the event is dropped and the next `listApps`
+   * rebuilds from the device. The existence check and the write are one
+   * statement, so a concurrent wipe cannot interleave between them.
    */
   async upsertInstalledApp(
     deviceId: string,
@@ -105,7 +116,33 @@ export class InstalledAppsRepository implements InstalledAppsStore {
 
     await db
       .insertInto("installed_apps")
-      .values(row)
+      .columns([
+        "device_id",
+        "user_id",
+        "package_name",
+        "is_system",
+        "installed_at",
+        "last_verified_at",
+      ])
+      .expression((eb) =>
+        db
+          .selectNoFrom([
+            eb.val(row.device_id).as("device_id"),
+            eb.val(row.user_id).as("user_id"),
+            eb.val(row.package_name).as("package_name"),
+            eb.val(row.is_system).as("is_system"),
+            eb.val(row.installed_at).as("installed_at"),
+            eb.val(row.last_verified_at).as("last_verified_at"),
+          ])
+          .where(
+            eb.exists(
+              eb
+                .selectFrom("installed_apps as existing")
+                .select("existing.package_name")
+                .where("existing.device_id", "=", deviceId),
+            ),
+          ),
+      )
       .onConflict((oc) =>
         oc.columns(["device_id", "user_id", "package_name"]).doUpdateSet({
           is_system: row.is_system,

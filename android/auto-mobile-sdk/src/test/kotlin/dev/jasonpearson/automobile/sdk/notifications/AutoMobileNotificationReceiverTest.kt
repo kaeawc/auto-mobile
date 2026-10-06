@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.notifications
 
 import dev.jasonpearson.automobile.sdk.NotificationAction
+import dev.jasonpearson.automobile.sdk.NotificationPostResult
 import kotlin.test.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -59,5 +60,12 @@ class AutoMobileNotificationReceiverTest {
     assertEquals(emptyList(), receiver.parseActions("   "))
     assertEquals(emptyList(), receiver.parseActions("{not valid json"))
     assertEquals(emptyList(), receiver.parseActions("[]"))
+  }
+
+  @Test
+  fun `resultCodeFor distinguishes full success, image-less post and failure`() {
+    assertEquals(1, receiver.resultCodeFor(NotificationPostResult.POSTED))
+    assertEquals(2, receiver.resultCodeFor(NotificationPostResult.POSTED_WITHOUT_IMAGE))
+    assertEquals(0, receiver.resultCodeFor(NotificationPostResult.FAILED))
   }
 }

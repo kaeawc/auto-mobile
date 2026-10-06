@@ -3,7 +3,13 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { readWindowManagerRotation } from "../../utils/android-cmdline-tools/readWindowManagerRotation";
 import { logger } from "../../utils/logger";
 
-function orientationFromRotation(
+/**
+ * The single definition of which WindowManager rotation value is portrait on a
+ * display: the natural orientation (`wm size` physical width > height) decides
+ * whether rotations 0/2 or 1/3 are the portrait pair. `null` (size unreadable)
+ * keeps the historical portrait-natural mapping.
+ */
+export function orientationFromRotation(
   rotation: number,
   naturalLandscape: boolean | null,
 ): "portrait" | "landscape" | null {
@@ -13,6 +19,47 @@ function orientationFromRotation(
   const naturalAxesLandscape = naturalLandscape ?? false;
   const rotatedFromNaturalAxes = rotation === 1 || rotation === 3;
   return naturalAxesLandscape === rotatedFromNaturalAxes ? "portrait" : "landscape";
+}
+
+/**
+ * The `user_rotation` value that holds `orientation` on a display with the
+ * given natural orientation; the inverse of {@link orientationFromRotation}
+ * for the unreversed rotations 0 and 1.
+ */
+export function rotationForOrientation(
+  orientation: "portrait" | "landscape",
+  naturalLandscape: boolean | null,
+): 0 | 1 {
+  return (orientation === "landscape") === (naturalLandscape ?? false) ? 0 : 1;
+}
+
+/**
+ * Whether the active display's natural (rotation 0) orientation is landscape,
+ * from `wm size`'s physical size. Returns null when the size cannot be read.
+ * Read it fresh per request: a fold or unfold changes which panel is active.
+ */
+export async function readNaturalLandscape(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<boolean | null> {
+  try {
+    const { stdout } = await adb.executeCommand(
+      "shell wm size",
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
+    // `wm size` prints `Override size:` after `Physical size:` once `wm size WxH` was applied;
+    // the override is the size rotation 0 actually presents, so it wins when present.
+    const size =
+      stdout.match(/Override size:\s*(\d+)x(\d+)/) ?? stdout.match(/Physical size:\s*(\d+)x(\d+)/);
+    return size ? Number(size[1]) > Number(size[2]) : null;
+  } catch (error) {
+    // A size probe is best effort; rotation alone still provides the prior answer.
+    logger.debug(`[OrientationReader] Failed to read natural display size: ${error}`);
+    return null;
+  }
 }
 
 export interface OrientationReader {
@@ -36,25 +83,7 @@ export class AndroidOrientationReader implements OrientationReader {
         return null;
       }
 
-      let naturalLandscape: boolean | null = null;
-      try {
-        const { stdout: sizeOutput } = await this.adb.executeCommand(
-          "shell wm size",
-          undefined,
-          undefined,
-          undefined,
-          signal,
-        );
-        // Keep this parser aligned with AxisRanges.ts's queryDisplaySize parser.
-        const size = sizeOutput.match(/Physical size:\s*(\d+)x(\d+)/);
-        if (size) {
-          naturalLandscape = Number(size[1]) > Number(size[2]);
-        }
-      } catch (error) {
-        // A size probe is best effort; rotation alone still provides the prior answer.
-        logger.debug(`[OrientationReader] Failed to read natural display size: ${error}`);
-      }
-
+      const naturalLandscape = await readNaturalLandscape(this.adb, signal);
       return orientationFromRotation(rotation, naturalLandscape);
     } catch (error) {
       logger.debug(`[OrientationReader] Failed to read Android orientation: ${error}`);

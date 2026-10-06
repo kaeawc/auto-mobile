@@ -4,10 +4,10 @@ import os from "os";
 import path from "path";
 import {
   AccessibilityAuditor,
-  findLatestScreenshotPath,
+  resolveObservationScreenshotPath,
 } from "../../../../src/features/observe/audits/AccessibilityAuditor";
-import { TEMP_SUBDIRS } from "../../../../src/utils/tempDir";
-import { screenshotFileName } from "../../../../src/utils/screenshot/screenshotFormats";
+import { InMemoryScreenshotStateStore } from "../../../../src/features/observe/screenshot/ScreenshotStateRegistry";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import type { AccessibilityAuditConfig } from "../../../../src/models/AccessibilityAudit";
@@ -19,6 +19,15 @@ function makeResult(overrides: Partial<ObserveResult> = {}): ObserveResult {
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     ...overrides,
   } as ObserveResult;
+}
+
+/** Minimal typed fields the auditor needs: an app, an (empty) hierarchy, an observation id. */
+function auditableObservation(observationId: string): Partial<ObserveResult> {
+  return {
+    observationId,
+    activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
+    viewHierarchy: { hierarchy: { node: {} } },
+  };
 }
 
 const androidDevice: BootedDevice = { deviceId: "dev-1", name: "android", platform: "android" };
@@ -99,74 +108,107 @@ describe("AccessibilityAuditor", () => {
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();
   });
+
+  test("asks the resolver for exactly this observation's screenshot", async () => {
+    const requested: string[] = [];
+    const auditor = new AccessibilityAuditor({
+      device: androidDevice,
+      getConfig: () => enabledConfig,
+      screenshotPathResolver: async (observationId) => {
+        requested.push(observationId);
+        return undefined;
+      },
+    });
+    const result = makeResult(auditableObservation("obs-B"));
+    await auditor.run(result, new NoOpPerformanceTracker());
+
+    expect(requested).toEqual(["obs-B"]);
+  });
+
+  test("skips contrast and says so when the observation has no screenshot (#10037)", async () => {
+    const auditor = new AccessibilityAuditor({
+      device: androidDevice,
+      getConfig: () => enabledConfig,
+      screenshotPathResolver: async () => undefined,
+    });
+    const result = makeResult(auditableObservation("obs-B"));
+    await auditor.run(result, new NoOpPerformanceTracker());
+
+    expect(result.accessibilityAudit?.summary.byType["insufficient-contrast"]).toBe(0);
+    expect(result.accessibilityAudit?.summary.notEvaluated).toEqual([
+      { check: "insufficient-contrast", reason: "no screenshot for this observation" },
+    ]);
+  });
+
+  test("never falls back to another capture when no resolver is wired", async () => {
+    const auditor = new AccessibilityAuditor({
+      device: androidDevice,
+      getConfig: () => enabledConfig,
+    });
+    const result = makeResult(auditableObservation("obs-B"));
+    await auditor.run(result, new NoOpPerformanceTracker());
+
+    expect(result.accessibilityAudit?.summary.notEvaluated).toHaveLength(1);
+  });
 });
 
-describe("findLatestScreenshotPath", () => {
-  let dataDir: string;
-  let screenshotDir: string;
-  let previousDataDir: string | undefined;
+describe("resolveObservationScreenshotPath", () => {
+  const deviceId = "dev-1";
+  let dir: string;
+  let store: InMemoryScreenshotStateStore;
 
   beforeEach(async () => {
-    dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "auditor-screenshots-"));
-    screenshotDir = path.join(dataDir, TEMP_SUBDIRS.SCREENSHOTS);
-    await fs.mkdir(screenshotDir, { recursive: true });
-    previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
-    process.env.AUTOMOBILE_DATA_DIR = dataDir;
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "auditor-observation-shot-"));
+    store = new InMemoryScreenshotStateStore(new FakeTimer());
   });
 
   afterEach(async () => {
-    if (previousDataDir === undefined) {
-      delete process.env.AUTOMOBILE_DATA_DIR;
-    } else {
-      process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
-    }
-    await fs.rm(dataDir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true });
   });
 
-  async function seed(name: string, mtimeSeconds: number): Promise<string> {
-    const filePath = path.join(screenshotDir, name);
+  async function seedScreenshot(name: string): Promise<string> {
+    const filePath = path.join(dir, name);
     await fs.writeFile(filePath, Buffer.alloc(8));
-    await fs.utimes(filePath, mtimeSeconds, mtimeSeconds);
     return filePath;
   }
 
-  test("finds a .jpg capture when the cache holds only CtrlProxy output", async () => {
-    const jpg = await seed("screenshot_2.jpg", 2_000);
+  function resolveFor(observationId: string): Promise<string | undefined> {
+    return resolveObservationScreenshotPath(store.getPathForObservation(deviceId, observationId));
+  }
 
-    expect(await findLatestScreenshotPath()).toBe(jpg);
+  test("returns the path recorded for the same observation", async () => {
+    const shotA = await seedScreenshot("a.jpg");
+    store.updateForObservation(deviceId, "obs-A", shotA);
+
+    expect(await resolveFor("obs-A")).toBe(shotA);
   });
 
-  test("picks the newest file by mtime across mixed .jpg/.png/.webp content", async () => {
-    await seed("screenshot_1.png", 1_000);
-    await seed("screenshot_2.webp", 2_000);
-    const newest = await seed("screenshot_3.jpg", 3_000);
+  test("does not hand observation B the device-wide capture of observation A", async () => {
+    const shotA = await seedScreenshot("a.jpg");
+    store.update(deviceId, shotA);
+    store.updateForObservation(deviceId, "obs-A", shotA);
 
-    expect(await findLatestScreenshotPath()).toBe(newest);
+    expect(await resolveFor("obs-B")).toBeUndefined();
   });
 
-  test("ignores another device's newer capture when resolving for a known device", async () => {
-    await seed(screenshotFileName(1, "device-a", "aaa", "jpg"), 1_000);
-    const ownCapture = await seed(screenshotFileName(2, "device-b", "bbb", "jpg"), 2_000);
-    await seed(screenshotFileName(3, "device-a", "ccc", "jpg"), 3_000);
+  test("returns nothing when this observation's capture failed, even with older files on disk", async () => {
+    await seedScreenshot("older-screen.jpg");
+    store.updateForObservation(deviceId, "obs-B", undefined, "screencap failed");
 
-    expect(await findLatestScreenshotPath("device-b")).toBe(ownCapture);
+    expect(await resolveFor("obs-B")).toBeUndefined();
   });
 
-  test("returns nothing when the requested device has no capture on disk", async () => {
-    await seed(screenshotFileName(3, "device-a", "ccc", "jpg"), 3_000);
+  test("returns nothing when this observation's capture was cancelled", async () => {
+    const shotA = await seedScreenshot("a.jpg");
+    store.update(deviceId, shotA);
+    store.endObservation(deviceId, "obs-B", "capture cancelled");
 
-    expect(await findLatestScreenshotPath("device-b")).toBeUndefined();
+    expect(await resolveFor("obs-B")).toBeUndefined();
   });
 
-  test("matches captures whose device id needed sanitizing for the filename", async () => {
-    const own = await seed(screenshotFileName(4, "127.0.0.1:5555", "ddd", "png"), 4_000);
+  test("returns nothing when the recorded file is gone", async () => {
+    store.updateForObservation(deviceId, "obs-B", path.join(dir, "missing.jpg"));
 
-    expect(await findLatestScreenshotPath("127.0.0.1:5555")).toBe(own);
-  });
-
-  test("does not hand a device the capture of a peer whose id sanitizes identically", async () => {
-    await seed(screenshotFileName(5, "host.name:5555", "eee", "png"), 5_000);
-
-    expect(await findLatestScreenshotPath("host-name:5555")).toBeUndefined();
+    expect(await resolveFor("obs-B")).toBeUndefined();
   });
 });

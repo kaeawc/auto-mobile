@@ -29,6 +29,8 @@ import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/Adb
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { getAbortSignal } from "../../src/utils/AbortContext";
+import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
+import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
 import {
   resetDeviceCreationGate,
   setDeviceCreationGate,
@@ -1552,6 +1554,173 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     await expect(readiness).rejects.toThrow(/preempted by teardown/);
     const teardownLease = await teardown;
     teardownLease.release();
+  });
+
+  // #10075: a launch cancelled after the emulator spawned rejects at once with the child
+  // on the error. The auto-start must confirm that child's exit before it frees the AVD
+  // lease, or the next start of the same AVD spawns a second emulator against the locks.
+  describe("cancelled Android auto-start launch", () => {
+    const AVD = "Pixel_9_Pro";
+
+    type FakeEmulatorChild = HostChildProcess & {
+      exitCode: number | null;
+      signalCode: NodeJS.Signals | null;
+    };
+
+    function fakeEmulatorChild(pid: number | undefined) {
+      const child = new EventEmitter() as FakeEmulatorChild;
+      const signals: string[] = [];
+      child.pid = pid;
+      child.exitCode = null;
+      child.signalCode = null;
+      child.kill = (signal?: NodeJS.Signals | number) => {
+        signals.push(String(signal ?? "SIGTERM"));
+        return true;
+      };
+      const exit = () => {
+        child.signalCode = "SIGKILL";
+        child.emit("exit", null, "SIGKILL");
+      };
+      return { child, signals, exit };
+    }
+
+    async function settle(): Promise<void> {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+
+    function startCancelledByAbort(childAtCancel: HostChildProcess | null) {
+      const timer = new FakeTimer();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
+      fakeAdb.setDevices([]);
+      fakeDeviceUtils.setDeviceImages("android", [{ name: AVD, platform: "android" }]);
+      fakeDeviceUtils.startDevice = async () => {
+        const signal = getAbortSignal();
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new EmulatorLaunchCancelledError(AVD, childAtCancel);
+      };
+      const manager = createTestSessionManager(buildProvider(), fakeAdbFactory, {
+        lifecycleCoordinator,
+        runnerReadinessTimer: timer,
+      });
+      const controller = new AbortController();
+      let outcome: "pending" | "rejected" = "pending";
+      const start = manager.findOrStartAndroidDevice({ signal: controller.signal }).then(
+        () => undefined,
+        (error: unknown) => {
+          outcome = "rejected";
+          return error;
+        },
+      );
+      // A following start of the same AVD: queued once this one holds the lease, and
+      // granted only when that lease is released.
+      let nextGranted = false;
+      const nextRefusals: unknown[] = [];
+      const requestNextStart = () =>
+        void lifecycleCoordinator
+          .reserve(
+            { kind: "stable", platform: "android", stableId: AVD },
+            { operation: "start", deadlineMs: 60_000 },
+          )
+          .then(
+            () => {
+              nextGranted = true;
+            },
+            (error: unknown) => {
+              nextRefusals.push(error);
+            },
+          );
+      return {
+        timer,
+        controller,
+        start,
+        outcome: () => outcome,
+        requestNextStart,
+        nextGranted: () => nextGranted,
+        nextRefusals,
+      };
+    }
+
+    test("holds the AVD lease until SIGTERM, then SIGKILL, confirms the child exited", async () => {
+      const emulator = fakeEmulatorChild(4242);
+      const t = startCancelledByAbort(emulator.child);
+      await settle();
+      t.requestNextStart();
+
+      t.controller.abort(new Error("request cancelled"));
+      await settle();
+
+      // The caller gets its rejection at once, but the lease stays held.
+      expect(t.outcome()).toBe("rejected");
+      expect(emulator.signals).toEqual(["SIGTERM"]);
+      expect(t.nextGranted()).toBe(false);
+
+      t.timer.advanceTime(1_000);
+      await settle();
+      expect(emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(t.nextGranted()).toBe(false);
+
+      emulator.exit();
+      await settle();
+      expect(t.nextGranted()).toBe(true);
+      expect(await t.start).toBeInstanceOf(EmulatorLaunchCancelledError);
+    });
+
+    test("releases the lease as soon as a SIGTERM-only exit is confirmed", async () => {
+      const emulator = fakeEmulatorChild(4242);
+      const t = startCancelledByAbort(emulator.child);
+      await settle();
+      t.requestNextStart();
+      t.controller.abort(new Error("request cancelled"));
+      await settle();
+      expect(t.nextGranted()).toBe(false);
+
+      emulator.exit();
+      await settle();
+
+      expect(emulator.signals).toEqual(["SIGTERM"]);
+      expect(t.nextGranted()).toBe(true);
+    });
+
+    test("keeps the lease for a child that survives SIGKILL until it finally exits", async () => {
+      // No pid: the survivor watch listens for `exit` only, so nothing probes a real pid.
+      const emulator = fakeEmulatorChild(undefined);
+      const t = startCancelledByAbort(emulator.child);
+      await settle();
+      t.requestNextStart();
+      t.controller.abort(new Error("request cancelled"));
+      await settle();
+
+      t.timer.advanceTime(1_000);
+      await settle();
+      t.timer.advanceTime(1_000);
+      await settle();
+      expect(emulator.signals).toEqual(["SIGTERM", "SIGKILL"]);
+      // The waiting start is refused with the unkillable-process hold, never granted.
+      expect(t.nextGranted()).toBe(false);
+      expect(String(t.nextRefusals[0])).toContain("unkillable process");
+
+      // The hold lifts only once the child is finally gone.
+      emulator.exit();
+      await settle();
+      t.requestNextStart();
+      await settle();
+      expect(t.nextGranted()).toBe(true);
+    });
+
+    test("releases the lease at once when the cancel arrived before anything spawned", async () => {
+      const t = startCancelledByAbort(null);
+      await settle();
+      t.requestNextStart();
+      t.controller.abort(new Error("request cancelled"));
+      await settle();
+
+      expect(t.outcome()).toBe("rejected");
+      expect(t.nextGranted()).toBe(true);
+    });
   });
 
   test("reserves a warm Android emulator by stable AVD name", async () => {

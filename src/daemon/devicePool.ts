@@ -1107,21 +1107,24 @@ export class DevicePool {
 
   private registerSessionReleaseHandlers(): void {
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) => {
+      release: (sessionId, reason, attempt, options) => {
         const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
           sessionId,
           reason,
           attempt,
+          options,
         );
         if (recoveryRelease) {
+          options.deviceReleaseManaged = true;
           return recoveryRelease;
         }
         const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
         if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
           return undefined;
         }
-        // A retained explicit-release fence upgrades the expiry reason, so its
-        // notification captures ownership instead of freeing the device below.
+        // This handler returns the device after the attempt, including when a
+        // retained terminal fence upgrades the expiry's diagnostic reason.
+        options.deviceReleaseManaged = true;
         let releasedDeviceId: string | null = null;
         return releaseSessionAndDevice(
           this.sessionManager,
@@ -1143,9 +1146,10 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // connection ownership and autolock metadata are removed when their session
     // ends.
-    this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
       this.clearMcpSessionOwnership(sessionId);
-      if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
+      // An expiry handler that owns the ordered release consumes its capture after the attempt.
+      if (options.expiryOrigin && !options.deviceReleaseManaged) {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
         this.captureReleasedDevice(sessionId, deviceId);

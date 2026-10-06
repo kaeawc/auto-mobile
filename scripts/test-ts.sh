@@ -817,53 +817,78 @@ case "$mode" in
       echo "No unit test paths were selected." >&2
       exit 2
     fi
-    # Four shards (#10213): under --isolate each process's RSS grows ~7.5 MB per
-    # test file, so two ~870-file shards peaked near 9 GB each on a 16 GB runner.
-    # Four ~220-file shards keep each process small and use all four vCPUs. The
-    # wall-clock budget below applies to each shard process, not their sum.
-    coverage_shards="${AUTOMOBILE_COVERAGE_SHARDS:-4}"
+    # Chunked coverage (#10213). Under --isolate one `bun test --coverage` process
+    # pays isolate overhead that grows with its age: RSS rises ~10 MB per file
+    # (4-5 GB by file ~330, ~9 GB by file ~870) and the last files of a process
+    # cost seconds each. More concurrent processes do not help: four shards of
+    # one process each exhausted a 16.8 GB runner by ~200 s, stalled every shard
+    # together on swap and ran past the budget. So concurrency stays low (2
+    # shard processes, within the cores - 1 rule above) and each shard recycles
+    # its Bun process every AUTOMOBILE_COVERAGE_CHUNK_FILES files, the way the
+    # unit lane's AUTOMOBILE_UNIT_TEST_CHUNK_FILES does. 50 files peaked at
+    # 1.25-1.45 GB per process (100 files: 2.1-2.3 GB, one 222-file process:
+    # 3.1 GB) on a 444-file sample, and ran faster. Each chunk writes its own
+    # lcov/JUnit; they are merged below. The wall-clock budget bounds each
+    # shard's whole chunk sequence, not a single chunk.
+    coverage_shards="${AUTOMOBILE_COVERAGE_SHARDS:-2}"
+    coverage_chunk_files="${AUTOMOBILE_COVERAGE_CHUNK_FILES-50}"
     validate_positive_integer "AUTOMOBILE_COVERAGE_SHARDS" "$coverage_shards"
+    validate_positive_integer "AUTOMOBILE_COVERAGE_CHUNK_FILES" "$coverage_chunk_files"
     if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
       validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
         "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
     fi
+    coverage_files=()
+    if [[ "${#unit_test_paths[@]}" -gt 0 ]]; then
+      coverage_files=("${unit_test_paths[@]}")
+    else
+      while IFS= read -r file; do
+        coverage_files+=("$file")
+      done < <(discover_unit_test_files)
+    fi
+    if [[ "${#coverage_files[@]}" -eq 0 ]]; then
+      echo "No unit test files discovered" >&2
+      exit 1
+    fi
+    if [[ "$coverage_shards" -gt "${#coverage_files[@]}" ]]; then
+      coverage_shards="${#coverage_files[@]}"
+    fi
+    # Everything but the per-chunk --config/--reporter flags, which the chunker adds.
+    coverage_prefix=(
+      "${unit_args[@]}"
+      --coverage --coverage-reporter=lcov
+      "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    )
+    if [[ "$runner_os" != "Windows" ]]; then
+      # Per-file start/end events with RSS, appended to one timing log per shard
+      # (every chunk of the shard) so the coverage artifact ties a stall to
+      # memory. The probe only appends to a file.
+      coverage_prefix+=(--preload "$ROOT/test/setup/fileTimingProbe.ts")
+    fi
     if [[ "${TEST_TS_PRINT_CMD:-}" != "1" ]]; then
       rm -rf coverage
       mkdir -p coverage/shards
-      for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-        bun scripts/lib/write-coverage-bunfig.ts \
-          "coverage/shards/shard-${coverage_shard}.toml" \
-          "coverage/shards/shard-${coverage_shard}"
-      done
     fi
     coverage_pids=()
-    coverage_lcov_files=()
-    coverage_junit_files=()
     for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-      coverage_dir="coverage/shards/shard-${coverage_shard}"
-      coverage_junit="coverage/shards/shard-${coverage_shard}.xml"
-      coverage_config="coverage/shards/shard-${coverage_shard}.toml"
-      coverage_args=(
-        bun "--config=${coverage_config}" "${unit_args[@]:1}"
-        --coverage --coverage-reporter=lcov
-        --reporter junit --reporter-outfile "$coverage_junit"
-        "--shard=${coverage_shard}/${coverage_shards}"
-        "${unit_test_paths[@]+"${unit_test_paths[@]}"}"
-        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+      # Round-robin over the sorted list: every file runs in exactly one shard
+      # and each shard sees a similar mix of directories.
+      shard_files=()
+      for ((index = coverage_shard - 1; index < ${#coverage_files[@]}; index += coverage_shards)); do
+        shard_files+=("${coverage_files[$index]}")
+      done
+      coverage_chunks=(
+        bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
+        "$coverage_chunk_files" "" "$coverage_shard"
+        "${coverage_prefix[@]}" -- "${shard_files[@]}"
       )
-      if [[ "$runner_os" != "Windows" ]]; then
-        # Per-file start/end events with RSS, written beside the shard log so the
-        # coverage artifact ties a stall to memory. The probe only appends to a file.
-        coverage_args+=(--preload "$ROOT/test/setup/fileTimingProbe.ts")
-      fi
-      coverage_lcov_files+=("${coverage_dir}/lcov.info")
-      coverage_junit_files+=("$coverage_junit")
       if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
-        printf '%q ' "${coverage_args[@]}"
+        printf '%q ' "${coverage_chunks[@]}"
         printf '\n'
         continue
       fi
       (
+        export AUTOMOBILE_CHUNK_COVERAGE_ROOT="coverage/shards"
         if [[ "$runner_os" != "Windows" ]]; then
           export AUTOMOBILE_TEST_TIMING_LOG="coverage/shards/timing-shard-${coverage_shard}.ndjson"
           export AUTOMOBILE_WATCHDOG_TIMING_LOG="$AUTOMOBILE_TEST_TIMING_LOG"
@@ -872,9 +897,9 @@ case "$mode" in
         if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
           # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
           source "$ROOT/scripts/ios/run_with_timeout.sh"
-          run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "${coverage_args[@]}"
+          run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "${coverage_chunks[@]}"
         else
-          "${coverage_args[@]}"
+          "${coverage_chunks[@]}"
         fi
       ) > "coverage/shards/shard-${coverage_shard}.log" 2>&1 3>&- &
       coverage_pids+=("$!")
@@ -899,10 +924,23 @@ case "$mode" in
       command cat "coverage/shards/shard-${coverage_shard}.log"
     done
     if [[ "$coverage_status" -ne 0 ]]; then exit "$coverage_status"; fi
+    coverage_lcov_files=()
+    coverage_junit_files=()
     for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
-      bash scripts/ci/verify-ts-coverage-output.sh "coverage/shards/shard-${coverage_shard}"
+      coverage_manifest="coverage/shards/shard-${coverage_shard}.chunks"
+      if [[ ! -f "$coverage_manifest" ]]; then
+        echo "FAIL: coverage shard ${coverage_shard}/${coverage_shards} wrote no chunk manifest" >&2
+        exit 1
+      fi
+      coverage_chunk_total="$(< "$coverage_manifest")"
+      for ((coverage_chunk = 1; coverage_chunk <= coverage_chunk_total; coverage_chunk += 1)); do
+        coverage_dir="coverage/shards/shard-${coverage_shard}-chunk-${coverage_chunk}"
+        bash scripts/ci/verify-ts-coverage-output.sh "$coverage_dir"
+        coverage_lcov_files+=("${coverage_dir}/lcov.info")
+        coverage_junit_files+=("${coverage_dir}.xml")
+      done
     done
-    if [[ "$coverage_shards" -eq 1 ]]; then
+    if [[ "${#coverage_lcov_files[@]}" -eq 1 ]]; then
       cp "${coverage_lcov_files[0]}" coverage/lcov.info
       cp "${coverage_junit_files[0]}" coverage/junit.xml
     else

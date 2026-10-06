@@ -9,8 +9,13 @@ import type { DisplaySize, ScreenGeometryTimeline } from "./ScreenGeometryTimeli
 
 /** The default display: the one the touchscreen node discovered at start is mapped to. */
 const PRIMARY_DISPLAY_ID = 0;
-/** Bounds the cross-check at stop so a slow device cannot eat the stop deadline. */
-const ROTATION_PROBE_TIMEOUT_MS = 2_000;
+/**
+ * Timeout for each adb read the tracker issues (`wm size`, and each of the two
+ * WindowManager rotation commands). Without it the adb client's 15 s default would
+ * apply to a stalled device. Stop-time reads are also raced against the recorder's
+ * overall finalisation budget.
+ */
+export const GEOMETRY_READ_TIMEOUT_MS = 1_000;
 
 /** Narrow read seam over the device for the timeline refresh; faked in tests. */
 export interface DisplayGeometryProbe {
@@ -22,8 +27,8 @@ export interface DisplayGeometryProbe {
 
 export function createAdbGeometryProbe(adb: AdbExecutor): DisplayGeometryProbe {
   return {
-    readRotation: () => readWindowManagerRotation(adb, { timeoutMs: ROTATION_PROBE_TIMEOUT_MS }),
-    readPhysicalSize: () => queryDisplaySize(adb),
+    readRotation: () => readWindowManagerRotation(adb, { timeoutMs: GEOMETRY_READ_TIMEOUT_MS }),
+    readPhysicalSize: () => queryDisplaySize(adb, { timeoutMs: GEOMETRY_READ_TIMEOUT_MS }),
   };
 }
 
@@ -60,9 +65,16 @@ export class DisplayGeometryTracker {
     this.refreshChain = this.refreshChain.then(() => this.refresh(at, rotationKnown));
   }
 
-  /** Resolves once every refresh started so far has been applied. */
-  settle(): Promise<void> {
-    return this.refreshChain;
+  /**
+   * Resolves once every refresh started so far has been applied, including a
+   * refresh a push queued while an earlier one was still being awaited.
+   */
+  async settle(): Promise<void> {
+    let chain: Promise<void>;
+    do {
+      chain = this.refreshChain;
+      await chain;
+    } while (chain !== this.refreshChain);
   }
 
   /**

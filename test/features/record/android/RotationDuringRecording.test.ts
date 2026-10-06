@@ -1,9 +1,15 @@
 import { describe, expect, mock, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DualTrackRecorder } from "../../../../src/features/record/android/DualTrackRecorder";
 import {
+  DualTrackRecorder,
+  GEOMETRY_FINALIZE_BUDGET_MS,
+  GEOMETRY_UNCONFIRMED_WARNING,
+} from "../../../../src/features/record/android/DualTrackRecorder";
+import {
+  createAdbGeometryProbe,
   DisplayGeometryTracker,
+  GEOMETRY_READ_TIMEOUT_MS,
   type DisplayGeometryProbe,
 } from "../../../../src/features/record/android/DisplayGeometryTracker";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
@@ -26,6 +32,7 @@ import type {
 } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../../fakes/FakeAdbProcess";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -54,13 +61,25 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Test", platform
 class FakeProbe implements DisplayGeometryProbe {
   rotation: number | null | Error = 0;
   size: DisplaySize | Error = PHYSICAL;
+  /** Runs at the start of every rotation read, e.g. to deliver a push mid-stop. */
+  onRotationRead?: () => void;
+  /** When set, `wm size` reads never resolve (a stalled adb). */
+  sizeStalls = false;
+  rotationStalls = false;
   async readRotation(): Promise<number | null> {
+    this.onRotationRead?.();
+    if (this.rotationStalls) {
+      return new Promise<number | null>(() => {});
+    }
     if (this.rotation instanceof Error) {
       throw this.rotation;
     }
     return this.rotation;
   }
   async readPhysicalSize(): Promise<DisplaySize> {
+    if (this.sizeStalls) {
+      return new Promise<DisplaySize>(() => {});
+    }
     if (this.size instanceof Error) {
       throw this.size;
     }
@@ -304,7 +323,8 @@ describe("DualTrackRecorder geometry timeline (#10174)", () => {
 
     const { steps, geometryWarnings } = await p.recorder.stop();
 
-    expect(steps[0].label).toBeUndefined();
+    // Nothing was pushed, so the touch cannot be proven right: it is labelled with the mismatch.
+    expect(steps[0].label).toContain("display rotation at stop (1) differs");
     expect(geometryWarnings).toEqual([
       expect.stringContaining("display rotation at stop (1) differs"),
     ]);
@@ -440,5 +460,107 @@ describe("ScreenGeometryTimeline", () => {
     timeline.apply({ rotation: 1 }, 5_000);
     timeline.apply({ rotation: 2 }, 4_000);
     expect(timeline.scalerAt(4_500).toScreenPoint(RAW.x, RAW.y)).toEqual(PORTRAIT_TAP);
+  });
+});
+
+describe("stop-time geometry finalisation is bounded and best-effort (#10181)", () => {
+  /** Let already-resolved promise chains run without advancing the fake clock. */
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  test("a stalled wm size read never loses the recording: stop returns the steps with a warning", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+    p.timer.advanceTime(2_000);
+    p.probe.sizeStalls = true;
+    rotate(p, 1);
+
+    const stopping = p.recorder.stop();
+    await flush();
+    p.timer.advanceTime(GEOMETRY_FINALIZE_BUDGET_MS);
+    const result = await stopping;
+
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0].params).toMatchObject(PORTRAIT_TAP);
+    expect(result.geometryWarnings).toEqual(expect.arrayContaining([GEOMETRY_UNCONFIRMED_WARNING]));
+  });
+
+  test("a stalled stop-time rotation read also returns the recording with the warning", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+    p.probe.rotationStalls = true;
+
+    const stopping = p.recorder.stop();
+    await flush();
+    p.timer.advanceTime(GEOMETRY_FINALIZE_BUDGET_MS);
+    const result = await stopping;
+
+    expect(result.steps).toHaveLength(1);
+    expect(result.geometryWarnings).toEqual([GEOMETRY_UNCONFIRMED_WARNING]);
+  });
+
+  test("the budget sits well under the manager's 10 s stop deadline", () => {
+    expect(GEOMETRY_FINALIZE_BUDGET_MS).toBeLessThanOrEqual(5_000);
+    expect(GEOMETRY_READ_TIMEOUT_MS).toBeLessThan(GEOMETRY_FINALIZE_BUDGET_MS);
+  });
+
+  test("a responsive device finishes at stop without the unconfirmed warning", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+
+    const result = await p.recorder.stop();
+
+    expect(result.geometryWarnings).toBeUndefined();
+  });
+
+  test("every adb read the tracker issues carries the short explicit timeout", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandResult("shell wm size", "Physical size: 1080x2400");
+    const probe = createAdbGeometryProbe(adb);
+
+    await probe.readPhysicalSize().catch(() => undefined);
+    await probe.readRotation().catch(() => undefined);
+
+    const calls = adb.getCommandCalls();
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls.every((call) => call.timeoutMs === GEOMETRY_READ_TIMEOUT_MS)).toBe(true);
+  });
+
+  test("a display push that arrives while stop is finalising still labels the tap", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+    // The device pushes inside its debounce window, after the user pressed stop.
+    p.timer.advanceTime(50);
+    p.probe.onRotationRead = () => p.source.emit(rotationChange(0));
+
+    const { steps } = await p.recorder.stop();
+
+    expect(steps[0].label).toContain(`within ${GEOMETRY_SETTLE_MS} ms of this gesture`);
+    expect(p.source.unsubscribed).toBe(1);
+  });
+
+  test("an unpushed rotation labels every step after the last known-good geometry", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+    p.timer.advanceTime(2_000);
+    rotate(p, 1);
+    p.timer.advanceTime(2_000);
+    tap(p);
+    p.timer.advanceTime(2_000);
+    // The device rotates again but the push never arrives.
+    p.probe.rotation = 2;
+    tap(p);
+
+    const { steps, geometryWarnings } = await p.recorder.stop();
+
+    expect(steps).toHaveLength(3);
+    expect(steps[0].label).toBeUndefined();
+    // The rotation-1 entry is the last known-good one: touches from it onwards are suspect.
+    expect(steps[1].label).toContain("display rotation at stop (2) differs");
+    expect(steps[2].label).toContain("display rotation at stop (2) differs");
+    expect(geometryWarnings).toEqual([expect.stringContaining("display rotation at stop (2)")]);
   });
 });

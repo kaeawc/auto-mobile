@@ -23,6 +23,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "../../action/tapAtGesture";
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 
 interface OrderedStep {
   resolved: boolean;
@@ -62,6 +63,19 @@ function buildTextCommand(text: string | null): SendKeysTextCommand {
 export const MERGE_WINDOW_MS = 750;
 
 /**
+ * One budget for everything stop does against the device: waiting for in-flight
+ * geometry refreshes plus the stop-time rotation cross-check. It is far below the
+ * manager's 10 s stop deadline (`STOP_RECORDING_TIMEOUT_MS`) so that a stalled adb
+ * read can never cost the recording: on expiry the captured steps are returned with
+ * `GEOMETRY_UNCONFIRMED_WARNING`. Each read inside also has its own shorter timeout
+ * (`GEOMETRY_READ_TIMEOUT_MS`).
+ */
+export const GEOMETRY_FINALIZE_BUDGET_MS = 3_000;
+
+export const GEOMETRY_UNCONFIRMED_WARNING =
+  "rotation/size could not be confirmed at stop; tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
+
+/**
  * Merges GestureEvents from getevent with InteractionEvents from the CtrlProxy
  * to build AutoMobile plan steps with full gesture-type and element-identity information.
  *
@@ -97,6 +111,11 @@ export class DualTrackRecorder {
 
   get stepCount(): number {
     return this.steps.length;
+  }
+
+  /** The steps captured so far; complete once `stop()` has been called, labels aside. */
+  get capturedSteps(): readonly PlanStep[] {
+    return this.steps;
   }
 
   constructor(
@@ -173,8 +192,6 @@ export class DualTrackRecorder {
 
     this.unsubscribeA11y?.();
     this.unsubscribeA11y = null;
-    this.unsubscribeDisplay?.();
-    this.unsubscribeDisplay = null;
     this.activeEmitter?.stop();
     this.activeEmitter = null;
 
@@ -186,7 +203,12 @@ export class DualTrackRecorder {
     }
     this.pendingGestures = [];
 
-    this.finalized = this.finalizeGeometry();
+    // Display pushes stay subscribed until finalisation is done: the device debounces
+    // them (100 ms), so a rotation just before stop is pushed after it.
+    this.finalized = this.finalizeGeometry().finally(() => {
+      this.unsubscribeDisplay?.();
+      this.unsubscribeDisplay = null;
+    });
     const geometryWarnings = await this.finalized;
 
     logger.debug(`[DualTrackRecorder] Stopped with ${this.steps.length} steps`);
@@ -221,16 +243,23 @@ export class DualTrackRecorder {
    * Attach a warning label to every tapAt/swipeOn step whose touch overlapped a
    * display change or ran under a geometry that could not be read, and return the
    * distinct warnings for the recording result. Runs at stop so late pushes count.
+   * Strictly best-effort: it never rejects and is bounded by
+   * `GEOMETRY_FINALIZE_BUDGET_MS`, because the steps are already captured.
    */
   private async finalizeGeometry(): Promise<string[]> {
     const geometry = this.geometry;
     if (!geometry) {
       return [];
     }
-    await geometry.settle();
+    const { mismatch, unconfirmed } = await this.confirmGeometryAtStop(geometry);
     const warnings = new Set<string>();
     for (const [step, { downAt, upAt }] of this.geometrySpans) {
       const stepWarnings = geometry.timeline.warningsFor(downAt, upAt);
+      // A rotation the device never pushed can have happened at any time after the last
+      // known-good geometry, so every touch from there on may be mapped with a stale one.
+      if (mismatch && upAt >= geometry.timeline.lastKnownGoodAt) {
+        stepWarnings.push(mismatch);
+      }
       if (stepWarnings.length > 0) {
         step.label = `Warning: ${stepWarnings.join("; ")}`;
         for (const warning of stepWarnings) {
@@ -238,11 +267,38 @@ export class DualTrackRecorder {
         }
       }
     }
-    const mismatch = await geometry.verifyAtStop();
     if (mismatch) {
       warnings.add(mismatch);
     }
+    if (unconfirmed) {
+      warnings.add(GEOMETRY_UNCONFIRMED_WARNING);
+    }
     return [...warnings];
+  }
+
+  private async confirmGeometryAtStop(
+    geometry: DisplayGeometryTracker,
+  ): Promise<{ mismatch?: string; unconfirmed: boolean }> {
+    try {
+      const mismatch = await raceWithDeadline(
+        async () => {
+          await geometry.settle();
+          return geometry.verifyAtStop();
+        },
+        {
+          timer: this.timer,
+          timeoutMs: GEOMETRY_FINALIZE_BUDGET_MS,
+          label: "Confirming display geometry at stop",
+        },
+      );
+      return { mismatch, unconfirmed: false };
+    } catch (error) {
+      logger.warn(
+        `[DualTrackRecorder] Could not confirm display geometry at stop: ${errorMessage(error)}`,
+        error,
+      );
+      return { unconfirmed: true };
+    }
   }
 
   // -------------------------------------------------------------------------

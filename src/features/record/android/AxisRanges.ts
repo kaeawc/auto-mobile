@@ -67,8 +67,13 @@ export function buildScaler(ranges: AxisRanges): CoordScaler {
  */
 export async function queryDisplaySize(
   adb: AdbExecutor,
+  options: { timeoutMs?: number } = {},
 ): Promise<{ width: number; height: number }> {
-  const { stdout } = await adb.executeCommand("shell wm size");
+  // An explicit timeout also disables the adb client's retry, so it bounds the whole read.
+  const { stdout } =
+    options.timeoutMs === undefined
+      ? await adb.executeCommand("shell wm size")
+      : await adb.executeCommand("shell wm size", options.timeoutMs, undefined, true);
   const match = stdout.match(/Physical size:\s*(\d+)x(\d+)/);
   if (!match) {
     throw new Error(`Could not parse display size from wm size output: ${stdout}`);

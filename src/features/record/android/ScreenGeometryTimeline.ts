@@ -2,11 +2,18 @@ import { buildScaler, type CoordScaler, type TimedCoordScaler } from "./AxisRang
 
 /**
  * How far either side of a gesture a reported display change makes that gesture
- * ambiguous (#10174). CtrlProxy debounces display callbacks by 100 ms before it
- * pushes them, and the push crosses a WebSocket, so a rotation is reported up to
- * a few hundred ms after it happened; a touch started in that gap is classified
- * with the previous rotation. The same window, before the gesture, covers a
- * geometry refresh that was still in flight when the touch began.
+ * ambiguous (#10174). It is a bracket built from named terms, not a measured
+ * latency: the device debounces display callbacks by `TRANSITION_DEBOUNCE_MS = 100`
+ * (`RotationProvenanceTracker.kt`), then the push is launched on the service scope,
+ * crosses the WebSocket and waits for the host event loop. 500 ms is that 100 ms
+ * debounce plus a 400 ms transport allowance; issue #9142 measured 222-361 ms
+ * touch-up to host receipt for accessibility events (debounce and WebSocket hop
+ * included), so the allowance is above that observation, but no measurement of
+ * `display_transition` pushes exists. A touch started in the gap is classified with the
+ * previous rotation. The same window, before the gesture, covers a geometry refresh
+ * that was still in flight when the touch began. A push later than this window is
+ * not labelled here; the stop-time cross-check (`DisplayGeometryTracker.verifyAtStop`)
+ * is the backstop for it.
  */
 export const GEOMETRY_SETTLE_MS = 500;
 
@@ -87,6 +94,20 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
   /** Latest rotation the timeline holds, used to cross-check at stop. */
   get currentRotation(): number {
     return this.entries[this.entries.length - 1].rotation;
+  }
+
+  /**
+   * When the latest entry free of caveats took effect (the start entry if none is).
+   * A rotation the device never pushed can have happened any time after it, so a
+   * stop-time mismatch makes touches from here on suspect.
+   */
+  get lastKnownGoodAt(): number {
+    for (let index = this.entries.length - 1; index >= 0; index--) {
+      if (this.entries[index].caveats.length === 0) {
+        return this.entries[index].reportedAt;
+      }
+    }
+    return this.entries[0].reportedAt;
   }
 
   /** A display change push arrived; the geometry refresh for it may still be in flight. */

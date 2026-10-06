@@ -33,6 +33,8 @@ class FakeRecorder {
   stopGate: Deferred<{ steps: PlanStep[]; stepCount: number }> | null = null;
   stopError: Error | null = null;
   steps: PlanStep[] = [];
+  /** What the recorder can still hand over after a failed stop. */
+  capturedSteps: PlanStep[] | undefined;
 
   get stepCount(): number {
     return 0;
@@ -211,6 +213,37 @@ describe("testRecordingManager stopping reservation", () => {
     expect((await next).recordingId).not.toBe(started.recordingId);
     await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
+    );
+  });
+
+  test("a stop that times out still returns the steps already captured, with a warning", async () => {
+    const timer = new FakeTimer();
+    const hung = new FakeRecorder();
+    hung.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    hung.capturedSteps = [capturedStep];
+    const { result: started } = await start(timer, hung);
+
+    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+    const result = await stopping;
+
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("OK");
+    expect(result.error).toContain("Stopping the recorder did not finish");
+    expect(result.error).toContain("timed out after 10000 ms");
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test("a stop that fails with nothing captured still rejects", async () => {
+    const timer = new FakeTimer();
+    const failed = new FakeRecorder();
+    failed.stopError = new Error("device disconnected");
+    failed.capturedSteps = [];
+    const { result: started } = await start(timer, failed);
+
+    await expect(stopTestRecording(started.recordingId, undefined, timer)).rejects.toThrow(
+      "Failed to stop test recording: device disconnected",
     );
   });
 

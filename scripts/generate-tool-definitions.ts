@@ -78,7 +78,10 @@ function registerAllTools(): void {
 }
 
 function getToolDefinitions(): unknown[] {
-  const toolDefinitions = ToolRegistry.getToolDefinitions({ includeUnavailable: true })
+  const toolDefinitions = ToolRegistry.getToolDefinitions({
+    includeUnavailable: true,
+    includeHidden: true,
+  })
     .slice()
     .sort((left, right) => left.name.localeCompare(right.name));
   return JSON.parse(JSON.stringify(toolDefinitions)) as unknown[];

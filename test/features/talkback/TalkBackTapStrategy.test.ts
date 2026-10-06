@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { HierarchyTalkBackDriver as FakeTalkBackNavigationDriver } from "./HierarchyTalkBackDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
-import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
+import {
+  FocusNavigationExecutor,
+  FocusNavigationUnavailableError,
+} from "../../../src/features/talkback/FocusNavigationExecutor";
 import { FocusElementMatcher } from "../../../src/features/talkback/FocusElementMatcher";
 import type { Element } from "../../../src/models/Element";
 import {
@@ -19,23 +21,21 @@ describe("TalkBackTapStrategy", () => {
   let driver: FakeTalkBackNavigationDriver;
   let fakeTimer: FakeTimer;
   let mockExecutor: FocusNavigationExecutor;
-  let mockPathCalculator: FocusPathCalculator;
   let matcher: FocusElementMatcher;
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     matcher = new FocusElementMatcher();
-    mockPathCalculator = new FocusPathCalculator(matcher);
     mockExecutor = new FocusNavigationExecutor({
       matcher,
-      pathCalculator: mockPathCalculator,
       timer: fakeTimer,
+      deviceResolver: () => ({ name: "d", deviceId: "device-1", platform: "android" }),
+      driverFactory: { createDriver: () => driver },
     });
 
     strategy = new TalkBackTapStrategy({
       matcher,
-      pathCalculator: mockPathCalculator,
       executor: mockExecutor,
       timer: fakeTimer,
     });
@@ -56,11 +56,10 @@ describe("TalkBackTapStrategy", () => {
           totalTimeMs: 1,
         });
         const focus = spyOn(driver, "requestCurrentFocus");
-        const path = spyOn(mockPathCalculator, "calculatePath");
-        spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
         const result = await strategy.executeTap("device-1", element, driver);
-        expect(path.mock.calls[0][0]).toBe(element);
         expect(focus).toHaveBeenCalled();
+        // The cursor was already on the target, so no focus request was needed.
+        expect(driver.getFocusRequestCount()).toBe(0);
         expect(result).toEqual({
           success: true,
           method: "accessibility-action",
@@ -75,6 +74,7 @@ describe("TalkBackTapStrategy", () => {
 
     test("ignores a failed focus reply even if it contains a focused element", async () => {
       const element = { "resource-id": "test:id/button" };
+      driver.setElements([element], null);
       driver.queueTraversalResult({
         elements: [element],
         focusedIndex: null,
@@ -86,46 +86,31 @@ describe("TalkBackTapStrategy", () => {
         focusedElement: element,
         totalTimeMs: 1,
       });
-      const path = spyOn(mockPathCalculator, "calculatePath").mockReturnValue(null);
-      expect(await strategy.executeTap("device-1", element, driver)).toEqual({
-        success: false,
-        method: "focus-navigation",
-        error: "Could not calculate navigation path to target element",
-        screenReaderNavigation: { reachable: false, traversalOrder: [], focusTrapDetected: false },
-      });
-      expect(path.mock.calls[0][0]).toBeNull();
-      expect(driver.getActionCount()).toBe(0);
+      const result = await strategy.executeTap("device-1", element, driver);
+      // The failed reply was not trusted, so the cursor was moved rather than assumed on target.
+      expect(driver.getFocusRequestCount()).toBe(1);
+      expect(result.screenReaderNavigation?.reachable).toBe(true);
     });
 
-    test("returns a navigation failure without activation when the executor returns false", async () => {
+    test("rejects without activation when the executor returns false", async () => {
       const element = { "resource-id": "test:id/button" };
       driver.setElements([element], 0);
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(false);
-      expect(await strategy.executeTap("device-1", element, driver)).toEqual({
-        success: false,
-        method: "focus-navigation",
-        error: "Focus navigation did not reach target element",
-        screenReaderNavigation: {
-          reachable: false,
-          traversalOrder: [element],
-          focusTrapDetected: true,
-        },
-      });
+      await expect(strategy.executeTap("device-1", element, driver)).rejects.toThrow(
+        "Focus navigation did not reach target element",
+      );
       expect(driver.getTapCount()).toBe(0);
       expect(driver.getActionCount()).toBe(0);
     });
 
-    test("preserves typed failure before traversal evidence exists", async () => {
+    test("a typed failure while reading the screen rejects instead of falling back", async () => {
       const element = { text: "Button" };
       spyOn(driver, "requestTraversalOrder").mockRejectedValue(
         new ActionableError("Service failed"),
       );
-      expect(await strategy.executeTap("device-1", element, driver)).toEqual({
-        success: false,
-        method: "focus-navigation",
-        error: "Service failed",
-        screenReaderNavigation: { reachable: false, traversalOrder: [], focusTrapDetected: false },
-      });
+      await expect(strategy.executeTap("device-1", element, driver)).rejects.toThrow(
+        "Service failed",
+      );
     });
 
     test("opt-in activation retains uncertainty after its ACTION_CLICK fallback", async () => {
@@ -177,14 +162,13 @@ describe("TalkBackTapStrategy", () => {
       expect(result.screenReaderNavigation).toMatchObject({
         reachable: true,
         focusTrapDetected: false,
-        traversalOrder: [element],
+        traversalOrder: [],
       });
       expect(navigateToElement).toHaveBeenCalledTimes(1);
       expect(navigateToElement).toHaveBeenCalledWith(
         "device-1",
-        expect.anything(),
-        expect.anything(),
-        expect.objectContaining({ verificationInterval: 1 }),
+        expect.objectContaining({ text: "Button" }),
+        expect.objectContaining({ onFocusObserved: expect.any(Function) }),
       );
       expect(driver.doubleTapHistory).toHaveLength(1); // One-request double tap to activate
       expect(driver.getTapCount()).toBe(0);
@@ -227,71 +211,46 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getTapCount()).toBe(0);
     });
 
-    test("returns error when focus navigation fails", async () => {
+    test("returns a failed result only when navigation could not start", async () => {
       const element = {
         "resource-id": "test:id/button",
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
-
       driver.setElements([element], 0);
-
       const navigateToElement = spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
-        new ActionableError("Navigation failed"),
+        new FocusNavigationUnavailableError("Navigation unavailable"),
       );
 
       const result = await strategy.executeTap("device-1", element, driver);
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
-      expect(result.error).toContain("Navigation failed");
+      expect(result.error).toContain("Navigation unavailable");
       expect(result.screenReaderNavigation).toMatchObject({
         reachable: false,
         focusTrapDetected: false,
-        traversalOrder: [element],
+        traversalOrder: [],
       });
       expect(navigateToElement).toHaveBeenCalledTimes(1);
+      expect(driver.getTapCount()).toBe(0);
     });
 
-    test("reports a focus trap when the convergence guard stops navigation", async () => {
-      const element = {
-        "resource-id": "test:id/button",
-        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-      } as Element;
-      driver.setElements([element], 0);
-      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
-        new ActionableError("Focus navigation is not converging on the target."),
-      );
-
-      const result = await strategy.executeTap("device-1", element, driver);
-
-      expect(result.screenReaderNavigation).toMatchObject({
-        reachable: false,
-        focusTrapDetected: true,
-        traversalOrder: [element],
-      });
-    });
-
-    // isFocusTrapError classifies exactly the three navigation-failure messages
-    // the FocusNavigationExecutor can throw; any other error is NOT a focus trap.
-    // Asserted via the observable focusTrapDetected flag on the result.
     test.each([
-      ["Focus did not move after multiple swipes. Try scrolling the container.", true],
-      ["Focus navigation could not track the TalkBack cursor position. Try narrowing.", true],
-      ["Focus navigation is not converging on the target. Try scrolling.", true],
-      ["Navigation failed for an unrelated reason", false],
-    ])("maps navigation error %j to focusTrapDetected=%p", async (message, expectedTrap) => {
+      "Focus navigation is not converging on the target.",
+      "The screen changed while moving the TalkBack cursor onto the target.",
+      "Navigation failed for an unrelated reason",
+    ])("rejects instead of falling back on a navigation failure: %s", async (message) => {
       const element = {
         "resource-id": "test:id/button",
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       } as Element;
       driver.setElements([element], 0);
-      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(
-        new ActionableError(message as string),
-      );
+      spyOn(mockExecutor, "navigateToElement").mockRejectedValue(new ActionableError(message));
 
-      const result = await strategy.executeTap("device-1", element, driver);
+      await expect(strategy.executeTap("device-1", element, driver)).rejects.toThrow(message);
 
-      expect(result.screenReaderNavigation?.focusTrapDetected).toBe(expectedTrap as boolean);
+      expect(driver.getTapCount()).toBe(0);
+      expect(driver.doubleTapHistory).toEqual([]);
     });
 
     test("uses ACTION_CLICK fallback if double-tap activation fails", async () => {
@@ -441,7 +400,7 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getActionCount()).toBe(0);
     });
 
-    test("returns error when navigation path cannot be calculated", async () => {
+    test("returns a failed result when the target is absent from the traversal", async () => {
       const element = {
         "resource-id": "test:id/nonexistent",
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -462,7 +421,8 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(false);
       expect(result.method).toBe("focus-navigation");
-      expect(result.error).toBe("Could not calculate navigation path to target element");
+      expect(result.error).toContain("Target not found in the accessibility traversal");
+      expect(driver.getFocusRequestCount()).toBe(0);
     });
 
     test.each([{ elements: [] }, { elements: [{ "resource-id": "test:id/other" }] }])(
@@ -528,7 +488,10 @@ describe("TalkBackTapStrategy", () => {
         driver,
       );
 
-      expect(result.error).toBe("Could not calculate navigation path to target element");
+      expect(result.error).toBe(
+        'Target not found in the accessibility traversal (resourceId="test:id/missing"). ' +
+          "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
+      );
     });
 
     test("returns error when traversal order request fails", async () => {

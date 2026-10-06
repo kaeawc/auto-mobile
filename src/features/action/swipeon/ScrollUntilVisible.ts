@@ -318,6 +318,7 @@ export class ScrollUntilVisible {
     };
 
     const maxTime = options.lookFor!.maxTime ?? 15000;
+    const maxSwipes = options.lookFor!.maxSwipes ?? Number.POSITIVE_INFINITY;
     const startTime = this.deps.timer.now();
     let foundElement: Element | null = null;
     let scrollIteration = 0;
@@ -416,7 +417,7 @@ export class ScrollUntilVisible {
     const reverseOptions = { ...lookForOptions, speed: "slow" as const };
 
     // Scroll until element is found
-    while (this.deps.timer.now() - startTime < maxTime) {
+    while (this.deps.timer.now() - startTime < maxTime && scrollIteration < maxSwipes) {
       throwIfAborted(signal);
       scrollIteration++;
       logger.info(

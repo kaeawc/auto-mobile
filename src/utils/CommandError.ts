@@ -7,7 +7,8 @@ export interface CommandErrorFormatOptions {
   stderr?: string | Buffer;
 }
 
-const MAX_COMMAND_OUTPUT_CHARS = 4000;
+const MAX_COMMAND_OUTPUT_CHARS = 300;
+const TRUNCATED_MARKER = "...[truncated]";
 
 function textFrom(value: unknown): string {
   if (typeof value === "string") {
@@ -24,7 +25,12 @@ function outputExcerpt(value: string): string {
   if (trimmed.length <= MAX_COMMAND_OUTPUT_CHARS) {
     return trimmed;
   }
-  return `...${trimmed.slice(-MAX_COMMAND_OUTPUT_CHARS)}`;
+  return `${TRUNCATED_MARKER}${trimmed.slice(-(MAX_COMMAND_OUTPUT_CHARS - TRUNCATED_MARKER.length))}`;
+}
+
+// Short raw-error and stderr labels retain the existing diagnostic format.
+function outputLabelLimit(value: string): number {
+  return value.trim().length > MAX_COMMAND_OUTPUT_CHARS ? MAX_COMMAND_OUTPUT_CHARS : 4000;
 }
 
 function commandLine(command: string, args: string[] = []): string {
@@ -53,12 +59,15 @@ export function formatCommandError(error: unknown, options: CommandErrorFormatOp
   if (err.signal) {
     lines.push(`signal: ${err.signal}`);
   }
-  lines.push(`raw error: (last ${MAX_COMMAND_OUTPUT_CHARS} chars) ${baseMessage}`);
+  lines.push(`raw error: (last ${outputLabelLimit(errorMessage(error))} chars) ${baseMessage}`);
   if (stdout.trim().length > 0) {
-    lines.push(`stdout: (last ${MAX_COMMAND_OUTPUT_CHARS} chars)`, outputExcerpt(stdout));
+    lines.push(
+      `stdout: (last ${MAX_COMMAND_OUTPUT_CHARS} chars; ${Buffer.byteLength(stdout)} bytes${stdout.trim().length > MAX_COMMAND_OUTPUT_CHARS ? "; truncated" : ""})`,
+      outputExcerpt(stdout),
+    );
   }
   if (stderr.trim().length > 0) {
-    lines.push(`stderr: (last ${MAX_COMMAND_OUTPUT_CHARS} chars)`, outputExcerpt(stderr));
+    lines.push(`stderr: (last ${outputLabelLimit(stderr)} chars)`, outputExcerpt(stderr));
   }
 
   return lines.join("\n");

@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -1009,7 +1010,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private async accessibilityServiceState(): Promise<AccessibilityServiceState> {
-    const result = await this.adb.executeCommand("shell dumpsys accessibility");
+    const result = await this.adb.executeCommand(
+      "shell dumpsys accessibility",
+      undefined,
+      DUMPSYS_MAX_BUFFER,
+    );
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
       throw new ActionableError(diagnostic);

@@ -362,3 +362,75 @@ test("read-only lifecycle reservation query includes a waiting successor", async
   successor.release();
   expect(coordinator.isReserved(identity)).toBe(false);
 });
+
+describe("device held by an unkillable process (#9920)", () => {
+  const identity = { kind: "stable", platform: "android", stableId: "Pixel_8" } as const;
+
+  test("refuses start, provision and configure at once, naming the pid", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const owner = await coordinator.reserve(identity, { operation: "start", deadlineMs: 1_000 });
+    owner.markHeldByUnkillableProcess?.(4242);
+
+    for (const operation of ["start", "provision", "configure"] as const) {
+      await expect(coordinator.reserve(identity, { operation, deadlineMs: 1_000 })).rejects.toThrow(
+        "android device 'Pixel_8' is held by unkillable process 4242",
+      );
+    }
+    // A refused request leaves nothing queued behind the owner.
+    owner.release();
+    expect(coordinator.isReserved(identity)).toBe(false);
+  });
+
+  test("rejects start work already queued behind the owner when the hold is recorded", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const owner = await coordinator.reserve(identity, { operation: "start", deadlineMs: 1_000 });
+    const queuedStart = coordinator
+      .reserve(identity, { operation: "start", deadlineMs: 1_000 })
+      .catch((error: unknown) => error);
+    const queuedRecovery = coordinator.reserve(identity, {
+      operation: "recovery",
+      deadlineMs: 1_000,
+    });
+    await Promise.resolve();
+
+    owner.markHeldByUnkillableProcess?.(undefined);
+
+    expect(String(((await queuedStart) as Error).message)).toContain(
+      "held by unkillable process (pid unknown)",
+    );
+    // Recovery and teardown are how the hold gets cleared, so they keep waiting.
+    owner.release();
+    (await queuedRecovery).release();
+    expect(coordinator.isReserved(identity)).toBe(false);
+  });
+
+  test("lets teardown wait for the release as before", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const owner = await coordinator.reserve(identity, { operation: "start", deadlineMs: 1_000 });
+    owner.markHeldByUnkillableProcess?.(4242);
+
+    let acquired = false;
+    const teardown = coordinator
+      .reserve(identity, { operation: "teardown", deadlineMs: 1_000 })
+      .then((lease) => {
+        acquired = true;
+        return lease;
+      });
+    await Promise.resolve();
+    expect(acquired).toBe(false);
+
+    owner.release();
+    (await teardown).release();
+    expect(acquired).toBe(true);
+  });
+
+  test("ends the hold with the lease, so the next owner is not refused", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const owner = await coordinator.reserve(identity, { operation: "start", deadlineMs: 1_000 });
+    owner.markHeldByUnkillableProcess?.(4242);
+    owner.release();
+
+    const next = await coordinator.reserve(identity, { operation: "start", deadlineMs: 1_000 });
+    next.release();
+  });
+});

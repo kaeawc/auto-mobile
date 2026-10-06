@@ -636,8 +636,8 @@ export class Daemon {
         {
           cancelDeviceExecutions: (
             deviceId: string,
-            reason: string,
-            options?: { excludeExecutionId?: string },
+            reason: string | Error,
+            options?: { excludeExecutionId?: string; onlySessionUuid?: string },
           ) => this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
         },
       ),
@@ -3302,8 +3302,8 @@ export class Daemon {
 
   private async cancelAndDrainDeviceExecutions(
     deviceId: string,
-    reason: string,
-    options?: { excludeExecutionId?: string },
+    reason: string | Error,
+    options?: { excludeExecutionId?: string; onlySessionUuid?: string },
   ): Promise<number> {
     const cancelled = await executionTracker.cancelDeviceExecutions(deviceId, reason, options);
     if (cancelled === 0) {

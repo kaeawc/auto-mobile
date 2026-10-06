@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.OverlayAssetContract
 import java.io.IOException
+import java.util.concurrent.Executor
 
 /**
  * Where asset bytes live. The production implementation is a directory under the CtrlProxy cache;
@@ -46,6 +47,7 @@ enum class OverlayAssetRejection {
   COUNT_LIMIT,
   TOTAL_LIMIT,
   STORAGE_FAILURE,
+  SESSION_ENDED,
 }
 
 sealed interface OverlayAssetPutResult {
@@ -62,82 +64,208 @@ sealed interface OverlayAssetPutResult {
  * error and chooses what to remove, because silently dropping an asset a live overlay references
  * would turn into a placeholder. A rejected put, including a rejected replacement, leaves every
  * existing asset untouched. Bytes are never logged.
+ *
+ * The store monitor guards bookkeeping only and is never held across file I/O, so a main-thread
+ * [clear] or [lookup] never waits on a multi-megabyte write. A put validates and reserves under the
+ * monitor, writes outside it, then commits under it again; puts are serialized against each other
+ * so the reservation stays valid. File deletions made by [clear], [remove] and a session change go
+ * through [fileWorker], which production points at an IO executor.
+ *
+ * Assets belong to the observer [session] that uploaded them. Any operation in a later session
+ * first drops the earlier session's assets, so a reconnect that outruns the disconnect callback
+ * cannot leave leftovers counting against the caps. A put whose write finishes after a [clear] (or
+ * such a session change) discards its file and is rejected instead of resurrecting an asset the
+ * session no longer owns.
  */
 class OverlayAssetStore(
   private val files: OverlayAssetFiles,
   val limits: OverlayAssetLimits = OverlayAssetLimits(),
+  private val session: () -> Int = { 0 },
+  private val fileWorker: Executor = Executor { it.run() },
 ) {
   private class Entry(val info: OverlayAssetInfo, val fileName: String)
+
+  /** Either a slot to write into or the rejection that explains why there is none. */
+  private class Reservation(
+    val generation: Long,
+    val fileName: String,
+    val info: OverlayAssetInfo,
+    val rejection: OverlayAssetPutResult.Rejected? = null,
+  )
 
   private val entries = LinkedHashMap<String, Entry>()
   private var totalBytes = 0L
   private var nextFile = 0L
 
+  // Bumped by every clear so an in-flight put can tell its reservation was cancelled.
+  private var generation = 0L
+  private var ownerSession = session()
+
+  // Serializes puts and the one-time orphan purge; never taken by clear, lookup or read.
+  private val putLock = Any()
+  private var orphansPurged = false
+
   val count: Int
-    @Synchronized get() = entries.size
+    @Synchronized
+    get() {
+      dropStaleSessionLocked()
+      return entries.size
+    }
 
   val totalByteCount: Long
-    @Synchronized get() = totalBytes
-
-  @Synchronized fun ids(): List<String> = entries.keys.toList()
+    @Synchronized
+    get() {
+      dropStaleSessionLocked()
+      return totalBytes
+    }
 
   @Synchronized
-  fun put(id: String, mimeType: String, bytes: ByteArray): OverlayAssetPutResult {
-    rejectionFor(id, mimeType, bytes)?.let {
-      return it
+  fun ids(): List<String> {
+    dropStaleSessionLocked()
+    return entries.keys.toList()
+  }
+
+  fun put(id: String, mimeType: String, bytes: ByteArray): OverlayAssetPutResult =
+    synchronized(putLock) {
+      purgeOrphansLocked()
+      val reservation = reserve(id, mimeType, bytes)
+      reservation.rejection ?: writeAndCommit(reservation, bytes)
     }
-    val replaced = entries[id]
-    val replacedBytes = replaced?.info?.byteCount ?: 0
-    if (replaced == null && entries.size >= limits.maxCount) {
-      return rejected(
-        OverlayAssetRejection.COUNT_LIMIT,
-        "Overlay asset limit reached (${limits.maxCount} assets); remove one first.",
-      )
+
+  @Synchronized
+  private fun reserve(id: String, mimeType: String, bytes: ByteArray): Reservation {
+    dropStaleSessionLocked()
+    val info = OverlayAssetInfo(id, mimeType, bytes.size)
+    val rejection = rejectionFor(id, mimeType, bytes) ?: limitRejection(id, bytes.size)
+    return Reservation(generation, "asset-${nextFile++}", info, rejection)
+  }
+
+  private fun limitRejection(id: String, size: Int): OverlayAssetPutResult.Rejected? {
+    val replacedBytes = entries[id]?.info?.byteCount ?: 0
+    return when {
+      entries[id] == null && entries.size >= limits.maxCount ->
+        rejected(
+          OverlayAssetRejection.COUNT_LIMIT,
+          "Overlay asset limit reached (${limits.maxCount} assets); remove one first.",
+        )
+      totalBytes - replacedBytes + size > limits.maxTotalBytes ->
+        rejected(
+          OverlayAssetRejection.TOTAL_LIMIT,
+          "Overlay asset storage full (${limits.maxTotalBytes} bytes in total); remove an asset first.",
+        )
+      else -> null
     }
-    if (totalBytes - replacedBytes + bytes.size > limits.maxTotalBytes) {
-      return rejected(
-        OverlayAssetRejection.TOTAL_LIMIT,
-        "Overlay asset storage full (${limits.maxTotalBytes} bytes in total); remove an asset first.",
-      )
-    }
-    val fileName = "asset-${nextFile++}"
+  }
+
+  private fun writeAndCommit(reservation: Reservation, bytes: ByteArray): OverlayAssetPutResult {
     try {
-      files.write(fileName, bytes)
+      files.write(reservation.fileName, bytes)
     } catch (error: IOException) {
       Log.w(TAG, "Overlay asset write failed (${bytes.size} bytes)", error)
-      files.delete(fileName)
+      discardFile(reservation.fileName)
       return rejected(OverlayAssetRejection.STORAGE_FAILURE, "Failed to store overlay asset.")
     }
-    val info = OverlayAssetInfo(id, mimeType, bytes.size)
-    entries[id] = Entry(info, fileName)
-    totalBytes += bytes.size - replacedBytes
-    replaced?.let { files.delete(it.fileName) }
+    val result = commit(reservation)
+    if (result is OverlayAssetPutResult.Rejected) discardFile(reservation.fileName)
+    return result
+  }
+
+  @Synchronized
+  private fun commit(reservation: Reservation): OverlayAssetPutResult {
+    dropStaleSessionLocked()
+    if (reservation.generation != generation) {
+      return rejected(
+        OverlayAssetRejection.SESSION_ENDED,
+        "Overlay asset session ended before the upload finished; upload it again.",
+      )
+    }
+    val info = reservation.info
+    // Re-read: a remove during the write only loosens the caps that were checked at reservation.
+    val replaced = entries[info.id]
+    entries[info.id] = Entry(info, reservation.fileName)
+    totalBytes += info.byteCount - (replaced?.info?.byteCount ?: 0)
+    replaced?.let { discardFile(it.fileName) }
     return OverlayAssetPutResult.Stored(info, replaced != null)
   }
 
   /** Idempotent: returns whether an asset was actually removed. */
   @Synchronized
   fun remove(id: String): Boolean {
+    dropStaleSessionLocked()
     val entry = entries.remove(id) ?: return false
     totalBytes -= entry.info.byteCount
-    files.delete(entry.fileName)
+    discardFile(entry.fileName)
     return true
   }
 
-  /** Drops every asset and any orphan file a previous process left behind. */
+  /**
+   * Drops every asset and cancels any put still writing. The in-memory state is reset before this
+   * returns, so a following [lookup] is already null; the files go on [fileWorker].
+   */
   @Synchronized
   fun clear() {
+    ownerSession = session()
+    dropAllLocked()
+  }
+
+  /**
+   * Service start: schedules removal of files a previous process left behind. It runs before the
+   * first put writes anything, so it can only ever see orphans.
+   */
+  fun purgeLeftovers() {
+    fileWorker.execute { synchronized(putLock) { purgeOrphansLocked() } }
+  }
+
+  private fun purgeOrphansLocked() {
+    if (orphansPurged) return
+    orphansPurged = true
+    try {
+      files.deleteAll()
+    } catch (error: RuntimeException) {
+      Log.w(TAG, "Overlay asset orphan cleanup failed", error)
+    }
+  }
+
+  private fun dropAllLocked() {
+    generation++
+    val names = entries.values.map { it.fileName }
     entries.clear()
     totalBytes = 0
-    files.deleteAll()
+    names.forEach(::discardFile)
+  }
+
+  /** A new observer session starts with an empty store; the previous session's assets are gone. */
+  private fun dropStaleSessionLocked() {
+    val current = session()
+    if (current == ownerSession) return
+    ownerSession = current
+    dropAllLocked()
+  }
+
+  private fun discardFile(name: String) {
+    fileWorker.execute {
+      try {
+        files.delete(name)
+      } catch (error: RuntimeException) {
+        Log.w(TAG, "Overlay asset file cleanup failed", error)
+      }
+    }
   }
 
   /** Renderer lookup: null means the id is unknown, which the renderer shows as a placeholder. */
-  @Synchronized fun lookup(id: String): OverlayAssetInfo? = entries[id]?.info
+  @Synchronized
+  fun lookup(id: String): OverlayAssetInfo? {
+    dropStaleSessionLocked()
+    return entries[id]?.info
+  }
 
   /** Stored bytes for [id], or null when unknown or unreadable. Call off the main thread. */
   fun read(id: String): ByteArray? {
-    val fileName = synchronized(this) { entries[id]?.fileName } ?: return null
+    val fileName =
+      synchronized(this) {
+        dropStaleSessionLocked()
+        entries[id]?.fileName
+      } ?: return null
     return try {
       files.read(fileName)
     } catch (error: IOException) {

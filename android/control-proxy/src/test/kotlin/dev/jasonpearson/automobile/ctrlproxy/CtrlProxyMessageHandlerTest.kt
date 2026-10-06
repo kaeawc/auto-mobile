@@ -542,7 +542,18 @@ class CtrlProxyMessageHandlerTest {
       """{"type":"request_action","requestId":"f1","action":"set_selection","focusedInput":true,"selectionStart":0,"selectionEnd":2}"""
     )
     assertEquals(
-      "requestFocusedInputAction" to listOf<Any?>("f1", "set_selection", 0, 2),
+      "requestFocusedInputAction" to listOf<Any?>("f1", "set_selection", 0, 2, null),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `forwards the package the caller observed with a focused-input action`() = runTest {
+    dispatch(
+      """{"type":"request_action","requestId":"f3","action":"click","focusedInput":true,"expectedPackage":"com.app"}"""
+    )
+    assertEquals(
+      "requestFocusedInputAction" to listOf<Any?>("f3", "click", null, null, "com.app"),
       lastCall,
     )
   }
@@ -551,7 +562,7 @@ class CtrlProxyMessageHandlerTest {
   fun `dispatches a focused-input click`() = runTest {
     dispatch("""{"type":"request_action","requestId":"f2","action":"click","focusedInput":true}""")
     assertEquals(
-      "requestFocusedInputAction" to listOf<Any?>("f2", "click", null, null),
+      "requestFocusedInputAction" to listOf<Any?>("f2", "click", null, null, null),
       lastCall,
     )
   }

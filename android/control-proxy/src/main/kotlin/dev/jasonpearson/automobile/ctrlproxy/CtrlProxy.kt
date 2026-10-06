@@ -2929,7 +2929,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     selectionStart: Int?,
     selectionEnd: Int?,
-  ) = performFocusedInputAction(requestId, action, selectionStart, selectionEnd)
+    expectedPackage: String?,
+  ) = performFocusedInputAction(requestId, action, selectionStart, selectionEnd, expectedPackage)
 
   override fun requestActivateAccessibilityLink(
     requestId: String?,
@@ -6093,6 +6094,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     selectionStart: Int?,
     selectionEnd: Int?,
+    expectedPackage: String?,
   ) {
     rememberedInsert = null
     val startTime = System.currentTimeMillis()
@@ -6103,12 +6105,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         Log.w(TAG, "Focused input lookup failed", e)
         null
       }
-    val error =
+    val failure =
       try {
-        focusedInputActionError(node, action, selectionStart, selectionEnd)
+        focusedInputActionFailure(node, action, selectionStart, selectionEnd, expectedPackage)
       } catch (e: Exception) {
         Log.e(TAG, "Error performing focused input action", e)
-        e.message ?: e.javaClass.simpleName
+        FocusedInputFailure(e.message ?: e.javaClass.simpleName)
       } finally {
         node?.recycle()
       }
@@ -6116,26 +6118,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       broadcastActionResult(
         requestId,
         action,
-        error == null,
-        error,
+        failure == null,
+        failure?.error,
         System.currentTimeMillis() - startTime,
+        failure?.errorCode,
       )
     }
   }
 
   /** Performs the action and returns its failure, or null when it succeeded. */
-  private fun focusedInputActionError(
+  private fun focusedInputActionFailure(
     node: AccessibilityNodeInfo?,
     action: String,
     selectionStart: Int?,
     selectionEnd: Int?,
-  ): String? {
+    expectedPackage: String?,
+  ): FocusedInputFailure? {
     val plan = planFocusedInputAction(action, selectionStart, selectionEnd)
-    if (plan is FocusedInputActionPlan.Rejected) return plan.error
+    if (plan is FocusedInputActionPlan.Rejected) return FocusedInputFailure(plan.error)
     plan as FocusedInputActionPlan.Perform
-    if (node == null) return "No focused editable node found"
-    focusedInputActionAvailability(action, plan.actionId, node.actionList?.map { it.id })?.let {
+    if (node == null) return FocusedInputFailure("No focused editable node found")
+    focusedInputScopeFailure(expectedPackage, node.packageName?.toString())?.let {
       return it
+    }
+    focusedInputActionAvailability(action, plan.actionId, node.actionList?.map { it.id })?.let {
+      return FocusedInputFailure(it)
     }
     val arguments =
       if (plan.selectionStart != null && plan.selectionEnd != null) {
@@ -6147,7 +6154,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         null
       }
     val performed = node.performAction(plan.actionId, arguments)
-    return if (performed) null else "performAction returned false"
+    return if (performed) null else FocusedInputFailure("performAction returned false")
   }
 
   /**
@@ -7494,6 +7501,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    errorCode: String? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping action result broadcast")
@@ -7508,6 +7516,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (error != null) {
             put("error", error)
+          }
+          if (errorCode != null) {
+            put("errorCode", errorCode)
           }
         }
       }

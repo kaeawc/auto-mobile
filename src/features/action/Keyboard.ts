@@ -9,6 +9,7 @@ import {
   Element,
   ElementBounds,
   KeyboardResult,
+  ViewHierarchyNode,
   ViewHierarchyResult,
 } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
@@ -27,7 +28,12 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
 import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/SkeletonProjection";
-import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/android/types";
+import {
+  FOCUS_MOVED_ERROR_CODE,
+  type A11yActionResult,
+  type AccessibilityNodeSelector,
+  type FocusedInputActionTarget,
+} from "../observe/android/types";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models/ActionableError";
@@ -131,10 +137,13 @@ export interface KeyboardOpenClient {
     perf?: undefined,
     signal?: AbortSignal,
   ): Promise<A11yActionResult>;
-  /** `click` or `set_selection` on the input-focused editable node; needs no selector. */
+  /**
+   * `click` or `set_selection` on the input-focused editable node; needs no selector. With
+   * `expectedPackage` the runner refuses (`focus_moved`) when the focused field is in another one.
+   */
   requestFocusedInputAction(
     action: "click" | "set_selection",
-    selection?: { start: number; end: number },
+    focused?: FocusedInputActionTarget,
     timeoutMs?: number,
     perf?: undefined,
     signal?: AbortSignal,
@@ -150,6 +159,7 @@ export interface KeyboardOpenClient {
 type NodeClickOutcome =
   | { kind: "unavailable" }
   | { kind: "refused" }
+  | { kind: "focusMoved"; error: string }
   | { kind: "sent" }
   | { kind: "unconfirmed"; error?: string };
 
@@ -159,12 +169,22 @@ type ShowRoute = "click" | "tap";
 const KEYBOARD_BOUNDS_NOT_SETTLED =
   " (the keyboard's bounds were still past the screen edge while it animated in, so none are reported; run keyboard detect for them)";
 
+/** The scope sent with a focused-input action; empty when the hierarchy named no package. */
+function scopeTo(expectedPackage: string | undefined): FocusedInputActionTarget {
+  return expectedPackage ? { expectedPackage } : {};
+}
+
 function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function sameSelection(a: InsertTextState, b: InsertTextState): boolean {
   return a.selectionStart === b.selectionStart && a.selectionEnd === b.selectionEnd;
+}
+
+/** The same content (the hint flag included: a hint's text is not the field's text). */
+function sameText(a: InsertTextState, b: InsertTextState): boolean {
+  return (a.text ?? null) === (b.text ?? null) && a.isShowingHintText === b.isShowingHintText;
 }
 
 function selectionRange(state: InsertTextState): string {
@@ -465,15 +485,22 @@ export class Keyboard {
 
     // Show the IME without a touch first: a coordinate tap lands inside the field
     // and moves the caret into existing text (#9942, #10152).
-    const click = await this.showWithoutTouch(focusedInput, hierarchy, signal);
+    const scope = this.observedPackage(hierarchy, focusedInput);
+    const click = await this.showWithoutTouch(focusedInput, hierarchy, scope, signal);
     // Once a click reached the device the field may already be activated (a read-only
     // picker would toggle twice), so a tap is only a fallback when no click was sent.
     if (click.kind === "unconfirmed") {
       const message = keyboardOpenIndeterminateMessage("node click", click.error);
       return { success: false, open: false, message, error: message };
     }
+    if (click.kind === "focusMoved") {
+      // Nothing was activated, and a tap at the stale coordinates would land on whatever now
+      // holds focus, so there is no fallback: the caller re-observes.
+      const message = `Keyboard was not opened: ${click.error}. Observe the screen and call keyboard open again.`;
+      return { success: false, open: false, message, error: message };
+    }
     if (click.kind === "sent") {
-      return this.finishOpen(caretBefore, "click", signal);
+      return this.finishOpen(caretBefore, "click", scope, signal);
     }
 
     const offScreen = this.offScreenTapError(focusedInput, hierarchy);
@@ -481,7 +508,7 @@ export class Keyboard {
       return { success: false, open: false, message: offScreen, error: offScreen };
     }
     await this.tapOnElement(focusedInput, signal);
-    return this.finishOpen(caretBefore, "tap", signal);
+    return this.finishOpen(caretBefore, "tap", scope, signal);
   }
 
   /**
@@ -491,10 +518,13 @@ export class Keyboard {
   private async finishOpen(
     caretBefore: InsertTextState | undefined,
     route: ShowRoute,
+    expectedPackage: string | undefined,
     signal?: AbortSignal,
   ): Promise<KeyboardResult> {
     const afterState = await this.waitForKeyboardState(true, signal);
-    const caretNote = afterState.open ? await this.reconcileCaret(caretBefore, route, signal) : "";
+    const caretNote = afterState.open
+      ? await this.reconcileCaret(caretBefore, route, expectedPackage, signal)
+      : "";
     return this.openResult(afterState, "Keyboard opened", caretNote);
   }
 
@@ -561,10 +591,13 @@ export class Keyboard {
   private async showWithoutTouch(
     element: Element,
     hierarchy: ViewHierarchyResult | null,
+    expectedPackage: string | undefined,
     signal?: AbortSignal,
   ): Promise<NodeClickOutcome> {
     const bySelector = await this.clickBySelector(element, hierarchy, signal);
-    return bySelector.kind === "unavailable" ? this.clickFocusedInput(signal) : bySelector;
+    return bySelector.kind === "unavailable"
+      ? this.clickFocusedInput(expectedPackage, signal)
+      : bySelector;
   }
 
   private async clickBySelector(
@@ -599,8 +632,15 @@ export class Keyboard {
     );
   }
 
-  /** Click the input-focused node; the runner finds it, so no selector is needed. */
-  private async clickFocusedInput(signal?: AbortSignal): Promise<NodeClickOutcome> {
+  /**
+   * Click the input-focused node; the runner finds it, so no selector is needed. The click is
+   * scoped to the package the field was observed in: focus may have moved to another app or a
+   * dialog since, and an unscoped click would activate whatever holds it now.
+   */
+  private async clickFocusedInput(
+    expectedPackage: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<NodeClickOutcome> {
     let client: KeyboardOpenClient;
     try {
       client = this.getOpenClient();
@@ -610,7 +650,14 @@ export class Keyboard {
       return { kind: "unavailable" };
     }
     const outcome = await this.dispatchNodeClick(
-      () => client.requestFocusedInputAction("click", undefined, undefined, undefined, signal),
+      () =>
+        client.requestFocusedInputAction(
+          "click",
+          scopeTo(expectedPackage),
+          undefined,
+          undefined,
+          signal,
+        ),
       signal,
     );
     // A refused focused-input click changed nothing, exactly like one that was never sent.
@@ -640,6 +687,9 @@ export class Keyboard {
       return { kind: "sent" };
     }
     logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
+    if (result.errorCode === FOCUS_MOVED_ERROR_CODE) {
+      return { kind: "focusMoved", error: result.error ?? "the focus moved to another package" };
+    }
     return unacknowledged ? { kind: "unconfirmed", error: result.error } : { kind: "refused" };
   }
 
@@ -667,8 +717,10 @@ export class Keyboard {
   private async reconcileCaret(
     before: InsertTextState | undefined,
     route: ShowRoute,
+    expectedPackage: string | undefined,
     signal?: AbortSignal,
   ): Promise<string> {
+    // A secure field reports no state, so none is read back or restored.
     if (!before) {
       return "";
     }
@@ -677,7 +729,13 @@ export class Keyboard {
       return "";
     }
     const moved = `the ${route} used to show it moved the caret from ${selectionRange(before)} to ${selectionRange(after)}`;
-    const failure = await this.restoreSelection(before, signal);
+    // An offset only means the same place in the same text: if the field was edited (or another
+    // field now holds focus) since the read, putting the old range back could select the wrong
+    // characters, so it is left alone and said so.
+    if (!sameText(before, after)) {
+      return ` (${moved}; not restored because the field's text changed since it was read)`;
+    }
+    const failure = await this.restoreSelection(before, expectedPackage, signal);
     if (failure) {
       return ` (${moved}; restoring it failed: ${failure})`;
     }
@@ -693,6 +751,7 @@ export class Keyboard {
   /** Why the selection could not be restored, or undefined once the runner accepted it. */
   private async restoreSelection(
     before: InsertTextState,
+    expectedPackage: string | undefined,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     throwIfAborted(signal);
@@ -700,7 +759,10 @@ export class Keyboard {
       const result = await awaitWhileRequestIsLive(
         this.getOpenClient().requestFocusedInputAction(
           "set_selection",
-          { start: before.selectionStart, end: before.selectionEnd },
+          {
+            selection: { start: before.selectionStart, end: before.selectionEnd },
+            ...scopeTo(expectedPackage),
+          },
           undefined,
           undefined,
           signal,
@@ -911,6 +973,45 @@ export class Keyboard {
       bounds.right > screenWidth ||
       bounds.bottom > screenHeight
     );
+  }
+
+  /**
+   * The package the focused field was observed in: its window's when the field sits in a window
+   * that names one, otherwise the foreground app's. Matched by bounds, since an `Element` does
+   * not carry its window. Undefined (no scoping, an older runner's behaviour) when neither is known.
+   */
+  private observedPackage(
+    hierarchy: ViewHierarchyResult | null,
+    field: Element,
+  ): string | undefined {
+    for (const window of hierarchy?.windows ?? []) {
+      if (!window.packageName) {
+        continue;
+      }
+      const roots = this.parser.extractWindowRootGroups({ hierarchy: {}, windows: [window] })[0];
+      if (roots?.some((root) => this.hasFocusedFieldAt(root, field.bounds))) {
+        return window.packageName;
+      }
+    }
+    return hierarchy?.packageName;
+  }
+
+  private hasFocusedFieldAt(root: ViewHierarchyNode, bounds: ElementBounds): boolean {
+    let found = false;
+    this.parser.traverseNode(root, (node: ViewHierarchyNode) => {
+      const focused = this.parser.extractNodeProperties(node).focused;
+      if (found || (focused !== "true" && focused !== true)) {
+        return;
+      }
+      const at = this.parser.parseNodeBounds(node)?.bounds;
+      found =
+        at !== undefined &&
+        at.left === bounds.left &&
+        at.top === bounds.top &&
+        at.right === bounds.right &&
+        at.bottom === bounds.bottom;
+    });
+    return found;
   }
 
   private isValidBounds(bounds: ElementBounds): boolean {

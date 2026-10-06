@@ -8,7 +8,7 @@ import {
 } from "../../../src/features/action/SendKeys";
 import {
   readIosFocusedField,
-  describeIosTypedTextMismatch,
+  judgeIosTypedText,
 } from "../../../src/features/action/IosTextReadBack";
 import {
   runWithTextRequestContext,
@@ -31,7 +31,10 @@ const iosDevice: BootedDevice = { deviceId: "ios-sim", name: "iPhone", platform:
  * focused node is rewritten to what the runner would report for the fake's modelled field. The
  * rest of the capture is untouched; only the focused field's value attributes vary.
  */
-function observationFor(fake: FakeIOSCtrlProxy): ObserveResult {
+function observationFor(
+  fake: FakeIOSCtrlProxy,
+  overrides: Record<string, unknown> = {},
+): ObserveResult {
   const hierarchy = structuredClone(iosKeyboardVisibleHierarchy);
   const parser = new DefaultElementParser();
   const attributes = fake.getFocusedTextFieldAttributes();
@@ -44,7 +47,7 @@ function observationFor(fake: FakeIOSCtrlProxy): ObserveResult {
       const target = nodeAttributes(node);
       delete target.value;
       delete target["hint-text"];
-      Object.assign(target, attributes);
+      Object.assign(target, attributes, overrides);
     });
   }
   return { timestamp: 1, viewHierarchy: hierarchy } as ObserveResult;
@@ -134,14 +137,14 @@ describe("sendKeys iOS typed-text read-back (#10167)", () => {
     }
   });
 
-  test("a replace needs only the read after typing", async () => {
+  test("a replace also reads the field before the clear, only to know which field it types into", async () => {
     const h = setup({ value: "old" });
 
     const result = await type(h, "new", "replace");
 
     expect(result).toMatchObject({ success: true, verified: true });
     expect(h.fake.getFocusedTextFieldValue()).toBe("new");
-    expect(h.reads).toHaveLength(1);
+    expect(h.reads).toHaveLength(2);
   });
 
   test("a maximum-length field that truncated the input warns that it is shorter", async () => {
@@ -209,7 +212,7 @@ describe("sendKeys iOS typed-text read-back (#10167)", () => {
         expect(result).toMatchObject({ success: true, verified: false });
         // No content warning even though the modelled field kept something else.
         expect(result.warning).toBeUndefined();
-        // An insert stops after the first read; a replace reads once after typing.
+        // Both stop after the read before typing: a secure field is never read again.
         expect(h.reads).toHaveLength(1);
         const logged = JSON.stringify([...warn.mock.calls, ...info.mock.calls]);
         expect(logged).not.toContain("hunter2");
@@ -225,7 +228,7 @@ describe("sendKeys iOS typed-text read-back (#10167)", () => {
   test("an empty field showing its placeholder is empty, so a good append verifies", async () => {
     const h = setup({ placeholder: "Email" });
     // The runner reports the placeholder as the value of an empty field.
-    expect(readIosFocusedField(observationFor(h.fake))).toEqual({
+    expect(readIosFocusedField(observationFor(h.fake))).toMatchObject({
       kind: "text",
       text: "Email",
       placeholder: "Email",
@@ -320,8 +323,8 @@ describe("sendKeys iOS typed-text read-back (#10167)", () => {
       expect(result.error).toContain("outcome is indeterminate");
       expect(result.verified).toBeUndefined();
       expect(result.warning).toBeUndefined();
-      // Insert read the field once before dispatch; nothing is read after the unconfirmed reply.
-      expect(h.reads).toHaveLength(operation === "insert" ? 1 : 0);
+      // The field was read once before dispatch; nothing is read after the unconfirmed reply.
+      expect(h.reads).toHaveLength(1);
     },
   );
 
@@ -433,6 +436,189 @@ describe("sendKeys iOS typed-text read-back (#10167)", () => {
   });
 });
 
+/** The first read is of the typed-into field; every later read is of `afterTyping`. */
+function focusMovesAfterTyping(afterTyping: (fake: FakeIOSCtrlProxy) => ObserveResult) {
+  let reads = 0;
+  return async (fake: FakeIOSCtrlProxy): Promise<ObserveResult> =>
+    ++reads === 1 ? observationFor(fake) : afterTyping(fake);
+}
+
+describe("sendKeys iOS read-back when the focus moved while typing (#10167 review)", () => {
+  const OTHER_FIELD = { "view-id": "s2-the-next-field", value: "someone-elses-draft" };
+
+  test.each<SendKeysOperation>(["insert", "replace"])(
+    "a Return that moved focus to another field is not verified, and that field is not quoted (%s)",
+    async (operation) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      try {
+        const h = setup(
+          { value: "" },
+          { observe: focusMovesAfterTyping((fake) => observationFor(fake, OTHER_FIELD)) },
+        );
+
+        const result = await type(h, "Jane\n", operation);
+
+        expect(result).toMatchObject({ success: true, verified: false });
+        expect(result.warning).toContain("was not read back");
+        expect(result.warning).toContain("focus moved to a different field");
+        expect(result.warning).not.toContain("someone-elses-draft");
+        expect(result.warning).not.toContain("holds");
+        expect(JSON.stringify([...warn.mock.calls, ...info.mock.calls])).not.toContain(
+          "someone-elses-draft",
+        );
+      } finally {
+        warn.mockRestore();
+        info.mockRestore();
+      }
+    },
+  );
+
+  test("focus that moved to a secure field is reported as moved, with no content or bullets", async () => {
+    const h = setup(
+      { value: "" },
+      {
+        observe: focusMovesAfterTyping((fake) =>
+          observationFor(fake, { "view-id": "s2-password", password: "true", value: "•••••" }),
+        ),
+      },
+    );
+
+    const result = await type(h, "jane@example.com\n");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("focus moved to a different field");
+    expect(result.warning).not.toContain("•");
+  });
+
+  test("a field that kept focus is still compared, so a real mismatch still warns", async () => {
+    const h = setup({ accept: (current, typed) => (current + typed).slice(0, 2) });
+
+    const result = await type(h, "abcd");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain('holds "ab"');
+  });
+
+  test("without a view-id the class and placeholder tell fields apart", () => {
+    const fake = new FakeIOSCtrlProxy();
+    fake.setFocusedTextField({ placeholder: "Email" });
+    const read = (overrides: Record<string, unknown>) =>
+      readIosFocusedField(observationFor(fake, { "view-id": undefined, ...overrides }));
+
+    expect(read({})).toMatchObject({ identity: "shape:UITextField|Email" });
+    expect(read({ "hint-text": "Password" })).toMatchObject({
+      identity: "shape:UITextField|Password",
+    });
+    expect(read({ "view-id": "login.email" })).toMatchObject({ identity: "view-id:login.email" });
+  });
+
+  test("a different field without a view-id is not mistaken for the typed-into one", async () => {
+    const h = setup(
+      { value: "" },
+      {
+        observe: focusMovesAfterTyping((fake) =>
+          observationFor(fake, { "view-id": undefined, "hint-text": "Last name" }),
+        ),
+      },
+    );
+    // The typed-into read carries the capture's view-id; the later one has none.
+    const result = await type(h, "Jane\n");
+
+    expect(result.warning).toContain("focus moved to a different field");
+  });
+});
+
+describe("sendKeys iOS read-back keeps what the hierarchy cannot tell undecided (#10167 review)", () => {
+  test("typing over selected text is not reported as a shortfall", async () => {
+    // selectAllText then sendKeys: the field is replaced, not appended to.
+    const h = setup({ value: "old draft", accept: (_current, typed) => typed });
+
+    const result = await type(h, "new text");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("selection is not reported");
+    expect(result.warning).not.toContain("shorter than expected");
+    expect(result.warning).not.toContain("holds");
+  });
+
+  test("typing over a selected middle part is undecided too", () => {
+    expect(
+      judgeIosTypedText({
+        typed: "X",
+        operation: "insert",
+        before: { text: "abcd" },
+        after: { text: "aXd" },
+      }),
+    ).toMatchObject({ kind: "unverifiable" });
+  });
+
+  test("a truncation that does not contain the typed text is still a mismatch", () => {
+    expect(
+      judgeIosTypedText({
+        typed: "cdef",
+        operation: "insert",
+        before: { text: "ab" },
+        after: { text: "abcd" },
+      }),
+    ).toMatchObject({ kind: "mismatch" });
+  });
+
+  test("a replace is never undecided: it clears first, so there is no selection", () => {
+    expect(
+      judgeIosTypedText({
+        typed: "new",
+        operation: "replace",
+        before: { text: "old" },
+        after: { text: "ne" },
+      }),
+    ).toMatchObject({ kind: "mismatch" });
+  });
+
+  test("a field whose real content is its placeholder text still verifies an append", async () => {
+    // The runner reports the placeholder as the value of an empty field, so "Email" is either.
+    const h = setup({ value: "Email", placeholder: "Email" });
+
+    const result = await type(h, "x");
+
+    expect(result).toMatchObject({ success: true, verified: true });
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("typing after a clipboard paste judges the append against the pasted text, even when it equals the placeholder", async () => {
+    const h = setup({ placeholder: "Email" });
+    // The clipboard tool pasted "Email" into the field (the paste fallback of #10084): the field
+    // now holds literally its placeholder text, which the hierarchy reports exactly as it reports
+    // an empty field.
+    const pasted = await h.fake.requestClipboard("paste", "Email");
+    expect(pasted.success).toBe(true);
+    h.fake.setFocusedTextField({ value: "Email", placeholder: "Email" });
+
+    const result = await type(h, "@b.c");
+
+    expect(h.fake.getFocusedTextFieldValue()).toBe("Email@b.c");
+    expect(result).toMatchObject({ success: true, verified: true });
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("a genuinely empty field still verifies an append beside its placeholder", async () => {
+    const h = setup({ placeholder: "Email" });
+
+    const result = await type(h, "x");
+
+    expect(result).toMatchObject({ success: true, verified: true });
+  });
+
+  test("a field that really holds its placeholder and lost the input still warns", async () => {
+    const h = setup({ value: "Email", placeholder: "Email", accept: (current) => current });
+
+    const result = await type(h, "x");
+
+    expect(result).toMatchObject({ success: true, verified: false });
+    expect(result.warning).toContain("did not take the input");
+  });
+});
+
 describe("iOS focused-field read", () => {
   test("reads the value and placeholder of the real captured focused field", () => {
     const observation = { timestamp: 1, viewHierarchy: iosKeyboardVisibleHierarchy };
@@ -441,6 +627,7 @@ describe("iOS focused-field read", () => {
       kind: "text",
       text: "mt8@example.com",
       placeholder: "Email",
+      identity: "view-id:s2-598fedefa9cbde41",
     });
   });
 
@@ -455,11 +642,11 @@ describe("iOS focused-field read", () => {
   test("a mismatch is described against the baseline, and a match yields nothing", () => {
     const after = { text: "ab" };
     expect(
-      describeIosTypedTextMismatch({ typed: "b", operation: "insert", before: "a", after }),
-    ).toBeUndefined();
+      judgeIosTypedText({ typed: "b", operation: "insert", before: { text: "a" }, after }),
+    ).toEqual({ kind: "match" });
     // A replace starts from empty whatever the field held before.
     expect(
-      describeIosTypedTextMismatch({ typed: "b", operation: "replace", before: "zzz", after }),
-    ).toContain("longer than expected");
+      judgeIosTypedText({ typed: "b", operation: "replace", before: { text: "zzz" }, after }),
+    ).toMatchObject({ kind: "mismatch", warning: expect.stringContaining("longer than expected") });
   });
 });

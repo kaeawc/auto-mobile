@@ -44,6 +44,33 @@ class FocusedInputActionPlannerTest {
   }
 
   @Test
+  fun `a focused field in the observed package is in scope`() {
+    assertNull(focusedInputScopeFailure("com.app", "com.app"))
+  }
+
+  @Test
+  fun `a caller that names no package is not scoped`() {
+    assertNull(focusedInputScopeFailure(null, "com.other"))
+    assertNull(focusedInputScopeFailure("", "com.other"))
+  }
+
+  @Test
+  fun `a focused field in another package is refused with the focus_moved code`() {
+    val failure = focusedInputScopeFailure("com.app", "com.other")
+
+    assertEquals(FOCUS_MOVED_ERROR_CODE, failure?.errorCode)
+    assertEquals(
+      "Focus moved: the input-focused field belongs to com.other, not com.app, so no action was performed",
+      failure?.error,
+    )
+  }
+
+  @Test
+  fun `a focused field with no package is refused rather than assumed to match`() {
+    assertEquals(FOCUS_MOVED_ERROR_CODE, focusedInputScopeFailure("com.app", null)?.errorCode)
+  }
+
+  @Test
   fun `a node that does not advertise the action is not asked to perform it`() {
     assertEquals(
       "Accessibility action is unavailable: click",

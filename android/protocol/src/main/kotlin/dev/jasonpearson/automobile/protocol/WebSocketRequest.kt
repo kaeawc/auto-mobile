@@ -306,6 +306,11 @@ data class RequestAction(
   /** Range for `set_selection` on the focused input. */
   val selectionStart: Int? = null,
   val selectionEnd: Int? = null,
+  /**
+   * With [focusedInput]: the package the caller observed the field in. The runner refuses with the
+   * `focus_moved` error code when the input-focused field belongs to another package.
+   */
+  val expectedPackage: String? = null,
 ) : WebSocketRequest()
 
 /**

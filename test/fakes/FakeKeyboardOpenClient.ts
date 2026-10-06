@@ -2,6 +2,7 @@ import type { KeyboardOpenClient } from "../../src/features/action/Keyboard";
 import type {
   A11yActionResult,
   AccessibilityNodeSelector,
+  FocusedInputActionTarget,
 } from "../../src/features/observe/android/types";
 import type { InsertTextState } from "../../src/features/observe/android/ctrlProxyProtocol";
 
@@ -10,10 +11,9 @@ export interface RecordedNodeAction {
   selector: AccessibilityNodeSelector;
 }
 
-export interface RecordedFocusedInputAction {
+export type RecordedFocusedInputAction = {
   action: "click" | "set_selection";
-  selection?: { start: number; end: number };
-}
+} & FocusedInputActionTarget;
 
 /** Scriptable CtrlProxy slice for Keyboard.open: node click plus caret reads. */
 export class FakeKeyboardOpenClient implements KeyboardOpenClient {
@@ -66,14 +66,14 @@ export class FakeKeyboardOpenClient implements KeyboardOpenClient {
 
   async requestFocusedInputAction(
     action: "click" | "set_selection",
-    selection?: { start: number; end: number },
+    focused: FocusedInputActionTarget = {},
     timeoutMs?: number,
     perf?: undefined,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
     void timeoutMs;
     void perf;
-    this.focusedInputActions.push({ action, ...(selection ? { selection } : {}) });
+    this.focusedInputActions.push({ action, ...focused });
     this.focusedInputSignals.push(signal);
     this.onFocusedInputAction?.(action);
     return action === "click" ? this.focusedClickResult : this.restoreResult;

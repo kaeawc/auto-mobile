@@ -41,6 +41,32 @@ internal fun planFocusedInputAction(
     else -> FocusedInputActionPlan.Rejected("Unsupported focused-input action: $action")
   }
 
+/** `action_result` error code for a focused-input action whose field is in another package. */
+internal const val FOCUS_MOVED_ERROR_CODE = "focus_moved"
+
+/** A failed focused-input action: the message, plus a machine-readable code when one applies. */
+internal data class FocusedInputFailure(val error: String, val errorCode: String? = null)
+
+/**
+ * Scopes a focused-input action to the package the caller observed. The runner resolves "the
+ * input-focused node" at execution time, so without this a click or caret restore lands in
+ * whichever field holds focus by then (a dialog or another app). `null` when the caller named no
+ * package (an older host) or the focused field belongs to it.
+ */
+internal fun focusedInputScopeFailure(
+  expectedPackage: String?,
+  actualPackage: String?,
+): FocusedInputFailure? =
+  if (expectedPackage.isNullOrEmpty() || expectedPackage == actualPackage) {
+    null
+  } else {
+    FocusedInputFailure(
+      "Focus moved: the input-focused field belongs to ${actualPackage ?: "an unknown package"}, " +
+        "not $expectedPackage, so no action was performed",
+      FOCUS_MOVED_ERROR_CODE,
+    )
+  }
+
 /**
  * `null` when the node advertises [actionId] (or the advertised list is unknown), otherwise the
  * failure to report. A node that does not advertise the action is not asked to perform it.

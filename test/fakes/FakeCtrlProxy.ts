@@ -14,6 +14,7 @@ import {
   AccessibilityHierarchy,
   AccessibilityNodeSelector,
 } from "../../src/features/observe/android";
+import type { FocusedInputActionTarget } from "../../src/features/observe/android/types";
 import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
 import type { OverlayAssetUpload } from "../../src/features/overlay/overlayAssets";
 import type { OverlayAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyOverlays";
@@ -47,10 +48,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     signal?: AbortSignal;
   }> = [];
 
-  private focusedInputActionHistory: Array<{
-    action: "click" | "set_selection";
-    selection?: { start: number; end: number };
-  }> = [];
+  private focusedInputActionHistory: Array<
+    { action: "click" | "set_selection" } & FocusedInputActionTarget
+  > = [];
 
   getFocusedInputActionHistory() {
     return this.focusedInputActionHistory.map((entry) => ({ ...entry }));
@@ -1024,11 +1024,11 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async requestFocusedInputAction(
     action: "click" | "set_selection",
-    selection?: { start: number; end: number },
+    focused: FocusedInputActionTarget = {},
   ): Promise<A11yActionResult> {
     await this.applyDelay("requestFocusedInputAction");
     this.checkFailure("requestFocusedInputAction");
-    this.focusedInputActionHistory.push({ action, ...(selection ? { selection } : {}) });
+    this.focusedInputActionHistory.push({ action, ...focused });
     return this.actionResult ?? { success: true, action, totalTimeMs: 100 };
   }
 

@@ -288,6 +288,7 @@ interface CtrlProxyActions {
     action: String,
     selectionStart: Int?,
     selectionEnd: Int?,
+    expectedPackage: String?,
   )
 
   fun requestActivateAccessibilityLink(

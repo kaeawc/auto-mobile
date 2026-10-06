@@ -402,6 +402,7 @@ class CtrlProxyMessageHandler(
             request.action,
             request.selectionStart,
             request.selectionEnd,
+            request.expectedPackage,
           )
         } else {
           actions.requestAction(

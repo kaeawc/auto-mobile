@@ -35,9 +35,9 @@ import {
 } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
-  describeIosTypedTextMismatch,
-  iosContentBeforeTyping,
+  iosFocusMoved,
   iosTypedTextNotVerifiedNote,
+  judgeIosTypedText,
   readIosFocusedField,
   type IosFieldRead,
 } from "./IosTextReadBack";
@@ -931,11 +931,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
-    // An append is judged against what the field held before; a replace clears first.
-    const before =
-      operation === "insert" && text.length > 0
-        ? await this.readIosField(signal, display, 0.5)
-        : undefined;
+    // The field before typing: what an append is judged against, and for both operations which
+    // field was typed into, so a later read of a different field is never compared.
+    const before = text.length > 0 ? await this.readIosField(signal, display, 0.5) : undefined;
     if (operation === "replace") {
       const clearResult = await this.textClient.clear(signal);
       if (!clearResult.success) {
@@ -984,33 +982,38 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?: AbortSignal,
     display?: string,
   ): Promise<Pick<TextActionResult, "verified" | "warning">> {
-    if (text.length === 0) {
+    if (text.length === 0 || before === undefined) {
       return {};
     }
-    if (before?.kind === "secure") {
+    if (before.kind === "secure") {
       return { verified: false };
     }
-    if (before?.kind === "unreadable") {
+    if (before.kind === "unreadable") {
       return this.iosNotVerified(`the field could not be read before typing: ${before.reason}`);
     }
     const after = await this.readIosField(signal, display, 1);
-    if (after.kind === "secure") {
-      return { verified: false };
-    }
     if (after.kind === "unreadable") {
       return this.iosNotVerified(after.reason);
     }
-    const warning = describeIosTypedTextMismatch({
-      typed: text,
-      operation,
-      before: before ? iosContentBeforeTyping(before) : "",
-      after,
-    });
-    if (warning === undefined) {
+    // Before any content or secure-field judgement: the read after typing is of whatever holds
+    // focus now, which a Return or Next key, or a field that advances itself, may have changed.
+    if (iosFocusMoved(before, after)) {
+      return this.iosNotVerified(
+        "focus moved to a different field after typing, so its content was not compared",
+      );
+    }
+    if (after.kind === "secure") {
+      return { verified: false };
+    }
+    const verdict = judgeIosTypedText({ typed: text, operation, before, after });
+    if (verdict.kind === "match") {
       return { verified: true };
     }
-    logger.warn(`[SendKeys] ${warning}`);
-    return { verified: false, warning };
+    if (verdict.kind === "unverifiable") {
+      return this.iosNotVerified(verdict.reason);
+    }
+    logger.warn(`[SendKeys] ${verdict.warning}`);
+    return { verified: false, warning: verdict.warning };
   }
 
   private iosNotVerified(reason: string): Pick<TextActionResult, "verified" | "warning"> {

@@ -105,6 +105,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     action: String,
     selectionStart: Int?,
     selectionEnd: Int?,
+    expectedPackage: String?,
   ) {}
 
   override fun requestActivateAccessibilityLink(
@@ -437,7 +438,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     action: String,
     selectionStart: Int?,
     selectionEnd: Int?,
-  ) = record("requestFocusedInputAction", requestId, action, selectionStart, selectionEnd)
+    expectedPackage: String?,
+  ) =
+    record(
+      "requestFocusedInputAction",
+      requestId,
+      action,
+      selectionStart,
+      selectionEnd,
+      expectedPackage,
+    )
 
   override fun requestActivateAccessibilityLink(
     requestId: String?,

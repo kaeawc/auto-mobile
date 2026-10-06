@@ -290,6 +290,11 @@ export interface RequestActionMessage {
   /** `set_selection` range on the focused input. */
   selectionStart?: number;
   selectionEnd?: number;
+  /**
+   * With `focusedInput`: the package the caller observed the field in. The runner refuses with
+   * the `focus_moved` error code when the focused field belongs to another package.
+   */
+  expectedPackage?: string;
 }
 
 /** `@SerialName("request_activate_accessibility_link")` → `RequestActivateAccessibilityLink` */
@@ -1128,6 +1133,7 @@ export const ctrlProxyRequests = {
     focusedInput?: boolean;
     selectionStart?: number;
     selectionEnd?: number;
+    expectedPackage?: string;
   }): RequestActionMessage {
     return {
       type: "request_action",
@@ -1138,6 +1144,7 @@ export const ctrlProxyRequests = {
       ...(args.focusedInput ? { focusedInput: true } : {}),
       ...(args.selectionStart === undefined ? {} : { selectionStart: args.selectionStart }),
       ...(args.selectionEnd === undefined ? {} : { selectionEnd: args.selectionEnd }),
+      ...(args.expectedPackage ? { expectedPackage: args.expectedPackage } : {}),
     };
   },
 

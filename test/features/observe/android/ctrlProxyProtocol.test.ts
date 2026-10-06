@@ -463,6 +463,20 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
     },
     {
       builder: "requestAction",
+      name: "focusedInput click carries the package the caller observed",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestAction({
+          requestId: "a-f3",
+          action: "click",
+          focusedInput: true,
+          expectedPackage: "com.app",
+        }),
+      ),
+      expected:
+        '{"type":"request_action","requestId":"a-f3","action":"click","focusedInput":true,"expectedPackage":"com.app"}',
+    },
+    {
+      builder: "requestAction",
       name: "resourceId omitted when undefined",
       actual: serializeCtrlProxyRequest(
         ctrlProxyRequests.requestAction({ requestId: "a-2", action: "clear_focus" }),

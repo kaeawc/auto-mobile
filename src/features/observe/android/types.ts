@@ -285,7 +285,23 @@ export type A11yActionResult = ActionTimingResult & {
   dispatched?: boolean;
   /** The runner replied, including an explicit refusal. False after a lost reply. */
   acknowledged?: boolean;
+  /** Machine-readable failure class from the runner, when it names one. */
+  errorCode?: string;
 };
+
+/** `action_result` errorCode: a focused-input action found the focus in another package. */
+export const FOCUS_MOVED_ERROR_CODE = "focus_moved";
+
+/** What a `click` or `set_selection` on the input-focused editable node is scoped to. */
+export interface FocusedInputActionTarget {
+  /** The range `set_selection` applies. */
+  selection?: { start: number; end: number };
+  /**
+   * The package the caller observed the field in. The runner refuses with `focus_moved` when the
+   * input-focused field belongs to another package; a runner that predates it ignores the field.
+   */
+  expectedPackage?: string;
+}
 
 /** Clipboard operation result from accessibility service */
 export interface A11yClipboardResult extends BaseResult {

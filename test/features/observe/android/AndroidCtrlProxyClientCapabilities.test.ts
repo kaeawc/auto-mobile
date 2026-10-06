@@ -153,7 +153,8 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     });
     try {
       await client.requestFocusedInputAction("click");
-      await client.requestFocusedInputAction("set_selection", { start: 0, end: 3 });
+      await client.requestFocusedInputAction("set_selection", { selection: { start: 0, end: 3 } });
+      await client.requestFocusedInputAction("click", { expectedPackage: "com.app" });
     } finally {
       send.mockRestore();
       await client.close();
@@ -168,7 +169,43 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
         selectionStart: 0,
         selectionEnd: 3,
       },
+      { type: "request_action", action: "click", focusedInput: true, expectedPackage: "com.app" },
     ]);
+  });
+
+  test("an action_result errorCode reaches the caller", async () => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const message = JSON.parse(String(data));
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "action_result",
+          requestId: message.requestId,
+          action: message.action,
+          success: false,
+          error: "Focus moved: the input-focused field belongs to com.other, not com.app",
+          errorCode: "focus_moved",
+          totalTimeMs: 1,
+        }),
+      );
+    });
+    try {
+      const result = await client.requestFocusedInputAction("click", {
+        expectedPackage: "com.app",
+      });
+
+      expect(result).toMatchObject({ success: false, errorCode: "focus_moved" });
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
   });
 
   test("waits for the connected handshake before reading node selector support", async function () {

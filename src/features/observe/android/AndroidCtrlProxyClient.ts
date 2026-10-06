@@ -208,6 +208,7 @@ import type {
   A11ySelectAllResult,
   A11yActionResult,
   AccessibilityNodeSelector,
+  FocusedInputActionTarget,
   A11yClipboardResult,
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
@@ -472,6 +473,7 @@ interface NodeActionTarget {
   focusedInput?: boolean;
   selectionStart?: number;
   selectionEnd?: number;
+  expectedPackage?: string;
 }
 
 interface WsInsertTextStateResultMessage extends WsRequestBase {
@@ -499,6 +501,7 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
   action: string;
+  errorCode?: string;
 }
 
 interface WsClipboardResultMessage extends WsRequestBase {
@@ -1207,7 +1210,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestFocusedInputAction(
     action: "click" | "set_selection",
-    selection?: { start: number; end: number },
+    focused?: FocusedInputActionTarget,
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
@@ -3652,14 +3655,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   async requestFocusedInputAction(
     action: "click" | "set_selection",
-    selection?: { start: number; end: number },
+    focused: FocusedInputActionTarget = {},
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
+    const { selection, expectedPackage } = focused;
     const target: NodeActionTarget = {
       focusedInput: true,
       ...(selection ? { selectionStart: selection.start, selectionEnd: selection.end } : {}),
+      ...(expectedPackage ? { expectedPackage } : {}),
     };
     return this.dispatchNodeAction(action, target, timeoutMs, perf, signal);
   }
@@ -5490,6 +5495,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         action: message.action,
         totalTimeMs: message.totalTimeMs,
         error: message.error,
+        ...(message.errorCode ? { errorCode: message.errorCode } : {}),
         perfTiming: message.perfTiming,
       })),
 

@@ -22,6 +22,7 @@ import capturedImeOpen from "../../fixtures/android-ime-window/playground-gboard
 
 const IME_WINDOW_TYPE = 2;
 const FIELD_CENTER = "shell input tap 540 1188";
+const PACKAGE = "dev.jasonpearson.automobile.playground";
 
 const device: BootedDevice = { deviceId: "emulator-5600", platform: "android", name: "emulator" };
 
@@ -121,7 +122,7 @@ describe("Keyboard open on a Compose text field with no stable selector (#10152)
 
     expect(result).toMatchObject({ success: true, open: true, message: "Keyboard opened" });
     expect(client.nodeActions).toEqual([]);
-    expect(client.focusedInputActions).toEqual([{ action: "click" }]);
+    expect(client.focusedInputActions).toEqual([{ action: "click", expectedPackage: PACKAGE }]);
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
@@ -146,8 +147,8 @@ describe("Keyboard open on a Compose text field with no stable selector (#10152)
       "Keyboard opened (the click used to show it moved the caret from 0-0 to 3-3; restored to 0-0)",
     );
     expect(client.focusedInputActions).toEqual([
-      { action: "click" },
-      { action: "set_selection", selection: { start: 0, end: 0 } },
+      { action: "click", expectedPackage: PACKAGE },
+      { action: "set_selection", selection: { start: 0, end: 0 }, expectedPackage: PACKAGE },
     ]);
     expect(client.caretReadCount).toBe(3);
   });
@@ -209,7 +210,7 @@ describe("Keyboard open on a Compose text field with no stable selector (#10152)
     const result = await open();
 
     expect(result.message).toBe("Keyboard opened");
-    expect(client.focusedInputActions).toEqual([{ action: "click" }]);
+    expect(client.focusedInputActions).toEqual([{ action: "click", expectedPackage: PACKAGE }]);
   });
 
   test("falls back to a tap at the field centre when the focused-input click is refused", async () => {
@@ -258,6 +259,162 @@ describe("Keyboard open on a Compose text field with no stable selector (#10152)
     expect(result.success).toBe(false);
     expect(result.error).toContain("Keyboard open outcome is indeterminate");
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  describe("scoping the focused-input actions to the observed package (#10152 review)", () => {
+    const focusMoved = {
+      success: false,
+      action: "click",
+      totalTimeMs: 1,
+      error:
+        "Focus moved: the input-focused field belongs to com.other, not dev.jasonpearson.automobile.playground, so no action was performed",
+      errorCode: "focus_moved",
+      dispatched: true,
+      acknowledged: true,
+    } as const;
+
+    test("a click names the package the field was observed in", async () => {
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+
+      await open();
+
+      expect(client.focusedInputActions[0]).toEqual({ action: "click", expectedPackage: PACKAGE });
+    });
+
+    test("a click the runner refuses because focus moved is not followed by a tap or a restore", async () => {
+      client.focusedClickResult = focusMoved;
+      hierarchy.setResults([closedWithFocusedComposeField()]);
+      client.queueInsertStates(caret(0), caret(3));
+
+      const result = await open();
+
+      expect(result.success).toBe(false);
+      expect(result.open).toBe(false);
+      expect(result.error).toContain("Focus moved");
+      expect(result.error).toContain("com.other");
+      expect(result.error).toContain("call keyboard open again");
+      expect(adb.getExecutedCommands()).toEqual([]);
+      expect(client.focusedInputActions).toEqual([{ action: "click", expectedPackage: PACKAGE }]);
+    });
+
+    test("a field in a window of another package is scoped to that window's package", async () => {
+      const dialog = closedWithFocusedComposeField();
+      const field = new DefaultElementFinder().findFocusedTextInput(dialog) as Element;
+      hierarchy.setResults([
+        {
+          ...dialog,
+          // The focused field lives only in a dialog window owned by another package.
+          hierarchy: { node: { $: { class: "android.widget.FrameLayout", bounds: field.bounds } } },
+          windows: [
+            {
+              id: 9,
+              type: 1,
+              packageName: "com.dialog.owner",
+              hierarchy: {
+                node: {
+                  $: { focused: "true", class: "android.widget.EditText", bounds: field.bounds },
+                },
+              },
+            },
+          ],
+        },
+        settledKeyboard(),
+      ]);
+
+      await open();
+
+      expect(client.focusedInputActions[0]).toEqual({
+        action: "click",
+        expectedPackage: "com.dialog.owner",
+      });
+    });
+
+    test("a hierarchy that names no package sends an unscoped click, as before", async () => {
+      const { packageName, ...unnamed } = closedWithFocusedComposeField();
+      void packageName;
+      hierarchy.setResults([unnamed, settledKeyboard()]);
+
+      await open();
+
+      expect(client.focusedInputActions).toEqual([{ action: "click" }]);
+    });
+
+    test("the caret restore is scoped to the same package", async () => {
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+      client.queueInsertStates(caret(0), caret(3), caret(0));
+
+      await open();
+
+      expect(client.focusedInputActions[1]).toEqual({
+        action: "set_selection",
+        selection: { start: 0, end: 0 },
+        expectedPackage: PACKAGE,
+      });
+    });
+
+    test("a restore the runner refuses because focus moved is reported as not restored", async () => {
+      client.restoreResult = { ...focusMoved, action: "set_selection" };
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+      client.queueInsertStates(caret(0), caret(3));
+
+      const result = await open();
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain(
+        "moved the caret from 0-0 to 3-3; restoring it failed: Focus moved",
+      );
+      expect(result.message).not.toContain("restored to");
+    });
+  });
+
+  describe("the caret is restored only into the text it was read from (#10152 review)", () => {
+    test("an edit between the two reads leaves the caret alone and says so", async () => {
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+      client.queueInsertStates(caret(0), { ...caret(4), text: "abcd" });
+
+      const result = await open();
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe(
+        "Keyboard opened (the click used to show it moved the caret from 0-0 to 4-4; not restored because the field's text changed since it was read)",
+      );
+      expect(client.focusedInputActions.map((call) => call.action)).toEqual(["click"]);
+      expect(client.caretReadCount).toBe(2);
+    });
+
+    test("a hint turning into text, or text into a hint, counts as a change", async () => {
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+      client.queueInsertStates(caret(0), { ...caret(3), isShowingHintText: true });
+
+      const result = await open();
+
+      expect(result.message).toContain("not restored because the field's text changed");
+      expect(client.focusedInputActions.map((call) => call.action)).toEqual(["click"]);
+    });
+
+    test("a field whose text is unreadable on both reads is the same field: still restored", async () => {
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+      client.queueInsertStates(
+        { ...caret(0), text: null },
+        { ...caret(3), text: null },
+        { ...caret(0), text: null },
+      );
+
+      const result = await open();
+
+      expect(result.message).toContain("restored to 0-0");
+    });
+
+    test("a secure field reports no state, so nothing is read back or restored", async () => {
+      hierarchy.setResults([closedWithFocusedComposeField(), settledKeyboard()]);
+      client.queueInsertStates(undefined, caret(3));
+
+      const result = await open();
+
+      expect(result.message).toBe("Keyboard opened");
+      expect(client.caretReadCount).toBe(1);
+      expect(client.focusedInputActions.map((call) => call.action)).toEqual(["click"]);
+    });
   });
 
   describe("a field whose bounds are off the screen", () => {

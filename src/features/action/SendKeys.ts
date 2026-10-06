@@ -564,7 +564,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     execution: SendKeysCommandExecution,
     restoreError: unknown,
   ): void {
-    const result = execution.results.at(-1)!;
+    // Prefer the IME-backed type whose commit needed the restore; a span whose types all
+    // resolved elsewhere still reports the failure on the last command rather than crashing.
+    const result =
+      execution.results.findLast(
+        (entry) =>
+          entry.action === "type" &&
+          (entry.resolvedMode === "ime" || entry.resolvedMode === "imeKeyEvents"),
+      ) ?? execution.results.at(-1)!;
     result.error = result.success
       ? `Text commit succeeded, but ${errorMessage(restoreError)}`
       : `${result.error ?? "Text commit failed."} ${errorMessage(restoreError)}`;
@@ -3306,15 +3313,36 @@ export class SendKeys {
     signal?: AbortSignal,
     routing: SendKeysRouting = {},
   ): Promise<SendKeysCommandExecution> {
-    const action = () => this.executeCommandLoop(commands, progress, signal, routing);
+    const results: SendKeysCommandResult[] = [];
+    const action = () =>
+      this.executeCommandLoop(commands, progress, signal, {
+        ...routing,
+        onCommandResult: (result) => {
+          results.push(result);
+          routing.onCommandResult?.(result);
+        },
+      });
     const needsImeSpan = commands.some(
       (command) =>
         command.action === "type" &&
         ["auto", "ime", "imeKeyEvents"].includes(command.mode ?? "auto"),
     );
-    return this.device.platform === "android" && needsImeSpan && this.executor.withImeSpan
-      ? this.executor.withImeSpan(action)
-      : action();
+    try {
+      return await (this.device.platform === "android" && needsImeSpan && this.executor.withImeSpan
+        ? this.executor.withImeSpan(action)
+        : action());
+    } catch (error) {
+      if (!isImeRestorationFailure(error) || isSendKeysBudgetExhausted(signal)) {
+        // Budget failures retain the delivery accounting in executeWithRequestBudget.
+        throw error;
+      }
+      logger.warn("[SendKeys] Command execution and IME restoration failed", error);
+      return {
+        results,
+        failure: { index: results.length, error: errorMessage(error) },
+        restorationFailed: true,
+      };
+    }
   }
 
   private async executeCommandLoop(

@@ -164,6 +164,107 @@ test("multi-command restore failure reports original-keyboard recovery guidance"
   }
 });
 
+test.each([["a"], ["a", "b"]])(
+  "restore failure belongs to the last IME type rather than a trailing enter key (%j)",
+  async (...texts) => {
+    const h = harness();
+    h.adb.setCommandError(restore, new Error("restore rejected"));
+    try {
+      const result = await h.action.execute([...texts.map(type), { action: "key", key: "enter" }]);
+      const failedIndex = texts.length - 1;
+      expect(result).toMatchObject({
+        success: false,
+        completedCommands: texts.length,
+        failedIndex,
+      });
+      expect(result.commands.slice(0, failedIndex).every((command) => command.success)).toBe(true);
+      expect(result.commands[failedIndex]).toMatchObject({ action: "type", success: false });
+      expect(result.commands[failedIndex].error).toContain("Text commit succeeded, but");
+      expect(result.commands[failedIndex].error).toContain(`keyboard setIme ${priorIme}`);
+      expect(result.error).toBe(result.commands[failedIndex].error);
+      expect(result.commands[texts.length]).toMatchObject({
+        action: "key",
+        key: "enter",
+        success: true,
+      });
+      expect(result.commands[texts.length].error).toBeUndefined();
+    } finally {
+      clearAndroidImeQuarantine(h.device.deviceId);
+    }
+  },
+);
+
+test("unbounded cancellation with a failed restore returns structured recovery guidance", async () => {
+  const h = harness();
+  const controller = new AbortController();
+  h.adb.setCommandError(restore, new Error("restore rejected"));
+  try {
+    const result = await runWithAbortSignal(controller.signal, () =>
+      h.action.execute(
+        [type("a"), type("b"), type("c")],
+        undefined,
+        async (index) => {
+          if (index === 2) {
+            controller.abort(new Error("cancelled between commands"));
+          }
+        },
+        controller.signal,
+      ),
+    );
+    expect(result).toMatchObject({ success: false, completedCommands: 2, failedIndex: 2 });
+    expect(result.commands).toHaveLength(2);
+    expect(result.error).toContain("cancelled between commands");
+    expect(result.error).toContain(`Could not restore the original keyboard ${priorIme}`);
+    expect(result.error).toContain(`keyboard setIme ${priorIme}`);
+    expect(h.committed).toEqual(["a", "b"]);
+    expect(h.selections()).toEqual([activate, restore]);
+    expect(
+      await withAndroidImeLock(h.device.deviceId, async () => true, undefined, {
+        allowQuarantined: true,
+      }),
+    ).toBe(true);
+  } finally {
+    clearAndroidImeQuarantine(h.device.deviceId);
+  }
+});
+
+test("sessionUnsafe inside a span skips restore, quarantines the device and releases the lock", async () => {
+  const h = harness();
+  const commit = h.client.commitViaIme;
+  h.client.commitViaIme = async (...args) =>
+    args[0] === "b"
+      ? {
+          success: false,
+          sessionUnsafe: true,
+          partialApplication: true,
+          error: "unacknowledged commit",
+        }
+      : commit(...args);
+  try {
+    const result = await h.action.execute([type("a"), type("b"), type("c")]);
+    expect(result).toMatchObject({ success: false, completedCommands: 1, failedIndex: 1 });
+    expect(result.commands).toHaveLength(2);
+    expect(h.committed).toEqual(["a"]);
+    expect(h.selections()).toEqual([activate]);
+    expect(h.adb.getExecutedCommands()).not.toContain(`shell ime disable ${AUTO_MOBILE_IME_ID}`);
+    await expect(
+      withAndroidImeLock(h.device.deviceId, async () => true, undefined, {
+        recoverQuarantined: async (snapshot) => {
+          expect(snapshot).toMatchObject({ imeId: priorIme, subtypeId: null, wasEnabled: false });
+          return false;
+        },
+      }),
+    ).rejects.toThrow("IME state is unknown after an unacknowledged cancellation");
+    expect(
+      await withAndroidImeLock(h.device.deviceId, async () => true, undefined, {
+        allowQuarantined: true,
+      }),
+    ).toBe(true);
+  } finally {
+    clearAndroidImeQuarantine(h.device.deviceId);
+  }
+});
+
 test("cancellation between commands restores once outside the request context", async () => {
   const h = harness();
   const controller = new AbortController();

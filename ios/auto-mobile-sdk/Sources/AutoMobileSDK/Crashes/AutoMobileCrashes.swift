@@ -179,7 +179,14 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         // Our handler already current (installed twice), or still linked into a later
         // reporter's chain after uninstall: keep the saved predecessor. Capturing the
         // current action as "previous" would create a handler cycle.
-        guard !isOwnSignalAction(current), table.slotState[idx] == 0 else { return }
+        guard !isOwnSignalAction(current) else { return }
+        // A slot marked linked may be stale: the later reporter that chained to us can
+        // have been removed without chaining. Nothing can reach us when the slot is empty
+        // (SIG_DFL/SIG_IGN) or holds our saved predecessor again, so install afresh. A
+        // different live handler might still chain through us; leave that one alone.
+        let linkedBehindLiveHandler = table.slotState[idx] != 0
+            && !isDispositionThatCannotChain(current, savedPrevious: table.previousActions[idx])
+        guard !linkedBehindLiveHandler else { return }
 
         table.previousActions[idx] = current
         table.slotState[idx] = 1
@@ -340,10 +347,6 @@ enum SignalChainAction {
     case restoreDefaultAndReraise
 }
 
-private let sigDflRaw = 0
-private let sigIgnRaw = 1
-private let sigErrRaw = -1
-
 /// Decide how to chain to `previous`, exactly as the kernel would have dispatched
 /// it. `SA_SIGINFO` selects the union member: reading `sa_handler` of an
 /// `SA_SIGINFO` action (or vice versa) is what broke crash reporters (#10141).
@@ -353,9 +356,11 @@ func chainAction(forPrevious previous: sigaction) -> SignalChainAction {
         return .invokeSigInfo(handler)
     }
     let raw = unsafeBitCast(previous.__sigaction_u.__sa_handler, to: Int.self)
+    // Literals, not file-scope `let`s: nothing in this function may depend on a lazily
+    // initialized global (`swift_once` is not async-signal-safe), whatever the compiler mode.
     switch raw {
-    case sigDflRaw, sigErrRaw: return .restoreDefaultAndReraise
-    case sigIgnRaw: return .ignore
+    case 0, -1: return .restoreDefaultAndReraise // SIG_DFL, SIG_ERR
+    case 1: return .ignore // SIG_IGN
     default:
         guard let handler = previous.__sigaction_u.__sa_handler else { return .restoreDefaultAndReraise }
         return .invokePlain(handler)
@@ -371,6 +376,18 @@ func signalInstallFlags(previous: sigaction) -> Int32 {
     SA_SIGINFO | SA_ONSTACK | (previous.sa_flags & SA_NODEFER)
 }
 
+/// Whether `current` is an empty slot (`SIG_DFL`/`SIG_IGN`) or exactly our saved
+/// predecessor: neither can be a reporter that forwards to our handler.
+func isDispositionThatCannotChain(_ current: sigaction, savedPrevious: sigaction) -> Bool {
+    if current.sa_flags & SA_SIGINFO == 0 {
+        let rawHandler = unsafeBitCast(current.__sigaction_u.__sa_handler, to: Int.self)
+        if rawHandler == 0 || rawHandler == 1 { return true }
+    }
+    guard current.sa_flags & SA_SIGINFO == savedPrevious.sa_flags & SA_SIGINFO else { return false }
+    return unsafeBitCast(current.__sigaction_u.__sa_handler, to: Int.self)
+        == unsafeBitCast(savedPrevious.__sigaction_u.__sa_handler, to: Int.self)
+}
+
 /// Whether `action` is our crash handler.
 func isOwnSignalAction(_ action: sigaction) -> Bool {
     guard action.sa_flags & SA_SIGINFO != 0, let handler = action.__sigaction_u.__sa_sigaction else { return false }
@@ -378,11 +395,26 @@ func isOwnSignalAction(_ action: sigaction) -> Bool {
     return unsafeBitCast(handler, to: UnsafeRawPointer.self) == unsafeBitCast(ours, to: UnsafeRawPointer.self)
 }
 
+/// `pthread` TSD-backed nesting marker.
+struct PthreadNestingStore: SignalNestingStore {
+    let key: pthread_key_t
+
+    init() {
+        var created = pthread_key_t()
+        pthread_key_create(&created, nil)
+        key = created
+    }
+
+    func load() -> UInt { UInt(bitPattern: pthread_getspecific(key)) }
+
+    func store(_ frame: UInt) { _ = pthread_setspecific(key, UnsafeRawPointer(bitPattern: frame)) }
+}
+
 /// All state the signal handler touches, allocated once up front so the handler
 /// never allocates, takes a lock, or goes through Swift's exclusivity-checked
 /// global variables. Every field is a `let`; only pointee memory changes.
 /// Writers are the install/uninstall paths; the handler only reads (plus the
-/// re-entrancy counter and one-shot flags), accepting benign races.
+/// per-thread nesting marker and one-shot flags), accepting benign races.
 final class SignalHandlerTable: @unchecked Sendable {
     static let slotCount = 64
     static let pathCapacity = 1024
@@ -398,8 +430,8 @@ final class SignalHandlerTable: @unchecked Sendable {
     let pathReady: UnsafeMutablePointer<Int32>
     /// 1 while the SDK is enabled; 0 makes the handler a pure forwarder.
     let recording: UnsafeMutablePointer<Int32>
-    /// Handler nesting depth (crash while handling a crash).
-    let depth: UnsafeMutablePointer<Int32>
+    /// Per-thread nesting marker storage (crash while handling a crash) used by the real handler.
+    let threadNesting: PthreadNestingStore
 
     init() {
         previousActions = .allocate(capacity: Self.slotCount)
@@ -414,8 +446,7 @@ final class SignalHandlerTable: @unchecked Sendable {
         pathReady.initialize(to: 0)
         recording = .allocate(capacity: 1)
         recording.initialize(to: 0)
-        depth = .allocate(capacity: 1)
-        depth.initialize(to: 0)
+        threadNesting = PthreadNestingStore()
     }
 
     /// Copy `path` into the pre-allocated buffer. Returns false when it does not fit.
@@ -434,13 +465,20 @@ final class SignalHandlerTable: @unchecked Sendable {
         ignoredOnce.update(repeating: 0, count: Self.slotCount)
         pathReady.pointee = 0
         recording.pointee = 0
-        depth.pointee = 0
     }
 }
 
 /// Process-global table. Touched at install time so lazy initialization has
 /// completed before the handler can ever run.
 let autoMobileSignalTable = SignalHandlerTable()
+
+/// Per-thread nesting marker storage (testing seam). The production store is a
+/// `pthread` TSD slot; tests substitute a fake with controllable thread identity.
+protocol SignalNestingStore {
+    /// Frame address of the live handler invocation on the calling thread; 0 = none.
+    func load() -> UInt
+    func store(_ frame: UInt)
+}
 
 /// Global handler for signal-based faults (SIGABRT, SIGSEGV, etc.), registered
 /// with `sigaction` + `SA_SIGINFO`. Only async-signal-safe work: `open`/`write`/
@@ -452,27 +490,81 @@ func autoMobileSignalHandler(
     _ info: UnsafeMutablePointer<siginfo_t>?,
     _ context: UnsafeMutableRawPointer?
 ) {
+    var frameMarker: UInt8 = 0
+    let frame = withUnsafeMutablePointer(to: &frameMarker) { UInt(bitPattern: $0) }
+    processSignal(
+        sig, info, context,
+        nesting: autoMobileSignalTable.threadNesting,
+        frame: frame,
+        terminate: restoreDefaultAndReraise
+    )
+}
+
+/// Signals the hardware raises synchronously, re-executing the faulting instruction
+/// when the handler returns. Everything else (SIGABRT, SIGUSR1, ...) is asynchronous.
+private func isSynchronousFault(_ sig: Int32, _ info: UnsafeMutablePointer<siginfo_t>?) -> Bool {
+    switch sig {
+    case SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP:
+        // Without siginfo we cannot rule a fault out; assume the safe, escalating case.
+        guard let info else { return true }
+        // Darwin gives hardware faults a small positive `si_code`; a signal sent with
+        // kill()/sigqueue() carries SI_USER (0x10001) or another code >= 0x10000, and
+        // raise() of FPE/TRAP carries 0. Those would be ignored on every delivery.
+        let code = info.pointee.si_code
+        return code > 0 && code < 0x10000
+    default:
+        return false
+    }
+}
+
+/// The handler body, with thread identity (`nesting`, `frame`) and termination
+/// injected so tests can drive it without a real fault or a real `raise`.
+///
+/// Re-entrancy is tracked per thread, not per process: `nesting` holds, for the
+/// calling thread only, the stack address of its live outermost handler frame.
+/// - Same thread, current frame below the marker: a fault inside our own chain (or
+///   inside the predecessor reporter). Do not record or chain again; die by the signal.
+/// - A different thread: independent. It records and chains exactly as the kernel
+///   would dispatch it directly, so a reporter writing for thread A is never killed
+///   by a signal on thread B; if B then faults inside the reporter, B's own marker
+///   catches it. Termination still comes from the chain (default action or the
+///   reporter); we never return into a faulting instruction except for `SIG_IGN`.
+/// - Marker at or above the current frame: stale. A predecessor left by
+///   `siglongjmp`/`pthread_exit`, so `defer` never cleared it; treat as a first entry.
+///   Exact when the handler runs on an alternate stack (every invocation starts at its
+///   top); best effort on the thread stack, where a later fault deeper than the old
+///   frame looks nested and dies by its signal after the first crash was recorded.
+func processSignal<Store: SignalNestingStore>(
+    _ sig: Int32,
+    _ info: UnsafeMutablePointer<siginfo_t>?,
+    _ context: UnsafeMutableRawPointer?,
+    nesting: Store,
+    frame: UInt,
+    terminate: (Int32) -> Void
+) {
     let table = autoMobileSignalTable
-    // A fault inside this handler (possibly a different signal, or the same one
-    // under SA_NODEFER): do not record or chain again, just die by the signal.
-    guard table.depth.pointee == 0 else {
-        restoreDefaultAndReraise(sig)
+    let outerFrame = nesting.load()
+    if outerFrame != 0, frame < outerFrame {
+        terminate(sig)
         return
     }
-    table.depth.pointee += 1
-    defer { table.depth.pointee -= 1 }
+
+    let idx = Int(sig)
+    let linked = idx > 0 && idx < SignalHandlerTable.slotCount && table.slotState[idx] != 0
+    let previous = linked ? table.previousActions[idx] : sigaction()
+    let action: SignalChainAction = linked ? chainAction(forPrevious: previous) : .restoreDefaultAndReraise
+    // An ignored asynchronous signal (kill/raise) was never going to crash anything:
+    // keep ignoring it on every delivery and leave no crash file behind.
+    if case .ignore = action, !isSynchronousFault(sig, info) { return }
+
+    nesting.store(frame)
+    defer { nesting.store(0) }
 
     if table.recording.pointee != 0, table.pathReady.pointee != 0 {
         recordSignal(sig, path: table.pathBuffer)
     }
 
-    let idx = Int(sig)
-    guard idx > 0, idx < SignalHandlerTable.slotCount, table.slotState[idx] != 0 else {
-        restoreDefaultAndReraise(sig)
-        return
-    }
-    let previous = table.previousActions[idx]
-    switch chainAction(forPrevious: previous) {
+    switch action {
     case let .invokeSigInfo(handler):
         resetToDefaultIfRequested(previous, sig: sig)
         handler(sig, info, context)
@@ -480,15 +572,15 @@ func autoMobileSignalHandler(
         resetToDefaultIfRequested(previous, sig: sig)
         handler(sig)
     case .ignore:
-        // Honour SIG_IGN once. A synchronous fault re-executes after we return and
-        // would loop forever, so a second delivery escalates to the default.
+        // A synchronous fault re-executes after we return and would loop forever:
+        // honour SIG_IGN for the first delivery, escalate to the default on recurrence.
         if table.ignoredOnce[idx] != 0 {
-            restoreDefaultAndReraise(sig)
+            terminate(sig)
         } else {
             table.ignoredOnce[idx] = 1
         }
     case .restoreDefaultAndReraise:
-        restoreDefaultAndReraise(sig)
+        terminate(sig)
     }
 }
 

@@ -61,6 +61,39 @@ private func rawHandlerAction(_ value: Int) -> sigaction {
     return action
 }
 
+/// Hook run from inside the hooking sigInfo predecessor (re-entrancy scenarios).
+private let predecessorHook = OSAllocatedUnfairLock(
+    initialState: (@Sendable (Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void)?.none
+)
+
+private let hookingSigInfoHandler: SignalInfoHandler = { sig, info, context in
+    let call = SignalCall(signal: sig, info: UInt(bitPattern: info), context: UInt(bitPattern: context))
+    recordedSigInfoCalls.withLock { $0.append(call) }
+    let hook = predecessorHook.withLock { $0 }
+    hook?(sig, info, context)
+}
+
+/// Nesting store with controllable thread identity: each fake thread has its own marker.
+private final class FakeThreads: SignalNestingStore {
+    var currentThread = 1
+    var markers: [Int: UInt] = [:]
+
+    func load() -> UInt { markers[currentThread] ?? 0 }
+    func store(_ frame: UInt) { markers[currentThread] = frame }
+}
+
+/// Collects the signals the handler decided to terminate the process with.
+private final class TerminationLog {
+    var signals: [Int32] = []
+}
+
+private func makeInfo(code: Int32, signal: Int32 = SIGUSR1) -> siginfo_t {
+    var info = siginfo_t()
+    info.si_signo = signal
+    info.si_code = code
+    return info
+}
+
 /// Stand-in for the kernel's per-signal action table.
 private final class FakeKernel {
     var actions: [Int32: sigaction] = [:]
@@ -329,16 +362,18 @@ final class SignalChainingTests: XCTestCase {
     }
 
     func testHandlerHonoursSigIgnPredecessorOnFirstDelivery() {
-        kernel.actions[SIGUSR1] = rawHandlerAction(1)
-        makeCrashes().installSignalHandlers()
-        var info = siginfo_t()
+        kernel.actions[SIGSEGV] = rawHandlerAction(1)
+        let crashes = makeCrashes()
+        crashes.signalsToMonitor = [SIGSEGV]
+        crashes.installSignalHandlers()
+        var info = makeInfo(code: 2, signal: SIGSEGV) // a hardware fault
 
-        autoMobileSignalHandler(SIGUSR1, &info, nil) // returns: nothing raised, nothing chained
+        autoMobileSignalHandler(SIGSEGV, &info, nil) // returns: nothing raised, nothing chained
 
-        XCTAssertEqual(autoMobileSignalTable.ignoredOnce[Int(SIGUSR1)], 1)
+        XCTAssertEqual(autoMobileSignalTable.ignoredOnce[Int(SIGSEGV)], 1)
         XCTAssertTrue(recordedSigInfoCalls.withLock { $0.isEmpty })
         XCTAssertTrue(recordedPlainCalls.withLock { $0.isEmpty })
-        XCTAssertEqual(autoMobileSignalTable.depth.pointee, 0, "depth is restored when the handler returns")
+        XCTAssertEqual(autoMobileSignalTable.threadNesting.load(), 0, "the nesting marker is cleared on return")
     }
 
     func testHandlerRecordsSignalOnlyWhileEnabled() throws {
@@ -384,6 +419,218 @@ final class SignalChainingTests: XCTestCase {
         sigaction(SIGUSR1, nil, &current)
         XCTAssertNil(raw(current.__sigaction_u.__sa_handler), "SA_RESETHAND resets to SIG_DFL")
         XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 1)
+    }
+
+    // MARK: - Re-entrancy is per thread (#10158 review)
+
+    private func run(
+        _ sig: Int32 = SIGUSR1,
+        info: UnsafeMutablePointer<siginfo_t>? = nil,
+        threads: FakeThreads,
+        frame: UInt,
+        log: TerminationLog
+    ) {
+        processSignal(sig, info, nil, nesting: threads, frame: frame, terminate: { log.signals.append($0) })
+    }
+
+    private func setPredecessorHook(
+        _ hook: @escaping @Sendable (Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void
+    ) {
+        predecessorHook.withLock { $0 = hook }
+    }
+
+    func testFaultOnASecondThreadWhileTheFirstIsInTheChainedReporterStillChains() {
+        kernel.actions[SIGUSR1] = sigInfoAction(hookingSigInfoHandler)
+        makeCrashes().installSignalHandlers()
+        let threads = FakeThreads()
+        let log = TerminationLog()
+        setPredecessorHook { [self] _, _, _ in
+            // Thread 2 takes a monitored signal while thread 1 is still inside the reporter.
+            if threads.currentThread == 1 {
+                threads.currentThread = 2
+                run(threads: threads, frame: 9000, log: log)
+                threads.currentThread = 1
+            }
+        }
+        defer { predecessorHook.withLock { $0 = nil } }
+
+        run(threads: threads, frame: 5000, log: log)
+
+        XCTAssertEqual(log.signals, [], "a different thread is not nested: it chains instead of re-raising")
+        XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 2, "the reporter ran for both threads")
+    }
+
+    func testFaultInsideTheReporterOnTheSameThreadStillDiesBySignal() {
+        kernel.actions[SIGUSR1] = sigInfoAction(hookingSigInfoHandler)
+        makeCrashes().installSignalHandlers()
+        let threads = FakeThreads()
+        let log = TerminationLog()
+        setPredecessorHook { [self] _, _, _ in
+            if recordedSigInfoCalls.withLock({ $0.count }) == 1 {
+                run(threads: threads, frame: 4000, log: log) // deeper on the same stack
+            }
+        }
+        defer { predecessorHook.withLock { $0 = nil } }
+
+        run(threads: threads, frame: 5000, log: log)
+
+        XCTAssertEqual(log.signals, [SIGUSR1], "nested on one thread: die by the signal, never re-enter the reporter")
+        XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 1)
+        XCTAssertEqual(threads.load(), 0, "the marker is cleared when the outer invocation returns")
+    }
+
+    func testStaleMarkerLeftByANonLocalExitDoesNotBlockTheNextCrash() {
+        kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
+        makeCrashes().installSignalHandlers()
+        let threads = FakeThreads()
+        let log = TerminationLog()
+        // The predecessor siglongjmp'd out of an earlier invocation whose frame was at 5000;
+        // `defer` never ran, so that thread's marker is still set.
+        threads.markers[1] = 5000
+
+        run(threads: threads, frame: 5000, log: log) // same stack position: a fresh invocation
+        run(threads: threads, frame: 8000, log: log) // shallower: the old frame is gone
+
+        XCTAssertEqual(log.signals, [])
+        XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 2, "both crashes still chain")
+    }
+
+    func testThreadThatLeavesTheReporterWithoutReturningDoesNotDisableLaterCrashes() {
+        kernel.actions[SIGUSR1] = sigInfoAction(hookingSigInfoHandler)
+        makeCrashes().installSignalHandlers()
+        // pthread_exit leaves without running `defer`, like a predecessor's siglongjmp.
+        predecessorHook.withLock { $0 = { _, _, _ in pthread_exit(nil) } }
+        var worker: pthread_t?
+        pthread_create(&worker, nil, { _ in
+            var info = siginfo_t()
+            autoMobileSignalHandler(SIGUSR1, &info, nil)
+            return nil
+        }, nil)
+        if let worker { pthread_join(worker, nil) }
+        predecessorHook.withLock { $0 = nil }
+        recordedSigInfoCalls.withLock { $0.removeAll() }
+
+        let log = TerminationLog()
+        run(threads: FakeThreads(), frame: 5000, log: log)
+
+        XCTAssertEqual(log.signals, [], "the next real crash must not be treated as nested")
+        XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 1)
+    }
+
+    // MARK: - SIG_IGN predecessor
+
+    func testIgnoredAsynchronousSignalStaysIgnoredEveryTimeAndRecordsNothing() {
+        let path = NSTemporaryDirectory() + "automobile_signal_chaining_\(UUID().uuidString)"
+        defer { unlink(path) }
+        XCTAssertTrue(autoMobileSignalTable.setCrashFilePath(path))
+        kernel.actions[SIGUSR1] = rawHandlerAction(1)
+        makeCrashes().installSignalHandlers()
+        let threads = FakeThreads()
+        let log = TerminationLog()
+        var info = makeInfo(code: 0) // sent by kill/raise, not a hardware fault
+
+        for _ in 0 ..< 3 {
+            run(info: &info, threads: threads, frame: 5000, log: log)
+        }
+
+        XCTAssertEqual(log.signals, [], "the kernel would have ignored every one of these deliveries")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path), "an ignored signal is not a crash")
+    }
+
+    func testIgnoredSynchronousFaultThatRecursImmediatelyEscalates() {
+        kernel.actions[SIGSEGV] = rawHandlerAction(1)
+        let crashes = makeCrashes()
+        crashes.signalsToMonitor = [SIGSEGV]
+        crashes.installSignalHandlers()
+        let threads = FakeThreads()
+        let log = TerminationLog()
+        var info = makeInfo(code: 2, signal: SIGSEGV) // SEGV_ACCERR
+
+        run(SIGSEGV, info: &info, threads: threads, frame: 5000, log: log)
+        XCTAssertEqual(log.signals, [], "the first delivery honours SIG_IGN")
+        run(SIGSEGV, info: &info, threads: threads, frame: 5000, log: log)
+        XCTAssertEqual(log.signals, [SIGSEGV], "the re-executed faulting instruction must not loop forever")
+    }
+
+    func testFaultSignalWithoutSiginfoIsTreatedAsSynchronous() {
+        kernel.actions[SIGSEGV] = rawHandlerAction(1)
+        let crashes = makeCrashes()
+        crashes.signalsToMonitor = [SIGSEGV]
+        crashes.installSignalHandlers()
+        let log = TerminationLog()
+
+        run(SIGSEGV, info: nil, threads: FakeThreads(), frame: 5000, log: log)
+        run(SIGSEGV, info: nil, threads: FakeThreads(), frame: 5000, log: log)
+
+        XCTAssertEqual(log.signals, [SIGSEGV])
+    }
+
+    func testUserSentFaultSignalCodeIsAsynchronous() {
+        kernel.actions[SIGSEGV] = rawHandlerAction(1)
+        let crashes = makeCrashes()
+        crashes.signalsToMonitor = [SIGSEGV]
+        crashes.installSignalHandlers()
+        let log = TerminationLog()
+        var info = makeInfo(code: SI_USER, signal: SIGSEGV)
+
+        for _ in 0 ..< 3 {
+            run(SIGSEGV, info: &info, threads: FakeThreads(), frame: 5000, log: log)
+        }
+
+        XCTAssertEqual(log.signals, [], "SI_USER marks a kill()/sigqueue() delivery, not a hardware fault")
+    }
+
+    // MARK: - Re-install after a later handler vanished
+
+    func testReinstallsWhenALaterHandlerWasRemovedWithoutChaining() {
+        kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
+        let crashes = makeCrashes()
+        crashes.installSignalHandlers()
+        kernel.installForeign(SIGUSR1, handler: otherSigInfoHandler)
+        crashes.uninstallSignalHandlers() // dormant: still linked behind the foreign reporter
+        kernel.actions[SIGUSR1] = sigaction() // the host removed it with signal(sig, SIG_DFL)
+
+        crashes.installSignalHandlers()
+
+        XCTAssertTrue(isOwnSignalAction(kernel.actions[SIGUSR1]!), "nothing points at us any more: install again")
+        XCTAssertEqual(autoMobileSignalTable.slotState[Int(SIGUSR1)], 1)
+        guard case .restoreDefaultAndReraise = chainAction(
+            forPrevious: autoMobileSignalTable.previousActions[Int(SIGUSR1)]
+        ) else {
+            return XCTFail("the saved predecessor is the disposition that was current")
+        }
+    }
+
+    func testReinstallsWhenThePredecessorWasRestoredDirectly() {
+        kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
+        let crashes = makeCrashes()
+        crashes.installSignalHandlers()
+        kernel.installForeign(SIGUSR1, handler: otherSigInfoHandler)
+        crashes.uninstallSignalHandlers()
+        kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler) // original put back by the host
+
+        crashes.installSignalHandlers()
+
+        XCTAssertTrue(isOwnSignalAction(kernel.actions[SIGUSR1]!))
+        let saved = autoMobileSignalTable.previousActions[Int(SIGUSR1)]
+        XCTAssertEqual(raw(saved.__sigaction_u.__sa_sigaction), raw(recordingSigInfoHandler))
+    }
+
+    func testStillLinkedForeignReporterIsNotOverwrittenOnReinstall() {
+        kernel.actions[SIGUSR1] = sigInfoAction(recordingSigInfoHandler)
+        let crashes = makeCrashes()
+        crashes.installSignalHandlers()
+        kernel.installForeign(SIGUSR1, handler: otherSigInfoHandler)
+        crashes.uninstallSignalHandlers()
+        let writesBefore = kernel.writes.count(where: { $0.signal == SIGUSR1 })
+
+        crashes.installSignalHandlers()
+
+        XCTAssertEqual(
+            kernel.writes.count(where: { $0.signal == SIGUSR1 }),
+            writesBefore,
+            "a live foreign handler may chain to us"
+        )
     }
 
     // MARK: - End to end through the real kernel (SIGUSR1)

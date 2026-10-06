@@ -104,6 +104,70 @@ describe("prepareOverlayAssets", () => {
   });
 });
 
+describe("prepareOverlayAssets observation sources", () => {
+  const uri = "automobile:observation/dev/obs/screenshot";
+  const reader = new FakeOverlayAssetFileReader();
+
+  test("reads the bytes through the observation reader and validates them like a file", async () => {
+    const reads: string[] = [];
+    const prepared = await prepareOverlayAssets(
+      [{ id: "shot", observation: uri }],
+      reader,
+      async (u) => {
+        reads.push(u);
+        return { bytes: webp };
+      },
+    );
+    expect(preparedMimeTypes(prepared)).toEqual(["image/webp"]);
+    expect(reads).toEqual([uri]);
+    expect(reader.reads).toEqual([]);
+  });
+
+  test("names the observation and the reason when it cannot be read", async () => {
+    const error = preparedError(
+      await prepareOverlayAssets([{ id: "shot", observation: uri }], reader, async () => ({
+        error: "Observation id obs is unknown or has been superseded.",
+      })),
+    );
+    expect(error).toContain(`'shot' (${uri})`);
+    expect(error).toContain("superseded");
+    expect(error).toContain("No assets were uploaded");
+  });
+
+  test("rejects non-image bytes, oversize screenshots and a throwing reader", async () => {
+    const cases: Array<[() => Promise<{ bytes: Buffer }>, string]> = [
+      [async () => ({ bytes: Buffer.from("GIF89a-bytes") }), "not a PNG, JPEG or WebP"],
+      [
+        async () => ({ bytes: png(MAX_OVERLAY_ASSET_BYTES) }),
+        `limit is ${MAX_OVERLAY_ASSET_BYTES}`,
+      ],
+      [
+        async () => {
+          throw new Error("disk gone");
+        },
+        "cannot read observation screenshot: disk gone",
+      ],
+    ];
+    for (const [read, message] of cases) {
+      const error = preparedError(
+        await prepareOverlayAssets([{ id: "shot", observation: uri }], reader, read),
+      );
+      expect(error).toContain(message);
+    }
+  });
+
+  test("without an observation reader the source is refused, and both or neither source is invalid", async () => {
+    expect(
+      preparedError(await prepareOverlayAssets([{ id: "shot", observation: uri }], reader)),
+    ).toContain("not available");
+    for (const source of [{ id: "x" }, { id: "x", path: "/a.png", observation: uri }]) {
+      expect(preparedError(await prepareOverlayAssets([source], reader))).toContain(
+        "exactly one of path or observation",
+      );
+    }
+  });
+});
+
 describe("uploadOverlayAssets", () => {
   const assets = (...ids: string[]): OverlayAssetUpload[] =>
     ids.map((id) => ({ id, mimeType: "image/png", bytes: png() }));
@@ -123,6 +187,19 @@ describe("uploadOverlayAssets", () => {
       .getOverlayAssetHistory()
       .map((entry) => (entry.method === "put" ? entry.asset.id : ""));
     expect(ids).toEqual(["a", "b"]);
+  });
+
+  test("a failed re-upload says the overlay stays as first sent", async () => {
+    const client = newClient();
+    client.setOverlayAssetResult({
+      success: false,
+      error: "store full",
+      dispatched: true,
+      acknowledged: true,
+    });
+    const outcome = await uploadOverlayAssets(client, assets("a"), { action: "resend" });
+    expect(outcome.error).toContain("The overlay stays as first sent");
+    expect(outcome.error).not.toContain("was not shown");
   });
 
   test("a device refusal stops the run and names the assets already stored", async () => {

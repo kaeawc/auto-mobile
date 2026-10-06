@@ -247,7 +247,18 @@ Host surface: the `overlay` tool's `show` and `update` (with `spec`) take
 reads and validates every file first (signature-detected MIME type, the contract
 limits, unique ids), then uploads sequentially before the overlay request; any
 failure fails the call before the overlay changes and names the assets already
-stored. See `docs/tools.md` for the result and deadline model.
+stored. An entry may instead be `{id, observation}`, an
+`automobile:observation/{deviceId}/{observationId}/screenshot` URI; the host reads it
+through the same handler as that resource (current-observation check, pending-capture
+wait, retention lease), which is readable by any client, so no access is widened.
+
+When `overlay_result.missingAssets` lists an id the same call uploaded (the device
+cleared its store between the upload and the show), the host re-uploads those assets
+once from the bytes it already holds and re-sends the show or update once. It never
+loops: if they are still missing, or the retry fails or is cancelled, the first
+successful result is returned with `missingAssets` and a `warning` on the tool output.
+Ids the call did not supply are only reported. See `docs/tools.md` for the result and
+deadline model.
 
 ## Actions and state
 

@@ -26,6 +26,7 @@ import {
   DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
   MAX_OVERLAY_ASSET_COUNT,
 } from "../../src/features/overlay/overlayAssets";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/server/observationResourceUris";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -1556,20 +1557,34 @@ describe("argument budget deadline gaps", () => {
       }
       expect(resolve({ action: "awaitEvent", timeoutMs: 60_000 }, 1_000_000)).toBe(1_000_000);
     });
-    test("show and update with assets budget one upload timeout per asset plus the request", () => {
+    test("show and update with assets budget the upload and send twice for the one retry", () => {
       const assets = (count: number) =>
         Array.from({ length: count }, (_, i) => ({ id: `a${i}`, path: `/x/${i}.png` }));
       const perAsset = DEFAULT_OVERLAY_ASSET_TIMEOUT_MS;
       for (const action of ["show", "update"]) {
-        expect(resolve({ action, assets: assets(1) })).toBe(perAsset + 5_000 + headroom);
-        expect(resolve({ action, assets: assets(4) })).toBe(4 * perAsset + 5_000 + headroom);
+        expect(resolve({ action, assets: assets(1) })).toBe(2 * (perAsset + 5_000) + headroom);
+        expect(resolve({ action, assets: assets(4) })).toBe(2 * (4 * perAsset + 5_000) + headroom);
         expect(resolve({ action, assets: assets(4), timeoutMs: 20_000 })).toBe(
-          4 * perAsset + 20_000 + headroom,
+          2 * (4 * perAsset + 20_000) + headroom,
         );
       }
       // The tool rejects more than the contract maximum, so the budget stops growing there.
       expect(resolve({ action: "show", assets: assets(500) })).toBe(
-        MAX_OVERLAY_ASSET_COUNT * perAsset + 5_000 + headroom,
+        2 * (MAX_OVERLAY_ASSET_COUNT * perAsset + 5_000) + headroom,
+      );
+    });
+    test("observation sources add one capture wait each", () => {
+      const assets = [
+        { id: "a", path: "/x/a.png" },
+        { id: "b", observation: "automobile:observation/d/o/screenshot" },
+        { id: "c", observation: "automobile:observation/d/p/screenshot" },
+        null,
+        "junk",
+      ];
+      expect(resolve({ action: "show", assets })).toBe(
+        2 * (5 * DEFAULT_OVERLAY_ASSET_TIMEOUT_MS + 5_000) +
+          2 * OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS +
+          headroom,
       );
     });
     test("show without usable assets keeps the default deadline", () => {

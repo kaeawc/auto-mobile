@@ -13,11 +13,21 @@ import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimension
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 
-/** One image the caller wants available to the overlay, read from a file the daemon can open. */
+/**
+ * One image the caller wants available to the overlay: a file the daemon can open (`path`) or the
+ * screenshot captured with an observation (`observation`, an `automobile:observation/.../screenshot`
+ * URI). Exactly one of the two is set.
+ */
 export interface OverlayAssetSource {
   id: string;
-  path: string;
+  path?: string;
+  observation?: string;
 }
+
+/** Resolves an observation screenshot URI to image bytes, or says why it cannot. */
+export type OverlayObservationScreenshotReader = (
+  uri: string,
+) => Promise<{ bytes: Buffer } | { error: string }>;
 
 /** The file seam: tests inject an in-memory reader so nothing touches disk. */
 export interface OverlayAssetFileReader {
@@ -53,8 +63,17 @@ export interface OverlayAssetUploadOutcome {
 
 type Prepared = { assets: OverlayAssetUpload[] } | { error: string };
 
-async function readSource(
-  source: OverlayAssetSource,
+function validateImageBytes(id: string, bytes: Buffer): OverlayAssetUpload | string {
+  const mimeType = detectImageMimeType(bytes);
+  if (mimeType === null) {
+    return "file is not a PNG, JPEG or WebP image (checked the file signature)";
+  }
+  const asset: OverlayAssetUpload = { id, mimeType, bytes };
+  return overlayAssetUploadProblem(asset) ?? asset;
+}
+
+async function readFileSource(
+  source: { id: string; path: string },
   reader: OverlayAssetFileReader,
 ): Promise<OverlayAssetUpload | string> {
   if (!isAbsolute(source.path)) {
@@ -68,17 +87,55 @@ async function readSource(
     if (stat.size > MAX_OVERLAY_ASSET_BYTES) {
       return `file is ${stat.size} bytes; the limit is ${MAX_OVERLAY_ASSET_BYTES}`;
     }
-    const bytes = await reader.readFile(source.path);
-    const mimeType = detectImageMimeType(bytes);
-    if (mimeType === null) {
-      return "file is not a PNG, JPEG or WebP image (checked the file signature)";
-    }
-    const asset: OverlayAssetUpload = { id: source.id, mimeType, bytes };
-    return overlayAssetUploadProblem(asset) ?? asset;
+    return validateImageBytes(source.id, await reader.readFile(source.path));
   } catch (error) {
     logger.warn(`[overlay] Cannot read asset file ${source.path}: ${errorMessage(error)}`, error);
     return `cannot read file: ${errorMessage(error)}`;
   }
+}
+
+async function readObservationSource(
+  source: { id: string; observation: string },
+  readObservation: OverlayObservationScreenshotReader | undefined,
+): Promise<OverlayAssetUpload | string> {
+  if (!readObservation) {
+    return "observation screenshots are not available here";
+  }
+  try {
+    const read = await readObservation(source.observation);
+    if ("error" in read) {
+      return read.error;
+    }
+    if (read.bytes.length > MAX_OVERLAY_ASSET_BYTES) {
+      return `screenshot is ${read.bytes.length} bytes; the limit is ${MAX_OVERLAY_ASSET_BYTES}`;
+    }
+    return validateImageBytes(source.id, read.bytes);
+  } catch (error) {
+    logger.warn(
+      `[overlay] Cannot read observation screenshot ${source.observation}: ${errorMessage(error)}`,
+      error,
+    );
+    return `cannot read observation screenshot: ${errorMessage(error)}`;
+  }
+}
+
+function describeSource(source: OverlayAssetSource): string {
+  return source.observation ?? source.path ?? "no source";
+}
+
+async function readSource(
+  source: OverlayAssetSource,
+  reader: OverlayAssetFileReader,
+  readObservation: OverlayObservationScreenshotReader | undefined,
+): Promise<OverlayAssetUpload | string> {
+  const { id, path, observation } = source;
+  if (path !== undefined && observation === undefined) {
+    return readFileSource({ id, path }, reader);
+  }
+  if (observation !== undefined && path === undefined) {
+    return readObservationSource({ id, observation }, readObservation);
+  }
+  return "give exactly one of path or observation";
 }
 
 /**
@@ -88,6 +145,7 @@ async function readSource(
 export async function prepareOverlayAssets(
   sources: readonly OverlayAssetSource[],
   reader: OverlayAssetFileReader = nodeOverlayAssetFileReader,
+  readObservation?: OverlayObservationScreenshotReader,
 ): Promise<Prepared> {
   const fail = (message: string): Prepared => ({
     error: `${message} No assets were uploaded and the overlay was not changed.`,
@@ -105,9 +163,9 @@ export async function prepareOverlayAssets(
       return fail(`Overlay asset id '${source.id}' appears more than once.`);
     }
     seen.add(source.id);
-    const read = await readSource(source, reader);
+    const read = await readSource(source, reader, readObservation);
     if (typeof read === "string") {
-      return fail(`Overlay asset '${source.id}' (${source.path}): ${read}.`);
+      return fail(`Overlay asset '${source.id}' (${describeSource(source)}): ${read}.`);
     }
     total += read.bytes.length;
     if (total > MAX_OVERLAY_ASSET_TOTAL_BYTES) {
@@ -126,6 +184,12 @@ function describeUploaded(uploaded: readonly UploadedOverlayAsset[]): string {
     : `Already uploaded: ${uploaded.map((asset) => asset.id).join(", ")}; they stay on the device until the overlay session ends, and re-sending the call replaces them.`;
 }
 
+const OUTCOME_AFTER_STOP = {
+  show: "The overlay was not shown.",
+  update: "The overlay was not updated.",
+  resend: "The overlay stays as first sent, with placeholders for the missing assets.",
+} as const;
+
 /**
  * Uploads prepared assets one at a time, in order. The first failure stops the run. The error
  * names the asset, says whether its outcome is indeterminate (written but never answered), and
@@ -134,13 +198,13 @@ function describeUploaded(uploaded: readonly UploadedOverlayAsset[]): string {
 export async function uploadOverlayAssets(
   client: OverlayAssetPutClient,
   assets: readonly OverlayAssetUpload[],
-  options: { signal?: AbortSignal; action: "show" | "update" },
+  options: { signal?: AbortSignal; action: "show" | "update" | "resend" },
 ): Promise<OverlayAssetUploadOutcome> {
   const uploaded: UploadedOverlayAsset[] = [];
   const stop = (reason: string): OverlayAssetUploadOutcome => ({
     success: false,
     uploaded,
-    error: `${reason} ${describeUploaded(uploaded)} The overlay was not ${options.action === "show" ? "shown" : "updated"}.`,
+    error: `${reason} ${describeUploaded(uploaded)} ${OUTCOME_AFTER_STOP[options.action]}`,
   });
   for (const asset of assets) {
     if (options.signal?.aborted) {

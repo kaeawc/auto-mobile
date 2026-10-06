@@ -40,8 +40,15 @@ import {
   prepareOverlayAssets,
   uploadOverlayAssets,
   type OverlayAssetFileReader,
+  type OverlayObservationScreenshotReader,
   type UploadedOverlayAsset,
 } from "../features/overlay/overlayAssetUploader";
+import type { OverlayAssetUpload } from "../features/overlay/overlayAssets";
+import {
+  missingAssetsWarning,
+  type MissingAssetRepair,
+} from "../features/overlay/overlayMissingAssets";
+import { readObservationScreenshotBytes } from "./observationResources";
 import {
   MAX_OVERLAY_ASSET_COUNT,
   MAX_OVERLAY_ASSET_ID_LENGTH,
@@ -125,9 +132,20 @@ const assetsInput = z
         path: z
           .string()
           .min(1)
+          .optional()
           .describe("Absolute path of a PNG, JPEG or WebP file the daemon can read"),
+        observation: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be that device's current observation",
+          ),
       })
-      .strict(),
+      .strict()
+      .refine((entry) => (entry.path === undefined) !== (entry.observation === undefined), {
+        message: "each asset needs exactly one of path or observation",
+      }),
   )
   .min(1)
   .max(MAX_OVERLAY_ASSET_COUNT);
@@ -154,7 +172,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       assets: assetsInput
         .optional()
         .describe(
-          "show, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored.",
+          "show, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
         ),
       all: z.literal(true).optional().describe("Dismiss all overlays on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
@@ -329,6 +347,16 @@ export const overlayOutputSchema = z.object({
     .describe(
       "show/update with assets: assets the device confirmed, also present on failure. They stay on the device until the overlay session ends.",
     ),
+  missingAssets: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "show/update: asset ids the overlay references that the device has no copy of; the overlay is shown with placeholders. Absent when none. Upload them with assets on a show or update with spec.",
+    ),
+  warning: z
+    .string()
+    .optional()
+    .describe("show/update succeeded but needs attention; names what to do about missingAssets"),
   ...eventCountsSchema.shape,
 });
 
@@ -351,6 +379,8 @@ type OverlayClient = Pick<
 export interface OverlayToolDependencies {
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
   assetFileReader?: OverlayAssetFileReader;
+  /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */
+  observationScreenshotReader?: OverlayObservationScreenshotReader;
   clientFactory?: (device: BootedDevice) => OverlayClient;
   store?: OverlayStatusStore;
   clock?: Pick<Timer, "now">;
@@ -383,22 +413,33 @@ async function mutate(
 
 interface AssetStage {
   uploaded: UploadedOverlayAsset[];
+  /** The validated uploads, kept so a missing asset can be re-sent without re-reading its source. */
+  prepared: OverlayAssetUpload[];
   failure?: OverlayResult;
+}
+
+interface AssetReaders {
+  assetFileReader: OverlayAssetFileReader;
+  observationScreenshotReader: OverlayObservationScreenshotReader;
 }
 
 /** Upload every `assets` entry before the overlay is sent; a failure ends the call. */
 async function stageAssets(
   client: OverlayClient,
   args: z.infer<typeof overlaySchema>,
-  reader: OverlayAssetFileReader,
+  readers: AssetReaders,
   signal: AbortSignal | undefined,
 ): Promise<AssetStage> {
   if (args.assets === undefined) {
-    return { uploaded: [] };
+    return { uploaded: [], prepared: [] };
   }
-  const prepared = await prepareOverlayAssets(args.assets, reader);
+  const prepared = await prepareOverlayAssets(
+    args.assets,
+    readers.assetFileReader,
+    readers.observationScreenshotReader,
+  );
   if ("error" in prepared) {
-    return { uploaded: [], failure: { success: false, error: prepared.error } };
+    return { uploaded: [], prepared: [], failure: { success: false, error: prepared.error } };
   }
   const outcome = await uploadOverlayAssets(client, prepared.assets, {
     signal,
@@ -406,6 +447,7 @@ async function stageAssets(
   });
   return {
     uploaded: outcome.uploaded,
+    prepared: prepared.assets,
     ...(outcome.success ? {} : { failure: { success: false, error: outcome.error } }),
   };
 }
@@ -420,6 +462,81 @@ async function runMutation(
     logger.warn("[overlay] Request failed", error);
     return { success: false, error: toActionableError(error, "Overlay request failed").message };
   }
+}
+
+interface MissingAssetRetry {
+  result: OverlayResult;
+  repair: MissingAssetRepair;
+}
+
+/**
+ * The upload-then-cleared race: the device finished the show/update but lists assets this same
+ * call uploaded as missing. Re-uploads those once and re-sends once. Bounded: never loops, honours
+ * the abort signal, and keeps the first (successful) result when the repair cannot complete.
+ */
+async function retryMissingAssets(
+  client: OverlayClient,
+  args: z.infer<typeof overlaySchema>,
+  stage: AssetStage,
+  first: OverlayResult,
+  signal: AbortSignal | undefined,
+): Promise<MissingAssetRetry | undefined> {
+  const missing = new Set(first.missingAssets);
+  const again = stage.prepared.filter((asset) => missing.has(asset.id));
+  if (again.length === 0) {
+    return undefined;
+  }
+  const fail = (reason: string): MissingAssetRetry => ({
+    result: first,
+    repair: { kind: "retry-failed", reason },
+  });
+  if (signal?.aborted) {
+    return fail("the request was cancelled");
+  }
+  const upload = await uploadOverlayAssets(client, again, { signal, action: "resend" });
+  if (!upload.success) {
+    return fail(upload.error ?? "upload failed");
+  }
+  if (signal?.aborted) {
+    return fail("the request was cancelled before the overlay was re-sent");
+  }
+  const second = await runMutation(client, args);
+  return second.success
+    ? { result: second, repair: { kind: "still-missing" } }
+    : fail(second.error ?? "re-sending the overlay failed");
+}
+
+interface MutationOutcome {
+  result: OverlayResult;
+  warning?: string;
+}
+
+async function sendOverlay(
+  client: OverlayClient,
+  args: z.infer<typeof overlaySchema>,
+  stage: AssetStage,
+  signal: AbortSignal | undefined,
+): Promise<MutationOutcome> {
+  if (stage.failure) {
+    return { result: stage.failure };
+  }
+  const first = await runMutation(client, args);
+  if (!first.success || !first.missingAssets?.length) {
+    return { result: first };
+  }
+  const retry = await retryMissingAssets(client, args, stage, first, signal);
+  const result = retry?.result ?? first;
+  if (!result.missingAssets?.length) {
+    return { result };
+  }
+  return {
+    result,
+    warning: missingAssetsWarning({
+      missing: result.missingAssets,
+      supplied: new Set(stage.prepared.map((asset) => asset.id)),
+      repair: retry?.repair,
+    }),
+  };
 }
 
 function clearMutationEvents(
@@ -455,14 +572,14 @@ async function performMutation(
     store: OverlayStatusStore;
     events: OverlayEventCoordinator;
     clientFactory: (device: BootedDevice) => OverlayClient;
-    assetFileReader: OverlayAssetFileReader;
+    assetReaders: AssetReaders;
   },
   device: BootedDevice,
   args: Omit<z.infer<typeof overlaySchema>, "action"> & { action: OverlayMutation },
   scope: OverlayScope,
   signal?: AbortSignal,
 ) {
-  const { store, events, clientFactory, assetFileReader } = dependencies;
+  const { store, events, clientFactory, assetReaders } = dependencies;
   const target = args.all
     ? { all: true as const }
     : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
@@ -471,8 +588,8 @@ async function performMutation(
   if (args.action === "show") {
     events.show(scope, target.id!, client);
   }
-  const stage = await stageAssets(client, args, assetFileReader, signal);
-  const result = stage.failure ?? (await runMutation(client, args));
+  const stage = await stageAssets(client, args, assetReaders, signal);
+  const { result, warning } = await sendOverlay(client, args, stage, signal);
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
@@ -486,7 +603,20 @@ async function performMutation(
     ...(result.error ? { error: result.error } : {}),
     lastResult,
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
+    ...missingAssetsOutput(result, warning),
   });
+}
+
+function missingAssetsOutput(
+  result: OverlayResult,
+  warning: string | undefined,
+): { missingAssets?: string[]; warning?: string } {
+  return {
+    ...(result.success && result.missingAssets?.length
+      ? { missingAssets: result.missingAssets }
+      : {}),
+    ...(warning ? { warning } : {}),
+  };
 }
 
 function notifyOverlayWaitProgress(
@@ -556,7 +686,11 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
   const events = new OverlayEventCoordinator(dependencies.timer ?? defaultTimer, store);
-  const assetFileReader = dependencies.assetFileReader ?? nodeOverlayAssetFileReader;
+  const assetReaders: AssetReaders = {
+    assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
+    observationScreenshotReader:
+      dependencies.observationScreenshotReader ?? readObservationScreenshotBytes,
+  };
   const handler = async (
     device: BootedDevice,
     input: unknown,
@@ -608,7 +742,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       }
     }
     return performMutation(
-      { store, events, clientFactory, assetFileReader },
+      { store, events, clientFactory, assetReaders },
       device,
       { ...args, action: args.action },
       scope,
@@ -617,7 +751,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     "overlay",
-    'Show, update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) uploaded before the overlay is sent; image nodes reference the id. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
+    'Show, update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

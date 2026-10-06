@@ -9,6 +9,7 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
@@ -213,7 +214,13 @@ export class NavigateTo {
         perf.end();
         const knownScreens = await this.navigationManager.getKnownScreens();
         throwIfAborted(signal);
-        return this.noKnownPathResult(currentScreen, targetScreen, knownScreens, startTime);
+        return this.noKnownPathResult(
+          currentScreen,
+          targetScreen,
+          knownScreens,
+          startTime,
+          pathResult.unreplayableEdges,
+        );
       }
 
       const result = await this.followPath(
@@ -453,11 +460,17 @@ export class NavigateTo {
     targetScreen: string,
     knownScreens: string[],
     startTime: number,
+    unreplayableEdges = 0,
   ): NavigateToResult {
+    const skipped =
+      unreplayableEdges > 0
+        ? ` ${unreplayableEdges} recorded transition(s) were ignored because no action was recorded ` +
+          `for them, so they cannot be replayed.`
+        : "";
     return {
       success: false,
       error:
-        `No known path from "${currentScreen}" to "${targetScreen}". ` +
+        `No known path from "${currentScreen}" to "${targetScreen}".${skipped} ` +
         `Known screens: ${knownScreens.join(", ") || "none"}`,
       currentScreen,
       targetScreen,
@@ -693,11 +706,15 @@ export class NavigateTo {
       };
       await this.executeToolCall(interaction, options, signal);
       executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
-    } else {
-      // No known interaction - try back button
-      logger.info(`[NAVIGATE_TO] No known interaction for edge, using back button`);
+    } else if (edge.edgeType === "back") {
+      logger.info(`[NAVIGATE_TO] Edge ${edge.from} → ${edge.to} is a Back edge, using back button`);
       await this.pressBack(signal);
       executedPath.push("pressButton(back)");
+    } else {
+      // Nothing says what caused this transition, so pressing Back would be a guess (#10196).
+      throw new ActionableError(
+        `The transition ${edge.from} → ${edge.to} has no recorded action, so it cannot be replayed.`,
+      );
     }
   }
 

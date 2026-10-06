@@ -59,11 +59,11 @@ type IsReplayFailed = (edge: DBNavigationEdge) => boolean;
 
 /**
  * Whether `candidate` should replace `existing` as the edge used for a screen
- * pair during path finding (#9990, #10031). Order of preference:
+ * pair during path finding (#9990, #10031). Both carry a tool call (an edge with
+ * none is not replayable and never reaches here, #10196). Order of preference:
  * 1. an edge whose replay has not failed over one remembered as failing, so a
- *    bad tool edge cannot shadow a working edge (even a no-tool Back edge);
- * 2. an edge carrying a tool call over one without (that is replayed as Back);
- * 3. the most recent row. Row id decides before the device event timestamp:
+ *    bad tool edge cannot shadow a working edge (including a recorded Back);
+ * 2. the most recent row. Row id decides before the device event timestamp:
  *    ids only grow, while device clocks can move backwards.
  */
 function isPreferredPathEdge(
@@ -75,10 +75,6 @@ function isPreferredPathEdge(
   if (candidateFailed !== isReplayFailed(existing)) {
     return !candidateFailed;
   }
-  const candidateReplayable = candidate.tool_name !== null;
-  if (candidateReplayable !== (existing.tool_name !== null)) {
-    return candidateReplayable;
-  }
   if (candidate.id !== existing.id) {
     return candidate.id > existing.id;
   }
@@ -86,16 +82,25 @@ function isPreferredPathEdge(
 }
 
 /**
- * Index edges by source screen, keeping one edge per (from, to) pair: every
- * traversal inserts a new row, and the oldest row may have no tool call
- * (replayed as Back). See #9990.
+ * Index the replayable edges by source screen, keeping one edge per (from, to)
+ * pair: every traversal inserts a new row. See #9990.
+ *
+ * An edge with no tool call is not replayable (#10196). Nothing says what caused
+ * it, so replaying it as a Back press would be a guess: only an edge recorded as
+ * `pressButton { button: "back" }` is replayed as Back. Such an edge is skipped
+ * here, so path finding routes around it, and counted so a failed search can say so.
  */
 function indexPathEdgesBySource(
   dbEdges: DBNavigationEdge[],
   isReplayFailed: IsReplayFailed,
-): Map<string, Map<string, DBNavigationEdge>> {
+): { edgesBySource: Map<string, Map<string, DBNavigationEdge>>; unreplayableEdges: number } {
   const edgesBySource = new Map<string, Map<string, DBNavigationEdge>>();
+  let unreplayableEdges = 0;
   for (const edge of dbEdges) {
+    if (edge.tool_name === null) {
+      unreplayableEdges++;
+      continue;
+    }
     const source = edge.from_screen;
     let outgoingEdges = edgesBySource.get(source);
     if (!outgoingEdges) {
@@ -107,7 +112,7 @@ function indexPathEdgesBySource(
       outgoingEdges.set(edge.to_screen, edge);
     }
   }
-  return edgesBySource;
+  return { edgesBySource, unreplayableEdges };
 }
 
 async function loadEdgeInteraction(
@@ -1751,7 +1756,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     const dbEdges = await this.repository.getEdges(this.currentAppId);
 
     const appId = this.currentAppId;
-    const edgesBySource = indexPathEdgesBySource(dbEdges, (edge) =>
+    const { edgesBySource, unreplayableEdges } = indexPathEdgesBySource(dbEdges, (edge) =>
       this.isEdgeReplayFailed(appId, edge),
     );
 
@@ -1795,6 +1800,7 @@ export class NavigationGraphManager implements NavigationGraphService {
       path: [],
       startScreen,
       targetScreen,
+      ...(unreplayableEdges > 0 ? { unreplayableEdges } : {}),
     };
   }
 

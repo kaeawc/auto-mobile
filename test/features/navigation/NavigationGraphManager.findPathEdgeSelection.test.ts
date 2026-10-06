@@ -102,7 +102,7 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
     ]);
   });
 
-  test("falls back to the newest edge with no tool call when nothing else exists (#9990)", async () => {
+  test("an edge with no tool call is not offered as a path (#10196)", async () => {
     const now = Date.now();
     await manager.recordNavigationEvent(createEvent("Home", now));
     await manager.recordNavigationEvent(createEvent("Settings", now + 100));
@@ -112,10 +112,51 @@ describe("NavigationGraphManager.findPath edge selection (#9990)", () => {
 
     const result = await manager.findPath("Settings");
 
+    // Nothing says what caused Home -> Settings, so it is not replayed as a guessed Back press.
+    expect(result.found).toBe(false);
+    expect(result.path).toEqual([]);
+    expect(result.unreplayableEdges).toBe(4);
+  });
+
+  test("routes around an edge with no tool call through recorded edges (#10196)", async () => {
+    const now = Date.now();
+    await manager.recordNavigationEvent(createEvent("Home", now));
+    // Home -> Target was seen with no attributable tool.
+    await manager.recordNavigationEvent(createEvent("Target", now + 100));
+    await manager.recordNavigationEvent(createEvent("Home", now + 200));
+
+    manager.recordToolCall("tapOn", { text: "Menu" });
+    await manager.recordNavigationEvent(createEvent("Menu", now + 300));
+    manager.recordToolCall("tapOn", { text: "Target" });
+    await manager.recordNavigationEvent(createEvent("Target", now + 400));
+    manager.recordToolCall("pressButton", { button: "back" });
+    await manager.recordNavigationEvent(createEvent("Home", now + 500));
+
+    const result = await manager.findPath("Target");
+
     expect(result.found).toBe(true);
-    expect(result.path).toHaveLength(1);
-    expect(result.path[0].edgeType).toBe("unknown");
-    expect(result.path[0].timestamp).toBe(now + 300);
+    expect(result.path.map((edge) => [edge.from, edge.to, edge.edgeType])).toEqual([
+      ["Home", "Menu", "tool"],
+      ["Menu", "Target", "tool"],
+    ]);
+  });
+
+  test("an edge recorded as a Back press is found (#10196)", async () => {
+    const now = Date.now();
+    await manager.recordNavigationEvent(createEvent("Home", now));
+    manager.recordToolCall("tapOn", { text: "Settings" });
+    await manager.recordNavigationEvent(createEvent("Settings", now + 100));
+    manager.recordToolCall("pressButton", { button: "back" });
+    await manager.recordNavigationEvent(createEvent("Home", now + 200));
+    await manager.recordNavigationEvent(createEvent("Settings", now + 300));
+
+    const result = await manager.findPath("Home");
+
+    expect(result.found).toBe(true);
+    expect(result.path[0].interaction).toMatchObject({
+      toolName: "pressButton",
+      args: { button: "back" },
+    });
   });
 });
 

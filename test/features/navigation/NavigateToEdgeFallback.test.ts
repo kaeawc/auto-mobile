@@ -179,9 +179,9 @@ describe("navigateTo edge fallback (#10031)", () => {
     expect(dispatched).toEqual(["tapOn:Stale"]);
   });
 
-  test("a failed tool edge does not shadow a no-tool Back edge for the same pair", async () => {
+  test("a failed tool edge does not shadow a recorded Back edge for the same pair", async () => {
     await go("Home");
-    await go("Settings");
+    await go("Settings", { name: "pressButton", args: { button: "back" } });
     await go("Home");
     await go("Settings", { name: "tapOn", args: SETTINGS_TAP });
     await go("Home");
@@ -194,10 +194,37 @@ describe("navigateTo edge fallback (#10031)", () => {
 
     await go("Home");
     const next = await manager.findPath("Settings");
-    expect(next.path[0].edgeType).toBe("unknown");
+    expect(next.path[0].interaction?.toolName).toBe("pressButton");
     dispatched = [];
     expect((await navigate("Settings")).success).toBe(true);
     expect(dispatched).toEqual(["pressButton"]);
+  });
+
+  test("a transition with no recorded action is never replayed as a guessed Back press (#10196)", async () => {
+    await go("Home");
+    await go("Settings");
+    await go("Home");
+
+    const result = await navigate("Settings");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No known path from "Home" to "Settings"');
+    expect(result.error).toContain("cannot be replayed");
+    expect(dispatched).toEqual([]);
+  });
+
+  test("a failed tool edge is not retried through an unrecorded edge as Back (#10196)", async () => {
+    await go("Home");
+    await go("Settings");
+    await go("Home");
+    await go("Settings", { name: "tapOn", args: SETTINGS_TAP });
+    await go("Home");
+    tapBehaviour = { Settings: "no-effect" };
+
+    const result = await navigate("Settings");
+
+    expect(result.success).toBe(false);
+    expect(dispatched).toEqual(["tapOn:Settings"]);
   });
 
   test("a remembered failure is forgotten when the edge's replay later succeeds", async () => {

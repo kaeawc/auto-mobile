@@ -160,6 +160,11 @@ export interface PathResult {
   path: NavigationEdge[];
   startScreen: string;
   targetScreen: string;
+  /**
+   * On a failed search: how many recorded edges were ignored because nothing says what
+   * caused them, so they cannot be replayed (#10196).
+   */
+  unreplayableEdges?: number;
 }
 
 /**

@@ -369,7 +369,9 @@ describe("AndroidCtrlProxyClient", function () {
     );
     try {
       const connectPromise = client.ensureConnected();
-      await flushPromises(8); // let setupBeforeConnect + ws construction settle; open has NOT fired
+      // Wait only until the ws is constructed (not a fixed number of event-loop turns); open has
+      // NOT fired.
+      await waitForSocket(() => socket);
       expect(socket).not.toBeNull();
       expect(client.isConnected()).toBe(false);
 
@@ -379,11 +381,10 @@ describe("AndroidCtrlProxyClient", function () {
       // The handshake now completes — `open` fires AFTER close().
       socket!.readyState = WebSocketState.OPEN;
       socket!.emit("open");
-      await flushPromises(8);
 
       // The post-close open is discarded: no socket installed, connect resolves false.
-      expect(client.isConnected()).toBe(false);
       await expect(connectPromise).resolves.toBe(false);
+      expect(client.isConnected()).toBe(false);
     } finally {
       await client.close();
     }

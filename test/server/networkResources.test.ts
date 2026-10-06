@@ -3,6 +3,7 @@ import { aggregateStatsByHost, bucketEvents } from "../../src/server/networkReso
 import { registerNetworkResources } from "../../src/server/networkResources";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { NetworkState } from "../../src/server/NetworkState";
 
 function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWithId {
   return {
@@ -38,6 +39,14 @@ describe("bucketEvents", () => {
       makeEvent({ statusCode: 301 }),
     ];
     expect(bucketEvents(events, 60)[0]).toMatchObject({ requests: 3, errors: 2 });
+  });
+
+  it("does not count a mocked 200 as an error but keeps a mocked 503", () => {
+    const events = [
+      makeEvent({ error: "mocked:mock-1" }),
+      makeEvent({ statusCode: 503, error: "mocked:mock-1" }),
+    ];
+    expect(bucketEvents(events, 60)[0]).toMatchObject({ requests: 2, errors: 1 });
   });
 
   it("returns empty array for no events", () => {
@@ -153,6 +162,12 @@ describe("aggregateStatsByHost", () => {
     ).toMatchObject({ requests: 3, errors: 2 });
   });
 
+  it("does not count a mocked 200 as an error for its host", () => {
+    expect(
+      aggregateStatsByHost([makeEvent({ error: "mocked:mock-1" }), makeEvent()])["api.example.com"],
+    ).toMatchObject({ requests: 2, errors: 0 });
+  });
+
   const PROTOTYPE_HOSTS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 
   it.each([...PROTOTYPE_HOSTS, "api.example.com"])("aggregates the %s host", (host) => {
@@ -246,6 +261,22 @@ describe("network resource registration", () => {
     });
   });
 
+  it("does not count a mocked 200 in the stats error count and rate", async () => {
+    registerNetworkResources({
+      getNetworkEvents: async () => [
+        makeEvent({ error: "mocked:mock-1" }),
+        makeEvent({ statusCode: 503, error: "mocked:mock-2" }),
+      ],
+      getNetworkEventById: async () => null,
+    });
+    const content = await ResourceRegistry.getResource("automobile:network/stats")!.handler();
+    expect(JSON.parse(content.text!)).toMatchObject({
+      totalRequests: 2,
+      errorCount: 1,
+      errorRate: 0.5,
+    });
+  });
+
   it("queries failures before applying the errors resource limit", async () => {
     registerNetworkResources({
       getNetworkEvents: async (query) => {
@@ -262,6 +293,37 @@ describe("network resource registration", () => {
 
   afterEach(() => {
     ResourceRegistry.clearResources();
+    NetworkState.resetInstance();
+  });
+
+  it("lists every device's mock rules tagged with the device they apply to (#10061)", async () => {
+    registerNetworkResources();
+    const state = NetworkState.getInstance();
+    const rule = {
+      path: "/x",
+      method: "*",
+      limit: null,
+      statusCode: 500,
+      responseHeaders: {},
+      responseBody: "",
+      contentType: "application/json",
+    };
+    state.addMock("emulator-5554", { ...rule, host: "a.com" });
+    state.addMock("emulator-5556", { ...rule, host: "b.com" });
+
+    const content = await ResourceRegistry.getResource("automobile:network/mocks")!.handler();
+    const payload = JSON.parse(content.text!);
+
+    expect(payload.count).toBe(2);
+    expect(payload.mocks.map((mock: { deviceId: string }) => mock.deviceId)).toEqual([
+      "emulator-5554",
+      "emulator-5556",
+    ]);
+    state.clearAllMocks("emulator-5556");
+    const after = JSON.parse(
+      (await ResourceRegistry.getResource("automobile:network/mocks")!.handler()).text!,
+    );
+    expect(after.count).toBe(1);
   });
 
   it("uses the canonical automobile:path form for every network resource", () => {

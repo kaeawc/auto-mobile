@@ -20,6 +20,7 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { dropMcpRecording } from "../server/mcpRecordingManager";
+import { isToolUnavailableWireError } from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
@@ -30,6 +31,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_TOOL_UNAVAILABLE_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -287,13 +289,14 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
   }
 }
 
-function mcpRequestFailureDetails(
+export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
 ): Pick<DaemonResponse, "code" | "overloadFailure" | "requestFailureCause"> {
   return {
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };
 }

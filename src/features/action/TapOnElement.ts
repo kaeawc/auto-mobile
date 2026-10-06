@@ -5178,9 +5178,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element,
         driver,
         fence,
+        signal,
       );
 
       if (result.success) {
+        // A focus-navigation gesture is acknowledged, not confirmed as an activation.
+        this.reportTalkBackActivationWarning(result, options, action);
         return result.screenReaderNavigation;
       }
 

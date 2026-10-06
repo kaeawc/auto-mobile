@@ -1,4 +1,5 @@
 import type { Element } from "../../src/models/Element";
+import type { DisplayFence } from "../../src/features/action/BaseVisualChange";
 import type {
   TalkBackTapResult,
   TalkBackFallbackAction,
@@ -33,6 +34,7 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
   tapCalls: Array<{
     deviceId: string;
     element: Element;
+    signal?: AbortSignal;
   }> = [];
 
   directActivationCalls: Array<{
@@ -103,8 +105,10 @@ export class FakeTalkBackTapStrategy implements TalkBackTapStrategyContract {
     deviceId: string,
     element: Element,
     _driver: TalkBackNavigationDriver,
+    _fence?: DisplayFence,
+    signal?: AbortSignal,
   ): Promise<TalkBackTapResult> {
-    this.tapCalls.push({ deviceId, element });
+    this.tapCalls.push({ deviceId, element, signal });
 
     if (this.tapOverrides.length > 0) {
       return this.tapOverrides.shift()!;

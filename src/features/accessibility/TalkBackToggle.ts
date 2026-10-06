@@ -26,6 +26,16 @@ const TALKBACK_STATE_CONFIRM_ATTEMPTS = 4; // 1 immediate + 3 × 500ms = 1500ms 
 const TALKBACK_STATE_CONFIRM_DELAY_MS = 500;
 const UIAUTOMATOR_DUMP_TIMEOUT_MS = 30_000;
 
+/**
+ * Longest a TalkBack toggle can take on its own clock: the one fallback
+ * `uiautomator dump`, every consent-dialog wait, and every state-confirmation
+ * wait. Ordinary adb/CtrlProxy calls add only milliseconds on top.
+ */
+export const TALKBACK_TOGGLE_WORST_CASE_MS =
+  UIAUTOMATOR_DUMP_TIMEOUT_MS +
+  (DIALOG_DISMISS_RETRIES - 1) * DIALOG_DISMISS_DELAY_MS +
+  (TALKBACK_STATE_CONFIRM_ATTEMPTS - 1) * TALKBACK_STATE_CONFIRM_DELAY_MS;
+
 /** Foreground activity identifies a runtime prompt, not the requested permission. */
 export function isTalkBackRuntimePermissionPrompt(app: {
   packageName: string;

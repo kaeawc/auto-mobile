@@ -535,6 +535,41 @@ describe("accessibilityTools", () => {
       expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: false }]);
     });
 
+    test("turning the screen reader back to what the session found clears the restore, so a later manual change survives release (#10159)", async () => {
+      registerAccessibilityTools();
+      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+      const args = { sessionUuid: "a11y-session" };
+
+      await accessibilityHandler()(ANDROID_DEVICE, { talkback: true, ...args });
+      expect(manager.getScreenReader("a11y-session")).toBeDefined();
+      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+      expect(manager.getScreenReader("a11y-session")).toBeUndefined();
+
+      // The user turns TalkBack on by hand while the session is still open.
+      enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
+      await manager.releaseSession("a11y-session");
+
+      expect(restores).toEqual([]);
+      expect(enabledByDevice.get(ANDROID_DEVICE.deviceId)).toBe(true);
+    });
+
+    test("a toggle that does not return the screen reader to the original keeps the restore", async () => {
+      enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
+      registerAccessibilityTools();
+      await manager.createSession("a11y-session", ANDROID_DEVICE.deviceId, "android");
+      const args = { sessionUuid: "a11y-session" };
+
+      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+      await accessibilityHandler()(ANDROID_DEVICE, { talkback: false, ...args });
+
+      expect(manager.getScreenReader("a11y-session")).toEqual({
+        platform: "android",
+        previousEnabled: true,
+      });
+      await manager.releaseSession("a11y-session");
+      expect(restores).toEqual([{ deviceId: ANDROID_DEVICE.deviceId, previousEnabled: true }]);
+    });
+
     test("a toggle that changes nothing, and a read of the state, register no restore", async () => {
       enabledByDevice.set(ANDROID_DEVICE.deviceId, true);
       registerAccessibilityTools();

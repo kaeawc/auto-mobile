@@ -45,7 +45,8 @@ interface AccessibilityArgs {
 /**
  * Run a screen-reader toggle so the state the session found is recorded before it
  * is changed and restored when the session releases its device (#10146). The slot is
- * write-once, so a later toggle in the same session never overwrites it.
+ * write-once, so a later toggle in the same session never overwrites it, and it is cleared
+ * again once a toggle returns the screen reader to the recorded state (#10159).
  */
 async function toggleRecordingPreviousState<
   R extends { supported: boolean; currentState?: boolean },
@@ -64,21 +65,28 @@ async function toggleRecordingPreviousState<
     args.sessionUuid,
     device.deviceId,
     async (slot?: ScreenReaderRestoreSlot) => {
-      const alreadyRecorded = slot?.get() !== undefined;
+      const priorState = slot?.get();
       let recordedPrevious: boolean | undefined;
       const result = await run({
         beforeChange: (previousEnabled) => {
-          if (slot && !alreadyRecorded) {
+          if (slot && !priorState) {
             slot.record({ platform, previousEnabled });
             recordedPrevious = previousEnabled;
           }
         },
       });
-      // Nothing changed (unsupported, or the write never landed): there is nothing to restore.
-      if (
+      // Nothing changed (unsupported, or the write never landed) on the toggle that recorded
+      // the slot: there is nothing to restore.
+      const recordedButUnchanged =
         recordedPrevious !== undefined &&
-        (!result.supported || result.currentState === recordedPrevious)
-      ) {
+        (!result.supported || result.currentState === recordedPrevious);
+      // The tool itself put the screen reader back to what the session found: the device
+      // matches again, so release must not later undo a change the user makes by hand.
+      const backToOriginal =
+        priorState !== undefined &&
+        result.supported &&
+        result.currentState === priorState.previousEnabled;
+      if (recordedButUnchanged || backToOriginal) {
         slot?.clear();
       }
       return result;

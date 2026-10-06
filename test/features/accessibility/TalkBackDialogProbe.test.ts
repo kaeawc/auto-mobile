@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import {
   CtrlProxyTalkBackDialogProbe,
@@ -56,6 +57,67 @@ describe("findTalkBackConsentDialog", () => {
   test("ignores a button1 that belongs to an unrelated dialog", () => {
     const unrelated = tree({ text: "Allow this app to access your location?" }, consentButton);
     expect(findTalkBackConsentDialog(unrelated)).toEqual({ kind: "none" });
+  });
+
+  // The captured tree is one root whose children are each window's root, marked with the
+  // native windowId (ViewHierarchyExtractor `UIElementInfo(children = sortedWindowRoots)`).
+  const window = (windowId: number, ...children: AccessibilityNode[]): AccessibilityNode => ({
+    windowId,
+    node: children,
+  });
+  const multiWindow = (...windows: AccessibilityNode[]): AccessibilityNode => ({ node: windows });
+  const otherWindowButton: AccessibilityNode = {
+    ...consentButton,
+    bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+  };
+
+  test("never taps another window's button1 because TalkBack is mentioned in a different window", () => {
+    const unrelatedDialog = window(
+      7,
+      { text: "Allow this app to access your location?" },
+      otherWindowButton,
+    );
+    const talkBackWindow = window(9, { text: "TalkBack is on" });
+
+    expect(findTalkBackConsentDialog(multiWindow(unrelatedDialog, talkBackWindow))).toEqual({
+      kind: "none",
+    });
+    expect(findTalkBackConsentDialog(multiWindow(talkBackWindow, unrelatedDialog))).toEqual({
+      kind: "none",
+    });
+  });
+
+  test("taps the TalkBack window's own button even when another window also has a button1", () => {
+    const unrelatedDialog = window(
+      7,
+      { text: "Allow this app to access your location?" },
+      otherWindowButton,
+    );
+    const talkBackDialog = window(9, consentMessage, consentButton);
+
+    expect(findTalkBackConsentDialog(multiWindow(unrelatedDialog, talkBackDialog))).toEqual({
+      kind: "dialog",
+      tap: { x: 360, y: 712 },
+    });
+  });
+
+  test("finds the consent dialog when it is not in the first window", () => {
+    const appWindow = window(1, { text: "Settings" });
+    const dialogWindow = window(2, consentMessage, consentButton);
+
+    expect(findTalkBackConsentDialog(multiWindow(appWindow, dialogWindow))).toMatchObject({
+      kind: "dialog",
+    });
+  });
+
+  test("reports none on a captured multi-window launcher hierarchy", () => {
+    const capture = JSON.parse(
+      readFileSync("test/fixtures/android-launcher/launcher-home-emulator-5600.json", "utf8"),
+    ) as { rawViewHierarchy: { json: string } };
+    const raw = JSON.parse(capture.rawViewHierarchy.json) as { hierarchy: AccessibilityNode };
+
+    expect(raw.hierarchy.node).toHaveLength(2);
+    expect(findTalkBackConsentDialog(raw.hierarchy)).toEqual({ kind: "none" });
   });
 
   test("reports no dialog when TalkBack is mentioned but there is no button", () => {

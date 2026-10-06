@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   restoreScreenReaderState,
@@ -11,6 +11,8 @@ import type {
   VoiceOverResult,
 } from "../../src/models/AccessibilityResult";
 import { runSessionScreenReaderMutation } from "../../src/server/sessionScreenReader";
+import { sequenceBackoff, type BackoffPolicy } from "../../src/utils/Backoff";
+import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -68,7 +70,13 @@ class FakeScreenReaderDevices {
   };
 }
 
-function harness() {
+interface HarnessOptions {
+  screenReaderBackoff?: BackoffPolicy;
+  /** How long one restore takes on the FakeTimer before it settles. */
+  restoreDurationMs?: number;
+}
+
+function harness(options: HarnessOptions = {}) {
   const timer = new FakeTimer();
   const devices = new FakeScreenReaderDevices();
   const manager = new SessionManager(
@@ -80,9 +88,13 @@ function harness() {
     {
       networkCondition: () => ({ restore: async () => {} }),
       clock: () => ({ restore: async () => {} }),
+      ...(options.screenReaderBackoff ? { screenReaderBackoff: options.screenReaderBackoff } : {}),
       screenReader: (target) => ({
         restore: async (state, signal) => {
           devices.restoreCalls.push({ deviceId: target.deviceId, state });
+          if (options.restoreDurationMs) {
+            await timer.sleep(options.restoreDurationMs);
+          }
           await restoreScreenReaderState(target, state, signal, devices.toggles);
         },
       }),
@@ -260,6 +272,151 @@ describe("session screen reader restoration (#10146)", () => {
     } finally {
       h.manager.stopCleanupTimer();
     }
+  });
+
+  describe("a restore that never sticks (#10159)", () => {
+    const stuckRelease = async (h: ReturnType<typeof harness>) => {
+      await h.manager.createSession("s1", android.deviceId, "android");
+      await h.toggleInSession("s1", android, true);
+      h.devices.stuck.add(android.deviceId);
+      await h.manager.releaseSession("s1");
+      // Wrapped: returning the promise from an async function would adopt (await) it.
+      return { pending: h.manager.getPendingDeviceCleanup(android.deviceId) };
+    };
+
+    test("retries are bounded, paced by the injected Backoff, and then stop without a timer", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const h = harness({ screenReaderBackoff: sequenceBackoff([111, 222]) });
+      try {
+        const { pending } = await stuckRelease(h);
+        expect(h.devices.restoreCalls).toHaveLength(1);
+
+        h.timer.advanceTime(110);
+        await flush();
+        expect(h.devices.restoreCalls).toHaveLength(1);
+        h.timer.advanceTime(1);
+        await flush();
+        expect(h.devices.restoreCalls).toHaveLength(2);
+        h.timer.advanceTime(221);
+        await flush();
+        expect(h.devices.restoreCalls).toHaveLength(2);
+        h.timer.advanceTime(1);
+        await pending;
+
+        expect(h.devices.restoreCalls).toHaveLength(3);
+        expect(h.manager.getPendingDeviceCleanup(android.deviceId)).toBeNull();
+        h.timer.advanceTime(10 * 60_000);
+        await flush();
+        expect(h.devices.restoreCalls).toHaveLength(3);
+        const gaveUp = warn.mock.calls
+          .map((call) => String(call[0]))
+          .find((message) => message.startsWith("Gave up restoring the screen reader"));
+        expect(gaveUp).toContain(android.deviceId);
+        expect(gaveUp).toContain("TalkBack should be disabled");
+      } finally {
+        h.manager.stopCleanupTimer();
+        warn.mockRestore();
+      }
+    });
+
+    test("the next session start on the device tries the restore once more", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const h = harness({ screenReaderBackoff: sequenceBackoff([1]) });
+      try {
+        const { pending } = await stuckRelease(h);
+        h.timer.advanceTime(1);
+        await flush();
+        h.timer.advanceTime(1);
+        await pending;
+        expect(h.devices.restoreCalls).toHaveLength(3);
+
+        // Still stuck: the start attempts exactly once and does not loop.
+        await h.manager.createSession("s2", android.deviceId, "android");
+        expect(h.devices.restoreCalls).toHaveLength(4);
+
+        h.devices.stuck.delete(android.deviceId);
+        await h.manager.createSession("s3", android.deviceId, "android");
+        expect(h.devices.restoreCalls).toHaveLength(5);
+        expect(h.devices.isEnabled(android.deviceId)).toBe(false);
+
+        // Restored: nothing is left to retry.
+        await h.manager.createSession("s4", android.deviceId, "android");
+        expect(h.devices.restoreCalls).toHaveLength(5);
+      } finally {
+        h.manager.stopCleanupTimer();
+        warn.mockRestore();
+      }
+    });
+
+    test("the next release on the device tries the restore once more", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const h = harness({ screenReaderBackoff: sequenceBackoff([1]) });
+      try {
+        const { pending } = await stuckRelease(h);
+        h.timer.advanceTime(1);
+        await flush();
+        h.timer.advanceTime(1);
+        await pending;
+        await h.manager.createSession("s2", android.deviceId, "android");
+        expect(h.devices.restoreCalls).toHaveLength(4);
+
+        h.devices.stuck.delete(android.deviceId);
+        await h.manager.releaseSession("s2");
+
+        expect(h.devices.restoreCalls).toHaveLength(5);
+        expect(h.devices.isEnabled(android.deviceId)).toBe(false);
+      } finally {
+        h.manager.stopCleanupTimer();
+        warn.mockRestore();
+      }
+    });
+
+    test("retiring the device forgets the unrestored state", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const h = harness({ screenReaderBackoff: sequenceBackoff([1]) });
+      try {
+        const { pending } = await stuckRelease(h);
+        h.timer.advanceTime(1);
+        await flush();
+        h.timer.advanceTime(1);
+        await pending;
+
+        h.manager.retireScreenReaderRestoration(android.deviceId);
+        await h.manager.createSession("s2", android.deviceId, "android");
+
+        expect(h.devices.restoreCalls).toHaveLength(3);
+      } finally {
+        h.manager.stopCleanupTimer();
+        warn.mockRestore();
+      }
+    });
+  });
+
+  describe("the restore has its own budget (#10159)", () => {
+    test.each([5_000, 33_000])(
+      "a toggle that takes %dms but completes is not quarantined",
+      async (durationMs) => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const h = harness({ restoreDurationMs: durationMs });
+        try {
+          await h.manager.createSession("s1", android.deviceId, "android");
+          await h.toggleInSession("s1", android, true);
+
+          const release = h.manager.releaseSession("s1");
+          await flush();
+          h.timer.advanceTime(durationMs);
+          await release;
+
+          expect(h.devices.isEnabled(android.deviceId)).toBe(false);
+          expect(h.manager.getPendingDeviceCleanup(android.deviceId)).toBeNull();
+          const warned = warn.mock.calls.map((call) => String(call[0]));
+          expect(warned.filter((message) => message.includes("quarantining"))).toEqual([]);
+        } finally {
+          h.manager.stopCleanupTimer();
+          warn.mockRestore();
+        }
+      },
+    );
   });
 
   test("retiring the device stops further restore retries", async () => {

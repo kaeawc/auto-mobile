@@ -4,8 +4,16 @@ import type {
   TalkBackResult,
   VoiceOverResult,
 } from "../../models/AccessibilityResult";
-import { TalkBackToggle } from "./TalkBackToggle";
+import { TALKBACK_TOGGLE_WORST_CASE_MS, TalkBackToggle } from "./TalkBackToggle";
 import { VoiceOverToggle } from "./VoiceOverToggle";
+
+/**
+ * Budget for one screen-reader restore. A toggle is not a settings write: the
+ * TalkBack path can spend its fallback hierarchy dump plus the dialog and
+ * confirmation waits, so size to that worst case (plus slack for the ordinary
+ * adb calls), not to the 1 s used for single `settings put` restores.
+ */
+export const SCREEN_READER_RESTORE_TIMEOUT_MS = TALKBACK_TOGGLE_WORST_CASE_MS + 2_000;
 
 /**
  * Screen-reader state a session found before its first `accessibility` toggle.

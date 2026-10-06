@@ -45,18 +45,42 @@ function collectNodes(root: AccessibilityNode): AccessibilityNode[] {
 }
 
 /**
- * Match `android:id/button1` only when the TalkBack dialog context is present:
- * that id is a generic one reused by many dialogs, and matching it by id keeps
- * the tap locale independent.
+ * The captured hierarchy is one tree whose children are every window's root, each
+ * carrying the native `windowId` marker. A tree without markers is a single window.
  */
-export function findTalkBackConsentDialog(root: AccessibilityNode): TalkBackDialogProbeResult {
-  const nodes = collectNodes(root);
+function windowRoots(root: AccessibilityNode): AccessibilityNode[] {
+  const roots: AccessibilityNode[] = [];
+  const pending = [root];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (node.windowId !== undefined) {
+      roots.push(node);
+    } else {
+      pending.push(...childrenOf(node));
+    }
+  }
+  return roots.length > 0 ? roots : [root];
+}
+
+function findConsentButtonInWindow(window: AccessibilityNode): AccessibilityNode | undefined {
+  const nodes = collectNodes(window);
   const mentionsTalkBack = nodes.some(
     (node) => node.text?.includes("TalkBack") || node["content-desc"]?.includes("TalkBack"),
   );
-  const button = mentionsTalkBack
+  return mentionsTalkBack
     ? nodes.find((node) => node["resource-id"] === CONSENT_BUTTON_ID)
     : undefined;
+}
+
+/**
+ * Match `android:id/button1` only when the TalkBack dialog context is present in
+ * the SAME window: that id is a generic one reused by many dialogs, so a TalkBack
+ * mention in one window must never select another window's OK button. Matching by
+ * id keeps the tap locale independent.
+ */
+export function findTalkBackConsentDialog(root: AccessibilityNode): TalkBackDialogProbeResult {
+  const button = windowRoots(root)
+    .map(findConsentButtonInWindow)
+    .find((candidate) => candidate !== undefined);
   if (!button) {
     return { kind: "none" };
   }

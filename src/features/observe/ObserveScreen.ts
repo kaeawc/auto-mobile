@@ -143,6 +143,14 @@ import {
   type ScreenshotEvidenceFiles,
 } from "./screenshot/observationScreenshotEvidence";
 
+/** Same panel key and display generation: the only proof a cached capture shows this panel. */
+function sameObservedPanel(
+  cached: ObserveResult["display"] | undefined,
+  observed: ObserveResult["display"],
+): boolean {
+  return cached?.key === observed.key && cached.generation === observed.generation;
+}
+
 function reconcileIosDisplayTransition(
   deviceId: string,
   result: ObserveResult,
@@ -1033,7 +1041,7 @@ export class RealObserveScreen implements ObserveScreen {
         `observe crop screenshot capture failed for device ${this.device.deviceId}: ${failure}. Retry with a fresh settled capture.`,
       );
     }
-    const cachedScreenshot = this.eligibleCachedScreenshot(displayId);
+    const cachedScreenshot = this.eligibleCachedScreenshot(displayId, result.display);
     if (cachedScreenshot) {
       try {
         Object.assign(
@@ -1073,26 +1081,36 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   private eligibleCachedScreenshot(
-    displayId?: number,
+    displayId: number | undefined,
+    observed: ObserveResult["display"],
   ): { path: string; imageSize?: { width: number; height: number } } | undefined {
     const cached = getObserveCacheStore().getRecentInMemoryForDevice(this.device.deviceId);
-    const explicitDisplay = Boolean(this.requestedDisplay && this.requestedDisplay !== "active");
-    if (!this.cachedScreenshotDisplayMatches(cached, displayId)) {
+    if (!this.cachedScreenshotDisplayMatches(cached, displayId, observed)) {
       return undefined;
     }
     if (cached?.screenshotPath) {
       return { path: cached.screenshotPath, imageSize: cached.screenshotImageSize };
     }
-    const path =
-      !explicitDisplay && displayId === undefined
-        ? getScreenshotStateStore().getPath(this.device.deviceId)
-        : undefined;
+    const path = this.deviceWideScreenshotPath(displayId);
     return path ? { path } : undefined;
+  }
+
+  /** The device-wide screenshot state has no panel provenance, so it never serves a multi-panel device. */
+  private deviceWideScreenshotPath(displayId: number | undefined): string | undefined {
+    const explicitDisplay = Boolean(this.requestedDisplay && this.requestedDisplay !== "active");
+    return !explicitDisplay && displayId === undefined && !this.hasMultiplePanels()
+      ? getScreenshotStateStore().getPath(this.device.deviceId)
+      : undefined;
+  }
+
+  private hasMultiplePanels(): boolean {
+    return (this.device.displays?.panels.length ?? 0) > 1;
   }
 
   private cachedScreenshotDisplayMatches(
     cached: ObserveResult | undefined,
-    displayId?: number,
+    displayId: number | undefined,
+    observed: ObserveResult["display"],
   ): boolean {
     const displayMatches = [
       undefined,
@@ -1101,7 +1119,11 @@ export class RealObserveScreen implements ObserveScreen {
       cached?.display.role,
     ].includes(this.requestedDisplay);
     const displayIdMatches = [undefined, cached?.viewHierarchy?.displayId].includes(displayId);
-    return displayMatches && displayIdMatches;
+    // A default or "active" read resolves its panel from live state, so the request alone cannot
+    // prove which panel a cached screenshot came from. On multi-panel devices the cached entry
+    // must carry this observation's panel key and display generation.
+    const panelMatches = !this.hasMultiplePanels() || sameObservedPanel(cached?.display, observed);
+    return displayMatches && displayIdMatches && panelMatches;
   }
 
   /**

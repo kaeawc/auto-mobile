@@ -15,6 +15,12 @@ data class OverlayRuntimeSnapshot(
   val spec: OverlaySpec,
   val pages: Map<String, Int>,
   val active: Boolean = true,
+  /**
+   * Bumped per key each time the controller's text for that key is replaced from outside the field:
+   * an authoritative patch that changes it, or a rejected edit that must be reverted. The field
+   * adopts the value whenever the epoch moves; see [TextChange].
+   */
+  val textEpochs: Map<String, Int> = emptyMap(),
 ) {
   val state: Map<String, OverlayScalar>
     get() = spec.state.orEmpty()
@@ -30,7 +36,12 @@ sealed interface OverlayInteraction {
 
   data class SettledPage(val pager: String, val page: Int) : OverlayInteraction
 
-  data class TextChange(val key: String, val value: String) : OverlayInteraction
+  /**
+   * [epoch] is the key's [OverlayRuntimeSnapshot.textEpochs] entry the editing field last rendered.
+   * An edit typed against text an authoritative `update_overlay` has since replaced is stale and is
+   * dropped, so the external value wins over reports still in flight.
+   */
+  data class TextChange(val key: String, val value: String, val epoch: Int = 0) : OverlayInteraction
 
   data class Select(
     val pager: String?,
@@ -63,7 +74,18 @@ class OverlayRuntime(
     get() = snapshots.value
 
   fun replace(spec: OverlaySpec) {
-    if (current.active) mutableSnapshot.value = snapshot(spec, current.pages)
+    if (!current.active) return
+    val next = snapshot(spec, current.pages)
+    val changed =
+      (current.state.keys + next.state.keys).filter { key ->
+        current.state[key] != next.state[key] &&
+          (current.state[key] is OverlayScalar.Text || next.state[key] is OverlayScalar.Text)
+      }
+    mutableSnapshot.value =
+      next.copy(
+        textEpochs =
+          current.textEpochs + changed.associateWith { (current.textEpochs[it] ?: 0) + 1 }
+      )
   }
 
   fun close() {
@@ -78,8 +100,7 @@ class OverlayRuntime(
       is OverlayInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is OverlayInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
-      is OverlayInteraction.TextChange ->
-        change(interaction.key, OverlayScalar.Text(interaction.value))
+      is OverlayInteraction.TextChange -> textChange(interaction)
       is OverlayInteraction.Select -> {
         if (interaction.pager != null) setPage(interaction.pager, interaction.index)
         else
@@ -133,6 +154,24 @@ class OverlayRuntime(
       (validation as? OverlaySpecValidation.Failure)?.error.toString()
     }
     mutableSnapshot.value = current.copy(spec = spec)
+  }
+
+  /**
+   * An edit the validator rejects (e.g. the spec size cap) leaves the state untouched, so the field
+   * that already shows it must be told to revert: the key's epoch moves, the field adopts the
+   * accepted text, and edits still in flight from the abandoned text go stale. Rethrown so the
+   * controller still logs the failure (never the typed text).
+   */
+  private suspend fun textChange(interaction: OverlayInteraction.TextChange) {
+    val key = interaction.key
+    if (interaction.epoch < (current.textEpochs[key] ?: 0)) return
+    try {
+      change(key, OverlayScalar.Text(interaction.value))
+    } catch (error: IllegalArgumentException) {
+      mutableSnapshot.value =
+        current.copy(textEpochs = current.textEpochs + (key to (current.textEpochs[key] ?: 0) + 1))
+      throw error
+    }
   }
 
   /** Changes emit once only for a changed value; setState actions and wire patches are silent. */

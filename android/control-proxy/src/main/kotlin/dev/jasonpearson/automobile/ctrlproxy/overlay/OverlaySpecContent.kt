@@ -29,8 +29,11 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
+
+/** Per-key epochs of the controller-held text; a field adopts the shown value when its moves. */
+internal val LocalOverlayTextEpochs = compositionLocalOf<Map<String, Int>> { emptyMap() }
 
 val OverlayRole = SemanticsPropertyKey<String>("OverlayRole")
 
@@ -41,11 +44,16 @@ internal fun OverlayRuntimeContent(
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
-  val scope = rememberCoroutineScope()
   if (snapshot.active) {
     key(runtime) {
-      OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
-        scope.launch { interact(interaction) }
+      // One ordered queue drained by one coroutine: interactions reach the controller exactly in
+      // the order they happened, whatever the dispatcher does with separately launched jobs.
+      val queue = remember { Channel<OverlayInteraction>(Channel.UNLIMITED) }
+      LaunchedEffect(queue) { for (interaction in queue) interact(interaction) }
+      CompositionLocalProvider(LocalOverlayTextEpochs provides snapshot.textEpochs) {
+        OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
+          queue.trySend(interaction)
+        }
       }
     }
   }
@@ -141,6 +149,13 @@ private fun RenderOverlayTextField(
   val presses = remember { MutableInteractionSource() }
   val focus = remember { FocusRequester() }
   val actions = source.onTap.orEmpty()
+  // The shown value is local state, updated synchronously by the IME's own edits; the controller
+  // is told afterwards. Binding it to node.text would show the controller's lagging echo, so fast
+  // commitText input could be applied against a stale value.
+  val epoch = LocalOverlayTextEpochs.current[source.stateKey] ?: 0
+  val sync = remember { OverlayTextFieldSync(node.text, epoch) }
+  var shown by remember { mutableStateOf(sync.text) }
+  LaunchedEffect(node.text, epoch) { if (sync.observe(node.text, epoch)) shown = sync.text }
   LaunchedEffect(presses, actions) {
     presses.interactions.collect { press ->
       if (press is PressInteraction.Release && actions.isNotEmpty())
@@ -158,8 +173,13 @@ private fun RenderOverlayTextField(
     }
   // Material's editable field supplies SetText semantics and the keyboard input connection.
   TextField(
-    node.text,
-    { interact(OverlayInteraction.TextChange(source.stateKey, it)) },
+    shown,
+    { value ->
+      if (sync.edit(value)) {
+        shown = value
+        interact(OverlayInteraction.TextChange(source.stateKey, value, sync.epoch))
+      }
+    },
     modifier = fieldModifier,
     interactionSource = presses,
     placeholder = { Text(source.placeholder.orEmpty()) },

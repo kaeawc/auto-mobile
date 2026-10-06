@@ -1,3 +1,5 @@
+import { parseOutputReductionFlags } from "../../src/utils/outputReductionFlags";
+import { DefaultFeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -4778,7 +4780,7 @@ describe("actions-compact-metadata", () => {
     }
   }
 
-  test("default finalized bytes stay identical; missing session/store are also unchanged", () => {
+  test("explicit opt-out keeps finalized bytes identical; missing session/store are also unchanged", () => {
     emit();
     const snapshot = structuredClone(records);
     const reads = spyOn(store, "getActionMetadata");
@@ -4799,6 +4801,39 @@ describe("actions-compact-metadata", () => {
     expect(JSON.stringify(emit(action(), { baselineStore: undefined }))).toBe(expected);
     expect(records.size).toBe(0);
   });
+  test("default configuration sends full first/new-session/device-switch blocks and compacts repeats", () => {
+    serverConfig.setActionsCompactMetadataEnabled(
+      parseOutputReductionFlags([], {}).actionsCompactMetadata,
+    );
+    expectFull(emit());
+    const repeated = observation(emit());
+    for (const key of Object.keys(metadata)) {
+      expect(repeated).not.toHaveProperty(key);
+    }
+    expectFull(emit(action(), { sessionUuid: "s2" }));
+    expectFull(emit(action("phone-b")));
+    expectFull(emit());
+  });
+  test.each(["environment", "feature-flag"])(
+    "%s opt-out restores every block and duplicate element",
+    (source) => {
+      if (source === "environment") {
+        serverConfig.setActionsCompactMetadataEnabled(
+          parseOutputReductionFlags([], {
+            AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
+          }).actionsCompactMetadata,
+        );
+      } else {
+        new DefaultFeatureFlagApplier().apply("actions-compact-metadata", false);
+      }
+      for (let i = 0; i < 2; i++) {
+        const response = emit();
+        expectFull(response);
+        expect(structuredPayload(response).element).toEqual(element);
+      }
+      expect(records.size).toBe(0);
+    },
+  );
   test("first full; identical second omits each block; changed block alone reappears", () => {
     expectFull(emit());
     const repeated = observation(emit());

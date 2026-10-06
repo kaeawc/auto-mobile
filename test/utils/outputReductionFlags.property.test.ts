@@ -17,43 +17,51 @@ const flagsArb = fc.record(
 ) as fc.Arbitrary<OutputReductionFlags>;
 
 const spec = fc.constantFrom(...OUTPUT_REDUCTION_FLAG_SPECS);
-const cliSet = new Set(OUTPUT_REDUCTION_FLAG_SPECS.map((s) => s.cli));
+const cliSet = new Set(
+  OUTPUT_REDUCTION_FLAG_SPECS.flatMap((s) => (s.disableCli ? [s.cli, s.disableCli] : [s.cli])),
+);
 const fieldsEqual = (a: OutputReductionFlags, b: OutputReductionFlags): boolean =>
   OUTPUT_REDUCTION_FLAG_SPECS.every((s) => a[s.field] === b[s.field]);
 
 describe("parseOutputReductionFlags (property-based)", () => {
-  test("with no CLI args and no env, every flag defaults off", () => {
+  test("with no CLI args and no env, only compact metadata defaults on", () => {
     fc.assert(
       fc.property(fc.constant(null), () => {
         const flags = parseOutputReductionFlags([], {});
-        return OUTPUT_REDUCTION_FLAG_SPECS.every((s) => flags[s.field] === false);
-      }),
-      RUN_OPTIONS,
-    );
-  });
-
-  test("a single CLI flag enables exactly its own field", () => {
-    fc.assert(
-      fc.property(spec, (s) => {
-        const flags = parseOutputReductionFlags([s.cli], {});
         return OUTPUT_REDUCTION_FLAG_SPECS.every(
-          (other) => flags[other.field] === (other.field === s.field),
+          (s) => flags[s.field] === (s.field === "actionsCompactMetadata"),
         );
       }),
       RUN_OPTIONS,
     );
   });
 
-  test('an env var enables only its own flag, and only on the exact string "1"', () => {
+  test("a single CLI flag enables its own field without changing other defaults", () => {
+    fc.assert(
+      fc.property(spec, (s) => {
+        const flags = parseOutputReductionFlags([s.cli], {});
+        return OUTPUT_REDUCTION_FLAG_SPECS.every(
+          (other) =>
+            flags[other.field] ===
+            (other.field === s.field || other.field === "actionsCompactMetadata"),
+        );
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("an env var overrides only its own flag with exact one or compact-metadata zero", () => {
     fc.assert(
       fc.property(spec, fc.oneof(fc.constant("1"), fc.string({ maxLength: 4 })), (s, value) => {
         const flags = parseOutputReductionFlags([], { [s.env]: value });
         // Check EVERY field, not just s.field: a spec that reused another spec's
         // env name would flip a second field here and be caught (cross-talk).
-        const enabled = value === "1";
-        return OUTPUT_REDUCTION_FLAG_SPECS.every(
-          (other) => flags[other.field] === (other.field === s.field && enabled),
-        );
+        return OUTPUT_REDUCTION_FLAG_SPECS.every((other) => {
+          const defaultOn = other.field === "actionsCompactMetadata";
+          const expected =
+            other.field === s.field ? value === "1" || (defaultOn && value !== "0") : defaultOn;
+          return flags[other.field] === expected;
+        });
       }),
       RUN_OPTIONS,
     );
@@ -74,12 +82,12 @@ describe("parseOutputReductionFlags (property-based)", () => {
 });
 
 describe("outputReductionFlagsToArgs (property-based)", () => {
-  test("emits exactly the CLI flags for the truthy fields, in spec order", () => {
+  test("emits enabled CLI flags and an explicit compact-metadata opt-out, in spec order", () => {
     fc.assert(
       fc.property(flagsArb, (flags) => {
         const args = outputReductionFlagsToArgs(flags);
-        const expected = OUTPUT_REDUCTION_FLAG_SPECS.filter((s) => flags[s.field]).map(
-          (s) => s.cli,
+        const expected = OUTPUT_REDUCTION_FLAG_SPECS.flatMap((s) =>
+          flags[s.field] ? [s.cli] : s.disableCli ? [s.disableCli] : [],
         );
         return args.length === expected.length && args.every((a, i) => a === expected[i]);
       }),
@@ -87,7 +95,7 @@ describe("outputReductionFlagsToArgs (property-based)", () => {
     );
   });
 
-  test("every emitted arg is a known CLI flag whose field is truthy", () => {
+  test("every emitted arg is a known CLI flag", () => {
     fc.assert(
       fc.property(flagsArb, (flags) => {
         const args = outputReductionFlagsToArgs(flags);
@@ -111,13 +119,9 @@ describe("outputReductionFlags round-trip (property-based)", () => {
   test("toArgs ∘ parse is a canonical fixed point over arbitrary argv", () => {
     // Feeding parse arbitrary argv (dupes, unknown tokens, any order) and then
     // re-serializing yields the same canonical, spec-ordered arg list twice.
-    const argv = fc.array(
-      fc.oneof(
-        spec.map((s) => s.cli),
-        fc.string({ maxLength: 8 }),
-      ),
-      { maxLength: 15 },
-    );
+    const argv = fc.array(fc.oneof(fc.constantFrom(...cliSet), fc.string({ maxLength: 8 })), {
+      maxLength: 15,
+    });
     fc.assert(
       fc.property(argv, (args) => {
         const once = outputReductionFlagsToArgs(parseOutputReductionFlags(args, {}));

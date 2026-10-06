@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { daemonCommandOptions } from "../../src/daemon/cli/runDaemonCommand";
@@ -12,6 +12,8 @@ import {
   daemonReuseOptions,
 } from "../../src/daemon/daemonOptionScopes";
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
+import { Daemon } from "../../src/daemon/daemon";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import type { DaemonOptions } from "../../src/daemon/types";
 
 /**
@@ -459,5 +461,31 @@ describe("reuse-critical drift guard", () => {
         AUTOMOBILE_DEBUG: "1",
       }),
     ).toEqual({ AUTOMOBILE_DEBUG: "1" });
+  });
+});
+
+describe("compact metadata opt-out startup relay", () => {
+  const previous = serverConfig.isActionsCompactMetadataEnabled();
+  afterEach(() => serverConfig.setActionsCompactMetadataEnabled(previous));
+
+  test("manager relay and daemon startup apply an explicit false", () => {
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    const parsed = parseDaemonArgs(serialize({ actionsCompactMetadata: false }), {});
+    expect(parsed.actionsCompactMetadata).toBe(false);
+    // Bypass the constructor: only exercise pure configuration application.
+    const daemon = Object.create(Daemon.prototype) as {
+      applyToolOutputOptions(options: DaemonOptions): void;
+    };
+    daemon.applyToolOutputOptions(parsed);
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
+  });
+
+  test("unspecified daemon option preserves a saved feature-flag opt-out", () => {
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    const daemon = Object.create(Daemon.prototype) as {
+      applyToolOutputOptions(options: DaemonOptions): void;
+    };
+    daemon.applyToolOutputOptions(parseDaemonArgs([], {}));
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
   });
 });

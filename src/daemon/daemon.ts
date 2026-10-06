@@ -800,8 +800,8 @@ export class Daemon {
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
     }
-    if (options.actionsCompactMetadata) {
-      serverConfig.setActionsCompactMetadataEnabled(true);
+    if (options.actionsCompactMetadata !== undefined) {
+      serverConfig.setActionsCompactMetadataEnabled(options.actionsCompactMetadata);
     }
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);

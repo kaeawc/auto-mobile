@@ -1,18 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseOutputReductionFlags,
+  parseOutputReductionFlagOverrides,
   OUTPUT_REDUCTION_FLAG_SPECS,
 } from "../../src/utils/outputReductionFlags";
 
 describe("parseOutputReductionFlags", () => {
-  test("defaults every flag to false when neither CLI nor env is set", () => {
+  test("defaults compact metadata on and neighbouring flags off", () => {
     const flags = parseOutputReductionFlags([], {});
     expect(flags).toEqual({
       observeResultIncludeElements: false,
       toolResultsNoStructuredContent: false,
       actionsDiffObserve: false,
       actionsNoObserve: false,
-      actionsCompactMetadata: false,
+      actionsCompactMetadata: true,
     });
   });
 
@@ -30,12 +31,12 @@ describe("parseOutputReductionFlags", () => {
     }
   });
 
-  test('env values other than "1" do not enable the flag', () => {
+  test("env zero disables every flag; other values preserve defaults", () => {
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
       const flags = parseOutputReductionFlags([], { [spec.env]: "0" });
       expect(flags[spec.field]).toBe(false);
       const flagsTrue = parseOutputReductionFlags([], { [spec.env]: "true" });
-      expect(flagsTrue[spec.field]).toBe(false);
+      expect(flagsTrue[spec.field]).toBe(spec.field === "actionsCompactMetadata");
     }
   });
 
@@ -76,4 +77,38 @@ test("compact metadata CLI/env flag is registered", () => {
     parseOutputReductionFlags([], { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "1" })
       .actionsCompactMetadata,
   ).toBe(true);
+});
+
+test("compact metadata environment zero opts out", () => {
+  expect(
+    parseOutputReductionFlags([], { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0" })
+      .actionsCompactMetadata,
+  ).toBe(false);
+});
+
+test("compact metadata negative relay argument overrides inherited environment", () => {
+  expect(
+    parseOutputReductionFlags(["--no-actions-compact-metadata"], {
+      AUTOMOBILE_ACTIONS_COMPACT_METADATA: "1",
+    }).actionsCompactMetadata,
+  ).toBe(false);
+  expect(
+    parseOutputReductionFlags(["--no-actions-compact-metadata", "--actions-compact-metadata"], {})
+      .actionsCompactMetadata,
+  ).toBe(true);
+});
+
+test("startup defaults are not explicit overrides of saved feature flags", () => {
+  expect(parseOutputReductionFlagOverrides([], {})).toEqual({});
+  expect(
+    parseOutputReductionFlagOverrides([], { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "true" }),
+  ).toEqual({});
+  expect(
+    parseOutputReductionFlagOverrides([], { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0" }),
+  ).toEqual({ actionsCompactMetadata: false });
+  expect(
+    parseOutputReductionFlagOverrides(["--actions-compact-metadata"], {
+      AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
+    }),
+  ).toEqual({ actionsCompactMetadata: true });
 });

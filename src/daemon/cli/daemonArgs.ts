@@ -1,4 +1,5 @@
 import { parsePort, parsePositiveNumber, type ParseLogger } from "../../cli/numericValidators";
+import { parseOutputReductionFlagOverrides } from "../../utils/outputReductionFlags";
 import { logger } from "../../utils/logger";
 import { shouldSkipCtrlProxyDownload } from "../../utils/ctrlProxyDownloadControl";
 import {
@@ -104,7 +105,6 @@ const booleanFlags: Partial<Record<string, DaemonBooleanOption>> = {
   "--tool-results-no-structured-content": "toolResultsNoStructuredContent",
   "--actions-diff-observe": "actionsDiffObserve",
   "--actions-no-observe": "actionsNoObserve",
-  "--actions-compact-metadata": "actionsCompactMetadata",
 };
 
 function hasDaemonFlagValue(value: string | undefined): value is string {
@@ -239,5 +239,9 @@ export function parseDaemonArgs(
       i++;
     }
   }
+  options.actionsCompactMetadata = parseOutputReductionFlagOverrides(
+    args,
+    env,
+  ).actionsCompactMetadata;
   return options;
 }

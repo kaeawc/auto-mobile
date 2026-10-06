@@ -183,3 +183,18 @@ describe("tool outputs directory daemon arg relay", () => {
 test("compact metadata daemon arg parses", () => {
   expect(parseDaemonArgs(["--actions-compact-metadata"]).actionsCompactMetadata).toBe(true);
 });
+
+test("compact metadata opt-out survives serialization and daemon parsing", () => {
+  const args = outputReductionFlagsToArgs({ actionsCompactMetadata: false });
+  expect(args).toEqual(["--no-actions-compact-metadata"]);
+  expect(
+    parseDaemonArgs(args, { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "1" }).actionsCompactMetadata,
+  ).toBe(false);
+});
+
+test("daemon environment zero opts out while absent configuration keeps no override", () => {
+  expect(
+    parseDaemonArgs([], { AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0" }).actionsCompactMetadata,
+  ).toBe(false);
+  expect(parseDaemonArgs([], {}).actionsCompactMetadata).toBeUndefined();
+});

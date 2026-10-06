@@ -21,7 +21,10 @@ process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 import type { DaemonOptions } from "./daemon/types";
 import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
-import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  parseOutputReductionFlagOverrides,
+} from "./utils/outputReductionFlags";
 import { hasGlobalHelpFlag } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
@@ -262,6 +265,10 @@ async function main() {
       enabledTools,
       disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
+    const outputReductionOverrides = parseOutputReductionFlagOverrides(
+      process.argv.slice(2),
+      process.env,
+    );
     if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
       await runDaemonCommand(daemonCommand, daemonArgs);
       await exitAfterSuccessfulDaemonCommand(logger, process);
@@ -365,7 +372,7 @@ async function main() {
 
     type CliFeatureFlagOverride = [
       FeatureFlagKey,
-      boolean,
+      boolean | undefined,
       string,
       (Record<string, unknown> | null | undefined)?,
     ];
@@ -381,7 +388,7 @@ async function main() {
       ["mcp-recording", mcpRecording, "--mcp-recording"],
       ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec): CliFeatureFlagOverride => [
         spec.featureFlagKey,
-        outputReduction[spec.field],
+        outputReductionOverrides[spec.field],
         spec.label,
         undefined,
       ]),
@@ -398,11 +405,11 @@ async function main() {
       await featureFlagService.initialize();
 
       for (const [key, enabled, flagLabel, config] of cliOverrides) {
-        if (!enabled) {
+        if (enabled === undefined || (!enabled && key !== "actions-compact-metadata")) {
           continue;
         }
-        await featureFlagService.setFlag(key, true, config);
-        logger.info(`Feature flag enabled (${flagLabel})`);
+        await featureFlagService.setFlag(key, enabled, config);
+        logger.info(`Feature flag ${enabled ? "enabled" : "disabled"} (${flagLabel})`);
       }
 
       if (!navigationScreenshots) {
@@ -538,6 +545,7 @@ async function main() {
         noOcclusion,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
+        actionsCompactMetadata: outputReductionOverrides.actionsCompactMetadata,
       });
       return;
     }
@@ -616,6 +624,7 @@ async function main() {
       ...(noOcclusion ? { noOcclusion: true } : {}),
       // OutputReductionFlags field names match these DaemonOptions fields 1:1.
       ...outputReduction,
+      actionsCompactMetadata: outputReductionOverrides.actionsCompactMetadata,
       // The positive flag is an explicit connection preference. Its absence is
       // no preference, so the daemon's global fallback remains authoritative.
       toolResultsNoStructuredContent: outputReduction.toolResultsNoStructuredContent

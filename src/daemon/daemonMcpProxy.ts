@@ -767,8 +767,11 @@ function requestedOptionDeficits<T>(
  * #3846): a client that does not ask for a flag has no opinion on it, so a flag
  * the daemon already has is never reported as a deficit just because a
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
- * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
- * read as "no opinion"; strings and marker arrays count only when the client
+ * Default-off booleans are compared strictly (`=== true`), so `undefined` and
+ * `false` read as "no opinion". Compact metadata is default-on: explicit false
+ * is a request, and an unspecified running value cannot prove it is satisfied
+ * (the saved feature flag may differ from the default).
+ * Strings and marker arrays count only when the client
  * supplies one that differs from the daemon's. Connection presentation options
  * are intentionally absent from this comparison.
  * Returns a human-readable list (empty when the daemon already satisfies every
@@ -783,8 +786,16 @@ function startupOptionDeficits(
       REUSE_CRITICAL_OPTION_KEYS,
       requested,
       running,
-      (options, key) => (options?.[key] === true ? true : undefined),
-      (options, key) => options?.[key] === true,
+      (options, key) =>
+        key === "actionsCompactMetadata"
+          ? options?.actionsCompactMetadata
+          : options?.[key] === true
+            ? true
+            : undefined,
+      (options, key) =>
+        key === "actionsCompactMetadata"
+          ? options?.actionsCompactMetadata
+          : options?.[key] === true,
     ),
     ...requestedOptionDeficits(
       REUSE_CRITICAL_STRING_OPTION_KEYS,
@@ -827,9 +838,9 @@ function startupOptionDeficits(
  * *running* daemon's existing options as the base and overlays the connecting
  * client's requested options, so a restart triggered for any reason can never
  * silently strip a flag the daemon was already launched with (issue #3846) —
- * it only ever adds flags the client explicitly asks for. Boolean CLI options
- * are one-directional: `false` means the caller has no opinion, so every
- * active boolean on the running daemon is force-preserved.
+ * it only ever adds flags the client explicitly asks for. Default-off boolean
+ * CLI options are one-directional: `false` means the caller has no opinion, so
+ * active values are preserved. Compact metadata accepts an explicit false.
  */
 function mergeDaemonOptions(
   running: DaemonOptions | undefined,
@@ -844,6 +855,10 @@ function mergeDaemonOptions(
       mergedRecord[key] = true;
     }
   }
+  // A default-on flag's explicit false must win over a running true. Absence
+  // preserves the running choice, including false, during unrelated restarts.
+  merged.actionsCompactMetadata =
+    requestedOptions.actionsCompactMetadata ?? runningOptions.actionsCompactMetadata;
   if (requested?.accessibilityAudit === true) {
     merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }

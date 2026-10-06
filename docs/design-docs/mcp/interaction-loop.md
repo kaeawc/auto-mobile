@@ -71,12 +71,18 @@ capture passed the gate:
 In diff mode (`--actions-diff-observe`) the flag rides on the diff alongside
 `activeWindow` and `freshness`, so one accessor works in both modes.
 
-## Opt-in compact action metadata
+## Default compact action metadata
 
-`--actions-compact-metadata` (or `AUTOMOBILE_ACTIONS_COMPACT_METADATA=1`,
-feature-flag key `actions-compact-metadata`) defaults off. Default response bytes
-are unchanged. With an external action call's `sessionUuid` and session store,
-this omits each unchanged `observation` block independently: `insets`,
+Compact action metadata is enabled by default. Set
+`AUTOMOBILE_ACTIONS_COMPACT_METADATA=0` or the feature-flag key
+`actions-compact-metadata` to `false` to restore full metadata and duplicate
+matched elements. An explicit CLI/env override takes precedence over the saved
+feature flag; absence preserves that saved choice. The existing
+`--actions-compact-metadata` flag and env value `1` explicitly enable compaction.
+The daemon relay uses `--no-actions-compact-metadata` to preserve an explicit
+opt-out, even with an inherited env value `1`; the positive CLI flag wins if
+both CLI forms are present. With an external action call's `sessionUuid` and
+session store, compaction omits each unchanged `observation` block independently: `insets`,
 `systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,
 `accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`
 and `viewHierarchy.systemInsets` copies follow the same rule independently.

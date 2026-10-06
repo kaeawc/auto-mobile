@@ -257,12 +257,20 @@ describe("deriveTapEffect", () => {
       captured.push(observation);
     };
     (tap as any).recordDeferredPredictionOutcome = async () => {};
-    (tap as any).selectionStateTracker = { finalize: async () => [] };
+    const finalizeEffects: unknown[] = [];
+    (tap as any).selectionStateTracker = {
+      finalize: async (request: { effect?: unknown }) => {
+        finalizeEffects.push(request.effect);
+        return [];
+      },
+    };
 
     const result = await tap.execute({ action: "tap", text: "Submit" });
 
     expect(result.observation).toBe(destination);
     expect(captured).toEqual([destination]);
+    // The tap flow's own screen-change verdict reaches selection tracking (#10185).
+    expect(finalizeEffects).toEqual([{ screenChanged: true, basis: "activeWindow changed" }]);
   });
 
   test("waits for a changed Android observation before deriving the effect", async () => {

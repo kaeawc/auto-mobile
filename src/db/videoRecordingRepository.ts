@@ -1,7 +1,7 @@
 import type { Kysely, SelectQueryBuilder } from "kysely";
 import { getDatabase } from "./database";
 import type {
-  VideoFormat,
+  VideoContainerFormat,
   VideoRecordingConfig,
   VideoRecordingHighlightEntry,
   VideoRecordingMetadata,
@@ -95,7 +95,7 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     outputName: row.output_name ?? undefined,
     fileName: row.file_name,
     filePath: row.file_path,
-    format: row.format as VideoFormat,
+    format: row.format as VideoContainerFormat,
     sizeBytes: row.size_bytes,
     durationMs: row.duration_ms ?? undefined,
     codec: row.codec ?? undefined,

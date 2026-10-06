@@ -4594,6 +4594,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           currentObservation: result.observation,
           previousObservation: previousObserveResult,
           element: result.element,
+          effect: postTap.effect,
           signal,
         });
         if (selectedElements.length > 0) {
@@ -5098,7 +5099,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * Default (#3936): directly activate the target via ACTION_CLICK — deterministic,
    * no cursor stepping — then fall back to a coordinate gesture, then ADB.
    * When `options.screenReaderNavigation` is set (opt-in fidelity mode, #3937),
-   * drive the TalkBack cursor by swipe navigation to the target before activating.
+   * move the TalkBack cursor onto the target with ACTION_ACCESSIBILITY_FOCUS (never a swipe, #10209)
+   * before activating.
    * For longPress, tries ACTION_LONG_CLICK first, then coordinate gesture, then ADB.
    */
   /**
@@ -5228,8 +5230,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     // Long press returned above; the remaining actions are tap and doubleTap.
     if (this.isScreenReaderNavigationEnabled(options)) {
-      // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
-      // navigation to the target, then activate.
+      // Opt-in fidelity mode (#3937): move the TalkBack cursor onto the target with
+      // ACTION_ACCESSIBILITY_FOCUS, then activate. A failure after the focus request was sent
+      // throws; only a failure before anything was dispatched returns here and may fall back.
       const result = await this.talkBackStrategy.executeTap(
         this.device.deviceId,
         element,
@@ -5245,7 +5248,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
 
       logger.warn(
-        `[TapOnElement] Focus navigation failed (${result.error}), ` +
+        `[TapOnElement] Focus navigation unavailable (${result.error}); nothing was dispatched, ` +
           `falling back to coordinate-based tap at (${x}, ${y})`,
       );
       screenReaderNavigation = result.screenReaderNavigation;

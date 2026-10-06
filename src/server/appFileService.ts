@@ -76,6 +76,8 @@ import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
+/** Printed by the write script only when it saved the previous content of an overwritten file. */
+const APP_FILE_BACKUP_MARKER = "AUTOMOBILE_APP_FILE_BACKUP";
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -771,6 +773,20 @@ function androidRunAsPrefix(appId: string, userId: number): string {
   return `shell run-as ${shellQuote(appId)}${userId ? ` --user ${userId}` : ""}`;
 }
 
+function androidAppFilePrefix(appTarget: AppContainersTarget, userId: number): string {
+  return appTarget.container === "externalFiles"
+    ? "shell"
+    : androidRunAsPrefix(appTarget.appId, userId);
+}
+
+/** Delete newly created files and restore overwritten ones, reporting failure if any step fails. */
+function androidRollbackScript(created: string[], restores: string[]): string {
+  const steps = [...(created.length > 0 ? [`rm -f ${created.join(" ")}`] : []), ...restores].map(
+    (step) => `${step} || rc=1`,
+  );
+  return `rc=0; ${steps.join("; ")}; exit $rc`;
+}
+
 class AndroidAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
@@ -824,6 +840,8 @@ class AndroidAppFileProvider
     );
     const results: AppFileProviderWriteResult[] = [];
     const writtenPaths: string[] = [];
+    // Destinations this batch overwrote, keyed to the backup of their previous content.
+    const backups = new Map<string, string>();
     const cleanupFailures: string[] = [];
     let failedPath = request.destinationPath;
     try {
@@ -833,8 +851,15 @@ class AndroidAppFileProvider
           file,
           adb,
           userId,
-          () => writtenPaths.push(file.destinationPath),
+          (backup) => {
+            writtenPaths.push(file.destinationPath);
+            if (backup !== undefined) {
+              backups.set(file.destinationPath, backup);
+            }
+          },
           cleanupFailures,
+          // A single-file write has no earlier file to roll back, so it needs no backup.
+          requests.length > 1,
         );
         if (cleanupFailures.length > 0) {
           throw new ActionableError("Android app-file staging cleanup failed.");
@@ -842,7 +867,7 @@ class AndroidAppFileProvider
         results.push({ resourceUserId: pinInResourceUri ? userId : undefined });
       }
     } catch (error) {
-      const rollback = await this.rollbackFiles(adb, appTarget, userId, writtenPaths);
+      const rollback = await this.rollbackFiles(adb, appTarget, userId, writtenPaths, backups);
       throw new ActionableError(
         `Android app-container batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
           `Rolled back: ${rollback.rolledBack.length > 0 ? rollback.rolledBack.join(", ") : "none"}. ` +
@@ -850,8 +875,33 @@ class AndroidAppFileProvider
         { cause: error },
       );
     }
+    await this.discardBackups(adb, appTarget, userId, [...backups.values()]);
     await this.confirmRunningState(adb, request, appTarget, userId, results);
     return results;
+  }
+
+  /** The whole batch committed, so the saved previous contents are no longer needed. */
+  private async discardBackups(
+    adb: AdbExecutor,
+    appTarget: AppContainersTarget,
+    userId: number,
+    backups: string[],
+  ): Promise<void> {
+    if (backups.length === 0) {
+      return;
+    }
+    const failures: string[] = [];
+    const prefix = androidAppFilePrefix(appTarget, userId);
+    await this.cleanupStaging(
+      adb,
+      [`${prefix} rm -f ${backups.map(shellQuote).join(" ")}`],
+      "previous-content backups",
+      failures,
+    );
+    if (failures.length > 0) {
+      // The write already succeeded; stray hidden backups must not fail it.
+      logger.warn(`Left Android app-file backups behind: ${failures.join("; ")}`);
+    }
   }
 
   private async confirmRunningState(
@@ -893,29 +943,33 @@ class AndroidAppFileProvider
     appTarget: AppContainersTarget,
     userId: number,
     writtenPaths: string[],
+    backups: ReadonlyMap<string, string>,
   ) {
     return rollbackWrittenFiles(writtenPaths, this.timer, (paths, signal, timeoutMs) => {
-      const targets = paths.map((path) => {
+      const created: string[] = [];
+      const restores: string[] = [];
+      for (const path of paths) {
         const resolved = resolveAndroidTarget(appTarget.appId, appTarget.container, path, userId);
         if (resolved.kind === "unsupported") {
           throw new ActionableError(resolved.message);
         }
-        return shellQuote(
+        const destination = shellQuote(
           resolved.kind === "external" ? resolved.absolutePath : resolved.relativePath,
         );
-      });
-      const prefix =
-        appTarget.container === "externalFiles"
-          ? "shell"
-          : androidRunAsPrefix(appTarget.appId, userId);
-      return adb.executeCommand(
-        `${prefix} rm -f ${targets.join(" ")}`,
-        timeoutMs,
-        undefined,
-        true,
-        signal,
-        true,
-      );
+        const backup = backups.get(path);
+        if (backup === undefined) {
+          created.push(destination);
+        } else {
+          restores.push(`mv -f ${shellQuote(backup)} ${destination}`);
+        }
+      }
+      const prefix = androidAppFilePrefix(appTarget, userId);
+      // Only destinations this batch created are deleted; overwritten ones get their content back.
+      const command =
+        restores.length === 0
+          ? `${prefix} rm -f ${created.join(" ")}`
+          : `${prefix} sh -c ${shellQuote(androidRollbackScript(created, restores))}`;
+      return adb.executeCommand(command, timeoutMs, undefined, true, signal, true);
     });
   }
 
@@ -923,8 +977,9 @@ class AndroidAppFileProvider
     request: PutAppFileProviderRequest,
     adb: AdbExecutor,
     userId: number,
-    onWritten: () => void,
+    onWritten: (backup: string | undefined) => void,
     cleanupFailures: string[],
+    keepPrevious: boolean,
   ): Promise<void> {
     const appTarget = requireAppContainersTarget(request.target);
     const target = resolveAndroidTarget(
@@ -947,6 +1002,7 @@ class AndroidAppFileProvider
     const destination = target.kind === "external" ? target.absolutePath : target.relativePath;
     const token = this.idGenerator.next();
     const temporary = posix.join(posix.dirname(destination), `.automobile-${token}.tmp`);
+    const backup = posix.join(posix.dirname(destination), `.automobile-${token}.bak`);
     const staging =
       target.kind === "external"
         ? temporary
@@ -959,10 +1015,16 @@ class AndroidAppFileProvider
       userId,
       access: target.kind === "external" ? ("externalFiles" as const) : ("run-as" as const),
     };
+    // Save the previous content before it is replaced so a failed batch can restore it.
+    const saveBackup = keepPrevious
+      ? `{ if [ -f ${shellQuote(destination)} ]; then ` +
+        `cp ${shellQuote(destination)} ${shellQuote(backup)} && echo ${APP_FILE_BACKUP_MARKER}; fi; } && `
+      : "";
     const cleanupCommands = [
       ...(target.kind === "external" ? [] : [`shell rm -f ${shellQuote(staging)}`]),
       `${prefix} rm -f ${shellQuote(temporary)}`,
     ];
+    let restoreOnFailure = keepPrevious;
     try {
       if (target.kind === "external") {
         await executeAndroidAppFileCommand(
@@ -978,19 +1040,31 @@ class AndroidAppFileProvider
         context,
         { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
       );
+      const replace = `mv -f ${shellQuote(temporary)} ${shellQuote(destination)}`;
       const command =
         target.kind === "external"
-          ? `mv -f ${shellQuote(temporary)} ${shellQuote(destination)}`
+          ? `${saveBackup}${replace}`
           : `mkdir -p ${shellQuote(posix.dirname(destination))} && ` +
             `cp ${shellQuote(staging)} ${shellQuote(temporary)} && ` +
-            `chmod 600 ${shellQuote(temporary)} && ` +
-            `mv -f ${shellQuote(temporary)} ${shellQuote(destination)}`;
-      await executeAndroidAppFileCommand(adb, `${prefix} sh -c ${shellQuote(command)}`, context, {
-        noRetry: true,
-        signal: request.signal,
-      });
-      onWritten();
+            `chmod 600 ${shellQuote(temporary)} && ${saveBackup}${replace}`;
+      const output = await executeAndroidAppFileCommand(
+        adb,
+        `${prefix} sh -c ${shellQuote(command)}`,
+        context,
+        { noRetry: true, signal: request.signal },
+      );
+      restoreOnFailure = false;
+      onWritten(output.stdout.includes(APP_FILE_BACKUP_MARKER) ? backup : undefined);
     } finally {
+      if (restoreOnFailure) {
+        // An ambiguous failure (e.g. a deadline after the rename) must not strand the original
+        // content in the backup; restoring is a no-op when the destination was never replaced.
+        cleanupCommands.push(
+          `${prefix} sh -c ${shellQuote(
+            `if [ -f ${shellQuote(backup)} ]; then mv -f ${shellQuote(backup)} ${shellQuote(destination)}; fi`,
+          )}`,
+        );
+      }
       await this.cleanupStaging(adb, cleanupCommands, request.destinationPath, cleanupFailures);
     }
   }
@@ -1660,6 +1734,14 @@ async function writeIosFileAtomically(
   }
 }
 
+interface IosWrittenFile {
+  target: string;
+  destinationPath: string;
+  /** Copy of the content this write replaced; absent when the destination was newly created. */
+  backup?: string;
+  preexisting: boolean;
+}
+
 class IosSimulatorAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
@@ -1695,7 +1777,7 @@ class IosSimulatorAppFileProvider
       }
       targets.push(join(root, normalizeAppFileRelativePath(request.destinationPath)));
     }
-    await Promise.all(requests.map((request, index) => this.writeFile(request, targets[index]!)));
+    await this.writeBatch(requests, targets);
     // Keep confirmation separate from container resolution and atomic writes.
     const runningStates = new Map<string, boolean | undefined>();
     for (const request of requests) {
@@ -1737,24 +1819,149 @@ class IosSimulatorAppFileProvider
     }));
   }
 
-  private async writeFile(request: PutAppFileProviderRequest, target: string): Promise<void> {
-    const previous = this.pendingWrites.get(target);
-    const write = previous
-      ? previous.then(
-          () =>
-            writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex),
-          () =>
-            writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex),
-        )
-      : writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex);
-    this.pendingWrites.set(target, write);
+  /**
+   * Writes every file, waits for all of them to settle, and on any failure undoes the ones this
+   * call committed so the container keeps its pre-call state (matching the Android provider).
+   */
+  private async writeBatch(
+    requests: PutAppFileProviderRequest[],
+    targets: string[],
+  ): Promise<void> {
+    const outcomes = await Promise.allSettled(
+      // A single-file write has no earlier file to roll back, so it needs no backup.
+      requests.map((request, index) =>
+        this.writeFile(request, targets[index]!, requests.length > 1),
+      ),
+    );
+    const written: IosWrittenFile[] = [];
+    let failure: { reason: unknown; destinationPath: string } | undefined;
+    for (const [index, outcome] of outcomes.entries()) {
+      const destinationPath = requests[index]!.destinationPath;
+      if (outcome.status === "fulfilled") {
+        written.push({ ...outcome.value, destinationPath });
+      } else if (failure === undefined) {
+        failure = { reason: outcome.reason, destinationPath };
+      }
+    }
+    if (failure === undefined) {
+      await this.discardBackups(written);
+      return;
+    }
+    if (written.length === 0) {
+      // Nothing was committed, so there is nothing to undo; keep the original error.
+      throw failure.reason;
+    }
+    const rollback = await this.rollbackWrites(written);
+    const list = (entries: string[]) => (entries.length > 0 ? entries.join(", ") : "none");
+    throw new ActionableError(
+      `iOS app-container batch write failed for ${failure.destinationPath}: ${errorMessage(failure.reason)} ` +
+        `Rolled back: ${list(rollback.rolledBack)}. ` +
+        `Left modified (previous content not restored): ${list(rollback.leftModified)}. ` +
+        `Rollback failures: ${rollback.failures.join("; ") || "none"}.`,
+      { cause: failure.reason },
+    );
+  }
+
+  private async rollbackWrites(written: IosWrittenFile[]): Promise<{
+    rolledBack: string[];
+    leftModified: string[];
+    failures: string[];
+  }> {
+    const rolledBack: string[] = [];
+    const leftModified: string[] = [];
+    const failures: string[] = [];
+    for (const file of [...written].reverse()) {
+      try {
+        if (file.backup !== undefined) {
+          await this.fileSystem.rename(file.backup, file.target);
+        } else if (file.preexisting) {
+          // Existed but could not be copied aside (not a regular file); never delete it.
+          leftModified.push(file.destinationPath);
+          continue;
+        } else {
+          await this.fileSystem.rm(file.target);
+        }
+        rolledBack.push(file.destinationPath);
+      } catch (error) {
+        failures.push(`${file.destinationPath}: ${errorMessage(error)}`);
+        logger.warn(
+          `Failed to roll back iOS app file ${file.target}: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return { rolledBack, leftModified, failures };
+  }
+
+  private async discardBackups(written: IosWrittenFile[]): Promise<void> {
+    for (const file of written) {
+      if (file.backup === undefined) {
+        continue;
+      }
+      try {
+        await this.fileSystem.rm(file.backup);
+      } catch (error) {
+        // The write already succeeded; a stray hidden backup must not fail it.
+        logger.warn(
+          `Failed to remove iOS app file backup ${file.backup}: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+  }
+
+  private async writeFile(
+    request: PutAppFileProviderRequest,
+    target: string,
+    keepPrevious: boolean,
+  ): Promise<{ target: string; backup?: string; preexisting: boolean }> {
+    const run = async () => {
+      const previous = keepPrevious ? await this.saveExisting(target) : { preexisting: false };
+      try {
+        await writeIosFileAtomically(this.fileSystem, request.sourcePath, target, ++this.tempIndex);
+      } catch (error) {
+        if (previous.backup !== undefined) {
+          await this.discardBackups([{ ...previous, target, destinationPath: target }]);
+        }
+        throw error;
+      }
+      return { target, ...previous };
+    };
+    const earlier = this.pendingWrites.get(target);
+    const write = earlier ? earlier.then(run, run) : run();
+    const settled = write.then(() => undefined);
+    this.pendingWrites.set(target, settled);
     const clear = () => {
-      if (this.pendingWrites.get(target) === write) {
+      if (this.pendingWrites.get(target) === settled) {
         this.pendingWrites.delete(target);
       }
     };
-    void write.then(clear, clear);
-    await write;
+    void settled.then(clear, clear);
+    return await write;
+  }
+
+  /** Copies a file this write is about to replace aside so a failed batch can restore it. */
+  private async saveExisting(target: string): Promise<{ backup?: string; preexisting: boolean }> {
+    let stats: AppFileStats;
+    try {
+      stats = await this.fileSystem.lstat(target);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        return { preexisting: false };
+      }
+      throw toActionableError(error, `Failed to inspect existing iOS app file at ${target}`);
+    }
+    if (!stats.isFile()) {
+      return { preexisting: true };
+    }
+    const backup = join(dirname(target), `.${basename(target)}.${++this.tempIndex}.bak`);
+    try {
+      await this.fileSystem.copyFile(target, backup);
+    } catch (error) {
+      await this.discardBackups([{ target, destinationPath: target, backup, preexisting: true }]);
+      throw error;
+    }
+    return { backup, preexisting: true };
   }
 
   async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {

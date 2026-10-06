@@ -77,6 +77,21 @@ dispatch-level `success: true`, sets `settled: false`, and omits the
 observation. Re-observe before continuing; do not interpret an unsettled
 result as proof that the tap failed or retry the tap automatically.
 
+## Dismiss outcome (Android)
+
+A `dismiss` swipe says nothing about whether the row left the shade: an ongoing
+(foreground-service, media) notification snaps back. After the swipe the tool
+compares the number of rows matching the criteria before the swipe with the
+post-swipe observation it already takes. If the count did not drop it waits one
+swipe settle (400 ms), observes once more, and returns `success: false` with
+`isError: true` when the row is still there. The message names
+"ongoing/non-clearable" only when the matched row lists accessibility actions
+without `dismiss` (SystemUI adds that action only to swipeable rows); otherwise
+it says the notification is still present. When the post-swipe observation is
+not the shade the outcome is indeterminate and the existing success result is
+kept. A confirmed dismiss costs no extra device call; a stuck row costs one sleep
+and one observe. iOS is unchanged.
+
 ## Android implementation
 
 Open/close the tray (preferred, emulator):

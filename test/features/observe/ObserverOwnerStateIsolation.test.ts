@@ -497,7 +497,7 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
     writer,
     new FakeFileSystem(),
     () => "/fake",
-    new FakeAndroidPhysicalDisplayIdResolver(),
+    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
     false,
     { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
   );
@@ -505,7 +505,9 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
     success: false,
     error: "maxBuffer exceeded",
   });
-  expect(adb.getExecutedCommands()).toEqual(['shell "screencap -d 0 -p | base64"']);
+  expect(adb.getExecutedCommands()).toEqual([
+    'shell "screencap -d 4619827259835644672 -p | base64"',
+  ]);
   expect(adb.getExecutedArgv()).toEqual([]);
   expect(writer.written).toEqual([]);
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
 
 SCRIPT="scripts/test-ts.sh"
 TIMING_SCRIPT="scripts/validate-bun-test-timings.sh"
@@ -1078,6 +1079,66 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(cat "$BATS_TEST_TMPDIR/timings.recheck.d/verdict.txt")" -eq 1 ]
   [[ "$output" == *"Test exceeded 100ms: suite.slow (median 150.00ms of 3 isolated runs)"* ]]
+}
+
+@test "timing gate ends failed output with verdicts and sample counts" {
+  seed_changed_offender_report
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES="src/example.ts\n$OFFENDER_FILE\n" \
+    STUB_RECHECK_CLASSNAME_FROM_FILE=1 \
+    STUB_RECHECK_TIMES="0.150 0.150 0.150 0.010 0.010 0.010 0.010 0.010 0.010 0.010 0.010 0.010" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Recheck cleared suite0.case"*"Unit timing budget failures:"*"FAIL: testLaneClassification.case | FAIL (median over budget) | first sample: 150.00ms | re-run samples: 150.00ms / 150.00ms / 150.00ms | median: 150.00ms"*"Rechecked tests: 4"*"Cleared tests: 3"*"Failing tests: 1" ]]
+  [ "$(grep -n 'Unit timing budget failures:' <<< "$output" | cut -d: -f1)" -gt "$(grep -n 'Recheck cleared suite0.case' <<< "$output" | cut -d: -f1)" ]
+}
+
+@test "timing gate final block lists offenders it could not verify" {
+  seed_outlier_report
+  BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=600 run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: suite.slow | FAIL (could not verify within the recheck budget) | first sample: 200.00ms"* ]]
+}
+
+@test "timing gate emits GitHub annotations only under Actions" {
+  seed_outlier_report
+  export GITHUB_ACTIONS=true
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"::error::FAIL: suite.slow | FAIL (median over budget)"* ]]
+  unset GITHUB_ACTIONS
+  rm -f "$STUB_RECHECK_INDEX"
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"::error::"* ]]
+}
+
+@test "timing gate adds the failing test list to the Markdown summary" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160"
+  [ "$status" -eq 1 ]
+  grep -Fq 'FAIL: suite.slow | FAIL (median over budget) | first sample: 200.00ms' \
+    "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate passing run has no failure block" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.012 0.011"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Unit timing budget failures:"* ]]
+  [[ "$output" != *"FAIL: suite.slow"* ]]
+}
+
+@test "timing gate closed stdout still records failure list and fails" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.160" closed
+  [ "$status" -eq 1 ]
+  grep -Fq 'FAIL: suite.slow | FAIL (median over budget)' \
+    "$BATS_TEST_TMPDIR/timings.recheck.d/failures.txt"
+  grep -Fq 'Failing tests: 1' "$BATS_TEST_TMPDIR/timings.recheck.d/failure-counts.txt"
 }
 
 @test "timing gate clears an outlier whose median recheck is within budget" {

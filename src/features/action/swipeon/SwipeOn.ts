@@ -18,6 +18,7 @@ import {
 } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { SwipeSearchCancelledError } from "./searchCancellation";
 import {
   BaseVisualChange,
   INTERMEDIATE_OBSERVATION_OPTIONS,
@@ -1029,6 +1030,10 @@ export class SwipeOn extends BaseVisualChange {
               );
         }
       } catch (error) {
+        // throwIfAborted would replace this with a generic cancellation that loses the swipe count.
+        if (error instanceof SwipeSearchCancelledError) {
+          throw error;
+        }
         throwIfAborted(signal);
         if (error instanceof Error && error.name === "AbortError") {
           throw error;
@@ -1210,6 +1215,9 @@ export class SwipeOn extends BaseVisualChange {
       return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
     } catch (error) {
       perf.end();
+      if (error instanceof SwipeSearchCancelledError) {
+        throw error;
+      }
       throwIfAborted(signal);
 
       logger.warn(`Swipe failed: ${errorMessage(error)}`, error);

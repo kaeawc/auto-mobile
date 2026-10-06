@@ -61,6 +61,7 @@ import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/s
 import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { annotateSearchCancellation, type SwipeCounter } from "./searchCancellation";
 import { DefaultObserveElementCollector } from "../../observe/ObserveElementCollector";
 import {
   getImeOccluderForElement,
@@ -156,6 +157,7 @@ interface SearchSwipeDispatchOptions {
   signal?: AbortSignal;
   onSearchFallback: () => void;
   searchDragState: AndroidSearchDragState;
+  swipes: SwipeCounter;
 }
 
 export class ScrollUntilVisible {
@@ -227,7 +229,13 @@ export class ScrollUntilVisible {
     signal?: AbortSignal;
     strategy?: ScrollUntilVisibleStrategy;
   }): Promise<SwipeOnResult> {
-    return withSwipeObservationReadScope(() => this.executeSearch(args));
+    const swipes: SwipeCounter = { dispatched: 0 };
+    try {
+      return await withSwipeObservationReadScope(() => this.executeSearch({ ...args, swipes }));
+    } catch (error) {
+      // A search cancelled after it moved the screen must say so (#10151).
+      throw annotateSearchCancellation(error, args.signal, swipes);
+    }
   }
 
   private async executeSearch({
@@ -236,12 +244,14 @@ export class ScrollUntilVisible {
     perf = new NoOpPerformanceTracker(),
     signal,
     strategy,
+    swipes,
   }: {
     options: SwipeOnResolvedOptions;
     progress?: ProgressCallback;
     perf?: PerformanceTracker;
     signal?: AbortSignal;
     strategy?: ScrollUntilVisibleStrategy;
+    swipes: SwipeCounter;
   }): Promise<SwipeOnResult> {
     const observe =
       strategy?.observe ??
@@ -466,6 +476,7 @@ export class ScrollUntilVisible {
         signal,
         onSearchFallback,
         searchDragState,
+        swipes,
       });
       throwIfAborted(signal);
 
@@ -604,6 +615,7 @@ export class ScrollUntilVisible {
             signal,
             onSearchFallback,
             searchDragState,
+            swipes,
           },
           onRecovery: () => {
             recoveryAttempted = true;
@@ -943,6 +955,7 @@ export class ScrollUntilVisible {
     signal,
     onSearchFallback,
     searchDragState,
+    swipes,
   }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
     const { startX, startY, endX, endY } = coordinates;
     const activeDuration = duration;
@@ -960,6 +973,11 @@ export class ScrollUntilVisible {
 
     // Execute swipe with observedInteraction
     let iosDispatchTimestamp: number | undefined;
+    if (strategy) {
+      // The caller's loop and recoveries check the signal, but not between that check and here.
+      throwIfAborted(signal);
+      swipes.dispatched++;
+    }
     return strategy
       ? await strategy.swipe({
           x1: Math.floor(startX),
@@ -981,6 +999,7 @@ export class ScrollUntilVisible {
               },
             };
             throwIfAborted(signal);
+            swipes.dispatched++;
             const swipeRunner =
               this.deps.device.platform === "ios"
                 ? this.deps.voiceOverExecutor

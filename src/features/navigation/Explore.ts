@@ -24,7 +24,7 @@ import { PressButton } from "../action/PressButton";
 import { LaunchApp } from "../action/LaunchApp";
 import { DefaultElementParser } from "../utility/ElementParser";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
@@ -308,7 +308,7 @@ export class Explore extends BaseVisualChange {
 
       if (!nextElement) {
         logger.info("[Explore] No suitable element found, checking dead-end recovery");
-        await this.handleDeadEnd(progress);
+        await this.handleDeadEnd(progress, signal);
         continue;
       }
 
@@ -1115,11 +1115,54 @@ export class Explore extends BaseVisualChange {
     }
   }
 
+  /** Record a cancelled run as the stop reason; true when the caller must stop. */
+  private stopIfCancelled(signal?: AbortSignal): boolean {
+    if (!signal?.aborted) {
+      return false;
+    }
+    this.stopReason = OPERATION_CANCELLED_MESSAGE;
+    return true;
+  }
+
+  /** Press Back to leave a dead end, through the transport this platform needs. */
+  private async pressBackForDeadEnd(signal?: AbortSignal): Promise<void> {
+    // Recovery dispatches below bypass BaseVisualChange's action boundary.
+    await beginPostActionCaptureAction();
+    if (this.device.platform === "android") {
+      // Preserve the Explore instance's injected transport and timer. Calling
+      // press() avoids nested observed-interaction progress on this operation.
+      const result = await new PressButton(this.device, this.adb, this.timer).press(
+        "back",
+        undefined,
+        undefined,
+        signal,
+      );
+      if (!result.success) {
+        throw new Error(result.error ?? "Android back navigation failed");
+      }
+    } else {
+      // iOS recovery must route through the selected device/session tool.
+      // Do not forward the outer progress callback: the nested action has a
+      // different scale and would make exploration progress jump backward.
+      const response = await ToolRegistry.callInternal("pressButton", {
+        button: "back",
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
+        ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+      });
+      throwIfInternalToolFailed(response, "pressButton", this.device.platform);
+    }
+  }
+
   /**
    * Handle dead-end situation by going back
    */
-  private async handleDeadEnd(progress?: ProgressCallback): Promise<void> {
+  private async handleDeadEnd(progress?: ProgressCallback, signal?: AbortSignal): Promise<void> {
     this.discardPendingToolCall();
+    // The loop-top check can be a whole observe and selection behind; do not press Back now.
+    if (this.stopIfCancelled(signal)) {
+      return;
+    }
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
@@ -1135,33 +1178,17 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Recovery dispatches below bypass BaseVisualChange's action boundary.
-      await beginPostActionCaptureAction();
-      if (this.device.platform === "android") {
-        // Preserve the Explore instance's injected transport and timer. Calling
-        // press() avoids nested observed-interaction progress on this operation.
-        const result = await new PressButton(this.device, this.adb, this.timer).press("back");
-        if (!result.success) {
-          throw new Error(result.error ?? "Android back navigation failed");
-        }
-      } else {
-        // iOS recovery must route through the selected device/session tool.
-        // Do not forward the outer progress callback: the nested action has a
-        // different scale and would make exploration progress jump backward.
-        const response = await ToolRegistry.callInternal("pressButton", {
-          button: "back",
-          platform: this.device.platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        });
-        throwIfInternalToolFailed(response, "pressButton", this.device.platform);
-      }
+      await this.pressBackForDeadEnd(signal);
       this.pendingBackScreen = currentScreen === "unknown" ? null : currentScreen;
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
-      await this.timer.sleep(1000);
+      await awaitWhileRequestIsLive(this.timer.sleep(1000), signal);
     } catch (error) {
+      // A cancelled recovery is not a failed one: report the cancelled partial run.
+      if (this.stopIfCancelled(signal)) {
+        return;
+      }
       logger.warn(`[Explore] Failed to navigate back: ${error}`);
       this.stopReason = `Back-navigation recovery failed: ${errorMessage(error)}`;
     }
@@ -1209,7 +1236,7 @@ export class Explore extends BaseVisualChange {
       }
 
       // Wait for home screen
-      await this.timer.sleep(2000);
+      await awaitWhileRequestIsLive(this.timer.sleep(2000), signal);
 
       // Home alone leaves the launcher in the foreground, which the next
       // observation would treat as having left the target app (issue #6126).
@@ -1220,6 +1247,9 @@ export class Explore extends BaseVisualChange {
       // Reset consecutive back count
       this.consecutiveBackCount = 0;
     } catch (error) {
+      if (this.stopIfCancelled(signal)) {
+        return;
+      }
       logger.warn(`[Explore] Failed to reset to home: ${error}`);
       this.stopReason = `Home-screen recovery failed: ${errorMessage(error)}`;
     }

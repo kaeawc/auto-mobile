@@ -20,6 +20,8 @@ export interface McpRecordingStopResult {
   durationMs: number;
   startedAt: string;
   stoppedAt: string;
+  /** One entry per call that was skipped or recorded in a weakened form; empty when none. */
+  warnings: string[];
 }
 
 export interface McpRecordingStatus {
@@ -118,13 +120,17 @@ export function stopMcpRecording({
   }
 
   try {
-    const steps = session.recorder.stop();
+    const { steps, warnings } = session.recorder.stopWithWarnings();
     const stoppedAt = timer.now();
     const resolvedName = formatPlanName(planName, timer);
 
     if (steps.length === 0) {
+      const skipped =
+        warnings.length > 0
+          ? ` ${warnings.length} call(s) were skipped: ${warnings.join("; ")}.`
+          : " Ensure plan-relevant tools were called during the recording.";
       throw new Error(
-        "No MCP tool calls were recorded. Ensure plan-relevant tools were called during the recording. " +
+        `No MCP tool calls were recorded.${skipped} ` +
           'Call recordSteps with action: "begin" to start a new session.',
       );
     }
@@ -165,6 +171,7 @@ export function stopMcpRecording({
       durationMs: stoppedAt - session.startedAt,
       startedAt: new Date(session.startedAt).toISOString(),
       stoppedAt: new Date(stoppedAt).toISOString(),
+      warnings,
     };
   } finally {
     activeSessions.delete(connectionKey);

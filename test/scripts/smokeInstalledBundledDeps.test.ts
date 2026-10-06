@@ -64,7 +64,7 @@ test("shared closure traversal imports every nested version from its own directo
       calls.push(pkg);
     },
   });
-  expect(calls.map((pkg) => path.relative(root, pkg.directory))).toEqual([
+  expect(calls.map((pkg) => path.relative(root, pkg.directory).replace(/\\/g, "/"))).toEqual([
     "node_modules/a",
     "node_modules/a/node_modules/dep",
     "node_modules/dep",

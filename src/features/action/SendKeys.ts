@@ -114,6 +114,9 @@ export function segmentGraphemes(text: string): string[] {
   );
 }
 
+/** Distinct undeliverable password characters named in the up-front refusal (#9941). */
+const PASSWORD_UNDELIVERABLE_LIST_LIMIT = 5;
+
 function graphemeCodePoints(graphemes: string[]): string {
   return graphemes
     .map((grapheme) =>
@@ -466,7 +469,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           error: validationError,
         };
       }
-      const routing = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
+      const routing = await this.resolveAutoPasswordMode(
+        requestedMode,
+        operation,
+        command.text,
+        signal,
+        display,
+      );
       resolvedMode = routing.mode;
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
       const autoImeFallback = getAutoImeFallback(
@@ -801,6 +810,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async resolveAutoPasswordMode(
     requestedMode: SendKeysTypingMode,
     operation: SendKeysOperation,
+    text: string,
     signal?: AbortSignal,
     display?: string,
   ): Promise<{ mode: AndroidSendKeysTypingMode; focusedInputVerified: boolean }> {
@@ -808,10 +818,41 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { mode: this.resolveMode(requestedMode), focusedInputVerified: false };
     }
     const password = await this.isFocusedAndroidPasswordField(operation, signal, display);
+    if (password && operation === "insert") {
+      await this.requirePasswordTextDeliverable(text, signal);
+    }
     return {
       mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
       focusedInputVerified: password !== undefined,
     };
+  }
+
+  /**
+   * Auto insert into a password field is delivered as key events, because CtrlProxy refuses
+   * `request_insert_text` on password fields. A character with no key event (non-ASCII, or an
+   * uppercase letter / shifted symbol below API 31) would be refused mid-run after the earlier
+   * characters were already typed (#9941). Decide up front so nothing is typed in that case.
+   */
+  private async requirePasswordTextDeliverable(text: string, signal?: AbortSignal): Promise<void> {
+    const undeliverable: string[] = [];
+    for (const grapheme of segmentGraphemes(text)) {
+      signal?.throwIfAborted();
+      if (!(await this.getEventAllKeyEventPlan(grapheme))) {
+        undeliverable.push(grapheme);
+      }
+    }
+    if (undeliverable.length === 0) {
+      return;
+    }
+    const distinct = [...new Set(undeliverable)];
+    const shown = graphemeCodePoints(distinct.slice(0, PASSWORD_UNDELIVERABLE_LIST_LIMIT));
+    const more =
+      distinct.length > PASSWORD_UNDELIVERABLE_LIST_LIMIT
+        ? ` and ${distinct.length - PASSWORD_UNDELIVERABLE_LIST_LIMIT} more`
+        : "";
+    throw new ActionableError(
+      `Nothing was typed: the text for the focused password field contains ${distinct.length} distinct character(s) that cannot be sent as key events on this device (${shown}${more}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Non-ASCII characters never have a key event; uppercase letters and shifted symbols need Android 12 (API 31) or newer. Use operation: "replace" to set the whole value at once.`,
+    );
   }
 
   private async isFocusedAndroidPasswordField(

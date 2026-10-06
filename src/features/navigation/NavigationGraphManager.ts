@@ -46,6 +46,7 @@ import {
 import type {
   NavigationNodeProvenanceRow,
   NavigationEdgeProvenanceRow,
+  NavigationEdgeTarget,
 } from "../../db/navigationRepository";
 
 // Re-export types for convenience
@@ -1790,6 +1791,19 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     const dbEdges = await this.repository.getEdgesFrom(this.currentAppId, screenName);
     return this.convertDBEdgesToNavigationEdges(dbEdges);
+  }
+
+  /**
+   * Distinct outgoing transitions of a screen for graph walks that only need
+   * adjacency; unlike getEdgesFrom this does not hydrate interactions, modals or
+   * scroll positions, so it cannot throw on a malformed edge payload.
+   */
+  public async getEdgeTargetsFrom(screenName: string): Promise<NavigationEdgeTarget[]> {
+    if (!this.currentAppId) {
+      return [];
+    }
+
+    return this.repository.getEdgeTargetsFrom(this.currentAppId, screenName);
   }
 
   /**

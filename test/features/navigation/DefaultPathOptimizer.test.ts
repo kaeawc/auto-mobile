@@ -1,6 +1,7 @@
 import { expect, describe, test } from "bun:test";
 import { DefaultPathOptimizer } from "../../../src/features/navigation/DefaultPathOptimizer";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import type { NavigationEdgeTarget } from "../../../src/db/navigationRepository";
 import type {
   NavigationNode,
   NavigationEdge,
@@ -9,7 +10,7 @@ import type {
 
 /**
  * DefaultPathOptimizer only depends on three NavigationGraphManager methods:
- * getNode(screen), getEdgesFrom(screen) (back-button verification walks forward
+ * getNode(screen), getEdgeTargetsFrom(screen) (back-button verification walks forward
  * edges from the target to the current screen) and findPath(target) (forward
  * recommendation). We inject a narrow stub exposing exactly those so the heuristic
  * is exercised in isolation without touching a real graph/DB (issue #3067) and with
@@ -41,8 +42,10 @@ function makeStub(config: {
     async getNode(screen: string): Promise<NavigationNode | undefined> {
       return nodes[screen];
     },
-    async getEdgesFrom(screen: string): Promise<NavigationEdge[]> {
-      return edges.filter((candidate) => candidate.from === screen);
+    async getEdgeTargetsFrom(screen: string): Promise<NavigationEdgeTarget[]> {
+      return edges
+        .filter((candidate) => candidate.from === screen)
+        .map((candidate) => ({ toScreen: candidate.to, toolName: null, toolArgs: null }));
     },
     async findPath(target: string): Promise<PathResult> {
       return (

@@ -126,10 +126,10 @@ export class DefaultPathOptimizer implements PathOptimizer {
     let frontier = [from];
     for (let hops = 1; hops <= maxHops && frontier.length > 0; hops++) {
       const outgoing = (
-        await Promise.all(frontier.map((screen) => this.navigationGraph.getEdgesFrom(screen)))
+        await Promise.all(frontier.map((screen) => this.navigationGraph.getEdgeTargetsFrom(screen)))
       )
         .flat()
-        .map((edge) => edge.to);
+        .map((target) => target.toScreen);
       if (outgoing.includes(to)) {
         return hops;
       }

@@ -23,7 +23,10 @@ import {
   type ScreenshotFileSystem,
 } from "./retainedScreenshot";
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
-import { OBSERVATION_SCREENSHOT_URI_TEMPLATE } from "./observationResourceUris";
+import {
+  OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
+  OBSERVATION_SCREENSHOT_URI_TEMPLATE,
+} from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
 let screenshotFileSystem: ScreenshotFileSystem = realFs;
@@ -40,8 +43,6 @@ interface SessionScreenshotResourceDependencies {
   resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined;
   createScreenshotService(device: BootedDevice): TrackedScreenshotService;
 }
-
-const SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;
 
 const defaultSessionScreenshotResourceDependencies: SessionScreenshotResourceDependencies = {
   resolveActiveSession: resolveActiveSessionDevice,
@@ -288,7 +289,11 @@ async function waitForObservationScreenshot(
   observationId: string,
 ): Promise<ResourceContent | undefined> {
   const store = getScreenshotStateStore();
-  await store.waitForObservation(deviceId, observationId, SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS);
+  await store.waitForObservation(
+    deviceId,
+    observationId,
+    OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS,
+  );
   if (!matchesObservationId(deviceId, observationId)) {
     return observationScreenshotUnknownError(uri, deviceId, observationId);
   }
@@ -396,6 +401,49 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
       ),
     };
   }
+}
+
+const OBSERVATION_SCREENSHOT_URI_PATTERN =
+  /^automobile:observation\/([^/&]+)\/([^/&]+)\/screenshot$/;
+
+export type ObservationScreenshotBytes = { bytes: Buffer; mimeType: string } | { error: string };
+
+function resourceErrorText(content: ResourceContent): string {
+  try {
+    const parsed: unknown = JSON.parse(content.text ?? "");
+    const message =
+      typeof parsed === "object" && parsed !== null && "error" in parsed ? parsed.error : undefined;
+    if (typeof message === "string") {
+      return message;
+    }
+  } catch (error) {
+    // Our own error envelope is JSON; anything else falls back to the raw text below.
+    logger.debug(`[ObservationResources] Non-JSON resource error body: ${errorMessage(error)}`);
+  }
+  return content.text ?? `No screenshot was returned for ${content.uri}.`;
+}
+
+/**
+ * Reads the bytes behind `automobile:observation/{deviceId}/{observationId}/screenshot` for host
+ * consumers such as the overlay tool. It runs the same handler as the resource read, so the
+ * observation must still be the device's current one, a pending capture is awaited, and the file
+ * is read through the same retention lease. That resource is readable by any client without
+ * session ownership, so this exposes nothing a client could not already read.
+ */
+export async function readObservationScreenshotBytes(
+  uri: string,
+): Promise<ObservationScreenshotBytes> {
+  const match = OBSERVATION_SCREENSHOT_URI_PATTERN.exec(uri);
+  if (!match) {
+    return {
+      error: `'${uri}' is not an observation screenshot URI; expected ${OBSERVATION_SCREENSHOT_URI_TEMPLATE}.`,
+    };
+  }
+  const content = await getObservationScreenshot({ deviceId: match[1], observationId: match[2] });
+  if (content.blob === undefined) {
+    return { error: resourceErrorText(content) };
+  }
+  return { bytes: Buffer.from(content.blob, "base64"), mimeType: content.mimeType ?? "image/png" };
 }
 
 function sessionResourceError(uri: string, sessionUuid: string): ResourceContent {

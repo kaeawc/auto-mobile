@@ -28,6 +28,7 @@ import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScree
 import {
   AndroidSegmentedPlanVideoSession,
   type AndroidSegmentedPlanVideoSessionOptions,
+  type SegmentedSessionResult,
 } from "./androidSegmentedPlanVideoSession";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
@@ -51,6 +52,55 @@ type SegmentedSessionRecordingDependencies = Pick<
   AndroidSegmentedPlanVideoSessionOptions,
   "rollbackVideoRecordingStart" | "startVideoRecording" | "stopVideoRecording"
 >;
+
+interface PersistedSegments {
+  segments: StoppedSegment[];
+  manifestPath: string | undefined;
+}
+
+/**
+ * One write per finalized result. A session's stop promise is shared, so a caller-driven stop
+ * that joins an in-flight `maxDuration` auto-stop receives the very same result object the
+ * auto-stop persists; keying on it makes both paths share a single manifest write.
+ */
+const persistedResults = new WeakMap<SegmentedSessionResult, Promise<PersistedSegments>>();
+
+/**
+ * Maps a finalized segmented session to its ordered segments and writes the `segments.json`
+ * manifest (which carries each segment's warnings). Shared by the caller-driven stop and the
+ * `maxDuration` auto-stop so both leave the same on-disk record, written once per result.
+ */
+function persistSegmentedResult(
+  handle: string,
+  result: SegmentedSessionResult,
+): Promise<PersistedSegments> {
+  const existing = persistedResults.get(result);
+  if (existing) {
+    return existing;
+  }
+  const persisting = writeSegmentedResult(handle, result);
+  persistedResults.set(result, persisting);
+  return persisting;
+}
+
+async function writeSegmentedResult(
+  handle: string,
+  { filePaths, recordingIds, metadata, warnings }: SegmentedSessionResult,
+): Promise<PersistedSegments> {
+  if (recordingIds.length === 0 && warnings?.length) {
+    throw new Error(warnings.join("; "));
+  }
+  const segments: StoppedSegment[] = recordingIds.map((id, index) => ({
+    recordingId: id,
+    filePath: filePaths[index],
+    segmentIndex: index,
+    ...(metadata[index]?.recordedPanel && { recordedPanel: metadata[index].recordedPanel }),
+    ...(metadata[index]?.transitions && { transitions: metadata[index].transitions }),
+    ...(metadata[index]?.warnings && { warnings: metadata[index].warnings }),
+  }));
+  const manifestPath = await writeSegmentManifest(handle, segments);
+  return { segments, manifestPath };
+}
 
 /**
  * Registry of timer-driven segmented Android recordings, keyed by the first
@@ -105,21 +155,10 @@ const segmentedSessions = (() => {
       handle: string,
       session: AndroidSegmentedPlanVideoSession,
     ): Promise<StoppedSegmentedSession> {
-      const { filePaths, recordingIds, metadata, highlights, warnings } = await session.stop();
+      const result = await session.stop();
       byHandle.delete(handle);
-      if (recordingIds.length === 0 && warnings?.length) {
-        throw new Error(warnings.join("; "));
-      }
-      const segments: StoppedSegment[] = recordingIds.map((id, index) => ({
-        recordingId: id,
-        filePath: filePaths[index],
-        segmentIndex: index,
-        ...(metadata[index]?.recordedPanel && { recordedPanel: metadata[index].recordedPanel }),
-        ...(metadata[index]?.transitions && { transitions: metadata[index].transitions }),
-        ...(metadata[index]?.warnings && { warnings: metadata[index].warnings }),
-      }));
-      const manifestPath = await writeSegmentManifest(handle, segments);
-      return { sessionId: handle, segments, manifestPath, highlights };
+      const { segments, manifestPath } = await persistSegmentedResult(handle, result);
+      return { sessionId: handle, segments, manifestPath, highlights: result.highlights };
     },
     async abortAndRemove(handle: string, session: AndroidSegmentedPlanVideoSession): Promise<void> {
       await session.abort();
@@ -484,6 +523,7 @@ async function startDeviceRecordings(
       // recordings, transparently produce ordered segments (<outputName>,
       // <outputName>-seg1, ...) via a timer-driven segmented session.
       if (target.platform === "android" && maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
+        const started: { handle?: string } = {};
         const session: AndroidSegmentedPlanVideoSession = new AndroidSegmentedPlanVideoSession({
           device: target,
           outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
@@ -494,6 +534,11 @@ async function startDeviceRecordings(
           timer: segmentedSessions.timer,
           maxDurationSeconds,
           startupAbortSignal: signal,
+          // The auto-stop discards the caller-facing result, so persist the manifest here.
+          // The handle is the first segment's recordingId, known once start() returns.
+          onAutoStopped: async (result) => {
+            await persistSegmentedResult(started.handle ?? result.recordingIds[0] ?? "", result);
+          },
           // Keep an auto-finalized session reachable until the all-device
           // request commits: an abort still must roll back every segment.
           onFinalized: () => {
@@ -506,6 +551,7 @@ async function startDeviceRecordings(
           ...segmentedSessions.recordingDependencies,
         });
         const active = await session.start();
+        started.handle = active.recordingId;
         segmentedSessions.track(active.recordingId, session);
 
         recordings.push({

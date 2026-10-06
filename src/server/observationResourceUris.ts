@@ -26,3 +26,10 @@ export const OBSERVATION_SCREENSHOT_URI_TEMPLATE =
 export function buildObservationScreenshotUri(deviceId: string, observationId: string): string {
   return `automobile:observation/${encodeUriSegment(deviceId)}/${encodeUriSegment(observationId)}/screenshot`;
 }
+
+/**
+ * How long reading an observation screenshot waits for a capture that is still in flight. Host
+ * consumers that read the resource on a caller's behalf (the overlay tool's asset sources) budget
+ * their request deadline with it.
+ */
+export const OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;

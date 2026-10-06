@@ -4,6 +4,8 @@ import { join } from "path";
 import {
   AndroidOrientationReader,
   IosOrientationReader,
+  orientationFromRotation,
+  rotationForOrientation,
 } from "../../../src/features/action/OrientationReader";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -83,6 +85,35 @@ describe("OrientationReader", () => {
     expect(await reader.readOrientation(device)).toBe("portrait");
   });
 
+  // Synthetic `wm size` output (no repo capture carries an override). Shape of the real command:
+  // `adb -s emulator-5602 shell wm size` after `adb -s emulator-5602 shell wm size 2400x1080`.
+  test("uses the Override size line as the effective size when present", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell dumpsys window displays",
+      result("  mRotation=0 mAltOrientation=false"),
+    );
+    adb.setCommandResponse(
+      "shell wm size",
+      result("Physical size: 1080x2400\nOverride size: 2400x1080\n"),
+    );
+    const reader = new AndroidOrientationReader(adb);
+
+    expect(await reader.readOrientation(device)).toBe("landscape");
+
+    adb.setCommandResponse(
+      "shell wm size",
+      result("Physical size: 2400x1080\nOverride size: 1080x2400\n"),
+    );
+    expect(await reader.readOrientation(device)).toBe("portrait");
+
+    adb.setCommandResponse(
+      "shell wm size",
+      result("Physical size: 1080x2400\nOverride size: 720x1600\n"),
+    );
+    expect(await reader.readOrientation(device)).toBe("portrait");
+  });
+
   test("forwards an abort signal to both Android orientation commands", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
@@ -114,5 +145,23 @@ describe("OrientationReader", () => {
     expect(
       await new IosOrientationReader().readOrientation({ ...device, platform: "ios" }),
     ).toBeNull();
+  });
+
+  test.each([null, false, true])(
+    "rotationForOrientation inverts orientationFromRotation for natural landscape %s",
+    (naturalLandscape) => {
+      for (const orientation of ["portrait", "landscape"] as const) {
+        const value = rotationForOrientation(orientation, naturalLandscape);
+        expect(orientationFromRotation(value, naturalLandscape)).toBe(orientation);
+      }
+    },
+  );
+
+  test("rotationForOrientation picks the rotation from the natural axes", () => {
+    expect(rotationForOrientation("portrait", false)).toBe(0);
+    expect(rotationForOrientation("landscape", false)).toBe(1);
+    expect(rotationForOrientation("portrait", true)).toBe(1);
+    expect(rotationForOrientation("landscape", true)).toBe(0);
+    expect(rotationForOrientation("portrait", null)).toBe(0);
   });
 });

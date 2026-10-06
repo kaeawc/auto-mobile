@@ -3,8 +3,9 @@ import { throwIfAborted } from "../../../utils/toolUtils";
 import { accessibilityDetector } from "../../accessibility/AccessibilityDetector";
 import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../accessibility/interfaces/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
+import type { IosVoiceOverDetector as IosVoiceOverDetectorContract } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
-import { IOSCtrlProxyClient } from "../ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../ios";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -14,6 +15,10 @@ export interface AccessibilityStateDetectorOptions {
   adb: AdbExecutor;
   featureFlags?: FeatureFlagService;
   accessibilityDetector?: AccessibilityDetectorContract;
+  /** iOS VoiceOver detector seam; defaults to the shared singleton. */
+  iosVoiceOverDetector?: IosVoiceOverDetectorContract;
+  /** iOS CtrlProxy client seam; defaults to the device's shared client, resolved lazily. */
+  iosClient?: IOSCtrlProxy;
 }
 
 /**
@@ -25,12 +30,16 @@ export class AccessibilityStateDetector {
   private readonly adb: AdbExecutor;
   private readonly featureFlags: FeatureFlagService | undefined;
   private readonly detector: AccessibilityDetectorContract;
+  private readonly iosDetector: IosVoiceOverDetectorContract;
+  private readonly iosClient: IOSCtrlProxy | undefined;
 
   constructor(opts: AccessibilityStateDetectorOptions) {
     this.device = opts.device;
     this.adb = opts.adb;
     this.featureFlags = opts.featureFlags;
     this.detector = opts.accessibilityDetector ?? accessibilityDetector;
+    this.iosDetector = opts.iosVoiceOverDetector ?? iosVoiceOverDetector;
+    this.iosClient = opts.iosClient;
   }
 
   async run(result: ObserveResult, perf: PerformanceTracker, signal?: AbortSignal): Promise<void> {
@@ -64,12 +73,18 @@ export class AccessibilityStateDetector {
           );
         } else if (this.device.platform === "ios") {
           // Detect VoiceOver state via CtrlProxy WebSocket
-          const client = IOSCtrlProxyClient.getInstance(this.device);
-          const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
+          const client = this.iosClient ?? IOSCtrlProxyClient.getInstance(this.device);
+          const enabled = await this.iosDetector.resolveState(
             this.device.deviceId,
             client,
             featureFlags,
           );
+          if (enabled === null) {
+            // accessibilityState is optional: omit unreadable evidence rather than asserting off
+            // (same contract as the Android branch, #9682).
+            delete result.accessibilityState;
+            return;
+          }
 
           result.accessibilityState = {
             enabled,

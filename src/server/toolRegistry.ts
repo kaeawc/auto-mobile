@@ -48,6 +48,7 @@ import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
@@ -93,7 +94,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-import { getAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, isClientCancelled } from "../utils/AbortContext";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -1233,6 +1234,12 @@ export type SettleObserveFactory = (
 ) => SettleObserve | undefined;
 
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+  // One writer per (timer, resolved directory), built lazily through the factory.
+  // The writer's directory-validation cache and 60s prune throttle are instance
+  // state, so a writer per tool call defeated both (issue #10079). Keyed by timer
+  // identity too because the writer captures its timer; production passes one.
+  private readonly artifactWriters = new WeakMap<Timer, Map<string, ObservationArtifactWriter>>();
+
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory = (
       outputDirectory,
@@ -1242,6 +1249,21 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     private readonly createSettleObserve: SettleObserveFactory = (device, timer) =>
       new RealSettleObserve(new RealObserveScreen(device), timer),
   ) {}
+
+  private getArtifactWriter(outputDirectory: string, timer: Timer): ObservationArtifactWriter {
+    let writersByDirectory = this.artifactWriters.get(timer);
+    if (!writersByDirectory) {
+      writersByDirectory = new Map();
+      this.artifactWriters.set(timer, writersByDirectory);
+    }
+    const key = resolvePathFromDaemonLaunchWorkingDirectory(outputDirectory);
+    let writer = writersByDirectory.get(key);
+    if (!writer) {
+      writer = this.createArtifactWriter(outputDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION);
+      writersByDirectory.set(key, writer);
+    }
+    return writer;
+  }
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
     const {
@@ -1374,9 +1396,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
     const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
     const artifactWriter = !internalCall
-      ? configuredArtifactDirectory
-        ? this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
-        : this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
+      ? this.getArtifactWriter(artifactDirectory, timer)
       : undefined;
 
     const finalizedResponse = finalizeToolResponse(response, {
@@ -1388,6 +1408,12 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       internal: internalCall,
       artifactWriter,
       artifactMode,
+      // A call the client cancelled or timed out has its response discarded by the
+      // transport, so it must not advance the diff baseline or metadata snapshot
+      // (#10081). A daemon-side abort (device loss, session release) does not
+      // discard a completed success, which is still returned to the client, so only
+      // a failure is treated as undelivered when the combined signal aborted.
+      delivered: !isClientCancelled(signal) && (toolSuccess || !signal?.aborted),
     });
 
     const telemetryArgs = { ...args };

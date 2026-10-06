@@ -43,6 +43,7 @@ class IcuRegexCompatibilityTest {
         "[a-z_]+",
         "\\p{L}+\\Q{}]\\E",
         "\\s",
+        "^asset-[0-9]+$",
       )
     portable.forEach { assertEquals(it, emptyList<String>(), IcuRegexSyntax.problems(it)) }
   }
@@ -78,7 +79,18 @@ class IcuRegexCompatibilityTest {
     // vacuously. Rather than an exact count (which breaks whenever a regex is legitimately
     // removed), require the scanner to still see literals in a few files that are known to hold
     // them. If you remove the last regex from one of these files, drop it from this list.
-    val anchorFiles = listOf("LogcatReader.kt", "ElementBounds.kt", "OverlaySpecValidator.kt")
+    // WebSocketServer.kt (malformed-frame type scrub, #9935), OverlayAssetDirectory.kt (asset
+    // file-name guard) and OverlayRenderModel.kt (colour check) build regexes that landed after the
+    // first anchors.
+    val anchorFiles =
+      listOf(
+        "LogcatReader.kt",
+        "ElementBounds.kt",
+        "OverlaySpecValidator.kt",
+        "WebSocketServer.kt",
+        "OverlayAssetDirectory.kt",
+        "OverlayRenderModel.kt",
+      )
     anchorFiles.forEach { name ->
       assertTrue(
         "Scanner found no regex literal in $name (found ${found.size} overall). Either the " +

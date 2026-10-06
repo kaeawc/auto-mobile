@@ -382,6 +382,128 @@ describe("SetPosture", () => {
     ]);
   });
 
+  // SYNTHETIC console replies: no real capture of a refused posture/resize-display exists in
+  // the repo (#9007 quotes the posture reply). Capture with, on a booted AVD:
+  //   adb -s emulator-5554 emu posture 2          (then `adb ... emu resize-display 2` headless)
+  describe("emulator console replies", () => {
+    const refuseResize = "KO: resize-display is not supported";
+
+    function foldableAdb(): FakeAdbExecutor {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(phoneStates, ""),
+      );
+      return adb;
+    }
+
+    function sizedFeature(
+      adb: FakeAdbExecutor,
+      sizes: { width: number; height: number }[],
+      role: "inner" | "cover" | "unknown" = "inner",
+      panels: DisplayPanel[] = [],
+    ) {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const tracker = new DisplayTransitionTracker(() => {});
+      const device = { ...makeDevice("emulator-5554", ["closed", "opened"]) };
+      device.displays = { panels, postures: ["closed", "opened"] };
+      let index = 0;
+      const feature = new SetPosture(device, {
+        adbFactory: { create: () => adb },
+        observeFactory: () =>
+          ({
+            execute: async () => {
+              const screenSize = sizes[Math.min(index++, sizes.length - 1)];
+              tracker.notifyTransition(device.deviceId, "fake observed identity change");
+              return {
+                ...observation,
+                display: { ...display, posture: "opened", role },
+                screenSize,
+                displayRevision: tracker.revision(device.deviceId),
+              };
+            },
+          }) as ObserveScreen,
+        timer,
+        transitionSink: tracker,
+      });
+      return { feature, timer };
+    }
+
+    test("a refused resize-display fails the call with the console's reason", async () => {
+      const adb = foldableAdb();
+      adb.setCommandResponse("emu resize-display 2", createExecResult(refuseResize, ""));
+      const { feature } = makeFeature(
+        makeDevice("emulator-5554", ["closed", "opened"]),
+        adb,
+        new FakeTimer(),
+        { ...observation, display: { ...display, posture: "opened" } },
+      );
+      const attempt = feature.execute("opened", "tablet");
+      await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+      await expect(attempt).rejects.toThrow(
+        "The emulator console refused 'emu resize-display 2': KO: resize-display is not supported",
+      );
+      await expect(attempt).rejects.toThrow("'tablet' display preset was not applied");
+    });
+
+    test("a refused resize-display on stderr is also reported", async () => {
+      const adb = foldableAdb();
+      adb.setCommandResponse("emu resize-display 2", createExecResult("", refuseResize));
+      const { feature } = makeFeature(makeDevice("emulator-5554", ["closed", "opened"]), adb);
+      await expect(feature.execute("opened", "tablet")).rejects.toThrow(refuseResize);
+    });
+
+    test("a refused posture command fails at once with the console's reason", async () => {
+      const adb = foldableAdb();
+      adb.setCommandResponse("emu posture 2", createExecResult("KO: Failed to set posture", ""));
+      const timer = new FakeTimer();
+      const { feature } = makeFeature(makeDevice(), adb, timer);
+      const attempt = feature.execute("half_opened", "tablet");
+      await expect(attempt).rejects.toThrow(
+        "The emulator console refused 'emu posture 2': KO: Failed to set posture. The posture did not change.",
+      );
+      await expect(attempt).rejects.not.toThrow("device_state override");
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell cmd device_state print-states",
+        "emu posture 2",
+      ]);
+    });
+
+    test("accepted OK replies still succeed without warnings", async () => {
+      const adb = foldableAdb();
+      adb.setCommandResponse("emu unfold", createExecResult("OK", ""));
+      adb.setCommandResponse("emu resize-display 2", createExecResult("OK", ""));
+      const { feature } = sizedFeature(adb, [{ width: 200, height: 300 }]);
+      const result = await feature.execute("opened", "tablet");
+      expect(result.warnings).toBeUndefined();
+    });
+
+    const cover: DisplayPanel = { key: "1", role: "cover", sizePx: { width: 100, height: 200 } };
+    const inner: DisplayPanel = { key: "0", role: "inner", sizePx: { width: 300, height: 400 } };
+
+    test("warns when the committed posture's panel has not swapped in", async () => {
+      const adb = foldableAdb();
+      const { feature } = sizedFeature(adb, [{ width: 200, height: 300 }], "cover", [cover, inner]);
+      const result = await feature.execute("opened");
+      expect(result.warnings).toEqual([
+        expect.stringContaining("active display is still the cover panel rather than the inner"),
+      ]);
+    });
+
+    test("stays silent when the active panel matches or the role is unknown", async () => {
+      const adb = foldableAdb();
+      const matching = sizedFeature(adb, [{ width: 200, height: 300 }], "inner", [cover, inner]);
+      expect((await matching.feature.execute("opened")).warnings).toBeUndefined();
+      const unknown = sizedFeature(foldableAdb(), [{ width: 200, height: 300 }], "unknown", [
+        cover,
+        inner,
+      ]);
+      expect((await unknown.feature.execute("opened")).warnings).toBeUndefined();
+    });
+  });
+
   test("uses observed posture when hydrated fold support exists but device_state is absent", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError(

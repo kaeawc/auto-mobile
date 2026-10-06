@@ -1,6 +1,8 @@
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { SIMULATOR_UNINSTALL_TIMEOUT_MS } from "../../../src/utils/ios-cmdline-tools/simulatorUninstallBound";
 import { PlistClient } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
 import { DefaultAndroidBuildToolsLocator } from "../../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
@@ -2145,7 +2147,12 @@ describe("InstallApp", () => {
       expect(repository.markStaleCalls).toBe(0);
     } else {
       if (outcome === "reinstall failure") {
-        await expect(installApp.execute("/tmp/MyApp.app")).rejects.toBe(reinstallError);
+        const failure = await installApp.execute("/tmp/MyApp.app").catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(ActionableError);
+        expect((failure as ActionableError).cause).toBe(reinstallError);
+        expect((failure as ActionableError).message).toContain(
+          "was uninstalled during downgrade recovery",
+        );
       } else {
         expect((await installApp.execute("/tmp/MyApp.app")).success).toBe(true);
       }
@@ -2509,6 +2516,449 @@ describe("InstallApp", () => {
 
       await expect(installApp.execute(hostile, 0)).rejects.toThrow("Command failed");
       expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
+    });
+  });
+
+  // The failure texts below are SYNTHETIC: no captured `simctl install` / `devicectl device install`
+  // rejection exists under test/fixtures. To capture real ones, run
+  // `xcrun simctl install <udid> <damaged-or-wrong-arch .app>` and
+  // `xcrun devicectl device install app --device <udid> <bad .ipa>` and record stderr.
+  describe("iOS downgrade classification and recovery disclosure", () => {
+    const bundleId = "com.example.app";
+    const downgradeDirApp = "/tmp/downgrade-fixtures/MyApp.app";
+    const downgradeDirIpa = "/tmp/downgrade-fixtures/MyApp.ipa";
+    const unrelatedStderr =
+      "An error was encountered processing the command (domain=IXUserPresentableErrorDomain, code=1)";
+    const newerStderr =
+      "Unable to install. A newer version of this application is already installed.";
+
+    function execRejection(file: string, artifact: string, stderr: string | undefined): Error {
+      const error = new Error(`Command failed: ${file} ${artifact}${stderr ? `\n${stderr}` : ""}`);
+      return stderr === undefined ? error : Object.assign(error, { code: 1, stderr });
+    }
+
+    interface SimulatorHarness {
+      calls: string[];
+      action: InstallApp;
+    }
+
+    function simulatorHarness(options: {
+      firstInstallError: Error;
+      onUninstall?: () => void;
+      reinstall?: () => Promise<void>;
+    }): SimulatorHarness {
+      const calls: string[] = [];
+      let attempts = 0;
+      const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+        timer: fakeTimer,
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        plist: fakePlist(bundleId),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        iosInstallBackendResolver: () => ({
+          kind: "simulator",
+          listApps: async () => (attempts > 1 ? [{ bundleId }] : []),
+          installApp: async () => {
+            if (attempts++ === 0) {
+              calls.push("install");
+              throw options.firstInstallError;
+            }
+            calls.push("reinstall");
+            await options.reinstall?.();
+          },
+        }),
+        iosDowngradeRecoveryBackendResolver: () => ({
+          kind: "simulator",
+          terminateApp: async () => {
+            calls.push("terminate");
+          },
+          uninstallApp: async () => {
+            calls.push("uninstall");
+            options.onUninstall?.();
+          },
+        }),
+      });
+      return { calls, action };
+    }
+
+    test.each([
+      ["stderr attached", unrelatedStderr],
+      ["message only", undefined],
+    ])(
+      "simulator: a path containing 'downgrade' does not trigger recovery (%s)",
+      async (_label, stderr) => {
+        const error = execRejection(`xcrun simctl install UDID`, downgradeDirApp, stderr);
+        const { calls, action } = simulatorHarness({ firstInstallError: error });
+        await expect(action.execute(downgradeDirApp)).rejects.toBe(error);
+        expect(calls).toEqual(["install"]);
+      },
+    );
+
+    test.each([
+      ["the full artifact path", `Unable to install ${downgradeDirApp}: damaged bundle`],
+      ["the artifact basename", "Unable to install MyDowngrade.app: damaged bundle"],
+    ])("simulator: tool output echoing %s does not trigger recovery", async (label, stderr) => {
+      const artifact =
+        label === "the artifact basename" ? "/tmp/builds/MyDowngrade.app" : downgradeDirApp;
+      const error = execRejection(`xcrun simctl install UDID`, artifact, stderr);
+      const { calls, action } = simulatorHarness({ firstInstallError: error });
+      await expect(action.execute(artifact)).rejects.toBe(error);
+      expect(calls).toEqual(["install"]);
+    });
+
+    test("simulator: a real rejection that also echoes the artifact path still recovers", async () => {
+      const error = execRejection(
+        `xcrun simctl install UDID`,
+        downgradeDirApp,
+        `${downgradeDirApp}: ${newerStderr}`,
+      );
+      const { calls, action } = simulatorHarness({ firstInstallError: error });
+      const result = await action.execute(downgradeDirApp);
+      expect(result.success).toBe(true);
+      expect(calls).toEqual(["install", "terminate", "uninstall", "reinstall"]);
+    });
+
+    test("simulator: a real downgrade rejection still recovers when the path contains 'downgrade'", async () => {
+      const error = execRejection(`xcrun simctl install UDID`, downgradeDirApp, newerStderr);
+      const { calls, action } = simulatorHarness({ firstInstallError: error });
+      const result = await action.execute(downgradeDirApp);
+      expect(result.success).toBe(true);
+      expect(calls).toEqual(["install", "terminate", "uninstall", "reinstall"]);
+    });
+
+    test.each([
+      ["stderr attached", unrelatedStderr],
+      ["message only", undefined],
+    ])(
+      "physical: a path containing 'downgrade' does not claim a newer version is installed (%s)",
+      async (_label, stderr) => {
+        const installer = new FakeDeviceAppInstaller();
+        const error = execRejection(
+          `xcrun devicectl device install app --device UDID`,
+          downgradeDirIpa,
+          stderr,
+        );
+        installer.shouldThrow = error;
+        const action = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+          performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+          deviceAppInstaller: installer,
+        });
+        await expect(action.execute(downgradeDirIpa)).rejects.toBe(error);
+      },
+    );
+
+    test("physical: a downgrade rejection wrapped with a cause still gives uninstall guidance", async () => {
+      const installer = new FakeDeviceAppInstaller();
+      installer.shouldThrow = new ActionableError(
+        `Failed to install app on physical iOS device: Command failed: xcrun devicectl ${downgradeDirIpa}`,
+        { cause: execRejection("xcrun devicectl", downgradeDirIpa, newerStderr) },
+      );
+      const action = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        deviceAppInstaller: installer,
+      });
+      await expect(action.execute(downgradeDirIpa)).rejects.toThrow(
+        "Uninstall the app first with uninstallApp",
+      );
+    });
+
+    test.each(["explicit", "ambient"] as const)(
+      "simulator: cancellation after the uninstall still finishes the reinstall (%s)",
+      async (source) => {
+        const controller = new AbortController();
+        const reinstallSawAbort: boolean[] = [];
+        const { calls, action } = simulatorHarness({
+          firstInstallError: new Error(newerStderr),
+          onUninstall: () => controller.abort(),
+          reinstall: async () => {
+            // simctl reads the ambient signal; an aborted request would reject it at once.
+            reinstallSawAbort.push(getAbortSignal()?.aborted === true);
+            if (getAbortSignal()?.aborted) {
+              throw new Error("simctl aborted");
+            }
+          },
+        });
+        const run = runWithAbortSignal(source === "ambient" ? controller.signal : undefined, () =>
+          action.execute(
+            "/tmp/MyApp.app",
+            undefined,
+            source === "explicit" ? controller.signal : undefined,
+          ),
+        );
+        if (source === "explicit") {
+          await expect(run).rejects.toThrow("Operation cancelled");
+        } else {
+          expect((await run).success).toBe(true);
+        }
+        expect(calls).toEqual(["install", "terminate", "uninstall", "reinstall"]);
+        expect(reinstallSawAbort).toEqual([false]);
+      },
+    );
+
+    describe("downgrade recovery uses the bounded, cancellable simulator uninstall (#10077)", () => {
+      type UninstallOptions = { timeoutMs?: number; signal?: AbortSignal } | undefined;
+
+      class RecoverySimctl extends DowngradeFakeSimctl {
+        events: string[] = [];
+        uninstallOptions: UninstallOptions[] = [];
+        onTerminate?: () => void;
+        onUninstall?: () => Error | undefined;
+
+        override async terminateApp(
+          bundle: string,
+          deviceId?: string,
+          options?: { timeoutMs?: number; signal?: AbortSignal },
+        ): Promise<void> {
+          this.events.push("terminate");
+          this.onTerminate?.();
+          return super.terminateApp(bundle, deviceId, options);
+        }
+
+        override async uninstallApp(
+          bundle: string,
+          deviceId?: string,
+          options?: UninstallOptions,
+        ): Promise<void> {
+          this.events.push("uninstall");
+          this.uninstallOptions.push(options);
+          const failure = this.onUninstall?.();
+          if (failure) {
+            throw failure;
+          }
+          return super.uninstallApp(bundle, deviceId, options);
+        }
+
+        override async installApp(appPath: string, deviceId?: string): Promise<void> {
+          this.events.push("install");
+          return super.installApp(appPath, deviceId);
+        }
+      }
+
+      function realRecovery() {
+        const simctl = new RecoverySimctl();
+        simctl.installError = new Error(newerStderr);
+        simctl.setListResponses([[], [{ bundleId, bundlePath: "/tmp/MyApp.app" }]]);
+        const repository = new CountingInstalledAppsRepository();
+        const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+          timer: fakeTimer,
+          performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+          simctl,
+          plist: fakePlist(bundleId),
+          installedAppsRepository: repository,
+        });
+        return { simctl, action, repository };
+      }
+
+      test("bounds the uninstall and carries the request signal to simctl", async () => {
+        const { simctl, action } = realRecovery();
+        const controller = new AbortController();
+
+        const result = await action.execute("/tmp/MyApp.app", undefined, controller.signal);
+
+        expect(result.success).toBe(true);
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall", "install"]);
+        expect(simctl.uninstallOptions).toHaveLength(1);
+        expect(simctl.uninstallOptions[0]?.timeoutMs).toBe(SIMULATOR_UNINSTALL_TIMEOUT_MS);
+        expect(simctl.uninstallOptions[0]?.signal).toBe(controller.signal);
+      });
+
+      test("a cancel between the terminate and the uninstall leaves the app installed", async () => {
+        const { simctl, action, repository } = realRecovery();
+        const controller = new AbortController();
+        simctl.onTerminate = () => controller.abort();
+
+        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect((failure as Error).message).toContain("Operation cancelled");
+        expect(simctl.events).toEqual(["install", "terminate"]);
+        expect(repository.markStaleCalls).toBe(0);
+      });
+
+      test("a cancel that kills the dispatched uninstall does not run the reinstall", async () => {
+        const { simctl, action } = realRecovery();
+        const controller = new AbortController();
+        simctl.onUninstall = () => {
+          controller.abort();
+          return new Error("simctl uninstall killed");
+        };
+
+        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect((failure as Error).message).toContain("Operation cancelled");
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall"]);
+      });
+
+      test("a cancel that arrives after the uninstall returned still finishes the reinstall", async () => {
+        const { simctl, action } = realRecovery();
+        const controller = new AbortController();
+        const baseUninstall = simctl.uninstallApp.bind(simctl);
+        simctl.uninstallApp = async (bundle, deviceId, options) => {
+          await baseUninstall(bundle, deviceId, options);
+          controller.abort();
+        };
+
+        const failure = await action.execute("/tmp/MyApp.app", undefined, controller.signal).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        // The explicit signal still reports the cancellation, but only once the reinstall ran.
+        expect((failure as Error).message).toContain("Operation cancelled");
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall", "install"]);
+      });
+
+      test("an uninstall that times out is reported as indeterminate and the reinstall is not attempted", async () => {
+        const { simctl, action, repository } = realRecovery();
+        const timeout = new SimctlCommandTimeoutError("Command timed out after 30000ms");
+        simctl.onUninstall = () => timeout;
+
+        const failure = await action.execute("/tmp/MyApp.app").then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect(failure).toBeInstanceOf(ActionableError);
+        expect((failure as ActionableError).message).toContain(
+          "Uninstall outcome is indeterminate",
+        );
+        expect((failure as ActionableError).message).not.toContain(
+          "was uninstalled during downgrade recovery",
+        );
+        expect((failure as ActionableError).cause).toBe(timeout);
+        expect(simctl.events).toEqual(["install", "terminate", "uninstall"]);
+        expect(repository.markStaleCalls).toBe(0);
+      });
+    });
+
+    describe("the reinstall's explicit budget reaches the real simctl child", () => {
+      // Real SimCtlClient over a fake process seam: the reinstall runs with no ambient signal, so
+      // without an explicit timeout simctl falls back to its own 60 s default and kills the child
+      // before the stated 120 s budget can fire.
+      function wedgedReinstall() {
+        const clientTimer = new FakeTimer();
+        const reinstallStarted = Promise.withResolvers<void>();
+        const installChildren: Array<{ aborted: boolean }> = [];
+        const simctl = new SimCtlClient(
+          null,
+          async (_file, args, _maxBuffer, signal) => {
+            if (args[1] !== "install") {
+              return createExecResult("", "");
+            }
+            installChildren.push({ aborted: false });
+            const child = installChildren[installChildren.length - 1]!;
+            if (installChildren.length === 1) {
+              throw Object.assign(new Error(`Command failed: xcrun ${args.join(" ")}`), {
+                code: 1,
+                stderr: newerStderr,
+              });
+            }
+            reinstallStarted.resolve();
+            return new Promise<never>((_resolve, reject) => {
+              signal?.addEventListener(
+                "abort",
+                () => {
+                  child.aborted = true;
+                  reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+                },
+                { once: true },
+              );
+            });
+          },
+          clientTimer,
+          "darwin",
+          undefined,
+          undefined,
+          undefined,
+          // Listings parse through plutil; keep every process behind a fake.
+          fakePlist(bundleId),
+        );
+        const action = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+          // A separate clock: only simctl's own bound is under test, not the 120 s race.
+          timer: new FakeTimer(),
+          performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+          simctl,
+          plist: fakePlist(bundleId),
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+        });
+        return { action, clientTimer, reinstallStarted, installChildren };
+      }
+
+      test("a 60-120 s reinstall is not killed at simctl's 60 s default", async () => {
+        const { action, clientTimer, reinstallStarted, installChildren } = wedgedReinstall();
+        const execution = action.execute("/tmp/MyApp.app");
+        const outcome = execution.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        await Promise.race([reinstallStarted.promise, outcome]);
+        expect(installChildren).toHaveLength(2);
+
+        clientTimer.advanceTime(60_000);
+        await Promise.resolve();
+        expect(installChildren[1]?.aborted).toBe(false);
+
+        clientTimer.advanceTime(60_000);
+        const failure = await outcome;
+        expect(installChildren[1]?.aborted).toBe(true);
+        expect((failure as Error).message).toContain("was uninstalled during downgrade recovery");
+      });
+    });
+
+    test("simulator: a failed reinstall says the app was uninstalled and keeps the cause", async () => {
+      const reinstallError = new Error("damaged bundle");
+      const { action } = simulatorHarness({
+        firstInstallError: new Error(newerStderr),
+        reinstall: async () => {
+          throw reinstallError;
+        },
+      });
+      const failure = await action.execute("/tmp/MyApp.app").then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(ActionableError);
+      const { message, cause } = failure as ActionableError;
+      expect(message).toContain(
+        `The previous version of ${bundleId} was uninstalled during downgrade recovery`,
+      );
+      expect(message).toContain("the app is not installed");
+      expect(message).toContain("damaged bundle");
+      expect(cause).toBe(reinstallError);
+    });
+
+    test("simulator: a reinstall that never settles hits its step deadline and discloses the uninstall", async () => {
+      fakeTimer = new FakeTimer();
+      const pending = Promise.withResolvers<void>();
+      const started = Promise.withResolvers<boolean>();
+      const { action } = simulatorHarness({
+        firstInstallError: new Error(newerStderr),
+        reinstall: () => {
+          started.resolve(true);
+          return pending.promise;
+        },
+      });
+      const execution = action.execute("/tmp/MyApp.app");
+      const outcome = execution.then(
+        () => undefined,
+        () => undefined,
+      );
+      try {
+        expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
+        expect(fakeTimer.getPendingTimeouts()).toEqual([120_000]);
+        fakeTimer.advanceTime(120_000);
+        await expect(execution).rejects.toThrow("iOS downgrade reinstall timed out after 120000ms");
+        await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        pending.resolve();
+        await outcome;
+      }
     });
   });
 });

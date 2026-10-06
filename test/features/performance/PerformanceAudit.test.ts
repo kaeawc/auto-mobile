@@ -399,9 +399,13 @@ describe("PerformanceAudit touch-latency opt-in", () => {
     delete process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING;
     serverConfig.setUiPerfMode(true);
     const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const audit = new PerformanceAudit(
       { deviceId: "test-device", name: "test", platform: "android" },
       factory,
+      undefined,
+      timer,
     );
 
     const metrics = await audit.collectMetrics("com.example", { width: 1080, height: 1920 });

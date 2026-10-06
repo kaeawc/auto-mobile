@@ -18,7 +18,8 @@ import {
   type NavigationEdge,
   type NavigationGraphService,
 } from "./NavigationGraphManager";
-import type { ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
+import type { PathResult, ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
+import { edgeReplayKey } from "./edgeReplayKey";
 import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";
@@ -30,6 +31,12 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { PressButton } from "../action/PressButton";
+import { RealObserveScreen } from "../observe/ObserveScreen";
+import {
+  describeForegroundOverlay,
+  type ForegroundObservation,
+  type ForegroundObserver,
+} from "./foregroundOverlay";
 
 /**
  * Options for the navigateTo tool.
@@ -43,6 +50,25 @@ export interface NavigateToOptions {
   sessionUuid?: string;
   [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]?: number;
   [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]?: number;
+}
+
+interface PathRunContext {
+  targetScreen: string;
+  startTime: number;
+  options: NavigateToOptions;
+  uiStateSetup: UIStateSetup;
+}
+
+/** A path run's result; `retryFrom` is set when a step failed with the device still at its source. */
+interface PathStepsOutcome {
+  result: NavigateToResult;
+  retryFrom?: NavigationEdge;
+}
+
+/** Why a fallback edge must not be dispatched: where the device actually is. */
+interface RetryBlocker {
+  reason: string;
+  screen: string | null;
 }
 
 interface NavigationPathResultContext {
@@ -64,6 +90,7 @@ export class NavigateTo {
   private timer: Timer;
   private pathOptimizer: PathOptimizer | undefined;
   private sessionUuid?: string;
+  private foregroundObserverProvider: () => ForegroundObserver;
 
   private static readonly MAX_TIMEOUT_MS = 30000; // 30 seconds
   private static readonly STEP_TIMEOUT_MS = 5000; // 5 seconds per step
@@ -78,6 +105,7 @@ export class NavigateTo {
     timer: Timer = defaultTimer,
     pathOptimizer?: PathOptimizer,
     sessionUuid?: string,
+    foregroundObserverProvider?: () => ForegroundObserver,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -85,6 +113,9 @@ export class NavigateTo {
     this.timer = timer;
     this.pathOptimizer = pathOptimizer;
     this.sessionUuid = sessionUuid;
+    this.foregroundObserverProvider =
+      foregroundObserverProvider ??
+      (() => new RealObserveScreen(this.device, { create: () => this.adb }));
 
     this.uiStateSetup = uiStateSetup;
     this.screenWaiter =
@@ -185,94 +216,236 @@ export class NavigateTo {
         return this.noKnownPathResult(currentScreen, targetScreen, knownScreens, startTime);
       }
 
-      // Execute path
-      const executedPath: string[] = [];
-      const resultContext = { targetScreen, executedPath, startTime };
-      let reached = false;
-      let arrivalScreen: string | undefined;
-
-      for (let i = 0; i < pathResult.path.length; i++) {
-        throwIfAborted(signal);
-        const edge = pathResult.path[i];
-
-        // Check timeout
-        if (this.timer.now() - startTime > NavigateTo.MAX_TIMEOUT_MS) {
-          perf.end();
-          return this.navigationTimeoutResult(targetScreen, executedPath, startTime);
-        }
-
-        // Report progress
-        if (progress) {
-          await awaitWhileRequestIsLive(
-            progress(i, pathResult.path.length, `Navigating: ${edge.from} → ${edge.to}`),
-            signal,
-          );
-        }
-
-        logger.info(
-          `[NAVIGATE_TO] Step ${i + 1}/${pathResult.path.length}: ${edge.from} → ${edge.to}`,
-        );
-
-        // Execute navigation step
-        try {
-          await this.replayStep(edge, options, uiStateSetup, executedPath, signal);
-        } catch (error) {
-          throwIfAborted(signal);
-          logger.warn(`[NAVIGATE_TO] Error executing step: ${errorMessage(error)}`, error);
-          perf.end();
-          return this.stepExecutionFailureResult(error, i, resultContext);
-        }
-
-        // Wait for screen transition
-        throwIfAborted(signal);
-        let stepReached = await this.screenWaiter.waitForScreen(
-          edge.to,
-          NavigateTo.STEP_TIMEOUT_MS,
-          signal,
-        );
-        throwIfAborted(signal);
-        let observedScreen: string | null = null;
-        if (!stepReached) {
-          throwIfAborted(signal);
-          observedScreen = this.navigationManager.getCurrentScreen();
-          throwIfAborted(signal);
-          stepReached = observedScreen === edge.to;
-        }
-        arrivalScreen = observedScreen === targetScreen ? observedScreen : undefined;
-        reached = stepReached && edge.to === targetScreen;
-        if (!stepReached && arrivalScreen !== undefined) {
-          reached = true;
-          break;
-        }
-        if (!stepReached) {
-          const error = `Navigation step ${i + 1} (${edge.from} → ${edge.to}) did not reach expected screen "${edge.to}"; observed current screen "${observedScreen ?? "unknown"}"; ${i + 1} steps ran (${executedPath.length} actions dispatched)`;
-          logger.warn(`[NAVIGATE_TO] ${error}`);
-          perf.end();
-          return this.stepArrivalFailureResult(error, observedScreen, resultContext);
-        }
-      }
-
-      // Final progress update
-      if (progress) {
-        await awaitWhileRequestIsLive(
-          progress(
-            pathResult.path.length,
-            pathResult.path.length,
-            reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
-          ),
-          signal,
-        );
-      }
-
-      throwIfAborted(signal);
+      const result = await this.followPath(
+        pathResult,
+        { targetScreen, startTime, options, uiStateSetup },
+        progress,
+        signal,
+      );
       perf.end();
-      return this.completedNavigationResult(arrivalScreen, reached, resultContext);
+      return result;
     } catch (error) {
       perf.end();
       throwIfAborted(signal);
       logger.warn(`[NAVIGATE_TO] Navigation failed: ${errorMessage(error)}`, error);
       return this.navigationFailureResult(error, targetScreen, startTime);
     }
+  }
+
+  /**
+   * Replay the found path. When a step does not reach its target while the device
+   * is still on the step's source screen, remember the failure and re-plan from
+   * there: findPath ranks the failed edge below the other edges for that screen pair,
+   * so the next-best one (another tool edge, then a no-tool Back edge) is tried before
+   * the navigation fails (#10031). Each edge action is tried at most once per call.
+   */
+  private async followPath(
+    initialPath: PathResult,
+    context: PathRunContext,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<NavigateToResult> {
+    const executedPath: string[] = [];
+    const attempted = new Set<string>();
+    let path = initialPath.path;
+    for (;;) {
+      const outcome = await this.runPathSteps(path, context, executedPath, progress, signal);
+      if (!outcome.retryFrom) {
+        return outcome.result;
+      }
+      attempted.add(edgeReplayKey(outcome.retryFrom));
+      const replanned = await this.navigationManager.findPath(context.targetScreen);
+      throwIfAborted(signal);
+      const nextEdge = replanned.found ? replanned.path[0] : undefined;
+      // A re-plan always starts at the screen the device is on; anything else (or an
+      // action already tried) means there is no further edge to try for this pair.
+      if (
+        !nextEdge ||
+        nextEdge.from !== outcome.retryFrom.from ||
+        attempted.has(edgeReplayKey(nextEdge))
+      ) {
+        return outcome.result;
+      }
+      logger.info(
+        `[NAVIGATE_TO] Replay of ${outcome.retryFrom.from} → ${outcome.retryFrom.to} did not ` +
+          `reach its target; trying another edge for ${nextEdge.from} → ${nextEdge.to}`,
+      );
+      path = replanned.path;
+    }
+  }
+
+  private async runPathSteps(
+    path: NavigationEdge[],
+    context: PathRunContext,
+    executedPath: string[],
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<PathStepsOutcome> {
+    const { targetScreen, startTime, options, uiStateSetup } = context;
+    const resultContext = { targetScreen, executedPath, startTime };
+    let reached = false;
+    let arrivalScreen: string | undefined;
+
+    for (let i = 0; i < path.length; i++) {
+      throwIfAborted(signal);
+      const edge = path[i];
+
+      // Check timeout
+      if (this.timer.now() - startTime > NavigateTo.MAX_TIMEOUT_MS) {
+        return { result: this.navigationTimeoutResult(targetScreen, executedPath, startTime) };
+      }
+
+      // Report progress
+      if (progress) {
+        await awaitWhileRequestIsLive(
+          progress(i, path.length, `Navigating: ${edge.from} → ${edge.to}`),
+          signal,
+        );
+      }
+
+      logger.info(`[NAVIGATE_TO] Step ${i + 1}/${path.length}: ${edge.from} → ${edge.to}`);
+
+      // Execute navigation step
+      try {
+        await this.replayStep(edge, options, uiStateSetup, executedPath, signal);
+      } catch (error) {
+        throwIfAborted(signal);
+        logger.warn(`[NAVIGATE_TO] Error executing step: ${errorMessage(error)}`, error);
+        return this.failedStepOutcome(
+          edge,
+          this.stepExecutionFailureResult(error, i, resultContext),
+          signal,
+        );
+      }
+
+      // Wait for screen transition
+      throwIfAborted(signal);
+      let stepReached = await this.screenWaiter.waitForScreen(
+        edge.to,
+        NavigateTo.STEP_TIMEOUT_MS,
+        signal,
+      );
+      throwIfAborted(signal);
+      let observedScreen: string | null = null;
+      if (!stepReached) {
+        throwIfAborted(signal);
+        observedScreen = this.navigationManager.getCurrentScreen();
+        throwIfAborted(signal);
+        stepReached = observedScreen === edge.to;
+      }
+      arrivalScreen = observedScreen === targetScreen ? observedScreen : undefined;
+      reached = stepReached && edge.to === targetScreen;
+      if (!stepReached && arrivalScreen !== undefined) {
+        reached = true;
+        break;
+      }
+      if (!stepReached) {
+        const error = `Navigation step ${i + 1} (${edge.from} → ${edge.to}) did not reach expected screen "${edge.to}"; observed current screen "${observedScreen ?? "unknown"}"; ${i + 1} steps ran (${executedPath.length} actions dispatched)`;
+        logger.warn(`[NAVIGATE_TO] ${error}`);
+        return this.failedStepOutcome(
+          edge,
+          this.stepArrivalFailureResult(error, observedScreen, resultContext),
+          signal,
+        );
+      }
+      this.navigationManager.recordEdgeReplayOutcome(edge, true);
+    }
+
+    // Final progress update
+    if (progress) {
+      await awaitWhileRequestIsLive(
+        progress(
+          path.length,
+          path.length,
+          reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
+        ),
+        signal,
+      );
+    }
+
+    throwIfAborted(signal);
+    return { result: this.completedNavigationResult(arrivalScreen, reached, resultContext) };
+  }
+
+  /**
+   * A step whose replay did not reach its target: remember that, and offer a retry
+   * only when the device never left the step's source screen (otherwise the next
+   * edge for that pair is no longer the right one to try from here). The graph's
+   * current screen is not proof of that: a replay can open a system dialog or sheet
+   * the graph never reports, so a fresh observation must agree before a fallback
+   * edge (possibly a Back press) is dispatched (#10133).
+   */
+  private async failedStepOutcome(
+    edge: NavigationEdge,
+    result: NavigateToResult,
+    signal?: AbortSignal,
+  ): Promise<PathStepsOutcome> {
+    this.navigationManager.recordEdgeReplayOutcome(edge, false);
+    // The failure result already carries the screen the graph reported after the replay.
+    if (result.currentScreen !== edge.from) {
+      return { result };
+    }
+    const blocker = await this.findBlockerBeforeRetry(edge.from, signal);
+    if (!blocker) {
+      return { result, retryFrom: edge };
+    }
+    return { result: this.withUnverifiedSourceDetail(result, edge.from, blocker) };
+  }
+
+  /**
+   * Observe the device and report why it cannot be trusted to still be on `source`,
+   * or `undefined` when it can. A failed observation is also a reason not to retry:
+   * the fallback must never be dispatched blind.
+   */
+  private async findBlockerBeforeRetry(
+    source: string,
+    signal?: AbortSignal,
+  ): Promise<RetryBlocker | undefined> {
+    let observation: ForegroundObservation;
+    try {
+      throwIfAborted(signal);
+      observation = await awaitWhileRequestIsLive(
+        this.foregroundObserverProvider().execute(signal ? { signal } : undefined),
+        signal,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        `[NAVIGATE_TO] Re-observe before fallback edge failed: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        reason: `the device could not be observed (${errorMessage(error)})`,
+        screen: this.navigationManager.getCurrentScreen(),
+      };
+    }
+    throwIfAborted(signal);
+    // The observation feeds the graph's screen tracking, so read the screen after it.
+    const screen = this.navigationManager.getCurrentScreen();
+    if (screen !== source) {
+      return { reason: `the observed screen is "${screen ?? "unknown"}"`, screen };
+    }
+    const overlay = describeForegroundOverlay(
+      observation,
+      this.navigationManager.getCurrentAppId(),
+    );
+    return overlay ? { reason: `it is showing ${overlay}`, screen } : undefined;
+  }
+
+  private withUnverifiedSourceDetail(
+    result: NavigateToResult,
+    source: string,
+    blocker: RetryBlocker,
+  ): NavigateToResult {
+    const detail =
+      `Not trying a fallback edge: after the failed replay the device is no longer ` +
+      `confirmed on "${source}" (${blocker.reason}); resolve that and call navigateTo again`;
+    logger.warn(`[NAVIGATE_TO] ${detail}`);
+    return {
+      ...result,
+      error: result.error ? `${result.error}. ${detail}` : detail,
+      currentScreen: blocker.screen,
+    };
   }
 
   private noKnownPathResult(

@@ -459,18 +459,17 @@ function buildNetworkMockRulesSnapshot(): Record<string, unknown> {
     timer: new FakeTimer(),
     notifier: { notifyResourceUpdated: () => {} },
   });
-  state.addMock({
+  state.addMock("snapshot-device", {
     host: "api.example.com",
     path: "/v1/users",
     method: "GET",
     limit: 3,
-    remaining: 3,
     statusCode: 200,
     responseHeaders: { "X-Mocked": "true" },
     responseBody: '{"users":[]}',
     contentType: "application/json",
   });
-  const rules = buildNetworkMockRules(state);
+  const rules = buildNetworkMockRules(state, "snapshot-device");
   // Round-trip through JSON.stringify exactly like the emit site, so the captured
   // object reflects on-the-wire serialization (dropped undefineds, etc.).
   return JSON.parse(JSON.stringify({ type: "set_network_mock_rules", rules }));

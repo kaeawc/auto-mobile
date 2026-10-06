@@ -89,6 +89,8 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
   constructor(
     private readonly timer: Timer = defaultTimer,
     private readonly pathModule: ScreenshotPathModule = nodePath,
+    /** Live-file cap; tests lower it so capacity needs a handful of files, not 4096. */
+    private readonly countCap: number = MAX_SCREENSHOT_PATH_PROTECTIONS,
   ) {
     this.startedAt = timer.now();
   }
@@ -219,8 +221,7 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     const nearCap =
       state.bytes + incoming >=
         SCREENSHOT_CACHE_MAX_SIZE_BYTES * SCREENSHOT_INVENTORY_RECONCILE_RATIO ||
-      (state.files?.size ?? 0) + 1 >=
-        MAX_SCREENSHOT_PATH_PROTECTIONS * SCREENSHOT_INVENTORY_RECONCILE_RATIO;
+      (state.files?.size ?? 0) + 1 >= this.countCap * SCREENSHOT_INVENTORY_RECONCILE_RATIO;
     if (!state.files || state.inventoryFailed || state.reconcileNeeded || nearCap) {
       await this.cleanup(directory, state);
     }
@@ -421,8 +422,8 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     const bytes = state.bytes;
     const count = state.files?.size ?? 0;
     const over = before
-      ? bytes >= SCREENSHOT_CACHE_MAX_SIZE_BYTES || count >= MAX_SCREENSHOT_PATH_PROTECTIONS
-      : bytes > SCREENSHOT_CACHE_MAX_SIZE_BYTES || count > MAX_SCREENSHOT_PATH_PROTECTIONS;
+      ? bytes >= SCREENSHOT_CACHE_MAX_SIZE_BYTES || count >= this.countCap
+      : bytes > SCREENSHOT_CACHE_MAX_SIZE_BYTES || count > this.countCap;
     if (over) {
       const earliest = Math.min(
         ...[...(state.files?.values() ?? [])].map((file) => this.expiry(file, state)),
@@ -431,6 +432,8 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
         bytes,
         count,
         Number.isFinite(earliest) ? earliest : this.timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS,
+        SCREENSHOT_CACHE_MAX_SIZE_BYTES,
+        this.countCap,
       );
     }
   }

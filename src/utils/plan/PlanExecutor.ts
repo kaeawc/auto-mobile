@@ -36,7 +36,11 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "../../models/DeviceLostError";
-import { formatStepError, parseStepParams } from "./planStepParams";
+import {
+  UNEVALUATED_EXPECTATIONS_WARNING,
+  formatStepError,
+  parseStepParams,
+} from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -59,13 +63,7 @@ interface StepExecutionContext {
   debugLog?: boolean;
 }
 
-/**
- * Plan steps may carry `expectations` (accepted by the plan schema) but nothing evaluates them
- * yet (#9925). Say so on the step's warnings rather than let a plan author believe the
- * assertions were checked and passed.
- */
-export const UNEVALUATED_EXPECTATIONS_WARNING =
-  "This step declares `expectations`, but expectations are not evaluated yet; the step ran without checking them.";
+export { UNEVALUATED_EXPECTATIONS_WARNING };
 
 function withUnevaluatedExpectationsWarning(
   step: PlanStep,

@@ -9,7 +9,10 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import {
+  DefaultPlanExecutor,
+  UNEVALUATED_EXPECTATIONS_WARNING,
+} from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { preserveToolRegistry, unregisterTemporaryTools } from "../helpers/withTemporaryTool";
@@ -154,6 +157,45 @@ describe("criticalSection sub-steps get the plan path's migration and schema par
     );
     expect(result.success).toBe(false);
     expect(result.failedStep?.error).toContain("Invalid parameters for tool tapOn");
+  });
+
+  test("a sub-step carrying expectations runs and the section warns they were not evaluated", async () => {
+    const result = await executor.executePlan(
+      sectionPlan([
+        {
+          tool: "tapOn",
+          params: { device: "A", action: "tap", selector: { text: "Sync" } },
+          expectations: [{ type: "elementVisible", selector: { text: "Done" } }],
+        },
+        { tool: "tapOn", params: { device: "A", action: "tap", selector: { text: "Plain" } } },
+      ]),
+      0,
+    );
+    expect(result.failedStep).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(tappedTexts).toEqual(["Sync", "Plain"]);
+    expect(result.warnings).toEqual([
+      {
+        stepIndex: 0,
+        tool: "criticalSection",
+        warnings: [`step 1 (tapOn): ${UNEVALUATED_EXPECTATIONS_WARNING}`],
+      },
+    ]);
+  });
+
+  test("an empty expectations list adds no warning", async () => {
+    const result = await executor.executePlan(
+      sectionPlan([
+        {
+          tool: "tapOn",
+          params: { device: "A", action: "tap", selector: { text: "Sync" } },
+          expectations: [],
+        },
+      ]),
+      0,
+    );
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
   });
 
   describe("schema defaults reach the handler", () => {

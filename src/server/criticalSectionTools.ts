@@ -14,7 +14,11 @@ import {
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { migratePlanStep } from "../utils/plan/PlanMigrator";
-import { formatStepError, parseStepParams } from "../utils/plan/planStepParams";
+import {
+  UNEVALUATED_EXPECTATIONS_WARNING,
+  formatStepError,
+  parseStepParams,
+} from "../utils/plan/planStepParams";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { isDeviceLostError } from "./deviceLossOutcome";
@@ -240,6 +244,11 @@ async function executeCriticalSectionSteps(
       }
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
+      // Nothing evaluates step-level `expectations` yet (#9925); say so rather than
+      // report a clean section, as PlanExecutor does for a top-level step.
+      if (step.expectations && step.expectations.length > 0) {
+        warnings.push(`step ${i + 1} (${step.tool}): ${UNEVALUATED_EXPECTATIONS_WARNING}`);
+      }
       executedSteps.push({ tool: step.tool, success: true });
     } catch (error) {
       executedSteps.push({ tool: step.tool, success: false });

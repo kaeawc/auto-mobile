@@ -29,3 +29,11 @@ export function formatStepError(
 export function parseStepParams(schema: z.ZodType, params: unknown): Record<string, unknown> {
   return schema.parse(stripUndeclaredSessionUuid(params, schema)) as Record<string, unknown>;
 }
+
+/**
+ * Plan steps may carry `expectations` (accepted by the plan schema) but nothing evaluates them
+ * yet (#9925). Say so on the step's warnings rather than let a plan author believe the
+ * assertions were checked and passed.
+ */
+export const UNEVALUATED_EXPECTATIONS_WARNING =
+  "This step declares `expectations`, but expectations are not evaluated yet; the step ran without checking them.";

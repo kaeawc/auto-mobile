@@ -128,6 +128,141 @@ describe("PlanExecutor — observe waitFor timeout", () => {
     expect(nextStep).toHaveBeenCalledTimes(1);
   });
 
+  describe("failed-step record (#10024)", () => {
+    function registerRecordingObserve(): { calls: number } {
+      const recorded = { calls: 0 };
+      ToolRegistry.unregister("observe");
+      ToolRegistry.register(
+        "observe",
+        "Recording observe",
+        z.object({}).passthrough(),
+        async () => {
+          recorded.calls++;
+          return createStructuredToolResponse({
+            activeWindow: { appId: "com.example.dialog" },
+            elements: { clickable: [{ text: "Error dialog OK" }] },
+          });
+        },
+      );
+      (ToolRegistry.getTool("observe") as { requiresDevice: boolean }).requiresDevice = true;
+      return recorded;
+    }
+
+    test("an observe timeout summarizes its own response and keeps warnings and diagnostics", async () => {
+      ToolRegistry.unregister("observe");
+      ToolRegistry.register("observe", "Timeout observe", z.object({}).passthrough(), async () =>
+        createStructuredToolResponse({
+          awaitTimeout: true,
+          awaitDuration: 5000,
+          timedOut: true,
+          matched: false,
+          polls: 4,
+          activeWindow: { appId: "com.example.error" },
+          elements: { text: [{ text: "Something went wrong" }] },
+          candidates: [
+            { text: "Welcom", "resource-id": "welcome", bounds: { left: 0 }, node: [{}] },
+          ],
+          warnings: ["w"],
+        }),
+      );
+      const result = await planExecutor.executePlan(
+        {
+          name: "observe timeout observation",
+          steps: [{ tool: "observe", params: { waitFor: { text: "Welcome", timeout: 5000 } } }],
+        },
+        0,
+        "android",
+        "emulator-5554",
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.failedStep?.failureObservation).toMatchObject({
+        awaitTimeout: true,
+        activeWindow: { appId: "com.example.error" },
+        visibleTextsSample: ["Something went wrong"],
+      });
+      expect(result.warnings).toEqual([{ stepIndex: 0, tool: "observe", warnings: ["w"] }]);
+      expect(result.debug?.steps[0].details).toMatchObject({
+        params: { waitFor: { text: "Welcome", timeout: 5000 } },
+        warnings: ["w"],
+        waitForTimeout: {
+          awaitDuration: 5000,
+          timedOut: true,
+          matched: false,
+          polls: 4,
+          candidates: [{ text: "Welcom", "resource-id": "welcome", bounds: { left: 0 } }],
+          candidateCount: 1,
+        },
+      });
+    });
+
+    test("an openLink timeout captures its failure observation through observe", async () => {
+      const observe = registerRecordingObserve();
+      ToolRegistry.register("openLink", "Mock openLink", z.object({}).passthrough(), async () =>
+        createStructuredToolResponse({ success: true, awaitTimeout: true, awaitDuration: 5000 }),
+      );
+      const result = await planExecutor.executePlan(
+        {
+          name: "openLink timeout observation",
+          steps: [{ tool: "openLink", params: { url: "myapp://x", waitFor: { text: "Pay" } } }],
+        },
+        0,
+        "android",
+        "emulator-5554",
+      );
+
+      expect(observe.calls).toBe(1);
+      expect(result.failedStep).toMatchObject({
+        stepIndex: 0,
+        tool: "openLink",
+        error: "openLink waitFor timed out after 5000ms",
+        failureObservation: { activeWindow: { appId: "com.example.dialog" } },
+      });
+      expect(result.debug?.steps[0].details).toMatchObject({
+        waitForTimeout: { awaitDuration: 5000 },
+      });
+    });
+
+    test("a skipped optional timeout captures no observation", async () => {
+      const observe = registerRecordingObserve();
+      ToolRegistry.register("openLink", "Mock openLink", z.object({}).passthrough(), async () =>
+        createStructuredToolResponse({ success: true, awaitTimeout: true, awaitDuration: 5000 }),
+      );
+      const result = await planExecutor.executePlan(
+        {
+          name: "optional openLink timeout",
+          steps: [{ tool: "openLink", params: { url: "myapp://x" }, optional: true }],
+        },
+        0,
+        "android",
+        "emulator-5554",
+      );
+
+      expect(result.success).toBe(true);
+      expect(observe.calls).toBe(0);
+    });
+
+    test("warnings on a success:false tool result reach the plan result", async () => {
+      registerRecordingObserve();
+      ToolRegistry.register("openLink", "Failing openLink", z.object({}).passthrough(), async () =>
+        createStructuredToolResponse({ success: false, error: "no handler", warnings: ["w"] }),
+      );
+      const result = await planExecutor.executePlan(
+        {
+          name: "failing tool warnings",
+          steps: [{ tool: "openLink", params: { url: "myapp://x" } }],
+        },
+        0,
+        "android",
+        "emulator-5554",
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.failedStep?.error).toBe("no handler");
+      expect(result.warnings).toEqual([{ stepIndex: 0, tool: "openLink", warnings: ["w"] }]);
+    });
+  });
+
   for (const tool of ["observe", "openLink"]) {
     test.each([false, undefined])(
       "passes satisfied " + tool + " waitFor with awaitTimeout=%s",

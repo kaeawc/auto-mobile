@@ -21,6 +21,8 @@ import type { ObserveResultCacheStore } from "../../../src/features/observe/cach
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { hasWrongWindowEvidence } from "../../../src/features/observe/observationFreshness";
+import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -366,6 +368,183 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       'pressButton { platform: "android", button: "home" }',
     );
     expect(result.freshness?.warning).toContain("relaunch the target app");
+  });
+
+  describe("CtrlProxy's own focusable overlay holds window focus (#10000)", () => {
+    const now = 1_700_000_000_000;
+    const playground = "dev.jasonpearson.automobile.playground";
+    const screenBounds = { left: 0, top: 0, right: 1080, bottom: 2400 };
+
+    function overlayFocusedHierarchy(
+      windows: ViewHierarchyWindowInfo[],
+      capturedAt: number = now,
+    ): ViewHierarchyResult {
+      return createHierarchyForTest({
+        updatedAt: capturedAt,
+        receivedAt: capturedAt,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        packageName: CTRL_PROXY_PACKAGE,
+        foregroundActivity: `${CTRL_PROXY_PACKAGE}/.MainActivity`,
+        windows,
+        hierarchy: {
+          node: {
+            bounds: screenBounds,
+            node: [{ text: "PRESS", bounds: { left: 100, top: 900, right: 400, bottom: 1000 } }],
+          },
+        },
+      });
+    }
+
+    async function observeWith(
+      hierarchy: ViewHierarchyResult,
+      foregroundPackage: string | undefined,
+    ): Promise<{ result: ObserveResult; hierarchyReads: number }> {
+      const timer = new FakeTimer();
+      timer.setCurrentTime(now);
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy(hierarchy);
+      const fakeAdb = new FakeAdbExecutor();
+      if (foregroundPackage) {
+        fakeAdb.setForegroundApp({ packageName: foregroundPackage, userId: 0 });
+      }
+      const result = await makeScreen(viewHierarchy, fakeAdb, timer).execute({
+        skipScreenshot: true,
+        skipBackStack: true,
+      });
+      return { result, hierarchyReads: viewHierarchy.getCallCount() };
+    }
+
+    const focusedOverlayWindows: ViewHierarchyWindowInfo[] = [
+      { id: 1, type: 1, isFocused: false, windowLayer: 10, bounds: screenBounds },
+      { id: 2, type: 4, isFocused: true, isActive: true, windowLayer: 20, bounds: screenBounds },
+    ];
+
+    test("is not a stale wrong-window capture and triggers no recovery re-read", async () => {
+      const { result, hierarchyReads } = await observeWith(
+        overlayFocusedHierarchy(focusedOverlayWindows),
+        playground,
+      );
+
+      expect(result.freshness?.isFresh).toBe(true);
+      expect(result.freshness?.verified).toBe(true);
+      expect(result.freshness?.category).toBeUndefined();
+      expect(hasWrongWindowEvidence(result)).toBe(false);
+      expect(hierarchyReads).toBe(1);
+    });
+
+    test("names the app behind the overlay as active and keeps the overlay visible", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy(focusedOverlayWindows),
+        playground,
+      );
+
+      expect(result.activeWindow?.appId).toBe(playground);
+      expect(result.activeWindow?.type).toBe("interactive_overlay");
+    });
+
+    test("without a device-confirmed foreground the window is left as captured", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy(focusedOverlayWindows),
+        undefined,
+      );
+
+      expect(result.activeWindow?.appId).toBe(CTRL_PROXY_PACKAGE);
+      expect(result.activeWindow?.type).toBeUndefined();
+    });
+
+    test("a stale capture taken while the overlay had focus is not relabelled or exempted", async () => {
+      // Taken a minute ago, while the text-field overlay held focus; the overlay is gone now and
+      // the app is in front. The capture's own window list cannot vouch for itself.
+      const { result } = await observeWith(
+        overlayFocusedHierarchy(focusedOverlayWindows, now - 60_000),
+        playground,
+      );
+
+      expect(result.activeWindow?.appId).toBe(CTRL_PROXY_PACKAGE);
+      expect(result.activeWindow?.type).toBeUndefined();
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.category).toBe("window_identity");
+      expect(hasWrongWindowEvidence(result)).toBe(true);
+    });
+
+    test("a capture without a device timestamp cannot date the overlay claim", async () => {
+      const undated = overlayFocusedHierarchy(focusedOverlayWindows);
+      delete undated.updatedAt;
+      delete undated.receivedAt;
+      const { result } = await observeWith(undated, playground);
+
+      expect(result.activeWindow?.appId).toBe(CTRL_PROXY_PACKAGE);
+      expect(result.activeWindow?.type).toBeUndefined();
+    });
+
+    test("a CtrlProxy-labelled capture with no overlay window is still a wrong-window capture", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy([
+          { id: 1, type: 1, isFocused: true, windowLayer: 10, bounds: screenBounds },
+        ]),
+        playground,
+      );
+
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.category).toBe("window_identity");
+      expect(result.freshness?.warning).toContain(CTRL_PROXY_PACKAGE);
+      expect(hasWrongWindowEvidence(result)).toBe(true);
+    });
+
+    test("the window's own package decides: a focused overlay window reporting CtrlProxy is the overlay", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy([
+          { id: 1, type: 1, isFocused: false, packageName: playground, bounds: screenBounds },
+          {
+            id: 2,
+            type: 4,
+            isFocused: true,
+            isActive: true,
+            packageName: CTRL_PROXY_PACKAGE,
+            bounds: screenBounds,
+          },
+        ]),
+        playground,
+      );
+
+      expect(result.freshness?.isFresh).toBe(true);
+      expect(hasWrongWindowEvidence(result)).toBe(false);
+      expect(result.activeWindow?.appId).toBe(playground);
+      expect(result.activeWindow?.type).toBe("interactive_overlay");
+    });
+
+    test("a focused overlay window reporting another package stays a wrong-window capture even when the capture is labelled CtrlProxy", async () => {
+      const { result } = await observeWith(
+        overlayFocusedHierarchy([
+          {
+            id: 2,
+            type: 4,
+            isFocused: true,
+            isActive: true,
+            packageName: "com.example.screenreader",
+            bounds: screenBounds,
+          },
+        ]),
+        playground,
+      );
+
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.category).toBe("window_identity");
+      expect(hasWrongWindowEvidence(result)).toBe(true);
+    });
+
+    test("another app's focused overlay window is still a wrong-window capture", async () => {
+      const hierarchy = createHierarchyForTest({
+        ...calendarHierarchy(now),
+        windows: [{ id: 2, type: 4, isFocused: true, bounds: screenBounds }],
+      });
+      const { result } = await observeWith(hierarchy, playground);
+
+      expect(result.freshness?.isFresh).toBe(false);
+      expect(result.freshness?.category).toBe("window_identity");
+    });
   });
 
   test("keeps a focused framework crash dialog fresh when its resumed app differs (#7442)", async () => {

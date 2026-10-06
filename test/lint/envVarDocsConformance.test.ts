@@ -454,13 +454,16 @@ describe("environment variable documentation", () => {
   let reads: Set<string>;
   let docs: Set<string>;
   let markdown: string;
+  // Parses the whole src/ tree: ~1s on a quiet machine, but Fast Validation runs this
+  // alongside ten other checks on a 4-core runner, where a passing run already took ~11s and
+  // a loaded one exceeded the old 15s hook cap. The scan is not a unit under the per-test budget.
   beforeAll(() => {
     reads = extractReads(
       sourceFiles(resolve(ROOT, "src")).map((path) => ({ path, text: readFileSync(path, "utf8") })),
     );
     markdown = readFileSync(resolve(ROOT, "docs/using/environment-variables.md"), "utf8");
     docs = documentedNames(markdown);
-  }, 15_000);
+  }, 60_000);
   test("every source read is public documentation or explicitly internal", () => {
     expect(violations(reads, docs, INTERNAL)).toEqual([]);
     expect(Object.values(INTERNAL).every((reason) => reason.length > 0)).toBe(true);

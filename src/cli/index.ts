@@ -18,7 +18,7 @@ import {
   DaemonAssetVersionMismatchError,
 } from "../daemon/daemonMcpProxy";
 import type { DaemonMcpProxyConfig } from "../daemon/daemonMcpProxy";
-import type { DaemonOptions } from "../daemon/types";
+import { isGatedToolErrorCode, type DaemonOptions } from "../daemon/types";
 import { resolveDaemonInstallSpecifier } from "../constants/release";
 import {
   DEVICE_SESSION_ACQUISITION_TOOLS,
@@ -336,7 +336,9 @@ async function runToolViaDaemon(
       throw error;
     }
     const message = errorMessage(error);
-    throw new ActionableError(formatDaemonToolError(toolName, message));
+    throw new ActionableError(
+      formatDaemonToolError(toolName, message, { gated: isGatedToolErrorCode(error) }),
+    );
   } finally {
     // Declare the session this one-shot process owns BEFORE closing (#6870).
     // Without it the connection's heartbeat keeper dies with the process and the

@@ -43,11 +43,34 @@ function harness() {
   return { ...h, action, device, timer, selections };
 }
 
-test("N IME types share one activation/restore and retain separate commits", async () => {
+function modelDeviceSideRestore(h: ReturnType<typeof harness>) {
+  const commit = h.client.commitViaIme;
+  const priors: (string | null)[] = [];
+  const selectionsAtCommit: string[][] = [];
+  let switchedAway = false;
+  h.client.commitViaIme = async (...args) => {
+    priors.push(args[1]);
+    selectionsAtCommit.push(h.selections());
+    if (switchedAway) {
+      return { success: false, error: "IME service did not start within timeout" };
+    }
+    const result = await commit(...args);
+    if (args[1] !== null) {
+      switchedAway = true;
+    }
+    return result;
+  };
+  return { priors, selectionsAtCommit };
+}
+
+test("IME span keeps the service active for three commits and restores only at the end", async () => {
   const h = harness();
+  const fake = modelDeviceSideRestore(h);
   const result = await h.action.execute([type("a"), type("b"), type("c")]);
   expect(result).toMatchObject({ success: true, completedCommands: 3 });
+  expect(fake.priors).toEqual([null, null, null]);
   expect(h.committed).toEqual(["a", "b", "c"]);
+  expect(fake.selectionsAtCommit).toEqual([[activate], [activate], [activate]]);
   expect(h.selections()).toEqual([activate, restore]);
 });
 
@@ -65,6 +88,39 @@ test("failure on command k restores once and stops subsequent commands", async (
   });
   expect(result.commands).toHaveLength(2);
   expect(h.committed).toEqual(["a"]);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("auto and IME key-event types leave restoration to the host", async () => {
+  const h = harness();
+  const fake = modelDeviceSideRestore(h);
+  const result = await h.action.execute([
+    { action: "type", text: "a" },
+    { action: "type", text: "b", mode: "imeKeyEvents" },
+    type("c"),
+  ]);
+  expect(result).toMatchObject({ success: true, completedCommands: 3 });
+  expect(fake.priors).toEqual([null, null, null]);
+  expect(h.committed).toEqual(["a", "b", "c"]);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("an auto type falls back to key events before a host-restored IME commit", async () => {
+  const h = harness();
+  const fake = modelDeviceSideRestore(h);
+  let capabilityChecks = 0;
+  h.client.supportsImeCommit = async () => ++capabilityChecks > 1;
+  const result = await h.action.execute([{ action: "type", text: "a" }, type("b")]);
+  expect(result).toMatchObject({ success: true, completedCommands: 2 });
+  expect(h.inserted).toEqual([]);
+  expect(h.deliveries).toEqual([
+    { kind: "keyevent", text: "a" },
+    { kind: "commit", text: "b" },
+  ]);
+  expect(result.commands.map((command) => command.resolvedMode)).toEqual(["eventAll", "ime"]);
+  expect(h.adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
+  expect(h.committed).toEqual(["b"]);
+  expect(fake.priors).toEqual([null]);
   expect(h.selections()).toEqual([activate, restore]);
 });
 
@@ -120,8 +176,12 @@ test("non-IME typing restores before a11y delivery; a later IME type reactivates
 
 test("single IME type preserves the original complete adb command sequence", async () => {
   const h = harness();
+  const fake = modelDeviceSideRestore(h);
   const result = await h.action.execute([type("x")]);
   expect(result).toMatchObject({ success: true, completedCommands: 1 });
+  expect(fake.priors).toEqual([null]);
+  expect(fake.selectionsAtCommit).toEqual([[activate]]);
+  expect(h.selections()).toEqual([activate, restore]);
   expect(h.clientCalls).toEqual(["commit:x"]);
   expect(h.adb.getExecutedCommands()).toEqual([
     "shell settings get secure default_input_method",
@@ -145,6 +205,13 @@ test("single IME type preserves the original complete adb command sequence", asy
     `shell ime disable ${AUTO_MOBILE_IME_ID}`,
     "shell ime list -s",
   ]);
+});
+
+test("direct executor type outside a span retains the device-side restore prior", async () => {
+  const h = harness();
+  const fake = modelDeviceSideRestore(h);
+  expect(await h.executor.type(type("x"))).toMatchObject({ success: true });
+  expect(fake.priors).toEqual([priorIme]);
 });
 
 test("multi-command restore failure reports original-keyboard recovery guidance", async () => {
@@ -319,19 +386,14 @@ test("the device lock remains held across an interleaved key until the final res
 
 test("concurrent calls sharing an executor have separate serialized IME spans", async () => {
   const h = harness();
-  const commit = h.client.commitViaIme;
-  const priorIds: Array<string | null> = [];
-  h.client.commitViaIme = async (...args) => {
-    priorIds.push(args[1]);
-    return commit(...args);
-  };
+  const fake = modelDeviceSideRestore(h);
   const results = await Promise.all([
     h.action.execute([type("a"), type("b")]),
     h.action.execute([type("c"), type("d")]),
   ]);
   expect(results.map((result) => result.success)).toEqual([true, true]);
   expect(h.committed).toEqual(["a", "b", "c", "d"]);
-  expect(priorIds).toEqual([priorIme, priorIme, priorIme, priorIme]);
+  expect(fake.priors).toEqual([null, null, null, null]);
   expect(h.selections()).toEqual([activate, restore, activate, restore]);
 });
 

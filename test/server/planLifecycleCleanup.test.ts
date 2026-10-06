@@ -7,6 +7,7 @@ import type { BootedDevice } from "../../src/models";
 import {
   DefaultAppCleanupService,
   type AppCleanupConfig,
+  type AppCleanupOutcome,
   type AppCleanupService,
 } from "../../src/server/AppCleanupService";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
@@ -34,21 +35,28 @@ const devices: BootedDevice[] = [
 class FakeAppCleanupService implements AppCleanupService {
   readonly calls: Array<{ device: BootedDevice; config: AppCleanupConfig }> = [];
   failingDeviceId?: string;
+  /** Devices whose next N cleanups return a `failed` outcome (the service logs, never throws). */
+  readonly softFailuresRemaining = new Map<string, number>();
   /** Like the real terminate / clear-data actions, throw when the ambient signal is aborted. */
   throwWhenAmbientAborted = false;
   /** Block until the ambient signal aborts (a dead device that never answers). */
   hangUntilAmbientAborted = false;
+  /** Never settle, even once aborted (an adb call that ignores its signal). */
+  hangForever = false;
   readonly abortedAtStart = new Map<string, boolean | undefined>();
 
   constructor(private readonly events: string[]) {}
 
-  async cleanup(device: BootedDevice, config: AppCleanupConfig): Promise<void> {
+  async cleanup(device: BootedDevice, config: AppCleanupConfig): Promise<AppCleanupOutcome> {
     this.calls.push({ device, config });
     this.events.push(`cleanup-start:${device.deviceId}`);
     const signal = getAbortSignal();
     this.abortedAtStart.set(device.deviceId, signal?.aborted);
     if (this.throwWhenAmbientAborted) {
       signal?.throwIfAborted();
+    }
+    if (this.hangForever) {
+      await new Promise<void>(() => {});
     }
     if (this.hangUntilAmbientAborted && signal) {
       await new Promise<void>((_resolve, reject) =>
@@ -59,7 +67,14 @@ class FakeAppCleanupService implements AppCleanupService {
       this.events.push(`cleanup-rejected:${device.deviceId}`);
       throw new Error("injected cleanup failure");
     }
+    const remaining = this.softFailuresRemaining.get(device.deviceId) ?? 0;
+    if (remaining > 0) {
+      this.softFailuresRemaining.set(device.deviceId, remaining - 1);
+      this.events.push(`cleanup-failed:${device.deviceId}`);
+      return { status: "failed", step: "clearAppData", reason: "pm clear exited 1" };
+    }
     this.events.push(`cleanup-end:${device.deviceId}`);
+    return { status: "cleaned" };
   }
 }
 
@@ -69,6 +84,7 @@ describe("executePlan cleans every acquired device before release", () => {
   let events: string[];
   let cleanup: FakeAppCleanupService;
   let log: FakeLogger;
+  let poolTimer: FakeTimer;
   const restores: Array<() => void> = [];
   const lifecycle = new DefaultPlanLifecycleManager();
 
@@ -81,6 +97,7 @@ describe("executePlan cleans every acquired device before release", () => {
       restores.push(() => spy.mockRestore());
     }
     const timer = new FakeTimer();
+    poolTimer = timer;
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const deviceManager = new FakeDeviceUtils();
     deviceManager.setBootedDevices(
@@ -205,6 +222,96 @@ describe("executePlan cleans every acquired device before release", () => {
       expect(sessionManager.getSession("base")).toBeNull();
     },
   );
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 50; i++) {
+      await Promise.resolve();
+    }
+  };
+  const marker = (id: string) => pool.getDeviceHealthMarker(id)?.reason;
+
+  test("a failed (non-throwing) cleanup is named in the summary and the device is marked app-cleanup", async () => {
+    await acquire(devices.slice(0, 3));
+    cleanup.softFailuresRemaining.set("device-B", 99);
+    await lifecycle.afterExecution(input());
+    const summary = log.at("warn").find((entry) => entry.message.includes("was incomplete"));
+    expect(summary?.message).toContain("failed on device-B (clearAppData: pm clear exited 1)");
+    expect(summary?.message).not.toContain("device-A");
+    expect(events.filter((event) => event.startsWith("release:"))).toHaveLength(3);
+    expect(marker("device-B")).toBe("app-cleanup");
+    expect(marker("device-A")).toBeUndefined();
+    expect(marker("device-C")).toBeUndefined();
+  });
+
+  test("a rejected cleanup also marks the device", async () => {
+    await acquire(devices.slice(0, 2));
+    cleanup.failingDeviceId = "device-A";
+    await lifecycle.afterExecution(input());
+    expect(marker("device-A")).toBe("app-cleanup");
+    expect(marker("device-B")).toBeUndefined();
+  });
+
+  test("a clean cleanup marks nothing", async () => {
+    await acquire(devices.slice(0, 2));
+    await lifecycle.afterExecution(input());
+    for (const target of devices.slice(0, 2)) {
+      expect(marker(target.deviceId)).toBeUndefined();
+    }
+  });
+
+  test("the marked device's cleanup is retried under a live signal and the marker clears", async () => {
+    await acquire(devices.slice(0, 2));
+    cleanup.softFailuresRemaining.set("device-B", 1);
+    cleanup.throwWhenAmbientAborted = true;
+    const controller = new AbortController();
+    controller.abort(new Error("request deadline"));
+    await runWithAbortSignal(controller.signal, () => lifecycle.afterExecution(input()));
+    expect(marker("device-B")).toBe("app-cleanup");
+    expect(cleanup.calls.map((call) => call.device.deviceId)).toEqual(["device-A", "device-B"]);
+
+    // The recovery is detached but inherits the aborted request signal unless it shields itself.
+    poolTimer.advanceTime(1000);
+    await flush();
+    expect(cleanup.calls.map((call) => call.device.deviceId)).toEqual([
+      "device-A",
+      "device-B",
+      "device-B",
+    ]);
+    expect(cleanup.calls[2].config).toEqual({ appId: "com.example.chat", clearAppData: true });
+    expect(cleanup.abortedAtStart.get("device-B")).toBe(false);
+    expect(marker("device-B")).toBeUndefined();
+  });
+
+  test("a device whose cleanup keeps failing stays marked after the bounded retries", async () => {
+    await acquire(devices.slice(0, 1));
+    cleanup.softFailuresRemaining.set("device-A", 99);
+    await lifecycle.afterExecution(input());
+    for (const delayMs of [1000, 2000, 4000]) {
+      poolTimer.advanceTime(delayMs);
+      await flush();
+    }
+    // The original attempt plus the three recovery attempts, then no more.
+    expect(cleanup.calls).toHaveLength(4);
+    poolTimer.advanceTime(60_000);
+    await flush();
+    expect(cleanup.calls).toHaveLength(4);
+    expect(marker("device-A")).toBe("app-cleanup");
+  });
+
+  test("devices still running at the cap are marked and named as unfinished", async () => {
+    await acquire(devices.slice(0, 2));
+    cleanup.hangForever = true;
+    const timer = new FakeTimer();
+    const capped = new DefaultPlanLifecycleManager(timer);
+    const work = capped.afterExecution(input());
+    await Promise.resolve();
+    timer.advanceTime(PLAN_APP_CLEANUP_CAP_MS);
+    await work;
+    const summary = log.at("warn").find((entry) => entry.message.includes("was incomplete"));
+    expect(summary?.message).toContain("unfinished on device-A, device-B");
+    expect(marker("device-A")).toBe("app-cleanup");
+    expect(marker("device-B")).toBe("app-cleanup");
+  });
 
   test.each(["device-A", "device-B"])("skips a retired pooled device %s", async (id) => {
     await acquire(devices.slice(0, 3));

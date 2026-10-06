@@ -9,6 +9,12 @@ export class ActionableError extends Error {
 }
 
 /**
+ * The target app is not installed, so there is nothing to act on. A subclass so callers can
+ * tell "nothing to clean" from a real failure without matching message text.
+ */
+export class AppNotInstalledError extends ActionableError {}
+
+/**
  * Wrap an unknown caught error in an ActionableError with actionable context.
  *
  * Use at system/MCP boundaries and feature actions where the failure should

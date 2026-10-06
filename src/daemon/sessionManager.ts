@@ -871,6 +871,20 @@ export class SessionManager {
     this.deviceHealth = { markers, incarnation, canRecover, backoff };
   }
 
+  /**
+   * A plan's app cleanup did not complete on this device. Marks it unhealthy so it cannot
+   * be allocated dirty, and retries `retry` on the bounded health-recovery budget once the
+   * device is idle; the marker clears when `retry` resolves. `retry` must run under its
+   * own abort signal: the recovery inherits this call's (possibly aborted) ambient one.
+   */
+  markDeviceNeedsAppCleanup(deviceId: string, retry: () => Promise<void>): void {
+    this.abandonRestore(
+      { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) },
+      "app-cleanup",
+      retry,
+    );
+  }
+
   private restoreIncarnationIsCurrent(target: { deviceId: string; incarnation?: number }): boolean {
     return (
       target.incarnation === undefined ||
@@ -894,7 +908,7 @@ export class SessionManager {
    */
   private abandonRestore(
     target: { deviceId: string; incarnation?: number },
-    reason: "biometric-enrollment" | "network-condition",
+    reason: Exclude<DeviceHealthReason, "clock">,
     restore: () => Promise<void>,
   ): void {
     const health = this.deviceHealth;

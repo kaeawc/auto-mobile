@@ -138,7 +138,7 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
       });
     });
 
-    test("when every reconnect closes mid-subscribe the last safe attempt fences cleanly", async () => {
+    test("when every reconnect closes mid-subscribe recovery is exhausted and hands over cleanly", async () => {
       const timer = new FakeTimer();
       const mint = mintingClient(() => FIRST_SESSION);
       const racingA = new HeldSubscribeClient();
@@ -156,10 +156,13 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
       await waitForSubscribe(racingB);
       racingB.closeSocketThenReleaseSubscribe();
       await tick;
+      // The tick failed and started recovery (#10053): three more attempts follow in ~4.7s
+      // slots (5s, 9.7s, 14.3s), each refused, before the daemon_stalled handover.
+      await timer.advanceTimeAsync(10_000);
 
       expect(heartbeats(racingA) + heartbeats(racingB)).toBe(0);
       await expect(target.callTool("observe", {})).rejects.toMatchObject({
-        reason: "heartbeat-unreachable",
+        reason: "daemon_stalled",
       });
       // Result-minted fence: the client is prompted to re-list (#9997).
       expect(listChanged).toEqual(["tools"]);
@@ -180,10 +183,12 @@ describe("stdio proxy: keeper fence, not-delivered retry and result-minted disco
       await target.listResources();
       listChanged.length = 0;
       mint.emitConnectionClosed();
-      await timer.advanceTimeAsync(5_000);
+      // The first tick (5s) fails against the refused daemon and starts recovery; its three
+      // attempts finish at ~14.3s with the daemon_stalled handover.
+      await timer.advanceTimeAsync(15_000);
 
       await expect(target.callTool("observe", {})).rejects.toMatchObject({
-        reason: "heartbeat-unreachable",
+        reason: "daemon_stalled",
       });
       expect(listChanged).toEqual(["tools"]);
 

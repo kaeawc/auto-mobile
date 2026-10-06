@@ -799,11 +799,19 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         livenessOwnerToken: "old-mcp-token",
       });
 
+      // The lost reply made that heartbeat a missing acknowledgement, so recovery (#10053) already
+      // re-sent the claim with the same token on the same transport and the daemon acknowledged it.
+      const claimsOnInitialClient = initialMcpClient.daemonRequests.filter(
+        (request) => request.params.claimLivenessOwnership === true,
+      );
+      expect(claimsOnInitialClient).toHaveLength(2);
+
       initialMcpClient.disconnect();
       await settleAsyncWork();
       await mcp.callTool("observe", {});
       await settleAsyncWork();
 
+      // After the reconnect the proxy resumes with the same token and no second claim.
       expect(replayedMcpClient.daemonRequests).toContainEqual({
         id: "continuity-1",
         type: "daemon_request",
@@ -812,7 +820,6 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           sessionId: sessionUuid,
           livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
           livenessOwnerToken: "old-mcp-token",
-          claimLivenessOwnership: true,
         },
       });
       expect(sessionManager.getSession(sessionUuid)).toMatchObject({

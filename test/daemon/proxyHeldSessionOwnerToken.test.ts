@@ -219,9 +219,10 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       daemonStateFor(sessionManager),
     );
     expect(foreign.success).toBe(true);
-    // The claim must keep retrying through the foreign owner's lease plus its
-    // suspect grace window (#10051), so the conflict leash is longer than both.
-    const proxy = createProxy({ token: "harness-token", leashMs: 40_000 });
+    // The claim keeps retrying through the foreign owner's lease plus its suspect grace
+    // window (#10051) under the proxy's default 10s lease: its conflict leash covers
+    // lease + grace (#10053) rather than the bare lease it used to be.
+    const proxy = createProxy({ token: "harness-token" });
     await acquire(proxy, "getAndroid", "android-session");
     await acquire(proxy, "getApple", "ios-session");
 
@@ -283,7 +284,7 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     expect(ownerOf("android-session")).toBe("harness-token");
   });
 
-  test("a held session whose conflict outlasts the heartbeat leash is dropped alone", async () => {
+  test("a held session whose conflict outlasts lease plus grace is dropped alone", async () => {
     const foreignHeartbeat = async (claimLivenessOwnership: boolean): Promise<void> => {
       await handleDaemonRequest(
         {
@@ -305,9 +306,9 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     await acquire(proxy, "getAndroid", "android-session");
     await acquire(proxy, "getApple", "ios-session");
 
-    // The foreign owner keeps its lease live, so the proxy's claim is refused for
-    // longer than the 10s heartbeat leash (7 ticks of 2s).
-    for (let tick = 0; tick < 7; tick++) {
+    // The foreign owner keeps its lease live, so the proxy's claim is refused for longer than
+    // the conflict leash: the 10s lease plus the 10s grace plus one 2s tick (13 ticks of 2s).
+    for (let tick = 0; tick < 13; tick++) {
       await foreignHeartbeat(false);
       await timer.advanceTimeAsync(INTERVAL_MS);
     }

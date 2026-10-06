@@ -936,7 +936,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
-  test("a reconnect still stuck near the leash fences with an actionable error", async () => {
+  test("a reconnect that stays stuck exhausts three recovery attempts and hands over daemon_stalled", async () => {
     await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
     const firstClient = heartbeatForwardingClient(sessionManager);
     const unreachableClient = heartbeatForwardingClient(sessionManager);
@@ -959,16 +959,18 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     try {
       await proxy.ensureConnected();
       firstClient.emitConnectionClosed();
-      // The last safe tick (8s) joins the stuck shared reconnect under its
-      // leash - elapsed - 1 deadline, so the fence lands 1ms before the leash.
+      // The first tick (2s) joins the stuck shared reconnect and times out at 6s, which starts
+      // recovery: three attempts in equal slots of the remaining lease-plus-grace budget, so the
+      // handover lands at 18s, inside the 20s the daemon would hold the session.
       await timer.advanceTimeAsync(8_000);
-      await timer.advanceTimeAsync(1_999);
+      await timer.advanceTimeAsync(11_000);
       await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
         ActionableError,
       );
       await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
-        reason: "heartbeat-unreachable",
-        message: expect.stringContaining("start a new transport"),
+        reason: "daemon_stalled",
+        handover: { code: "daemon_stalled", attempts: 3 },
+        message: expect.stringContaining("restart the daemon yourself"),
       });
       expect(unreachableClient.callDaemonMethodCalls).toEqual([]);
       finishConnect();
@@ -1035,7 +1037,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       }
     });
 
-    test("a daemon that stays unreachable is fenced by the leash after one reconnect attempt", async () => {
+    test("a daemon that stays unreachable hands over daemon_stalled after three recovery attempts", async () => {
       await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
       const firstClient = heartbeatForwardingClient(sessionManager);
       const unreachableClient = heartbeatForwardingClient(sessionManager);
@@ -1057,13 +1059,15 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         // The first tick attempted the reconnect rather than fencing.
         expect(connectAttempts).toBe(1);
 
-        // Worst case: tick (5s) + its deadline (leash - elapsed - 1 = 4_999ms), so
-        // the fence lands 1ms before the leash instead of at the first tick.
-        await timer.advanceTimeAsync(4_998);
-        await timer.advanceTimeAsync(1);
+        // The tick's own deadline (5s) expires at 10s and starts recovery: three attempts in
+        // 3s slots (the 20s lease-plus-grace budget less 1s margin, from the 10s start), so
+        // the handover lands at 19s, still inside the budget (checked at 19s).
+        await timer.advanceTimeAsync(9_000);
+        await timer.advanceTimeAsync(5_000);
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
-          reason: "heartbeat-unreachable",
-          message: expect.stringContaining("start a new transport"),
+          reason: "daemon_stalled",
+          handover: { code: "daemon_stalled", attempts: 3 },
+          message: expect.stringContaining("restart the daemon yourself"),
         });
         expect(unreachableClient.callDaemonMethodCalls).toEqual([]);
       } finally {
@@ -1073,7 +1077,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       }
     });
 
-    test("a reconnect that fails fast at the last safe attempt fences the session", async () => {
+    test("a reconnect that fails fast is retried three times, spread over the budget, before the handover", async () => {
       await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
       const firstClient = heartbeatForwardingClient(sessionManager);
       let connectAttempts = 0;
@@ -1093,11 +1097,15 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         await proxy.ensureConnected();
         firstClient.emitConnectionClosed();
         await timer.advanceTimeAsync(5_000);
-        // At interval == threshold the first tick is the last safe attempt: it
-        // tried to reconnect, failed, and no later tick can save the lease.
+        // The first tick failed fast and started recovery; it has not handed over yet.
         expect(connectAttempts).toBeGreaterThanOrEqual(1);
+        expect(connectAttempts).toBeLessThan(4);
+        // The attempts are spread over equal ~4.7s slots (t=5s, 9.7s, 14.3s), not burned at once.
+        await timer.advanceTimeAsync(10_000);
+        expect(connectAttempts).toBeGreaterThanOrEqual(4);
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
-          reason: "heartbeat-unreachable",
+          reason: "daemon_stalled",
+          handover: { attempts: 3 },
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -1106,7 +1114,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     });
   });
 
-  test("a connected socket with unanswered heartbeats fences before the leash", async () => {
+  test("a connected socket with unanswered heartbeats hands over daemon_stalled inside lease plus grace", async () => {
     await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
     let attempts = 0;
     const client = new FakeDaemonClient({
@@ -1133,11 +1141,13 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
 
     try {
       await proxy.ensureConnected();
-      await timer.advanceTimeAsync(9_999);
-      expect(attempts).toBeGreaterThanOrEqual(3);
+      // Tick at 2s times out at 6s; three recovery attempts follow in ~4.3s slots (6s, 10.3s, 14.7s).
+      await timer.advanceTimeAsync(18_999);
+      expect(attempts).toBeGreaterThanOrEqual(4);
       await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
-        reason: "heartbeat-unreachable",
-        message: expect.stringContaining("start a new transport"),
+        reason: "daemon_stalled",
+        handover: { code: "daemon_stalled", attempts: 3 },
+        message: expect.stringContaining("restart the daemon yourself"),
       });
       await monitor.tick();
       expect(reaped).toEqual([]);

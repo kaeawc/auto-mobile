@@ -192,11 +192,20 @@ describe("proxy heartbeats every session it holds (issue #9335)", () => {
     await acquire("getApple", "ios-session");
 
     failHeartbeatFor.add("android-session");
-    expect(await tickSessions()).toEqual(["android-session", "initial-session", "ios-session"]);
-    expect(await tickSessions()).toEqual(["android-session", "initial-session", "ios-session"]);
+    // The failed heartbeat is followed by a recovery attempt for that session (#10053), so it
+    // appears more than once in the first tick, then sits out the ticks while it recovers.
+    expect(await tickSessions()).toEqual([
+      "android-session",
+      "android-session",
+      "initial-session",
+      "ios-session",
+    ]);
+    expect(await tickSessions()).toEqual(["initial-session", "ios-session"]);
     expect(warnSpy).toHaveBeenCalled();
 
+    // The first recovery attempt that the daemon acknowledges returns the session to the cadence.
     failHeartbeatFor.clear();
+    await timer.advanceTimeAsync(INTERVAL_MS * 3);
     expect(await tickSessions()).toEqual(["android-session", "initial-session", "ios-session"]);
   });
 
@@ -222,8 +231,11 @@ describe("proxy heartbeats every session it holds (issue #9335)", () => {
     await acquire("getApple", "ios-session");
 
     failHeartbeatFor.add("ios-session");
-    expect(await tickSessions()).toEqual(["android-session", "ios-session"]);
-    expect(await tickSessions()).toEqual(["android-session", "ios-session"]);
+    // The failing latest binding gets a recovery attempt (#10053) and then sits out the ticks
+    // while it recovers; the held session keeps heartbeating throughout.
+    expect(await tickSessions()).toEqual(["android-session", "ios-session", "ios-session"]);
+    expect(await tickSessions()).toEqual(["android-session"]);
+    expect(await tickSessions()).toEqual(["android-session"]);
   });
 
   test("rebinding does not duplicate timers or heartbeats", async () => {

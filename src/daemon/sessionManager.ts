@@ -51,6 +51,7 @@ import {
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -405,6 +406,9 @@ export class TerminalSessionError extends Error {
  * restores it with a heartbeat from the owner token.
  */
 export class SessionSuspectError extends ActionableError {
+  /** Travels on the socket response so a proxy can tell "restorable" from "gone" (#10053). */
+  readonly code = DAEMON_SESSION_SUSPECT_CODE;
+
   constructor(
     readonly sessionUuid: string,
     readonly remainingMs: number,

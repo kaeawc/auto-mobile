@@ -113,6 +113,13 @@ export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded";
 
+/**
+ * A tool call reached a session whose owner's lease expired and that is held inside its suspect
+ * window (#10051). Its owner can still restore it with a heartbeat, so a proxy treats this as
+ * "recovery is still possible" rather than as a loss (#10053).
+ */
+export const DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect";
+
 /** A claim from a different token was rejected because the owner's lease is live (#10050). */
 export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
 

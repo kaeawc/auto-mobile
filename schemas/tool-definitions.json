@@ -27729,7 +27729,7 @@
           "maximum": 1798000
         },
         "intensity": {
-          "description": "Shake intensity on Android (1-1000, default 100)",
+          "description": "Shake intensity on Android (1-1000, default 100); ignored on iOS",
           "type": "number",
           "minimum": 1,
           "maximum": 1000

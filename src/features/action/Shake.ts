@@ -111,11 +111,14 @@ export class Shake extends BaseVisualChange {
     return this.observedInteraction(
       async () => {
         let restoreError: string | undefined;
+        let restoreWarning: string | undefined;
         try {
           // Start the shake by setting high acceleration values
           await perf.track("shakeExecution", async () => {
             throwIfAborted(signal);
-            const originalAcceleration = await this.readAcceleration(signal);
+            const { acceleration: originalAcceleration, warning } =
+              await this.readAcceleration(signal);
+            restoreWarning = warning;
             try {
               const result = await awaitWhileRequestIsLive(
                 this.adb.executeCommand(
@@ -145,6 +148,7 @@ export class Shake extends BaseVisualChange {
             success: true,
             duration,
             intensity,
+            ...(restoreWarning ? { restoreWarning } : {}),
           };
         } catch (error) {
           throwIfAborted(signal);
@@ -156,6 +160,7 @@ export class Shake extends BaseVisualChange {
             intensity,
             error: `Failed to shake device: ${error}${restoreError ? `; ${restoreError}` : ""}`,
             ...(restoreError ? { restoreError } : {}),
+            ...(!restoreError && restoreWarning ? { restoreWarning } : {}),
           };
         }
       },
@@ -190,7 +195,9 @@ export class Shake extends BaseVisualChange {
     }
   }
 
-  private async readAcceleration(signal?: AbortSignal): Promise<string> {
+  private async readAcceleration(
+    signal?: AbortSignal,
+  ): Promise<{ acceleration: string; warning?: string }> {
     try {
       const result = await awaitWhileRequestIsLive(
         this.adb.executeCommand("emu sensor get acceleration"),
@@ -201,7 +208,7 @@ export class Shake extends BaseVisualChange {
       }
       const acceleration = parseAccelerationReadback(result.stdout);
       if (acceleration) {
-        return acceleration;
+        return { acceleration };
       }
       throw new Error("unrecognized acceleration read-back");
     } catch (error) {
@@ -210,29 +217,31 @@ export class Shake extends BaseVisualChange {
         `Could not read pre-shake acceleration; using ${FALLBACK_RESTING_ACCELERATION}`,
         error,
       );
-      return FALLBACK_RESTING_ACCELERATION;
+      return {
+        acceleration: FALLBACK_RESTING_ACCELERATION,
+        warning: `Could not read pre-shake acceleration; restored fallback vector ${FALLBACK_RESTING_ACCELERATION}`,
+      };
     }
   }
 }
 
 function parseAccelerationReadback(stdout: string): string | undefined {
-  const lines = stdout
+  const accelerationLines = stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.at(-1) === "OK") {
-    lines.pop();
-  }
-  if (lines.length !== 1) {
+    .filter((line) => line.startsWith("acceleration ="));
+  if (accelerationLines.length !== 1) {
     return undefined;
   }
-  const match = /^acceleration = (-?\d+(?:\.\d+)?):(-?\d+(?:\.\d+)?):(-?\d+(?:\.\d+)?)$/.exec(
-    lines[0],
-  );
-  if (!match || !match.slice(1).every((value) => Number.isFinite(Number(value)))) {
+  const value = accelerationLines[0].slice("acceleration =".length).trim();
+  const components = value.split(":").map((component) => component.trim());
+  if (
+    components.length !== 3 ||
+    components.some((component) => component.length === 0 || !Number.isFinite(Number(component)))
+  ) {
     return undefined;
   }
-  return `${match[1]}:${match[2]}:${match[3]}`;
+  return components.map((component) => String(Number(component))).join(":");
 }
 
 function isValidShakeOptions(duration: number, intensity: number, platform: string): boolean {

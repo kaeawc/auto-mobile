@@ -260,7 +260,7 @@ export const shakeSchema = addDeviceTargetingToSchema(
         .max(SHAKE_INTENSITY_MAX)
         .optional()
         .describe(
-          `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100)`,
+          `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
         ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on

@@ -336,6 +336,29 @@ describe("Shake", () => {
       ]);
     });
 
+    test.each([
+      "acceleration = 0e0:9.77622e0:+0",
+      "before\n  acceleration =  0 : +9.77622 : -0  \nafter",
+    ])("parses finite Number components with surrounding output: %s", async (stdout) => {
+      fakeAdb.setCommandResponse("emu sensor get acceleration", { stdout, stderr: "" });
+      const result = await shake.execute({ duration: 10 });
+      expect(result.success).toBe(true);
+      expect(result.restoreWarning).toBeUndefined();
+      expect(fakeAdb.getExecutedCommands()).toContain("emu sensor set acceleration 0:9.77622:0");
+    });
+
+    test("surfaces fallback use when acceleration output is invalid", async () => {
+      fakeAdb.setCommandResponse("emu sensor get acceleration", {
+        stdout: "before\nacceleration = 0:NaN:0\nafter",
+        stderr: "",
+      });
+      const result = await shake.execute({ duration: 10 });
+      expect(result.success).toBe(true);
+      expect(result.restoreWarning).toContain("Could not read pre-shake acceleration");
+      expect(result.restoreWarning).toContain("fallback vector 0:9.77622:0");
+      expect(fakeAdb.wasCommandExecuted("emu sensor set acceleration 0:9.77622:0")).toBe(true);
+    });
+
     test("restores acceleration when setting the shake vector fails", async () => {
       fakeAdb.setCommandResponse("emu sensor get acceleration", {
         stdout: "acceleration = 0:9.77622:0",

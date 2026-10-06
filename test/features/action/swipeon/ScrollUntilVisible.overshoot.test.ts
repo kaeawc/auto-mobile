@@ -5,6 +5,7 @@ import type { ElementGeometry } from "../../../../src/utils/interfaces/ElementGe
 import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResolver";
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
+import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
@@ -220,6 +221,82 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal),
     ).rejects.toThrow("Operation cancelled");
     expect(talkBackExecutor.getSwipeCalls()).toHaveLength(1);
+  });
+
+  test("a search cancelled after its swipes reports how many it dispatched and starts no more (#10151)", async () => {
+    const controller = new AbortController();
+    let interactions = 0;
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [0, 1, 2, 3, 4].map((id) => makeObserveResult(id)),
+      talkBackExecutor,
+      onInteraction: () => {
+        interactions++;
+        if (interactions === 3) {
+          controller.abort();
+        }
+      },
+    });
+    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(SwipeSearchCancelledError);
+    expect((error as SwipeSearchCancelledError).swipesDispatched).toBe(3);
+    expect((error as SwipeSearchCancelledError).message).toBe(
+      "Operation cancelled after 3 swipe(s) were dispatched; the screen has scrolled. Observe before retrying.",
+    );
+    expect(talkBackExecutor.getSwipeCalls()).toHaveLength(3);
+  });
+
+  test("a cancel that lands during a swipe stops before the settle poll that follows it (#10151)", async () => {
+    const controller = new AbortController();
+    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    let observesAtSwipe: number | undefined;
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
+      talkBackExecutor,
+      observeOptions,
+      onInteraction: () => {
+        observesAtSwipe = observeOptions.length;
+        controller.abort();
+      },
+    });
+    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect((error as SwipeSearchCancelledError).swipesDispatched).toBe(1);
+    expect(observesAtSwipe).toBeGreaterThan(0);
+    expect(observeOptions).toHaveLength(observesAtSwipe!);
+    expect(talkBackExecutor.getSwipeCalls()).toHaveLength(1);
+  });
+
+  test("a search cancelled before any swipe keeps the generic cancellation (#10151)", async () => {
+    const controller = new AbortController();
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+    });
+    controller.abort();
+    const error = await scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).not.toBeInstanceOf(SwipeSearchCancelledError);
+    expect((error as Error).message).toBe("Operation cancelled");
+    expect(talkBackExecutor.getSwipeCalls()).toEqual([]);
   });
 
   test("automatic scrolling keeps the outer scrollable ahead of a nested carousel", async () => {

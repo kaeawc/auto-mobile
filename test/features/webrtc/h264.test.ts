@@ -14,6 +14,10 @@ import {
   packetizeAccessUnit,
   packetizeNalUnit,
 } from "../../../src/features/webrtc/h264";
+import {
+  capturedH264AsDevicePackets,
+  readCapturedH264Stream,
+} from "../../helpers/capturedH264Stream";
 
 /** Build a NAL unit whose header encodes the given type, padded to `size`. */
 function makeNal(type: number, size: number, fill = 0xab): Buffer {
@@ -274,5 +278,72 @@ describe("packetizeAccessUnit", () => {
     expect(markers.filter(Boolean)).toHaveLength(1);
     expect(units[units.length - 1].marker).toBe(true);
     expect(units[0].marker).toBe(false);
+  });
+});
+
+describe("H264AnnexBParser / H264AccessUnitAssembler packet boundary (issue #10150)", () => {
+  test("flush at a packet end releases the whole trailing NAL of every captured device packet", () => {
+    const packets = capturedH264AsDevicePackets();
+    // The captured file is reproduced byte for byte by its device-shaped packets.
+    expect(Buffer.concat(packets).equals(readCapturedH264Stream())).toBe(true);
+
+    const held = new H264AnnexBParser();
+    const prompt = new H264AnnexBParser();
+    const heldNals: Buffer[] = [];
+    const promptNals: Buffer[] = [];
+    let heldBeforeFinalFlush = 0;
+    for (const packet of packets) {
+      heldNals.push(...held.push(packet));
+      heldBeforeFinalFlush = heldNals.length;
+      promptNals.push(...prompt.push(packet), ...prompt.flush());
+    }
+    heldNals.push(...held.flush());
+
+    // Without the boundary the last packet's NAL is still buffered; with it, nothing is.
+    expect(heldBeforeFinalFlush).toBe(heldNals.length - 1);
+    expect(promptNals.map((nal) => nal.toString("hex"))).toEqual(
+      heldNals.map((nal) => nal.toString("hex")),
+    );
+  });
+
+  test("a NAL split across transport chunks stays buffered until the packet end", () => {
+    const [, idrPacket] = capturedH264AsDevicePackets();
+    const parser = new H264AnnexBParser();
+    const emitted: Buffer[] = [];
+    for (let offset = 0; offset < idrPacket.length; offset += 11) {
+      emitted.push(...parser.push(idrPacket.subarray(offset, offset + 11)));
+    }
+    // The SEI is complete once the IDR start code is seen; the IDR itself is not.
+    expect(emitted.map(nalUnitType)).toEqual([6]);
+    const released = parser.flush();
+    expect(released.map(nalUnitType)).toEqual([NAL_TYPE_IDR]);
+    expect(idrPacket.subarray(idrPacket.length - released[0].length).equals(released[0])).toBe(
+      true,
+    );
+  });
+
+  test("flushPicture emits a picture in progress but keeps a parameter-set-only prefix pending", () => {
+    const [configPacket, idrPacket, pPacket] = capturedH264AsDevicePackets();
+    const nals = (packet: Buffer): Buffer[] => {
+      const parser = new H264AnnexBParser();
+      return [...parser.push(packet), ...parser.flush()];
+    };
+    const assembler = new H264AccessUnitAssembler();
+    for (const nal of nals(configPacket)) {
+      expect(assembler.push(nal)).toEqual([]);
+    }
+    expect(assembler.flushPicture()).toEqual([]);
+
+    for (const nal of nals(idrPacket)) {
+      assembler.push(nal);
+    }
+    const [accessUnit] = assembler.flushPicture();
+    expect(accessUnit.map(nalUnitType)).toEqual([NAL_TYPE_SPS, NAL_TYPE_PPS, 6, NAL_TYPE_IDR]);
+    expect(assembler.flush()).toEqual([]);
+
+    for (const nal of nals(pPacket)) {
+      assembler.push(nal);
+    }
+    expect(assembler.flushPicture().map((au) => au.map(nalUnitType))).toEqual([[1]]);
   });
 });

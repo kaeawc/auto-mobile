@@ -104,11 +104,11 @@ afterEach(() => {
   }
 });
 
-function harness(defaultNamespace = false) {
-  const dir = mkdtempSync(join(tmpdir(), "namespace-unit-"));
-  dirs.push(dir);
-  const socket = defaultNamespace ? DEFAULT_SOCKET_PATH : join(dir, "private socket.sock");
-  const pidPath = defaultNamespace ? DEFAULT_PID_FILE_PATH : join(dir, "daemon.pid");
+function createHarness(
+  dir: string,
+  paths: { socket: string; pidPath: string; lockPath: string | undefined },
+) {
+  const { socket, pidPath, lockPath } = paths;
   const processes = new NamespaceProcesses();
   const identity = new NamespaceIdentity();
   const timer = new FakeTimer();
@@ -173,7 +173,7 @@ function harness(defaultNamespace = false) {
     }),
     undefined,
     timer,
-    defaultNamespace ? undefined : join(dir, "daemon.lock"),
+    lockPath,
     pidPath,
     socket,
     processes,
@@ -230,8 +230,6 @@ function harness(defaultNamespace = false) {
     timer,
     calls,
     signals,
-    socket,
-    pidPath,
     ports,
     addForeign,
     addOwn,
@@ -249,6 +247,26 @@ function harness(defaultNamespace = false) {
       onSignalHandOff = handOff;
     },
   };
+}
+
+function harness() {
+  const dir = mkdtempSync(join(tmpdir(), "namespace-unit-"));
+  dirs.push(dir);
+  const socket = join(dir, "private socket.sock");
+  const pidPath = join(dir, "daemon.pid");
+  const lockPath = join(dir, "daemon.lock");
+  const built = createHarness(dir, { socket, pidPath, lockPath });
+  return { ...built, socket, pidPath };
+}
+
+function defaultNamespaceHarness() {
+  const dir = mkdtempSync(join(tmpdir(), "namespace-unit-"));
+  dirs.push(dir);
+  return createHarness(dir, {
+    socket: DEFAULT_SOCKET_PATH,
+    pidPath: DEFAULT_PID_FILE_PATH,
+    lockPath: undefined,
+  });
 }
 
 describe("daemon namespace ownership", () => {
@@ -378,7 +396,7 @@ describe("daemon namespace ownership", () => {
   });
 
   test("default namespace ignores an unmarked daemon that does not answer on its socket", async () => {
-    const h = harness(true);
+    const h = defaultNamespaceHarness();
     h.addForeign();
     await expect(h.manager.start()).resolves.toBe("started");
     expect(h.calls).toHaveLength(1);

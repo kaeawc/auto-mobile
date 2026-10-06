@@ -1,9 +1,19 @@
-import { Element, ElementBounds, ObserveResult, ScreenSize } from "../../models";
+import {
+  Element,
+  ElementBounds,
+  ObserveResult,
+  ScreenSize,
+  ViewHierarchyResult,
+} from "../../models";
 import { SelectedElement, SelectedElementDetection } from "../../utils/interfaces/NavigationGraph";
 import { ScreenshotUtils, screenshotUtilsAdapter } from "../../utils/ScreenshotUtilsAdapter";
 import { ImageUtils } from "../../utils/interfaces/ImageUtils";
 import { JimpImageUtils } from "../../utils/image-utils";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import type { TapEffect } from "../../models/TapOnElementResult";
+import { SearchableHierarchy } from "../utility/SearchableNode";
+import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { UIStateExtractor } from "./UIStateExtractor";
 
 interface VisualSelectionConfig {
@@ -32,6 +42,26 @@ export interface SelectionDetectionContext {
   tappedElement?: Element;
   beforeScreenshotPath?: string | null;
   afterScreenshotPath?: string | null;
+  /** The tap flow's own screen-change verdict for this action, when it computed one. */
+  tapEffect?: TapEffect;
+}
+
+/**
+ * A tap navigated away when the tap flow's screen identity or active window changed. A bare
+ * `viewHierarchy changed` is deliberately not navigation: switching a tab swaps the content below
+ * it without leaving the screen, and the element-presence check covers a destination screen that
+ * lacks the tapped element.
+ */
+export function tapNavigatedAwayFromScreen(effect: TapEffect | undefined): boolean {
+  return (
+    effect?.screenChanged === true &&
+    (effect.basis === "screenIdentity changed" || effect.basis === "activeWindow changed")
+  );
+}
+
+/** An identifier the tapped element does not have constrains nothing; one it has must match. */
+function identifierMatches(expected: string | undefined, actual: string | undefined): boolean {
+  return !expected || expected === actual;
 }
 
 export interface SelectionStateDetectorLike {
@@ -71,26 +101,44 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
       return selectedElements;
     }
 
-    if (!context.tappedElement) {
+    return this.detectVisualFallback(context, currentObservation);
+  }
+
+  private async detectVisualFallback(
+    context: SelectionDetectionContext,
+    currentObservation: ObserveResult,
+  ): Promise<SelectedElement[]> {
+    const { tappedElement, beforeScreenshotPath, afterScreenshotPath } = context;
+    if (!tappedElement) {
       logger.debug("[SELECTION_STATE] Visual fallback skipped: no tapped element provided");
       return [];
     }
 
-    if (!context.beforeScreenshotPath || !context.afterScreenshotPath) {
+    if (!beforeScreenshotPath || !afterScreenshotPath) {
       logger.debug("[SELECTION_STATE] Visual fallback skipped: missing before/after screenshots");
       return [];
     }
 
-    const selectedElement = this.buildSelectedElement(context.tappedElement);
+    const selectedElement = this.buildSelectedElement(tappedElement);
     if (!selectedElement) {
       logger.debug("[SELECTION_STATE] Visual fallback skipped: tapped element lacks identifiers");
       return [];
     }
 
+    const skipReason = this.visualFallbackSkipReason(
+      selectedElement,
+      context.tapEffect,
+      currentObservation.viewHierarchy,
+    );
+    if (skipReason) {
+      logger.debug(`[SELECTION_STATE] Visual fallback skipped: ${skipReason}`);
+      return [];
+    }
+
     const visualResult = await this.detectVisualSelection(
-      context.tappedElement.bounds,
-      context.beforeScreenshotPath,
-      context.afterScreenshotPath,
+      tappedElement.bounds,
+      beforeScreenshotPath,
+      afterScreenshotPath,
       context.previousObservation?.screenSize,
       currentObservation.screenSize,
     );
@@ -118,6 +166,25 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     ];
   }
 
+  /**
+   * The visual signal measures pixels under the PRE-tap bounds. After a navigation, or once the
+   * tapped element is gone, those pixels belong to other content, so a difference there says
+   * nothing about the tapped element.
+   */
+  private visualFallbackSkipReason(
+    selectedElement: SelectedElement,
+    tapEffect: TapEffect | undefined,
+    viewHierarchy: ViewHierarchyResult | undefined,
+  ): string | null {
+    if (tapNavigatedAwayFromScreen(tapEffect)) {
+      return `tap navigated (${tapEffect?.basis})`;
+    }
+    if (!this.isStillPresent(selectedElement, viewHierarchy)) {
+      return `${this.describeElement(selectedElement)} is not in the post-tap hierarchy`;
+    }
+    return null;
+  }
+
   private applySelectedState(
     selectedElements: SelectedElement[],
     selectedState: SelectedElementDetection,
@@ -142,6 +209,29 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
     return selected;
   }
 
+  /**
+   * Whether a node carrying every identifier the tapped element has (text, resource-id,
+   * content-desc — the identity SelectedElement and the navigation graph use across observations)
+   * exists in the post-tap hierarchy. Bounds are not identity: new content can sit at old bounds.
+   */
+  private isStillPresent(
+    identity: SelectedElement,
+    viewHierarchy: ViewHierarchyResult | undefined,
+  ): boolean {
+    if (!viewHierarchy) {
+      return false;
+    }
+    const nodes = new SearchableHierarchy().project(
+      resolveViewHierarchyForSearch(viewHierarchy) ?? viewHierarchy,
+    );
+    return nodes.some(
+      ({ properties }) =>
+        identifierMatches(identity.text, properties.text) &&
+        identifierMatches(identity.resourceId, properties["resource-id"]) &&
+        identifierMatches(identity.contentDesc, properties["content-desc"]),
+    );
+  }
+
   private describeElement(element: SelectedElement): string {
     return element.text || element.resourceId || element.contentDesc || "unknown element";
   }
@@ -161,6 +251,19 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
         beforeScreenshot.buffer,
       );
       const afterDimensions = await this.screenshotUtils.getImageDimensions(afterScreenshot.buffer);
+
+      if (
+        beforeDimensions.width !== afterDimensions.width ||
+        beforeDimensions.height !== afterDimensions.height
+      ) {
+        // Rotation or a resolution change: the same bounds no longer cover the same pixels.
+        logger.debug(
+          `[SELECTION_STATE] Visual fallback skipped: screenshot size changed ` +
+            `${beforeDimensions.width}x${beforeDimensions.height} -> ` +
+            `${afterDimensions.width}x${afterDimensions.height}`,
+        );
+        return null;
+      }
 
       const beforeCrop = await this.cropElementRegion(
         beforeScreenshot.buffer,
@@ -189,6 +292,13 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
         false,
       );
 
+      if (!comparison.compared) {
+        // Could not compare: unknown, not "changed" and not "unchanged". The comparator already
+        // logged the underlying error; keep the trace attached to this decision too.
+        logger.warn(`[SELECTION_STATE] Visual fallback skipped: ${comparison.error}`);
+        return null;
+      }
+
       const differencePercent = Math.max(0, 100 - comparison.similarity);
       if (differencePercent < this.config.minDifferencePercent) {
         logger.debug(
@@ -205,7 +315,7 @@ export class SelectionStateDetector implements SelectionStateDetectorLike {
         reason: `visual diff ${differencePercent.toFixed(2)}% >= ${this.config.minDifferencePercent}%`,
       };
     } catch (error) {
-      logger.warn(`[SELECTION_STATE] Visual fallback failed: ${error}`);
+      logger.warn(`[SELECTION_STATE] Visual fallback failed: ${errorMessage(error)}`, error);
       return null;
     }
   }

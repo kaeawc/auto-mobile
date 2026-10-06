@@ -132,6 +132,7 @@ describe("SelectionStateTracker", () => {
       currentObservation: observation,
       previousObservation: observation,
       element,
+      effect: { screenChanged: true, basis: "screenIdentity changed" },
     });
 
     expect(selected).toHaveLength(1);
@@ -141,6 +142,11 @@ describe("SelectionStateTracker", () => {
     expect(contexts).toHaveLength(1);
     expect(contexts[0].beforeScreenshotPath).toBe("before.png");
     expect(contexts[0].afterScreenshotPath).toBe("after.png");
+    // The tap flow's navigation verdict is forwarded so the detector can refuse a stale claim.
+    expect(contexts[0].tapEffect).toEqual({
+      screenChanged: true,
+      basis: "screenIdentity changed",
+    });
   });
 
   test("skips capture when element is not selectable", async () => {

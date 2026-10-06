@@ -34,7 +34,13 @@ import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,
 } from "../../src/server/stripToolResultStructuredContent";
-import type { ToolOutputArtifactRetention } from "../../src/server/toolOutputArtifactWriter";
+import {
+  JsonToolOutputArtifactWriter,
+  type ToolOutputArtifactFileSystem,
+  type ToolOutputArtifactRetention,
+} from "../../src/server/toolOutputArtifactWriter";
+import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
@@ -810,6 +816,102 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     expect(requestedDirectories).toEqual([]);
     expect(writer.writes).toHaveLength(0);
     expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
+  });
+
+  // #10079: the writer's directory-validation cache and prune throttle are
+  // instance state, so the handler must reuse one writer across tool calls.
+  describe("artifact writer reuse across tool calls (#10079)", () => {
+    const handleObserve = (handler: DefaultAfterToolCallHandler, timer: FakeTimer) =>
+      handler.handle({
+        name: "observe",
+        args: { project: "full" },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 0,
+      });
+
+    test("builds one writer per configured directory and reuses it", async () => {
+      let created = 0;
+      const handler = new DefaultAfterToolCallHandler(() => {
+        created += 1;
+        return new FakeObservationArtifactWriter();
+      });
+      const timer = new FakeTimer();
+      serverConfig.setToolOutputsDir("/tmp/artifacts");
+
+      await handleObserve(handler, timer);
+      await handleObserve(handler, timer);
+      expect(created).toBe(1);
+
+      serverConfig.setToolOutputsDir("/tmp/other-artifacts");
+      await handleObserve(handler, timer);
+      expect(created).toBe(2);
+    });
+
+    test("does not build a writer for internal calls", async () => {
+      let created = 0;
+      const handler = new DefaultAfterToolCallHandler(() => {
+        created += 1;
+        return new FakeObservationArtifactWriter();
+      });
+      serverConfig.setToolOutputsDir("/tmp/artifacts");
+
+      await handler.handle({
+        name: "observe",
+        args: { project: "full" },
+        device: undefined,
+        internalCall: true,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "session-1",
+        shouldResolveDevice: false,
+        timer: new FakeTimer(),
+        toolStartMs: 0,
+      });
+
+      expect(created).toBe(0);
+    });
+
+    test("the real writer validates the directory and scans it once across calls", async () => {
+      const ensureCalls: string[] = [];
+      const listCalls: string[] = [];
+      const writes: string[] = [];
+      const fileSystem: ToolOutputArtifactFileSystem = {
+        ensureDirectory: (dirPath) => void ensureCalls.push(dirPath),
+        assertWritableDirectory: () => {},
+        writeFileExclusive: (filePath) => void writes.push(filePath),
+        listFiles: (dirPath) => {
+          listCalls.push(dirPath);
+          return [];
+        },
+        deleteFile: () => {},
+      };
+      const handler = new DefaultAfterToolCallHandler(
+        (outputDirectory, writerTimer, retention) =>
+          new JsonToolOutputArtifactWriter({
+            outputDirectory,
+            fileSystem,
+            timer: writerTimer,
+            retention,
+            ledger: new ToolOutputArtifactLedger(),
+            idGenerator: new FakeIdGenerator(["a", "b", "c"]),
+          }),
+      );
+      const timer = new FakeTimer();
+      timer.setCurrentTime(1_000);
+      serverConfig.setToolOutputsDir("/tmp/artifacts");
+
+      await handleObserve(handler, timer);
+      timer.advanceTime(1_000);
+      await handleObserve(handler, timer);
+
+      expect(writes).toHaveLength(2);
+      expect(ensureCalls).toHaveLength(1);
+      expect(listCalls).toHaveLength(1);
+    });
   });
 
   test("artifact finalization failures are not recorded as successful tool calls", async () => {

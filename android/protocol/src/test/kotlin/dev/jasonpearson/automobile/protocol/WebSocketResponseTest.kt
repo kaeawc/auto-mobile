@@ -538,6 +538,20 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `overlay result missing assets round trip and are omitted when absent`() {
+    val literal =
+      """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":true,"error":null,"missingAssets":["hero","logo"]}"""
+    val decoded = assertIs<OverlayResult>(json.decodeFromString<WebSocketResponse>(literal))
+    assertEquals(listOf("hero", "logo"), decoded.missingAssets)
+    assertEquals(literal, json.encodeToString<WebSocketResponse>(decoded))
+    // Peers that predate the field: it decodes as absent and is never written back as null.
+    val legacy = """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":true}"""
+    val legacyDecoded = assertIs<OverlayResult>(json.decodeFromString<WebSocketResponse>(legacy))
+    assertNull(legacyDecoded.missingAssets)
+    assertFalse(json.encodeToString<WebSocketResponse>(legacyDecoded).contains("missingAssets"))
+  }
+
+  @Test
   fun `overlay result echoes request id and event has no request id`() {
     val resultLiteral =
       """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":false,"error":"overlay host not wired"}"""

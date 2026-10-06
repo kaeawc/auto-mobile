@@ -68,7 +68,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileNotifications {
   public final void reset$auto_mobile_sdk();
   public final boolean post(java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
   public static boolean post$default(dev.jasonpearson.automobile.sdk.AutoMobileNotifications, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List, java.lang.String, int, java.lang.Object);
-  public final boolean postWithContext$auto_mobile_sdk(android.content.Context, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
+  public final dev.jasonpearson.automobile.sdk.NotificationPostResult postWithContext$auto_mobile_sdk(android.content.Context, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
 }
 Compiled from "AutoMobileSDK.kt"
 public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
@@ -257,6 +257,15 @@ public final class dev.jasonpearson.automobile.sdk.NotificationAction {
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
+}
+Compiled from "AutoMobileNotifications.kt"
+public final class dev.jasonpearson.automobile.sdk.NotificationPostResult extends java.lang.Enum<dev.jasonpearson.automobile.sdk.NotificationPostResult> {
+  public static final dev.jasonpearson.automobile.sdk.NotificationPostResult POSTED;
+  public static final dev.jasonpearson.automobile.sdk.NotificationPostResult POSTED_WITHOUT_IMAGE;
+  public static final dev.jasonpearson.automobile.sdk.NotificationPostResult FAILED;
+  public static dev.jasonpearson.automobile.sdk.NotificationPostResult[] values();
+  public static dev.jasonpearson.automobile.sdk.NotificationPostResult valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.NotificationPostResult> getEntries();
 }
 Compiled from "AutoMobileNotifications.kt"
 public final class dev.jasonpearson.automobile.sdk.NotificationStyle$Companion {

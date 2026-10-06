@@ -7,7 +7,6 @@ import java.io.OutputStreamWriter
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -30,13 +29,9 @@ class McpStdioClient(
   private val processStarter: (List<String>) -> Process = { commandParts ->
     ProcessBuilder(commandParts).redirectError(ProcessBuilder.Redirect.INHERIT).start()
   },
-  private val responseReader: StdioResponseReader = StdioResponseReader { read, timeoutMs ->
-    if (timeoutMs == null) {
-      read.call()
-    } else {
-      requestReader.submit(read).get(timeoutMs, TimeUnit.MILLISECONDS)
-    }
-  },
+  // The awaited read is an interruptible wait on the response pump's future and enforces the
+  // deadline itself, so the default runs it on the caller's thread.
+  private val responseReader: StdioResponseReader = StdioResponseReader { read, _ -> read.call() },
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
   override val connectionDescription: String = command
@@ -44,8 +39,8 @@ class McpStdioClient(
 
   private val ioLock = Any()
   private var process: Process? = null
-  private var reader: BufferedReader? = null
   private var writer: BufferedWriter? = null
+  private var pump: StdioResponsePump? = null
   private var initialized = false
 
   override fun ping() {
@@ -441,8 +436,8 @@ class McpStdioClient(
       } catch (_: Exception) {}
       process?.destroy()
       process = null
-      reader = null
       writer = null
+      pump = null
       initialized = false
     }
   }
@@ -506,64 +501,93 @@ class McpStdioClient(
     expectResponse: Boolean,
     deadline: StatusRequestDeadline? = null,
   ): JsonRpcResponse {
+    val expectedId = request.id?.jsonPrimitive?.content
+    val timeoutMs: Long?
+    val currentProcess: Process
+    val pending: PendingResponse?
+    // The lock covers starting the process and writing the request only. The wait for the reply
+    // happens outside it, so a caller that is cancelled or past its deadline never pins the lock.
     synchronized(ioLock) {
-      val timeoutMs = deadline?.remainingTimeoutMs()
+      timeoutMs = deadline?.remainingTimeoutMs()
       ensureProcessStarted()
-      val currentProcess = process ?: throw McpConnectionException("MCP stdio process unavailable")
+      currentProcess = process ?: throw McpConnectionException("MCP stdio process unavailable")
       val currentWriter = writer ?: throw McpConnectionException("MCP stdio writer unavailable")
-      val currentReader = reader ?: throw McpConnectionException("MCP stdio reader unavailable")
-
-      val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
-      currentWriter.write(requestBody)
-      currentWriter.newLine()
-      currentWriter.flush()
-
-      if (!expectResponse) {
-        return JsonRpcResponse(jsonrpc = "2.0")
-      }
-
-      try {
-        val expectedId = request.id?.jsonPrimitive?.content
-        val read = Callable { readResponse(currentReader, expectedId, request.method) }
-        return responseReader.read(read, timeoutMs)
-      } catch (_: java.util.concurrent.TimeoutException) {
-        // BufferedReader.readLine() cannot be reliably interrupted. Its worker stays isolated on
-        // the old stream while this caller releases ioLock; later requests start a fresh process.
-        if (process === currentProcess) {
-          process = null
-          reader = null
-          writer = null
-          initialized = false
+      val currentPump = pump ?: throw McpConnectionException("MCP stdio reader unavailable")
+      pending =
+        if (expectResponse && expectedId != null) {
+          PendingResponse(expectedId, currentPump)
+        } else {
+          null
         }
-        terminateProcessTree(currentProcess)
-        throw McpConnectionException(
-          "MCP stdio request '${request.method}' timed out after ${timeoutMs}ms"
-        )
-      } catch (e: java.util.concurrent.ExecutionException) {
-        throw (e.cause as? Exception ?: e)
+      try {
+        val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
+        currentWriter.write(requestBody)
+        currentWriter.newLine()
+        currentWriter.flush()
+      } catch (e: Exception) {
+        pending?.abandon()
+        throw e
       }
+    }
+    if (pending == null) {
+      return JsonRpcResponse(jsonrpc = "2.0")
+    }
+
+    try {
+      val read = Callable { awaitResponse(pending, request.method, timeoutMs) }
+      return responseReader.read(read, timeoutMs)
+    } catch (_: java.util.concurrent.TimeoutException) {
+      pending.abandon()
+      // Only a request with a deadline (status probes) restarts the server; the next request
+      // starts a fresh process. The old pump stays blocked on the old pipe until it is destroyed.
+      discardProcess(currentProcess)
+      throw McpConnectionException(
+        "MCP stdio request '${request.method}' timed out after ${timeoutMs}ms"
+      )
+    } catch (e: java.util.concurrent.ExecutionException) {
+      pending.abandon()
+      throw (e.cause as? Exception ?: e)
+    } catch (e: Exception) {
+      // Includes InterruptedException from a cancelled caller: stop waiting for this reply and
+      // leave the server running; the late reply is dropped by id.
+      pending.abandon()
+      throw e
     }
   }
 
-  private fun readResponse(
-    currentReader: BufferedReader,
-    expectedId: String?,
+  private fun awaitResponse(
+    pending: PendingResponse,
     method: String,
+    timeoutMs: Long?,
   ): JsonRpcResponse {
-    while (true) {
-      val line = currentReader.readLine() ?: throw McpConnectionException("MCP stdio closed")
-      if (line.isBlank()) continue
-      val response = json.decodeFromString(serializer<JsonRpcResponse>(), line)
-      val responseId = response.id?.jsonPrimitive?.content
-      if (expectedId != null && responseId != expectedId) continue
-      if (response.error != null) {
-        throw McpConnectionException(
-          "MCP stdio error ${response.error.code}: ${response.error.message}"
-        )
-      }
-      response.resultFor(method)
-      return response
+    val response =
+      if (timeoutMs == null) pending.future.get()
+      else pending.future.get(timeoutMs, TimeUnit.MILLISECONDS)
+    if (response.error != null) {
+      throw McpConnectionException(
+        "MCP stdio error ${response.error.code}: ${response.error.message}"
+      )
     }
+    response.resultFor(method)
+    return response
+  }
+
+  private fun discardProcess(currentProcess: Process) {
+    synchronized(ioLock) {
+      if (process === currentProcess) {
+        process = null
+        writer = null
+        pump = null
+        initialized = false
+      }
+    }
+    terminateProcessTree(currentProcess)
+  }
+
+  private class PendingResponse(private val id: String, private val pump: StdioResponsePump) {
+    val future = pump.register(id)
+
+    fun abandon() = pump.abandon(id)
   }
 
   private fun terminateProcessTree(currentProcess: Process) {
@@ -589,8 +613,9 @@ class McpStdioClient(
 
     val newProcess = processStarter(commandParts)
     process = newProcess
-    reader = BufferedReader(InputStreamReader(newProcess.inputStream))
+    val newReader = BufferedReader(InputStreamReader(newProcess.inputStream))
     writer = BufferedWriter(OutputStreamWriter(newProcess.outputStream))
+    pump = StdioResponsePump(newReader, json).also { it.start() }
   }
 
   private fun parseCommand(command: String): List<String> {
@@ -651,13 +676,6 @@ class McpStdioClient(
 
     flushCurrent()
     return parts
-  }
-
-  private companion object {
-    private val requestReader =
-      java.util.concurrent.Executors.newCachedThreadPool { runnable ->
-        Thread(runnable, "mcp-stdio-response-reader").apply { isDaemon = true }
-      }
   }
 }
 

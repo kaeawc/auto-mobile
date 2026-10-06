@@ -32,6 +32,7 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
+import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
@@ -496,7 +497,7 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
     writer,
     new FakeFileSystem(),
     () => "/fake",
-    undefined,
+    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
     false,
     { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
   );
@@ -504,7 +505,9 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
     success: false,
     error: "maxBuffer exceeded",
   });
-  expect(adb.getExecutedCommands()).toEqual(['shell "screencap -d 0 -p | base64"']);
+  expect(adb.getExecutedCommands()).toEqual([
+    'shell "screencap -d 4619827259835644672 -p | base64"',
+  ]);
   expect(adb.getExecutedArgv()).toEqual([]);
   expect(writer.written).toEqual([]);
 });

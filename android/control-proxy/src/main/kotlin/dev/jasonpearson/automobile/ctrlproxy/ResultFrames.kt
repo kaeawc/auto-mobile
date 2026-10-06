@@ -135,13 +135,19 @@ internal fun traversalOrderErrorFrame(
     put("error", error ?: "Unknown error")
   }
 
-internal fun overlayResultFrame(requestId: String?, success: Boolean, error: String?): String =
+internal fun overlayResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  missingAssets: List<String> = emptyList(),
+): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     OverlayResult(
       timestamp = System.currentTimeMillis(),
       requestId = requestId,
       success = success,
       error = error,
+      missingAssets = missingAssets.ifEmpty { null },
     )
   )
 

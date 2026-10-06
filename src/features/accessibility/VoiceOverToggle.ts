@@ -1,7 +1,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
-import type { VoiceOverResult } from "../../models/AccessibilityResult";
+import type { ScreenReaderToggleOptions, VoiceOverResult } from "../../models/AccessibilityResult";
 import type { IosVoiceOverDetector } from "./interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector } from "./IosVoiceOverDetector";
 import {
@@ -27,12 +27,44 @@ export class VoiceOverToggle {
       IOSCtrlProxyClient.getInstance(this.device),
   ) {}
 
-  async toggle(enabled: boolean): Promise<VoiceOverResult> {
+  async toggle(enabled: boolean, options?: ScreenReaderToggleOptions): Promise<VoiceOverResult> {
+    await this.reportPreviousState(enabled, options);
     if (!this.isSimulator()) {
       return this.toggleViaSettings(enabled);
     }
 
     return this.toggleViaSimctl(enabled);
+  }
+
+  /**
+   * Hand the caller the state VoiceOver is in before anything is written, so a
+   * session can restore it on release (#10146). Only a confirmed read that differs
+   * from the request is reported: an unreadable state cannot be restored to, and
+   * the toggle still proceeds exactly as before.
+   */
+  private async reportPreviousState(
+    enabled: boolean,
+    options: ScreenReaderToggleOptions | undefined,
+  ): Promise<void> {
+    if (!options?.beforeChange) {
+      return;
+    }
+    let previous: boolean | null = null;
+    try {
+      this.detector.invalidateCache(this.device.deviceId);
+      previous = await this.detector.resolveState(this.device.deviceId, this.clientProvider());
+    } catch (error) {
+      logger.warn(`[VoiceOverToggle] Could not read VoiceOver state: ${errorMessage(error)}`);
+    }
+    if (previous === null) {
+      logger.warn(
+        `[VoiceOverToggle] VoiceOver state on ${this.device.deviceId} was unreadable before the toggle; it will not be restored on session release`,
+      );
+      return;
+    }
+    if (previous !== enabled) {
+      await options.beforeChange(previous);
+    }
   }
 
   /**

@@ -724,6 +724,13 @@ data class HighlightResponse(
   val error: String? = null,
 ) : WebSocketResponse()
 
+/**
+ * [missingAssets] is a warning, not a failure: after a successful `show_overlay` or
+ * `update_overlay` it lists the asset ids the spec references that the device has no copy of (never
+ * uploaded, or cleared since), so the host can re-upload them. It is omitted from the frame when
+ * empty or absent, so peers that predate it see exactly the frame they always did.
+ */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("overlay_result")
 data class OverlayResult(
@@ -731,6 +738,7 @@ data class OverlayResult(
   val requestId: String? = null,
   val success: Boolean,
   val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val missingAssets: List<String>? = null,
 ) : WebSocketResponse()
 
 @Serializable

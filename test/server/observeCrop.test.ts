@@ -807,3 +807,12 @@ test("crop writer refuses capacity with a typed error and retains both devices' 
   expect(files.existsSync("/screenshots/screenshot_0_deviceA.png")).toBe(true);
   expect(files.existsSync("/screenshots/screenshot_0_deviceB.png")).toBe(true);
 });
+
+describe("explicit observe cached-hierarchy verification (#9963)", () => {
+  test("a session observe asks the screen to verify a cached Android hierarchy", async () => {
+    await call({});
+    expect(fake.getExecuteOptions().map((options) => options.verifyCachedHierarchy)).toEqual([
+      true,
+    ]);
+  });
+});

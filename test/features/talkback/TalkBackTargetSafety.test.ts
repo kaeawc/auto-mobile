@@ -211,13 +211,13 @@ describe("TalkBack selected target safety", () => {
       success: true,
     });
     const bounds = live[1].bounds!;
-    expect(driver.tapHistory).toEqual(
-      Array.from({ length: 2 }, () => ({
+    expect(driver.doubleTapHistory).toEqual([
+      {
         x: Math.round((bounds.left + bounds.right) / 2),
         y: Math.round((bounds.top + bounds.bottom) / 2),
-        durationMs: 50,
-      })),
-    );
+      },
+    ]);
+    expect(driver.tapHistory).toEqual([]);
   });
 
   test("fresh traversal still rejects focus on the wrong same-id sibling", async () => {
@@ -284,7 +284,8 @@ describe("TalkBack selected target safety", () => {
       expect(await strategy.executeTap(device.deviceId, rows[0], driver)).toMatchObject({
         success: true,
       });
-      expect(driver.tapHistory).toHaveLength(2);
+      expect(driver.doubleTapHistory).toHaveLength(1);
+      expect(driver.tapHistory).toEqual([]);
     },
   );
   test.each(["tap", "longPress"] as const)(
@@ -407,10 +408,8 @@ describe("TalkBack selected target safety", () => {
       success: true,
       screenReaderNavigation: { reachable: true, traversalOrder: [first, second] },
     });
-    expect(driver.tapHistory).toEqual([
-      { x: 50, y: 250, durationMs: 50 },
-      { x: 50, y: 250, durationMs: 50 },
-    ]);
+    expect(driver.doubleTapHistory).toEqual([{ x: 50, y: 250 }]);
+    expect(driver.tapHistory).toEqual([]);
     expect(driver.actionHistory).toEqual([]);
   });
 

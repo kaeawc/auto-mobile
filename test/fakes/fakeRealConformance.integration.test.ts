@@ -15,6 +15,8 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeToolSelectionProfileProvenanceStore.ts:FakeToolSelectionProfileProvenanceStore":
     "ToolSelectionProfileProvenanceStore",
   "FakeAdbClient.ts:FakeAdbClient": "AdbExecutor",
+  "FakeAndroidPhysicalDisplayIdResolver.ts:FakeAndroidPhysicalDisplayIdResolver":
+    "PhysicalDisplayIdResolver",
   "FakeDaemonProcess.ts:FakeDaemonProcess": "DaemonLaunchedProcess",
   "FakeDaemonSpawner.ts:FakeDaemonSpawner": "DaemonProcessSpawner",
   "FakeDeviceSnapshotConfigRepository.ts:FakeDeviceSnapshotConfigRepository": "ConfigRepository",

@@ -460,6 +460,12 @@ export interface OverlayResult {
   error?: string | null;
   requestId?: string;
   timestamp?: number;
+  /**
+   * Warning, not a failure: after a successful show_overlay or update_overlay, the asset ids the
+   * spec references that the device has no copy of (never uploaded, or cleared since), so the
+   * host can re-upload them. Absent when nothing is missing and on devices that predate it.
+   */
+  missingAssets?: string[];
 }
 
 /**

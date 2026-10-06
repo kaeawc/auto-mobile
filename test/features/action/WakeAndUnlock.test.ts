@@ -35,6 +35,8 @@ const UNLOCKED: DeviceLockState = { locked: false, keyguardShowing: false, secur
 // `dumpsys window policy` reports showing=true occluded=true.
 const OCCLUDED_SECURE: DeviceLockState = { locked: false, keyguardShowing: true, secure: true };
 
+const OCCLUDED_SWIPE: DeviceLockState = { locked: false, keyguardShowing: true, secure: false };
+
 class FakeCredentialStore implements LockCredentialStore {
   recorded: string | null = null;
   /** When set, `recorded` is only replayed on this identity (like the real store). */
@@ -651,11 +653,32 @@ describe("WakeAndUnlock", () => {
       expect(store.remembered).toEqual([]);
     });
 
-    test("an occluded swipe keyguard is also not reported as unlocked", async () => {
+    test("an occluded swipe keyguard needs no credential: it is dismissed, not refused", async () => {
       adb.setScreenState(true, "Awake");
-      adb.setDeviceLock({ locked: false, keyguardShowing: true, secure: false });
+      adb.setDeviceLockSequence([OCCLUDED_SWIPE, UNLOCKED]);
 
       const result = await android().execute();
+
+      expect(result).toMatchObject({ success: true, unlocked: true });
+      expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    });
+
+    test("an occluded swipe keyguard that does not dismiss is reported, never as unlocked", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock(OCCLUDED_SWIPE);
+
+      const result = await android().execute();
+
+      expect(result).toMatchObject({ success: false, unlocked: false });
+      expect(result.error).toContain("did not dismiss");
+      expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
+    });
+
+    test("an occluded keyguard whose security could not be read is still refused", async () => {
+      adb.setScreenState(true, "Awake");
+      adb.setDeviceLock({ locked: false, keyguardShowing: true });
+
+      const result = await android().execute("1234");
 
       expect(result).toMatchObject({ success: false, wasLocked: true, unlocked: false });
       expect(adb.getExecutedCommands()).toEqual([]);

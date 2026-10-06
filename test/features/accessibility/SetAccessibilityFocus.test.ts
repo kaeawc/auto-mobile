@@ -525,6 +525,44 @@ describe("SetAccessibilityFocus", () => {
     expect(result.warning).toContain("could not be read back");
   });
 
+  test("treats an error-carrying read-back result as unconfirmed (#10036)", async () => {
+    // The real client resolves an error result on timeout/disconnect instead of throwing.
+    service.setCurrentFocusError("Current focus timeout after 5000ms");
+    const feature = makeFeature();
+
+    const result = await feature.execute({ resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(result.focusedElement).toBeUndefined();
+    expect(result.confirmed).toBe(false);
+    expect(result.warning).toContain("could not be read back");
+    expect(result.warning).toContain("acknowledged");
+    expect(result.warning).toContain("Current focus timeout after 5000ms");
+  });
+
+  test("treats an error-carrying read-back after clear as unconfirmed (#10036)", async () => {
+    service.setCurrentFocusError("Failed to connect to accessibility service");
+    const feature = makeFeature();
+
+    const result = await feature.execute({ action: "clear", resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(result.confirmed).toBe(false);
+    expect(result.warning).toContain("Focus clear was acknowledged");
+    expect(result.warning).toContain("Failed to connect to accessibility service");
+  });
+
+  test("a read-back with no focused element and no error stays confirmed", async () => {
+    const feature = makeFeature();
+
+    const result = await feature.execute({ action: "clear", resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(result.focusedElement).toBeUndefined();
+    expect(result.confirmed).toBe(true);
+    expect(result.warning).toBeUndefined();
+  });
+
   test("throws ActionableError on iOS (Android-only gating)", async () => {
     const feature = makeFeature(iosDevice);
     await expect(feature.execute({ action: "set", resourceId: "x" })).rejects.toThrow(

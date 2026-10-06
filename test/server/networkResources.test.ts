@@ -40,6 +40,14 @@ describe("bucketEvents", () => {
     expect(bucketEvents(events, 60)[0]).toMatchObject({ requests: 3, errors: 2 });
   });
 
+  it("does not count a mocked 200 as an error but keeps a mocked 503", () => {
+    const events = [
+      makeEvent({ error: "mocked:mock-1" }),
+      makeEvent({ statusCode: 503, error: "mocked:mock-1" }),
+    ];
+    expect(bucketEvents(events, 60)[0]).toMatchObject({ requests: 2, errors: 1 });
+  });
+
   it("returns empty array for no events", () => {
     expect(bucketEvents([], 60)).toEqual([]);
   });
@@ -153,6 +161,12 @@ describe("aggregateStatsByHost", () => {
     ).toMatchObject({ requests: 3, errors: 2 });
   });
 
+  it("does not count a mocked 200 as an error for its host", () => {
+    expect(
+      aggregateStatsByHost([makeEvent({ error: "mocked:mock-1" }), makeEvent()])["api.example.com"],
+    ).toMatchObject({ requests: 2, errors: 0 });
+  });
+
   const PROTOTYPE_HOSTS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 
   it.each([...PROTOTYPE_HOSTS, "api.example.com"])("aggregates the %s host", (host) => {
@@ -242,6 +256,22 @@ describe("network resource registration", () => {
     expect(JSON.parse(content.text!)).toMatchObject({
       totalRequests: 4,
       errorCount: 2,
+      errorRate: 0.5,
+    });
+  });
+
+  it("does not count a mocked 200 in the stats error count and rate", async () => {
+    registerNetworkResources({
+      getNetworkEvents: async () => [
+        makeEvent({ error: "mocked:mock-1" }),
+        makeEvent({ statusCode: 503, error: "mocked:mock-2" }),
+      ],
+      getNetworkEventById: async () => null,
+    });
+    const content = await ResourceRegistry.getResource("automobile:network/stats")!.handler();
+    expect(JSON.parse(content.text!)).toMatchObject({
+      totalRequests: 2,
+      errorCount: 1,
       errorRate: 0.5,
     });
   });

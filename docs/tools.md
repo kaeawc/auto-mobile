@@ -1799,6 +1799,23 @@ explicit bitrate or frame-rate settings.
 at 300 seconds on Android and 3600 seconds on iOS. `outputName` supplies a
 recording label.
 
+Android plan recordings that run longer than `screenrecord`'s 180 second limit
+are split into segments, rotated about every 170 seconds. A sequential plan
+rotates only between steps. A multi-device plan runs its tracks concurrently,
+so it rotates on a timer, mid-step: the old segment is stopped and pulled before
+the next one starts, and whatever the device shows in between is not recorded.
+Each stop and each start is bounded at 10 seconds; a start that exceeds it is
+abandoned and retried at the next rotation. Every uncaptured stretch is
+reported as a `Video gap: <n>ms without capture ...` entry in the video
+warnings.
+
+On the iOS Simulator the in-progress size cap (`maxArchiveSizeMb`) is compared
+with the raw capture file (`<id>-raw.mov`) that `simctl recordVideo` is
+writing, because the final `.mp4` only exists after post-processing. The
+recording can therefore be stopped at the cap even though the final file would
+have been smaller than it. Physical iOS devices write the output file
+directly, so the cap applies to that file.
+
 On Android, `videoRecording({ action: "start", display })` accepts a physical
 panel key, the role `inner`, `cover`, `rear`, or `external`, or `"active"`.
 Omitting `display` selects the active panel when supported. Multi-panel recordings pin

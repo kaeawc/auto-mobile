@@ -655,6 +655,25 @@ export class AndroidSegmentedPlanVideoSession {
     return true;
   }
 
+  /**
+   * The start leg of a rotation, bounded like its stop leg ({@link ROTATION_STOP_TIMEOUT_MS}).
+   * Every ms spent here is a ms the device is not being captured, and an unbounded start would
+   * park the timer-driven rotation loop (and a plan's step hook) behind a hung start. The caller's
+   * abort handling is unchanged: only the deadline is raced, so a cancelled start still settles
+   * through {@link startSegment} (and is rolled back by id) exactly as before. On the deadline
+   * the pending start is aborted so a late success cannot leave an untracked second recording.
+   */
+  private async startSegmentForRotation(signal: AbortSignal): Promise<void> {
+    const startAbort = new AbortController();
+    const startSignal = combineAbortSignals(signal, startAbort.signal) ?? startAbort.signal;
+    await raceWithDeadline(() => this.startSegment(startSignal), {
+      timer: this.timer,
+      timeoutMs: ROTATION_STOP_TIMEOUT_MS,
+      label: `Replacement segment start on device ${this.deviceId}`,
+      onTimeout: () => startAbort.abort(),
+    });
+  }
+
   private async rotateToNextSegment(planSignal?: AbortSignal): Promise<void> {
     if (this.stopping || this.rotationHalted || this.sessionAbortController.signal.aborted) {
       return;
@@ -680,7 +699,7 @@ export class AndroidSegmentedPlanVideoSession {
         return;
       }
       signal.throwIfAborted();
-      await this.startSegment(signal);
+      await this.startSegmentForRotation(signal);
     } catch (error) {
       if (signal.aborted) {
         // An aborted start is rolled back by its owner and is not a capture defect.

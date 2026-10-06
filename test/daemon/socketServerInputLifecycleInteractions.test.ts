@@ -236,6 +236,27 @@ describe("(a) input/gestureStart that leaves while waiting on the device key (#1
     expect(pending("gestureEnd")).toHaveLength(1);
   });
 
+  test("a start cancelled by daemon/cancelRequest while in flight is cancelled on ack, not recorded", async () => {
+    const owner = connect();
+    owner.send(gestureFrame("start", "input/gestureStart", "g1"));
+    await settle();
+    expect(pending("gestureStart")).toHaveLength(1);
+
+    owner.send(cancelFrame("cancel", "start"));
+    await settle();
+    pending("gestureStart")[0].release({ success: true });
+    await settle();
+
+    // The client was told the start was cancelled and will send no end: the registry cancels it.
+    expect(owner.responses.find((frame) => frame.id === "start")).toMatchObject({ success: false });
+    expect(pending("gestureEnd")).toHaveLength(1);
+    expect(pending("gestureEnd")[0].args).toEqual(["g1", 0, 0, true, 5000]);
+    expect(internals.ownedGestures.ownerCount).toBe(0);
+    pending("gestureEnd")[0].release({ success: true });
+    await drain();
+    expect(pending("gestureEnd")).toHaveLength(1);
+  });
+
   test("a start acked while the socket is live is owned, then cancelled once by the close", async () => {
     const owner = connect();
     owner.send(gestureFrame("start", "input/gestureStart", "g1"));
@@ -342,6 +363,19 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
       internals.runTrackedDeviceInput("input/tap", device, operation, abortedSignal()),
     ).rejects.toThrow(/no longer owns device 'emulator-5599'/);
     expect(operationRuns).toBe(0);
+  });
+
+  test("a stale owner entry is cleared when the next resolve finds the device unowned", async () => {
+    useSessionState(device.deviceId);
+    internals.captureInputTargetOwner(device);
+    // Released: a same-object device (physical iOS) is resolved again by a sessionless input.
+    rebindAway();
+    internals.captureInputTargetOwner(device);
+
+    await expect(internals.runTrackedDeviceInput("input/tap", device, operation)).resolves.toBe(
+      "ran",
+    );
+    expect(operationRuns).toBe(1);
   });
 
   test("a refused bind wins over an already-aborted owner and the execution is still ended", async () => {

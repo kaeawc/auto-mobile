@@ -10,7 +10,7 @@ import {
   type VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntil } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 
 // #10026: a partitioned (`devices:`) plan never calls PlanExecutionOptions.onBeforePlanStep,
 // so step-driven rotation left the first screenrecord segment to self-stop at 180 s. The
@@ -115,6 +115,9 @@ describe("multi-device Android plan video rotation (#10026)", () => {
     const before = capture.started;
     timer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
     await drainUntil(() => capture.started > before, { description: "a rotated segment start" });
+    // The start's own deadline timer is pending until the start leg settles; let it clear so the
+    // pending-timer wait below observes the rescheduled rotation, not that deadline.
+    await drainMicrotasks(50);
     // Let the session reschedule its next rotation after the replacement is running.
     await drainUntil(() => timer.getPendingTimeoutCount() > 0, {
       description: "the next rotation timer",

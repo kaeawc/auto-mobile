@@ -69,6 +69,16 @@ describe("GestureOwnershipRegistry", () => {
     expect(registry.ownerCount).toBe(0);
   });
 
+  test("a start acked after the client cancelled the request is cancelled though its socket is live", async () => {
+    const { liveSockets, cancels, registry } = createHarness();
+    liveSockets.add("s1");
+
+    expect(await registry.onStartAcked("s1", device, "g1", true)).toBe("cancelled");
+
+    expect(cancels).toEqual([{ deviceId: "emulator-5554", gestureId: "g1" }]);
+    expect(registry.ownerCount).toBe(0);
+  });
+
   test("an acked end clears ownership so socket close issues no cancel", async () => {
     const { liveSockets, cancels, registry } = createHarness();
     liveSockets.add("s1");

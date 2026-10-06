@@ -5416,8 +5416,14 @@ export class UnixSocketServer {
     // forward (no client session) can't be cancelled on close, so it isn't tracked.
     if (socketSessionId) {
       if (kind === "start") {
-        // A start acked after its socket closed is cancelled here instead of recorded (#10005).
-        await this.ownedGestures.onStartAcked(socketSessionId, targetDevice, args.gestureId);
+        // A start acked after its socket closed, or after the client cancelled it in flight, is
+        // cancelled here instead of recorded (#10005): no end will follow either.
+        await this.ownedGestures.onStartAcked(
+          socketSessionId,
+          targetDevice,
+          args.gestureId,
+          input?.signal?.aborted === true,
+        );
       } else if (kind === "end") {
         this.ownedGestures.onEndAcked(socketSessionId, targetDevice.deviceId, args.gestureId);
       }
@@ -6409,6 +6415,10 @@ export class UnixSocketServer {
     const owner = this.daemonState.getSessionManager().getSessionForDevice?.(targetDevice.deviceId);
     if (owner) {
       this.inputTargetOwners.set(targetDevice, owner);
+    } else {
+      // Physical iOS devices come back as the SAME object across discoveries, so an entry left by
+      // a since-released session would falsely refuse the next sessionless input on this device.
+      this.inputTargetOwners.delete(targetDevice);
     }
   }
 

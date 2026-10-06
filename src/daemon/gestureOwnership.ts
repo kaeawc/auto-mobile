@@ -44,14 +44,17 @@ export class GestureOwnershipRegistry {
 
   /**
    * The runner acked a `gestureStart`. Records ownership while the socket is live; when the socket
-   * is already gone, cancels the gesture immediately instead and records nothing.
+   * is already gone, or the client cancelled the start while it was in flight ([requestCancelled],
+   * `daemon/cancelRequest` answered it as cancelled so no end will ever follow), cancels the
+   * gesture immediately instead and records nothing.
    */
   async onStartAcked(
     socketSessionId: string,
     targetDevice: BootedDevice,
     gestureId: string,
+    requestCancelled: boolean = false,
   ): Promise<"owned" | "cancelled"> {
-    if (!this.deps.isSocketLive(socketSessionId)) {
+    if (requestCancelled || !this.deps.isSocketLive(socketSessionId)) {
       await this.cancelOne(targetDevice, gestureId, socketSessionId);
       return "cancelled";
     }
@@ -97,7 +100,7 @@ export class GestureOwnershipRegistry {
       await this.deps.cancelGesture(targetDevice, gestureId);
     } catch (error) {
       logger.warn(
-        `Failed to cancel orphaned gesture ${gestureId} on ${targetDevice.deviceId} for closed socket ${socketSessionId}: ${errorMessage(error)}`,
+        `Failed to cancel orphaned gesture ${gestureId} on ${targetDevice.deviceId} for closed or cancelled socket ${socketSessionId}: ${errorMessage(error)}`,
       );
     }
   }

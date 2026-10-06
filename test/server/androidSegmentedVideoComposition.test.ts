@@ -12,6 +12,7 @@ import { DEFAULT_VIDEO_RECORDING_CONFIG, VideoRecorderService } from "../../src/
 import type { ActiveVideoRecording } from "../../src/features/video";
 import {
   AndroidSegmentedPlanVideoSession,
+  ROTATION_STOP_TIMEOUT_MS,
   type SegmentedSessionResult,
 } from "../../src/server/androidSegmentedPlanVideoSession";
 import {
@@ -239,6 +240,56 @@ describe("timer-rotated Android session racing its stop paths (#10026 x #10018)"
     expect(timer.getPendingTimeoutCount()).toBe(0);
     // Without maxDuration the plan's own finalize is the only stop; no auto-stop result exists.
     expect(autoStopped).toHaveLength(0);
+  });
+
+  const allWarnings = (result: SegmentedSessionResult): string[] =>
+    result.metadata.flatMap((metadata) => metadata.warnings ?? []);
+
+  test("a replacement start that outlives the rotation stop budget is abandoned and retried on the next tick", async () => {
+    const session = makeSession();
+    await session.start();
+    // The first replacement start hangs; the retry (startHold is consumed once) succeeds at once.
+    capture.startHold = deferred<void>();
+
+    timer.advanceTime(ROTATE_MS);
+    await drainUntil(() => capture.startRequests === 2, { description: "the hung start" });
+    timer.advanceTime(ROTATION_STOP_TIMEOUT_MS);
+    await drainMicrotasks(50);
+
+    // Bounded: the loop is not parked behind the hung start; it reschedules and starts again.
+    timer.advanceTime(ROTATE_MS);
+    await drainUntil(() => capture.startRequests === 3, { description: "the retried start" });
+    await drainUntil(() => capture.started.length === 2, { description: "the retry to land" });
+    const result = await session.stop();
+
+    const warnings = allWarnings(result);
+    expect(warnings).toContainEqual(
+      expect.stringMatching(/failed to start next segment.*timed out after 10000ms/),
+    );
+    // The whole uncaptured stretch (stop done at 1000ms -> retry landed at 12000ms) is reported.
+    expect(warnings).toContain(
+      "Video gap: 11000ms without capture between segments or before finalization",
+    );
+  });
+
+  test("a replacement start that lands inside the budget reports its gap duration and no timeout", async () => {
+    const session = makeSession();
+    await session.start();
+    const slowStart = deferred<void>();
+    capture.startHold = slowStart;
+
+    timer.advanceTime(ROTATE_MS);
+    await drainUntil(() => capture.startRequests === 2, { description: "the slow start" });
+    timer.advanceTime(3_000);
+    slowStart.resolve();
+    await drainUntil(() => capture.started.length === 2, { description: "the slow start to land" });
+    const result = await session.stop();
+
+    const warnings = allWarnings(result);
+    expect(warnings).toContain(
+      "Video gap: 3000ms without capture between segments or before finalization",
+    );
+    expect(warnings.join(" ")).not.toContain("timed out");
   });
 
   test("abort while a replacement segment is starting rolls back and starts nothing after", async () => {

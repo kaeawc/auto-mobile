@@ -723,7 +723,9 @@ export class PlanExecutionOrchestrator {
         // Sequential plans rotate between steps (never mid-step). A partitioned plan's tracks
         // run concurrently, so no step boundary is quiescent and executeDeviceTrack never calls
         // the hook; the session's own timer rotates instead, and one session-level timer cannot
-        // be raced by several tracks.
+        // be raced by several tracks. That mid-step rotation stops and pulls one segment before
+        // starting the next, so frames between them are lost (bounded per leg, reported as a
+        // "Video gap" warning); sequential plans rotate between steps instead.
         state.androidTimerDriven = PlanPartitioner.isMultiDevicePlan(plan);
         await (state.androidTimerDriven ? session.start() : session.startFirstSegment());
         state.androidSession = session;

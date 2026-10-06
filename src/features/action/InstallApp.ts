@@ -55,7 +55,10 @@ import {
   type DeviceWindowCacheInvalidator,
 } from "./TerminateApp";
 
-import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
+import {
+  ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS,
+  IOS_SIMULATOR_DOWNGRADE_REINSTALL_TIMEOUT_MS,
+} from "./installAppTimeout";
 
 export { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "./installAppTimeout";
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
@@ -797,6 +800,33 @@ export class InstallApp {
   }
 
   /**
+   * The part of an iOS install failure that the tool itself printed, for classification only.
+   * The rejection's `message` is `Command failed: <argv>` plus stderr, and the argv carries the
+   * user's artifact path, so searching it would match a path such as `build/downgrade-test/`.
+   * Prefer stderr/stdout (walking `cause` for wrapped errors); when none is attached, drop the
+   * command line and any other occurrence of the artifact path from the message.
+   */
+  private iosToolOutput(error: unknown, artifactPath: string): string {
+    let current: unknown = error;
+    for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+      const details = current as Error & { stderr?: unknown; stdout?: unknown };
+      const streams = [details.stderr, details.stdout].filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
+      if (streams.length > 0) {
+        return streams.join("\n");
+      }
+      current = current.cause;
+    }
+    return errorMessage(error)
+      .split("\n")
+      .filter((line) => !line.includes("Command failed:"))
+      .join("\n")
+      .split(artifactPath)
+      .join("");
+  }
+
+  /**
    * Detect an iOS install failure caused by the installed version being newer
    * than the artifact (simctl/devicectl downgrade rejection).
    */
@@ -887,7 +917,7 @@ export class InstallApp {
     const beforeBundleIds = this.extractBundleIds(beforeApps);
 
     const downgraded = await perf.track("simctlInstall", () =>
-      this.installiOSSimulatorWithDowngradeRecovery(appPath, backend, signal),
+      this.installiOSSimulatorWithDowngradeRecovery(appPath, backend),
     );
 
     this.cacheInvalidator.invalidate(this.device);
@@ -1005,14 +1035,13 @@ export class InstallApp {
   private async installiOSSimulatorWithDowngradeRecovery(
     appPath: string,
     backend: IosInstallBackend,
-    signal?: AbortSignal,
   ): Promise<boolean> {
     try {
       await backend.installApp(appPath);
       return false;
     } catch (error) {
       const text = this.extractErrorText(error);
-      if (!this.isiOSDowngradeError(text)) {
+      if (!this.isiOSDowngradeError(this.iosToolOutput(error, appPath))) {
         throw error;
       }
       const recoveryBackend = this.iosDowngradeRecoveryBackendResolver(this.device.deviceId, {
@@ -1043,11 +1072,32 @@ export class InstallApp {
       await recoveryBackend.uninstallApp(bundleId);
       this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
-      if (signal?.aborted) {
-        throw new Error(OPERATION_CANCELLED_MESSAGE);
-      }
-      await backend.installApp(appPath);
+      await this.reinstallAfterIosDowngradeUninstall(appPath, bundleId, backend);
       return true;
+    }
+  }
+
+  /** Once the uninstall has succeeded, finish the reinstall even if the request is cancelled. */
+  private async reinstallAfterIosDowngradeUninstall(
+    appPath: string,
+    bundleId: string,
+    backend: IosInstallBackend,
+  ): Promise<void> {
+    try {
+      // Escape the ambient abort (simctl reads it) while keeping the step deadline.
+      await runWithAbortSignal(undefined, () =>
+        raceWithDeadline(() => backend.installApp(appPath), {
+          timer: this.timer ?? defaultTimer,
+          timeoutMs: IOS_SIMULATOR_DOWNGRADE_REINSTALL_TIMEOUT_MS,
+          label: "iOS downgrade reinstall",
+        }),
+      );
+    } catch (error) {
+      // A failed must-finish reinstall must disclose the already completed uninstall.
+      throw new ActionableError(
+        `The previous version of ${bundleId} was uninstalled during downgrade recovery (the installed version was newer than the artifact); the simulator now has no copy of the app; the app is not installed. ${this.extractErrorText(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -1067,7 +1117,7 @@ export class InstallApp {
       await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);
-      if (this.isiOSDowngradeError(text)) {
+      if (this.isiOSDowngradeError(this.iosToolOutput(error, ipaPath))) {
         // devicectl has no downgrade flag, so guide the user to uninstall first.
         throw new Error(
           `Install failed because a newer version is already installed on the device. ` +

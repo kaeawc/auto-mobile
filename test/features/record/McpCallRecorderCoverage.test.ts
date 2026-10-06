@@ -208,7 +208,8 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
     { scope: "sharedPreferences", appId: "com.example", key: "flag", value: true, type: "bool" },
   ],
   ["setPreference", { scope: "systemProperty", key: "debug.flag", value: "1", type: "string" }],
-  ["resetKeychain", { appId: "com.example", confirm: true }],
+  // The recorder writes the destructive confirmation as false (#10052).
+  ["resetKeychain", { appId: "com.example", confirm: false }],
   ["resetAppLogs", { appId: "com.example", container: "documents", paths: ["logs/app.log"] }],
   [
     "putAppFile",

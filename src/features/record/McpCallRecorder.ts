@@ -117,6 +117,51 @@ export function isReadOnlyCall(toolName: string, params: Record<string, unknown>
   return readOnly !== undefined && typeof params.action === "string" && readOnly.has(params.action);
 }
 
+/**
+ * Destructive-confirmation guards on recorded tools, by tool name. `resetKeychain`
+ * is the only recorded tool whose input schema carries one (the other
+ * confirmation-style params, `killDevice.force` and `deleteDevice.force`, belong
+ * to excluded device-management tools). PlanExecutor re-injects `sessionUuid`
+ * at replay, which satisfies the tool's explicit-device-target guard, so a
+ * recorded `confirm: true` would make a replay wipe the iOS Simulator Keychain
+ * of every app with no prompt. The recorder therefore writes the guard as
+ * `false`: the step still parses (the schema requires the field) and the tool
+ * refuses with its own "Set confirm: true to proceed" error until the plan's
+ * author flips it by hand.
+ */
+const DESTRUCTIVE_CONFIRM_PARAMS: Readonly<Record<string, readonly string[]>> = {
+  resetKeychain: ["confirm"],
+};
+
+/** Replace each destructive-confirmation param of the tool with `false`. */
+export function withholdDestructiveConfirmations(
+  toolName: string,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const guards = DESTRUCTIVE_CONFIRM_PARAMS[toolName];
+  if (!guards) {
+    return params;
+  }
+  return { ...params, ...Object.fromEntries(guards.map((guard) => [guard, false])) };
+}
+
+/**
+ * Largest single param, JSON-encoded, that a recording keeps. A recorded step is
+ * stored in the plan and the whole plan comes back inline in the `recordSteps`
+ * end response, so this matches the 64 KiB inline response budget
+ * (`DEFAULT_OBSERVATION_INLINE_MAX_BYTES`, not imported to avoid pulling the
+ * response finalizer into the recorder). Larger inline fixtures are skipped
+ * with a warning.
+ */
+export const MAX_RECORDED_PARAM_BYTES = 64 * 1024;
+
+/** Name of the first param whose JSON encoding exceeds the cap, if any. */
+function findOversizedParam(params: Record<string, unknown>): string | undefined {
+  return Object.keys(params).find(
+    (key) => Buffer.byteLength(JSON.stringify(params[key]) ?? "") > MAX_RECORDED_PARAM_BYTES,
+  );
+}
+
 /** Tools that write caller-supplied files, from a host path or inline content. */
 const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set([
   "putAppFile",
@@ -178,19 +223,33 @@ export function stripInternalParams(args: Record<string, unknown>): Record<strin
  */
 export class McpCallRecorder {
   private steps: PlanStep[] = [];
+  private warnings: string[] = [];
   private recording = false;
 
   start(): void {
     this.steps = [];
+    this.warnings = [];
     this.recording = true;
     logger.info("[McpCallRecorder] Recording started");
   }
 
   stop(): PlanStep[] {
+    return this.stopWithWarnings().steps;
+  }
+
+  /**
+   * Stop recording and return the steps with a warning per call that was skipped
+   * or recorded in a weakened form, so the caller can tell the user what a
+   * replay of the plan will not do.
+   */
+  stopWithWarnings(): { steps: PlanStep[]; warnings: string[] } {
     this.recording = false;
-    const result = [...this.steps];
+    const result = { steps: [...this.steps], warnings: [...this.warnings] };
     this.steps = [];
-    logger.info(`[McpCallRecorder] Recording stopped with ${result.length} steps`);
+    this.warnings = [];
+    logger.info(
+      `[McpCallRecorder] Recording stopped with ${result.steps.length} steps and ${result.warnings.length} warnings`,
+    );
     return result;
   }
 
@@ -214,13 +273,31 @@ export class McpCallRecorder {
     if (isReadOnlyCall(toolName, params)) {
       return;
     }
-    if (referencesHostFile(toolName, params)) {
-      logger.warn(
-        `[McpCallRecorder] Not recording ${toolName}: it copies a host file (sourcePath), which a replay on another host cannot resolve; use contentText or contentBase64 to record it`,
-      );
+    const skipReason = this.skipReason(toolName, params);
+    if (skipReason) {
+      const warning = `${toolName} was not recorded (after ${this.steps.length} recorded steps): ${skipReason}`;
+      logger.warn(`[McpCallRecorder] ${warning}`);
+      this.warnings.push(warning);
       return;
     }
-    this.steps.push({ tool: toolName, params });
+    const recorded = withholdDestructiveConfirmations(toolName, params);
+    if (recorded !== params) {
+      this.warnings.push(
+        `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
+      );
+    }
+    this.steps.push({ tool: toolName, params: recorded });
     logger.info(`[McpCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+  }
+
+  private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {
+    if (referencesHostFile(toolName, params)) {
+      return "it copies a host file (sourcePath), which a replay on another host cannot resolve; use contentText or contentBase64 to record it";
+    }
+    const oversized = findOversizedParam(params);
+    if (oversized) {
+      return `param '${oversized}' is larger than ${MAX_RECORDED_PARAM_BYTES} bytes, which is too large to store in the plan`;
+    }
+    return undefined;
   }
 }

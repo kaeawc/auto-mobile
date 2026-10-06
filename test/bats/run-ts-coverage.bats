@@ -81,6 +81,6 @@ EOF
   run env -u AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS PATH="$STUB_DIR:$PATH" \
     RUNNER_OS=Linux bash "$SCRIPT" "$WORK_DIR/out.log"
   [ "$status" -eq 124 ]
-  [[ "$output" == *"::error::coverage: Coverage test run exceeded its 720s wall-clock budget (shard 1/2)"* ]]
+  [[ "$output" == *"::error::coverage: Coverage test run exceeded its 720s wall-clock budget (shard 1/4)"* ]]
   [[ "$output" == *"shard test output 259"*"::error::coverage:"* ]]
 }

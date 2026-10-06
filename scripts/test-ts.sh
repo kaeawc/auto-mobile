@@ -817,7 +817,11 @@ case "$mode" in
       echo "No unit test paths were selected." >&2
       exit 2
     fi
-    coverage_shards="${AUTOMOBILE_COVERAGE_SHARDS:-2}"
+    # Four shards (#10213): under --isolate each process's RSS grows ~7.5 MB per
+    # test file, so two ~870-file shards peaked near 9 GB each on a 16 GB runner.
+    # Four ~220-file shards keep each process small and use all four vCPUs. The
+    # wall-clock budget below applies to each shard process, not their sum.
+    coverage_shards="${AUTOMOBILE_COVERAGE_SHARDS:-4}"
     validate_positive_integer "AUTOMOBILE_COVERAGE_SHARDS" "$coverage_shards"
     if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
       validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
@@ -847,6 +851,11 @@ case "$mode" in
         "${unit_test_paths[@]+"${unit_test_paths[@]}"}"
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
       )
+      if [[ "$runner_os" != "Windows" ]]; then
+        # Per-file start/end events with RSS, written beside the shard log so the
+        # coverage artifact ties a stall to memory. The probe only appends to a file.
+        coverage_args+=(--preload "$ROOT/test/setup/fileTimingProbe.ts")
+      fi
       coverage_lcov_files+=("${coverage_dir}/lcov.info")
       coverage_junit_files+=("$coverage_junit")
       if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -855,6 +864,11 @@ case "$mode" in
         continue
       fi
       (
+        if [[ "$runner_os" != "Windows" ]]; then
+          export AUTOMOBILE_TEST_TIMING_LOG="coverage/shards/timing-shard-${coverage_shard}.ndjson"
+          export AUTOMOBILE_WATCHDOG_TIMING_LOG="$AUTOMOBILE_TEST_TIMING_LOG"
+          export AUTOMOBILE_WATCHDOG_LABEL="coverage shard ${coverage_shard}/${coverage_shards}"
+        fi
         if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
           # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
           source "$ROOT/scripts/ios/run_with_timeout.sh"

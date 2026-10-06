@@ -769,6 +769,37 @@ describe("VideoRecorderService", () => {
       expect(backend.stopCalls[0]).toBe(backend.startResults[0]);
     });
 
+    test("reports the backend's stop warnings and the recording file it returned (#10188)", async () => {
+      const recording = await service.startRecording();
+      const kept = path.join(path.dirname(recording.outputPath), "kept-raw.mov");
+      backend.setStopResultOverrides({
+        outputPath: kept,
+        warnings: ["iOS post-processing did not finish (timed out); returning the raw capture."],
+      });
+
+      const metadata = await service.stopRecording(recording.recordingId);
+
+      expect(metadata.filePath).toBe(kept);
+      expect(metadata.fileName).toBe("kept-raw.mov");
+      // The metadata describes the file that was returned, not the requested container.
+      expect(metadata.format).toBe("mov");
+      expect(metadata.warnings).toEqual([
+        "iOS post-processing did not finish (timed out); returning the raw capture.",
+      ]);
+    });
+
+    test("keeps the requested format when the backend returns the file it was asked for", async () => {
+      const recording = await service.startRecording();
+
+      expect((await service.stopRecording(recording.recordingId)).format).toBe("mp4");
+    });
+
+    test("has no warnings when neither the start nor the stop produced one", async () => {
+      const recording = await service.startRecording();
+
+      expect((await service.stopRecording(recording.recordingId)).warnings).toBeUndefined();
+    });
+
     test("throws for unknown recording id", async () => {
       await expect(service.stopRecording("nonexistent")).rejects.toThrow(
         "No active recording found",

@@ -5,6 +5,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { serverConfig } from "../../utils/ServerConfig";
+import type { TapEffect } from "../../models/TapOnElementResult";
 import { SelectedElement } from "../../utils/interfaces/NavigationGraph";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
 import {
@@ -55,6 +56,8 @@ interface SelectionFinalizeRequest {
   currentObservation?: ObserveResult;
   previousObservation?: ObserveResult | null;
   element?: Element;
+  /** The tap flow's screen-change verdict, so a tap that navigated is never read as "selected". */
+  effect?: TapEffect;
   signal?: AbortSignal;
 }
 
@@ -127,8 +130,15 @@ export class SelectionStateTracker {
   }
 
   async finalize(request: SelectionFinalizeRequest): Promise<SelectedElement[]> {
-    const { selectionState, currentObservation, previousObservation, element, action, signal } =
-      request;
+    const {
+      selectionState,
+      currentObservation,
+      previousObservation,
+      element,
+      effect,
+      action,
+      signal,
+    } = request;
     if (!selectionState || !currentObservation || !element) {
       return [];
     }
@@ -143,6 +153,7 @@ export class SelectionStateTracker {
       currentObservation,
       previousObservation,
       tappedElement: element,
+      tapEffect: effect,
       beforeScreenshotPath: selectionState.beforeScreenshotPath,
       afterScreenshotPath,
     };

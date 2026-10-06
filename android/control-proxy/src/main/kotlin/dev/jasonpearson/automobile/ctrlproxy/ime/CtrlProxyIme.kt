@@ -225,24 +225,48 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   /** True when an editor is bound to this keyboard and its input connection is live. */
   fun hasLiveInputConnection(): Boolean = isInputStarted && currentInputConnection != null
 
+  /** What [performEditorAction] did, reported on the main thread. */
+  sealed interface EditorActionOutcome {
+    /** [actionId] was sent; [handled] is the editor's answer (false: it did not run anything). */
+    data class Sent(val actionId: Int, val handled: Boolean) : EditorActionOutcome
+
+    /** The editor declares no action for the request (see the `resolveActionId` argument). */
+    object NoEditorAction : EditorActionOutcome
+
+    /** The keyboard no longer has a live input connection (it was restored or the editor left). */
+    object NoConnection : EditorActionOutcome
+  }
+
   /**
-   * Delivers [actionId] (an `EditorInfo.IME_ACTION_*`) to the bound editor exactly as the
-   * keyboard's action key does, so the app's `OnEditorActionListener` / Compose `KeyboardActions`
-   * runs and the app decides where focus goes. [onResult] runs on the main thread with false when
-   * there is no live input connection or the editor did not handle the action.
+   * Delivers an editor action to the bound editor exactly as the keyboard's action key does, so the
+   * app's `OnEditorActionListener` / Compose `KeyboardActions` runs and the app decides where focus
+   * goes. The id is chosen on the main thread, against the editor that is bound when the action
+   * runs, by [resolveActionId] from that editor's `EditorInfo.imeOptions` (null: the editor has no
+   * action to run). [onResult] runs on the main thread.
    */
-  fun performEditorAction(actionId: Int, onResult: (Boolean) -> Unit) {
+  fun performEditorAction(
+    resolveActionId: (imeOptions: Int) -> Int?,
+    onResult: (EditorActionOutcome) -> Unit,
+  ) {
     mainHandler.post {
       val connection = if (isInputStarted) connectionAdapter() else null
+      if (connection == null) {
+        onResult(EditorActionOutcome.NoConnection)
+        return@post
+      }
+      val actionId = resolveActionId(currentInputEditorInfo?.imeOptions ?: 0)
+      if (actionId == null) {
+        onResult(EditorActionOutcome.NoEditorAction)
+        return@post
+      }
       val handled =
-        connection != null &&
-          try {
-            connection.performEditorAction(actionId)
-          } catch (e: Exception) {
-            Log.w(TAG, "performEditorAction($actionId) threw", e)
-            false
-          }
-      onResult(handled)
+        try {
+          connection.performEditorAction(actionId)
+        } catch (e: Exception) {
+          Log.w(TAG, "performEditorAction($actionId) threw", e)
+          false
+        }
+      onResult(EditorActionOutcome.Sent(actionId, handled))
     }
   }
 

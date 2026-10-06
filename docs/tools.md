@@ -1054,8 +1054,15 @@ focus directly (skipping disabled, invisible and non-focusable fields), and the
 other keys use the accessibility IME-enter action. The command result reports
 the `mechanism` used (`editor-action`, `focus-traversal`, `ime-enter`,
 `keycode-enter`); a successful `focus-traversal` also carries a warning that the
-field's own handler did not run. `next` and `previous` succeed only when the
-focused input actually changed.
+field's own handler did not run. `done`, `go`, `send` and `search` all mean
+"submit": with the keyboard bound, the field's own configured action is sent
+(`done` on a field declaring `actionSearch` searches), reported as `editorAction`;
+a field with no action, or a multi-line field that keeps Enter for a newline,
+gets the same Enter fallback as the no-keyboard path. `next` and `previous` stay
+literal and succeed when the focused input changed or focus left the field
+entirely (the app moved on); an unchanged or unreadable focus, or a timed-out
+dispatch, is a failure with `retryable: false` because the app's handler may
+already have run.
 
 `sendKeys.container` accepts the same nested chain: the outermost scope resolves
 first, then each inner container and the field resolve among strict descendants

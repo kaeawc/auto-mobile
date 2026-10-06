@@ -498,6 +498,9 @@ interface WsImeActionResultMessage extends WsRequestBase {
   type: "ime_action_result";
   action: string;
   mechanism?: ImeActionMechanism;
+  /** Present and false when the action was dispatched but its effect was not confirmed. */
+  retryable?: boolean;
+  editorAction?: string;
 }
 
 interface WsSelectAllResultMessage extends WsRequestBase {
@@ -5495,6 +5498,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         ...(message.mechanism ? { mechanism: message.mechanism } : {}),
+        ...(message.editorAction ? { editorAction: message.editorAction } : {}),
+        // Dispatched but unconfirmed (focus unchanged, wait timed out): a retry re-delivers it.
+        ...(message.retryable === false ? { retryable: false } : {}),
         perfTiming: message.perfTiming,
       })),
 

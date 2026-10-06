@@ -278,6 +278,8 @@ export interface A11ySetTextResult extends BaseResult {
 export type A11yImeActionResult = ActionTimingResult & {
   /** How the service delivered the action; absent from older APKs and from early failures. */
   mechanism?: ImeActionMechanism;
+  /** The `IME_ACTION_*` the keyboard sent (the field's own action for done/go/send/search). */
+  editorAction?: string;
 };
 
 /** Select all result from accessibility service */

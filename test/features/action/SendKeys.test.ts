@@ -359,6 +359,115 @@ describe("SendKeys IME failure after typing", () => {
     }
   });
 
+  test.each([
+    {
+      name: "done that ran the field's own search action says so",
+      key: "done",
+      wire: { success: true, mechanism: "editor-action", editorAction: "search" },
+      success: true,
+      editorAction: "search",
+      retryable: undefined,
+      warning: "ran the field's own 'search' action",
+    },
+    {
+      name: "done that ran done reports it without a warning",
+      key: "done",
+      wire: { success: true, mechanism: "editor-action", editorAction: "done" },
+      success: true,
+      editorAction: "done",
+      retryable: undefined,
+      warning: undefined,
+    },
+    {
+      name: "next whose outcome is unconfirmed is not retryable",
+      key: "next",
+      wire: {
+        success: false,
+        mechanism: "editor-action",
+        retryable: false,
+        error: "IME action 'next' ... outcome is indeterminate. Do not retry automatically.",
+      },
+      success: false,
+      editorAction: undefined,
+      retryable: false,
+      warning: undefined,
+    },
+    {
+      name: "a rejected editor action stays retryable",
+      key: "done",
+      wire: {
+        success: false,
+        mechanism: "editor-action",
+        editorAction: "search",
+        error: "The editor did not handle IME action 'search'",
+      },
+      success: false,
+      editorAction: "search",
+      retryable: undefined,
+      warning: undefined,
+    },
+  ])("Android ime reply: $name (#10219)", async (testCase) => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+    adb.setScreenState(true);
+    const device = { ...androidDevice, deviceId: `ime-reply-${testCase.name.length}` };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      device,
+      adb,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        socket.send = (data: unknown) => {
+          const request = JSON.parse(String(data)) as Record<string, unknown>;
+          if (request.type === "request_ime_action") {
+            socket.simulateMessage(
+              JSON.stringify({
+                type: "ime_action_result",
+                requestId: request.requestId,
+                action: testCase.key,
+                totalTimeMs: 1,
+                ...testCase.wire,
+              }),
+            );
+          }
+        };
+        return socket;
+      },
+      timer,
+    );
+    const { client: textClient } = createTextClient();
+    textClient.ime = (action) => client.requestImeAction(action);
+    const observer = createObserver(focusedAndroidObservation("", {}, 1));
+    const executor = new DefaultSendKeysCommandExecutor(device, createAdbFactory(adb), observer, {
+      textClient,
+      timer,
+    });
+    const sendKeys = new SendKeys(device, undefined, {
+      executor,
+      observer,
+      timer,
+      timestampProvider: { now: async () => 0 },
+    });
+    try {
+      expect(await client.ensureConnected()).toBe(true);
+      const result = await sendKeys.execute([{ action: "key", key: testCase.key }]);
+      const command = result.commands[0];
+      expect(command.success).toBe(testCase.success);
+      expect(command.editorAction).toBe(testCase.editorAction);
+      expect(command.retryable).toBe(testCase.retryable);
+      if (testCase.warning) {
+        expect(command.warning).toContain(testCase.warning);
+      } else {
+        expect(command.warning).toBeUndefined();
+      }
+      if (testCase.retryable === false) {
+        expect(result.retryable).toBe(false);
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
   test("does not claim typing succeeded when the type step fails", async () => {
     const { client } = createTextClient();
     client.insert = async () => ({ success: false, error: "typing failed" });

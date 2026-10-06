@@ -281,20 +281,31 @@ class NodeLookupTest {
     verify(exactly = 1) { readOnly.recycle() }
   }
 
+  // ----- focusFirstTraversalTarget: each strategy falls through to the next (#10219) -----
+
+  private val focusIt: (AccessibilityNodeInfo) -> Boolean = { true }
+
   @Test
   fun `a traversal hint that points at a disabled node falls through to the next strategy`() {
     val disabledHint = field("hint", enabled = false)
     val viaSearch = field("search")
     val current = field("current")
+    val focused = mutableListOf<AccessibilityNodeInfo>()
 
-    val target =
-      selectTraversalTarget(listOf({ disabledHint }, { viaSearch }, { error("not reached") })) {
-        it === current
-      }
+    val outcome =
+      focusFirstTraversalTarget(
+        listOf({ disabledHint }, { viaSearch }, { error("not reached") }),
+        { it === current },
+        {
+          focused += it
+          true
+        },
+      )
 
-    assertSame(viaSearch, target)
+    assertEquals(TraversalOutcome.FOCUSED, outcome)
+    assertEquals(listOf(viaSearch), focused)
     verify(exactly = 1) { disabledHint.recycle() }
-    verify(exactly = 0) { viaSearch.recycle() }
+    verify(exactly = 1) { viaSearch.recycle() }
   }
 
   @Test
@@ -302,18 +313,97 @@ class NodeLookupTest {
     val current = field("current")
     val other = field("other")
 
-    val target = selectTraversalTarget(listOf({ current }, { other })) { it === current }
+    val outcome =
+      focusFirstTraversalTarget(listOf({ current }, { other }), { it === current }, focusIt)
 
-    assertSame(other, target)
+    assertEquals(TraversalOutcome.FOCUSED, outcome)
     verify(exactly = 1) { current.recycle() }
+    verify(exactly = 1) { other.recycle() }
   }
 
   @Test
-  fun `no strategy yielding a reachable node returns null`() {
+  fun `a focusSearch result that is the host view and refuses focus falls through to tree order`() {
+    // Compose: focusSearch resolves to AndroidComposeView, which is focusable, visible and
+    // enabled (so it passes reachability) but refuses ACTION_FOCUS. Tree order must still run.
+    val current = field("current")
+    val host = field("host", editable = true)
+    val treeOrder = field("treeOrder")
+    val tried = mutableListOf<AccessibilityNodeInfo>()
+
+    val outcome =
+      focusFirstTraversalTarget(
+        listOf({ host }, { null }, { treeOrder }),
+        { it === current },
+        {
+          tried += it
+          it !== host
+        },
+      )
+
+    assertEquals(TraversalOutcome.FOCUSED, outcome)
+    assertEquals(listOf(host, treeOrder), tried)
+    verify(exactly = 1) { host.recycle() }
+    verify(exactly = 1) { treeOrder.recycle() }
+  }
+
+  @Test
+  fun `a strategy node that is not an editable input falls through without being focused`() {
+    val current = field("current")
+    val container = field("container", editable = false)
+    val treeOrder = field("treeOrder")
+    val tried = mutableListOf<AccessibilityNodeInfo>()
+
+    val outcome =
+      focusFirstTraversalTarget(
+        listOf({ container }, { treeOrder }),
+        { it === current },
+        {
+          tried += it
+          true
+        },
+      )
+
+    assertEquals(TraversalOutcome.FOCUSED, outcome)
+    assertEquals(listOf(treeOrder), tried)
+    verify(exactly = 1) { container.recycle() }
+  }
+
+  @Test
+  fun `every strategy refusing focus reports a refusal after trying them all`() {
+    val current = field("current")
+    val first = field("first")
+    val second = field("second")
+
+    val outcome =
+      focusFirstTraversalTarget(
+        listOf({ first }, { second }),
+        { it === current },
+        { false },
+      )
+
+    assertEquals(TraversalOutcome.REFUSED, outcome)
+    verify(exactly = 1) { first.recycle() }
+    verify(exactly = 1) { second.recycle() }
+  }
+
+  @Test
+  fun `no strategy yielding an eligible node reports no target`() {
     val invisible = field("invisible", visible = false)
 
-    assertNull(selectTraversalTarget(listOf({ null }, { invisible })) { false })
+    val outcome =
+      focusFirstTraversalTarget(listOf({ null }, { invisible }), { false }, { error("no") })
 
+    assertEquals(TraversalOutcome.NO_TARGET, outcome)
     verify(exactly = 1) { invisible.recycle() }
+  }
+
+  @Test
+  fun `a refusal followed by an ineligible node still reports a refusal`() {
+    val refuser = field("refuser")
+    val hidden = field("hidden", visible = false)
+
+    val outcome = focusFirstTraversalTarget(listOf({ refuser }, { hidden }), { false }, { false })
+
+    assertEquals(TraversalOutcome.REFUSED, outcome)
   }
 }

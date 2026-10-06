@@ -5730,9 +5730,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     companion object {
       /**
        * [imeConnectionAvailable] is true when [CtrlProxyIme] is bound to the focused editor with a
-       * live input connection. Then every action is delivered like the keyboard's action key; only
-       * without one do next/previous fall back to moving focus and done/go/send/search to
-       * `ACTION_IME_ENTER` (API 30+) or an Enter key event.
+       * live input connection. Then every action is delivered like the keyboard's action key (a
+       * submit word sends the editor's own action, see [resolveEditorActionId]); only without one
+       * do next/previous fall back to moving focus and done/go/send/search to `ACTION_IME_ENTER`
+       * (API 30+) or an Enter key event.
        */
       fun select(
         action: String,
@@ -5829,7 +5830,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           verdict.success,
           verdict.error,
           totalTime,
-          step.mechanism?.wire,
+          (verdict.mechanism ?: step.mechanism)?.wire,
+          retryable = verdict.retryable,
+          editorAction = verdict.editorAction,
         )
       }
     } catch (e: Exception) {
@@ -5857,20 +5860,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     focused: android.view.accessibility.AccessibilityNodeInfo,
     ime: CtrlProxyIme?,
   ): ImeActionVerdict {
-    val mechanism =
+    var mechanism =
       step.mechanism ?: return ImeActionVerdict(false, "Unsupported IME action '$action'")
     val before = focusIdentity(focused)
-    val dispatch =
+    var dispatch =
       when (step) {
         ImeActionStep.EDITOR_ACTION -> dispatchEditorAction(ime, action)
-        ImeActionStep.NEXT -> moveFocusByTraversal(root, focused, forward = true)
-        ImeActionStep.PREVIOUS -> moveFocusByTraversal(root, focused, forward = false)
-        ImeActionStep.IME_ENTER -> dispatchImeEnter(focused)
-        else -> dispatchKeycodeEnter()
+        else -> dispatchWithoutConnection(step, root, focused)
       }
-    val focusMoved =
+    if (dispatch.fallBack) {
+      // The editor has no action to run, or the keyboard went away since the liveness check: use
+      // the path the no-keyboard case uses, so the reply does not depend on the keyboard's timing.
+      val fallbackStep = ImeActionStep.select(action, true, android.os.Build.VERSION.SDK_INT, false)
+      mechanism = fallbackStep.mechanism ?: mechanism
+      dispatch = dispatchWithoutConnection(fallbackStep, root, focused)
+    }
+    val focusChange =
       if (dispatch.dispatched && isFocusMovingImeAction(action)) {
-        awaitFocusMoved(
+        awaitFocusChange(
           before = before,
           readFocus = ::readInputFocus,
           nowMs = { android.os.SystemClock.uptimeMillis() },
@@ -5879,39 +5886,36 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       } else {
         null
       }
-    return judgeImeAction(action, mechanism, dispatch, focusMoved)
+    return judgeImeAction(action, mechanism, dispatch, focusChange)
   }
 
+  private fun dispatchWithoutConnection(
+    step: ImeActionStep,
+    root: android.view.accessibility.AccessibilityNodeInfo?,
+    focused: android.view.accessibility.AccessibilityNodeInfo,
+  ): ImeDispatch =
+    when (step) {
+      ImeActionStep.NEXT -> moveFocusByTraversal(root, focused, forward = true)
+      ImeActionStep.PREVIOUS -> moveFocusByTraversal(root, focused, forward = false)
+      ImeActionStep.IME_ENTER -> dispatchImeEnter(focused)
+      else -> dispatchKeycodeEnter()
+    }
+
   /**
-   * `InputConnection.performEditorAction` on the main thread, awaited with a bound. A timeout is
-   * reported as indeterminate: the action may still be delivered later.
+   * `InputConnection.performEditorAction` on the main thread, awaited with a bound. The id is
+   * resolved against the editor bound when the action runs ([resolveEditorActionId]): next and
+   * previous are literal, a submit word runs the editor's own action. A timeout is reported as
+   * indeterminate: the action may still be delivered later.
    */
   private fun dispatchEditorAction(ime: CtrlProxyIme?, action: String): ImeDispatch {
-    val actionId = imeEditorActionId(action)
-    if (ime == null || actionId == null) {
-      return ImeDispatch(false, "No live input connection for IME action '$action'")
-    }
-    val handled = CompletableDeferred<Boolean>()
-    ime.performEditorAction(actionId) { handled.complete(it) }
+    if (ime == null) return ImeDispatch(false, fallBack = true)
+    val outcome = CompletableDeferred<CtrlProxyIme.EditorActionOutcome>()
+    ime.performEditorAction({ resolveEditorActionId(action, it) }) { outcome.complete(it) }
     val result =
       kotlinx.coroutines.runBlocking {
-        kotlinx.coroutines.withTimeoutOrNull(EDITOR_ACTION_TIMEOUT_MS) { handled.await() }
+        kotlinx.coroutines.withTimeoutOrNull(EDITOR_ACTION_TIMEOUT_MS) { outcome.await() }
       }
-    return when (result) {
-      true -> ImeDispatch(true)
-      false ->
-        ImeDispatch(
-          false,
-          "The editor did not handle IME action '$action' (no live input connection or the " +
-            "editor rejected it)",
-        )
-      null ->
-        ImeDispatch(
-          false,
-          "Timed out waiting for the keyboard to dispatch IME action '$action'; its outcome is " +
-            "indeterminate. Observe before retrying.",
-        )
-    }
+    return dispatchFromEditorOutcome(action, result)
   }
 
   /** API 30+: `ACTION_IME_ENTER` runs the editor's configured action on the focused node. */
@@ -5951,8 +5955,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val direction =
       if (forward) android.view.View.FOCUS_FORWARD else android.view.View.FOCUS_BACKWARD
     val word = if (forward) "next" else "previous"
-    val target =
-      selectTraversalTarget(
+    // Each strategy falls through to the next when its node is not an editable input or refuses
+    // focus: focusSearch can resolve to the host view itself (AndroidComposeView), which refuses
+    // ACTION_FOCUS, and tree order must still get its turn.
+    val outcome =
+      focusFirstTraversalTarget(
         strategies =
           listOf(
             { nodeOrNull("focusSearch") { focused.focusSearch(direction) } },
@@ -5964,18 +5971,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             { findAdjacentFocusableNode(root, focused, forward) },
           ),
         isCurrent = { it == focused || isSameNode(it, focused) },
+        focus = {
+          it.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS)
+        },
       )
-    if (target == null) {
-      Log.w(TAG, "No $word focusable node found")
-      return ImeDispatch(false, "No $word focusable node found")
-    }
-    val focusSuccess =
-      try {
-        target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS)
-      } finally {
-        target.recycle()
+    return when (outcome) {
+      TraversalOutcome.FOCUSED -> ImeDispatch(true)
+      TraversalOutcome.REFUSED -> ImeDispatch(false, "The $word field refused focus")
+      TraversalOutcome.NO_TARGET -> {
+        Log.w(TAG, "No $word focusable node found")
+        ImeDispatch(false, "No $word focusable node found")
       }
-    return ImeDispatch(focusSuccess, if (focusSuccess) null else "The $word field refused focus")
+    }
   }
 
   private fun nodeOrNull(
@@ -5992,13 +5999,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private fun focusIdentity(node: android.view.accessibility.AccessibilityNodeInfo): FocusIdentity =
     FocusIdentity(node.hashCode(), node.viewIdResourceName)
 
-  /** The input-focused node of the active window right now, or null when none can be read. */
-  private fun readInputFocus(): FocusIdentity? {
-    val activeRoot = rootInActiveWindow ?: return null
+  /** The input focus of the active window right now (see [FocusRead]). */
+  private fun readInputFocus(): FocusRead {
+    val activeRoot = rootInActiveWindow ?: return FocusRead.Unreadable
     val inputFocus =
       activeRoot.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
     return try {
-      inputFocus?.let(::focusIdentity)
+      inputFocus?.let { FocusRead.Input(focusIdentity(it)) } ?: FocusRead.NoInput
     } finally {
       inputFocus?.recycle()
       activeRoot.recycle()
@@ -7590,6 +7597,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     error: String?,
     totalTimeMs: Long,
     mechanism: String? = null,
+    retryable: Boolean = true,
+    editorAction: String? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
@@ -7607,6 +7616,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
           if (mechanism != null) {
             put("mechanism", mechanism)
+          }
+          // Dispatched but unconfirmed: a retry would deliver the action twice.
+          if (!retryable) {
+            put("retryable", false)
+          }
+          if (editorAction != null) {
+            put("editorAction", editorAction)
           }
         }
       }

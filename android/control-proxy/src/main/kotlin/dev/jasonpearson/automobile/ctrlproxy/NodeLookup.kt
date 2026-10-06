@@ -82,25 +82,48 @@ internal fun selectAdjacentFocusable(
   return target
 }
 
+/** How a traversal attempt ended. */
+internal enum class TraversalOutcome {
+  /** A target accepted focus. */
+  FOCUSED,
+  /** At least one eligible target was found but every one refused focus. */
+  REFUSED,
+  /** No strategy produced an eligible target. */
+  NO_TARGET,
+}
+
 /**
- * The first node the lazily evaluated [strategies] yield that focus may move to: not [isCurrent],
- * and reachable ([isReachableFocusTarget]). A rejected node is recycled and the next strategy is
- * tried, so a framework hint that points at a disabled or hidden node falls through to the next
- * source instead of being focused. The caller owns the returned node.
+ * Moves focus with the first of the lazily evaluated [strategies] whose node is an eligible target
+ * (not [isCurrent], an editable input, reachable by [isReachableFocusTarget]) AND accepts [focus].
+ * A node that is not eligible, or that refuses focus, is recycled and the next strategy runs, so a
+ * framework hint that resolves to the host view itself (for Compose, `AndroidComposeView`: it
+ * passes the reachability check but refuses `ACTION_FOCUS`), a disabled node or a hidden one never
+ * ends the attempt while a later strategy (ending at tree order) could still succeed. Each node is
+ * recycled exactly once, here.
  */
-internal fun selectTraversalTarget(
+internal fun focusFirstTraversalTarget(
   strategies: List<() -> AccessibilityNodeInfo?>,
   isCurrent: (AccessibilityNodeInfo) -> Boolean,
-): AccessibilityNodeInfo? {
+  focus: (AccessibilityNodeInfo) -> Boolean,
+): TraversalOutcome {
+  var refused = false
   for (strategy in strategies) {
     val node = strategy() ?: continue
-    if (
-      !isCurrent(node) &&
-        isReachableFocusTarget(node.isFocusable, node.isVisibleToUser, node.isEnabled)
-    ) {
-      return node
+    try {
+      if (!isEligibleTraversalTarget(node, isCurrent)) continue
+      if (focus(node)) return TraversalOutcome.FOCUSED
+      refused = true
+    } finally {
+      node.recycle()
     }
-    node.recycle()
   }
-  return null
+  return if (refused) TraversalOutcome.REFUSED else TraversalOutcome.NO_TARGET
 }
+
+private fun isEligibleTraversalTarget(
+  node: AccessibilityNodeInfo,
+  isCurrent: (AccessibilityNodeInfo) -> Boolean,
+): Boolean =
+  !isCurrent(node) &&
+    node.isEditable &&
+    isReachableFocusTarget(node.isFocusable, node.isVisibleToUser, node.isEnabled)

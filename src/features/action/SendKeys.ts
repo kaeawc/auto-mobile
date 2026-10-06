@@ -220,6 +220,8 @@ export interface SendKeysCommandResult extends BaseActionResult {
   warning?: string;
   /** Semantic IME keys on Android: how the action was delivered (see ImeActionMechanism). */
   mechanism?: ImeActionMechanism;
+  /** Semantic IME keys on the keyboard path: the editor action that was actually sent. */
+  editorAction?: string;
   backend?: "autoMobileIme";
   capability?: "semanticText";
   keyboard?: KeyboardIdentity;
@@ -323,6 +325,8 @@ export type TextActionResult = {
   sessionUnsafe?: boolean;
   /** Android IME actions only: how the action was delivered. */
   mechanism?: ImeActionMechanism;
+  /** Android IME actions only: the editor action sent through the input connection. */
+  editorAction?: string;
 };
 
 export interface SendKeysTextClient {
@@ -2435,16 +2439,34 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
  */
 function imeMechanismFields(
   key: string,
-  result: Pick<TextActionResult, "success" | "mechanism">,
-): Pick<SendKeysCommandResult, "mechanism" | "warning"> {
+  result: Pick<TextActionResult, "success" | "mechanism" | "editorAction">,
+): Pick<SendKeysCommandResult, "mechanism" | "editorAction" | "warning"> {
   if (!result.mechanism) {
     return {};
   }
-  const warning =
-    result.success && result.mechanism === "focus-traversal"
-      ? `IME action '${key}' moved focus directly (the AutoMobile keyboard was not the active input method); the field's own '${key}' handler did not run.`
-      : undefined;
-  return { mechanism: result.mechanism, ...(warning ? { warning } : {}) };
+  const warning = imeMechanismWarning(key, result);
+  return {
+    mechanism: result.mechanism,
+    ...(result.editorAction ? { editorAction: result.editorAction } : {}),
+    ...(warning ? { warning } : {}),
+  };
+}
+
+function imeMechanismWarning(
+  key: string,
+  result: Pick<TextActionResult, "success" | "mechanism" | "editorAction">,
+): string | undefined {
+  if (!result.success) {
+    return undefined;
+  }
+  if (result.mechanism === "focus-traversal") {
+    return `IME action '${key}' moved focus directly (the AutoMobile keyboard was not the active input method); the field's own '${key}' handler did not run.`;
+  }
+  // done/go/send/search all mean "submit": the keyboard sends the field's own configured action.
+  if (result.editorAction && result.editorAction !== key) {
+    return `IME action '${key}' ran the field's own '${result.editorAction}' action (done, go, send and search all submit through the action the field declares).`;
+  }
+  return undefined;
 }
 
 export class SendKeys {

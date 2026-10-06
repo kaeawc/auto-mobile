@@ -302,6 +302,12 @@ const startDeviceParametersSchema = z.object({
     .describe(
       "Exact Android Virtual Device name. Unlike name, this never selects a substring-matching AVD.",
     ),
+  cameraPosterPath: z
+    .string()
+    .optional()
+    .describe(
+      "Host PNG/JPG/JPEG poster image for the Android emulator back camera wall; cold boot only",
+    ),
   formFactor: z.enum(["phone", "tablet", "foldable"]).optional().describe("Device form factor"),
   requires: z
     .object({
@@ -831,6 +837,7 @@ export function createToolErrorResponse(
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
+  cameraPosterPath?: string;
   platform: "android" | "ios";
   minOsVersion?: string;
   maxOsVersion?: string;

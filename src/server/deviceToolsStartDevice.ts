@@ -1,8 +1,9 @@
+import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
-import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -105,6 +106,7 @@ async function waitForDevicePreparation<T>(
 }
 
 type BootPreparationOptions = {
+  autolockEnabled: boolean;
   deviceMatcher: DeviceMatcher;
   bootDeadlineMs: number;
   requestedIdentity: string;
@@ -249,6 +251,7 @@ const bootAndPrepareDevice = async (
   );
   const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
     const readinessResult = await prepareStartDeviceRunnerReadiness({
+      autolockEnabled: options.autolockEnabled,
       boot: state.boot!,
       args,
       operationName: budgets.operationName,
@@ -405,6 +408,7 @@ async function bindPreparedDevice(
     preparation,
     readinessResult,
     acquisitionReadinessKey,
+    autolockEnabled,
   }: BootPreparationOptions & {
     daemonState: DaemonState;
     preparation: BootPreparationState;
@@ -444,9 +448,7 @@ async function bindPreparedDevice(
     );
     // Recovery must revalidate the caller through the same autolock path;
     // a preserved UUID alone is not proof that this client owns the session.
-    // Read the flag once so the reuse decision below cannot disagree with
-    // the readiness recording that follows it.
-    const autolockEnabled = isDevicePoolAutolockEnabled();
+    // Reuse the acquisition snapshot for recovery, binding, and readiness recording.
     const boundSessionId =
       readinessResult.preservedSessionId && !autolockEnabled
         ? readinessResult.preservedSessionId
@@ -474,6 +476,7 @@ async function bindPreparedDevice(
                     releaseReadinessReservations.map((reservation) => reservation.owner),
                   ),
                   verifiedAndroidAvdIdentity: verifiedWarmAndroidAvdIdentity,
+                  autolockEnabled,
                   achievedReadiness: "automationReady",
                   collectCancellationSettlement: (settlement) => {
                     state.bindingSettlements.push(settlement);
@@ -570,11 +573,13 @@ async function bindBootedDeviceSession(
   sourceImage?: DeviceInfo,
   childProcess?: ChildProcess | null,
   {
+    autolockEnabled = captureAutolockPolicy(getDeviceToolsDependencies().env),
     readinessReservationOwners,
     verifiedAndroidAvdIdentity,
     achievedReadiness = "automationReady",
     collectCancellationSettlement,
   }: {
+    autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
     verifiedAndroidAvdIdentity?: DeviceInfo;
     achievedReadiness?: DeviceReadinessLevel;
@@ -584,7 +589,7 @@ async function bindBootedDeviceSession(
   // Reserve the exact ready device before resource notifications publish it
   // to concurrent allocators.
   const daemonState = DaemonState.getInstance();
-  if (isDevicePoolAutolockEnabled() && daemonState.isInitialized()) {
+  if (autolockEnabled && daemonState.isInitialized()) {
     const autolockSessionId = await daemonState
       .getDevicePool()
       .autolockDevice(
@@ -598,6 +603,7 @@ async function bindBootedDeviceSession(
         verifiedAndroidAvdIdentity,
         achievedReadiness,
         collectCancellationSettlement,
+        { autolockEnabled },
       );
     if (autolockSessionId) {
       // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before

@@ -1,8 +1,17 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import os from "node:os";
 import path from "node:path";
-import { existsSync, promises as fsPromises, statSync } from "node:fs";
+import { promises as fsPromises } from "node:fs";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -160,7 +169,11 @@ describe("videoRecording tool segmentation branch", () => {
     setSegmentedSessionTimer(segmentTimer);
   });
 
+  let writeFileSpy: ReturnType<typeof spyOn<typeof fsPromises, "writeFile">> | undefined;
+
   afterEach(() => {
+    writeFileSpy?.mockRestore();
+    writeFileSpy = undefined;
     displayTransitions.reset("tool-foldable");
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
@@ -988,6 +1001,20 @@ describe("videoRecording tool segmentation branch", () => {
       },
     });
 
+    // Observe the auto-stop's manifest write; the spy still performs the real write. The
+    // deferred adopts the write's own promise, so awaiting it waits for the bytes to land.
+    const manifestWritten = Promise.withResolvers<void>();
+    const realWriteFile = fsPromises.writeFile.bind(fsPromises);
+    writeFileSpy = spyOn(fsPromises, "writeFile").mockImplementation(
+      (...args: Parameters<typeof fsPromises.writeFile>) => {
+        const write = realWriteFile(...args);
+        if (String(args[0]).endsWith("segments.json")) {
+          manifestWritten.resolve(write);
+        }
+        return write;
+      },
+    );
+
     // Fire-and-forget usage: start a segmented recording with a maxDuration bound and
     // never call stop. The session-level auto-stop must fire AND clean itself out of the
     // registry — otherwise the dead entry leaks and its stale segments resurface later.
@@ -1018,16 +1045,9 @@ describe("videoRecording tool segmentation branch", () => {
     // The auto-stop persists the same manifest a caller-driven stop would (#10018): both
     // segments in order, with the warning the second segment carried.
     const manifestPath = path.join(fakeSegmentDir, "segments.json");
-    // A real file write needs event-loop turns, which a microtask-only waitFor never yields.
-    // (Non-empty, not just present: the file is created before its bytes land.)
-    for (
-      let turn = 0;
-      turn < 200 && !(existsSync(manifestPath) && statSync(manifestPath).size > 0);
-      turn++
-    ) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    expect(existsSync(manifestPath)).toBe(true);
+    // The write is real I/O, so wait for its own completion rather than polling event-loop
+    // turns: a turn cap can run out before the thread pool answers on a loaded runner.
+    await manifestWritten.promise;
     const manifest = JSON.parse(await fsPromises.readFile(manifestPath, "utf8")) as {
       sessionId: string;
       segmentCount: number;

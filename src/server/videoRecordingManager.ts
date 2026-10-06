@@ -1515,7 +1515,7 @@ async function interruptVideoRecordingWithDependencies(
   recordingId: string,
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
-  const { recordingRepository, now } = deps;
+  const { recordingRepository, now, statFileSize } = deps;
   clearAutoStop(recordingId);
   clearInProgressSizeCap(recordingId);
 
@@ -1539,7 +1539,8 @@ async function interruptVideoRecordingWithDependencies(
     status: "interrupted",
     endedAt,
     lastAccessedAt: endedAt,
-    sizeBytes: await getFileSize(record.filePath),
+    // Through the injected seam, not a direct fs.stat, so an interrupt does no real I/O in tests.
+    sizeBytes: await statFileSize(record.filePath),
     durationMs: calculateDurationMs(record.startedAt, endedAt),
     highlights,
     recordedPanel: record.recordedPanel,

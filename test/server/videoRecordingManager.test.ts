@@ -893,9 +893,37 @@ describe("videoRecordingManager", () => {
     expect(stopAttempts).toBe(2);
   });
 
+  /**
+   * Terminal finalization failures delete the recording directory and stat the output; both
+   * are real threadpool I/O by default, which a loaded runner can delay past the 5 s test
+   * ceiling for a test whose logic takes under a millisecond. Route them through the
+   * service's `fileSystem` and the manager's `statFileSize` seams instead.
+   */
+  const useHermeticFileSystem = async (): Promise<string[]> => {
+    const removed: string[] = [];
+    service = new VideoRecorderService({
+      backend: fakeBackend,
+      idGenerator: new FakeIdGenerator(),
+      archiveRoot,
+      securePermissions: new FakeSecurePermissions(false),
+      now: () => new Date(fakeTimer.now()),
+      fileSystem: {
+        rm: async (target) => {
+          removed.push(String(target));
+        },
+      },
+    });
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: service,
+      statFileSize: async () => 0,
+    });
+    return removed;
+  };
+
   test.each(["ios", "android"] as const)(
     "exited %s backend finalization failure is terminal through the manager",
     async (platform) => {
+      const removed = await useHermeticFileSystem();
       const device = { ...testDevice, platform };
       const active = await startVideoRecording({ device, maxDurationSeconds: 1 });
       const captureTimer = new FakeTimer();
@@ -961,6 +989,7 @@ describe("videoRecordingManager", () => {
       fakeTimer.advanceTime(60_000);
       await Promise.resolve();
       expect(stopAttempts).toBe(1);
+      expect(removed).toEqual([path.dirname(active.outputPath)]);
       await expect(startVideoRecording({ device })).resolves.toBeDefined();
       if (platform === "android") {
         expect(factory.getFakeClient().wasSpawned("rm /sdcard/empty.mp4")).toBe(true);
@@ -971,6 +1000,7 @@ describe("videoRecordingManager", () => {
   test.each(["ios", "android"] as const)(
     "terminal %s finalization failure releases ownership, cancels retries and allows restart",
     async (platform) => {
+      const removed = await useHermeticFileSystem();
       const device = { ...testDevice, platform };
       const active = await startVideoRecording({ device, maxDurationSeconds: 1 });
       let stopAttempts = 0;
@@ -991,6 +1021,7 @@ describe("videoRecordingManager", () => {
       expect(stopAttempts).toBe(1);
       expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
       expect(error).toBeInstanceOf(ActionableError);
+      expect(removed).toEqual([path.dirname(active.outputPath)]);
       await expect(startVideoRecording({ device })).resolves.toBeDefined();
     },
   );

@@ -1586,6 +1586,7 @@ export class RealObserveScreen implements ObserveScreen {
           initialMismatch.foreground,
           options,
           remainingMs,
+          { skipBackStack, displayId: requestedDisplayId ?? observedAndroid?.logicalId ?? 0 },
         );
         // The replacement has a new package; dialog confirmation belongs to it.
         confirmedFrameworkErrorDialog = undefined;
@@ -2049,13 +2050,19 @@ export class RealObserveScreen implements ObserveScreen {
     }
   }
 
-  /** One bounded hierarchy extraction; derived work and screenshots run later once. */
+  /**
+   * One bounded hierarchy extraction; derived work and screenshots run later once. The
+   * lock state and back stack sampled with the discarded window are re-read against the
+   * replacement (#9982), within the same budget and only when the replacement is applied.
+   */
   private async refreshKnownStaleHierarchy(
     result: ObserveResult,
     foreground: string,
     options: ObserveScreenExecuteOptions | undefined,
     remainingMs: number,
+    sideSamples: { skipBackStack: boolean; displayId: number },
   ): Promise<void> {
+    const startedAt = this.timer.now();
     const hierarchy = await this.readIndependentHierarchy(
       result.viewHierarchy?.updatedAt,
       options?.signal,
@@ -2073,6 +2080,79 @@ export class RealObserveScreen implements ObserveScreen {
       // Earlier back-stack/lock samples describe the discarded window.
       delete result.backStack;
       delete result.deviceLock;
+      await this.resampleAfterStaleWindowRecovery(result, {
+        ...sideSamples,
+        signal: options?.signal,
+        budgetMs: remainingMs - (this.timer.now() - startedAt),
+      });
+    }
+  }
+
+  /**
+   * Re-read the lock state and (unless the caller skipped it) the back stack for the
+   * window that replaced a stale one. The reads land on a scratch observation and are
+   * copied only if they finish inside the budget, so a read that loses the deadline
+   * cannot write onto the published result later. A failed or late read leaves the
+   * field absent.
+   */
+  private async resampleAfterStaleWindowRecovery(
+    result: ObserveResult,
+    options: {
+      skipBackStack: boolean;
+      displayId: number;
+      signal: AbortSignal | undefined;
+      budgetMs: number;
+    },
+  ): Promise<void> {
+    const { skipBackStack, displayId, signal, budgetMs } = options;
+    if (budgetMs <= 0) {
+      return;
+    }
+    const sampled: ObserveResult = {
+      ...result,
+      deviceLock: undefined,
+      backStack: undefined,
+      errors: undefined,
+    };
+    const abort = new AbortController();
+    const readSignal = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
+    try {
+      await raceWithDeadline(
+        Promise.all([
+          this.deviceStateCollector.collectDeviceLock(sampled, readSignal),
+          skipBackStack
+            ? Promise.resolve()
+            : this.deviceStateCollector.collectBackStack(
+                sampled,
+                new NoOpPerformanceTracker(),
+                readSignal,
+                displayId,
+              ),
+        ]),
+        {
+          timer: this.timer,
+          timeoutMs: budgetMs,
+          signal,
+          label: "Stale-window side-sample refresh",
+          onTimeout: () => abort.abort(),
+        },
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(
+        `[ObserveScreen] Stale-window side-sample refresh failed: ${describeError(error)}`,
+        error,
+      );
+      return;
+    }
+    if (sampled.deviceLock) {
+      result.deviceLock = sampled.deviceLock;
+    }
+    if (sampled.backStack) {
+      result.backStack = sampled.backStack;
+    }
+    for (const error of sampled.errors ?? []) {
+      appendObserveError(result, error);
     }
   }
 

@@ -51,6 +51,7 @@ import {
 } from "./BaseVisualChange";
 import {
   type CoordinateTapClient,
+  type IosCoordinateTapClient,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
   isStaleFrameContextRejection,
@@ -338,7 +339,7 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   talkBackStrategy?: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   androidClient?: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> };
-  iosClient?: CoordinateTapClient;
+  iosClient?: IosCoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   invalidateIosCache?: () => void;
@@ -368,7 +369,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidClient: CoordinateTapClient<() => void> & {
     supportsCommand?: (name: string) => Promise<boolean>;
   };
-  private readonly iosClient: CoordinateTapClient;
+  private readonly iosClient: IosCoordinateTapClient;
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
@@ -689,6 +690,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       point.y,
       tapDurationMs(options, "ios"),
       frameContext,
+      { signal },
     );
     onTapDelivered();
     try {
@@ -1239,14 +1241,10 @@ export class TapAtCoordinate extends BaseVisualChange {
     await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
     throwIfAborted(signal);
     this.assertDisplayRevisionCurrent(revision);
-    await this.iosCoordinateTap(
-      this.iosClient,
-      point.x,
-      point.y,
-      IOS_TAP_DURATION_MS,
-      undefined,
-      "second tap",
-    );
+    await this.iosCoordinateTap(this.iosClient, point.x, point.y, IOS_TAP_DURATION_MS, undefined, {
+      failureLabel: "second tap",
+      signal,
+    });
   }
 
   private resolveCoordinates(
@@ -1351,7 +1349,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           point.y,
           duration,
           second ? undefined : observation.viewHierarchy?.frameContext,
-          second ? "second tap" : "tap",
+          { failureLabel: second ? "second tap" : "tap", signal },
         );
         context.onTapDelivered();
       } else {

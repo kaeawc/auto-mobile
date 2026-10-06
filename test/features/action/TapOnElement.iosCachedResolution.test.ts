@@ -98,7 +98,7 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
     });
   }
   const dispatch = spyOn(client, "requestTapCoordinates");
-  const run = (searchMs = 100, deadline?: number) => {
+  const run = (searchMs = 100, deadline?: number, signal?: AbortSignal) => {
     const options = {
       text: "Target",
       action: deadline === undefined ? ("longPress" as const) : ("tap" as const),
@@ -108,8 +108,8 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
       searchUntil: { duration: searchMs },
     };
     return tap instanceof TapOnElement
-      ? tap.execute(options, undefined, undefined, undefined, { requestDeadlineMs: deadline })
-      : tap.execute(options, undefined, undefined, { requestDeadlineMs: deadline });
+      ? tap.execute(options, undefined, signal, undefined, { requestDeadlineMs: deadline })
+      : tap.execute(options, undefined, signal, { requestDeadlineMs: deadline });
   };
   return {
     tap,
@@ -155,6 +155,16 @@ for (const tool of ["tapOn", "tapAny"] as const) {
         expect(h.dispatch.mock.calls[0]?.slice(0, 2)).toEqual([250, 230]);
         expect(h.sync).toHaveBeenCalledTimes(1);
         expect(h.sync.mock.calls[0]?.[4]).toEqual({ forceCapture: true });
+      } finally {
+        h.restore();
+      }
+    });
+    test("the request's signal reaches the coordinate tap (#9971)", async () => {
+      const h = harness(tool);
+      try {
+        const controller = new AbortController();
+        expect((await h.run(100, undefined, controller.signal)).success).toBe(true);
+        expect(h.dispatch.mock.calls[0]?.[6]).toBe(controller.signal);
       } finally {
         h.restore();
       }

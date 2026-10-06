@@ -17,4 +17,8 @@ export interface SwipeResult extends BaseActionResult {
   fallbackReason?: string; // If a11y failed and fell back to ADB, this explains why
   /** The swipe was dispatched but its outcome is unknown; observe before retrying. */
   outcomeIndeterminate?: boolean;
+  /** A multi-leg gesture delivered part of its effect (boomerang: forward landed, return did not). */
+  partialApplication?: boolean;
+  /** `false` when repeating the call would apply the already-delivered part again. */
+  retryable?: boolean;
 }

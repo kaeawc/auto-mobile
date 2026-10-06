@@ -33,6 +33,8 @@ export interface VoiceOverActivationOptions {
 export interface CtrlProxyRequestActionOptions {
   abortSignal?: AbortSignal;
   duration?: number;
+  /** Fires once the request frame was written; after it the action may have run. */
+  onDispatch?: () => void;
 }
 
 /**
@@ -109,7 +111,8 @@ export class CtrlProxyVoiceOver {
     perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
-    return sendCommand<CtrlProxyActionResult>(this.context, {
+    let dispatched = false;
+    const result = await sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "action",
       responseType: "action",
       messageType: "request_action",
@@ -123,9 +126,22 @@ export class CtrlProxyVoiceOver {
       perf,
       cancelScreenshotBackoff: false,
       abortSignal: options?.abortSignal,
+      onDispatch: () => {
+        dispatched = true;
+        options?.onDispatch?.();
+      },
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
+      // A write that was never answered may have run: say so, and do not invite a retry.
+      timeoutError: () => ({
+        success: false,
+        error: "Timeout waiting for action_result",
+        ...(dispatched ? { dispatched, acknowledged: false, retryable: false } : {}),
+      }),
     });
+    // Only the unanswered path above sets acknowledged:false; any reply confirms the runner answered.
+    return dispatched
+      ? { ...result, dispatched, acknowledged: result.acknowledged ?? true }
+      : result;
   }
 
   /**

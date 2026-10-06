@@ -82,6 +82,7 @@ case "$1 $2" in
       */check-runs/15/annotations*|*/check-runs/16/annotations*|*/check-runs/17/annotations*) annotation_response '[]' ;;
       */actions/jobs/6/logs) printf 'readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/45/logs) printf '%s\n' "$FAKE_EMULATOR_LOG" ;;
+      */actions/jobs/46/logs) printf '%s\n' "$FAKE_RUNNER_LOG" ;;
       */actions/jobs/44/logs) printf '%s\n' "$FAKE_XCTEST_LOG" ;;
       */actions/jobs/35/logs) printf 'First emulator attempt failed; captured diagnostics follow:\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=241\nStarting emulator retry attempt 2.\ngetAndroid automation runner readiness failed: phase=runner-connect attempts=237: readiness phase exceeded the remaining deadline\n' ;;
       */actions/jobs/36/logs) printf 'getAndroid automation runner readiness failed: phase=runner-health attempts=4\n' ;;
@@ -769,6 +770,39 @@ startup_fixture() {
 @test "unrelated Node job cannot inherit emulator startup signatures" {
   startup_fixture "Node Unit Tests"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_EMULATOR_LOG=$'Error on ZipFile unknown archive\ncould not connect to TCP port 5554: Connection refused' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"RERUN-DONT-FIX"* ]]
+}
+
+runner_shutdown_fixture() {
+  local job="$1"
+  jq -n --arg job "$job" '{headBranch:"work/ci", jobs:[{databaseId:46,name:$job,conclusion:"failure",steps:[{name:"Run build/test lane",conclusion:"failure"}]}]}' > "$FIXTURE"
+}
+
+# Real capture from #10015 (runs 37396277713 and 37398684911).
+RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.\n##[error]Process completed with exit code 143.'
+
+@test "classifies a hosted runner shutdown signal as a rerun infrastructure failure on any job" {
+  for job in "Node TypeScript Build and Test (ubuntu-latest)" "JUnit Runner Kotlin Consumer Compatibility"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG="$RUNNER_SHUTDOWN_LOG" bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — hosted runner shut down mid-job (exit 143), infrastructure failure"* ]]
+    [[ "$output" != *"UNKNOWN"* ]]
+  done
+}
+
+@test "classifies a runner shutdown signal in a timestamped ANSI log line" {
+  runner_shutdown_fixture "Node TypeScript Build and Test (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'2026-10-06T01:02:03.4567890Z \033[31m'"$RUNNER_SHUTDOWN_LOG"$'\033[0m' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RERUN-DONT-FIX — hosted runner shut down mid-job"* ]]
+}
+
+@test "does not classify a bare exit code 143 without the runner shutdown message" {
+  runner_shutdown_fixture "Node TypeScript Build and Test (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'expect(received).toBe(expected) ... someRealRegression assertion failed\n##[error]Process completed with exit code 143.' bash "$SCRIPT" 123
   [ "$status" -eq 0 ]
   [[ "$output" == *"UNKNOWN"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]

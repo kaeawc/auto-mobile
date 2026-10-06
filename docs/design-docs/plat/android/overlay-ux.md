@@ -274,6 +274,38 @@ preserve any text-field, selection, or sheet binding's scalar type at runtime;
 renderer enforcement is part of #9300. Event sequence and transmission are
 #9298/#9303. Dismissal does not remove the host's safety responsibilities.
 
+### Host helper: showVariants
+
+The `overlay` tool's `showVariants` action composes public nodes and actions:
+one helper pager named `variants`, with one page per alternative. Fullscreen
+pages stack their content and control row in a box. Floating pages contain only
+the control row, leaving the app live underneath; applying alternatives through
+an SDK is outside this MVP. Controls sit inside each page so `{page}` and
+`{pageCount}` resolve against their enclosing pager. Arrows use `setPage`;
+pick uses only `emit("selected", {index, label?})`, with a static zero-based
+page index and optional label. It does not dismiss on pick.
+
+Variants supply exactly one existing asset-image reference or public node
+fragment, plus an optional label of at most 256 characters. The helper accepts
+1–12 variants and validates all supplied content in carousel context against
+contract limits, including before floating content is omitted.
+Image variants reference asset ids; `display` and `assets` (file paths, screenshot
+observations) are accepted exactly as for `show` and go through the same display
+resolution, upload-before-show staging and single missing-asset re-send of the
+composed spec.
+`opacity` passes through; floating placement defaults to `bottomCenter` with
+zero offset. The composed spec goes through the ordinary `show` path, so the
+event subscription, fresh sequence epoch, replacement of another shown overlay
+and host status are exactly those of `show`. `waitForSelection` then waits on
+the coordinator's `awaitEvent` wait (default 30000 ms; the tool's `timeoutMs`
+bounds only the show request), so timeout, request cancellation, session
+release, device removal and a device-side dismissal all settle it. The MCP
+request deadline for such a call is the show stage (with `assets`, the upload-and-send
+budget of `show`) plus the 30 s wait plus 30 s of headroom. Whether
+the Kotlin renderer resolves `{page}`/`{pageCount}` inside a pager and emits the
+static payload is not verified without a device. See
+[tool inputs and results](../../../tools.md#overlay) for the complete helper surface.
+
 ## Anchors
 
 #9316 specifies semantics but not exact field names. These are the chosen strict

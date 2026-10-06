@@ -1,3 +1,7 @@
+import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
+import { FakeFeatureFlagRepository } from "../../fakes/FakeFeatureFlagRepository";
+import { outputReductionFlagsToArgs } from "../../../src/utils/outputReductionFlags";
+import { parseDaemonArgs } from "../../../src/daemon/cli/daemonArgs";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DefaultFeatureFlagApplier } from "../../../src/features/featureFlags/FeatureFlagApplier";
 import {
@@ -9,7 +13,7 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 /**
  * EC2: DefaultFeatureFlagApplier.apply routes each output-reduction key to the
  * matching serverConfig setter (the feature-flag pipeline).
- * EC4: FEATURE_FLAG_DEFINITIONS registers each key, default false.
+ * EC4: FEATURE_FLAG_DEFINITIONS registers compact metadata default true and other keys false.
  */
 const CASES: Array<{ key: FeatureFlagKey; read: () => boolean }> = [
   {
@@ -30,7 +34,7 @@ describe("DefaultFeatureFlagApplier output-reduction flags", () => {
 
   afterEach(() => {
     for (const { key } of CASES) {
-      applier.apply(key, false);
+      applier.apply(key, key === "actions-compact-metadata");
     }
   });
 
@@ -46,10 +50,31 @@ describe("DefaultFeatureFlagApplier output-reduction flags", () => {
 
 describe("FEATURE_FLAG_DEFINITIONS output-reduction flags", () => {
   for (const { key } of CASES) {
-    test(`registers "${key}" default off`, () => {
+    test(`registers "${key}" with its default`, () => {
       const def = FEATURE_FLAG_DEFINITIONS.find((d) => d.key === key);
       expect(def).toBeDefined();
-      expect(def?.defaultValue).toBe(false);
+      expect(def?.defaultValue).toBe(key === "actions-compact-metadata");
     });
+  }
+});
+
+test("persisted compact metadata false restores full metadata and relays an explicit off", async () => {
+  const previous = serverConfig.isActionsCompactMetadataEnabled();
+  const repository = new FakeFeatureFlagRepository();
+  await repository.upsertFlag("actions-compact-metadata", false);
+  const service = new FeatureFlagService(repository, new DefaultFeatureFlagApplier());
+  try {
+    await service.initialize();
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
+    expect(
+      parseDaemonArgs(
+        outputReductionFlagsToArgs({
+          actionsCompactMetadata: service.isEnabled("actions-compact-metadata"),
+        }),
+        {},
+      ).actionsCompactMetadata,
+    ).toBe(false);
+  } finally {
+    serverConfig.setActionsCompactMetadataEnabled(previous);
   }
 });

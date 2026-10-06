@@ -253,12 +253,22 @@ describe("daemon startup-option propagation", () => {
     expect(args).toContain("--no-retrieve-interactive-windows");
   });
 
+  test("compact metadata false survives the manager arg builder", () => {
+    const args = serialize({ actionsCompactMetadata: false });
+    expect(args).toContain("--no-actions-compact-metadata");
+    expect(parseDaemonArgs(args, {}).actionsCompactMetadata).toBe(false);
+  });
+
   test("no flags -> no propagation args beyond the base launch", () => {
     // A bare options object must not emit any of the propagating flags.
     const args = serialize({});
     for (const field of PROPAGATING_BOOLEAN_FLAGS) {
       const parsed = parseDaemonArgs(args);
-      expect(parsed[field]).toBeUndefined();
+      if (field === "actionsCompactMetadata") {
+        expect(parsed[field]).toBe(true);
+      } else {
+        expect(parsed[field]).toBeUndefined();
+      }
     }
   });
 

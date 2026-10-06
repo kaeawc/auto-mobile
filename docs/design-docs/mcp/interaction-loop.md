@@ -71,16 +71,18 @@ capture passed the gate:
 In diff mode (`--actions-diff-observe`) the flag rides on the diff alongside
 `activeWindow` and `freshness`, so one accessor works in both modes.
 
-## Opt-in compact action metadata
+## Default compact action metadata
 
-`--actions-compact-metadata` (or `AUTOMOBILE_ACTIONS_COMPACT_METADATA=1`,
-feature-flag key `actions-compact-metadata`) defaults off. Default response bytes
-are unchanged. With an external action call's `sessionUuid` and session store,
+Compact action metadata defaults on. Opt out with
+`AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`, or
+feature-flag key `actions-compact-metadata` set to false. The existing
+`--actions-compact-metadata` explicitly enables it. With an external action call's `sessionUuid` and session store,
 this omits each unchanged `observation` block independently: `insets`,
 `systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,
 `accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`
 and `viewHierarchy.systemInsets` copies follow the same rule independently.
-Values must be deeply equal; timestamps inside a block count as changes.
+Values must be deeply equal except `backStack.capturedAt`. Stale freshness,
+unstable gfx metrics, and partial back stacks remain inline even if unchanged.
 The first action response sends available blocks in full, changes resend the
 changed block, and a new session or any device switch sends available blocks
 in full again. `screenSize`, `display`, and observation/device join keys remain

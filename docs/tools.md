@@ -2256,3 +2256,18 @@ error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or
 `restored`; degraded network writes report capability `partial`. Setter TTL
 rejection and biometric capture failures also return structured failure payloads
 without MCP `isError`.
+
+### Compact action metadata
+
+Action responses compact unchanged metadata by default within a session and device:
+`observation.insets`, `systemInsets`, `backStack`, `gfxMetrics`,
+`displayedTimeMetrics`, `deviceLock`, `accessibilityState`, and `freshness`, plus
+raw `viewHierarchy.insets` and `viewHierarchy.systemInsets`. First delivery,
+a new session, and every device switch send available blocks in full; changed
+blocks reappear. Stale freshness, unstable gfx metrics, and partial back stacks
+remain inline. `backStack.capturedAt` alone does not count as a change.
+A duplicate top-level `element` is omitted when identical to
+`selectedElement.matchedElement` and not required by the output schema.
+Use `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`,
+or feature flag `actions-compact-metadata=false` to restore full metadata.
+`observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).

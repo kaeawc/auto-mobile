@@ -11,13 +11,13 @@ import {
  * This is the forward half of the MCP-process -> daemon-process hand-off.
  */
 describe("parseDaemonArgs output-reduction flags", () => {
-  test("defaults are undefined when no flag is passed", () => {
+  test("compact metadata defaults on; other options are undefined", () => {
     const options = parseDaemonArgs([]);
     expect(options.observeResultIncludeElements).toBeUndefined();
     expect(options.toolResultsNoStructuredContent).toBeUndefined();
     expect(options.actionsDiffObserve).toBeUndefined();
     expect(options.actionsNoObserve).toBeUndefined();
-    expect(options.actionsCompactMetadata).toBeUndefined();
+    expect(options.actionsCompactMetadata).toBe(true);
   });
 
   test("--observe-result-include-elements sets observeResultIncludeElements", () => {
@@ -80,7 +80,7 @@ describe("parseDaemonArgs output-reduction flags", () => {
  * hand-adjacent flag strings; this round-trip guards them from drifting apart.
  */
 describe("output-reduction daemon-arg round trip", () => {
-  test("outputReductionFlagsToArgs emits nothing when all flags are off", () => {
+  test("outputReductionFlagsToArgs emits nothing when no flags are specified", () => {
     expect(outputReductionFlagsToArgs({})).toEqual([]);
   });
 

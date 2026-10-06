@@ -1,3 +1,4 @@
+import { parseOutputReductionFlags } from "../../src/utils/outputReductionFlags";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -4778,13 +4779,16 @@ describe("actions-compact-metadata", () => {
     }
   }
 
-  test("default finalized bytes stay identical; missing session/store are also unchanged", () => {
+  test("opt-out finalized bytes stay identical; missing session/store are also unchanged", () => {
     emit();
     const snapshot = structuredClone(records);
     const reads = spyOn(store, "getActionMetadata");
     const writes = spyOn(store, "setActionMetadata");
     serverConfig.setActionsCompactMetadataEnabled(false);
-    const expected = JSON.stringify(emit());
+    const full = emit();
+    expectFull(full);
+    expect(structuredPayload(full).element).toEqual(element);
+    const expected = JSON.stringify(full);
     expect(JSON.stringify(emit())).toBe(expected);
     emit(action().observation as Record<string, unknown>, { name: "observe" });
     emit({ ...action(), success: false });
@@ -4799,7 +4803,10 @@ describe("actions-compact-metadata", () => {
     expect(JSON.stringify(emit(action(), { baselineStore: undefined }))).toBe(expected);
     expect(records.size).toBe(0);
   });
-  test("first full; identical second omits each block; changed block alone reappears", () => {
+  test("default compact: first full; identical second omits each block; changed block alone reappears", () => {
+    serverConfig.setActionsCompactMetadataEnabled(
+      parseOutputReductionFlags([], {}).actionsCompactMetadata,
+    );
     expectFull(emit());
     const repeated = observation(emit());
     for (const key of Object.keys(metadata)) {

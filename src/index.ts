@@ -378,7 +378,14 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
-      ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec): CliFeatureFlagOverride => [
+      ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
+        (spec) =>
+          !spec.disableCli ||
+          rawArgs.includes(spec.cli) ||
+          rawArgs.includes(spec.disableCli) ||
+          process.env[spec.env] === "0" ||
+          process.env[spec.env] === "1",
+      ).map((spec): CliFeatureFlagOverride => [
         spec.featureFlagKey,
         outputReduction[spec.field],
         spec.label,
@@ -397,12 +404,17 @@ async function main() {
       await featureFlagService.initialize();
 
       for (const [key, enabled, flagLabel, config] of cliOverrides) {
-        if (!enabled) {
+        if (!enabled && key !== "actions-compact-metadata") {
           continue;
         }
-        await featureFlagService.setFlag(key, true, config);
-        logger.info(`Feature flag enabled (${flagLabel})`);
+        await featureFlagService.setFlag(key, enabled, config);
+        logger.info(`Feature flag ${enabled ? "enabled" : "disabled"} (${flagLabel})`);
       }
+
+      // Preserve a persisted feature-flag opt-out in the daemon relay as well.
+      outputReduction.actionsCompactMetadata = featureFlagService.isEnabled(
+        "actions-compact-metadata",
+      );
 
       if (!navigationScreenshots) {
         await featureFlagService.setFlag("navigation-screenshots", false);

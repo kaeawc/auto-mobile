@@ -3747,6 +3747,7 @@ export class DaemonMcpProxy {
     if (
       this.boundSessionUuid === sessionUuid &&
       !this.terminalBoundSession &&
+      !this.closing &&
       !this.connected &&
       this.boundSessionUuidAt !== undefined &&
       this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs

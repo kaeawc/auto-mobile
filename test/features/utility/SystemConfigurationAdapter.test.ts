@@ -800,15 +800,13 @@ describe("SystemConfigurationAdapter", () => {
       );
     });
 
-    it("returns false when the time-zone read-back is null", async () => {
+    it("reports an unreadable time-zone read-back as indeterminate, not as not applied", async () => {
       const adb = new FakeAdbClient();
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
       const result = await adapter.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe(
-        'Read-back verification failed: expected "Asia/Tokyo" but got "null"',
-      );
+      expect(result.error).toContain("Time zone change outcome is indeterminate");
     });
 
     it("surfaces setprop failures for time-zone changes", async () => {

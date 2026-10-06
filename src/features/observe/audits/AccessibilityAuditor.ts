@@ -6,10 +6,9 @@ import { statAsync } from "../../../utils/io";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { ScreenshotCache } from "../../../utils/screenshot/ScreenshotCache";
 import { screenshotFileBelongsToDevice } from "../../../utils/screenshot/screenshotFormats";
-import { WcagAudit } from "../../accessibility/WcagAudit";
-import { DefaultElementParser } from "../../utility/ElementParser";
+import { WcagAudit, capAccessibilityViolations } from "../../accessibility/WcagAudit";
+import { projectAuditElements } from "../../accessibility/AuditElementProjection";
 import type { BootedDevice, ObserveResult } from "../../../models";
-import type { Element } from "../../../models/Element";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { AccessibilityAuditConfig } from "../../../models/AccessibilityAudit";
 
@@ -137,11 +136,11 @@ export class AccessibilityAuditor {
         // Initialize audit
         const wcagAudit = new WcagAudit();
 
-        // Extract elements directly from view hierarchy for audit
-        const elementParser = new DefaultElementParser();
-        const allElements: Element[] = elementParser
-          .flattenViewHierarchy(result.viewHierarchy!)
-          .map((entry) => entry.element);
+        // Extract elements directly from view hierarchy for audit, noting which
+        // clickable containers are labelled by merged descendant text.
+        const { elements: allElements, descendantLabelled } = projectAuditElements(
+          result.viewHierarchy!,
+        );
 
         // Get screenshot path if available (from TakeScreenshot cache)
         const screenshotPath = await this.screenshotPathResolver();
@@ -153,11 +152,15 @@ export class AccessibilityAuditor {
           screenshotPath,
           result.activeWindow!.appId,
           auditConfig,
-          { density: result.viewHierarchy!.density, windows: result.viewHierarchy!.windows },
+          {
+            density: result.viewHierarchy!.density,
+            windows: result.viewHierarchy!.windows,
+            descendantLabelled,
+          },
         );
 
-        // Attach audit result to observe result
-        result.accessibilityAudit = auditResult;
+        // Attach audit result to observe result, bounded for output
+        result.accessibilityAudit = capAccessibilityViolations(auditResult);
 
         if (!auditResult.summary.passed) {
           logger.warn(

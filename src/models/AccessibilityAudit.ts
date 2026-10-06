@@ -137,8 +137,23 @@ export interface AccessibilityAuditResult {
   /** Summary statistics */
   summary: AccessibilityAuditSummary;
 
-  /** List of violations (after baseline filtering) */
+  /**
+   * List of violations (after baseline filtering). Bounded for observe output:
+   * when more were found than {@link violationsTruncated} says were kept, the
+   * most severe come first and `violationsTruncated` carries the counts.
+   * `summary.byType` / `summary.bySeverity` always count the full set.
+   */
   violations: WcagViolation[];
+
+  /** Present only when `violations` was capped; absent means the list is complete. */
+  violationsTruncated?: {
+    /** Violations found after baseline filtering, before the cap. */
+    total: number;
+    /** Violations dropped by the cap (`total - violations.length`). */
+    omitted: number;
+    /** Dropped violations per rule (only rules that lost entries). */
+    omittedByType: Partial<Record<ViolationType, number>>;
+  };
 
   /** Timestamp when audit was performed */
   timestamp: number;

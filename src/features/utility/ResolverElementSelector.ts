@@ -5,7 +5,7 @@ import { getHierarchySnapshot } from "../observe/HierarchyCapture";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../models";
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, type ContainerFailure } from "../../models/ActionableError";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import {
   ElementResolver,
@@ -138,15 +138,18 @@ export class ResolverElementSelector implements ElementSelector {
     container: ElementContainerSelector,
     strategy?: ElementSelectionStrategy,
   ) {
-    const result = this.resolver.resolve(
-      { id: "container", nodes: this.selectionNodes(capture, {}) },
-      {
-        container: propagateUniqueStrategy(container, strategy),
-      },
-      { action: "inspect" },
-    );
+    const result: ElementResolution & { containerFailure?: ContainerFailure } =
+      this.resolver.resolve(
+        { id: "container", nodes: this.selectionNodes(capture, {}) },
+        {
+          container: propagateUniqueStrategy(container, strategy),
+        },
+        { action: "inspect" },
+      );
     if (result.error && !isMissingContainerError(result.error)) {
-      throw new ActionableError(result.error);
+      throw new ActionableError(result.error, {
+        containerFailure: result.containerFailure,
+      });
     }
     return result;
   }
@@ -193,14 +196,19 @@ export class ResolverElementSelector implements ElementSelector {
         requireBounds: options.intentAction === "inspect",
       },
     );
-    this.checkResolutionError(result.error, options);
+    this.checkResolutionError(result, options);
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
       return this.select(capture, selector, { ...options, intentAction: "tap" });
     }
     return this.selectionResult(result, capture, options.strategy ?? "first", selector);
   }
 
-  private checkResolutionError(error: string | undefined, options: SelectionOptions): void {
+  // Accept the additive field from dependency PR #10292 before its resolver lands here.
+  private checkResolutionError(
+    resolution: ElementResolution & { containerFailure?: ContainerFailure },
+    options: SelectionOptions,
+  ): void {
+    const { error, containerFailure } = resolution;
     if (!error) {
       return;
     }
@@ -209,7 +217,7 @@ export class ResolverElementSelector implements ElementSelector {
       "nested-container-defined",
     );
     if (strictScope || !isMissingContainerError(error)) {
-      throw new ActionableError(error);
+      throw new ActionableError(error, { containerFailure });
     }
   }
 

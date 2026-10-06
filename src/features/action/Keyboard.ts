@@ -27,6 +27,12 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
 import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/SkeletonProjection";
+import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/android/types";
+import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { ActionableError } from "../../models/ActionableError";
+import { stableNodeSelectorForElement } from "../talkback/TalkBackTapStrategy";
+import { keyboardNodeClickTargetError } from "./keyboardNodeClickTarget";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -105,6 +111,41 @@ type KeyboardDetection = {
   imeWindowPresent?: boolean;
 };
 
+/**
+ * The slice of the CtrlProxy client `open` needs to show the IME without a touch:
+ * a node `click` (the framework shows the keyboard for the focused field without
+ * a touch position, so the caret and selection stay put) and the caret read used
+ * to report a moved caret when the tap fallback has to run.
+ */
+export interface KeyboardOpenClient {
+  supportsNodeActionSelectors(perf?: undefined, signal?: AbortSignal): Promise<boolean>;
+  requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    timeoutMs?: number,
+    perf?: undefined,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
+  requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
+}
+
+type NodeClickOutcome =
+  | { kind: "unavailable" }
+  | { kind: "sent" }
+  | { kind: "unconfirmed"; error?: string };
+
+function keyboardOpenIndeterminateMessage(dispatched: string, reason?: string): string {
+  return `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`;
+}
+
+/** A cancelled open whose click/tap was already sent: the device may have applied it. */
+export class KeyboardOpenIndeterminateError extends ActionableError {
+  constructor(dispatched: string, reason?: string) {
+    super(keyboardOpenIndeterminateMessage(dispatched, reason));
+    this.name = "KeyboardOpenIndeterminateError";
+  }
+}
+
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
   // The IME show/hide animation runs ~200-400ms on typical devices, so a single
@@ -120,6 +161,8 @@ export class Keyboard {
   private geometry: ElementGeometry;
   private finder: ElementFinder;
   private timer: Timer;
+  private adbFactory: AdbClientFactory;
+  private openClient: KeyboardOpenClient | undefined;
 
   constructor(
     device: BootedDevice,
@@ -129,8 +172,11 @@ export class Keyboard {
     parser: ElementParser = new DefaultElementParser(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
     finder: ElementFinder = new DefaultElementFinder(),
+    openClient?: KeyboardOpenClient,
   ) {
     this.device = device;
+    this.adbFactory = adbFactory;
+    this.openClient = openClient;
     this.adb = adbFactory.create(device);
     this.parser = parser;
     this.geometry = geometry;
@@ -377,11 +423,35 @@ export class Keyboard {
       };
     }
 
-    await this.tapOnElement(focusedInput, signal);
+    // Show the IME without a touch first: a coordinate tap lands inside the field
+    // and moves the caret into existing text (#9942).
+    const click = await this.showWithoutTouch(focusedInput, hierarchy, signal);
+    // Once a click reached the device the field may already be activated (a read-only
+    // picker would toggle twice), so a tap is only a fallback when no click was sent.
+    if (click.kind === "unconfirmed") {
+      const message = keyboardOpenIndeterminateMessage("node click", click.error);
+      return { success: false, open: false, message, error: message };
+    }
+    if (click.kind === "sent") {
+      return this.openResult(await this.waitForKeyboardState(true, signal), "Keyboard opened");
+    }
 
+    const caretBefore = await this.readCaret(signal);
+    await this.tapOnElement(focusedInput, signal);
     const afterState = await this.waitForKeyboardState(true, signal);
+    const caretNote = afterState.open ? await this.caretMovedNote(caretBefore, signal) : "";
+    return this.openResult(afterState, "Keyboard opened", caretNote);
+  }
+
+  private openResult(
+    afterState: KeyboardDetection,
+    openedMessage: string,
+    caretNote: string = "",
+  ): KeyboardResult {
     const success = afterState.open && !afterState.error;
-    const message = success ? "Keyboard opened" : (afterState.error ?? "Failed to open keyboard");
+    const message = success
+      ? `${openedMessage}${caretNote}`
+      : (afterState.error ?? "Failed to open keyboard");
 
     return {
       success,
@@ -390,6 +460,110 @@ export class Keyboard {
       message,
       ...(afterState.error ? { error: afterState.error } : {}),
     };
+  }
+
+  private getOpenClient(): KeyboardOpenClient {
+    this.openClient ??= AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    return this.openClient;
+  }
+
+  /**
+   * Ask CtrlProxy to `click` the focused editable node, which makes the framework
+   * show the IME for that field without a touch position. `unavailable` means no
+   * click was sent and the tap fallback is allowed (no stable selector, the selector
+   * does not resolve to exactly this field, the runner is too old, or it refused the
+   * action); `sent` means the runner accepted it; `unconfirmed` means it was
+   * dispatched but never acknowledged, so a second activation would be unsafe.
+   */
+  private async showWithoutTouch(
+    element: Element,
+    hierarchy: ViewHierarchyResult | null,
+    signal?: AbortSignal,
+  ): Promise<NodeClickOutcome> {
+    const selector = stableNodeSelectorForElement(element);
+    if (!selector) {
+      return { kind: "unavailable" };
+    }
+    let client: KeyboardOpenClient;
+    try {
+      client = this.getOpenClient();
+      // The runner clicks the first depth-first match of the whole selector, so it must
+      // name exactly one node in this hierarchy and that node must be the focused field.
+      const targetError = await keyboardNodeClickTargetError(selector, hierarchy, element, () =>
+        awaitWhileRequestIsLive(client.supportsNodeActionSelectors(undefined, signal), signal),
+      );
+      if (targetError) {
+        logger.warn(`Keyboard open: node click unavailable (${targetError})`);
+        return { kind: "unavailable" };
+      }
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
+      return { kind: "unavailable" };
+    }
+    return this.dispatchNodeClick(client, selector, signal);
+  }
+
+  private async dispatchNodeClick(
+    client: KeyboardOpenClient,
+    selector: AccessibilityNodeSelector,
+    signal?: AbortSignal,
+  ): Promise<NodeClickOutcome> {
+    throwIfAborted(signal);
+    let result: A11yActionResult;
+    try {
+      result = await client.requestNodeAction("click", selector, undefined, undefined, signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
+      return { kind: "unavailable" };
+    }
+    const unacknowledged = result.dispatched === true && result.acknowledged !== true;
+    // The runner reports an aborted-after-send click as dispatched but unacknowledged.
+    if (signal?.aborted && unacknowledged) {
+      throw new KeyboardOpenIndeterminateError("node click", result.error);
+    }
+    throwIfAborted(signal);
+    if (result.success) {
+      return { kind: "sent" };
+    }
+    logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
+    return unacknowledged ? { kind: "unconfirmed", error: result.error } : { kind: "unavailable" };
+  }
+
+  /** Best-effort caret read; undefined when the runner cannot report it. */
+  private async readCaret(signal?: AbortSignal): Promise<InsertTextState | undefined> {
+    try {
+      const result = await awaitWhileRequestIsLive(
+        this.getOpenClient().requestInsertTextState(),
+        signal,
+      );
+      throwIfAborted(signal);
+      return result.success ? result.state : undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: caret read failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  /** Non-empty only when both caret reads succeeded and the selection differs. */
+  private async caretMovedNote(
+    before: InsertTextState | undefined,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (!before) {
+      return "";
+    }
+    const after = await this.readCaret(signal);
+    if (
+      !after ||
+      (after.selectionStart === before.selectionStart && after.selectionEnd === before.selectionEnd)
+    ) {
+      return "";
+    }
+    const range = (state: InsertTextState) => `${state.selectionStart}-${state.selectionEnd}`;
+    return ` (the tap used to show it moved the caret from ${range(before)} to ${range(after)})`;
   }
 
   private async close(signal?: AbortSignal): Promise<KeyboardResult> {
@@ -637,9 +811,23 @@ export class Keyboard {
     const x = Math.round(center.x);
     const y = Math.round(center.y);
     throwIfAborted(signal);
-    await awaitWhileRequestIsLive(
-      this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal),
-      signal,
-    );
+    try {
+      // Do not stop waiting on abort: the adb process is terminated and awaited (bounded by
+      // the adb client's grace period) so a started tap has settled before callers restore state.
+      await this.adb.executeCommand(
+        `shell input tap ${x} ${y}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+        true,
+      );
+    } catch (error) {
+      // The tap command had started, so it may have reached the device.
+      if (signal?.aborted) {
+        throw new KeyboardOpenIndeterminateError("tap", errorMessage(error));
+      }
+      throw error;
+    }
   }
 }

@@ -63,6 +63,42 @@ describe("AccessibilityAuditor: clickable containers labelled by descendant text
   });
 });
 
+describe("AccessibilityAuditor: descendant labels must say something", () => {
+  type MutableNode = { text?: string; node?: MutableNode | MutableNode[] };
+
+  function childTexts(node: MutableNode): MutableNode[] {
+    const children = node.node === undefined ? [] : [node.node].flat();
+    return children.flatMap((child) => [child, ...childTexts(child)]);
+  }
+
+  /** The real Playground capture with some button labels replaced by badge-like text. */
+  function captureWithLabels(replacements: Record<string, string>): ObserveResult {
+    const observation = loadCapture("android-enabled/playground-disabled-control-api36.json");
+    const root = observation.viewHierarchy!.hierarchy as MutableNode;
+    for (const node of childTexts(root)) {
+      if (node.text !== undefined && node.text in replacements) {
+        node.text = replacements[node.text];
+      }
+    }
+    return observation;
+  }
+
+  test("a purely numeric badge or a lone decorative glyph does not label its clickable container", async () => {
+    const result = await auditCapture(
+      captureWithLabels({ "Primary Button": "3", "Secondary Button": "\u2022" }),
+    );
+
+    // Two of the six descendant-labelled buttons now carry no usable name.
+    expect(missingLabels(result)).toHaveLength(2);
+  });
+
+  test("a text label (or a number next to a word) still labels the container", async () => {
+    const result = await auditCapture(captureWithLabels({ "Primary Button": "3 new messages" }));
+
+    expect(missingLabels(result)).toEqual([]);
+  });
+});
+
 describe("AccessibilityAuditor: bounded violations", () => {
   function denseCapture(): ObserveResult {
     // This capture is a bare hierarchy (Playground with Gboard open). A very high

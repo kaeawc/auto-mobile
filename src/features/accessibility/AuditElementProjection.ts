@@ -17,6 +17,16 @@ export interface AuditElementProjection {
 }
 
 /**
+ * A merged descendant label only names the container when it says something. A
+ * purely numeric badge ("3") or a lone decorative glyph ("•") is announced by
+ * TalkBack but does not describe the control, so it must not hide a missing
+ * content description. Any letter (any script) is enough.
+ */
+function isMeaningfulLabel(label: string | undefined): boolean {
+  return /\p{L}/u.test(label ?? "");
+}
+
+/**
  * Project a capture once for the audit. The label merge is the shared
  * `SearchableHierarchy` projection (real tree ancestry, smallest clickable
  * ancestor wins, nested clickables never swallow each other), not a second
@@ -41,7 +51,7 @@ export function projectAuditElements(
     if (
       !hasOwnLabel &&
       entry.affordances.includes("tap") &&
-      (entry.displayedLabel ?? "").trim() !== ""
+      isMeaningfulLabel(entry.displayedLabel)
     ) {
       descendantLabelled.add(entry.element);
     }

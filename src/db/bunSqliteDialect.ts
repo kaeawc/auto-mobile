@@ -55,10 +55,14 @@ export const DEFAULT_OPTIMIZE_INTERVAL_MS = 5 * 60 * 1000;
  * retries inside a transaction. `IMMEDIATE` takes the write lock up front, so
  * cross-process contention waits on `busy_timeout` at `BEGIN` instead.
  *
- * Applies to all transactions because every call site writes (read-then-write
- * storage/navigation/retention transactions and write-first ones alike); none is
- * read-only, so no reader is serialized. A future read-only transaction would
- * need an access-mode carve-out (Kysely `setAccessMode("read only")`).
+ * Applies to all transactions, so a transaction must only be opened when it will
+ * write: every in-repo transaction is read-then-write or write-first, and the one
+ * read-mostly caller (`ThresholdManager` / `MemoryThresholdManager`
+ * `getOrCreateThresholds`) reads outside a transaction and opens one only to
+ * create a missing row. A reader inside a transaction waits behind a peer
+ * daemon's writer for up to `busy_timeout`. A future genuinely read-only
+ * transaction would need an access-mode carve-out (Kysely
+ * `setAccessMode("read only")`).
  */
 export const BEGIN_TRANSACTION_SQL = "begin immediate";
 
@@ -282,7 +286,9 @@ export class BunSqliteConnectionState {
     await this.#acquire("txn", owner);
 
     try {
-      await this.executeQuery(CompiledQuery.raw(BEGIN_TRANSACTION_SQL), owner);
+      // BEGIN is the one control statement that is always safe to retry: when it
+      // fails BUSY no transaction was opened, so nothing is re-executed.
+      await this.#execute(CompiledQuery.raw(BEGIN_TRANSACTION_SQL), owner, true);
     } catch (error) {
       this.#transactionOwner = null;
       this.#pump();
@@ -308,6 +314,14 @@ export class BunSqliteConnectionState {
   }
 
   async executeQuery<R>(compiledQuery: CompiledQuery, owner: symbol): Promise<QueryResult<R>> {
+    return this.#execute<R>(compiledQuery, owner, false);
+  }
+
+  async #execute<R>(
+    compiledQuery: CompiledQuery,
+    owner: symbol,
+    isBegin: boolean,
+  ): Promise<QueryResult<R>> {
     await this.#enterQuery(owner);
 
     const { sql, parameters } = compiledQuery;
@@ -323,7 +337,7 @@ export class BunSqliteConnectionState {
         try {
           return await this.#executeOnce<R>(sql, parameters);
         } catch (error) {
-          const delayMs = this.#prepareRetry(error, attempt, sql);
+          const delayMs = this.#prepareRetry(error, attempt, sql, isBegin);
           await this.#timer.sleep(delayMs);
         }
       }
@@ -333,8 +347,8 @@ export class BunSqliteConnectionState {
     }
   }
 
-  #prepareRetry(error: unknown, attempt: number, sql: string): number {
-    if (!this.#shouldRetry(error, attempt)) {
+  #prepareRetry(error: unknown, attempt: number, sql: string, isBegin: boolean): number {
+    if (!this.#shouldRetry(error, attempt, isBegin)) {
       throw error;
     }
     const delayMs = this.#retryDelayMs(attempt);
@@ -350,9 +364,10 @@ export class BunSqliteConnectionState {
    * when: the code (via `err.cause.code`, #2793 contract) is `retryable`
    * (`SQLITE_BUSY`/`SQLITE_LOCKED`); attempts remain; the handle is still open;
    * and we are NOT inside a transaction (autocommit only — `#transactionOwner`
-   * is cleared). Never retries `constraint`/`fatal`.
+   * is cleared), except for the transaction's own `BEGIN` (`isBegin`), which has
+   * opened nothing yet. Never retries `constraint`/`fatal`.
    */
-  #shouldRetry(error: unknown, attempt: number): boolean {
+  #shouldRetry(error: unknown, attempt: number, isBegin: boolean): boolean {
     if (attempt >= this.#maxRetryAttempts) {
       return false;
     }
@@ -363,8 +378,10 @@ export class BunSqliteConnectionState {
     // statement of a multi-statement unit (the begin/commit are themselves
     // routed through executeQuery). #transactionOwner is null exactly when no
     // lease holds the transaction lock, so this also blocks retrying the raw
-    // begin/commit/rollback control statements.
-    if (this.#transactionOwner !== null) {
+    // commit/rollback control statements. `#transactionOwner` is already set to
+    // the beginning lease while its BEGIN runs (the FIFO admission precedes it),
+    // so the BEGIN itself is exempted explicitly.
+    if (this.#transactionOwner !== null && !isBegin) {
       return false;
     }
     return classifySqliteError(error) === "retryable";

@@ -14,6 +14,11 @@ import { clamp } from "../../utils/bounds";
 import type { ImageBackend, RawImage } from "../../utils/image/backend/ImageBackend";
 import { resolveImageBackend } from "../../utils/image/backend/resolveImageBackend";
 
+/** Android mdpi baseline: 1dp == 1px at 160 dpi. */
+const BASELINE_DENSITY_DPI = 160;
+/** WCAG large text (18pt regular, 14pt bold) is about 24dp of text height on Android. */
+const LARGE_TEXT_MIN_HEIGHT_DP = 24;
+
 interface RGB {
   r: number;
   g: number;
@@ -221,11 +226,12 @@ export class ContrastChecker {
     screenshotPath: string,
     element: Element,
     wcagLevel: WcagLevel,
+    density?: number,
   ): Promise<ContrastResult | null> {
     try {
       // Phase 3: Check element-level cache
       if (this.config.enableElementCache) {
-        const elementKey = this.elementCacheKey(element, wcagLevel);
+        const elementKey = this.elementCacheKey(element, wcagLevel, density);
         const screenshotFingerprint = await this.getScreenshotFingerprint(screenshotPath);
         const cached = this.elementCache.get(elementKey);
 
@@ -250,11 +256,11 @@ export class ContrastChecker {
       const image = await this.getOrLoadScreenshot(screenshotPath);
 
       // Calculate contrast with the loaded image
-      const result = await this.checkContrastWithImage(image, element, wcagLevel);
+      const result = await this.checkContrastWithImage(image, element, wcagLevel, density);
 
       // Cache the result if element caching is enabled
       if (result && this.config.enableElementCache) {
-        const elementKey = this.elementCacheKey(element, wcagLevel);
+        const elementKey = this.elementCacheKey(element, wcagLevel, density);
         const screenshotFingerprint = await this.getScreenshotFingerprint(screenshotPath);
 
         this.elementCache.set(elementKey, {
@@ -278,11 +284,12 @@ export class ContrastChecker {
     element: Element,
     wcagLevel: WcagLevel,
     screenshotFingerprint: string,
+    density?: number,
   ): ElementCacheEntry | undefined {
     if (!this.config.enableElementCache) {
       return undefined;
     }
-    const elementKey = this.elementCacheKey(element, wcagLevel);
+    const elementKey = this.elementCacheKey(element, wcagLevel, density);
     const cached = this.elementCache.get(elementKey);
     if (cached && cached.screenshotFingerprint === screenshotFingerprint) {
       this.elementHits++;
@@ -297,10 +304,11 @@ export class ContrastChecker {
     wcagLevel: WcagLevel,
     screenshotFingerprint: string,
     result: ContrastResult | null,
+    density?: number,
   ): void {
     // Cache the result
     if (result && this.config.enableElementCache) {
-      const elementKey = this.elementCacheKey(element, wcagLevel);
+      const elementKey = this.elementCacheKey(element, wcagLevel, density);
       this.elementCache.set(elementKey, {
         result,
         timestamp: this.timer.now(),
@@ -314,12 +322,14 @@ export class ContrastChecker {
    * @param screenshotPath Path to the screenshot image
    * @param elements Array of text elements to check
    * @param wcagLevel WCAG compliance level (affects minimum ratio)
+   * @param density Display density in DPI; text size is only classified as "large" when known
    * @returns Map of elements to their contrast results
    */
   async checkContrastBatch(
     screenshotPath: string,
     elements: Element[],
     wcagLevel: WcagLevel,
+    density?: number,
   ): Promise<Map<Element, ContrastResult | null>> {
     const results = new Map<Element, ContrastResult | null>();
 
@@ -330,17 +340,22 @@ export class ContrastChecker {
 
       for (const element of elements) {
         try {
-          const cached = this.getBatchCachedContrast(element, wcagLevel, screenshotFingerprint);
+          const cached = this.getBatchCachedContrast(
+            element,
+            wcagLevel,
+            screenshotFingerprint,
+            density,
+          );
           if (cached) {
             results.set(element, cached.result);
             continue;
           }
 
           // Calculate contrast for this element
-          const result = await this.checkContrastWithImage(image, element, wcagLevel);
+          const result = await this.checkContrastWithImage(image, element, wcagLevel, density);
           results.set(element, result);
 
-          this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, result);
+          this.cacheBatchContrast(element, wcagLevel, screenshotFingerprint, result, density);
         } catch (error) {
           logger.warn(`Error checking contrast for element: ${errorMessage(error)}`, error);
           results.set(element, null);
@@ -369,6 +384,7 @@ export class ContrastChecker {
     image: RawImage,
     element: Element,
     wcagLevel: WcagLevel,
+    density?: number,
   ): Promise<ContrastResult | null> {
     // Extract element bounds
     const { left, top, right, bottom } = element.bounds;
@@ -389,22 +405,15 @@ export class ContrastChecker {
       const shadowDetected = this.config.detectTextShadows
         ? this.detectTextShadow(image, element.bounds, textColor, backgroundColor)
         : false;
-      const baseRequiredRatio = this.getRequiredContrastRatio(element, wcagLevel);
-      const requiredRatio = this.applyShadowAdjustment(baseRequiredRatio, element, shadowDetected);
-      const meetsAA =
-        ratio >=
-        this.applyShadowAdjustment(
-          this.getRequiredContrastRatio(element, "AA"),
-          element,
-          shadowDetected,
-        );
-      const meetsAAA =
-        ratio >=
-        this.applyShadowAdjustment(
-          this.getRequiredContrastRatio(element, "AAA"),
-          element,
-          shadowDetected,
-        );
+      const baseRequiredRatio = this.getRequiredContrastRatio(element, wcagLevel, density);
+      const requiredRatio = this.applyShadowAdjustment(
+        baseRequiredRatio,
+        element,
+        shadowDetected,
+        density,
+      );
+      const meetsAA = ratio >= this.requiredRatioFor(element, "AA", shadowDetected, density);
+      const meetsAAA = ratio >= this.requiredRatioFor(element, "AAA", shadowDetected, density);
 
       return {
         ratio,
@@ -467,23 +476,16 @@ export class ContrastChecker {
     const shadowDetected = this.config.detectTextShadows
       ? this.detectTextShadow(image, element.bounds, textColor, backgroundColor)
       : false;
-    const baseRequiredRatio = this.getRequiredContrastRatio(element, wcagLevel);
-    const requiredRatio = this.applyShadowAdjustment(baseRequiredRatio, element, shadowDetected);
+    const baseRequiredRatio = this.getRequiredContrastRatio(element, wcagLevel, density);
+    const requiredRatio = this.applyShadowAdjustment(
+      baseRequiredRatio,
+      element,
+      shadowDetected,
+      density,
+    );
 
-    const meetsAA =
-      minRatio >=
-      this.applyShadowAdjustment(
-        this.getRequiredContrastRatio(element, "AA"),
-        element,
-        shadowDetected,
-      );
-    const meetsAAA =
-      minRatio >=
-      this.applyShadowAdjustment(
-        this.getRequiredContrastRatio(element, "AAA"),
-        element,
-        shadowDetected,
-      );
+    const meetsAA = minRatio >= this.requiredRatioFor(element, "AA", shadowDetected, density);
+    const meetsAAA = minRatio >= this.requiredRatioFor(element, "AAA", shadowDetected, density);
 
     return {
       ratio: minRatio,
@@ -597,12 +599,14 @@ export class ContrastChecker {
   /**
    * Phase 3: Generate element cache key
    */
-  private elementCacheKey(element: Element, wcagLevel: WcagLevel): string {
+  private elementCacheKey(element: Element, wcagLevel: WcagLevel, density?: number): string {
     return JSON.stringify({
       text: element.text,
       bounds: element.bounds,
       class: element.class,
       wcagLevel,
+      // The large-text threshold depends on density, so results are density-specific.
+      density: density && density > 0 ? density : null,
     });
   }
 
@@ -1197,17 +1201,42 @@ export class ContrastChecker {
     requiredRatio: number,
     element: Element,
     shadowDetected: boolean,
+    density?: number,
   ): number {
-    if (!shadowDetected || !this.isLargeText(element)) {
+    if (!shadowDetected || !this.isLargeText(element, density)) {
       return requiredRatio;
     }
 
     return Math.max(3.0, requiredRatio - 0.5);
   }
 
-  private isLargeText(element: Element): boolean {
-    const height = element.bounds.bottom - element.bounds.top;
-    return height >= 24;
+  private requiredRatioFor(
+    element: Element,
+    level: WcagLevel,
+    shadowDetected: boolean,
+    density?: number,
+  ): number {
+    return this.applyShadowAdjustment(
+      this.getRequiredContrastRatio(element, level, density),
+      element,
+      shadowDetected,
+      density,
+    );
+  }
+
+  /**
+   * WCAG large text is 18pt (14pt bold), about 24dp of text height on Android.
+   * `bounds` are physical pixels, so the height is converted to dp with the
+   * observation's density first (same class as the touch-target fix, #6127). A
+   * missing or non-positive density is "unknown": treat the text as normal size
+   * (the strict threshold) rather than guessing a density.
+   */
+  private isLargeText(element: Element, density?: number): boolean {
+    if (!density || density <= 0) {
+      return false;
+    }
+    const heightPx = element.bounds.bottom - element.bounds.top;
+    return (heightPx * BASELINE_DENSITY_DPI) / density >= LARGE_TEXT_MIN_HEIGHT_DP;
   }
 
   private isSimilarColor(color: RGB, other: RGB): boolean {
@@ -1276,10 +1305,10 @@ export class ContrastChecker {
   /**
    * Get required contrast ratio for an element based on WCAG level
    */
-  private getRequiredContrastRatio(element: Element, level: WcagLevel): number {
+  private getRequiredContrastRatio(element: Element, level: WcagLevel, density?: number): number {
     // Determine if text is large (18pt or 14pt bold)
-    // We approximate based on element height in pixels
-    const isLargeText = this.isLargeText(element);
+    // We approximate from the element height converted to dp
+    const isLargeText = this.isLargeText(element, density);
 
     if (level === "AAA") {
       return isLargeText ? 4.5 : 7.0;

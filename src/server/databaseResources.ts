@@ -393,6 +393,7 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
           table: decodedTable,
           columns: data.columns,
           rows: data.rows,
+          ...(data.bigIntegerColumns ? { bigIntegerColumns: data.bigIntegerColumns } : {}),
           total: data.total,
           limit,
           offset,

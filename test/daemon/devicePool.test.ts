@@ -2799,7 +2799,7 @@ describe("DevicePool", () => {
 
     test("removes unassigned devices that are no longer booted", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
-      await fakeAppsRepo.upsertInstalledApp("sim-old", 0, "com.test.app", false, Date.now());
+      await fakeAppsRepo.seedInstalledApp("sim-old", 0, "com.test.app", false, Date.now());
       fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
 
       const added = await devicePool.refreshDevices();
@@ -8243,7 +8243,7 @@ describe("DevicePool", () => {
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
 
       // Add some fake cache data
-      await fakeAppsRepo.upsertInstalledApp("emulator-5554", 0, "com.test.app", false, Date.now());
+      await fakeAppsRepo.seedInstalledApp("emulator-5554", 0, "com.test.app", false, Date.now());
       const appsBefore = await fakeAppsRepo.listInstalledApps("emulator-5554");
       expect(appsBefore.length).toBe(1);
 

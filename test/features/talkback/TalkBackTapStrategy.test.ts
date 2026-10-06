@@ -6,6 +6,12 @@ import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNav
 import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
 import { FocusElementMatcher } from "../../../src/features/talkback/FocusElementMatcher";
 import type { Element } from "../../../src/models/Element";
+import {
+  testTagHierarchy,
+  testTagHierarchyWithFirstRowMoved,
+  testTagHierarchyWithoutFirstRow,
+  testTagRows,
+} from "./capturedTestTagTargets";
 import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("TalkBackTapStrategy", () => {
@@ -646,6 +652,65 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getActionCount()).toBe(0); // No ACTION_LONG_CLICK attempted
       expect(driver.getTapCount()).toBe(1);
       expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 1000 });
+    });
+
+    describe("advertised long click on a stable-selector target reports node not found", () => {
+      const row = { ...testTagRows[0]!, actions: ["long_click"] } as Element;
+      const notFound = {
+        success: false,
+        action: "long_click" as const,
+        totalTimeMs: 1,
+        error: "Element not found with NodeSelector(testTag=submit-form)",
+      };
+
+      test("falls back to coordinates while a fresh hierarchy still shows the element in place", async () => {
+        // The device lookup missed (e.g. the element sits in another window); that is not a
+        // rejected press, so the coordinate gesture must still run (#10070).
+        driver.hierarchy = testTagHierarchy;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("coordinate-fallback");
+        expect(result.semanticActionFailure).toBeUndefined();
+        expect(driver.tapHistory).toEqual([{ x: 120, y: 130, durationMs: 1000 }]);
+      });
+
+      test("fails instead of pressing a stale coordinate when the element is gone", async () => {
+        driver.hierarchy = testTagHierarchyWithoutFirstRow;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result).toMatchObject({
+          success: false,
+          method: "accessibility-action",
+          semanticActionFailure: true,
+          error: notFound.error,
+        });
+        expect(driver.getTapCount()).toBe(0);
+      });
+
+      test("fails when the same row moved to other bounds", async () => {
+        driver.hierarchy = testTagHierarchyWithFirstRowMoved;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result.semanticActionFailure).toBe(true);
+        expect(driver.getTapCount()).toBe(0);
+      });
+
+      test("fails when the fresh hierarchy is unavailable", async () => {
+        driver.hierarchy = null;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result.semanticActionFailure).toBe(true);
+        expect(driver.getTapCount()).toBe(0);
+      });
     });
 
     test("returns error when coordinate fallback also fails", async () => {

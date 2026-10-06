@@ -1770,6 +1770,14 @@ allowed); `slowThresholdMs` is the positive duration threshold in milliseconds
 at or above which a request counts as slow.
 
 `clearMockNetwork.mockId` selects one mock to clear; omit it to clear all.
+Mock rules and error simulation are kept per device. When a session is released
+or leaves a device, only the rules and simulation that session installed are
+removed, and the rest of the device's set is pushed to it. Rules and a
+simulation installed without a session (direct mode), or by another session, are
+never removed by a session release, even on the same device; sessionless state
+has no automatic lifetime and stays until `clearMockNetwork`, a cancelled or
+expired simulation, or removal of the device. A replaced simulation belongs to
+the session that installed the replacement.
 `getNetworkGraph.sinceSeconds` sets the lookback in seconds, and `minRequests`
 sets the minimum request count.
 

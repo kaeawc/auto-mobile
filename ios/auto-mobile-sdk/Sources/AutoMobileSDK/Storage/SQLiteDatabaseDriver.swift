@@ -9,6 +9,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     private let operationLock = NSLock()
     private let searchPaths: [String]
     private let busyBudget: SQLiteBusyBudget
+    private let now: @Sendable () -> TimeInterval
     private var openDatabases: [String: CachedConnection] = [:]
 
     /// `st_dev` + `st_ino` of the database file a connection was opened on.
@@ -29,11 +30,18 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true),
         ].flatMap { $0 }
         busyBudget = .standard
+        now = { SdkDatabaseBudget.now() }
     }
 
-    init(searchPaths: [String], busyBudget: SQLiteBusyBudget = .standard) {
+    /// `now` is the monotonic clock write deadlines and budgets are measured on; tests script it.
+    init(
+        searchPaths: [String],
+        busyBudget: SQLiteBusyBudget = .standard,
+        now: @escaping @Sendable () -> TimeInterval = { SdkDatabaseBudget.now() }
+    ) {
         self.searchPaths = searchPaths
         self.busyBudget = busyBudget
+        self.now = now
     }
 
     deinit {
@@ -139,14 +147,24 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         let countQuery = "SELECT COUNT(*) FROM \"\(sanitizeIdentifier(table))\""
         var countStmt: OpaquePointer?
         var totalRows = 0
-        guard sqlite3_prepare_v2(db, countQuery, -1, &countStmt, nil) == SQLITE_OK else {
-            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return TableDataResult(columns: [], rows: [], totalRows: 0, diagnostic: Self.diagnostic(for: message))
+        let countPrepared = sqlite3_prepare_v2(db, countQuery, -1, &countStmt, nil)
+        guard countPrepared == SQLITE_OK else {
+            return TableDataResult(
+                columns: [],
+                rows: [],
+                totalRows: 0,
+                diagnostic: Self.failureDiagnostic(db: db, resultCode: countPrepared)
+            )
         }
         defer { sqlite3_finalize(countStmt) }
-        guard sqlite3_step(countStmt) == SQLITE_ROW else {
-            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return TableDataResult(columns: [], rows: [], totalRows: 0, diagnostic: Self.diagnostic(for: message))
+        let countStep = sqlite3_step(countStmt)
+        guard countStep == SQLITE_ROW else {
+            return TableDataResult(
+                columns: [],
+                rows: [],
+                totalRows: 0,
+                diagnostic: Self.failureDiagnostic(db: db, resultCode: countStep)
+            )
         }
         totalRows = Int(sqlite3_column_int64(countStmt, 0))
 
@@ -158,13 +176,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             let fallbackQuery = order.isEmpty
                 ? "SELECT * FROM \"\(sanitizeIdentifier(table))\" LIMIT ? OFFSET ?"
                 : "SELECT * FROM \"\(sanitizeIdentifier(table))\" ORDER BY \(order) LIMIT ? OFFSET ?"
-            guard sqlite3_prepare_v2(db, fallbackQuery, -1, &dataStmt, nil) == SQLITE_OK else {
-                let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
+            let fallbackPrepared = sqlite3_prepare_v2(db, fallbackQuery, -1, &dataStmt, nil)
+            guard fallbackPrepared == SQLITE_OK else {
                 return TableDataResult(
                     columns: [],
                     rows: [],
                     totalRows: totalRows,
-                    diagnostic: Self.diagnostic(for: message)
+                    diagnostic: Self.failureDiagnostic(db: db, resultCode: fallbackPrepared)
                 )
             }
         }
@@ -192,12 +210,11 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             stepResult = sqlite3_step(dataStmt)
         }
         guard stepResult == SQLITE_DONE else {
-            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
             return TableDataResult(
                 columns: columns,
                 rows: rows,
                 totalRows: totalRows,
-                diagnostic: Self.diagnostic(for: message)
+                diagnostic: Self.failureDiagnostic(db: db, resultCode: stepResult)
             )
         }
 
@@ -217,9 +234,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         let query = "PRAGMA table_info(\"\(sanitizeIdentifier(table))\")"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return TableStructureResult(columns: [], diagnostic: Self.diagnostic(for: message))
+        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        guard prepared == SQLITE_OK else {
+            return TableStructureResult(columns: [], diagnostic: Self.failureDiagnostic(db: db, resultCode: prepared))
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -256,9 +273,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     /// `deadline` is a `SdkDatabaseBudget.now()` instant after which the runner's relay has given up
-    /// on the request. A statement that needs the write connection never starts, and never waits on
-    /// the app's lock, past it: otherwise it could commit after the caller was told it failed and a
-    /// retry would apply it twice (#10166).
+    /// on the request. A statement that needs the write connection does not start past it, and its
+    /// waits for the app's lock draw on one budget (the write budget, cut to the time left before
+    /// `deadline`) shared by prepare and step, recomputed before each: otherwise it could commit after
+    /// the caller was told it failed and a retry would apply it twice (#10166). SQLite retries a lock
+    /// on its own schedule, so a lock released just inside the budget can still let the step commit
+    /// slightly after `deadline`; the runner reports that case as an indeterminate outcome, never as a
+    /// failure.
     func executeSQL(databasePath: String, query: String, deadline: TimeInterval?) -> SQLExecutionResult {
         operationLock.lock()
         defer { operationLock.unlock() }
@@ -294,27 +315,23 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             )
         }
 
-        if classification.requiresWriteConnection {
-            guard let waitMs = writeWaitMs(deadline: deadline) else { return Self.busyResult() }
-            sqlite3_busy_timeout(db, waitMs)
-        }
-
+        let wait = classification.requiresWriteConnection ? writeWait(deadline: deadline) : nil
         if classification.returnsRows {
-            return executeQuery(db: db, query: trimmed, includeRowsAffected: !classification.readOnly)
+            return executeQuery(db: db, query: trimmed, includeRowsAffected: !classification.readOnly, wait: wait)
         } else {
-            return executeMutation(db: db, query: trimmed)
+            return executeMutation(db: db, query: trimmed, wait: wait)
         }
     }
 
     // MARK: - Internal Helpers
 
-    /// How long a write may wait for the app's lock: the write budget, cut to what is left before
-    /// `deadline`. Nil when the deadline has already passed.
-    private func writeWaitMs(deadline: TimeInterval?) -> Int32? {
-        guard let deadline else { return busyBudget.writeMs }
-        let remaining = deadline - SdkDatabaseBudget.now()
-        guard remaining > 0 else { return nil }
-        return min(busyBudget.writeMs, Int32(min(remaining * 1000, Double(Int32.max)).rounded(.up)))
+    /// The one budget a write's lock waits share, started when the write begins.
+    private func writeWait(deadline: TimeInterval?) -> WriteWait {
+        WriteWait(
+            budgetEnd: now() + Double(busyBudget.writeMs) / 1000,
+            deadline: deadline,
+            now: now
+        )
     }
 
     /// Returns the cached connection for `path` while the file at `path` is still the file it was
@@ -581,21 +598,16 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     private func executeQuery(
         db: OpaquePointer,
         query: String,
-        includeRowsAffected: Bool = false
+        includeRowsAffected: Bool = false,
+        wait: WriteWait? = nil
     )
         -> SQLExecutionResult
     {
+        guard wait?.arm(db) ?? true else { return Self.busyResult() }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            let diagnostic = Self.diagnostic(for: error)
-            return SQLExecutionResult(
-                columns: nil,
-                rows: nil,
-                rowsAffected: 0,
-                error: error,
-                diagnostic: diagnostic
-            )
+        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        guard prepared == SQLITE_OK else {
+            return Self.failureResult(db: db, resultCode: prepared)
         }
         defer { sqlite3_finalize(stmt) }
 
@@ -611,6 +623,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         var bytesRead = 0
         var truncated = false
         let totalBefore = sqlite3_total_changes(db)
+        // Prepare may have spent part of the budget waiting for the schema; step gets only what is left.
+        guard wait?.arm(db) ?? true else { return Self.busyResult() }
         var stepResult = sqlite3_step(stmt)
         while stepResult == SQLITE_ROW {
             var row: [String?] = []
@@ -628,15 +642,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
 
         if !truncated && stepResult != SQLITE_DONE {
-            let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            let diagnostic = Self.diagnostic(for: error)
-            return SQLExecutionResult(
-                columns: nil,
-                rows: nil,
-                rowsAffected: 0,
-                error: error,
-                diagnostic: diagnostic
-            )
+            return Self.failureResult(db: db, resultCode: stepResult)
         }
 
         if truncated && includeRowsAffected { sqlite3_reset(stmt) }
@@ -644,21 +650,18 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: rowsAffected, truncated: truncated)
     }
 
-    private func executeMutation(db: OpaquePointer, query: String) -> SQLExecutionResult {
+    private func executeMutation(db: OpaquePointer, query: String, wait: WriteWait?) -> SQLExecutionResult {
+        guard wait?.arm(db) ?? true else { return Self.busyResult() }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
-            let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            return SQLExecutionResult(
-                columns: nil,
-                rows: nil,
-                rowsAffected: 0,
-                error: error,
-                diagnostic: Self.diagnostic(for: error)
-            )
+        let prepared = sqlite3_prepare_v2(db, query, -1, &stmt, nil)
+        guard prepared == SQLITE_OK else {
+            return Self.failureResult(db: db, resultCode: prepared)
         }
         defer { sqlite3_finalize(stmt) }
 
         let totalBefore = sqlite3_total_changes(db)
+        // Prepare may have spent part of the budget waiting for the schema; step gets only what is left.
+        guard wait?.arm(db) ?? true else { return Self.busyResult() }
         let result = sqlite3_step(stmt)
         if result == SQLITE_DONE {
             let changes = rowsAffected(db: db, totalBefore: totalBefore)
@@ -692,28 +695,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 finalResult = sqlite3_step(stmt)
             } while finalResult == SQLITE_ROW
             guard truncated || finalResult == SQLITE_DONE else {
-                let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-                return SQLExecutionResult(
-                    columns: nil,
-                    rows: nil,
-                    rowsAffected: 0,
-                    error: error,
-                    diagnostic: Self.diagnostic(for: error)
-                )
+                return Self.failureResult(db: db, resultCode: finalResult)
             }
             if truncated { sqlite3_reset(stmt) }
             let changes = rowsAffected(db: db, totalBefore: totalBefore)
             return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes, truncated: truncated)
         } else {
-            let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
-            let diagnostic = Self.diagnostic(for: error)
-            return SQLExecutionResult(
-                columns: nil,
-                rows: nil,
-                rowsAffected: 0,
-                error: error,
-                diagnostic: diagnostic
-            )
+            return Self.failureResult(db: db, resultCode: result)
         }
     }
 
@@ -728,9 +716,23 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return primary == SQLITE_BUSY || primary == SQLITE_LOCKED
     }
 
+    /// Busy is decided from SQLite's result code alone. The message is data for the caller, never a
+    /// signal: `no such column: is_locked` or `UNIQUE constraint failed: accounts.locked_by` are real
+    /// SQL errors that happen to contain the word, and must keep their status and text.
     private static func failureDiagnostic(db: OpaquePointer, resultCode: Int32) -> StorageDiagnostic {
         let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
         return isBusy(resultCode) ? StorageDiagnostic(code: "busy_lock", message: message) : diagnostic(for: message)
+    }
+
+    private static func failureResult(db: OpaquePointer, resultCode: Int32) -> SQLExecutionResult {
+        let diagnostic = failureDiagnostic(db: db, resultCode: resultCode)
+        return SQLExecutionResult(
+            columns: nil,
+            rows: nil,
+            rowsAffected: 0,
+            error: diagnostic.message,
+            diagnostic: diagnostic
+        )
     }
 
     private static func busyResult() -> SQLExecutionResult {
@@ -744,11 +746,10 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         )
     }
 
+    /// Classifies a non-busy failure by its text. Never returns `busy_lock`; see `failureDiagnostic`.
     private static func diagnostic(for message: String) -> StorageDiagnostic {
         let code: String
         switch message.lowercased() {
-        case let value where value.contains("locked") || value.contains("busy"):
-            code = "busy_lock"
         case let value where value.contains("malformed") || value.contains("corrupt"):
             code = "corrupt_store"
         case let value where value.contains("no such table") || value.contains("schema"):
@@ -835,6 +836,38 @@ struct SQLiteBusyBudget: Sendable {
     var writeMs: Int32
 
     static let standard = SQLiteBusyBudget(classifierMs: 300, readMs: 500, writeMs: 800)
+}
+
+/// The one budget a write's waits for the app's lock share. `budgetEnd` is when the write budget runs
+/// out and `deadline` (optional) when the runner's relay gives up; both are instants of `now`
+/// (`SdkDatabaseBudget.now()` outside tests). Prepare and step each call `arm` right before they
+/// run, so the waits add up to at most one budget instead of one budget apiece.
+struct WriteWait {
+    let budgetEnd: TimeInterval
+    let deadline: TimeInterval?
+    let now: @Sendable () -> TimeInterval
+
+    /// How long the next SQLite call may wait for a lock: what is left of the budget, cut to the time
+    /// before `deadline`. 0 means no waiting, which still lets a free lock succeed. Nil when
+    /// `deadline` has already passed: the next SQLite call must not run, because it could take effect
+    /// after the caller was told the request failed.
+    func remainingMs() -> Int32? {
+        let current = now()
+        var end = budgetEnd
+        if let deadline {
+            guard deadline > current else { return nil }
+            end = min(end, deadline)
+        }
+        let remaining = max(0, ((end - current) * 1000).rounded(.up))
+        return Int32(min(remaining, Double(Int32.max)))
+    }
+
+    /// Installs `remainingMs()` as the connection's busy wait. False when the deadline has passed.
+    func arm(_ db: OpaquePointer) -> Bool {
+        guard let waitMs = remainingMs() else { return false }
+        sqlite3_busy_timeout(db, waitMs)
+        return true
+    }
 }
 
 struct SQLiteTablesResult: Sendable {

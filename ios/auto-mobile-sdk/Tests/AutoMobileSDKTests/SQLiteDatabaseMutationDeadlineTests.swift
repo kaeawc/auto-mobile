@@ -152,6 +152,81 @@ final class SQLiteDatabaseMutationDeadlineTests: XCTestCase {
         XCTAssertEqual(try fixture.values(), ["row"])
     }
 
+    // MARK: - One budget across open, prepare and step
+
+    func testWriteWaitSharesOneBudgetAndNeverExceedsTheDeadline() {
+        let budgetOnly = WriteWait(budgetEnd: 100.8, deadline: nil, now: { 100 })
+        XCTAssertEqual(budgetOnly.remainingMs(), 800)
+        XCTAssertEqual(
+            WriteWait(budgetEnd: 100.8, deadline: nil, now: { 100.3 }).remainingMs(),
+            500,
+            "time already spent is not granted again"
+        )
+        XCTAssertEqual(
+            WriteWait(budgetEnd: 100.8, deadline: nil, now: { 101 }).remainingMs(),
+            0,
+            "an exhausted budget means no waiting, not a fresh budget"
+        )
+
+        XCTAssertEqual(
+            WriteWait(budgetEnd: 100.8, deadline: 100.25, now: { 100 }).remainingMs(),
+            250,
+            "the deadline cuts the budget"
+        )
+        XCTAssertNil(
+            WriteWait(budgetEnd: 100.8, deadline: 100.25, now: { 100.25 }).remainingMs(),
+            "at the deadline nothing may start"
+        )
+        XCTAssertNil(WriteWait(budgetEnd: 100.8, deadline: 100.25, now: { 100.9 }).remainingMs())
+    }
+
+    /// Prepare ran on a fresh connection and spent 250 ms of a 300 ms budget; step must get the 50 ms
+    /// that is left, not another 300 ms. The scripted clock stands in for the time prepare spent,
+    /// because a lock that blocks prepare also blocks the classifier that runs before it.
+    func testStepWaitsOnlyForWhatPrepareLeftOfTheBudget() throws {
+        let readings = ScriptedClock([100, 100, 100.25])
+        let driver = SQLiteDatabaseDriver(
+            searchPaths: [fixture.directoryURL.path],
+            busyBudget: SQLiteBusyBudget(classifierMs: 5, readMs: 5, writeMs: 300),
+            now: { readings.next() }
+        )
+        defer { driver.closeAll() }
+        try holdAppWriteLock()
+
+        let started = Date()
+        let result = driver.executeSQL(
+            databasePath: fixture.path,
+            query: "INSERT INTO t (v) VALUES ('x')",
+            deadline: nil
+        )
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertEqual(result.diagnostic?.code, "busy_lock")
+        XCTAssertLessThan(elapsed, 0.2, "step waited \(elapsed) s; the budget left after prepare was 0.05 s")
+        releaseAppLock()
+        XCTAssertEqual(try fixture.values(), ["row"])
+    }
+
+    func testStepDoesNotStartOnceThePrepareLeftNothingBeforeTheDeadline() throws {
+        let readings = ScriptedClock([100, 100, 100.5])
+        let driver = SQLiteDatabaseDriver(
+            searchPaths: [fixture.directoryURL.path],
+            busyBudget: SQLiteBusyBudget(classifierMs: 5, readMs: 5, writeMs: 800),
+            now: { readings.next() }
+        )
+        defer { driver.closeAll() }
+
+        // The deadline passed while prepare ran: the statement exists but is never stepped.
+        let result = driver.executeSQL(
+            databasePath: fixture.path,
+            query: "INSERT INTO t (v) VALUES ('late')",
+            deadline: 100.4
+        )
+
+        XCTAssertEqual(result.diagnostic?.code, "busy_lock")
+        XCTAssertEqual(try fixture.values(), ["row"], "a statement that was not stepped must not be applied")
+    }
+
     func testMutationDeadlineIsAShareOfTheRelayTimeoutWithMargin() {
         let received: TimeInterval = 100
         XCTAssertEqual(
@@ -185,5 +260,21 @@ final class SQLiteDatabaseMutationDeadlineTests: XCTestCase {
         XCTAssertNil(request.relayTimeoutMs)
         let current = Data(#"{"databasePath":"/db","query":"SELECT 1","relayTimeoutMs":2000}"#.utf8)
         XCTAssertEqual(try JSONDecoder().decode(SdkExecuteSqlRequest.self, from: current).relayTimeoutMs, 2000)
+    }
+}
+
+/// Returns the scripted instants in order, then keeps returning the last one.
+private final class ScriptedClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var readings: [TimeInterval]
+
+    init(_ readings: [TimeInterval]) {
+        self.readings = readings
+    }
+
+    func next() -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return readings.count > 1 ? readings.removeFirst() : readings[0]
     }
 }

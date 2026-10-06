@@ -131,6 +131,9 @@ final class SdkDatabaseClientTests: XCTestCase {
         XCTAssertFalse(message.contains("embed the AutoMobile SDK"), message)
         XCTAssertTrue(message.contains("indeterminate"), message)
         XCTAssertTrue(message.contains("Do not retry automatically"), message)
+        // The host (src/server/storageSdkErrors.ts) matches this fragment to word a timed-out read
+        // as a plain, retryable timeout; keep the two in step.
+        XCTAssertTrue(message.contains("the outcome is indeterminate"), message)
     }
 
     func testReadOnlyEndpointTimeoutStaysUnavailable() async {

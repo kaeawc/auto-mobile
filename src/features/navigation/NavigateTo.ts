@@ -24,7 +24,7 @@ import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
-import { DefaultUIStateSetup } from "./DefaultUIStateSetup";
+import { DefaultUIStateSetup, UIStateSetupScreenChangedError } from "./DefaultUIStateSetup";
 import { ScreenTransitionWaiter } from "./interfaces/ScreenTransitionWaiter";
 import { DefaultScreenTransitionWaiter } from "./DefaultScreenTransitionWaiter";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -266,7 +266,13 @@ export class NavigateTo {
         perf.end();
         const knownScreens = await this.navigationManager.getKnownScreens();
         throwIfAborted(signal);
-        return this.noKnownPathResult(currentScreen, targetScreen, knownScreens, startTime);
+        return this.noKnownPathResult(
+          currentScreen,
+          targetScreen,
+          knownScreens,
+          startTime,
+          pathResult.unreplayableEdges,
+        );
       }
 
       const result = await this.followPath(
@@ -473,6 +479,9 @@ export class NavigateTo {
     failure?: StepFailureDetail,
   ): Promise<PathStepsOutcome> {
     this.rememberReplayFailure(edge, failure);
+    if (failure?.error instanceof UIStateSetupScreenChangedError) {
+      return { result };
+    }
     // The failure result already carries the screen the graph reported after the replay.
     if (result.currentScreen !== edge.from) {
       return { result };
@@ -563,11 +572,17 @@ export class NavigateTo {
     targetScreen: string,
     knownScreens: string[],
     startTime: number,
+    unreplayableEdges = 0,
   ): NavigateToResult {
+    const skipped =
+      unreplayableEdges > 0
+        ? ` ${unreplayableEdges} recorded transition(s) were ignored because no action was recorded ` +
+          `for them, so they cannot be replayed.`
+        : "";
     return {
       success: false,
       error:
-        `No known path from "${currentScreen}" to "${targetScreen}". ` +
+        `No known path from "${currentScreen}" to "${targetScreen}".${skipped} ` +
         `Known screens: ${knownScreens.join(", ") || "none"}`,
       currentScreen,
       targetScreen,
@@ -928,11 +943,15 @@ export class NavigateTo {
       };
       await this.replayToolCall(edge, interaction, options, { ...run, executedPath }, signal);
       executedPath.push(`${edge.interaction.toolName}(${JSON.stringify(interaction.args)})`);
-    } else {
-      // No known interaction - try back button
-      logger.info(`[NAVIGATE_TO] No known interaction for edge, using back button`);
+    } else if (edge.edgeType === "back") {
+      logger.info(`[NAVIGATE_TO] Edge ${edge.from} → ${edge.to} is a Back edge, using back button`);
       await this.pressBack(signal);
       executedPath.push("pressButton(back)");
+    } else {
+      // Nothing says what caused this transition, so pressing Back would be a guess (#10196).
+      throw new ActionableError(
+        `The transition ${edge.from} → ${edge.to} has no recorded action, so it cannot be replayed.`,
+      );
     }
   }
 

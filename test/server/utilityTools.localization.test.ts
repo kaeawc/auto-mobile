@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemConfigurationManager } from "../../src/features/utility/SystemConfigurationManager";
-import type { BootedDevice, SetLocaleResult } from "../../src/models";
+import type { BootedDevice, SetLocaleResult, SetTimeZoneResult } from "../../src/models";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -14,6 +14,7 @@ describe("changeLocalization handler", () => {
   let success: boolean;
   let error: string | undefined;
   let localeResult: Partial<SetLocaleResult>;
+  let timeZoneResult: Partial<SetTimeZoneResult>;
   let restore: () => void;
 
   beforeEach(() => {
@@ -21,6 +22,7 @@ describe("changeLocalization handler", () => {
     success = true;
     error = undefined;
     localeResult = {};
+    timeZoneResult = {};
     const manager = SystemConfigurationManager.prototype;
     const spies = [
       spyOn(defaultAdbClientFactory, "create").mockReturnValue(new FakeAdbExecutor()),
@@ -30,7 +32,7 @@ describe("changeLocalization handler", () => {
       }),
       spyOn(manager, "setTimeZone").mockImplementation(async (zoneId) => {
         calls.push(["timeZone", zoneId]);
-        return { success, zoneId, error };
+        return { success, zoneId, error, ...timeZoneResult };
       }),
       spyOn(manager, "setTextDirection").mockImplementation(async (rtl, options) => {
         calls.push(["direction", rtl, options]);
@@ -116,6 +118,24 @@ describe("changeLocalization handler", () => {
   test("adds no warning field when the adapter reports none", async () => {
     const result = await call("android", { locale: "en-US", appId: "com.example.app" });
     expect("warning" in result).toBe(false);
+  });
+
+  test("surfaces the stored-not-confirmed time zone warning on a successful change (#10190)", async () => {
+    timeZoneResult = { warning: "stored, not confirmed applied" };
+    const result = await call("android", { timeZone: "UTC" });
+    expect(result.success).toBe(true);
+    expect(result.changes).toEqual({ timeZone: "UTC" });
+    expect(result.timeZoneWarning).toBe("stored, not confirmed applied");
+  });
+
+  test("adds no time zone warning when the adapter reports none or the change fails (#10190)", async () => {
+    expect("timeZoneWarning" in (await call("android", { timeZone: "UTC" }))).toBe(false);
+    success = false;
+    error = "Invalid time zone";
+    timeZoneResult = { warning: "stale" };
+    const failed = await call("android", { timeZone: "Nope/Zone" });
+    expect(failed).toMatchObject({ success: false, changes: {}, error: "Invalid time zone" });
+    expect("timeZoneWarning" in failed).toBe(false);
   });
 
   test.each([

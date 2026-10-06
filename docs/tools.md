@@ -1644,7 +1644,14 @@ Android buttons, each with `label` and `actionId`.
 `wakeAndUnlock.pin` supplies a secure Android unlock credential; it may be omitted
 if one is already remembered for the session and is ignored on iOS.
 
-`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`.
+`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`. A malformed
+ID, a wrong-case spelling of a known zone (the device looks IDs up case-sensitively), or a
+bare UTC offset such as `+05:00` is refused before anything is written. Android also accepts
+Java custom IDs such as `GMT+5` or `GMT-08:00`. An ID shaped like `Area/Location` that the
+host does not know is still sent, with a note that the host could not validate it, and the
+device read-back decides whether it took effect. A successful change reports
+`timeZoneWarning`: the stored value read back, which does not confirm that running apps
+observe the new zone.
 `timeFormat` selects `"12"` or `"24"`, and `textDirection` selects `ltr` or `rtl`.
 `calendarSystem` accepts calendar identifiers such as `gregory`, `japanese`,
 `buddhist`, or `islamic-civil`. `restartApp` is the iOS bundle ID to relaunch
@@ -1933,11 +1940,11 @@ accept the recording `display` argument.
 
 ## Accessibility & session tools
 
-| Tool                               | What it does                                                                                                                                                                                                                                                                                                       |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it.                            |
-| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                |
-| 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`. |
+| Tool                               | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
+| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
+| 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
 
 ### Accessibility focus selectors
 

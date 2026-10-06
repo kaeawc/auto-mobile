@@ -32,6 +32,7 @@ import {
   normalizeTimeFormat,
   parseBooleanSetting,
   parseLocaleList,
+  timeZoneIdsEquivalent,
   validateLocaleTag,
 } from "./parsing";
 
@@ -76,6 +77,23 @@ function describeAppLocales(read: AppLocaleRead): string {
  */
 function indeterminateLocaleError(languageTag: string, reason: string, subject: string): string {
   return `Locale change outcome is indeterminate: "${languageTag}" was sent but no result was confirmed (${reason}). ${subject} was not restored and may have changed. Do not retry automatically. Check the current locale before retrying.`;
+}
+
+const TIME_ZONE_READ = "shell getprop persist.sys.timezone";
+const ANDROID_TIME_ZONE_STORED_WARNING =
+  "persist.sys.timezone was stored and read back, which does not confirm the zone is in effect: a raw setprop bypasses the system time-zone setter, so already-running apps may keep the previous zone until restarted.";
+
+function timeZoneRestoreFailureText(
+  failures: Array<{ label: string; message: string }>,
+  fallbackAttempted: boolean,
+): string {
+  if (failures.length === 0) {
+    return "";
+  }
+  if (failures.length === 1 && !fallbackAttempted) {
+    return ` (${failures[0]?.message})`;
+  }
+  return ` (${failures.map(({ label, message }) => `${label}: ${message}`).join("; ")})`;
 }
 
 const MIN_APP_LOCALE_API_LEVEL = 33;
@@ -481,38 +499,161 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   }
 
   async setTimeZone(zoneId: string): Promise<SetTimeZoneResult> {
-    const previousZoneId = await this.readSetting("shell getprop persist.sys.timezone");
+    const previousZoneId = await this.readSetting(TIME_ZONE_READ);
+    const setpropError = await this.attemptTimeZoneWrite(
+      `shell setprop persist.sys.timezone ${shellQuote(zoneId)}`,
+      "Failed to set time zone",
+    );
 
-    try {
-      await this.adb.executeCommand(`shell setprop persist.sys.timezone ${shellQuote(zoneId)}`);
-      const effectiveZoneId = await this.readSetting("shell getprop persist.sys.timezone");
-      if (effectiveZoneId !== zoneId) {
-        return {
-          success: false,
-          zoneId,
-          previousZoneId,
-          error: `Read-back verification failed: expected "${zoneId}" but got "${effectiveZoneId ?? "null"}"`,
-        };
-      }
+    let persistedZoneId = await this.readSetting(TIME_ZONE_READ);
+    if (persistedZoneId === null) {
+      // An unreadable read-back proves nothing about the device, so do not write
+      // again on a guess (same contract as the locale path, issue #10155).
+      return {
+        success: false,
+        zoneId,
+        previousZoneId,
+        error: `${this.indeterminateTimeZoneError(zoneId, previousZoneId)}${this.timeZoneWriteFailure(setpropError)}`,
+      };
+    }
+    if (setpropError.success && timeZoneIdsEquivalent(persistedZoneId, zoneId)) {
       return {
         success: true,
         zoneId,
         previousZoneId,
         method: "setprop persist.sys.timezone",
+        warning: ANDROID_TIME_ZONE_STORED_WARNING,
       };
-    } catch (error) {
-      logger.warn(
-        `[SystemConfigurationManager] Failed to set time zone: ${errorMessage(error)}`,
-        error,
-      );
-      const errorMsg = errorMessage(error);
+    }
+
+    const fallbackError = await this.attemptTimeZoneWrite(
+      `shell cmd alarm set-timezone ${shellQuote(zoneId)}`,
+      "cmd alarm set-timezone fallback failed",
+    );
+    persistedZoneId = await this.readSetting(TIME_ZONE_READ);
+    if (persistedZoneId === null) {
       return {
         success: false,
         zoneId,
         previousZoneId,
-        error: `Failed to set time zone: ${errorMsg}`,
+        error: `${this.indeterminateTimeZoneError(zoneId, previousZoneId)}${this.timeZoneWriteFailure(setpropError, fallbackError)}`,
       };
     }
+    if (!timeZoneIdsEquivalent(persistedZoneId, zoneId)) {
+      const restoreNote = await this.restoreSystemTimeZone(previousZoneId, persistedZoneId);
+      return {
+        success: false,
+        zoneId,
+        previousZoneId,
+        error: `Read-back verification failed: expected "${zoneId}" but got "${persistedZoneId}"${restoreNote}${this.timeZoneWriteFailure(setpropError, fallbackError)}`,
+      };
+    }
+    return {
+      success: true,
+      zoneId,
+      previousZoneId,
+      method: "cmd alarm set-timezone",
+    };
+  }
+
+  private async attemptTimeZoneWrite(
+    command: string,
+    warning: string,
+  ): Promise<{ success: true } | { success: false; error: unknown }> {
+    try {
+      await this.adb.executeCommand(command);
+      return { success: true };
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] ${warning}: ${errorMessage(error)}`, error);
+      return { success: false, error };
+    }
+  }
+
+  private indeterminateTimeZoneError(zoneId: string, previousZoneId: string | null): string {
+    return `Time zone change outcome is indeterminate: "${zoneId}" was sent but no result was confirmed (persist.sys.timezone could not be read back). The device-wide time zone was not restored and may have changed${previousZoneId === null ? "" : ` (previously "${previousZoneId}")`}. Do not retry automatically. Check the current time zone before retrying.`;
+  }
+
+  private timeZoneWriteFailure(
+    setprop: { success: true } | { success: false; error: unknown },
+    fallback?: { success: true } | { success: false; error: unknown },
+  ): string {
+    const failures: string[] = [];
+    if (!setprop.success) {
+      failures.push(errorMessage(setprop.error));
+    }
+    if (fallback && !fallback.success) {
+      failures.push(`cmd alarm set-timezone: ${errorMessage(fallback.error)}`);
+    }
+    return failures.length === 0 ? "" : ` Failed to set time zone: ${failures.join("; ")}.`;
+  }
+
+  /**
+   * Put `persist.sys.timezone` back after a change that did not read back as
+   * asked. Returns a sentence (with a leading ". ") to append to the caller's
+   * error, or "" when the device still holds the earlier value so nothing needed
+   * restoring. When the restore does not take, the sentence names the value the
+   * device is left with.
+   */
+  private async restoreSystemTimeZone(
+    previous: string | null,
+    persisted: string | null,
+  ): Promise<string> {
+    const sameAsPrevious = (value: string | null): boolean =>
+      previous === null ? value === null : timeZoneIdsEquivalent(value, previous);
+    if (sameAsPrevious(persisted)) {
+      return "";
+    }
+
+    const previousLabel = previous === null ? "unset" : `"${previous}"`;
+    const restoreFailures: Array<{ label: string; message: string }> = [];
+    let fallbackAttempted = false;
+    let leftAs = persisted;
+    try {
+      // An empty value clears the prop, which is how an unset zone is restored.
+      await this.adb.executeCommand(
+        `shell setprop persist.sys.timezone ${shellQuote(previous ?? "")}`,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to restore time zone: ${errorMessage(error)}`,
+        error,
+      );
+      restoreFailures.push({ label: "setprop", message: errorMessage(error) });
+    }
+
+    const afterRestore = await this.readSetting(TIME_ZONE_READ);
+    if (sameAsPrevious(afterRestore)) {
+      return `. Restored the previous time zone (${previousLabel}).`;
+    }
+    if (previous !== null) {
+      fallbackAttempted = true;
+      const fallbackRestore = await this.restoreTimeZoneWithAlarm(previous);
+      leftAs = fallbackRestore.value;
+      if (fallbackRestore.error) {
+        restoreFailures.push({ label: "cmd alarm set-timezone", message: fallbackRestore.error });
+      }
+      if (sameAsPrevious(fallbackRestore.value)) {
+        return `. Restored the previous time zone (${previousLabel}).`;
+      }
+    }
+    const failures = timeZoneRestoreFailureText(restoreFailures, fallbackAttempted);
+    return `. Restoring the previous time zone (${previousLabel}) failed${failures}; persist.sys.timezone is left as "${leftAs ?? "null"}".`;
+  }
+
+  private async restoreTimeZoneWithAlarm(
+    previous: string,
+  ): Promise<{ value: string | null; error?: string }> {
+    let errorMessageFromCommand: string | undefined;
+    try {
+      await this.adb.executeCommand(`shell cmd alarm set-timezone ${shellQuote(previous)}`);
+    } catch (error) {
+      errorMessageFromCommand = errorMessage(error);
+      logger.warn(
+        `[SystemConfigurationManager] Failed to restore time zone with cmd alarm: ${errorMessageFromCommand}`,
+        error,
+      );
+    }
+    return { value: await this.readSetting(TIME_ZONE_READ), error: errorMessageFromCommand };
   }
 
   async setTextDirection(rtl: boolean, options: BroadcastOptions): Promise<SetTextDirectionResult> {

@@ -315,11 +315,13 @@ describe("sendKeys Android focus read routing", () => {
       "cover",
     );
     expect(result.success).toBe(true);
-    expect(h.reads.length).toBe(4);
+    // Focus, clear verification, the eventOnly letter-case read-back (#9888), then the final read.
+    expect(h.reads.length).toBe(5);
     expect(h.reads[0]).toMatchObject({ display: "cover", skipScreenshot: true });
     expect(h.reads[1]).toMatchObject({ display: "cover", skipScreenshot: true });
     expect(h.reads[2]).toMatchObject({ display: "cover", skipScreenshot: true, minTimestamp: 0 });
-    expect(h.reads[3]).toMatchObject({
+    expect(h.reads[3]).toMatchObject({ display: "cover", skipScreenshot: true });
+    expect(h.reads[4]).toMatchObject({
       display: "cover",
       skipScreenshot: true,
       skipAccessibilityAudit: true,

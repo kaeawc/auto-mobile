@@ -1655,8 +1655,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (eventFailure) {
       return this.withTextWarnings(eventFailure, [initialResult.warning]);
     }
+    let suffixResult: TextActionResult;
     try {
-      const suffixResult = suffix
+      suffixResult = suffix
         ? await this.insertText(
             suffix,
             {
@@ -1666,7 +1667,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             signal,
           )
         : { success: true };
-      return this.withTextWarnings(markPartialAfterMutation(suffixResult), [initialResult.warning]);
     } catch (error) {
       logger.warn("[SendKeys] eventLast suffix insertion failed", error);
       return this.withTextWarnings(
@@ -1674,6 +1674,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         [initialResult.warning],
       );
     }
+    const verified = await this.verifyKeyEventLetterCase(
+      "eventLast",
+      text,
+      markPartialAfterMutation(suffixResult),
+      signal,
+      display,
+    );
+    return this.withTextWarnings(verified, [initialResult.warning]);
   }
 
   private async insertEventLastPrefix(
@@ -1865,7 +1873,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const confirmed = unchangedWarning
       ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
       : typed;
-    return this.verifyEventAllLetterCase(text, confirmed, signal, display);
+    return this.verifyKeyEventLetterCase("eventAll", text, confirmed, signal, display);
   }
 
   /**
@@ -1900,16 +1908,21 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   /**
-   * Some keyboards/fields change letter case after key events (#9888). Warn only on the
-   * case-insensitive match; any other mismatch or an unreadable field is left alone.
+   * Gboard's autocorrect/auto-capitalisation can rewrite letter case after hardware key events
+   * (#9888): the keys are sent correctly and the field still ends up holding other casing. Compare
+   * the field with the requested text case-sensitively; warn only when the text is present modulo
+   * case. Any other mismatch (an app mask, formatter, or a moved field) and an unreadable or
+   * secure field (`readFocusedText` yields undefined) are left alone. Reuses the single settled
+   * read-back: an exact match costs one fresh read, and caseless text costs none.
    */
-  private async verifyEventAllLetterCase(
+  private async verifyKeyEventLetterCase(
+    mode: "eventAll" | "eventOnly" | "eventLast",
     text: string,
     typed: TextActionResult,
     signal?: AbortSignal,
     display?: string,
   ): Promise<TextActionResult> {
-    if (text.toLowerCase() === text.toUpperCase()) {
+    if (!typed.success || text.toLowerCase() === text.toUpperCase()) {
       return typed;
     }
     try {
@@ -1927,14 +1940,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         if (attempt === ANDROID_READ_BACK_ATTEMPTS - 1) {
           // The app may intend the other case (all-caps, auto-capitalise). The text was typed,
           // so stay successful: a failed result invites a retry that would duplicate it.
-          const warning = `eventAll typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case (possibly intended). Use mode "ime" or "a11y" for exact case.`;
+          const warning = `${mode} typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the IME (keyboard autocorrect/auto-capitalisation) or the field rewrote the letter case (possibly intended). Use mode "ime" or "a11y" to bypass IME composition and get exact case.`;
           logger.warn(`[SendKeys] ${warning}`);
           return this.withTextWarnings(typed, [warning]);
         }
       }
     } catch (error) {
       this.checkAbort(signal, error);
-      logger.warn(`[SendKeys] eventAll case read-back unavailable: ${errorMessage(error)}`, error);
+      logger.warn(`[SendKeys] ${mode} case read-back unavailable: ${errorMessage(error)}`, error);
     }
     return typed;
   }
@@ -2258,7 +2271,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       mutated = true;
     }
-    return { success: true };
+    return this.verifyKeyEventLetterCase("eventOnly", text, { success: true }, signal, display);
   }
 
   private async clearEventOnlyForReplace(

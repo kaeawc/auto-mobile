@@ -4447,16 +4447,61 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.calls.filter((call) => call.startsWith("insert:"))[0]).toBe("insert:É");
     });
 
-    test("eventAll replace over an already-cleared mask is not failed or warned", async () => {
+    const replaceEmile = (h: ReturnType<typeof harness>) =>
+      h.executor.type({ action: "type", text: "Émile", operation: "replace", mode: "eventAll" });
+
+    test("a normal replace has no warning and no read beyond the case check", async () => {
+      // Reads: focus check, pre-clear, two polls, then the single letter-case read-back.
+      const h = harness(["old z", "old z", "old z", ""]);
+      const result = await replaceEmile(h);
+      expect(result.success).toBe(true);
+      expect(result.warning).toBeUndefined();
+      expect(h.seq.reads()).toBe(5);
+    });
+
+    test("a field already at a permanent prefix succeeds and names the prefix possibility", async () => {
       const h = harness(["+1 "]);
+      const result = await replaceEmile(h);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("still shows its pre-clear text");
+      expect(result.warning).toContain('holds "+1 "');
+      expect(result.warning).toContain("permanent prefix or mask");
+    });
+
+    test("a field that refuses the clear still holds both texts and the call says so", async () => {
+      // Every read shows the old text, as when the app restores it after the clear.
+      const h = harness(["old z"]);
+      const result = await replaceEmile(h);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("refused the clear and now contains both");
+      expect(result.warning).toContain('holds "old z"');
+    });
+
+    test("a clear that was only slow to apply passes without a warning", async () => {
+      // Focus, pre-clear and the three polls show the old text; the post-typing read shows the new.
+      const h = harness(["old z", "old z", "old z", "old z", "old z", "Émile"]);
+      const result = await replaceEmile(h);
+      expect(result.success).toBe(true);
+      expect(result.warning).toBeUndefined();
+    });
+
+    test("an unreadable field after typing keeps the unchanged-clear warning", async () => {
+      const h = harness(["old z", "old z", "old z", "old z", "old z", undefined]);
+      const result = await replaceEmile(h);
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("could not be read after typing");
+    });
+
+    test("eventLast replace with a tail key event surfaces an unchanged clear", async () => {
+      const h = harness(["old z"]);
       const result = await h.executor.type({
         action: "type",
-        text: "Émile",
+        text: "0",
         operation: "replace",
-        mode: "eventAll",
+        mode: "eventLast",
       });
-      expect(result).toMatchObject({ success: true });
-      expect(result.warning ?? "").not.toContain("pre-clear text");
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("still shows its pre-clear text");
     });
 
     test("eventAll append does not clear or read before the insert", async () => {

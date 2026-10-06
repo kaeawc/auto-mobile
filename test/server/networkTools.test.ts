@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { IOSCtrlProxyClient, type IosMockRuleSyncOutcome } from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
 import { NetworkState } from "../../src/server/NetworkState";
 import {
@@ -33,6 +33,7 @@ describe("network tool schema", () => {
   let androidMessages: string[];
   let iosErrorSimulations: unknown[];
   let iosMockRuleSyncCalls: number;
+  let iosMockRuleSyncResult: IosMockRuleSyncOutcome | Error;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
   let androidGetInstanceSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
@@ -67,6 +68,7 @@ describe("network tool schema", () => {
     iosMessages = [];
     iosErrorSimulations = [];
     iosMockRuleSyncCalls = 0;
+    iosMockRuleSyncResult = "sent";
     androidMessages = [];
     androidSendResult = true;
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -81,6 +83,10 @@ describe("network tool schema", () => {
       },
       syncNetworkMockRulesIfAvailable: async () => {
         iosMockRuleSyncCalls++;
+        if (iosMockRuleSyncResult instanceof Error) {
+          throw iosMockRuleSyncResult;
+        }
+        return iosMockRuleSyncResult;
       },
     } as IOSCtrlProxyClient);
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
@@ -716,6 +722,63 @@ describe("network tool schema", () => {
 
     expect(NetworkState.getInstance().getMockSummary()).toEqual({});
     expect(androidMessages).toHaveLength(0);
+  });
+
+  for (const outcome of ["noCapability", "disabled", "failed", "superseded", "throws"] as const) {
+    function setIosOutcome(): void {
+      iosMockRuleSyncResult = outcome === "throws" ? new Error("probe exploded") : outcome;
+    }
+
+    test(`mockNetwork reports iOS rules as not synced when sync outcome is ${outcome}`, async () => {
+      setIosOutcome();
+      const payload = parseToolJson(
+        await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(iosDevice, {
+          host: "api\\.example\\.com",
+          path: "/v1/.*",
+          statusCode: 500,
+        }),
+      );
+      expect(payload.deviceSynced).toBe(false);
+      expect(payload.warning).toEqual(expect.stringContaining("not synced to the device"));
+      expect(payload.mockId).toBe("mock-1");
+      expect(NetworkState.getInstance().getMocks().has(payload.mockId)).toBe(true);
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    test(`clearMockNetwork reports iOS rules as not synced when sync outcome is ${outcome}`, async () => {
+      const mockTool = ToolRegistry.getTool("mockNetwork")!;
+      await mockTool.deviceAwareHandler!(iosDevice, { host: "api.example.com", path: "/one" });
+      setIosOutcome();
+      const payload = parseToolJson(
+        await ToolRegistry.getTool("clearMockNetwork")!.deviceAwareHandler!(iosDevice, {
+          mockId: "mock-1",
+        }),
+      );
+      expect(payload.deviceSynced).toBe(false);
+      expect(payload.warning).toEqual(expect.stringContaining("not synced to the device"));
+      expect(payload.cleared).toBe(1);
+    });
+  }
+
+  test("mockNetwork logs the underlying error when the iOS sync throws", async () => {
+    const error = new Error("probe exploded");
+    iosMockRuleSyncResult = error;
+    await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(iosDevice, {
+      host: "api.example.com",
+      path: "/one",
+    });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("probe exploded"), error);
+  });
+
+  test("mockNetwork omits sync warning fields when the iOS sync is sent", async () => {
+    const payload = parseToolJson(
+      await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(iosDevice, {
+        host: "api.example.com",
+        path: "/one",
+      }),
+    );
+    expect(payload).not.toHaveProperty("deviceSynced");
+    expect(payload).not.toHaveProperty("warning");
   });
 
   test("clearMockNetwork supports iOS and re-syncs remaining rules", async () => {

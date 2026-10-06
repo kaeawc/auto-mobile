@@ -1096,6 +1096,18 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatch typed overlay asset requests`() = runTest {
+    dispatch(
+      """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""
+    )
+    assertEquals("putOverlayAsset", lastCall.first)
+    assertEquals(listOf("p", "hero", "image/png", "iVBORw0KGgo="), lastCall.second)
+    dispatch("""{"type":"remove_overlay_asset","requestId":"r","id":"hero"}""")
+    assertEquals("removeOverlayAsset", lastCall.first)
+    assertEquals(listOf("r", "hero"), lastCall.second)
+  }
+
+  @Test
   fun `invalid overlay combinations return precise correlated failures without actions`() =
     runTest {
       val spec =

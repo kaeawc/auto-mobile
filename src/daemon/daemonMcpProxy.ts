@@ -3482,8 +3482,13 @@ export class DaemonMcpProxy {
     // A reconnect already in progress is shared by ensureConnected(). If it has
     // consumed the safe retry window, stop claiming ownership before the daemon
     // can reap it silently while all later ticks wait on the same connection.
+    // Only an in-flight reconnect qualifies: a socket that merely closed (no
+    // reconnect started) must get its bounded attempt below first. At the stdio
+    // cadence the threshold equals one interval, so fencing on `!connected`
+    // alone would fence the first tick without ever trying to reconnect (#9995).
     if (
       !this.connected &&
+      this.connecting !== null &&
       this.boundSessionUuidAt !== undefined &&
       this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
     ) {
@@ -3502,21 +3507,42 @@ export class DaemonMcpProxy {
         this.heartbeatLeashMs - elapsedMs - 1,
       ),
     );
-    await raceWithDeadline(() => this.sendBoundSessionHeartbeat(() => !abandoned), {
-      timer: this.timer,
-      timeoutMs: deadlineMs,
-      label: "Bound-session heartbeat",
-      onTimeout: () => {
-        abandoned = true;
-        if (
-          this.boundSessionUuid === sessionUuid &&
-          this.boundSessionUuidAt !== undefined &&
-          this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
-        ) {
-          this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
-        }
-      },
-    });
+    try {
+      await raceWithDeadline(() => this.sendBoundSessionHeartbeat(() => !abandoned), {
+        timer: this.timer,
+        timeoutMs: deadlineMs,
+        label: "Bound-session heartbeat",
+        onTimeout: () => {
+          abandoned = true;
+          if (
+            this.boundSessionUuid === sessionUuid &&
+            this.boundSessionUuidAt !== undefined &&
+            this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+          ) {
+            this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+          }
+        },
+      });
+    } catch (error) {
+      this.fenceIfLastSafeAttemptFailed(sessionUuid, lastSafeAttemptMs);
+      throw error;
+    }
+  }
+
+  // The tick at or past `lastSafeAttemptMs` is the last one that can still reach
+  // the daemon before the lease lapses. If its reconnect attempt failed fast
+  // (rather than hanging into the deadline's onTimeout) and the transport is
+  // still down, no later tick can save the session, so fence it now (#9995).
+  private fenceIfLastSafeAttemptFailed(sessionUuid: string, lastSafeAttemptMs: number): void {
+    if (
+      this.boundSessionUuid === sessionUuid &&
+      !this.terminalBoundSession &&
+      !this.connected &&
+      this.boundSessionUuidAt !== undefined &&
+      this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+    ) {
+      this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+    }
   }
 
   private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {

@@ -1304,11 +1304,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /**
-   * Test-only accessor for the currently bound session (or null when unbound).
-   * Mirrors the Android client so isolation tests can pin the routing invariant.
+   * The session currently receiving this device's navigation events, or null when
+   * unbound. Mirrors the Android client.
    */
-  public getBoundSessionIdForTesting(): string | null {
+  public getBoundSessionId(): string | null {
     return this.boundSessionId;
+  }
+
+  /** Test-only alias kept for isolation tests that pin the routing invariant. */
+  public getBoundSessionIdForTesting(): string | null {
+    return this.getBoundSessionId();
   }
 
   /**

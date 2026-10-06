@@ -306,9 +306,24 @@ export class WebRtcPublisher {
 
   /** Feed a chunk of the raw H.264 (Annex-B) elementary stream. */
   writeH264Chunk(chunk: Buffer): void {
+    this.withH264Writer((writer) => writer.writeChunk(chunk));
+  }
+
+  /**
+   * The source finished delivering one complete packet (one encoder output) via
+   * {@link writeH264Chunk}; send the access unit it completed now rather than
+   * when the next packet starts.
+   */
+  endOfH264Packet(): void {
+    this.withH264Writer((writer) => writer.endOfPacket());
+  }
+
+  private withH264Writer(write: (writer: RtpH264TrackWriter) => void): void {
     try {
       const framesBefore = this.writer?.stats.framesWritten ?? 0;
-      this.writer?.writeChunk(chunk);
+      if (this.writer) {
+        write(this.writer);
+      }
       this.recordFirstRtpIfConnected(framesBefore);
     } catch (error) {
       const sourceFailure = error instanceof Error ? error : new Error(String(error));

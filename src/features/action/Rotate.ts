@@ -3,6 +3,7 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -1093,6 +1094,7 @@ export class Rotate extends BaseVisualChange {
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
           if (display !== 0) {
+            await this.assertDisplayExists(display, signal);
             const rotation = rotationForOrientation(
               orientation,
               await readNaturalLandscape(this.adb, signal),
@@ -1126,6 +1128,38 @@ export class Rotate extends BaseVisualChange {
         signal?.aborted
           ? "Rotation cancelled; device may still complete the change"
           : "Failed to rotate device",
+      );
+    }
+  }
+
+  private async assertDisplayExists(display: number, signal?: AbortSignal): Promise<void> {
+    let availableDisplayIds: string[] = [];
+    try {
+      const displayOutput = await this.adb.executeCommand(
+        "shell cmd display get-displays",
+        2000,
+        undefined,
+        true,
+        signal,
+      );
+      throwIfAborted(signal);
+      availableDisplayIds = parseAndroidDisplayInfos(displayOutput.stdout).map(
+        ({ logicalId }) => logicalId,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      logger.debug(`[Rotate] Could not read Android displays: ${error}`);
+    }
+    if (availableDisplayIds.length === 0) {
+      logger.debug("[Rotate] Android display list is empty; skipping display existence check");
+      return;
+    }
+    if (!availableDisplayIds.includes(String(display))) {
+      throw new ActionableError(
+        `display ${display} not found; available: ${availableDisplayIds.join(", ")}`,
       );
     }
   }

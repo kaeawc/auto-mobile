@@ -371,6 +371,15 @@ describe("assertUnitTestLogsDirIsolated", () => {
     ).not.toThrow();
   });
 
+  test.each([
+    ["AUTOMOBILE_LOG_DIR", "AUTO_MOBILE_LOG_DIR"],
+    ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"],
+  ])("an empty %s shadows a set %s, as the resolver does", (empty, twin) => {
+    expect(() =>
+      assertUnitTestLogsDirIsolated({ NODE_ENV: "test", [empty]: "", [twin]: "/tmp/redirected" }),
+    ).toThrow(ActionableError);
+  });
+
   test("is inert outside a test context", () => {
     expect(() => assertUnitTestLogsDirIsolated({})).not.toThrow();
     expect(() => assertUnitTestLogsDirIsolated({ NODE_ENV: "production" })).not.toThrow();

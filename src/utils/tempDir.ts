@@ -98,11 +98,11 @@ export function assertUnitTestLogsDirIsolated(env: NodeJS.ProcessEnv = process.e
   if (env.NODE_ENV !== "test") {
     return;
   }
+  // Same `??` precedence as resolveAutoMobileLogsDir/resolveAutoMobileBaseDir: an
+  // empty AUTOMOBILE_* value shadows its AUTO_MOBILE_* twin there, so it must here too.
   const overrides = [
-    env.AUTOMOBILE_LOG_DIR,
-    env.AUTO_MOBILE_LOG_DIR,
-    env.AUTOMOBILE_DATA_DIR,
-    env.AUTO_MOBILE_DATA_DIR,
+    env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR,
+    env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR,
   ];
   if (overrides.some((value) => value !== undefined && value.trim().length > 0)) {
     return;

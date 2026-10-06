@@ -4917,9 +4917,12 @@ describe("IOSCtrlProxyManager", function () {
         const internal = manager as unknown as {
           startOnDevice: () => Promise<void>;
           startIproxyTunnel: () => Promise<void>;
+          assertTunnelForwardsServicePort: () => void;
           verifyInstalledAppBundle: () => Promise<void>;
         };
         internal.startIproxyTunnel = async () => {};
+        // The tunnel is stubbed out, so there is no forwarded port to compare (#10232).
+        internal.assertTunnelForwardsServicePort = () => {};
         internal.verifyInstalledAppBundle = async () => {};
         if (rejectVerification) {
           await expect(internal.startOnDevice()).rejects.toThrow("runner verification rejected");
@@ -4972,11 +4975,13 @@ describe("IOSCtrlProxyManager", function () {
         const internal = manager as unknown as {
           verifyInstalledAppBundle: () => Promise<void>;
           startIproxyTunnel: () => Promise<void>;
+          assertTunnelForwardsServicePort: () => void;
           startOnDevice: () => Promise<void>;
         };
         // Bypass tunnel/install verification — not under test here.
         internal.verifyInstalledAppBundle = async () => {};
         internal.startIproxyTunnel = async () => {};
+        internal.assertTunnelForwardsServicePort = () => {};
 
         await internal.startOnDevice();
 
@@ -5024,12 +5029,14 @@ describe("IOSCtrlProxyManager", function () {
       const internal = manager as unknown as {
         verifyInstalledAppBundle: () => Promise<void>;
         startIproxyTunnel: () => Promise<void>;
+        assertTunnelForwardsServicePort: () => void;
         startOnDevice: () => Promise<void>;
         xcTestProcessId: number | null;
         xcTestProcess: FakeChildProcess | null;
       };
       internal.verifyInstalledAppBundle = async () => {};
       internal.startIproxyTunnel = async () => {};
+      internal.assertTunnelForwardsServicePort = () => {};
 
       await internal.startOnDevice();
       const staleChild = fakeExecutor.getSpawnedProcesses()[0].process as FakeChildProcess;

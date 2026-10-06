@@ -369,6 +369,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private iproxyProcessId: number | null = null;
   private iproxyProcess: ChildProcess | null = null;
   private iproxyDevicePort: number | null = null;
+  // Host port the tracked tunnel forwards (`iproxy <local> <device> <udid>`). Recorded
+  // where the tunnel is spawned and cleared wherever tracking is dropped, so the
+  // manager can tell "our own tunnel holds this port" from a genuine collision and
+  // can never leave the tunnel and `servicePort` pointing at different ports (#10232).
+  private iproxyLocalPort: number | null = null;
   private isStopping: boolean = false;
 
   // Shared process startup prevents concurrent callers from launching duplicate runners.
@@ -504,6 +509,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       onExit: () => {
         this.iproxyProcessId = null;
         this.iproxyProcess = null;
+        this.iproxyLocalPort = null;
       },
       onRestartFailure: (error) => {
         logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`);
@@ -842,6 +848,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.iproxyProcessId = null;
     this.iproxyProcess = null;
     this.iproxyDevicePort = null;
+    this.iproxyLocalPort = null;
     this.clearCaches();
     PortManager.release(this.device.deviceId);
 
@@ -2152,9 +2159,24 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     );
   }
 
-  private ensureLocalServicePortAllocatedAndAvailable(): void {
+  /**
+   * True when the port is held by THIS manager's own live tunnel for this device
+   * (identified by its recorded PID and forwarded port, never by guessing from the
+   * port alone). A bind probe sees that listener as "busy", but it is not a collision
+   * (#10232).
+   */
+  private async isPortHeldByOwnLiveTunnel(port: number): Promise<boolean> {
+    if (this.useRemoteRunner() || this.iproxyProcessId === null || this.iproxyLocalPort !== port) {
+      return false;
+    }
+    return this.isProcessRunning(this.iproxyProcessId);
+  }
+
+  private async ensureLocalServicePortAllocatedAndAvailable(): Promise<void> {
     const currentAllocation = PortManager.getPort(this.device.deviceId);
-    const currentPortIsAvailable = PortManager.isPortAvailable(this.servicePort);
+    const currentPortIsAvailable =
+      PortManager.isPortAvailable(this.servicePort) ||
+      (await this.isPortHeldByOwnLiveTunnel(this.servicePort));
     if (currentAllocation === this.servicePort && currentPortIsAvailable) {
       return;
     }
@@ -2327,7 +2349,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
     const bundleId = this.resolveTargetBundleId();
-    this.ensureLocalServicePortAllocatedAndAvailable();
+    await this.ensureLocalServicePortAllocatedAndAvailable();
 
     // The runner reads CTRL_PROXY_IOS_PORT from its OWN ProcessInfo.environment.
     // `xcodebuild test-without-building` does not forward the host process env
@@ -3573,12 +3595,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // left by post-extract verification alone (issue #4759).
     await this.builder.verifyRunnerBinaryBeforeLaunch("device");
 
-    this.ensureLocalServicePortAllocatedAndAvailable();
+    await this.ensureLocalServicePortAllocatedAndAvailable();
     await this.startIproxyTunnel();
     await this.verifyInstalledAppBundle();
 
     const signing = await this.signingManager.resolveSigningForDevice(this.device.deviceId);
     signing.warnings.forEach((warning) => logger.warn(`[IOSCtrlProxy] ${warning}`));
+    this.assertTunnelForwardsServicePort();
 
     const signingArgs = this.deviceSigningArguments(signing);
 
@@ -3658,6 +3681,24 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
 
     this.trackStartedXcodebuild(child);
+  }
+
+  /**
+   * Fail fast when the tunnel and the runner would disagree about the host port.
+   * The runner is told to listen on `servicePort` and everything dials
+   * `localhost:<servicePort>`, so a tunnel forwarding anything else can only end
+   * in a health-poll timeout (#10232). Local runners only: the host-control tunnel
+   * is owned by the macOS host.
+   */
+  private assertTunnelForwardsServicePort(): void {
+    if (this.iproxyProcessId !== null && this.iproxyLocalPort === this.servicePort) {
+      return;
+    }
+    throw new ActionableError(
+      `iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "none"} but the CtrlProxy ` +
+        `runner port is ${this.servicePort}; refusing to launch a runner nothing can reach. ` +
+        `Retry the call, or restart the daemon if this persists.`,
+    );
   }
 
   private async verifyInstalledAppBundle(): Promise<void> {
@@ -3852,10 +3893,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     if (this.iproxyProcessId && (await this.isProcessRunning(this.iproxyProcessId))) {
-      if (options.supervise !== false) {
-        await this.iproxySupervisor.start();
+      if (this.iproxyLocalPort === this.servicePort) {
+        if (options.supervise !== false) {
+          await this.iproxySupervisor.start();
+        }
+        return;
       }
-      return;
+      // The live tunnel forwards a different host port than the runner will use
+      // (#10232). Reusing it would leave health polling and the WebSocket client
+      // dialling a port nothing forwards, so replace it, stopping it by its
+      // recorded handle before the new one is spawned.
+      logger.warn(
+        `[IOSCtrlProxy] Live iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "unknown"} ` +
+          `but the runner port is ${this.servicePort}; restarting the tunnel`,
+      );
     }
 
     await this.stopIproxyTunnel({ stopSupervisor: options.supervise !== false });
@@ -3881,6 +3932,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyProcessId = child.pid;
     this.iproxyProcess = child;
+    this.iproxyLocalPort = this.servicePort;
     this.captureIproxyOutput(child);
 
     child.on("exit", () => {
@@ -3945,6 +3997,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyProcessId = result.data.pid;
     this.iproxyProcess = null;
+    this.iproxyLocalPort = this.servicePort;
     this.iproxyDevicePort = devicePort;
     await this.waitForIproxyStartup();
     if (options.supervise !== false) {
@@ -3982,6 +4035,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyProcessId = null;
     this.iproxyProcess = null;
+    this.iproxyLocalPort = null;
     if (options.clearDevicePort) {
       this.iproxyDevicePort = null;
     }

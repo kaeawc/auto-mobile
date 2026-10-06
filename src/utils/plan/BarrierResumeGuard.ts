@@ -352,7 +352,12 @@ function lockArrivalsByLock(plan: Plan): Map<string, Arrival[]> {
       continue;
     }
     const arrivals = arrivalsByLock.get(lock) ?? [];
-    arrivals.push({ planIndex, deviceCount: readDeviceCount(step), device: readDevice(step) });
+    arrivals.push({
+      planIndex,
+      deviceCount: readDeviceCount(step),
+      device: readDevice(step),
+      tool: step.tool,
+    });
     arrivalsByLock.set(lock, arrivals);
   }
   return arrivalsByLock;

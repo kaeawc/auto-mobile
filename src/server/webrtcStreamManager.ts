@@ -805,6 +805,21 @@ async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   }
 }
 
+/** Cache parameter sets and stamp the first IDR from NALs the source's splitter released. */
+function observeMediaNals(record: WebRtcStreamRecord, nals: Buffer[]): void {
+  for (const nal of nals) {
+    const type = nalUnitType(nal);
+    if (type === NAL_TYPE_SPS) {
+      record.cachedSps = Buffer.from(nal);
+    } else if (type === NAL_TYPE_PPS) {
+      record.cachedPps = Buffer.from(nal);
+    }
+    if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
+      record.telemetry.firstIdr = dependencies.now().toISOString();
+    }
+  }
+}
+
 /**
  * Prepare a local capture before the WHIP session. Source output is retained by
  * the manager and delivered to the publisher once its RTP writer exists; this
@@ -845,18 +860,18 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
           );
           return;
         }
-        for (const nal of nals) {
-          const type = nalUnitType(nal);
-          if (type === NAL_TYPE_SPS) {
-            record.cachedSps = Buffer.from(nal);
-          } else if (type === NAL_TYPE_PPS) {
-            record.cachedPps = Buffer.from(nal);
-          }
-          if (type === NAL_TYPE_IDR && !record.telemetry.firstIdr) {
-            record.telemetry.firstIdr = dependencies.now().toISOString();
-          }
-        }
+        observeMediaNals(record, nals);
         record.publisher.writeH264Chunk(chunk);
+      },
+      // The source delivered one complete length-framed packet (Android persistent encoder), so
+      // release the NAL the splitters hold for a next start code instead of waiting for the
+      // encoder's next output (issue #10150).
+      onEncodedAccessUnit: () => {
+        if (record.source !== source) {
+          return;
+        }
+        observeMediaNals(record, record.mediaParser.flush());
+        record.publisher.endOfH264Packet();
       },
       onAudioData: (chunk) => {
         if (record.source === source) {

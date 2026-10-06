@@ -138,6 +138,9 @@ final class CommandHandler: CommandHandling {
         do {
             switch request {
             // View hierarchy commands
+            // On iOS, `request_hierarchy_if_stale` deliberately performs a fresh
+            // capture identical to `request_hierarchy`; there is no cache or timestamp
+            // comparison, and any client-supplied `sinceTimestamp` is ignored.
             case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
                 return try await handleRequestHierarchy(payload, startTime: startTime)
 

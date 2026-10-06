@@ -112,18 +112,12 @@ function accumulateEvent(hostMap: Map<string, HostEntry>, event: NetworkEventWit
 function insertPathGroups(
   root: Record<string, GraphNode>,
   pathGroups: Map<string, EventGroup[]>,
-  minRequests: number,
 ): void {
   for (const [groupKey, groups] of pathGroups) {
     const [path] = groupKey.split("::");
     const segments = path.split("/").filter((s) => s.length > 0);
 
     for (const group of groups) {
-      const totalRequests = group.success + group.errors;
-      if (totalRequests < minRequests) {
-        continue;
-      }
-
       const sorted = [...group.durations].sort((a, b) => a - b);
       const leaf: GraphLeaf & { _durations?: number[] } = {
         method: group.method,
@@ -158,7 +152,10 @@ export function buildNetworkGraph(
   for (const [, { scheme, host, pathGroups }] of hostMap) {
     const root: Record<string, GraphNode> = createPathNode();
 
-    insertPathGroups(root, pathGroups, minRequests);
+    insertPathGroups(root, pathGroups);
+    // minRequests is evaluated on the aggregated (parameterized) endpoint, the unit the
+    // graph reports, so it must run after `{id}` collapse rather than per raw URL (#9917).
+    pruneBelowMinRequests(root, minRequests);
 
     if (Object.keys(root).length > 0) {
       stripDurations(root);
@@ -180,6 +177,37 @@ function mergeLeafStats(
   const sorted = [...combined].sort((a, b) => a - b);
   target.p50 = Math.round(computePercentile(sorted, 50));
   target.p95 = Math.round(computePercentile(sorted, 95));
+}
+
+const LEAF_STAT_KEYS = ["method", "type", "success", "errors", "p50", "p95", "_durations"] as const;
+
+function dropLeafStats(node: GraphLeaf & Partial<GraphBranch> & { _durations?: number[] }): void {
+  for (const key of LEAF_STAT_KEYS) {
+    delete node[key];
+  }
+}
+
+/**
+ * Remove leaves whose merged request count is under `minRequests`, then branches left
+ * with no leaves. A combined leaf+branch node keeps its children when only its own
+ * stats fall below the threshold.
+ */
+function pruneBelowMinRequests(node: Record<string, GraphNode>, minRequests: number): void {
+  for (const key of Object.keys(node)) {
+    const val = node[key] as GraphLeaf & Partial<GraphBranch> & { _durations?: number[] };
+    if (val.paths) {
+      pruneBelowMinRequests(val.paths, minRequests);
+      if (Object.keys(val.paths).length === 0) {
+        delete val.paths;
+      }
+    }
+    if (val.success !== undefined && val.success + val.errors < minRequests) {
+      dropLeafStats(val);
+    }
+    if (val.success === undefined && !val.paths) {
+      delete node[key];
+    }
+  }
 }
 
 function stripDurations(node: Record<string, GraphNode>): void {

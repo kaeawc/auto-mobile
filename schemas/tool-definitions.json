@@ -14268,14 +14268,14 @@
   },
   {
     "name": "overlay",
-    "description": "Show, update (spec or flat state), dismiss (id or all:true), or inspect host-local overlay status on Android. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. Verify with observe; no screenshot is returned. Status reflects host requests only, not device events.",
+    "description": "Show, update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["show", "update", "dismiss", "status"]
+          "enum": ["show", "update", "dismiss", "status", "awaitEvent"]
         },
         "spec": {
           "description": "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
@@ -15393,7 +15393,7 @@
           "additionalProperties": false
         },
         "id": {
-          "description": "Overlay id for update or dismiss; must equal spec.id on update",
+          "description": "Overlay id required for update, dismiss or awaitEvent; must equal spec.id on update",
           "type": "string",
           "minLength": 1
         },
@@ -15422,7 +15422,24 @@
           "type": "boolean",
           "const": true
         },
+        "eventName": {
+          "description": "awaitEvent only: filter event name",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "description": "awaitEvent only: filter event kind",
+          "type": "string",
+          "enum": ["emit", "page_changed", "dismissed"]
+        },
+        "afterSequence": {
+          "description": "awaitEvent only: return a sequence strictly above this cursor",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "timeoutMs": {
+          "description": "Device request timeout; awaitEvent defaults to 30000 ms, maximum 60000 ms; timeout is a successful empty result",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
@@ -15484,6 +15501,24 @@
               "timestamp": {
                 "description": "Host clock milliseconds when the request completed",
                 "type": "number"
+              },
+              "pendingCount": {
+                "description": "Unconsumed events, including events excluded by filters or cursor",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastSequence": {
+                "description": "Highest sequence accepted for this overlay",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "droppedCount": {
+                "description": "Cumulative events dropped by buffer overflow in this scope",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               }
             },
             "required": ["lastAction", "success", "timestamp"],
@@ -15521,6 +15556,99 @@
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
+        "event": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["emit", "page_changed", "dismissed"]
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "payload": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "state": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            },
+            "pages": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "timestamp": {
+              "type": "number"
+            }
+          },
+          "required": ["id", "sequence", "kind", "name", "payload", "state", "pages", "timestamp"],
+          "additionalProperties": false
+        },
+        "timedOut": {
+          "description": "awaitEvent reached its timeout without a matching event; success remains true",
+          "type": "boolean",
+          "const": true
+        },
+        "reason": {
+          "description": "The overlay scope ended without a matching event",
+          "type": "string",
+          "const": "dismissed"
+        },
+        "pendingCount": {
+          "description": "Unconsumed events, including events excluded by filters or cursor",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lastSequence": {
+          "description": "Highest sequence accepted for this overlay",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "droppedCount": {
+          "description": "Cumulative events dropped by buffer overflow in this scope",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
@@ -15553,7 +15681,40 @@
         }
       },
       "required": ["success"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema0"
+              }
+            }
+          ]
+        }
+      }
     }
   },
   {

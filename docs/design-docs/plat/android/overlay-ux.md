@@ -201,6 +201,24 @@ use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
 renders a visible placeholder and reports a result under #9301; image bytes,
 MIME types, URLs, cache paths, and screenshot handles are not spec properties.
 
+### Asset transport (#9301, first slice)
+
+`put_overlay_asset {id, mimeType, dataBase64}` uploads one asset and
+`remove_overlay_asset {id}` deletes one; each gets one `overlay_result` carrying the
+request ID. Bytes travel as base64 in the single JSON text frame, like screenshots.
+Heap, not the 64 MiB frame limit, is the binding constraint, so caps are
+conservative and shared with the host through `schemas/overlay-asset-contract.json`:
+4 MiB per asset, 32 assets, 16 MiB total, ids of 1 to 256 characters, and
+`image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start
+with the matching signature. Putting an existing ID replaces it; a full store rejects
+the put with a clear error and never evicts. Removing an unknown ID succeeds. Assets
+sit in the CtrlProxy cache directory and are cleared when the overlay session ends:
+on any dismissal, on service start, unbind or teardown, on `dismiss_overlay` with
+`all`, and when the last client disconnects (even with no overlay showing). A show
+replacement and a temporary lock-screen hide keep them. Decoding, `contentScale`
+and the placeholder are not part of this slice: an `image` node still renders a plain
+gray box, and a nav item shows its built-in icon or a gray square.
+
 ## Actions and state
 
 | Action `type` | Properties                                                                                                                                        |

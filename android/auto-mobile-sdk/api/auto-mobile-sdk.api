@@ -1837,8 +1837,8 @@ public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriv
   public static final int $stable;
   public static final java.lang.String CHANGES_AUTHORITY_SUFFIX = ".automobile.sharedprefs";
   public static final java.lang.String CHANGES_PATH = "changes";
-  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations);
-  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations, kotlin.jvm.functions.Function0<java.lang.Boolean>);
+  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations, kotlin.jvm.functions.Function0, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final java.lang.String getProcessToken$auto_mobile_sdk();
   public java.util.List<dev.jasonpearson.automobile.sdk.storage.PreferenceFileDescriptor> getPreferenceFiles();
   public java.util.List<dev.jasonpearson.automobile.sdk.storage.KeyValuePair> getPreferences(java.lang.String);
@@ -1889,6 +1889,11 @@ Compiled from "SharedPreferencesError.kt"
 public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$ReadError extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$ReadError(java.lang.String);
+}
+Compiled from "SharedPreferencesError.kt"
+public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$WriteFailed extends dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError$WriteFailed(java.lang.String);
 }
 Compiled from "SharedPreferencesError.kt"
 public abstract class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError extends java.lang.Exception {

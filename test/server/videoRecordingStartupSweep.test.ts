@@ -9,8 +9,11 @@ import {
   listVideoRecordings,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
+  startVideoRecording,
   stopVideoRecording,
 } from "../../src/server/videoRecordingManager";
+import type { BootedDevice } from "../../src/models";
+import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -73,7 +76,7 @@ describe("video recording startup sweep (#10043)", () => {
     });
   }
 
-  async function sweep(
+  async function configure(
     repository: VideoRecordingRepository | FakeVideoRecordingRepository,
     livePeers: () => ReadonlySet<string>,
   ) {
@@ -89,9 +92,17 @@ describe("video recording startup sweep (#10043)", () => {
         backend: new FakeVideoCaptureBackend(),
         idGenerator: new FakeIdGenerator(),
         archiveRoot: "/unused",
+        securePermissions: new FakeSecurePermissions(false),
         now: () => new Date(STARTED_AT),
       }),
     });
+  }
+
+  async function sweep(
+    repository: VideoRecordingRepository | FakeVideoRecordingRepository,
+    livePeers: () => ReadonlySet<string>,
+  ) {
+    await configure(repository, livePeers);
     // The first manager use runs the startup sweep.
     await listVideoRecordings();
   }
@@ -174,5 +185,88 @@ describe("video recording startup sweep (#10043)", () => {
 
     expect((await repo.getRecording("peer-row"))?.status).toBe("recording");
     expect((await repo.getRecording("orphan-row"))?.status).toBe("interrupted");
+  });
+
+  describe("start preflight (#10043 follow-up)", () => {
+    const device: BootedDevice = { deviceId: "device", platform: "android", name: "Device" };
+
+    // Run the startup sweep on an empty table so the rows inserted next reach the
+    // start preflight instead of being swept first.
+    async function armedRepository(livePeers: () => ReadonlySet<string>) {
+      const repo = new VideoRecordingRepository(db);
+      await configure(repo, livePeers);
+      await listVideoRecordings();
+      return repo;
+    }
+
+    test("refuses to start over a live peer's recording and leaves its row untouched", async () => {
+      await insertSession("peer-session", "peer");
+      const repo = await armedRepository(() => new Set(["peer"]));
+      await repo.insertRecording(recordingRow("peer-row", "peer-session"));
+
+      const start = startVideoRecording({ device });
+
+      await expect(start).rejects.toThrow("peer-session");
+      await expect(start).rejects.toThrow("another AutoMobile daemon");
+      const row = await repo.getRecording("peer-row");
+      expect(row?.status).toBe("recording");
+      expect(row?.endedAt).toBeUndefined();
+    });
+
+    test("interrupts this process's stale row and starts", async () => {
+      await insertSession("own-session", "self");
+      const repo = await armedRepository(() => new Set(["peer"]));
+      await repo.insertRecording(recordingRow("own-row", "own-session"));
+
+      const active = await startVideoRecording({ device });
+
+      expect((await repo.getRecording("own-row"))?.status).toBe("interrupted");
+      expect(active.recordingId).not.toBe("own-row");
+    });
+
+    test("interrupts a dead daemon's row and starts", async () => {
+      await insertSession("dead-session", "gone");
+      const repo = await armedRepository(() => new Set(["peer"]));
+      await repo.insertRecording(recordingRow("dead-row", "dead-session"));
+
+      await startVideoRecording({ device });
+
+      expect((await repo.getRecording("dead-row"))?.status).toBe("interrupted");
+    });
+
+    test("interrupts an unowned legacy row even with a live peer and starts", async () => {
+      const repo = await armedRepository(() => new Set(["peer"]));
+      await repo.insertRecording(recordingRow("legacy-row"));
+
+      await startVideoRecording({ device });
+
+      expect((await repo.getRecording("legacy-row"))?.status).toBe("interrupted");
+    });
+
+    test("fails closed when live peers cannot be determined", async () => {
+      let discoveryFails = false;
+      const repo = await armedRepository(() => {
+        if (discoveryFails) {
+          throw new Error("pid file unreadable");
+        }
+        return new Set();
+      });
+      await repo.insertRecording(recordingRow("some-row", "some-session"));
+      discoveryFails = true;
+
+      await expect(startVideoRecording({ device })).rejects.toThrow("pid file unreadable");
+      expect((await repo.getRecording("some-row"))?.status).toBe("recording");
+    });
+
+    test("the fake repository mirrors the peer-owned refusal", async () => {
+      const repo = new FakeVideoRecordingRepository();
+      repo.setSessionDaemon("peer-session", "peer");
+      await configure(repo, () => new Set(["peer"]));
+      await listVideoRecordings();
+      await repo.insertRecording(recordingRow("peer-row", "peer-session"));
+
+      await expect(startVideoRecording({ device })).rejects.toThrow("peer-session");
+      expect((await repo.getRecording("peer-row"))?.status).toBe("recording");
+    });
   });
 });

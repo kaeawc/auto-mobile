@@ -1233,7 +1233,56 @@ async function ensureRecordingDeviceAvailable(
     throw new ActionableError(`Video recording already active for device ${device.deviceId}.`);
   }
   if (existing.length > 0) {
+    assertNoLivePeerRecording(device, await listPeerOwnedRecordings(deps, existing));
     await Promise.all(existing.map((recording) => interruptVideoRecording(recording.recordingId)));
+  }
+}
+
+/**
+ * Of this device's `recording` rows, those a LIVE PEER daemon owns (issue #10043
+ * follow-up). Rows this process, a dead daemon, or nobody owns (legacy, no owner
+ * session) are stale and may be interrupted; a peer's row is still being captured.
+ * Fails closed like the startup sweep: when peer liveness cannot be established
+ * the start is refused rather than rewriting a row a peer may be writing.
+ */
+async function listPeerOwnedRecordings(
+  deps: VideoRecordingManagerDependencies,
+  existing: readonly VideoRecordingRecord[],
+): Promise<VideoRecordingRecord[]> {
+  const owned = existing.filter((recording) => recording.ownerSessionUuid !== undefined);
+  if (owned.length === 0) {
+    return [];
+  }
+  let nonPeerIds: Set<string>;
+  try {
+    const livePeerDaemonSessionIds = deps.resolveLivePeerDaemonSessionIds();
+    const nonPeer =
+      await deps.recordingRepository.listRecordingsWithoutLivePeerOwner(livePeerDaemonSessionIds);
+    nonPeerIds = new Set(nonPeer.map((recording) => recording.recordingId));
+  } catch (error) {
+    logger.warn(
+      `[VideoRecording] Refusing to start: live peer daemons unknown: ${errorMessage(error)}`,
+      error,
+    );
+    throw new ActionableError(
+      "Cannot start video recording: unable to determine whether another AutoMobile daemon is " +
+        `still recording this device (${errorMessage(error)}). Retry once the daemon registry is readable.`,
+    );
+  }
+  return owned.filter((recording) => !nonPeerIds.has(recording.recordingId));
+}
+
+function assertNoLivePeerRecording(
+  device: BootedDevice,
+  peerOwned: readonly VideoRecordingRecord[],
+): void {
+  const peer = peerOwned[0];
+  if (peer) {
+    throw new ActionableError(
+      `Video recording already active for device ${device.deviceId} in another AutoMobile ` +
+        `daemon (recording ${peer.recordingId}, owner session ${peer.ownerSessionUuid}). ` +
+        "Stop it there; two daemons cannot record the same device.",
+    );
   }
 }
 

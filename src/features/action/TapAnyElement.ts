@@ -1784,6 +1784,14 @@ export class TapAnyElement extends BaseVisualChange {
                 onDispatched,
                 timer: this.timer,
                 onWarning: (warning) => onActivationWarnings([warning]),
+                // Same TalkBack state the default route uses; unknown/off keeps the raw gesture.
+                talkBack:
+                  target.talkBackState === true
+                    ? {
+                        strategy: this.talkBackStrategy,
+                        driver: this.talkBackDriverFactory.createDriver(this.device),
+                      }
+                    : undefined,
               },
             )
           : undefined;

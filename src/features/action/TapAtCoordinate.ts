@@ -6,6 +6,7 @@ import {
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriver,
@@ -457,10 +458,9 @@ export class TapAtCoordinate extends BaseVisualChange {
           (await this.resolveTalkBackState(signal, onActivationWarnings));
         if (talkBackEnabled) {
           // The shared TalkBack driver has no display-addressed activation capability.
-          if (displayId !== undefined && displayId !== 0) {
-            throw new ActionableError(
-              `TalkBack coordinate activation cannot target display ${displayId}; no gesture was dispatched.`,
-            );
+          const refusal = talkBackDisplayRefusal(displayId);
+          if (refusal) {
+            throw refusal;
           }
           await this.dispatchDisplayTalkBackTapWithOneFreshRetry(options, resolved, observation, {
             signal,

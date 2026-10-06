@@ -374,6 +374,10 @@ function appendDisabledElementWarning(
 /**
  * Command to tap on UI element containing specified text
  */
+function warningsField(warnings: string[]): { warnings?: string[] } {
+  return warnings.length ? { warnings } : {};
+}
+
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
   private readonly refreshedDisplayTransitions: Pick<
     DisplayTransitionTracker,
@@ -3595,7 +3599,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     }
     const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
-    const dispatchAction = await this.androidDisplayDispatch(options, context);
+    const displayWarnings: string[] = [];
+    const dispatchAction = await this.androidDisplayDispatch(options, {
+      ...context,
+      onWarnings: (warnings) => displayWarnings.push(...warnings),
+    });
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -3619,6 +3627,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       action: options.action,
       element,
       selectedElement,
+      ...warningsField(displayWarnings),
     };
   }
 
@@ -3628,17 +3637,36 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
       signal?: AbortSignal;
       onDispatched: () => void;
+      onWarnings?: (warnings: string[]) => void;
     },
   ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-    return androidDisplayTapDispatch(
+    // Same TalkBack detection as the default route; unknown state keeps the raw gesture.
+    const warnings: string[] = [];
+    const talkBackEnabled = await this.strategy.isAccessibilityServiceEnabled((warning) =>
+      warnings.push(warning),
+    );
+    const dispatch = await androidDisplayTapDispatch(
       this.accessibilityService,
       this.adb,
       {
         action: options.action === "focus" ? "tap" : options.action,
         duration: options.duration,
       },
-      { ...context, timer: this.timer },
+      {
+        target: context.target,
+        signal: context.signal,
+        onDispatched: context.onDispatched,
+        timer: this.timer,
+        talkBack: talkBackEnabled
+          ? {
+              strategy: this.talkBackStrategy,
+              driver: this.talkBackDriverFactory.createDriver(this.device),
+            }
+          : undefined,
+      },
     );
+    context.onWarnings?.(warnings);
+    return dispatch;
   }
 
   private selectElementOnDisplay(

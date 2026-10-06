@@ -20,6 +20,10 @@ import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionRe
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 
 const device = {
   deviceId: "tap-display-verification",
@@ -87,6 +91,8 @@ function harness(
     productionCapture?: boolean;
     manualTimer?: boolean;
     vision?: boolean;
+    /** true: TalkBack on, null: state unknown; default off. */
+    talkBack?: boolean | null;
   } = {},
 ) {
   const transitions = new FakeDisplayTransitionReader();
@@ -129,7 +135,17 @@ function harness(
   capture.read = (_index, request) => ({ ...(request.displayId === 2 ? current : decoy) });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
+  const detector = new FakeAccessibilityDetector();
+  if (options.talkBack === true) {
+    detector.setDetectionResult(device.deviceId, true);
+  } else if (options.talkBack === null) {
+    detector.setDefaultResult(null);
+  }
+  const talkBackDriver = new FakeTalkBackNavigationDriver();
   const action = new TapOnElement(device, executor, {
+    accessibilityDetector: detector,
+    talkBackStrategy: new TalkBackTapStrategy({ timer }),
+    talkBackDriverFactory: { createDriver: () => talkBackDriver },
     screenshotCapturer: screenshots,
     visionConfig: {
       enabled: options.vision ?? false,
@@ -186,6 +202,7 @@ function harness(
     client,
     capability,
     observation,
+    talkBackDriver,
     setDefault: (next: ViewHierarchyResult) => {
       decoy = next;
     },
@@ -1048,5 +1065,44 @@ describe("tapOn targeted display resolution", () => {
     expect(h.capture.requests.length).toBeGreaterThan(1);
     expect(h.capture.requests.every((request) => request.displayId === undefined)).toBe(true);
     expect(h.dispatches).toEqual([]);
+  });
+});
+
+describe("tapOn explicit display with TalkBack (#9905)", () => {
+  for (const ctrlProxy of [true, false]) {
+    for (const action of ["tap", "doubleTap", "longPress"] as const) {
+      test(`TalkBack on refuses ${action} on a non-default display before any gesture (${ctrlProxy ? "CtrlProxy" : "adb"})`, async () => {
+        const h = harness(ctrlProxy, { talkBack: true });
+        const result = await h.execute({ action });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("TalkBack coordinate activation cannot target display 2");
+        expect(result.error).toContain("no gesture was dispatched");
+        expect(h.dispatches).toEqual([]);
+        expect(h.talkBackDriver.tapHistory).toEqual([]);
+        expect(h.talkBackDriver.doubleTapHistory).toEqual([]);
+        expect(
+          h.executor.getExecutedCommands().some((command) => command.includes("touchscreen")),
+        ).toBe(false);
+      });
+    }
+  }
+
+  test("TalkBack off keeps the raw display dispatch and carries no TalkBack warning", async () => {
+    const h = harness(true, { talkBack: false });
+    const result = await h.execute({});
+    expect(result.success).toBe(true);
+    expect(result.warnings).toBeUndefined();
+    expect(h.dispatches).toHaveLength(1);
+    expect(h.dispatches[0]).toMatchObject({ displayId: 2 });
+    expect(h.talkBackDriver.tapHistory).toEqual([]);
+  });
+
+  test("TalkBack state unknown keeps the raw display dispatch with the unknown-state warning", async () => {
+    const h = harness(true, { talkBack: null });
+    const result = await h.execute({});
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([TALKBACK_STATE_UNKNOWN_WARNING]);
+    expect(h.dispatches).toHaveLength(1);
+    expect(h.talkBackDriver.tapHistory).toEqual([]);
   });
 });

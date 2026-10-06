@@ -13,6 +13,9 @@ import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
+import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
+import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../../src/features/accessibility/interfaces/AccessibilityDetector";
 import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
 const inner = "4619827259835644672";
@@ -36,7 +39,8 @@ afterEach(() => {
   }
 });
 
-function harness(ctrlProxy: boolean, targetDevice = device) {
+/** true: TalkBack on, null: state unknown; default off. */
+function harness(ctrlProxy: boolean, targetDevice = device, talkBack: boolean | null = false) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const transitions = new FakeDisplayTransitionReader();
@@ -53,12 +57,21 @@ function harness(ctrlProxy: boolean, targetDevice = device) {
       "utf8",
     ),
   );
+  const detector = new FakeAccessibilityDetector();
+  if (talkBack === true) {
+    detector.setDetectionResult(device.deviceId, true);
+  } else if (talkBack === null) {
+    detector.setDefaultResult(null);
+  }
+  const talkBackDriver = new FakeTalkBackNavigationDriver();
   const deps = {
     timer,
     hierarchyCapture: capture,
     displayTransitions: transitions,
     lastRenderedObservation: () => observation,
-    accessibilityDetector: new FakeAccessibilityDetector(),
+    accessibilityDetector: detector,
+    talkBackStrategy: new TalkBackTapStrategy({ timer }),
+    talkBackDriverFactory: { createDriver: () => talkBackDriver },
   };
   const action = new TapAnyElement(targetDevice, adb, deps);
   const observe = new FakeObserveScreen();
@@ -91,6 +104,7 @@ function harness(ctrlProxy: boolean, targetDevice = device) {
     observation,
     transitions,
     dispatches,
+    talkBackDriver,
     onDispatch: (callback: () => void) => {
       onDispatch = callback;
     },
@@ -288,4 +302,41 @@ test("tapAny block refusal before dispatch never receives the dispatched marker"
   expect(result.error).not.toContain("gesture was dispatched");
   expect(result.error).not.toContain("Do not retry automatically");
   expect(h.dispatches).toEqual([]);
+});
+
+for (const ctrlProxy of [true, false]) {
+  for (const action of ["tap", "doubleTap", "longPress"] as const) {
+    test(`tapAny TalkBack on refuses ${action} on a non-default display before any gesture via ${ctrlProxy ? "CtrlProxy" : "adb"}`, async () => {
+      const h = harness(ctrlProxy, device, true);
+      const result = await h.action.execute({ action, display: "cover" });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("TalkBack coordinate activation cannot target display 3");
+      expect(result.error).toContain("no gesture was dispatched");
+      expect(h.dispatches).toEqual([]);
+      expect(h.talkBackDriver.tapHistory).toEqual([]);
+      expect(h.talkBackDriver.doubleTapHistory).toEqual([]);
+      expect(
+        h.adb.getCommandCalls().some((call) => call.command.includes("input touchscreen")),
+      ).toBe(false);
+    });
+  }
+}
+
+test("tapAny TalkBack on refuses a session-pinned display the same way", async () => {
+  const h = harness(true, device, true);
+  const result = await runWithSelectedDisplayPin({ pin: "cover", inventory: device.displays }, () =>
+    h.action.execute({ action: "tap", display: "cover" }),
+  );
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("TalkBack coordinate activation cannot target display 3");
+  expect(h.dispatches).toEqual([]);
+});
+
+test("tapAny TalkBack state unknown keeps the raw display dispatch and warns", async () => {
+  const h = harness(true, device, null);
+  const result = await h.action.execute({ action: "tap", display: "cover" });
+  expect(result.success).toBe(true);
+  expect(result.warnings).toContain(TALKBACK_STATE_UNKNOWN_WARNING);
+  expect(h.dispatches).toEqual([3, 3]);
+  expect(h.talkBackDriver.tapHistory).toEqual([]);
 });

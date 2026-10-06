@@ -4613,6 +4613,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     delayMs: number = 500,
     timeoutMs: number = 3000,
   ): Promise<boolean> {
+    const signal = combineWithAmbientAbort();
+    signal?.throwIfAborted();
     // Remember the most recent runner error text across attempts (issue #3062) so the terminal
     // warn — the one visible at the default log level — attributes the deterministic handler
     // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
@@ -4638,7 +4640,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         const hierarchyResult = await this.requestHierarchySync(
           new NoOpPerformanceTracker(),
           false,
-          undefined,
+          signal,
           timeoutMs,
           diagnostics,
         );
@@ -4667,6 +4669,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       {
         maxAttempts,
         delays: delayMs,
+        signal,
         shouldRetry: () => {
           if (identicalRunnerErrorStreak >= VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT) {
             shortCircuited = true;
@@ -4680,6 +4683,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         },
       },
     );
+
+    signal?.throwIfAborted();
 
     if (!result.success) {
       const runnerErrorSuffix = lastRunnerError ? ` (last runner error: ${lastRunnerError})` : "";

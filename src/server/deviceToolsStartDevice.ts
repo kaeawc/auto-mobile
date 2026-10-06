@@ -26,6 +26,7 @@ import {
 } from "../ctrlProxy/RunnerReadinessService";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { acquisitionDeadlineMs } from "./deviceToolsAcquisition";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -741,7 +742,10 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       {
         bootTimeoutMs: totalTimeoutMs,
         automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
-        automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
+        automationDeadlineMs: acquisitionDeadlineMs(
+          rawArgs,
+          getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
+        ),
         operationName: "startDevice",
         stableTarget:
           args.platform === "android" && target.name && !args.deviceId

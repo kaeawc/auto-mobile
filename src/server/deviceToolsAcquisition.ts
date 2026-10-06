@@ -44,9 +44,18 @@ import type {
   StartDeviceArgs,
 } from "./deviceTools";
 import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import { resolveTransportDeadlineMs } from "./formTools";
 
 // Match the cancellation settlement grace in RunnerReadinessService and DeviceBootService.
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+/** Cap acquisition budgets using the existing anchored/legacy transport contract. */
+export function acquisitionDeadlineMs(rawArgs: unknown, requestedDeadlineMs: number): number {
+  return Math.min(
+    requestedDeadlineMs,
+    resolveTransportDeadlineMs(rawArgs) ?? Number.POSITIVE_INFINITY,
+  );
+}
 
 async function awaitFailedAcquisitionCleanup(
   cleanup: () => Promise<void>,
@@ -295,7 +304,10 @@ async function prepareDevice(
   const deps = getDeviceToolsDependencies();
   const deviceUtils = deps.deviceManagerFactory();
   const deviceMatcher = deps.deviceMatcherFactory();
-  const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
+  const bootDeadlineMs = Math.min(
+    deps.timer.now() + budgets.bootTimeoutMs,
+    budgets.automationDeadlineMs,
+  );
   const requestedIdentity = describeStartDeviceRequest(args);
   const state: {
     boot: DeviceBootResult | undefined;
@@ -497,7 +509,10 @@ async function getAndroidHandler(
     {
       bootTimeoutMs,
       automationReadyTimeoutMs,
-      automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+      automationDeadlineMs: acquisitionDeadlineMs(
+        rawArgs,
+        startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+      ),
       operationName: "getAndroid",
       ...(args.avdName
         ? {
@@ -547,7 +562,10 @@ async function getAppleHandler(
     {
       bootTimeoutMs,
       automationReadyTimeoutMs,
-      automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+      automationDeadlineMs: acquisitionDeadlineMs(
+        rawArgs,
+        startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
+      ),
       operationName: "getApple",
       stableTarget: { platform: "ios", stableId: udid },
     },

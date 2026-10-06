@@ -18,6 +18,9 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -112,9 +115,14 @@ describe("device acquisition wait deadlines", () => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
   });
 
-  function acquire(device: BootedDevice, signal?: AbortSignal) {
+  function acquire(
+    device: BootedDevice,
+    signal?: AbortSignal,
+    internalArgs: Record<string, number> = {},
+  ) {
     deviceUtils.setBootedDevices(device.platform, [device]);
     const tool = ToolRegistry.getTool(device.platform === "android" ? "getAndroid" : "getApple")!;
     return tool.handler(
@@ -122,10 +130,194 @@ describe("device acquisition wait deadlines", () => {
         ...(device.platform === "android" ? { avdName: device.name } : { udid: device.deviceId }),
         bootTimeoutMs: 1_000,
         automationReadyTimeoutMs: 1_000,
+        ...internalArgs,
       },
       undefined,
       signal,
     );
+  }
+
+  test("startDevice caps its boot/preparation budget by the anchored MCP deadline", async () => {
+    let observedDeadline: number | undefined;
+    const stopped = new Error("captured preparation before device work");
+    const handlers = createStartDeviceHandlers({
+      stripInternalAcquisitionParams: () => ({ platform: "android", name: "Pixel" }),
+      prepareDevice: async (_args, budgets) => {
+        observedDeadline = budgets.automationDeadlineMs;
+        throw stopped;
+      },
+    });
+    const rawArgs = { platform: "android" as const, name: "Pixel", __mcpRequestDeadlineMs: 500 };
+    await expect(handlers.startDeviceHandler(rawArgs)).rejects.toBe(stopped);
+    expect(observedDeadline).toBe(500);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  for (const stage of [
+    "CtrlProxy APK install",
+    "CtrlProxy APK upgrade",
+    "CtrlProxy WebSocket connect",
+    "CtrlProxy readiness wait",
+    "iOS CtrlProxy setup",
+  ]) {
+    for (const mode of ["in-time", "deadline", "request abort"] as const) {
+      const inTime = mode === "in-time";
+      test(`${stage} acquisition ${mode}`, async () => {
+        const platform = stage === "iOS CtrlProxy setup" ? "ios" : "android";
+        const device = platform === "android" ? android : ios;
+        await pool.addDevice(device);
+        const adb = new FakeAdbExecutor();
+        const manager = AndroidCtrlProxyManager.createForTestingWithDeps(android, adb, timer);
+        let stageSignal: AbortSignal | undefined;
+        const gate = Promise.withResolvers<void>();
+        const execute = adb.executeCommand.bind(adb);
+        const commands: string[] = [];
+        adb.executeCommand = async (command, timeout, buffer, noRetry, signal) => {
+          commands.push(command);
+          if (!command.startsWith("install ")) {
+            return execute(command, timeout, buffer, noRetry, signal);
+          }
+          stageSignal = signal ?? getAbortSignal();
+          await gate.promise;
+          return {
+            stdout: "Success",
+            stderr: "",
+            toString: () => "Success",
+            trim: () => "Success",
+            includes: (value) => "Success".includes(value),
+          };
+        };
+        AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+        adb.setCommandResponse(`shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
+          stderr: "",
+        });
+        adb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+          stdout: "package:/data/app/ctrlproxy/base.apk",
+          stderr: "",
+        });
+        adb.setCommandResponse("shell sha256sum", {
+          stdout: "different-sha /data/app/ctrlproxy/base.apk",
+          stderr: "",
+        });
+        manager.downloadApk = async () => "fake.apk";
+        manager.cleanupApk = async () => {};
+        let connectionReady = stage !== "CtrlProxy WebSocket connect" && platform === "android";
+        const wait = async () => {
+          stageSignal = getAbortSignal();
+          await gate.promise;
+          stageSignal?.throwIfAborted();
+          connectionReady = true;
+          return true;
+        };
+        const client = {
+          isConnected: () => connectionReady,
+          waitForConnection: stage === "CtrlProxy WebSocket connect" ? wait : async () => true,
+          verifyServiceReady: stage === "CtrlProxy readiness wait" ? wait : async () => true,
+          connectWithoutSetup: async () => true,
+        };
+        const service = new RunnerReadinessService({
+          timer,
+          getAndroidManager: () => ({
+            isInstalled: async () => true,
+            isEnabled: async () => true,
+            isVersionCompatible: async () => true,
+            enable: async () => {},
+            resetSetupState: () => {},
+            setup: async () => ({ success: true, message: "ready" }),
+            ensureCompatibleVersion: async () => {
+              if (stage === "CtrlProxy APK upgrade") {
+                return manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
+              }
+              if (stage === "CtrlProxy APK install") {
+                await manager.install("fake.apk");
+              }
+              return { status: "installed" };
+            },
+          }),
+          getAndroidClient: () => client,
+          getIosClient: () => client,
+          getIosManager: () => ({
+            isInstalled: async () => true,
+            resetSetupState: () => {},
+            getServicePort: () => 8765,
+            start: async () => {},
+            forceRestart: async () => {},
+            setup: async (_force, _perf, signal) => {
+              stageSignal = signal;
+              await gate.promise;
+              signal?.throwIfAborted();
+              connectionReady = true;
+              return { success: true, message: "ready" };
+            },
+          }),
+          checkIosOverride: async () => ({ present: false, usable: true }),
+          awaitIosStartupMaintenance: async () => {},
+        });
+        setDeviceToolsDependencies({
+          ensureCtrlProxyReady: (request) => service.ensureReady(request),
+        });
+        const caller = new AbortController();
+        if (mode === "request abort") {
+          // Registered before the phase deadline to model the transport winning
+          // the exact-deadline race. Its anchored deadline overrides the fallback.
+          timer.setTimeout(
+            () => caller.abort(new DOMException("MCP request timed out", "TimeoutError")),
+            500,
+          );
+        }
+        const pending = acquire(
+          device,
+          caller.signal,
+          mode === "request abort"
+            ? {
+                __mcpRequestDeadlineMs: 500,
+                __mcpRequestTimeoutMs: 9_000,
+                __executionStartTime: 100,
+              }
+            : {
+                __mcpRequestTimeoutMs: 500,
+                __executionStartTime: 0,
+              },
+        );
+        const outcome = observe(pending);
+        try {
+          await flushMicrotasks();
+          expect(reservations.isReservedForReadiness(device.deviceId)).toBe(true);
+          if (inTime) {
+            timer.advanceTime(499);
+            gate.resolve();
+            await pending;
+            expect(outcome.error).toBeUndefined();
+            expect(stageSignal?.aborted).toBe(false);
+            expect(sessionManager.getAllSessionIds()).toHaveLength(1);
+          } else {
+            timer.advanceTime(500);
+            await flushMicrotasks();
+            expect(stageSignal?.aborted).toBe(true);
+            // An abort-ignoring dependency receives cancellation; bounded settlement
+            // cannot strand the device when that dependency never resolves.
+            timer.advanceTime(1_000);
+            await flushMicrotasks();
+            expect(outcome.settled).toBe(true);
+            expect(outcome.error).toBeInstanceOf(ActionableError);
+            expect((outcome.error as Error).message).toContain(stage);
+            expect(sessionManager.getAllSessionIds()).toEqual([]);
+          }
+          expect(reservations.isReservedForReadiness(device.deviceId)).toBe(false);
+          expect(lifecycleReleases).toBe(1);
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          gate.resolve();
+          await flushMicrotasks();
+        }
+        expect(sessionManager.getAllSessionIds()).toHaveLength(inTime ? 1 : 0);
+        expect(commands.filter((command) => command.startsWith("install "))).toHaveLength(
+          stage.startsWith("CtrlProxy APK") ? 1 : 0,
+        );
+        expect(commands.some((command) => command.startsWith("shell pm uninstall"))).toBe(false);
+      });
+    }
   }
 
   function ensureReady(device: BootedDevice, signal?: AbortSignal, totalDeadlineMs = 2_000) {

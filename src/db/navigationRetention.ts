@@ -12,8 +12,13 @@
 //      (node / edge / suggestion observations) are the
 //      unbounded surface — one row per (build, device, session) per node/edge —
 //      so they are pruned by age, and build keys orphaned by that prune are
-//      swept. Nodes/edges themselves are bounded (one per screen/transition) and
-//      durable, so they are intentionally NOT age-deleted here. The TTL tier
+//      swept. Nodes are bounded (one per screen) and durable, so they are
+//      intentionally NOT age-deleted here. Edges are an append-only traversal
+//      log (every traversal inserts a row; readers collapse them to distinct
+//      transitions, #10194), so they are bounded per transition rather than by
+//      age: only the newest `maxEdgeTraversalsPerTransition` rows of each distinct
+//      (app, from, to, tool, args) transition are kept, never deleting the newest
+//      row, and never a row a test-coverage session references. The TTL tier
 //      spares the active build key entirely (never age-delete what is current).
 //   3. Global LRU size cap — a backstop enforcing a per-app AND a global budget
 //      on the observation rows, evicting oldest by `last_seen_at`. Unlike the TTL
@@ -87,6 +92,11 @@ export interface NavigationRetentionConfig {
    * bun:sqlite's `MAX_VARIABLE_NUMBER` (250_000) and defeat the batching.
    */
   evictionChunkSize: number;
+  /**
+   * Max `navigation_edges` rows (traversals) kept per distinct transition; the newest
+   * by insertion order are kept. Config/override only (no env var).
+   */
+  maxEdgeTraversalsPerTransition: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -99,6 +109,7 @@ export const DEFAULT_STRUCTURE_TTL_MS = 90 * DAY_MS; // ~3 months
 export const DEFAULT_PER_APP_MAX_OBSERVATIONS = 50_000;
 export const DEFAULT_GLOBAL_MAX_OBSERVATIONS = 500_000;
 export const DEFAULT_EVICTION_CHUNK_SIZE = 5_000;
+export const DEFAULT_MAX_EDGE_TRAVERSALS_PER_TRANSITION = 20;
 
 /** Default cadence of the background pass: every 6 hours. */
 export const DEFAULT_NAV_RETENTION_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -126,6 +137,8 @@ export interface NavigationRetentionSummary {
   edgeObservationsDeleted: number;
   suggestionObservationsDeleted: number;
   buildKeysDeleted: number;
+  /** Surplus `navigation_edges` traversal rows deleted (see the per-transition cap). */
+  edgeTraversalsDeleted: number;
   /** Clock time (ms) the pass ran at. */
   prunedAt: number;
 }
@@ -137,6 +150,7 @@ function emptySummary(prunedAt: number): NavigationRetentionSummary {
     edgeObservationsDeleted: 0,
     suggestionObservationsDeleted: 0,
     buildKeysDeleted: 0,
+    edgeTraversalsDeleted: 0,
     prunedAt,
   };
 }
@@ -216,6 +230,9 @@ export function resolveNavigationRetentionConfig(
       ),
       MAX_EVICTION_CHUNK_SIZE,
     ),
+    maxEdgeTraversalsPerTransition:
+      sanitizePositiveInt(overrides.maxEdgeTraversalsPerTransition) ??
+      DEFAULT_MAX_EDGE_TRAVERSALS_PER_TRANSITION,
   };
 }
 
@@ -287,6 +304,8 @@ export class NavigationRetention {
     // reached and the file was stranded on disk with no DB pointer left to
     // rediscover it. Pairing each clear-commit with its unlink closes that window.
     await this.pruneScreenshots(now, summary);
+    // Before the observation tiers: deleting an edge row cascades its provenance rows.
+    await this.pruneExcessEdgeTraversals(summary);
     await this.pruneObservationsByTtl(now, summary);
     await this.enforceCaps(summary);
     await this.pruneOrphanBuildKeys(summary);
@@ -479,6 +498,60 @@ export class NavigationRetention {
    * full protected-set snapshot, then transactionally revalidates only the apps
    * represented by its selected rows before deleting them.
    */
+  /**
+   * Bound the `navigation_edges` traversal log (#10194): keep the newest
+   * `maxEdgeTraversalsPerTransition` rows (by id, i.e. insertion order, immune to a
+   * device clock stepping backwards) of every distinct (app, from, to, tool, args)
+   * transition. A row a test-coverage session references is never deleted. One
+   * grouped scan finds the transitions over the cap; each is then trimmed in short
+   * transactions of at most `evictionChunkSize` rows, yielding between them, so the
+   * single connection is released as in the other tiers (#6650). Deleting a row
+   * cascades its UI elements, modals, scroll position and provenance rows.
+   */
+  private async pruneExcessEdgeTraversals(summary: NavigationRetentionSummary): Promise<void> {
+    const keep = this.config.maxEdgeTraversalsPerTransition;
+    const chunk = this.config.evictionChunkSize;
+    const overCap = await this.db
+      .selectFrom("navigation_edges")
+      .select(["app_id", "from_screen", "to_screen", "tool_name", "tool_args"])
+      .groupBy(["app_id", "from_screen", "to_screen", "tool_name", "tool_args"])
+      .having((eb) => eb.fn.countAll(), ">", keep)
+      .execute();
+    for (const transition of overCap) {
+      for (;;) {
+        const result = await this.db.transaction().execute((trx) =>
+          trx
+            .deleteFrom("navigation_edges")
+            .where("id", "in", (eb) =>
+              eb
+                .selectFrom("navigation_edges as e")
+                .select("e.id")
+                .where("e.app_id", "=", transition.app_id)
+                .where("e.from_screen", "=", transition.from_screen)
+                .where("e.to_screen", "=", transition.to_screen)
+                // `IS` matches NULL tool_name / tool_args as the GROUP BY above grouped them.
+                .where(sql<boolean>`e.tool_name is ${transition.tool_name}`)
+                .where(sql<boolean>`e.tool_args is ${transition.tool_args}`)
+                .where(
+                  sql<boolean>`not exists (select 1 from test_edge_coverage c where c.edge_id = e.id)`,
+                )
+                .orderBy("e.id", "desc")
+                .limit(chunk)
+                .offset(keep),
+            )
+            .executeTakeFirst(),
+        );
+        const deleted = Number(result.numDeletedRows ?? 0);
+        summary.edgeTraversalsDeleted += deleted;
+        if (deleted < chunk) {
+          break;
+        }
+        await this.yieldBetweenBatches();
+      }
+      await this.yieldBetweenBatches();
+    }
+  }
+
   private async pruneObservationsByTtl(
     now: number,
     summary: NavigationRetentionSummary,

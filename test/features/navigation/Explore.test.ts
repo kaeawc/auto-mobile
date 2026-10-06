@@ -845,6 +845,21 @@ describe("Explore", () => {
       }
     });
 
+    test("a run that only re-traverses known transitions reports no edges added (#10194)", async () => {
+      const initialGraph = seedTargetGraph();
+      // Re-traversal appends rows to the log; the distinct transitions are unchanged.
+      const retraversed = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue({
+        ...initialGraph,
+        edges: [...initialGraph.edges, ...initialGraph.edges, ...initialGraph.edges],
+      });
+      try {
+        const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
+        expect(result.edgesAdded).toBe(0);
+      } finally {
+        retraversed.mockRestore();
+      }
+    });
+
     for (const appId of ["com.test.app", null]) {
       test(`clamps report counts when the graph shrinks (initial appId ${appId})`, async () => {
         const initialGraph = { ...seedTargetGraph(), appId };

@@ -1605,8 +1605,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       };
     }
 
-    // Get all edges for BFS
-    const dbEdges = await this.repository.getEdges(this.currentAppId);
+    // Distinct transitions for BFS: path finding must not load every traversal row (#10194)
+    const dbEdges = await this.repository.getDistinctEdges(this.currentAppId);
 
     const appId = this.currentAppId;
     const edgesBySource = indexPathEdgesBySource(dbEdges, (edge) =>
@@ -2025,7 +2025,8 @@ export class NavigationGraphManager implements NavigationGraphService {
     }
 
     const dbNodes = await this.repository.getNodes(appId);
-    const dbEdges = await this.repository.getEdges(appId);
+    // One edge per distinct transition (newest traversal's metadata), not per traversal (#10194)
+    const dbEdges = await this.repository.getDistinctEdges(appId);
 
     const nodes: NavigationNode[] = [];
     for (const dbNode of dbNodes) {

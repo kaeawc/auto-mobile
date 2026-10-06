@@ -78,6 +78,7 @@ import type { BlockerHandlerDeps, DialogTapActionFactory } from "./ExploreBlocke
 
 // Import validate mode functions
 import {
+  countNewTransitions,
   initializeGraphTraversal,
   markNodeVisited,
   markEdgeTraversed,
@@ -1441,7 +1442,7 @@ export class Explore extends BaseVisualChange {
       ? await this.navigationManager.exportGraphForApp(initialGraph.appId)
       : await this.navigationManager.exportGraph();
     const screensDiscovered = Math.max(0, finalGraph.nodes.length - initialGraph.nodes.length);
-    const edgesAdded = Math.max(0, finalGraph.edges.length - initialGraph.edges.length);
+    const edgesAdded = countNewTransitions(initialGraph.edges, finalGraph.edges);
 
     // Calculate coverage
     const totalScreens = finalGraph.nodes.length;

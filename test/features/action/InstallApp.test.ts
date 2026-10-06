@@ -16,6 +16,7 @@ import {
 } from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
@@ -1408,6 +1409,18 @@ describe("InstallApp", () => {
       return installCommand;
     }
 
+    /** After the package-wide uninstall, the target user's listing no longer has the app. */
+    function emptyUserTenListingAfterUninstall(adb: InstallAppFakeAdbExecutor): void {
+      const execute = adb.executeCommand.bind(adb);
+      spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+        const result = await execute(...args);
+        if (args[0].startsWith("uninstall ")) {
+          adb.setCommandResponse("shell pm list packages --user 10", createExecResult(""));
+        }
+        return result;
+      });
+    }
+
     test.each([false, true])(
       "restores other users after downgrade (stopped user: %s)",
       async (stopped) => {
@@ -1688,6 +1701,7 @@ describe("InstallApp", () => {
         fakeTimer = new FakeTimer();
         const adb = fakeAdb as InstallAppFakeAdbExecutor;
         adb.honourRequestAbort = true;
+        emptyUserTenListingAfterUninstall(adb);
         const pending = Promise.withResolvers<ExecResult>();
         const started = Promise.withResolvers<boolean>();
         adb.reinstallOperation = () => {
@@ -1704,10 +1718,12 @@ describe("InstallApp", () => {
         try {
           expect(await Promise.race([started.promise, outcome.then(() => false)])).toBe(true);
           expect(fakeTimer.getPendingTimeouts()).toEqual([120_000]);
+          fakeTimer.enableAutoAdvance();
           fakeTimer.advanceTime(120_000);
           await expect(execution).rejects.toThrow("timed out after 120000ms");
           await expect(execution).rejects.toThrow("was uninstalled during downgrade recovery");
-          await expect(execution).rejects.toThrow("not installed");
+          await expect(execution).rejects.toThrow("indeterminate");
+          await expect(execution).rejects.toThrow("do not retry automatically");
           expect(adb.wasCommandExecuted("install-existing")).toBe(false);
           expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
         } finally {
@@ -1962,6 +1978,8 @@ describe("InstallApp", () => {
         expect(fakeAdb.getExecutedCommands()).toEqual([
           "shell pm list packages --user 0",
           "shell pm list packages --user 0",
+          // An upgrade snapshots the installed version so a timed-out install can be judged.
+          ...(upgrade ? [`shell dumpsys package '${packageName}'`] : []),
           `install --user 0 -r "${apkPath}"`,
           "shell pm list packages --user 0",
         ]);
@@ -2277,5 +2295,220 @@ describe("InstallApp", () => {
     await expect(installApp.execute(ipaPath)).rejects.toThrow(
       "Uninstall the app first with uninstallApp",
     );
+  });
+
+  // #10191: the adb install step budget only kills the host process; the device may finish.
+  describe("Android install that hits the adb timeout (#10191)", () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const packageName = "dev.jasonpearson.automobile.playground";
+    const installCommand = `install --user 0 -r "${apkPath}"`;
+    const listCommand = "shell pm list packages --user 0";
+    const dumpsysCommand = `shell dumpsys package '${packageName}'`;
+    const present = () => createExecResult(`package:${packageName}`);
+    const absent = () => createExecResult("");
+    // The "before" snapshot is the captured fixture; the "after" snapshot only moves its
+    // lastUpdateTime, as a committed upgrade would.
+    const dumpsysBefore = readFileSync(
+      path.join(
+        import.meta.dir,
+        "../../fixtures/android-dumpsys-package/dumpsys-package-installed.txt",
+      ),
+      "utf8",
+    );
+    const dumpsysAfter = dumpsysBefore.replace(
+      "lastUpdateTime=2026-10-03 17:28:08",
+      "lastUpdateTime=2026-10-06 09:15:42",
+    );
+    const timeoutError = () =>
+      new AdbCommandTimeoutError(`Command timed out after 120000ms: adb -s x ${installCommand}`);
+
+    function setup(installTimesOut = true): {
+      repo: CountingInstalledAppsRepository;
+      installApp: InstallApp;
+    } {
+      fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/36.0.0/aapt2" });
+      fakeHost.setCommandResponse("aapt2", createExecResult(playgroundBadgingOutput));
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+      if (installTimesOut) {
+        fakeAdb.setCommandError(installCommand, timeoutError());
+      }
+      const repo = new CountingInstalledAppsRepository();
+      const installApp = new InstallApp(device, fakeAdbFactory, {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        timer: fakeTimer,
+        installedAppsRepository: repo,
+      });
+      return { repo, installApp };
+    }
+
+    test("first install the device finishes after the timeout reports success with a warning", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, "com.other", false, 1_000);
+      fakeAdb.setCommandResponseSequence(listCommand, [absent(), absent(), present()]);
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result).toMatchObject({ success: true, upgrade: false, userId: 0, packageName });
+      expect(result.warning).toContain("timed out but the device finished installing");
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        listCommand,
+        listCommand,
+        installCommand,
+        listCommand, // live re-read after the timeout
+        listCommand, // post-install verification
+      ]);
+      expect(repo.markStaleCalls).toBeGreaterThan(0);
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("first install absent from the device is indeterminate, never a flat failure", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, "com.other", false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, absent());
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install outcome is indeterminate");
+      expect(result.error).toContain("may still complete; do not retry automatically");
+      expect(result.error).toContain(`${packageName} is not listed for user 0`);
+      expect(result.error).not.toContain("Failed to install");
+      // Two pre-install reads, the install, then three bounded live re-reads.
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        listCommand,
+        listCommand,
+        installCommand,
+        listCommand,
+        listCommand,
+        listCommand,
+      ]);
+      expect(fakeTimer.getSleepHistory()).toEqual([2_000, 2_000]);
+      expect(repo.markStaleCalls).toBeGreaterThan(0);
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("upgrade whose lastUpdateTime moved after the timeout is a success", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, packageName, false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, present());
+      fakeAdb.setCommandResponseSequence("shell dumpsys package", [
+        createExecResult(dumpsysBefore),
+        createExecResult(dumpsysAfter),
+      ]);
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result).toMatchObject({ success: true, upgrade: true, packageName });
+      expect(result.warning).toContain("timed out but the device finished installing");
+      expect(fakeAdb.getExecutedCommands()).toEqual([
+        listCommand,
+        listCommand,
+        dumpsysCommand,
+        installCommand,
+        listCommand,
+        dumpsysCommand,
+        listCommand,
+      ]);
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("upgrade still showing the pre-install copy is indeterminate", async () => {
+      const { repo, installApp } = setup();
+      await repo.seedInstalledApp(device.deviceId, 0, packageName, false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, present());
+      fakeAdb.setCommandResponse("shell dumpsys package", createExecResult(dumpsysBefore));
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install outcome is indeterminate");
+      expect(result.error).toContain("still the pre-install copy");
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("a failed live re-read is indeterminate and names the read failure", async () => {
+      const { installApp } = setup();
+      fakeAdb.setCommandResponseSequence(listCommand, [absent(), absent()]);
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installed = false;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (installed && args[0] === listCommand) {
+          throw new Error("adb: device offline");
+        }
+        installed ||= args[0] === installCommand;
+        return execute(...args);
+      });
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install outcome is indeterminate");
+      expect(result.error).toContain("the package-state check failed: adb: device offline");
+    });
+
+    test("downgrade reinstall that times out then appears is reported as installed", async () => {
+      const { repo, installApp } = setup(false);
+      await repo.seedInstalledApp(device.deviceId, 0, packageName, false, 1_000);
+      fakeAdb.setCommandResponse(listCommand, present());
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installs = 0;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (args[0] === installCommand) {
+          if (++installs === 1) {
+            return createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]");
+          }
+          throw timeoutError();
+        }
+        return execute(...args);
+      });
+
+      const result = await installApp.execute(apkPath, 0);
+
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("timed out but the device finished installing");
+      expect(await repo.getCacheVerifiedAt(device.deviceId)).toBe(0);
+    });
+
+    test("downgrade reinstall that times out and is absent never claims the app is not installed", async () => {
+      const { installApp } = setup(false);
+      fakeAdb.setCommandResponse(listCommand, present());
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let installs = 0;
+      spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+        if (args[0] === installCommand) {
+          if (++installs === 1) {
+            return createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]");
+          }
+          throw timeoutError();
+        }
+        if (args[0].startsWith("uninstall ")) {
+          fakeAdb.setCommandResponse(listCommand, absent());
+        }
+        return execute(...args);
+      });
+
+      const rejection = installApp.execute(apkPath, 0);
+      await expect(rejection).rejects.toThrow("was uninstalled during downgrade recovery");
+      await expect(rejection).rejects.toThrow("Install outcome is indeterminate");
+      await expect(rejection).rejects.toThrow("do not retry automatically");
+      await expect(rejection).rejects.not.toThrow("the app is not installed");
+    });
+
+    test("error classification ignores the echoed command line and APK path", async () => {
+      const { installApp } = setup(false);
+      const hostile = `/tmp/INSTALL_FAILED_VERSION_DOWNGRADE.apk`;
+      const command = `install --user 0 -r "${hostile}"`;
+      fakeAdb.setCommandError(
+        command,
+        Object.assign(new Error(`Command failed: adb ${command}`), {
+          stderr: "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]",
+        }),
+      );
+
+      await expect(installApp.execute(hostile, 0)).rejects.toThrow("Command failed");
+      expect(fakeAdb.wasCommandExecuted("uninstall ")).toBe(false);
+    });
   });
 });

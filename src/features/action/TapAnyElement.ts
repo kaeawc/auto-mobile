@@ -95,7 +95,13 @@ import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierar
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
-import { androidDisplayTapDispatch, dispatchAndroidCoordinateTap } from "./coordinateTapDispatch";
+import {
+  androidDisplayTapDispatch,
+  dispatchAndroidCoordinateTap,
+  dispatchIosCoordinateTap,
+  dispatchIosSecondTap,
+  indeterminateTapError,
+} from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
 import { assertTouchscreenInputSucceeded } from "./touchscreenInput";
 import {
@@ -1197,6 +1203,7 @@ export class TapAnyElement extends BaseVisualChange {
       await this.executeIosTapWithVoiceOver(xcTestClient, action, element, x, y, {
         durationMs: longPressDuration,
         scoped: fenceOptions.scoped,
+        signal,
       });
       return;
     }
@@ -1247,33 +1254,14 @@ export class TapAnyElement extends BaseVisualChange {
     if (action === "doubleTap") {
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      const firstResult = await xcTestClient.requestTapCoordinates(
-        x,
-        y,
-        tapDuration,
-        timeoutMs,
-        undefined,
-        undefined,
+      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
         signal,
-      );
-      if (!firstResult.success) {
-        throw new ActionableError(`CtrlProxy iOS tap failed: ${firstResult.error}`);
-      }
+        timeoutMs,
+      });
       await this.timer.sleep(TAP_ANY_DOUBLE_TAP_GAP_MS);
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence.assertCurrent();
-      const secondResult = await xcTestClient.requestTapCoordinates(
-        x,
-        y,
-        tapDuration,
-        timeoutMs,
-        undefined,
-        undefined,
-        signal,
-      );
-      if (!secondResult.success) {
-        throw new ActionableError(`CtrlProxy iOS second tap failed: ${secondResult.error}`);
-      }
+      await dispatchIosSecondTap(xcTestClient, { x, y }, tapDuration, { signal, timeoutMs });
       return;
     }
 
@@ -1281,18 +1269,10 @@ export class TapAnyElement extends BaseVisualChange {
     fence.assertCurrent();
     throwIfAborted(signal);
     try {
-      const result = await xcTestClient.requestTapCoordinates(
-        x,
-        y,
-        tapDuration,
-        timeoutMs,
-        undefined,
-        undefined,
+      await dispatchIosCoordinateTap(xcTestClient, x, y, tapDuration, undefined, {
         signal,
-      );
-      if (!result.success) {
-        throw new ActionableError(`CtrlProxy iOS tap failed: ${result.error}`);
-      }
+        timeoutMs,
+      });
     } catch (error) {
       logger.warn(`[TapAnyElement] CtrlProxy iOS tap failed: ${errorMessage(error)}`, error);
       if (action === "longPress") {
@@ -1355,19 +1335,48 @@ export class TapAnyElement extends BaseVisualChange {
     voiceOverAction: "activate" | "long_press",
     timeoutMs: number | undefined,
     duration?: number,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const result = await xcTestClient.requestAction(
-      voiceOverAction,
-      resourceId,
-      undefined,
-      timeoutMs,
-      undefined,
-      duration === undefined ? undefined : { duration },
-    );
+    let dispatched = false;
+    let result: Awaited<ReturnType<IOSCtrlProxyClient["requestAction"]>>;
+    try {
+      result = await xcTestClient.requestAction(
+        voiceOverAction,
+        resourceId,
+        undefined,
+        timeoutMs,
+        undefined,
+        {
+          ...(duration === undefined ? {} : { duration }),
+          abortSignal: signal,
+          onDispatch: () => {
+            dispatched = true;
+          },
+        },
+      );
+    } catch (error) {
+      // A socket failure after the write is unconfirmed; a refusal or the caller's abort is not.
+      if (dispatched && !(error instanceof ActionableError) && error !== signal?.reason) {
+        throw indeterminateTapError(errorMessage(error));
+      }
+      throw error;
+    }
+    this.confirmIosVoiceOverDispatch(result);
     if (!result.success) {
       throw new ActionableError(
         `VoiceOver action failed for resource-id "${resourceId}": ${result.error ?? "unknown error"}`,
       );
+    }
+  }
+
+  /** A VoiceOver activation that was written but never answered may have landed. */
+  private confirmIosVoiceOverDispatch(result: {
+    error?: string;
+    dispatched?: boolean;
+    acknowledged?: boolean;
+  }): void {
+    if (result.dispatched && result.acknowledged !== true) {
+      throw indeterminateTapError(result.error);
     }
   }
 
@@ -1377,7 +1386,7 @@ export class TapAnyElement extends BaseVisualChange {
     element: Element,
     x: number,
     y: number,
-    pressOptions: { durationMs: number; scoped?: boolean },
+    pressOptions: { durationMs: number; scoped?: boolean; signal?: AbortSignal },
   ): Promise<void> {
     const longPressDuration = pressOptions.durationMs;
     const label = this.resolveIosVoiceOverLabel(element);
@@ -1410,6 +1419,7 @@ export class TapAnyElement extends BaseVisualChange {
         voiceOverAction,
         timeoutMs,
         action === "longPress" ? longPressDuration : undefined,
+        pressOptions.signal,
       );
       return;
     }
@@ -1425,6 +1435,7 @@ export class TapAnyElement extends BaseVisualChange {
       },
     );
 
+    this.confirmIosVoiceOverDispatch(result);
     if (!result.success) {
       throw new ActionableError(
         `VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}`,

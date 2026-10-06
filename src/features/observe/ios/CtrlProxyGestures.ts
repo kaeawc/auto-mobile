@@ -7,10 +7,11 @@ import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch
  */
 
 import {
+  DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
   SharedGestureDelegate,
   type TapDiagnosticParameters,
 } from "../shared/SharedGestureDelegate";
-import type { DelegateContext } from "./types";
+import type { CtrlProxyTapResult, DelegateContext } from "./types";
 import type { GestureTimingResult } from "../shared/types";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
@@ -44,6 +45,38 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       strategy === "displayTargetedObserved"
       ? { diagnostics: true, tapStrategy: strategy }
       : { diagnostics: true };
+  }
+
+  /**
+   * A tap written to the socket whose reply is late or lost may still have landed, so it is
+   * reported as dispatched-but-unacknowledged (never as a plain failure) the way presses are.
+   * A runner reply, including a refusal, stays acknowledged; a tap never sent stays a plain
+   * failure. The iOS client has no display routing, so `displayId` and `beforeSend` are unused.
+   */
+  // oxlint-disable-next-line max-params -- Keeps the shared delegate's positional tap signature.
+  override async requestTapCoordinates(
+    x: number,
+    y: number,
+    duration: number = 0,
+    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+    perf?: PerformanceTracker,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    return sendIOSPressCommand(
+      this.context,
+      this.tapCommandOptions({
+        x,
+        y,
+        duration,
+        timeoutMs,
+        perf,
+        frameContext,
+        signal,
+        onDispatch,
+      }),
+    );
   }
 
   /**

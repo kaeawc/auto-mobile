@@ -3,7 +3,11 @@ import {
   getTextRequestDeadlineMs,
   TEXT_MCP_REQUEST_HEADROOM_MS,
 } from "./textTransportTimeout";
-import { combineAbortSignals, runOutsideRequestContext } from "../../utils/AbortContext";
+import {
+  combineAbortSignals,
+  getRequestContext,
+  runOutsideRequestContext,
+} from "../../utils/AbortContext";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { selectablePanels } from "../../models/DisplayPanel";
@@ -1057,6 +1061,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     snapshot: AndroidImeRecoverySnapshot,
     signal?: AbortSignal,
   ): Promise<boolean> {
+    if (snapshot.wasEnabled === undefined) {
+      return false;
+    }
     if (snapshot.imeId === AUTO_MOBILE_IME_ID) {
       return false;
     }
@@ -1066,7 +1073,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const safe = state.installed.some(
         (ime) => ime.id === snapshot.imeId && ime.enabled && ime.active,
       );
+      const commitImeEnabled =
+        state.installed.find((ime) => ime.id === AUTO_MOBILE_IME_ID)?.enabled ?? false;
+      const commitImeStateMatches = snapshot.wasEnabled ? commitImeEnabled : !commitImeEnabled;
       return (
+        commitImeStateMatches &&
         safe &&
         state.activeImeId === snapshot.imeId &&
         (await catalog.readSubtype(snapshot.imeId, signal)).id === snapshot.subtypeId
@@ -1195,7 +1206,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       prior,
       routing,
       mode,
-      priorSubtype,
+      { ...priorSubtype, wasEnabled },
     );
     if (safeToRestore) {
       await this.restoreKeyboardProfileIfNeeded(keyboardProfile, previousProfileId);
@@ -1213,7 +1224,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     prior: string | null,
     routing: ImeCommitRouting,
     mode: "ime" | "imeKeyEvents",
-    priorSubtype: ImeSubtypeSnapshot,
+    priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
   ): Promise<{
     outcome?: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode };
     failure?: unknown;
@@ -1221,6 +1232,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }> {
     const { signal } = routing;
     let safeToRestore = true;
+    let commitResult: TextActionResult = { success: false };
     try {
       this.checkAbort(signal);
       if (operation === "replace") {
@@ -1238,6 +1250,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
       safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
+      commitResult = result;
       if (result.success && mode === "ime" && text.length > 0) {
         const error = await this.verifyImeCommit(text, routing);
         if (error !== undefined) {
@@ -1265,6 +1278,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore,
       };
     } catch (error) {
+      if (commitResult.success && isSendKeysBudgetExhausted(signal)) {
+        logger.warn("[SendKeys] Budget expired after IME acknowledgement", error);
+        return {
+          outcome: {
+            ...commitResult,
+            resolvedMode: mode,
+            warning: [
+              commitResult.warning,
+              "Delivery was acknowledged but not verified before the request budget expired.",
+            ]
+              .filter(Boolean)
+              .join(" "),
+          },
+          safeToRestore,
+        };
+      }
       return { failure: error, safeToRestore };
     }
   }
@@ -1430,12 +1459,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private canRestoreAfterImeCommit(
     result: TextActionResult,
     prior: string | null,
-    subtype: ImeSubtypeSnapshot,
+    subtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
   ): boolean {
     if (result.sessionUnsafe) {
       quarantineAndroidIme(
         this.device.deviceId,
-        prior === null ? undefined : { imeId: prior, subtypeId: subtype.id },
+        prior === null
+          ? undefined
+          : { imeId: prior, subtypeId: subtype.id, wasEnabled: subtype.wasEnabled },
       );
       return false;
     }
@@ -1583,7 +1614,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     } catch (error) {
       quarantineAndroidIme(
         this.device.deviceId,
-        priorImeId === null ? undefined : { imeId: priorImeId, subtypeId: subtype.id },
+        priorImeId === null ? undefined : { imeId: priorImeId, subtypeId: subtype.id, wasEnabled },
       );
       logger.warn("[SendKeys] Original keyboard restoration failed", error);
       const recovery =
@@ -2611,17 +2642,27 @@ export class SendKeys {
     },
   ): Promise<SendKeysResult> {
     const { selector, progress, signal, routing } = options;
-    const deadlineMs = getTextRequestDeadlineMs();
+    // Capture the live accessor while request context is active; timers may run outside it.
+    const getDeadlineMs = getRequestContext()?.getDeadlineMs;
+    const deadlineMs = getTextRequestDeadlineMs(getDeadlineMs);
     if (this.device.platform !== "android" || deadlineMs === undefined) {
       return this.executeUnbounded(commands, selector, progress, signal, routing);
     }
     const controller = new AbortController();
     const remainingMs = deadlineMs - this.timer.now() - TEXT_MCP_REQUEST_HEADROOM_MS;
-    const expire = () => controller.abort(new SendKeysBudgetError());
-    const handle = this.timer.setTimeout(expire, Math.max(0, remainingMs));
-    if (remainingMs <= 0) {
-      expire();
-    }
+    let handle: NodeJS.Timeout | undefined;
+    const expireOrRearm = () => {
+      const liveRemainingMs =
+        (getTextRequestDeadlineMs(getDeadlineMs) ?? deadlineMs) -
+        this.timer.now() -
+        TEXT_MCP_REQUEST_HEADROOM_MS;
+      if (liveRemainingMs > 0) {
+        handle = this.timer.setTimeout(expireOrRearm, liveRemainingMs);
+      } else {
+        controller.abort(new SendKeysBudgetError());
+      }
+    };
+    expireOrRearm();
     const combined = combineAbortSignals(signal, controller.signal);
     const results: SendKeysCommandResult[] = [];
     let pending = false;
@@ -2639,12 +2680,15 @@ export class SendKeys {
     } catch (error) {
       signal?.throwIfAborted();
       if (!isSendKeysBudgetExhausted(combined)) {
-        throw toActionableError(error, "Android sendKeys failed");
+        // Preserve the same error identity as the no-deadline path.
+        throw error;
       }
       logger.warn("[SendKeys] Request budget exhausted", error);
-      return this.budgetResult(commands.length, results, pending);
+      return this.budgetResult(commands.length, results, pending, remainingMs <= 0);
     } finally {
-      this.timer.clearTimeout(handle);
+      if (handle !== undefined) {
+        this.timer.clearTimeout(handle);
+      }
     }
   }
 
@@ -2652,15 +2696,19 @@ export class SendKeys {
     commandCount: number,
     results: SendKeysCommandResult[],
     indeterminate: boolean,
+    refusedAtAdmission: boolean,
   ): SendKeysResult {
     const completedCommands = results.filter((result) => result.success).length;
+    const warnings = results.flatMap((result) => (result.warning ? [result.warning] : []));
     if (completedCommands === commandCount) {
       return {
         success: true,
         completedCommands,
         commands: results,
-        warning:
+        warning: [
+          ...warnings,
           "All commands were delivered; the request budget expired before final observation completed.",
+        ].join(" "),
       };
     }
     const firstUnconfirmed = results.length;
@@ -2670,14 +2718,19 @@ export class SendKeys {
       `${notSent} command(s) not sent.` +
       (indeterminate
         ? ` Command ${firstUnconfirmed} outcome is indeterminate: it may have been sent but was not acknowledged. Do not retry automatically; observe before retrying.`
-        : " No further commands were dispatched.");
+        : refusedAtAdmission
+          ? " no request budget remained at admission; no commands were sent."
+          : " No further commands were dispatched.");
     return {
       success: false,
       completedCommands,
       failedIndex: firstUnconfirmed,
       commands: results,
       error,
-      warning: "Partial application: already delivered commands are not rolled back.",
+      warning: [
+        ...warnings,
+        "Partial application: already delivered commands are not rolled back.",
+      ].join(" "),
       retryable: false,
     };
   }

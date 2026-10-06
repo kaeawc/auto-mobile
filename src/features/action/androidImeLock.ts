@@ -9,6 +9,8 @@ const imeLocks = new Map<string, Mutex>();
 export interface AndroidImeRecoverySnapshot {
   imeId: string;
   subtypeId: number | null;
+  /** Undefined snapshots cannot prove that the full pre-call state was restored. */
+  wasEnabled?: boolean;
 }
 
 const unsafeImeDevices = new Map<string, AndroidImeRecoverySnapshot | undefined>();

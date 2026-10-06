@@ -126,4 +126,90 @@ describe("LaunchApp live install confirmation (#9976)", () => {
     ).rejects.toThrow(`Could not determine whether ${packageName} is installed`);
     expect(hasAmStart()).toBe(false);
   });
+
+  // #10192: the mirror of the case above. The cache still lists an app that was removed
+  // outside the tools, so the launcher intent is rejected and the fallbacks cannot help.
+  describe("an app removed outside the tools is still cached as installed (#10192)", () => {
+    const amError = {
+      stdout:
+        "Error: Activity not started, unable to resolve Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 pkg=com.example.fresh }",
+      stderr: "",
+    };
+    const adbCalls = (needle: string) =>
+      fakeAdb.getExecutedCommands().filter((command) => command.includes(needle));
+
+    beforeEach(() => {
+      fakeAdb.setCommandResponse("shell am start --user 0", amError);
+      fakeAdb.setCommandResponse("shell monkey", {
+        stdout: "** No activities found to run, monkey aborted.",
+        stderr: "",
+      });
+    });
+
+    test("fails fast with App is not installed after one live read and stales the cache", async () => {
+      fakeAdb.setCommandResponse(listCommand, {
+        stdout: "package:com.example.cached\n",
+        stderr: "",
+      });
+
+      const result = await createLaunchApp([packageName]).execute(packageName, false, false);
+
+      expect(result).toMatchObject({
+        success: false,
+        packageName,
+        userId: 0,
+        error: "App is not installed",
+      });
+      // One launcher intent, one live listing; no monkey, discovery, patterns or final intent.
+      expect(adbCalls("shell am start")).toHaveLength(1);
+      expect(listCommandCount()).toBe(1);
+      expect(adbCalls("shell monkey")).toHaveLength(0);
+      expect(adbCalls("query-activities")).toHaveLength(0);
+      expect(adbCalls("pm dump")).toHaveLength(0);
+      expect(staled).toEqual([deviceId]);
+      expect(getInstalledAppsCacheWriteCoordinator().isDirty(deviceId)).toBe(true);
+    });
+
+    test("an installed app without a launcher activity still runs every fallback", async () => {
+      fakeAdb.setCommandResponse(listCommand, { stdout: `package:${packageName}\n`, stderr: "" });
+      fakeAdb.setCommandResponse("shell am start --user 0 -n", {
+        stdout: "Error type 3\nActivity class does not exist.",
+        stderr: "",
+      });
+
+      await expect(
+        createLaunchApp([packageName]).execute(packageName, false, false),
+      ).rejects.toThrow("No launcher activity found and launcher intent failed");
+
+      expect(listCommandCount()).toBe(1);
+      expect(adbCalls("shell monkey")).toHaveLength(1);
+      // launcher intent, six common component guesses, final launcher intent
+      expect(adbCalls("shell am start")).toHaveLength(8);
+      expect(staled).toEqual([]);
+    });
+
+    test("an unreadable live listing neither fails the launch nor skips the fallbacks", async () => {
+      fakeAdb.setCommandError(listCommand, new Error("adb: device offline"));
+
+      await expect(
+        createLaunchApp([packageName]).execute(packageName, false, false),
+      ).rejects.toThrow("No launcher activity found and launcher intent failed");
+
+      expect(adbCalls("shell monkey")).toHaveLength(1);
+      expect(staled).toEqual([]);
+    });
+
+    test("a launcher intent that succeeds never pays for a live listing", async () => {
+      fakeAdb.setCommandResponse("shell am start --user 0", {
+        stdout: "Starting: Intent",
+        stderr: "",
+      });
+
+      const result = await createLaunchApp([packageName]).execute(packageName, false, false);
+
+      expect(result.success).toBe(true);
+      expect(listCommandCount()).toBe(0);
+      expect(staled).toEqual([]);
+    });
+  });
 });

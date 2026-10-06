@@ -80,6 +80,15 @@ export function amStartReportedFailure(stdout: string, stderr: string): boolean 
   );
 }
 
+const PACKAGE_NOT_INSTALLED_ERROR = "App is not installed";
+
+/** Raised inside the launch action when a live read shows the package was removed (#10192). */
+class LaunchPackageRemovedError extends ActionableError {
+  constructor() {
+    super(PACKAGE_NOT_INSTALLED_ERROR);
+  }
+}
+
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number, signal?: AbortSignal): Promise<number>;
 }
@@ -843,18 +852,21 @@ export class LaunchApp extends BaseVisualChange {
       return true;
     }
     return perf.track("confirmInstalledLive", () =>
-      this.confirmInstalledLive(packageName, userId, signal),
+      this.confirmInstalledLive(packageName, userId, false, signal),
     );
   }
 
   /**
    * A listing may be served from the installed-apps cache, which an out-of-band
    * install (adb, Gradle) does not invalidate. Confirm a negative with one live
-   * read before telling the caller the app is absent (#9976).
+   * read before telling the caller the app is absent (#9976). The mirror case, a
+   * cached "installed" for an app removed out of band, is confirmed by
+   * {@link failFastWhenPackageRemoved} once the first launch attempt fails (#10192).
    */
   private async confirmInstalledLive(
     packageName: string,
     userId: number,
+    cacheListedPackage: boolean,
     signal?: AbortSignal,
   ): Promise<boolean> {
     this.installedAppsCacheStaleMarker ??= new InstalledAppsRepository();
@@ -864,8 +876,40 @@ export class LaunchApp extends BaseVisualChange {
       packageName,
       userId,
       staleMarker: this.installedAppsCacheStaleMarker,
+      cacheListedPackage,
       signal,
     });
+  }
+
+  /**
+   * The cache said installed and the launcher intent was rejected with an `am`
+   * error. That is also what a package removed outside the tools looks like, and
+   * the remaining fallbacks (about a dozen adb calls) cannot launch it. One live
+   * read settles it before they run; the success path never pays for it (#10192).
+   * A failed read is not evidence either way, so the fallbacks still run.
+   */
+  private async failFastWhenPackageRemoved(
+    packageName: string,
+    userId: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let installed = true;
+    try {
+      installed = await perf.track("confirmInstalledAfterLaunchFailure", () =>
+        this.confirmInstalledLive(packageName, userId, true, signal),
+      );
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.warn(
+        `[LaunchApp] Could not confirm ${packageName} is still installed after the launcher intent failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    if (!installed) {
+      logger.error(`[LaunchApp] ${packageName} is no longer installed for user ${userId}`);
+      throw new LaunchPackageRemovedError();
+    }
   }
 
   private async detectTargetUserId(
@@ -996,7 +1040,7 @@ export class LaunchApp extends BaseVisualChange {
         success: false,
         packageName: packageName,
         userId: targetUserId,
-        error: "App is not installed",
+        error: PACKAGE_NOT_INSTALLED_ERROR,
       };
     }
 
@@ -1185,9 +1229,18 @@ export class LaunchApp extends BaseVisualChange {
         deferPostActionScreenshot: true,
         signal,
       },
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof LaunchPackageRemovedError) {
+        perf.end();
+        return { success: false, packageName, userId: targetUserId, error: error.message };
+      }
+      throw error;
+    });
 
     signal?.throwIfAborted();
+    if (!launchResult.success && launchResult.error === PACKAGE_NOT_INSTALLED_ERROR) {
+      return launchResult;
+    }
     const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
       launchResult,
       packageName,
@@ -2019,7 +2072,7 @@ export class LaunchApp extends BaseVisualChange {
     packageName: string,
     userId: number,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean }> {
+  ): Promise<{ success: boolean; amReportedError?: boolean }> {
     logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
     try {
       // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
@@ -2033,7 +2086,11 @@ export class LaunchApp extends BaseVisualChange {
         return { success: true };
       }
       logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
-      return { success: false };
+      // Classified from am's own output; the echoed intent (and its package) is not searched.
+      return {
+        success: false,
+        amReportedError: amStartReportedFailure(result.stdout, result.stderr),
+      };
     } catch (error) {
       this.assertLaunchNotAborted(signal);
       logger.warn(
@@ -2096,6 +2153,9 @@ export class LaunchApp extends BaseVisualChange {
           activityName: "intent_launch",
           userId,
         };
+      }
+      if (intentResult.amReportedError) {
+        await this.failFastWhenPackageRemoved(packageName, userId, perf, signal);
       }
     }
 

@@ -172,6 +172,14 @@ interface ObservedChangeOptions {
   skipPreviousObserve?: boolean;
   skipUiStability?: boolean;
   observationTimestampProvider?: () => number | undefined;
+  /**
+   * Host-clock time (`timer.now()`) at which the action's input was dispatched.
+   * Converted to the device clock with the skew measured once at action start
+   * (`actionStartTime` minus the host time of that read), so no second device
+   * read is needed after the input (#9879). Ignored when
+   * `observationTimestampProvider` yields a value.
+   */
+  observationHostTimestampProvider?: () => number | undefined;
   overrideMinTimestamp?: number;
   signal?: AbortSignal;
   deferPredictionOutcome?: boolean;
@@ -446,6 +454,11 @@ export class BaseVisualChange {
       }
       return this.timer.now();
     });
+    // Host-device clock skew, measured once with the action-start read. Zero on
+    // iOS and whenever the device clock was unavailable (host-time fallback).
+    // Taken after the read so any round trip makes the converted floor earlier,
+    // never later, than the true post-input device time.
+    const clockSkewMs = actionStartTime - this.timer.now();
 
     const blockResult = await perf.track("executeBlock", async () => {
       throwIfAborted(options.signal);
@@ -484,7 +497,10 @@ export class BaseVisualChange {
     }
 
     let observationStartTime = actionStartTime;
-    const observationTimestampOverride = options.observationTimestampProvider?.();
+    const hostTimestamp = options.observationHostTimestampProvider?.();
+    const observationTimestampOverride =
+      options.observationTimestampProvider?.() ??
+      (typeof hostTimestamp === "number" ? hostTimestamp + clockSkewMs : undefined);
     if (
       typeof observationTimestampOverride === "number" &&
       !Number.isNaN(observationTimestampOverride)

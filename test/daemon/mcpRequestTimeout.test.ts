@@ -1,3 +1,23 @@
+import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../../src/features/snapshot/DeviceSnapshotConfig";
+import {
+  DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
+  MAX_VM_SNAPSHOT_TIMEOUT_MS,
+} from "../../src/features/snapshot/deviceSnapshotTimeout";
+import { MAX_VM_SNAPSHOT_TIMEOUT_MS as schemaSnapshotMaxMs } from "../../src/server/snapshotTools";
+import { BARRIER_TIMEOUT_MS as coordinatorDefaultMs } from "../../src/server/CriticalSectionCoordinator";
+import { BARRIER_TIMEOUT_MS } from "../../src/features/action/coordinationTimeout";
+import { DEFAULT_EXPLORE_TIMEOUT_MS as explorationDefaultMs } from "../../src/features/navigation/Explore";
+import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../../src/features/navigation/exploreTimeout";
+import { SHARED_STORAGE_PUSH_TIMEOUT_MS as storagePushMs } from "../../src/server/sharedStorageService";
+import { APP_FILE_PUSH_TIMEOUT_MS as appPushMs } from "../../src/server/appFileService";
+import {
+  SHARED_STORAGE_PUSH_TIMEOUT_MS,
+  APP_FILE_PUSH_TIMEOUT_MS,
+} from "../../src/features/storage/fileTransferTimeout";
+import {
+  MCP_ARGUMENT_BUDGET_CASES,
+  MALFORMED_MCP_BUDGETS,
+} from "../helpers/mcpArgumentBudgetCases";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -26,6 +46,10 @@ import {
   resolveMcpRequestTimeoutMs,
   ProgressExtendableDeadline,
   MAX_PROGRESS_EXTENDED_MCP_REQUEST_TIMEOUT_MS,
+  EXECUTE_PLAN_BUDGET_HEADROOM_MS,
+  MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS,
+  MAX_EXECUTE_PLAN_BUDGET_STEPS,
+  WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
 } from "../../src/daemon/mcpRequestTimeout";
 import {
   TAP_ANY_SEARCH_UNTIL_DEFAULT_MS,
@@ -1394,5 +1418,367 @@ describe("bounded excess text request floors", () => {
         Array.from({ length: 100 }, () => "a".repeat(1000)),
       ),
     ).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+  });
+});
+
+describe("argument budget deadline gaps", () => {
+  for (const budget of MCP_ARGUMENT_BUDGET_CASES) {
+    const resolve = (args: unknown, timeoutMs?: number): number =>
+      resolveMcpRequestTimeoutMs({
+        id: "argument-budget",
+        type: "mcp_request",
+        method: "tools/call",
+        timeoutMs,
+        params: { name: budget.tool, arguments: args },
+      });
+    test(`${budget.tool} omitted arguments use the default floor`, () => {
+      expect(resolve(undefined)).toBe(budget.defaultFloor);
+      expect(resolve({})).toBe(budget.defaultFloor);
+      expect(resolve(budget.argumentsFor(undefined))).toBe(budget.defaultFloor);
+    });
+    test(`${budget.tool} supplied work budget gets headroom`, () => {
+      expect(resolve(budget.argumentsFor(budget.supplied))).toBe(budget.suppliedFloor);
+    });
+    test(`${budget.tool} larger request timeout wins`, () => {
+      expect(resolve({}, 1_000_000)).toBe(1_000_000);
+      expect(resolve(budget.argumentsFor(budget.supplied), 1_000_000)).toBe(1_000_000);
+    });
+    test(`${budget.tool} malformed arguments are safe and bounded`, () => {
+      for (const value of MALFORMED_MCP_BUDGETS) {
+        const result = resolve(budget.argumentsFor(value));
+        expect(result).toBeGreaterThanOrEqual(budget.defaultFloor);
+        expect(result).toBeLessThanOrEqual(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+        if (
+          value !== Number.MAX_SAFE_INTEGER ||
+          budget.tool.includes("Storage") ||
+          budget.tool === "putAppFile"
+        ) {
+          expect(result).toBe(budget.defaultFloor);
+        }
+      }
+      for (const args of [null, "wrong", [], { waitFor: [] }]) {
+        expect(resolve(args)).toBe(budget.defaultFloor);
+      }
+      expect(resolve(budget.argumentsFor(budget.oversized))).toBe(
+        MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+      );
+    });
+  }
+  test("observe uses nested timeout aliases for legacy and DSL waits", () => {
+    const resolve = (args: Record<string, unknown>) =>
+      resolveMcpRequestTimeoutMs({
+        id: "observe-alias",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "observe", arguments: args },
+      });
+    for (const selector of [
+      { elementId: "missing" },
+      { for: "appear" },
+      { for: "stable" },
+      { textAny: ["missing"] },
+    ]) {
+      expect(resolve({ waitFor: { ...selector, timeoutMs: 600_000 } })).toBe(630_000);
+      expect(resolve({ waitFor: { ...selector, timeout: 600_000, timeoutMs: 700_000 } })).toBe(
+        630_000,
+      );
+    }
+    expect(resolve({ timeoutMs: 600_000 })).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
+    expect(resolve({ waitFor: { for: "stable" } })).toBe(DEFAULT_OBSERVE_MCP_TIMEOUT_MS);
+    const previousFloor = process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR];
+    process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = "700000";
+    try {
+      expect(resolve({ waitFor: { timeout: 600_000 } })).toBe(700_000);
+    } finally {
+      if (previousFloor === undefined) {
+        delete process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR];
+      } else {
+        process.env[OBSERVE_MCP_TIMEOUT_ENV_VAR] = previousFloor;
+      }
+    }
+  });
+  test("putAppFile legacy single-file shape uses one push floor", () => {
+    expect(
+      resolveMcpRequestTimeoutMs({
+        id: "legacy-file",
+        type: "mcp_request",
+        method: "tools/call",
+        params: {
+          name: "putAppFile",
+          arguments: {
+            appId: "example",
+            container: "data",
+            destinationPath: "fixture",
+            contentText: "x",
+          },
+        },
+      }),
+    ).toBe(150_000);
+  });
+  test.each(["tapOn", "listDevices", "observe"])(
+    "%s unrelated arguments keep the existing deadline",
+    (name) => {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "unrelated",
+          type: "mcp_request",
+          method: "tools/call",
+          params: {
+            name,
+            arguments: { timeout: 600_000, timeoutMs: 600_000, files: new Array(100) },
+          },
+        }),
+      ).toBe(name === "observe" ? DEFAULT_OBSERVE_MCP_TIMEOUT_MS : DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    },
+  );
+});
+
+test("request budget constants are the tool implementation constants", () => {
+  expect(DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs).toBe(DEFAULT_VM_SNAPSHOT_TIMEOUT_MS);
+  expect(schemaSnapshotMaxMs).toBe(MAX_VM_SNAPSHOT_TIMEOUT_MS);
+  expect(coordinatorDefaultMs).toBe(BARRIER_TIMEOUT_MS);
+  expect(explorationDefaultMs).toBe(DEFAULT_EXPLORE_TIMEOUT_MS);
+  expect(storagePushMs).toBe(SHARED_STORAGE_PUSH_TIMEOUT_MS);
+  expect(appPushMs).toBe(APP_FILE_PUSH_TIMEOUT_MS);
+});
+
+describe("client-supplied tool names that match inherited object members", () => {
+  const INHERITED_NAMES = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"];
+  const ARGUMENT_SETS: Array<Record<string, unknown> | undefined> = [
+    undefined,
+    {},
+    { timeout: 600_000, timeoutMs: 600_000, files: [{}, {}], commands: [], fields: [] },
+  ];
+
+  test.each(INHERITED_NAMES)("%s resolves to the default deadline without throwing", (name) => {
+    for (const args of ARGUMENT_SETS) {
+      expect(
+        resolveMcpRequestTimeoutMs({
+          id: "inherited",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    }
+  });
+
+  test.each([undefined, null, 7, true, {}])(
+    "non-string tool name %p resolves to the default deadline without throwing",
+    (name) => {
+      for (const args of ARGUMENT_SETS) {
+        const request = {
+          id: "non-string",
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name, arguments: args },
+        } as unknown as Parameters<typeof resolveMcpRequestTimeoutMs>[0];
+        expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+    },
+  );
+});
+
+describe("executePlan deadline derived from the plan's steps (#9882)", () => {
+  const HEADROOM_MS = EXECUTE_PLAN_BUDGET_HEADROOM_MS;
+  // observe waitFor budgets its timeout plus the wait headroom.
+  const observeWait = (timeoutMs: number, extra: Record<string, unknown> = {}) => ({
+    tool: "observe",
+    params: { waitFor: { elementId: "x", timeout: timeoutMs }, ...extra },
+  });
+  const observeWaitMs = (timeoutMs: number): number =>
+    timeoutMs + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
+  // JSON is valid YAML, and the daemon sees planContent as a YAML string.
+  const planContent = (plan: Record<string, unknown>): string => JSON.stringify(plan);
+  const resolvePlan = (content: unknown, timeoutMs?: number): number =>
+    resolveMcpRequestTimeoutMs({
+      id: "plan",
+      type: "mcp_request",
+      method: "tools/call",
+      timeoutMs,
+      params: { name: "executePlan", arguments: { planContent: content, platform: "android" } },
+    });
+
+  test("sequential waits sum past the 600 s floor, plus headroom", () => {
+    const content = planContent({
+      name: "p",
+      steps: [observeWait(300_000), observeWait(300_000), observeWait(300_000)],
+    });
+    expect(resolvePlan(content)).toBe(3 * observeWaitMs(300_000) + HEADROOM_MS);
+    expect(resolvePlan(content)).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("parallel device tracks take the longest track's sum, not the total", () => {
+    const content = planContent({
+      name: "p",
+      devices: ["A", "B"],
+      steps: [
+        observeWait(300_000, { device: "A" }),
+        observeWait(300_000, { device: "B" }),
+        observeWait(300_000, { device: "A" }),
+        observeWait(300_000, { device: "B" }),
+        observeWait(300_000, { device: "A" }),
+      ],
+    });
+    // Track A has three waits, track B two.
+    expect(resolvePlan(content)).toBe(3 * observeWaitMs(300_000) + HEADROOM_MS);
+  });
+
+  test("criticalSection counts its barrier wait and its nested sub-steps on the owner track", () => {
+    const content = planContent({
+      name: "p",
+      devices: ["A", "B"],
+      steps: [
+        {
+          tool: "criticalSection",
+          params: {
+            device: "A",
+            lock: "l",
+            deviceCount: 2,
+            steps: [
+              { tool: "observe", params: { device: "A", waitFor: { timeout: 400_000 } } },
+              { tool: "observe", params: { device: "A", waitFor: { timeout: 400_000 } } },
+            ],
+          },
+        },
+        observeWait(100_000, { device: "B" }),
+      ],
+    });
+    const barrierMs = BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
+    expect(resolvePlan(content)).toBe(barrierMs + 2 * observeWaitMs(400_000) + HEADROOM_MS);
+  });
+
+  test("legacy `command` and inline-param steps are budgeted like params steps", () => {
+    const content = [
+      "name: p",
+      "steps:",
+      "  - command: observe",
+      "    waitFor: { timeout: 500000 }",
+      "  - tool: observe",
+      "    params:",
+      "      waitFor: { timeout: 500000 }",
+    ].join("\n");
+    expect(resolvePlan(content)).toBe(2 * observeWaitMs(500_000) + HEADROOM_MS);
+  });
+
+  test("fixed-floor tools such as installApp contribute their own floor", () => {
+    const content = planContent({
+      name: "p",
+      steps: [
+        { tool: "installApp", params: { apk: "a" } },
+        { tool: "installApp", params: { apk: "b" } },
+      ],
+    });
+    expect(resolvePlan(content)).toBe(2 * MIN_INSTALL_APP_MCP_TIMEOUT_MS + HEADROOM_MS);
+  });
+
+  test("a short plan keeps the 600 s floor", () => {
+    const content = planContent({
+      name: "p",
+      steps: [
+        { tool: "tapOn", params: { text: "ok" } },
+        { tool: "observe", params: {} },
+        observeWait(5_000),
+      ],
+    });
+    expect(resolvePlan(content)).toBe(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("a larger caller timeout wins", () => {
+    const content = planContent({
+      name: "p",
+      steps: [observeWait(300_000), observeWait(300_000), observeWait(300_000)],
+    });
+    expect(resolvePlan(content, 1_500_000)).toBe(1_500_000);
+  });
+
+  test("a sum beyond the global cap saturates at the cap", () => {
+    const content = planContent({
+      name: "p",
+      steps: Array.from({ length: 10 }, () => observeWait(300_000)),
+    });
+    expect(resolvePlan(content)).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("malformed plans fall back to the floor without throwing", () => {
+    const malformed: unknown[] = [
+      undefined,
+      null,
+      42,
+      ["steps"],
+      "",
+      ": : [",
+      "just a string",
+      "- a\n- b",
+      planContent({ name: "p" }),
+      planContent({ name: "p", steps: "nope" }),
+      planContent({ name: "p", steps: { tool: "observe" } }),
+      planContent({ name: "p", steps: [null, 1, "x", [], {}, { tool: 5 }, { tool: "observe" }] }),
+      planContent({ name: "p", steps: [{ tool: "observe", params: "bad" }] }),
+      planContent({ name: "p", steps: [{ tool: "criticalSection", params: { steps: "bad" } }] }),
+      planContent({ name: "p", devices: "A", steps: [{ tool: "observe", params: { device: 1 } }] }),
+    ];
+    for (const content of malformed) {
+      expect(resolvePlan(content)).toBe(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+    }
+  });
+
+  test("absurd numbers stay within the cap", () => {
+    const content = planContent({
+      name: "p",
+      steps: [
+        observeWait(Number.MAX_SAFE_INTEGER),
+        observeWait(Number.NaN),
+        observeWait(-1),
+        { tool: "barrier", params: { timeout: 1e308 } },
+      ],
+    });
+    expect(resolvePlan(content)).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("oversized plans saturate instead of being walked", () => {
+    const manySteps = planContent({
+      name: "p",
+      steps: Array.from({ length: MAX_EXECUTE_PLAN_BUDGET_STEPS + 1 }, () => ({ tool: "tapOn" })),
+    });
+    expect(resolvePlan(manySteps)).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+    expect(resolvePlan("#".repeat(MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS + 1))).toBe(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
+    let nested: Record<string, unknown> = { tool: "tapOn" };
+    for (let depth = 0; depth < 20; depth += 1) {
+      nested = { tool: "criticalSection", params: { steps: [nested] } };
+    }
+    expect(resolvePlan(planContent({ name: "p", steps: [nested] }))).toBe(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
+  });
+
+  test("a plan exactly at the step bound is still budgeted, not saturated", () => {
+    const content = planContent({
+      name: "p",
+      steps: Array.from({ length: MAX_EXECUTE_PLAN_BUDGET_STEPS }, () => ({ tool: "tapOn" })),
+    });
+    expect(resolvePlan(content)).toBe(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("only executePlan is affected, and only on tools/call", () => {
+    const content = planContent({ name: "p", steps: [observeWait(900_000)] });
+    expect(
+      resolveMcpRequestTimeoutMs({
+        id: "other",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: "tapOn", arguments: { planContent: content } },
+      }),
+    ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    expect(
+      resolveMcpRequestTimeoutMs({
+        id: "other",
+        type: "mcp_request",
+        method: "resources/read",
+        params: { name: "executePlan", arguments: { planContent: content } },
+      }),
+    ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 });

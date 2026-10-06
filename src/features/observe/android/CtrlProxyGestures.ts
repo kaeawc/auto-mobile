@@ -36,6 +36,12 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     x: number,
     y: number,
     onDispatch?: () => void,
+    options: {
+      frameContext?: string;
+      displayId?: number;
+      signal?: AbortSignal;
+      beforeSend?: () => void;
+    } = {},
   ): Promise<A11yTapCoordinatesResult> {
     return sendCommand<A11yTapCoordinatesResult>(this.context, {
       idPrefix: "double_tap",
@@ -46,10 +52,21 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
         y: this.coord(y),
         duration: 50,
         doubleTap: true,
+        frameContext: options.frameContext,
+        // Callers gate a non-default panel on gesture_display_id_v1 before choosing this request.
+        ...this.gestureDisplayParams(options.displayId),
       }),
       requiredCapability: "tap_double_v1",
       timeoutMs: DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
       errorLabel: "Double tap",
+      timeoutError: (timeoutMs) => ({
+        success: false,
+        totalTimeMs: timeoutMs,
+        error: `Double tap timed out after ${timeoutMs}ms`,
+        acknowledged: false,
+      }),
+      abortSignal: options.signal,
+      beforeSend: options.beforeSend,
       onDispatch,
     });
   }

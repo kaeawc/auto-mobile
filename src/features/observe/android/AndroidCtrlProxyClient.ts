@@ -3141,13 +3141,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  /** TalkBack activation with device-side double-tap timing. */
+  /** Double tap (TalkBack activation, tapOn/tapAny/tapAt) with device-side double-tap timing. */
   async requestDoubleTapCoordinates(
     x: number,
     y: number,
     onDispatch?: () => void,
+    options?: {
+      frameContext?: string;
+      displayId?: number;
+      signal?: AbortSignal;
+      beforeSend?: () => void;
+    },
   ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch);
+    return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch, options);
   }
 
   async requestTwoFingerSwipe(
@@ -5286,6 +5292,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: message.totalTimeMs,
           error: message.error,
           perfTiming: message.perfTiming,
+          acknowledged: true,
         });
       }
     },

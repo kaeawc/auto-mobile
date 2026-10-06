@@ -880,7 +880,7 @@ case "$mode" in
       coverage_chunks=(
         bash "$ROOT/scripts/lib/bun-unit-chunks.sh" "$ROOT" "$runner_os"
         "$coverage_chunk_files" "" "$coverage_shard"
-        "${coverage_prefix[@]}" -- "${shard_files[@]}"
+        ${coverage_prefix[@]+"${coverage_prefix[@]}"} -- ${shard_files[@]+"${shard_files[@]}"}
       )
       if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
         printf '%q ' "${coverage_chunks[@]}"

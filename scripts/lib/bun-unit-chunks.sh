@@ -63,7 +63,7 @@ if [[ -n "$coverage_root" ]]; then trap interrupted TERM; fi
 status=0
 chunk=0
 for ((offset = 0; offset < ${#files[@]}; offset += chunk_files)); do
-  args=("${command_words[@]}")
+  args=(${command_words[@]+"${command_words[@]}"})
   chunk_slice=("${files[@]:offset:chunk_files}")
   if [[ -n "$coverage_root" ]]; then
     chunk_id="shard-${shard}-chunk-$((chunk + 1))"

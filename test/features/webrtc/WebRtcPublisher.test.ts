@@ -7,6 +7,7 @@ import {
 } from "../../../src/features/webrtc/WebRtcPublisher";
 import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { capturedH264AsDevicePackets } from "../../helpers/capturedH264Stream";
 
 const ACCEPTED_VIDEO_ANSWER = [
   "v=0",
@@ -523,6 +524,40 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
 
     pc.connectionState = "connected";
     publisher.writeH264Chunk(Buffer.concat([startCode, pFrame]));
+    expect(events.filter((event) => event === "first_rtp_sent")).toHaveLength(1);
+
+    await publisher.stop();
+  });
+});
+
+describe("WebRtcPublisher packet boundary (issue #10150)", () => {
+  test("endOfH264Packet sends the access unit the packet completed without a later packet", async () => {
+    const pc = new FakePeerConnection();
+    const events: string[] = [];
+    const publisher = new WebRtcPublisher(
+      { streamId: "s", whipEndpoint: "https://coord/whip" },
+      {
+        onLifecycleEvent: (event) => events.push(event),
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+        createWhipClient: () =>
+          ({
+            publish: async () => ({
+              answerSdp: ACCEPTED_VIDEO_ANSWER,
+              resourceUrl: "https://coord/whip/s",
+            }),
+            delete: async () => {},
+          }) as unknown as WhipClient,
+      },
+    );
+    await publisher.start();
+    pc.connectionState = "connected";
+    // Captured SPS+PPS then SEI+IDR (the device's config and key-frame packets). The splitter
+    // still holds the IDR's last NAL because no later start code follows.
+    const [config, idrPacket] = capturedH264AsDevicePackets();
+    publisher.writeH264Chunk(Buffer.concat([config, idrPacket]));
+    expect(events).not.toContain("first_rtp_sent");
+
+    publisher.endOfH264Packet();
     expect(events.filter((event) => event === "first_rtp_sent")).toHaveLength(1);
 
     await publisher.stop();

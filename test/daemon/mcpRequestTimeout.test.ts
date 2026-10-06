@@ -1740,6 +1740,37 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
     expect(resolvePlan(content)).toBe(2 * MIN_INSTALL_APP_MCP_TIMEOUT_MS + HEADROOM_MS);
   });
 
+  describe("base64: prefixed planContent (#10173)", () => {
+    const encode = (content: string): string =>
+      `base64:${Buffer.from(content, "utf-8").toString("base64")}`;
+    const slowPlan = planContent({
+      name: "slow sync",
+      steps: [observeWait(480_000), observeWait(480_000)],
+    });
+
+    test("a base64 plan gets the same deadline as its plain-YAML twin", () => {
+      const plain = resolvePlan(slowPlan);
+      expect(plain).toBe(2 * observeWaitMs(480_000) + HEADROOM_MS);
+      expect(plain).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+      expect(resolvePlan(encode(slowPlan))).toBe(plain);
+    });
+
+    test("the runners' default 600 s caller timeout does not mask the budget", () => {
+      expect(resolvePlan(encode(slowPlan), 600_000)).toBe(resolvePlan(slowPlan, 600_000));
+    });
+
+    test("an oversized base64 value saturates without being decoded", () => {
+      const oversized = `base64:${"A".repeat(MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS)}`;
+      expect(resolvePlan(oversized)).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+    });
+
+    test("invalid base64 and base64 of invalid YAML fall back to the floor without throwing", () => {
+      for (const content of ["base64:!!!not base64???", "base64:", encode(": : ["), encode("x")]) {
+        expect(resolvePlan(content)).toBe(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+      }
+    });
+  });
+
   test("a short plan keeps the 600 s floor", () => {
     const content = planContent({
       name: "p",

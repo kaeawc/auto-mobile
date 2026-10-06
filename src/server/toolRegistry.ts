@@ -620,6 +620,12 @@ export interface PlanLifecycleInput {
   device: BootedDevice | undefined;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /**
+   * The call ran as a step of another plan (the ambient request context carries that plan's
+   * `planRequest`). Only the outermost plan owns the session, its devices and the app cleanup, so
+   * a nested `executePlan` must neither clean up nor release them (#10172).
+   */
+  nestedInPlan?: boolean;
   // Injected teardown for the server-side per-transport SessionToolBinding
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
@@ -1650,6 +1656,15 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionBindingReleaseHandler,
       sessionToolSelectionService,
     } = input;
+    if (name === "executePlan" && input.nestedInPlan) {
+      // The enclosing plan injected its own sessionUuid into this step, so releasing here would
+      // free the session and device the outer plan is still running on (#10172). The outermost
+      // plan's own lifecycle hook does the cleanup and the release when it finishes.
+      logger.debug(
+        `[PlanLifecycle] Nested executePlan finished; leaving session ${baseSessionUuid ?? sessionUuid ?? "none"} to the enclosing plan`,
+      );
+      return;
+    }
     if (device && name === "executePlan" && args?.cleanupAppId) {
       // Resolved under the request signal: a device-loss abort names the lost device
       // to skip. A deadline or client cancel aborts it too but names no device, so
@@ -2142,17 +2157,7 @@ export class ToolRegistryClass {
                 : "";
               throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
             } finally {
-              await this.planLifecycleManager.afterExecution({
-                name,
-                args: handlerArgs,
-                baseSessionUuid: resolvedTarget.baseSessionUuid,
-                cleanupService: this.cleanupService,
-                device: resolvedTarget.device,
-                sessionUuid: resolvedTarget.sessionUuid,
-                shouldResolveDevice: resolvedTarget.shouldResolveDevice,
-                sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
-                sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
-              });
+              await this.runPlanLifecycle(name, handlerArgs, resolvedTarget, selectionContext);
             }
           }),
         );
@@ -2190,6 +2195,28 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
+    });
+  }
+
+  private runPlanLifecycle(
+    name: string,
+    args: Record<string, unknown>,
+    resolvedTarget: ExecutionTargetContext,
+    callContext: ReturnType<typeof getToolSelectionContext>,
+  ): Promise<void> {
+    return this.planLifecycleManager.afterExecution({
+      name,
+      args,
+      baseSessionUuid: resolvedTarget.baseSessionUuid,
+      cleanupService: this.cleanupService,
+      device: resolvedTarget.device,
+      sessionUuid: resolvedTarget.sessionUuid,
+      shouldResolveDevice: resolvedTarget.shouldResolveDevice,
+      // Read from the context captured when this call began: it is this request's own async
+      // chain, never process state shared with a concurrent plan (#10172).
+      nestedInPlan: callContext?.planRequest !== undefined,
+      sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
+      sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
     });
   }
 

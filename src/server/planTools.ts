@@ -14,7 +14,11 @@ import {
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
-import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../features/toolSelection/toolSelectionContext";
+import { nextPlanNestingDepth } from "../utils/plan/planNesting";
 import {
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
@@ -186,6 +190,9 @@ const executePlanTool = async (
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ): Promise<any> => {
+  // An executePlan step inside a running plan is level 2+; a runaway chain (a plan that includes
+  // itself) is cut here, before the nested plan allocates or records anything (#10172).
+  const planDepth = nextPlanNestingDepth(getToolSelectionContext()?.planRequest?.planDepth);
   const orchestrator = new PlanExecutionOrchestrator({
     device,
     request: params,
@@ -202,6 +209,7 @@ const executePlanTool = async (
         timeoutMs: internalParams[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM],
         startTime: internalParams[INTERNAL_EXECUTION_START_TIME_PARAM],
         liveDeadlineKey: internalParams[INTERNAL_LIVE_DEADLINE_KEY_PARAM],
+        planDepth,
         progress,
       },
     },

@@ -374,6 +374,10 @@
               "keepScreenAwake": {
                 "type": "boolean",
                 "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "elementId": {
+                "type": "string",
+                "description": "Element resource ID / accessibility identifier"
               }
             },
             "allOf": [
@@ -384,6 +388,9 @@
                   },
                   {
                     "required": ["id"]
+                  },
+                  {
+                    "required": ["elementId"]
                   },
                   {
                     "required": ["text"]
@@ -408,6 +415,14 @@
                     "properties": {
                       "params": {
                         "required": ["text"]
+                      }
+                    },
+                    "required": ["params"]
+                  },
+                  {
+                    "properties": {
+                      "params": {
+                        "required": ["elementId"]
                       }
                     },
                     "required": ["params"]
@@ -729,6 +744,12 @@
               },
               {
                 "required": ["biometrics"]
+              },
+              {
+                "required": ["connectivity"]
+              },
+              {
+                "required": ["location"]
               },
               {
                 "required": ["networkCondition"]
@@ -1221,6 +1242,15 @@
           "type": "string",
           "description": "Element ID",
           "minLength": 1
+        },
+        "container": {
+          "description": "Nested container scope for this endpoint; outermost container resolves first",
+          "$ref": "#/$defs/dragAndDropContainer"
+        },
+        "selectionStrategy": {
+          "description": "Endpoint selection strategy (default: first); unique requires one match at every unindexed scope level and at the target",
+          "type": "string",
+          "enum": ["first", "random", "unique"]
         }
       },
       "additionalProperties": false,
@@ -1353,14 +1383,11 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["box", "circle"],
+          "enum": ["circle"],
           "description": "Highlight shape type"
         },
         "bounds": {
           "$ref": "#/$defs/highlightBounds"
-        },
-        "style": {
-          "$ref": "#/$defs/highlightStyle"
         }
       },
       "required": ["type", "bounds"],
@@ -1471,6 +1498,10 @@
         "deviceId": {
           "type": "string",
           "description": "Device ID override"
+        },
+        "elementId": {
+          "type": "string",
+          "description": "Element resource ID / accessibility identifier"
         }
       },
       "additionalProperties": true,
@@ -1544,6 +1575,161 @@
         },
         "clock": {
           "$ref": "#/$defs/deviceClockStateInput"
+        },
+        "connectivity": {
+          "description": "Android connectivity toggles to apply.",
+          "type": "object",
+          "properties": {
+            "airplaneMode": {
+              "description": "Enable or disable Airplane mode on Android.",
+              "type": "boolean"
+            },
+            "wifiEnabled": {
+              "description": "Enable or disable Wi-Fi on Android.",
+              "type": "boolean"
+            },
+            "bluetoothEnabled": {
+              "description": "Enable or disable Bluetooth on Android.",
+              "type": "boolean"
+            },
+            "locationEnabled": {
+              "description": "Enable or disable Location on Android.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "location": {
+          "description": "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "description": "Apply one static coordinate.",
+                  "type": "string",
+                  "const": "static"
+                },
+                "latitude": {
+                  "type": "number",
+                  "minimum": -90,
+                  "maximum": 90
+                },
+                "longitude": {
+                  "type": "number",
+                  "minimum": -180,
+                  "maximum": 180
+                }
+              },
+              "required": ["mode", "latitude", "longitude"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "route"
+                },
+                "waypoints": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      },
+                      "longitude": {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      },
+                      "altitude": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["latitude", "longitude"],
+                    "additionalProperties": false
+                  }
+                },
+                "loop": {
+                  "type": "boolean"
+                },
+                "updateIntervalMs": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 60000
+                },
+                "speedMetersPerSecond": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": ["mode", "waypoints", "speedMetersPerSecond"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "route"
+                },
+                "waypoints": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      },
+                      "longitude": {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      },
+                      "altitude": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["latitude", "longitude"],
+                    "additionalProperties": false
+                  }
+                },
+                "loop": {
+                  "type": "boolean"
+                },
+                "updateIntervalMs": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 60000
+                },
+                "durationMs": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": ["mode", "waypoints", "durationMs"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "stop"
+                }
+              },
+              "required": ["mode"],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "anyOf": [
@@ -1558,6 +1744,12 @@
         },
         {
           "required": ["clock"]
+        },
+        {
+          "required": ["connectivity"]
+        },
+        {
+          "required": ["location"]
         }
       ],
       "description": "Parameters for setDeviceState"
@@ -2040,6 +2232,58 @@
         }
       },
       "description": "Parameters for barrier tool: a pure synchronization point with no serialized section. additionalProperties stays true for any genuinely-unknown extra field, but the device-targeting fields injected by addDeviceTargetingToSchema (device, sessionUuid, platform, deviceId, keepScreenAwake) are explicitly typed so a malformed value (e.g. platform: windows) is rejected here instead of only failing at execution (#6215 review). lock/deviceCount are intentionally NOT required here for the same reason as criticalSectionParams -- required-ness is enforced against the inline+params union in the planStep if/then block. __lockNamespace is deliberately NOT declared here (and is explicitly rejected in the criticalSection/barrier if/then blocks below): it is injected internally by PlanExecutor at runtime to scope a plan's lock state, and an authored plan must never set it -- two participants authoring different truthy __lockNamespace values for the same lock would pass every per-lock feasibility check yet wait in separate namespaced barriers at runtime until timeout."
+    },
+    "dragAndDropContainer": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "elementId": {
+              "description": "Container resource ID",
+              "type": "string",
+              "minLength": 1
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "selectionStrategy": {
+              "type": "string",
+              "enum": ["first", "random", "unique"]
+            },
+            "container": {
+              "$ref": "#/$defs/dragAndDropContainer"
+            }
+          },
+          "required": ["elementId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "description": "Container text",
+              "type": "string",
+              "minLength": 1
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "selectionStrategy": {
+              "type": "string",
+              "enum": ["first", "random", "unique"]
+            },
+            "container": {
+              "$ref": "#/$defs/dragAndDropContainer"
+            }
+          },
+          "required": ["text"],
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

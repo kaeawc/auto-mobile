@@ -1,5 +1,6 @@
 import { logger } from "../../utils/logger";
 import { NavigationGraphManager } from "./NavigationGraphManager";
+import { isRecordedBackEdgeTarget } from "./ExploreValidateMode";
 import {
   PathOptimizer,
   BackButtonRecommendation,
@@ -116,6 +117,12 @@ export class DefaultPathOptimizer implements PathOptimizer {
   /**
    * Shortest known forward path length (in edges) from `from` to `to`, searching no
    * deeper than `maxHops`; undefined when there is none within that bound.
+   *
+   * Only reachability by screen matters here, so repeated edge rows for one screen
+   * pair collapse (unlike findPath, no tool-call preference is needed). Recorded
+   * Back presses are not forward steps: a Back edge X -> Y means Back on X lands on
+   * Y (the shallower screen), so following it would walk up the stack instead of
+   * down it.
    */
   private async shortestForwardPathLength(
     from: string,
@@ -129,6 +136,7 @@ export class DefaultPathOptimizer implements PathOptimizer {
         await Promise.all(frontier.map((screen) => this.navigationGraph.getEdgeTargetsFrom(screen)))
       )
         .flat()
+        .filter((target) => !isRecordedBackEdgeTarget(target))
         .map((target) => target.toScreen);
       if (outgoing.includes(to)) {
         return hops;

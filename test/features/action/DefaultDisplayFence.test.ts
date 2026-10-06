@@ -321,7 +321,7 @@ describe("default-display dispatch fences", () => {
             await h.bump();
             return "unknown";
           });
-          watch(h.voiceOver, "isVoiceOverEnabled").mockImplementation(async () => {
+          watch(h.voiceOver, "resolveState").mockImplementation(async () => {
             await h.bump();
             return false;
           });
@@ -867,7 +867,7 @@ describe("default-display recovery dispatches", () => {
           }
           return "unknown";
         });
-        watch(h.voiceOver, "isVoiceOverEnabled").mockImplementation(async () => {
+        watch(h.voiceOver, "resolveState").mockImplementation(async () => {
           await h.bump();
           return false;
         });

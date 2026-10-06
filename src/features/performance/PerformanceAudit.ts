@@ -19,6 +19,15 @@ import {
   getPreferredDisplayedLogcatTag,
   parseDisplayedDurationMs,
 } from "./DisplayedTimeMetricsCollector";
+import {
+  PERF_AUDIT_WINDOW_MS,
+  computeCpuUsagePercent,
+  computeJankWindow,
+  parseJankyFrames,
+  parseProcStat,
+  type CpuSample,
+  type GfxCounterSample,
+} from "./PerformanceAuditWindow";
 
 /**
  * Performance metrics collected during audit
@@ -30,13 +39,21 @@ interface PerformanceMetrics {
   p95Ms: number | null;
   p99Ms: number | null;
 
-  // Jank indicators
+  // Jank indicators, measured over the audit window (PERF_AUDIT_WINDOW_MS) from
+  // two cumulative gfxinfo readings (#10094).
+  /** Janky frames per second over the window (the unit of `jankCountThreshold`). */
   jankCount: number | null;
+  /** Raw per-cause deltas over the window; the causes overlap, so never sum them. */
   missedVsyncCount: number | null;
   slowUiThreadCount: number | null;
   frameDeadlineMissedCount: number | null;
 
   // CPU metrics
+  /**
+   * Process CPU time over the audit window as a percentage of ONE core, from
+   * two /proc/<pid>/stat readings (#10094). Can exceed 100 for a
+   * multi-threaded process.
+   */
   cpuUsagePercent: number | null;
   threadCount: number | null;
 
@@ -124,6 +141,7 @@ export class PerformanceAudit {
   private capabilitiesDetector: DeviceCapabilitiesDetector;
   private touchLatencyTracker: TouchLatencyTracker;
   private repository = new PerformanceAuditRepository();
+  private timer: Timer;
 
   constructor(
     device: BootedDevice,
@@ -138,6 +156,7 @@ export class PerformanceAudit {
     inertTouchPointResolver?: InertTouchPointResolver,
     timer: Timer = defaultTimer,
   ) {
+    this.timer = timer;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.idle = new Idle(device, adbFactory);
@@ -235,35 +254,59 @@ export class PerformanceAudit {
   }
 
   /**
-   * Collect graphics performance metrics using gfxinfo
+   * Read `dumpsys gfxinfo` once. The cumulative counters it holds only mean
+   * something as a difference between two readings (#10094). Public as the
+   * device-read seam for tests.
+   */
+  async readGfxSample(
+    packageName: string,
+    perf: PerformanceTracker,
+  ): Promise<{ stdout: string; counters: GfxCounterSample }> {
+    const { stdout } = await perf.track("adbGfxinfo", () =>
+      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+    );
+    const metrics = this.idle.parseMetrics(stdout);
+    return {
+      stdout,
+      counters: {
+        totalFrames: metrics.totalFrames,
+        jankyFrames: parseJankyFrames(stdout),
+        missedVsync: metrics.missedVsync,
+        slowUiThread: metrics.slowUiThread,
+        frameDeadlineMissed: metrics.frameDeadlineMissed,
+      },
+    };
+  }
+
+  /**
+   * Collect graphics performance metrics using gfxinfo. Frame-time percentiles
+   * come from the closing reading; jank is the difference between an opening
+   * and a closing reading `PERF_AUDIT_WINDOW_MS` apart (#10094).
    */
   private async collectGfxMetrics(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
     try {
-      const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
-      );
+      const opening = await this.readGfxSample(packageName, perf);
+      const openedAtMs = this.timer.now();
+      await this.timer.sleep(PERF_AUDIT_WINDOW_MS);
+      const closing = await this.readGfxSample(packageName, perf);
+      const elapsedMs = this.timer.now() - openedAtMs;
 
-      const metrics = this.idle.parseMetrics(stdout);
-
-      // Calculate jank count as sum of all jank indicators
-      const jankCount =
-        (metrics.missedVsync || 0) +
-        (metrics.slowUiThread || 0) +
-        (metrics.frameDeadlineMissed || 0);
+      const metrics = this.idle.parseMetrics(closing.stdout);
+      const window = computeJankWindow(opening.counters, closing.counters, elapsedMs);
 
       return {
         p50Ms: metrics.percentile50th,
         p90Ms: metrics.percentile90th,
         p95Ms: metrics.percentile95th,
         p99Ms: metrics.percentile99th,
-        jankCount,
-        missedVsyncCount: metrics.missedVsync,
-        slowUiThreadCount: metrics.slowUiThread,
-        frameDeadlineMissedCount: metrics.frameDeadlineMissed,
-        gfxinfoRaw: stdout,
+        jankCount: window?.jankPerSecond ?? null,
+        missedVsyncCount: window?.missedVsync ?? null,
+        slowUiThreadCount: window?.slowUiThread ?? null,
+        frameDeadlineMissedCount: window?.frameDeadlineMissed ?? null,
+        gfxinfoRaw: closing.stdout,
       };
     } catch (error) {
       logger.warn(`[PerformanceAudit] Failed to collect gfx metrics: ${error}`);
@@ -282,19 +325,44 @@ export class PerformanceAudit {
   }
 
   /**
-   * Collect CPU usage metrics for the package
+   * Read the process's CPU ticks and the device uptime once. Public as the
+   * device-read seam for tests. Returns null when the output cannot be parsed.
+   */
+  async readCpuSample(
+    pid: string,
+    perf: PerformanceTracker,
+  ): Promise<{ sample: CpuSample; statRaw: string } | null> {
+    // Format: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime ...
+    const { stdout: statOutput } = await perf.track("adbCpuStat", () =>
+      this.adb.executeCommand(`shell cat /proc/${shellQuote(pid)}/stat`),
+    );
+    const { stdout: uptimeOutput } = await perf.track("adbUptime", () =>
+      this.adb.executeCommand("shell cat /proc/uptime"),
+    );
+    const stat = parseProcStat(statOutput);
+    const uptimeSeconds = parseFloat(uptimeOutput.trim().split(/\s+/)[0] || "");
+    if (!stat || !Number.isFinite(uptimeSeconds) || uptimeSeconds <= 0) {
+      return null;
+    }
+    return { sample: { ...stat, uptimeSeconds }, statRaw: statOutput };
+  }
+
+  /**
+   * Collect CPU usage metrics for the package: the process's CPU time over the
+   * device time elapsed between two readings `PERF_AUDIT_WINDOW_MS` apart, as a
+   * percentage of one core (#10094).
    */
   private async collectCpuMetrics(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
     try {
-      // Get process ID
+      // Get process ID (first one when the package runs several processes)
       const { stdout: pidOutput } = await perf.track("adbGetPid", () =>
         this.adb.executeCommand(`shell pidof ${shellQuote(packageName)}`),
       );
 
-      const pid = pidOutput.trim();
+      const pid = pidOutput.trim().split(/\s+/)[0];
       if (!pid) {
         logger.warn(`[PerformanceAudit] No PID found for ${packageName}`);
         return {
@@ -310,40 +378,17 @@ export class PerformanceAudit {
       );
       const threadCount = parseInt(threadOutput.trim(), 10) - 1; // Subtract header line
 
-      // Get CPU stats from /proc/{pid}/stat
-      const { stdout: statOutput } = await perf.track("adbCpuStat", () =>
-        this.adb.executeCommand(`shell cat /proc/${shellQuote(pid)}/stat`),
-      );
+      const opening = await this.readCpuSample(pid, perf);
+      await this.timer.sleep(PERF_AUDIT_WINDOW_MS);
+      const closing = await this.readCpuSample(pid, perf);
 
-      // Parse CPU usage
-      // Format: pid (comm) state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime cutime cstime...
-      const commEnd = statOutput.lastIndexOf(")");
-      const statFields =
-        commEnd >= 0
-          ? statOutput
-              .slice(commEnd + 1)
-              .trim()
-              .split(/\s+/)
-          : [];
-      const utime = parseInt(statFields[11] || "0", 10); // User time
-      const stime = parseInt(statFields[12] || "0", 10); // System time
-      const totalTime = utime + stime;
-
-      // Get system uptime to calculate CPU percentage
-      const { stdout: uptimeOutput } = await perf.track("adbUptime", () =>
-        this.adb.executeCommand("shell cat /proc/uptime"),
-      );
-      const uptimeSeconds = parseFloat(uptimeOutput.split(" ")[0] || "0");
-
-      // CPU usage = (total_time / uptime) * 100
-      // Note: This is a simplified calculation. For more accurate results,
-      // we should measure delta over time
-      const cpuUsagePercent = uptimeSeconds > 0 ? (totalTime / (uptimeSeconds * 100)) * 100 : null;
+      const cpuUsagePercent =
+        opening && closing ? computeCpuUsagePercent(opening.sample, closing.sample) : null;
 
       return {
         cpuUsagePercent,
         threadCount,
-        cpuStatsRaw: statOutput,
+        cpuStatsRaw: (closing ?? opening)?.statRaw ?? null,
       };
     } catch (error) {
       logger.warn(`[PerformanceAudit] Failed to collect CPU metrics: ${error}`);

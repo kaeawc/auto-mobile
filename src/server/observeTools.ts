@@ -2049,6 +2049,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
           : await observeScreen.execute({
               perf: createGlobalPerformanceTracker(),
               skipWaitForFresh: true,
+              verifyCachedHierarchy: true,
               signal,
               screenshot: screenshotMode,
               screenshotOptions: args.screenshotOptions,

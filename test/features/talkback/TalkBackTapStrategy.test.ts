@@ -6,6 +6,12 @@ import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNav
 import { FocusPathCalculator } from "../../../src/features/talkback/FocusPathCalculator";
 import { FocusElementMatcher } from "../../../src/features/talkback/FocusElementMatcher";
 import type { Element } from "../../../src/models/Element";
+import {
+  testTagHierarchy,
+  testTagHierarchyWithFirstRowMoved,
+  testTagHierarchyWithoutFirstRow,
+  testTagRows,
+} from "./capturedTestTagTargets";
 import { ActionableError } from "../../../src/models/ActionableError";
 
 describe("TalkBackTapStrategy", () => {
@@ -180,7 +186,8 @@ describe("TalkBackTapStrategy", () => {
         expect.anything(),
         expect.objectContaining({ verificationInterval: 1 }),
       );
-      expect(driver.getTapCount()).toBe(2); // Double-tap to activate
+      expect(driver.doubleTapHistory).toHaveLength(1); // One-request double tap to activate
+      expect(driver.getTapCount()).toBe(0);
     });
 
     test("navigates using content-desc match when element has no resource-id", async () => {
@@ -216,7 +223,8 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
       expect(navigateToElement).toHaveBeenCalledTimes(1);
-      expect(driver.getTapCount()).toBe(2); // Double-tap to activate
+      expect(driver.doubleTapHistory).toHaveLength(1); // One-request double tap to activate
+      expect(driver.getTapCount()).toBe(0);
     });
 
     test("returns error when focus navigation fails", async () => {
@@ -302,7 +310,8 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("accessibility-action");
-      expect(driver.getTapCount()).toBe(1); // Only first tap attempted
+      expect(driver.doubleTapHistory).toHaveLength(1); // The single double-tap request failed
+      expect(driver.getTapCount()).toBe(0);
       expect(driver.getActionCount()).toBe(1); // ACTION_CLICK fallback
       expect(driver.actionHistory[0]).toEqual({ action: "click", resourceId: "test:id/button" });
     });
@@ -325,23 +334,25 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getActionCount()).toBe(0); // No ACTION_CLICK attempted without resource-id
     });
 
-    test("returns failure when text-only element second tap fails (no ACTION_CLICK fallback)", async () => {
+    test("text-only activation without tap_double_v1 fails and reports the missing capability", async () => {
       const element = {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         text: "Button",
       } as Element;
 
       driver.setElements([element], 0);
-
+      driver.doubleTapCapabilitySupported = false;
       spyOn(mockExecutor, "navigateToElement").mockResolvedValue(true);
-      driver.queueTapResult({ success: true, totalTimeMs: 1 }); // first tap succeeds
-      driver.setTapResult({ success: false, totalTimeMs: 1, error: "second tap failed" });
 
       const result = await strategy.executeTap("device-1", element, driver);
 
-      expect(result.success).toBe(false);
-      expect(result.method).toBe("focus-navigation");
-      expect(driver.getActionCount()).toBe(0); // No ACTION_CLICK attempted without resource-id
+      expect(result).toMatchObject({
+        success: false,
+        method: "focus-navigation",
+        unsupportedCapability: "tap_double_v1",
+      });
+      expect(driver.getTapCount()).toBe(0); // never splits into two single-tap requests
+      expect(driver.getActionCount()).toBe(0);
     });
 
     test("returns error if both double-tap and ACTION_CLICK fail", async () => {
@@ -389,9 +400,8 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
-      expect(driver.getTapCount()).toBe(2);
-      expect(driver.tapHistory[0]).toMatchObject({ x: 600, y: 700 });
-      expect(driver.tapHistory[1]).toMatchObject({ x: 600, y: 700 });
+      expect(driver.doubleTapHistory).toEqual([{ x: 600, y: 700 }]);
+      expect(driver.getTapCount()).toBe(0);
     });
 
     // Regression for #3918: a bounds-less activation target must never tap (0,0).
@@ -499,7 +509,8 @@ describe("TalkBackTapStrategy", () => {
 
       expect(result.success).toBe(true);
       expect(result.error).toBeUndefined();
-      expect(driver.getTapCount()).toBe(2);
+      expect(driver.doubleTapHistory).toHaveLength(1);
+      expect(driver.getTapCount()).toBe(0);
     });
 
     test("keeps the missing-target error for an unrelated truncation reason", async () => {
@@ -641,6 +652,65 @@ describe("TalkBackTapStrategy", () => {
       expect(driver.getActionCount()).toBe(0); // No ACTION_LONG_CLICK attempted
       expect(driver.getTapCount()).toBe(1);
       expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 1000 });
+    });
+
+    describe("advertised long click on a stable-selector target reports node not found", () => {
+      const row = { ...testTagRows[0]!, actions: ["long_click"] } as Element;
+      const notFound = {
+        success: false,
+        action: "long_click" as const,
+        totalTimeMs: 1,
+        error: "Element not found with NodeSelector(testTag=submit-form)",
+      };
+
+      test("falls back to coordinates while a fresh hierarchy still shows the element in place", async () => {
+        // The device lookup missed (e.g. the element sits in another window); that is not a
+        // rejected press, so the coordinate gesture must still run (#10070).
+        driver.hierarchy = testTagHierarchy;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result.success).toBe(true);
+        expect(result.method).toBe("coordinate-fallback");
+        expect(result.semanticActionFailure).toBeUndefined();
+        expect(driver.tapHistory).toEqual([{ x: 120, y: 130, durationMs: 1000 }]);
+      });
+
+      test("fails instead of pressing a stale coordinate when the element is gone", async () => {
+        driver.hierarchy = testTagHierarchyWithoutFirstRow;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result).toMatchObject({
+          success: false,
+          method: "accessibility-action",
+          semanticActionFailure: true,
+          error: notFound.error,
+        });
+        expect(driver.getTapCount()).toBe(0);
+      });
+
+      test("fails when the same row moved to other bounds", async () => {
+        driver.hierarchy = testTagHierarchyWithFirstRowMoved;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result.semanticActionFailure).toBe(true);
+        expect(driver.getTapCount()).toBe(0);
+      });
+
+      test("fails when the fresh hierarchy is unavailable", async () => {
+        driver.hierarchy = null;
+        driver.setActionResult(notFound);
+
+        const result = await strategy.executeLongPress(120, 130, 1000, row, driver);
+
+        expect(result.semanticActionFailure).toBe(true);
+        expect(driver.getTapCount()).toBe(0);
+      });
     });
 
     test("returns error when coordinate fallback also fails", async () => {

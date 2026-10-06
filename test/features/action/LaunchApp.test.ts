@@ -938,6 +938,7 @@ describe("LaunchApp", () => {
         layoutSeqSum: 1,
         systemOverlay: true,
       },
+      deviceLock: { locked: false, keyguardShowing: false, secure: false },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -950,7 +951,7 @@ describe("LaunchApp", () => {
       .filter((command) => command === "shell cmd statusbar collapse").length;
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("notification shade");
+    expect(result.error).toContain("(notification shade) is covering the app");
     expect(fakeTimer.now()).toBeGreaterThanOrEqual(15_000);
     expect(collapseCount).toBeGreaterThan(1);
     expect(collapseCount).toBeLessThan(20);
@@ -966,6 +967,7 @@ describe("LaunchApp", () => {
         layoutSeqSum: 1,
         systemOverlay: true,
       },
+      deviceLock: { locked: false, keyguardShowing: false, secure: false },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -975,7 +977,7 @@ describe("LaunchApp", () => {
     const result = await launchApp.execute(packageName, false, true);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("notification shade");
+    expect(result.error).toContain("(notification shade) is covering the app");
     expect(result.error).not.toContain("coldBoot: true");
   });
 
@@ -1002,6 +1004,111 @@ describe("LaunchApp", () => {
     expect(result.error).toContain("device is locked");
     expect(result.error).toContain("wakeAndUnlock");
     expect(result.error).not.toContain("notification shade");
+  });
+
+  describe("system UI launch blocker wording (#10182)", () => {
+    const systemUiObservation = (extra: Partial<ObserveResult> = {}): ObserveResult => ({
+      ...createObserveResult(),
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+      ...extra,
+    });
+
+    const launchWith = async (observation: ObserveResult) => {
+      fakeTimer.enableAutoAdvance();
+      fakeAdb.setForegroundApp({ packageName, userId: 0 });
+      fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+      fakeObserveScreen.setObserveResult(() => observation);
+      return launchApp.execute(packageName, false, true);
+    };
+
+    test("a lock sample of locked=false identifies the shade", async () => {
+      const result = await launchWith(
+        systemUiObservation({
+          deviceLock: { locked: false, keyguardShowing: false, secure: false },
+        }),
+      );
+
+      expect(result.error).toContain("(notification shade) is covering the app");
+      expect(result.error).not.toContain("could not be determined");
+    });
+
+    test("no lock sample says the lock state is unknown and names both remedies", async () => {
+      fakeAdb.setDeviceLock(null);
+      const result = await launchWith(systemUiObservation());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("lock state could not be determined");
+      expect(result.error).toContain("wakeAndUnlock");
+      expect(result.error).toContain("collapse the shade");
+      expect(result.error).not.toContain("(notification shade) is covering the app");
+    });
+
+    test("a failed lock re-read stays unknown instead of failing the launch result", async () => {
+      const reread = spyOn(fakeAdb, "getDeviceLock").mockRejectedValue(new Error("dumpsys died"));
+      const result = await launchWith(systemUiObservation());
+
+      expect(reread).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("lock state could not be determined");
+    });
+
+    test("a fresh lock read that finds the keyguard overrides a missing sample", async () => {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: false });
+      const result = await launchWith(systemUiObservation());
+
+      expect(result.error).toContain("device is locked");
+      expect(result.error).toContain("wakeAndUnlock");
+      expect(result.error).not.toContain("notification shade");
+    });
+
+    test("a fresh lock read that finds the keyguard overrides a stale unlocked sample", async () => {
+      fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
+      const result = await launchWith(
+        systemUiObservation({
+          deviceLock: { locked: false, keyguardShowing: false, secure: false },
+        }),
+      );
+
+      expect(result.error).toContain("device is locked");
+      expect(result.error).not.toContain("notification shade");
+    });
+
+    test("a fresh unlocked read identifies the shade when the observation had no sample", async () => {
+      fakeAdb.setDeviceLock({ locked: false, keyguardShowing: false, secure: false });
+      const result = await launchWith(systemUiObservation());
+
+      expect(result.error).toContain("(notification shade) is covering the app");
+    });
+
+    test("the hierarchy naming the keyguard says lock screen without a lock sample", async () => {
+      fakeAdb.setDeviceLock(null);
+      const result = await launchWith(
+        systemUiObservation({
+          viewHierarchy: {
+            hierarchy: { error: "Device is locked; ...", unavailableReason: "device_locked" },
+          },
+        }),
+      );
+
+      expect(result.error).toContain("lock screen");
+      expect(result.error).toContain("wakeAndUnlock");
+      expect(result.error).not.toContain("notification shade");
+    });
+
+    test("an already-locked observation sample skips the re-read", async () => {
+      const reread = spyOn(fakeAdb, "getDeviceLock");
+      const result = await launchWith(
+        systemUiObservation({ deviceLock: { locked: true, keyguardShowing: true, secure: true } }),
+      );
+
+      expect(reread).not.toHaveBeenCalled();
+      expect(result.error).toContain("device is locked");
+    });
   });
 
   test("reports the actual foreground blocker after cold boot launch verification times out", async () => {

@@ -292,6 +292,7 @@ describe("registered interaction handlers honor cancellation", () => {
         handler("rotate")(device, { orientation: "landscape" }, undefined, controller.signal),
       ).rejects.toThrow("device may still complete the change");
       expect(adb.getExecutedCommands()).toEqual([
+        "shell wm size",
         "shell dumpsys window displays",
         "shell settings put system accelerometer_rotation 0",
         "shell settings put system accelerometer_rotation 1",

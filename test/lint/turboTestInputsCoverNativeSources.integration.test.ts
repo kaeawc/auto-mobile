@@ -64,6 +64,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",
+    // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
+    // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
+    "android/junit-runner/src/test/resources/captured/**",
   ] as const;
 
   interface TurboConfig {

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "../db/testDbHelper";
@@ -29,6 +29,13 @@ function execution(overrides: Partial<TestExecutionRecord> = {}): TestExecutionR
 describe("test timing sessionUuid scope (#10091)", () => {
   let db: Kysely<Database>;
   let repo: TestExecutionRepository;
+
+  beforeAll(async () => {
+    // Warm the migrated in-memory template outside the per-test timing budget; the first
+    // createTestDatabase() in a process pays the one-time migration run (~150ms on CI).
+    const template = await createTestDatabase();
+    await template.destroy();
+  });
 
   beforeEach(async () => {
     db = await createTestDatabase();

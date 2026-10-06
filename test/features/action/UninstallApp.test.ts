@@ -88,7 +88,7 @@ describe("UninstallApp (iOS simulator)", () => {
     };
 
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
+    await repo.seedInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
     const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
       simctl: fakeSimctl,
       deviceAppUninstaller: fakeUninstaller,
@@ -434,7 +434,7 @@ describe("UninstallApp (Android)", () => {
 
   test("marks the Android installed-apps cache stale after a successful uninstall", async () => {
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
       { stdout: "package:com.example.app\npackage:com.android.settings" },
       { stdout: "package:com.android.settings" },
@@ -472,7 +472,7 @@ describe("UninstallApp (Android)", () => {
 
     const repo = new FakeInstalledAppsRepository();
     const adb = new VerificationFailureAdb();
-    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
 
     const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(adb), {
@@ -711,7 +711,7 @@ describe("UninstallApp (Android)", () => {
 
   test("returns not installed when package is missing", async () => {
     const repo = new FakeInstalledAppsRepository();
-    await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
+    await repo.seedInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     setupNoApp(fakeAdb, 0);

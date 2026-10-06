@@ -224,7 +224,9 @@ describe("TerminateApp (iOS)", () => {
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(true);
     expect(result.wasRunning).toBe(true);
-    expect(result.wasForeground).toBe(false);
+    // No pre-terminate observation on the skipObservation path, so the
+    // foreground state is unknown and must be omitted rather than asserted false.
+    expect("wasForeground" in result).toBe(false);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(true);
   });
 
@@ -443,6 +445,7 @@ describe("TerminateApp (iOS)", () => {
     expect(result.error).toContain("com.example.app");
     expect(result.wasInstalled).toBeUndefined();
     expect(result.wasRunning).toBeUndefined();
+    expect("wasForeground" in result).toBe(false);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
   });
 
@@ -495,7 +498,7 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(true);
     expect(result.wasRunning).toBe(true);
-    expect(result.wasForeground).toBe(false);
+    expect("wasForeground" in result).toBe(false);
     expect(result.packageName).toBe("com.example.app");
     expect(fakeSimctl.wasMethodCalled("listApps")).toBe(false);
     // Physical path must route through devicectl terminator, never simctl.
@@ -567,6 +570,7 @@ describe("TerminateApp (iOS physical device)", () => {
     // fabricated `false` that a caller could misread as "not installed".
     expect(result.wasInstalled).toBeUndefined();
     expect(result.wasRunning).toBeUndefined();
+    expect("wasForeground" in result).toBe(false);
     // A failure must not crash and must not fall back to simctl.
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
     expect(cacheInvalidator.calls).toEqual([]);
@@ -592,6 +596,141 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.wasRunning).toBe(true);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(true);
     expect(terminator.terminateCalls).toHaveLength(0);
+  });
+});
+
+describe("TerminateApp (iOS wasForeground from the pre-terminate observation)", () => {
+  const simDevice: BootedDevice = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+  const physicalDevice: BootedDevice = {
+    deviceId: "00008110-001A2B3C4D5E6F70",
+    name: "iPhone 15 Pro (physical)",
+    platform: "ios",
+  };
+
+  let fakeSimctl: FakeSimctl;
+  let fakeTimer: FakeTimer;
+
+  beforeEach(() => {
+    fakeSimctl = new FakeSimctl();
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
+  });
+
+  const observationFor = (
+    appId: string,
+    overrides: Partial<ObserveResult> = {},
+  ): ObserveResult => ({
+    display: { key: "primary", role: "inner", posture: "opened", generation: 0 },
+    observationId: "pre-terminate",
+    updatedAt: fakeTimer.now(),
+    screenSize: { width: 1170, height: 2532 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    activeWindow: { appId, activityName: "", type: "window" },
+    viewHierarchy: {
+      packageName: appId,
+      updatedAt: fakeTimer.now(),
+      hierarchy: { node: { text: "screen" } },
+    },
+    ...overrides,
+  });
+
+  const terminateObserved = async (
+    device: BootedDevice,
+    previous: ObserveResult,
+    terminator = new FakeDeviceAppTerminator({ result: { wasInstalled: true, wasRunning: true } }),
+  ) => {
+    const terminateApp = new TerminateApp(device, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+      cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+    });
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(previous);
+    terminateApp.observeScreen = observeScreen;
+    terminateApp.window = new FakeWindow();
+    terminateApp.awaitIdle = new FakeAwaitIdle();
+    return terminateApp.execute("com.example.app", {});
+  };
+
+  test("reports wasForeground true when the terminated app was the foreground app", async () => {
+    const result = await terminateObserved(simDevice, observationFor("com.example.app"));
+
+    expect(result.success).toBe(true);
+    expect(result.wasRunning).toBe(true);
+    expect(result.wasForeground).toBe(true);
+  });
+
+  test("reports wasForeground false when a different app was in the foreground", async () => {
+    const result = await terminateObserved(simDevice, observationFor("com.apple.springboard"));
+
+    expect(result.success).toBe(true);
+    expect(result.wasForeground).toBe(false);
+  });
+
+  test("reports wasForeground true for a physical device whose app was foreground", async () => {
+    const result = await terminateObserved(physicalDevice, observationFor("com.example.app"));
+
+    expect(result.success).toBe(true);
+    expect(result.wasForeground).toBe(true);
+  });
+
+  test("omits wasForeground when the pre-terminate observation is not fresh", async () => {
+    const result = await terminateObserved(
+      simDevice,
+      observationFor("com.example.app", {
+        freshness: { isFresh: false, requestedMinTimestamp: 0, actualTimestamp: 0 },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect("wasForeground" in result).toBe(false);
+  });
+
+  test("omits wasForeground when the observation names no foreground app", async () => {
+    const result = await terminateObserved(
+      simDevice,
+      observationFor("", {
+        activeWindow: undefined,
+        viewHierarchy: {
+          updatedAt: fakeTimer.now(),
+          hierarchy: { node: { text: "screen" } },
+        },
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect("wasForeground" in result).toBe(false);
+  });
+
+  test("reports wasForeground false when the process was already gone, even if observed foreground", async () => {
+    const result = await terminateObserved(
+      physicalDevice,
+      observationFor("com.example.app"),
+      new FakeDeviceAppTerminator({ result: { wasInstalled: true, wasRunning: false } }),
+    );
+
+    expect(result.wasRunning).toBe(false);
+    expect(result.wasForeground).toBe(false);
+  });
+
+  test("omits wasForeground when the terminate itself fails", async () => {
+    const terminator = new FakeDeviceAppTerminator();
+    terminator.setError(new Error("devicectl failed"));
+
+    const result = await terminateObserved(
+      physicalDevice,
+      observationFor("com.example.app"),
+      terminator,
+    );
+
+    expect(result.success).toBe(false);
+    expect("wasForeground" in result).toBe(false);
   });
 });
 

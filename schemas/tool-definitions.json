@@ -8892,7 +8892,7 @@
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor.",
+              "description": "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
               "anyOf": [
                 {
                   "type": "boolean"
@@ -8909,7 +8909,10 @@
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": true
+                },
+                {
+                  "$ref": "#/$defs/__schema0"
                 }
               ]
             },
@@ -16761,6 +16764,41 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "pages": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "state": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "lastKnown": {
+                "description": "Pages and state are the last accepted overlay_event snapshot, not a live device query",
+                "type": "boolean",
+                "const": true
               }
             },
             "required": ["lastAction", "success", "timestamp"],
@@ -27788,12 +27826,16 @@
       "type": "object",
       "properties": {
         "duration": {
-          "description": "Shake duration ms (default 1000)",
-          "type": "number"
+          "description": "Shake duration ms (1-1798000, default 1000)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1798000
         },
         "intensity": {
-          "description": "Shake intensity (Android; default 100)",
-          "type": "number"
+          "description": "Shake intensity on Android (1-1000, default 100); ignored on iOS",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1000
         },
         "platform": {
           "type": "string",

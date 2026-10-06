@@ -10,6 +10,7 @@ import {
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
 } from "../daemon/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
+import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 
 export interface ToolCallErrorContext {
   toolName: string;
@@ -48,17 +49,45 @@ export function shapeToolCallError(
                 })
               : error instanceof SessionRecoveryAssignmentError
                 ? JSON.stringify({ error: { message, ...error.details } })
-                : error instanceof ActionableError && error.containerFailure
+                : isSuspectSessionError(error)
                   ? JSON.stringify({
-                      success: false,
-                      error: message,
-                      containerFailure: error.containerFailure,
+                      error: {
+                        code: DAEMON_SESSION_SUSPECT_CODE,
+                        message,
+                        sessionUuid: error.sessionUuid,
+                        remainingMs: error.remainingMs,
+                        retryable: true,
+                      },
                     })
-                  : `Error: ${message}`,
+                  : error instanceof ActionableError && error.containerFailure
+                    ? JSON.stringify({
+                        success: false,
+                        error: message,
+                        containerFailure: error.containerFailure,
+                      })
+                    : `Error: ${message}`,
       },
     ],
     isError: true,
   };
+}
+
+/**
+ * A refusal from a session held inside its suspect window (#10051). Matched on its wire `code`
+ * rather than the class so this module does not import the daemon's session manager.
+ */
+function isSuspectSessionError(
+  error: unknown,
+): error is Error & { sessionUuid: string; remainingMs: number } {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === DAEMON_SESSION_SUSPECT_CODE &&
+    "sessionUuid" in error &&
+    typeof error.sessionUuid === "string" &&
+    "remainingMs" in error &&
+    typeof error.remainingMs === "number"
+  );
 }
 
 function safeToolCallErrorMessage(error: unknown): string {

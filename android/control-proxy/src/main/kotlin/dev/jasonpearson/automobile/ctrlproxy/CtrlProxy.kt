@@ -1083,8 +1083,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
     Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
 
-  @Volatile private var isRecording: Boolean = false
-
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
   @Volatile private var occlusionEnabled: Boolean = true
@@ -3133,12 +3131,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     handleClearPreferences(requestId, packageName, fileName)
 
   override fun startRecording() {
-    isRecording = true
+    // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording started")
   }
 
   override fun stopRecording() {
-    isRecording = false
+    // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording stopped")
   }
 

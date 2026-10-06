@@ -415,6 +415,68 @@ describe("storageTools Android user targeting for the direct-file fallback (#996
     },
   );
 
+  const sdkRouteClient = () =>
+    inspectionDisabledClient({
+      setPreference: async () => {},
+      removePreference: async () => {},
+      clearPreferenceStore: async () => {},
+    });
+  const warningOf = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    const response = await toolHandler(name)(ANDROID_DEVICE, args);
+    return JSON.parse((response.content[0] as { text: string }).text).warning;
+  };
+
+  test.each(toolCalls)(
+    "%s says a userId was not applied when the SDK route handled the call",
+    async (name, extra) => {
+      const adb = WORK_PROFILE_ADB();
+      setStorageToolsDependenciesForTesting({
+        androidClientFactory: sdkRouteClient,
+        adbClientFactory: singleAdbFactory(adb),
+      });
+
+      const warning = await warningOf(name, {
+        appId: APP_ID,
+        name: FILE_NAME,
+        userId: 10,
+        ...extra,
+      });
+
+      expect(warning).toContain("userId 10 was not applied");
+      expect(warning).toContain("not user-scoped");
+      expect(runAsCommands(adb)).toHaveLength(0);
+    },
+  );
+
+  test.each(toolCalls)(
+    "%s adds no userId warning when no userId was given and the SDK route handled the call",
+    async (name, extra) => {
+      setStorageToolsDependenciesForTesting({
+        androidClientFactory: sdkRouteClient,
+        adbClientFactory: singleAdbFactory(WORK_PROFILE_ADB()),
+      });
+
+      expect(await warningOf(name, { appId: APP_ID, name: FILE_NAME, ...extra })).toBeUndefined();
+    },
+  );
+
+  test.each(toolCalls)(
+    "%s reports only the relaunch warning, not the SDK one, when the direct fallback honoured userId",
+    async (name, extra) => {
+      useFallback(WORK_PROFILE_ADB());
+
+      const warning = await warningOf(name, {
+        appId: APP_ID,
+        name: FILE_NAME,
+        userId: 10,
+        ...extra,
+      });
+
+      expect(warning).toContain("directly");
+      expect(warning).not.toContain("was not applied");
+    },
+  );
+
   test.each(toolCalls)("%s rejects userId on an iOS device", async (name, extra) => {
     setStorageToolsDependenciesForTesting({
       iosClientFactory: () => {

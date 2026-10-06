@@ -4,8 +4,9 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice } from "../../models";
+import type { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { SetAndroidNotificationPolicyAccess } from "../action/SetAndroidNotificationPolicyAccess";
 import {
   defaultBulletinBoardReader,
@@ -48,59 +49,141 @@ export interface NotificationPolicyDependencies {
   iosReader?: IosNotificationAuthorizationReader;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const ALLOWED_PROVIDERS_HEADER = /^\s*Allowed condition providers:\s*$/;
+const ALLOWED_PROVIDERS_LINE = /^\s+(.*?)\s*\(user: (\d+) isPrimary: (true|false)\)\s*$/;
+
+/** One Android user's approved condition-provider lists, split by the dump's `isPrimary` flag. */
+interface UserProviderLists {
+  primary?: string[];
+  other: string[];
 }
 
-function collectPolicyAccessSection(
-  lines: string[],
-): { headerIdx: number; sectionLines: string[] } | null {
-  const headerRe = /mPolicyAccess|policy\s+access/i;
-  for (let i = 0; i < lines.length; i++) {
-    if (!headerRe.test(lines[i])) {
-      continue;
-    }
-    const headerIndent = lines[i].match(/^\s*/)![0].length;
-    const sectionLines: string[] = [lines[i]];
-    for (let j = i + 1; j < lines.length; j++) {
-      const line = lines[j];
-      if (line.trim().length === 0) {
-        continue;
-      }
-      const indent = line.match(/^\s*/)![0].length;
-      if (indent <= headerIndent) {
-        break;
-      }
-      sectionLines.push(line);
-    }
-    return { headerIdx: i, sectionLines };
-  }
-  return null;
+type PolicyAccessByUser = Map<number, UserProviderLists>;
+
+type PolicyAccessParse =
+  | { kind: "providers"; byUser: PolicyAccessByUser }
+  | { kind: "unrecognised"; reason: string };
+
+function splitEntries(items: string): string[] {
+  return items.split(":").filter((entry) => entry.length > 0);
 }
 
-function parseAndroidPolicyAccess(output: string, appId: string): NotificationPolicyAccessState {
+/**
+ * Recognise the shape `cmd notification allow_dnd|disallow_dnd` actually changes (captured on API 36
+ * emulators): under `Allowed condition providers:` (the ConditionProviders ManagedServices dump) each
+ * `(user, isPrimary)` pair prints one line, `<entry>:<entry>:... (user: N isPrimary: true|false)`,
+ * where an entry is a bare package or `package/Component`. `allow_dnd <pkg>` adds the bare package
+ * to the primary list; `disallow_dnd` removes it. `dumpsys notification` has no
+ * `mPolicyAccess` line (an earlier revision parsed one and so reported `allowed: null` everywhere).
+ * The separate `Has user set:` block is not a grant (it still names a package after a revoke) and is
+ * ignored. A missing, repeated or unparseable block is "unrecognised" so the caller reports an
+ * unverified state rather than a confident but possibly wrong answer.
+ */
+function parsePolicyAccess(output: string): PolicyAccessParse {
   const lines = output.split(/\r?\n/);
-  const section = collectPolicyAccessSection(lines);
-
-  if (!section) {
+  const headers = lines.flatMap((line, index) =>
+    ALLOWED_PROVIDERS_HEADER.test(line) ? [index] : [],
+  );
+  if (headers.length !== 1) {
     return {
-      supported: true,
-      allowed: null,
-      method: "android_dumpsys_notification",
-      warning: "Could not find notification policy access state in dumpsys notification output",
+      kind: "unrecognised",
+      reason:
+        headers.length === 0
+          ? "Could not find the allowed condition providers list in dumpsys notification output"
+          : "dumpsys notification output has several allowed condition providers lists",
     };
   }
+  const byUser: PolicyAccessByUser = new Map();
+  for (const line of lines.slice(headers[0] + 1)) {
+    const match = ALLOWED_PROVIDERS_LINE.exec(line);
+    if (!match) {
+      break;
+    }
+    const userId = Number.parseInt(match[2], 10);
+    const lists = byUser.get(userId) ?? { other: [] };
+    const entries = splitEntries(match[1]);
+    if (match[3] === "false") {
+      lists.other.push(...entries);
+    } else if (lists.primary) {
+      return {
+        kind: "unrecognised",
+        reason: "dumpsys notification repeats a user's primary allowed condition providers list",
+      };
+    } else {
+      lists.primary = entries;
+    }
+    byUser.set(userId, lists);
+  }
+  return byUser.size === 0
+    ? {
+        kind: "unrecognised",
+        reason: "dumpsys notification allowed condition providers list has no recognised entries",
+      }
+    : { kind: "providers", byUser };
+}
 
-  const sectionText = section.sectionLines.join("\n");
-  const appPattern = new RegExp(`(^|[^A-Za-z0-9_.])${escapeRegExp(appId)}([^A-Za-z0-9_.]|$)`);
-  const allowed = appPattern.test(sectionText);
-  const matchLine = section.sectionLines.find((line) => appPattern.test(line));
-  return {
-    supported: true,
-    allowed,
-    method: "android_dumpsys_notification",
-    rawValue: (matchLine ?? section.sectionLines[0]).trim(),
-  };
+/**
+ * Decide the app's grant from one user's lists. The bare package in the primary list is the grant.
+ * A `package/Component` entry is a condition-provider component, not the package grant, and a bare
+ * package only in the non-primary list is not what `allow_dnd` writes, so neither grants nor proves
+ * a revoke (null). A user with no primary list is unverified.
+ */
+function decideForUser(lists: UserProviderLists, appId: string): boolean | null {
+  if (!lists.primary) {
+    return null;
+  }
+  if (lists.primary.includes(appId)) {
+    return true;
+  }
+  const mentioned = [...lists.primary, ...lists.other].some(
+    (entry) => entry === appId || entry.startsWith(`${appId}/`),
+  );
+  return mentioned ? null : false;
+}
+
+interface CurrentUser {
+  userId?: number;
+  unavailableReason?: string;
+}
+
+/** Resolve the Android user `cmd notification allow_dnd|disallow_dnd` acts on (the current user). */
+async function resolveCurrentUser(adb: AdbExecutor): Promise<CurrentUser> {
+  try {
+    const target = await new AndroidUserTargetResolver(adb).resolve({ currentUser: true });
+    return target.source === "currentUser"
+      ? { userId: target.userId }
+      : { unavailableReason: "the current Android user could not be read" };
+  } catch (error) {
+    logger.warn(
+      `[NotificationPolicy] Failed to resolve the current Android user: ${errorMessage(error)}`,
+    );
+    return { unavailableReason: "the current Android user could not be resolved" };
+  }
+}
+
+function decide(
+  parsed: PolicyAccessParse,
+  appId: string,
+  user: CurrentUser,
+): Pick<NotificationPolicyAccessState, "allowed" | "warning"> {
+  if (parsed.kind === "unrecognised") {
+    return { allowed: null, warning: parsed.reason };
+  }
+  if (user.userId === undefined) {
+    const why = user.unavailableReason ?? "current Android user unknown";
+    return { allowed: null, warning: `Policy access is listed per user but ${why}` };
+  }
+  const lists = parsed.byUser.get(user.userId);
+  if (!lists) {
+    return {
+      allowed: null,
+      warning: `dumpsys notification lists no allowed condition providers for Android user ${user.userId}`,
+    };
+  }
+  const allowed = decideForUser(lists, appId);
+  return allowed === null
+    ? { allowed, warning: `dumpsys notification does not conclusively list ${appId} for the user` }
+    : { allowed };
 }
 
 export class NotificationPolicy {
@@ -155,7 +238,13 @@ export class NotificationPolicy {
         undefined,
         true,
       );
-      const policyAccess = parseAndroidPolicyAccess(result.stdout, appId);
+      const parsed = parsePolicyAccess(result.stdout);
+      const user = parsed.kind === "providers" ? await resolveCurrentUser(adb) : {};
+      const policyAccess: NotificationPolicyAccessState = {
+        supported: true,
+        method: "android_dumpsys_notification",
+        ...decide(parsed, appId, user),
+      };
       return {
         success: !policyAccess.error,
         appId,
@@ -211,18 +300,68 @@ export class NotificationPolicy {
       allowed: input.policyAccess,
     });
 
+    // Never echo the request: read the policy-access state back (one extra
+    // `shell dumpsys notification`) and report what the device now says.
+    const observed = await this.getPolicy(appId);
+    return this.buildSetResult(appId, input, result, observed);
+  }
+
+  private buildSetResult(
+    appId: string,
+    input: SetNotificationPolicyInput,
+    command: AndroidDeviceShellToolResult,
+    observed: NotificationPolicyResult,
+  ): NotificationPolicyResult {
+    const base = { appId, deviceId: this.device.deviceId, platform: this.device.platform };
+    const readBack = observed.policyAccess;
+    const allowed = observed.success ? (readBack.allowed ?? null) : null;
+    const policyAccess: NotificationPolicyAccessState = {
+      supported: true,
+      allowed,
+      method: observed.success ? "android_dumpsys_notification" : "android_cmd_notification",
+    };
+
+    const verdict = classifySetOutcome(appId, input, command, allowed, readBack);
+    if (verdict.error) {
+      const { error } = verdict;
+      return { ...base, success: false, policyAccess: { ...policyAccess, error }, error };
+    }
     return {
-      success: result.success,
-      appId,
-      deviceId: this.device.deviceId,
-      platform: this.device.platform,
-      policyAccess: {
-        supported: true,
-        allowed: input.policyAccess,
-        method: "android_cmd_notification",
-        ...(result.error ? { error: result.error } : {}),
-      },
-      ...(result.error ? { error: result.error } : {}),
+      ...base,
+      success: true,
+      policyAccess: verdict.warning ? { ...policyAccess, warning: verdict.warning } : policyAccess,
     };
   }
+}
+
+/** Compare the command outcome and the read-back with the request; error means failure. */
+function classifySetOutcome(
+  appId: string,
+  input: SetNotificationPolicyInput,
+  command: AndroidDeviceShellToolResult,
+  allowed: boolean | null,
+  readBack: NotificationPolicyAccessState,
+): { error?: string; warning?: string } {
+  if (!command.success) {
+    const commandError = command.error ?? "cmd notification failed";
+    // A conclusive read-back that already equals the request means the desired state holds.
+    return allowed === input.policyAccess
+      ? {
+          warning: `cmd notification reported an error but the requested state holds: ${commandError}`,
+        }
+      : { error: commandError };
+  }
+  if (allowed === null) {
+    const reason = readBack.error ?? readBack.warning ?? "state could not be determined";
+    return {
+      warning: `Command succeeded but the resulting policy access was not verified: ${reason}`,
+    };
+  }
+  if (allowed !== input.policyAccess) {
+    const sub = input.policyAccess ? "allow_dnd" : "disallow_dnd";
+    return {
+      error: `cmd notification ${sub} reported success but dumpsys notification shows policy access ${allowed ? "still granted" : "not granted"} for ${appId}`,
+    };
+  }
+  return {};
 }

@@ -21,11 +21,36 @@ export async function resolveDefaultAndroidPreferencesUser(
 ): Promise<number> {
   const candidates = await installedSecondaryUsers(adb, appId);
   if (candidates.length > 1) {
-    throw new ActionableError(
+    throw new AmbiguousAndroidPreferencesUserError(appId, candidates);
+  }
+  return candidates[0] ?? 0;
+}
+
+/** The app is on several non-zero users and not on user 0, so no default can be chosen. */
+export class AmbiguousAndroidPreferencesUserError extends ActionableError {
+  constructor(
+    readonly appId: string,
+    readonly candidates: number[],
+  ) {
+    super(
       `Android app ${appId} is not installed for user 0 but is installed for several users (${candidates.join(", ")}). Pass userId to choose one.`,
     );
   }
-  return candidates[0] ?? 0;
+}
+
+/**
+ * Rethrow `error` for a route that has no `userId` parameter (the `ide/*` Storage-pane
+ * mutations and the storage resources). The ambiguity error's "Pass userId" advice is not
+ * actionable there, so it is replaced with one that names where `userId` can be passed.
+ */
+export function rethrowForRouteWithoutUserId(error: unknown): never {
+  if (error instanceof AmbiguousAndroidPreferencesUserError) {
+    throw new ActionableError(
+      `Android app ${error.appId} is not installed for user 0 but is installed for several users (${error.candidates.join(", ")}), and this route cannot choose between them because it has no userId parameter. Use a tool that accepts userId (getPreference, setKeyValue, removeKeyValue, clearKeyValueFile).`,
+      { cause: error },
+    );
+  }
+  throw error;
 }
 
 /** Running non-zero users that have `appId`, or `[]` when user 0 should be used. */

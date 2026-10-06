@@ -1,0 +1,46 @@
+# grep -c mPolicyAccess: 0
+656:   Condition providers:
+657:     Allowed condition providers:
+658:       com.google.android.apps.diagnosticstool:com.google.android.apps.safetyhub:com.google.intelligence.sense:com.google.android.apps.wellbeing:com.google.android.dialer:com.google.android.gms:com.google.android.settings.intelligence:com.google.android.GoogleCamera (user: 0 isPrimary: true)
+659:       com.google.android.as:com.google.android.apps.nexuslauncher (user: 0 isPrimary: false)
+660:     Has user set:
+661:       userId=0 value={com.google.android.apps.diagnosticstool, com.google.android.as/com.google.android.apps.miphone.aiai.common.notification.service.AiAiNotificationAssistantService, com.google.android.apps.safetyhub, dev.jasonpearson.automobile.playground, com.google.android.as, com.google.intelligence.sense, com.google.android.apps.wellbeing, com.google.android.dialer, com.google.android.gms, com.google.android.apps.nexuslauncher, com.google.android.settings.intelligence, com.google.android.GoogleCamera}
+662:     All condition providers (2) enabled for current profiles:
+663:       ComponentInfo{com.google.android.apps.wellbeing/com.google.android.apps.wellbeing.azr.impl.AzrConditionProviderService}
+664:       ComponentInfo{com.google.android.gms/com.google.android.location.settings.DrivingConditionProvider}
+665:     Live condition providers (5):
+666:       ComponentInfo{android/com.android.server.notification.CountdownConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@9324060 SYSTEM
+667:       ComponentInfo{android/com.android.server.notification.ScheduleConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@442d919 SYSTEM
+668:       ComponentInfo{android/com.android.server.notification.EventConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@f23dde SYSTEM
+669:       ComponentInfo{android/com.android.server.notification.CustomManualConditionProvider} (user 0): android.service.notification.ConditionProviderService$Provider@db22bbf SYSTEM
+670:       ComponentInfo{com.google.android.apps.wellbeing/com.google.android.apps.wellbeing.azr.impl.AzrConditionProviderService} (user 0): android.service.notification.IConditionProvider$Stub$Proxy@ebed352
+671:     Snoozed condition providers (1):
+672:       User: 0
+673:         com.google.android.gms/com.google.android.location.settings.DrivingConditionProvider
+674:     mRecords(0):
+675:     mSystemConditionProviders: {schedule, event, custom_manual, countdown}
+676:     ScheduleConditionProvider:
+677:       mConnected=true
+678:       mRegistered=false
+679:       mSubscriptions=
+680:       snoozed due to alarm: 
+681:       mNextAlarmTime=0
+682:     CustomManualConditionProvider: ENABLED
+683:     CountdownConditionProvider:
+684:       mConnected=true
+685:       mTime=0
+686:     EventConditionProvider:
+687:       mConnected=true
+688:       mRegistered=false
+689:       mBootComplete=true
+690:       mNextAlarmTime=0
+691:       mSubscriptions=
+692:       mTrackers=
+693:         user=0
+694:           mCallback=null
+695:           mRegistered=false
+696:           u=0
+697: 
+# lines naming the playground package:
+464:      AppSettings: dev.jasonpearson.automobile.playground (10232)
+661:      userId=0 value={com.google.android.apps.diagnosticstool, com.google.android.as/com.google.android.apps.miphone.aiai.common.notification.service.AiAiNotificationAssistantService, com.google.android.apps.safetyhub, dev.jasonpearson.automobile.playground, com.google.android.as, com.google.intelligence.sense, com.google.android.apps.wellbeing, com.google.android.dialer, com.google.android.gms, com.google.android.apps.nexuslauncher, com.google.android.settings.intelligence, com.google.android.GoogleCamera}

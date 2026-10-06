@@ -1,5 +1,5 @@
 import type { Mutex } from "async-mutex";
-import type { DeviceInfo } from "../models";
+import { ActionableError, type DeviceInfo } from "../models";
 import type { Session, SessionManager } from "./sessionManager";
 import type { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
 import type {
@@ -377,6 +377,7 @@ export class AdbServerResetQuarantine {
       if (matchingReservations.length > 0) {
         await this.waitForAdbServerResetReservations(matchingReservations, signal);
       } else {
+        this.throwIfRecoveryReservationUnconfirmed(matchingRecoveryAvdNames);
         await this.pool
           .getRecoveryCoordinator()
           .waitForRecoveringAndroidImages(matchingRecoveryAvdNames, signal);
@@ -393,6 +394,23 @@ export class AdbServerResetQuarantine {
         this.pool.getAndroidStartupLeases().delete(owner);
       });
     };
+  }
+
+  /**
+   * A sessionless recovery that could not confirm the old emulator stopped keeps
+   * its reservation until a later fresh observation decides it. Waiting out the
+   * boot budget cannot change that, so fail at once and name the reservation.
+   */
+  private throwIfRecoveryReservationUnconfirmed(avdNames: readonly string[]): void {
+    const avdName = this.pool
+      .getRecoveryCoordinator()
+      .findUnconfirmedRecoveringAndroidImage(avdNames);
+    if (avdName !== undefined) {
+      throw new ActionableError(
+        `Android AVD '${avdName}' is reserved by an interrupted emulator recovery whose shutdown could not be confirmed. ` +
+          "The reservation lifts after the next successful device refresh shows whether the emulator is still running; retry then.",
+      );
+    }
   }
 
   /**

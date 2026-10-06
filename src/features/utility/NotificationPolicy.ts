@@ -49,78 +49,96 @@ export interface NotificationPolicyDependencies {
   iosReader?: IosNotificationAuthorizationReader;
 }
 
-const POLICY_ACCESS_HEADER = /^\s*(?:mPolicyAccess|policy\s+access)\b/i;
-const POLICY_ACCESS_INLINE_MAP = /^\s*mPolicyAccess\s*=\s*\{(.*)\}\s*$/;
-const USER_LIST_ENTRY = /(\d+)=\[([^\]]*)\]/g;
+const ALLOWED_PROVIDERS_HEADER = /^\s*Allowed condition providers:\s*$/;
+const ALLOWED_PROVIDERS_LINE = /^\s+(.*?)\s*\(user: (\d+) isPrimary: (true|false)\)\s*$/;
 
-/** Per-Android-user list of the package (or `package/Component`) entries granted policy access. */
-type PolicyAccessByUser = Map<number, string[]>;
+/** One Android user's approved condition-provider lists, split by the dump's `isPrimary` flag. */
+interface UserProviderLists {
+  primary?: string[];
+  other: string[];
+}
+
+type PolicyAccessByUser = Map<number, UserProviderLists>;
 
 type PolicyAccessParse =
-  | { kind: "map"; byUser: PolicyAccessByUser; headerLine: string }
+  | { kind: "providers"; byUser: PolicyAccessByUser }
   | { kind: "unrecognised"; reason: string };
 
-/**
- * Recognise exactly one shape: a single line-anchored `mPolicyAccess={<user>=[<entries>], ...}`.
- * Anything else (no header, several header-like lines, a label with children on other lines, a
- * malformed or duplicated map) is "unrecognised" so the caller reports an unverified state rather
- * than a confident but possibly wrong answer.
- */
-function parsePolicyAccessMap(output: string): PolicyAccessParse {
-  const headers = output.split(/\r?\n/).filter((line) => POLICY_ACCESS_HEADER.test(line));
-  if (headers.length === 0) {
-    return {
-      kind: "unrecognised",
-      reason: "Could not find notification policy access state in dumpsys notification output",
-    };
-  }
-  const inline = headers.length === 1 ? POLICY_ACCESS_INLINE_MAP.exec(headers[0]) : null;
-  if (!inline) {
-    return {
-      kind: "unrecognised",
-      reason:
-        headers.length > 1
-          ? "dumpsys notification output has several policy access lines"
-          : "dumpsys notification policy access line is not in a recognised format",
-    };
-  }
-  const body = inline[1];
-  if (body.replace(USER_LIST_ENTRY, "").replace(/[\s,]/g, "").length > 0) {
-    return {
-      kind: "unrecognised",
-      reason: "dumpsys notification policy access map is not in a recognised format",
-    };
-  }
-  const byUser: PolicyAccessByUser = new Map();
-  for (const [, user, list] of body.matchAll(USER_LIST_ENTRY)) {
-    const userId = Number.parseInt(user, 10);
-    if (byUser.has(userId)) {
-      return {
-        kind: "unrecognised",
-        reason: "dumpsys notification policy access map repeats a user",
-      };
-    }
-    byUser.set(
-      userId,
-      list
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0),
-    );
-  }
-  return { kind: "map", byUser, headerLine: headers[0].trim() };
+function splitEntries(items: string): string[] {
+  return items.split(":").filter((entry) => entry.length > 0);
 }
 
 /**
- * Decide the app's grant from one user's list. An exact package entry is granted; a bare
- * `package/Component` entry is a condition-provider component, not the package grant, so it
- * neither grants nor proves a revoke (null).
+ * Recognise the shape `cmd notification allow_dnd|disallow_dnd` actually changes (captured on API 36
+ * emulators): under `Allowed condition providers:` (the ConditionProviders ManagedServices dump) each
+ * `(user, isPrimary)` pair prints one line, `<entry>:<entry>:... (user: N isPrimary: true|false)`,
+ * where an entry is a bare package or `package/Component`. `allow_dnd <pkg>` adds the bare package
+ * to the primary list; `disallow_dnd` removes it. `dumpsys notification` has no
+ * `mPolicyAccess` line (an earlier revision parsed one and so reported `allowed: null` everywhere).
+ * The separate `Has user set:` block is not a grant (it still names a package after a revoke) and is
+ * ignored. A missing, repeated or unparseable block is "unrecognised" so the caller reports an
+ * unverified state rather than a confident but possibly wrong answer.
  */
-function decideForUser(entries: string[], appId: string): boolean | null {
-  if (entries.includes(appId)) {
+function parsePolicyAccess(output: string): PolicyAccessParse {
+  const lines = output.split(/\r?\n/);
+  const headers = lines.flatMap((line, index) =>
+    ALLOWED_PROVIDERS_HEADER.test(line) ? [index] : [],
+  );
+  if (headers.length !== 1) {
+    return {
+      kind: "unrecognised",
+      reason:
+        headers.length === 0
+          ? "Could not find the allowed condition providers list in dumpsys notification output"
+          : "dumpsys notification output has several allowed condition providers lists",
+    };
+  }
+  const byUser: PolicyAccessByUser = new Map();
+  for (const line of lines.slice(headers[0] + 1)) {
+    const match = ALLOWED_PROVIDERS_LINE.exec(line);
+    if (!match) {
+      break;
+    }
+    const userId = Number.parseInt(match[2], 10);
+    const lists = byUser.get(userId) ?? { other: [] };
+    const entries = splitEntries(match[1]);
+    if (match[3] === "false") {
+      lists.other.push(...entries);
+    } else if (lists.primary) {
+      return {
+        kind: "unrecognised",
+        reason: "dumpsys notification repeats a user's primary allowed condition providers list",
+      };
+    } else {
+      lists.primary = entries;
+    }
+    byUser.set(userId, lists);
+  }
+  return byUser.size === 0
+    ? {
+        kind: "unrecognised",
+        reason: "dumpsys notification allowed condition providers list has no recognised entries",
+      }
+    : { kind: "providers", byUser };
+}
+
+/**
+ * Decide the app's grant from one user's lists. The bare package in the primary list is the grant.
+ * A `package/Component` entry is a condition-provider component, not the package grant, and a bare
+ * package only in the non-primary list is not what `allow_dnd` writes, so neither grants nor proves
+ * a revoke (null). A user with no primary list is unverified.
+ */
+function decideForUser(lists: UserProviderLists, appId: string): boolean | null {
+  if (!lists.primary) {
+    return null;
+  }
+  if (lists.primary.includes(appId)) {
     return true;
   }
-  return entries.some((entry) => entry.startsWith(`${appId}/`)) ? null : false;
+  const mentioned = [...lists.primary, ...lists.other].some(
+    (entry) => entry === appId || entry.startsWith(`${appId}/`),
+  );
+  return mentioned ? null : false;
 }
 
 interface CurrentUser {
@@ -147,34 +165,25 @@ function decide(
   parsed: PolicyAccessParse,
   appId: string,
   user: CurrentUser,
-): Pick<NotificationPolicyAccessState, "allowed" | "rawValue" | "warning"> {
+): Pick<NotificationPolicyAccessState, "allowed" | "warning"> {
   if (parsed.kind === "unrecognised") {
     return { allowed: null, warning: parsed.reason };
   }
-  const rawValue = parsed.headerLine;
-  if (parsed.byUser.size === 0) {
-    return { allowed: false, rawValue };
-  }
   if (user.userId === undefined) {
     const why = user.unavailableReason ?? "current Android user unknown";
-    return { allowed: null, rawValue, warning: `Policy access is listed per user but ${why}` };
+    return { allowed: null, warning: `Policy access is listed per user but ${why}` };
   }
-  const entries = parsed.byUser.get(user.userId);
-  if (!entries) {
+  const lists = parsed.byUser.get(user.userId);
+  if (!lists) {
     return {
       allowed: null,
-      rawValue,
-      warning: `dumpsys notification lists no policy access entry for Android user ${user.userId}`,
+      warning: `dumpsys notification lists no allowed condition providers for Android user ${user.userId}`,
     };
   }
-  const allowed = decideForUser(entries, appId);
+  const allowed = decideForUser(lists, appId);
   return allowed === null
-    ? {
-        allowed,
-        rawValue,
-        warning: `dumpsys notification lists only component entries for ${appId}`,
-      }
-    : { allowed, rawValue };
+    ? { allowed, warning: `dumpsys notification does not conclusively list ${appId} for the user` }
+    : { allowed };
 }
 
 export class NotificationPolicy {
@@ -229,9 +238,8 @@ export class NotificationPolicy {
         undefined,
         true,
       );
-      const parsed = parsePolicyAccessMap(result.stdout);
-      const user =
-        parsed.kind === "map" && parsed.byUser.size > 0 ? await resolveCurrentUser(adb) : {};
+      const parsed = parsePolicyAccess(result.stdout);
+      const user = parsed.kind === "providers" ? await resolveCurrentUser(adb) : {};
       const policyAccess: NotificationPolicyAccessState = {
         supported: true,
         method: "android_dumpsys_notification",
@@ -311,7 +319,6 @@ export class NotificationPolicy {
       supported: true,
       allowed,
       method: observed.success ? "android_dumpsys_notification" : "android_cmd_notification",
-      ...(readBack.rawValue ? { rawValue: readBack.rawValue } : {}),
     };
 
     const verdict = classifySetOutcome(appId, input, command, allowed, readBack);

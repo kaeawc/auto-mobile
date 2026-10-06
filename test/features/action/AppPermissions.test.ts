@@ -6,6 +6,10 @@ import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import {
+  CAPTURED_APP_ID,
+  dumpsysNotificationFromCapture,
+} from "../../helpers/notificationPolicyCapture";
 import type {
   IosSimulatorPermissionCommandResult,
   TccPermissionReader,
@@ -51,8 +55,16 @@ const egg = readFileSync(
 ).replaceAll("com.android.egg", "com.example.app");
 const dumpsysNotification = "shell dumpsys notification";
 const currentUser = "shell am get-current-user";
-const policyListsApp = "  mPolicyAccess={0=[com.example.app, com.other.app]}\n";
-const policyOmitsApp = "  mPolicyAccess={0=[com.other.app]}\n";
+// Real API 36 captures (see test/fixtures/android-notification-policy), with the captured package
+// renamed to this suite's app id the same way the dumpsys package fixture is.
+const policyListsApp = dumpsysNotificationFromCapture("after-allow", "emulator-5600").replaceAll(
+  CAPTURED_APP_ID,
+  "com.example.app",
+);
+const policyOmitsApp = dumpsysNotificationFromCapture("after-disallow", "emulator-5600").replaceAll(
+  CAPTURED_APP_ID,
+  "com.example.app",
+);
 const grantedEgg = egg.replace(
   "android.permission.READ_EXTERNAL_STORAGE: granted=false",
   "android.permission.READ_EXTERNAL_STORAGE: granted=true",

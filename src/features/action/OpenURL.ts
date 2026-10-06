@@ -48,11 +48,19 @@ const foregroundAppId = (observation: ObserveResult): string | undefined => {
   );
 };
 
+/**
+ * Poll fresh observations until the foreground app is `expectedAppId`. When
+ * `previousApp` is given, any other verified foreground app also confirms: an
+ * http(s) universal link is routed to its owning app instead of Safari, so
+ * "something other than what was in the foreground before the open" is the
+ * plausible-handler signal (issue #9978).
+ */
 export async function waitForIosForegroundChange(
   expectedAppId: string,
   reader: ForegroundObservationReader,
   timer: Timer,
   signal?: AbortSignal,
+  previousApp?: string,
 ): Promise<boolean> {
   const deadline = timer.now() + FOREGROUND_CHANGE_TIMEOUT_MS;
   for (let attempt = 1; timer.now() < deadline; attempt++) {
@@ -72,8 +80,9 @@ export async function waitForIosForegroundChange(
         observation.freshness?.isFresh !== false &&
         observation.freshness?.verified !== false &&
         currentApp &&
-        currentApp === expectedAppId
+        (currentApp === expectedAppId || (previousApp && currentApp !== previousApp))
       ) {
+        logger.info(`[OpenURL] Foreground app after open: ${currentApp}`);
         return true;
       }
     } catch (error) {
@@ -109,8 +118,10 @@ const SYSTEM_URL_HANDLERS: ReadonlyMap<string, string> = new Map([
   ["maps", "com.apple.Maps"],
 ]);
 
+const isHttpUrl = (url: string): boolean => /^https?:\/\//i.test(url);
+
 const expectedIosForegroundHandler = (url: string): string | undefined => {
-  if (/^https?:\/\//i.test(url)) {
+  if (isHttpUrl(url)) {
     return SAFARI_BUNDLE_ID;
   }
   const scheme = url.match(/^([a-z][a-z0-9+.-]*):/i)?.[1].toLowerCase();
@@ -376,6 +387,9 @@ export class OpenURL extends BaseVisualChange {
           },
           this.timer,
           signal,
+          // A universal link may open its owning app instead of Safari, so for
+          // http(s) any foreground app change counts as handled (#9978).
+          isHttpUrl(url) ? previousApp : undefined,
         )
       : true;
     return {

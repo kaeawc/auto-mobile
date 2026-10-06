@@ -580,6 +580,15 @@ export function emulatorConsoleReportsFailure(stdout: string, stderr: string): b
 }
 
 /**
+ * The console's reason for a refusal: its first non-empty reply line, verbatim
+ * (`KO: <reason>`). Call only after `emulatorConsoleReportsFailure` returned true.
+ */
+export function emulatorConsoleFailureReason(stdout: string, stderr: string): string {
+  const line = `${stdout}\n${stderr}`.split(/\r?\n/).find((candidate) => candidate.trim());
+  return line?.trim() ?? "the console gave no reason";
+}
+
+/**
  * Best-effort parse of the emulator console `network status` free text into the
  * structured applied values (issue #6085 item 3). The output — per the Android
  * emulator console — is roughly:

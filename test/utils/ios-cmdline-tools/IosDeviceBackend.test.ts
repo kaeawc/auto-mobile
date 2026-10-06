@@ -1,6 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { SIMULATOR_UNINSTALL_TIMEOUT_MS } from "../../../src/utils/ios-cmdline-tools/simulatorUninstallBound";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import {
   resolveIosInstallBackend,
   SimulatorIosInstallBackend,
@@ -38,11 +40,20 @@ type Call =
 
 class FakeSimctlTerminator {
   terminateError?: Error;
+  /** Runs inside terminateApp before it settles, e.g. to cancel the request mid-terminate. */
+  onTerminate?: () => void;
+  terminateOptions?: { timeoutMs?: number; signal?: AbortSignal };
 
   constructor(private readonly calls: Call[]) {}
 
-  async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
+  async terminateApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
     this.calls.push({ operation: "terminate", bundleId, deviceId: deviceId ?? "" });
+    this.terminateOptions = options;
+    this.onTerminate?.();
     if (this.terminateError) {
       throw this.terminateError;
     }
@@ -50,10 +61,18 @@ class FakeSimctlTerminator {
 }
 
 class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
+  uninstallOptions?: { signal?: AbortSignal };
+
   constructor(private readonly calls: Call[]) {}
 
-  async uninstallApp(deviceId: string, bundleId: string, isSimulator?: boolean): Promise<void> {
+  async uninstallApp(
+    deviceId: string,
+    bundleId: string,
+    isSimulator?: boolean,
+    options?: { signal?: AbortSignal },
+  ): Promise<void> {
     this.calls.push({ operation: "uninstall", deviceId, bundleId, isSimulator });
+    this.uninstallOptions = options;
   }
 }
 
@@ -111,6 +130,87 @@ describe("resolveIosDeviceBackend", () => {
       { operation: "terminate", bundleId, deviceId: simulatorUdid },
       { operation: "uninstall", deviceId: simulatorUdid, bundleId, isSimulator: true },
     ]);
+  });
+});
+
+describe("SimulatorIosDeviceBackend uninstall cancellation (issue #10077)", () => {
+  const abortError = () => new DOMException("The operation was aborted", "AbortError");
+
+  function simulatorBackend() {
+    const calls: Call[] = [];
+    const simctl = new FakeSimctlTerminator(calls);
+    const uninstaller = new FakeDeviceAppUninstaller(calls);
+    const backend = new SimulatorIosDeviceBackend(simulatorUdid, {
+      simctl,
+      deviceAppUninstaller: uninstaller,
+    });
+    return { backend, calls, simctl, uninstaller };
+  }
+
+  test("a request cancelled during the terminate leaves the app installed (ambient signal)", async () => {
+    const { backend, calls, simctl } = simulatorBackend();
+    const controller = new AbortController();
+    simctl.onTerminate = () => controller.abort();
+    simctl.terminateError = abortError();
+
+    await expect(
+      runWithAbortSignal(controller.signal, () => backend.uninstallApp(bundleId)),
+    ).rejects.toThrow();
+
+    expect(calls).toEqual([{ operation: "terminate", bundleId, deviceId: simulatorUdid }]);
+  });
+
+  test("a request cancelled during the terminate leaves the app installed (explicit signal)", async () => {
+    const { backend, calls, simctl } = simulatorBackend();
+    const controller = new AbortController();
+    simctl.onTerminate = () => controller.abort();
+    simctl.terminateError = abortError();
+
+    await expect(backend.uninstallApp(bundleId, controller.signal)).rejects.toThrow();
+
+    expect(calls).toEqual([{ operation: "terminate", bundleId, deviceId: simulatorUdid }]);
+  });
+
+  test("a cancellation landing after a successful terminate still stops before the uninstall", async () => {
+    const { backend, calls, simctl } = simulatorBackend();
+    const controller = new AbortController();
+    simctl.onTerminate = () => controller.abort();
+
+    await expect(backend.uninstallApp(bundleId, controller.signal)).rejects.toThrow();
+
+    expect(calls).toEqual([{ operation: "terminate", bundleId, deviceId: simulatorUdid }]);
+  });
+
+  test("an already-cancelled request dispatches nothing", async () => {
+    const { backend, calls } = simulatorBackend();
+
+    await expect(backend.uninstallApp(bundleId, AbortSignal.abort())).rejects.toThrow();
+
+    expect(calls).toEqual([]);
+  });
+
+  test("runs terminate and uninstall under the request signal with a bounded terminate", async () => {
+    const { backend, simctl, uninstaller } = simulatorBackend();
+    const controller = new AbortController();
+
+    await backend.uninstallApp(bundleId, controller.signal);
+
+    expect(simctl.terminateOptions?.timeoutMs).toBeGreaterThan(0);
+    expect(simctl.terminateOptions?.signal?.aborted).toBe(false);
+    expect(uninstaller.uninstallOptions?.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(simctl.terminateOptions?.signal?.aborted).toBe(true);
+    expect(uninstaller.uninstallOptions?.signal?.aborted).toBe(true);
+  });
+
+  test("a non-cancellation terminate failure still uninstalls without a signal", async () => {
+    const { backend, calls, simctl, uninstaller } = simulatorBackend();
+    simctl.terminateError = new Error("app not running");
+
+    await backend.uninstallApp(bundleId);
+
+    expect(calls.map((call) => call.operation)).toEqual(["terminate", "uninstall"]);
+    expect(uninstaller.uninstallOptions).toBeUndefined();
   });
 });
 
@@ -438,8 +538,13 @@ describe("resolveIosDowngradeRecoveryBackend", () => {
     expect(backend?.kind).toBe("simulator");
     await backend?.terminateApp(bundleId);
     await backend?.uninstallApp(bundleId);
-    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
-    expect(simctl.getMethodCalls("uninstallApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
+    // Both are bounded (issue #10077); no request signal is in scope here, so none is forwarded.
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([
+      { bundleId, deviceId: simulatorUdid, options: { timeoutMs: expect.any(Number) } },
+    ]);
+    expect(simctl.getMethodCalls("uninstallApp")).toEqual([
+      { bundleId, deviceId: simulatorUdid, options: { timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS } },
+    ]);
   });
 
   test.each([physicalUdid, "unrecognized-device"])(

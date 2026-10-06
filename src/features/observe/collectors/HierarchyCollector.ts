@@ -19,6 +19,11 @@ export interface HierarchyCollectorOptions {
   adbFactory: AdbClientFactory;
   timer: Timer;
   onAvailabilityLost?: (reason: string) => void;
+  /** Test seam for the Android raw read; defaults to the per-device CtrlProxy singleton. */
+  androidRawClient?: (
+    device: BootedDevice,
+    adbFactory: AdbClientFactory,
+  ) => Pick<AndroidCtrlProxyClient, "requestHierarchySync" | "invalidateCache">;
 }
 
 /**
@@ -211,18 +216,31 @@ export class HierarchyCollector {
    * Fetch raw (unfiltered) view hierarchy and attach it to the result.
    * Invalidates the shared cache after fetching so that the unfiltered snapshot
    * does not bleed into subsequent normal observe calls.
+   *
+   * `displayId` (Android only) is the logical display of the observation the raw
+   * tree is attached to; omitted, CtrlProxy answers for its default display.
    */
-  async collectRaw(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+  async collectRaw(result: ObserveResult, signal?: AbortSignal, displayId?: number): Promise<void> {
     const { device, adbFactory, timer } = this.opts;
     try {
       if (device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(device, adbFactory);
+        const client = (
+          this.opts.androidRawClient ?? ((d, f) => AndroidCtrlProxyClient.getInstance(d, f))
+        )(device, adbFactory);
         const syncResult = await client.requestHierarchySync(
           new NoOpPerformanceTracker(),
           true, // disableAllFiltering
           signal,
+          undefined,
+          undefined,
+          displayId,
         );
-        client.invalidateCache();
+        // A read of a non-default display answers its caller only (#10106): it never wrote
+        // the unfiltered tree into the shared default-display cache, so there is nothing to
+        // drop, and dropping would cost the next default-display action a device read.
+        if (displayId === undefined || displayId === 0) {
+          client.invalidateCache();
+        }
         if (syncResult?.hierarchy) {
           result.rawViewHierarchy = {
             json: JSON.stringify(syncResult.hierarchy, null, 2),

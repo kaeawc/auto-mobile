@@ -77,8 +77,26 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
     return this.accessibilityService.requestCurrentFocus();
   }
 
-  async requestSwipe(x1: number, y1: number, x2: number, y2: number, durationMs: number) {
-    return this.accessibilityService.requestSwipe(x1, y1, x2, y2, durationMs);
+  async requestSwipe(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    durationMs: number,
+    signal?: AbortSignal,
+  ) {
+    return this.accessibilityService.requestSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      durationMs,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   async getScreenSize() {

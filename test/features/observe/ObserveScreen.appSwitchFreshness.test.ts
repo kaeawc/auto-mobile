@@ -9,6 +9,8 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import type { ObserveScreenDependencies } from "../../../src/features/observe/ObserveScreenDependencies";
+import type { BackStackInfo } from "../../../src/models";
 import { createObserveScreenForTest } from "./observeScreenTestBuilders";
 
 afterEach(() => {
@@ -16,7 +18,11 @@ afterEach(() => {
   displayTransitions.reset("fake-settle-cache");
 });
 
-async function harness(switched: boolean, answerSync = true) {
+async function harness(
+  switched: boolean,
+  answerSync = true,
+  backStack?: ObserveScreenDependencies["backStack"],
+) {
   const h = await deviceLikeAndroidHierarchy(() => "App content", {
     packageName: (extraction) =>
       switched && extraction > 0 ? "com.example.new" : "com.android.settings",
@@ -34,6 +40,7 @@ async function harness(switched: boolean, answerSync = true) {
     new FakeAdbClientFactory(h.adb),
     {
       viewHierarchy: h.viewHierarchy,
+      ...(backStack ? { backStack } : {}),
       hierarchyCapture: createDeviceHierarchyCapture(h.device, {
         viewHierarchy: h.viewHierarchy,
         timer: h.timer,
@@ -184,5 +191,101 @@ describe("observe app-switch cache recovery", () => {
     } finally {
       h.restore();
     }
+  });
+
+  describe("side samples after the recovery (#9982)", () => {
+    const oldLock = { locked: true, keyguardShowing: true, secure: true };
+    const newLock = { locked: false, keyguardShowing: false, secure: false };
+    const stackFor = (activity: string): BackStackInfo => ({
+      depth: 1,
+      activities: [],
+      tasks: [{ id: 9, packageName: "com.example.new" }],
+      currentActivity: { name: activity, taskId: 9 },
+      source: "adb",
+    });
+    /** First read describes the discarded window; later reads describe the new app. */
+    function sequencedBackStack(
+      outcomes: (BackStackInfo | Error)[],
+    ): NonNullable<ObserveScreenDependencies["backStack"]> & { calls: number } {
+      const fake = {
+        calls: 0,
+        execute: async () => {
+          const outcome = outcomes[Math.min(fake.calls++, outcomes.length - 1)];
+          if (outcome instanceof Error) {
+            throw outcome;
+          }
+          return outcome;
+        },
+      };
+      return fake;
+    }
+
+    test("re-reads lock state and back stack so the new app's activity is named", async () => {
+      const backStack = sequencedBackStack([
+        stackFor("com.android.settings.Settings"),
+        stackFor("com.example.new.MainActivity"),
+      ]);
+      const h = await harness(true, true, backStack);
+      h.adb.setDeviceLockSequence([oldLock, newLock]);
+      try {
+        const result = await h.screen.execute({ skipScreenshot: true, timeoutMs: 500 });
+        expect(result.viewHierarchy?.packageName).toBe("com.example.new");
+        expect(result.deviceLock).toEqual(newLock);
+        expect(result.backStack?.currentActivity?.name).toBe("com.example.new.MainActivity");
+        expect(result.activeWindow).toMatchObject({
+          appId: "com.example.new",
+          activityName: "com.example.new.MainActivity",
+        });
+        expect(backStack.calls).toBeGreaterThanOrEqual(2);
+      } finally {
+        h.restore();
+      }
+    });
+
+    test("skipBackStack re-reads only the lock state", async () => {
+      const backStack = sequencedBackStack([stackFor("com.example.new.MainActivity")]);
+      const h = await harness(true, true, backStack);
+      h.adb.setDeviceLockSequence([oldLock, newLock]);
+      try {
+        const result = await h.screen.execute({ ...options });
+        expect(result.deviceLock).toEqual(newLock);
+        expect(result.backStack).toBeUndefined();
+        expect(backStack.calls).toBe(0);
+      } finally {
+        h.restore();
+      }
+    });
+
+    test("a failed back-stack re-read leaves the field absent and still returns the new tree", async () => {
+      const backStack = sequencedBackStack([
+        stackFor("com.android.settings.Settings"),
+        new Error("dumpsys failed"),
+      ]);
+      const h = await harness(true, true, backStack);
+      h.adb.setDeviceLockSequence([oldLock, newLock]);
+      try {
+        const result = await h.screen.execute({ skipScreenshot: true, timeoutMs: 500 });
+        expect(result.viewHierarchy?.packageName).toBe("com.example.new");
+        expect(result.deviceLock).toEqual(newLock);
+        expect(result.backStack).toBeUndefined();
+        expect(result.activeWindow?.appId).toBe("com.example.new");
+        expect(result.activeWindow?.activityName).toBe("");
+      } finally {
+        h.restore();
+      }
+    });
+
+    test("a same-app cache hit keeps its own lock state and back stack", async () => {
+      const backStack = sequencedBackStack([stackFor("com.android.settings.Settings")]);
+      const h = await harness(false, true, backStack);
+      h.adb.setDeviceLock(oldLock);
+      try {
+        const result = await h.screen.execute({ skipScreenshot: true, timeoutMs: 500 });
+        expect(result.deviceLock).toEqual(oldLock);
+        expect(result.backStack?.currentActivity?.name).toBe("com.android.settings.Settings");
+      } finally {
+        h.restore();
+      }
+    });
   });
 });

@@ -27,6 +27,12 @@ export interface SearchableNode {
   elementId?: string;
   label?: string;
   displayedLabel?: string;
+  /**
+   * The text the element shows, without toggle/description/hint fallbacks: an editable's
+   * typed `value` when it has one (iOS fields keep it apart from the placeholder in `text`),
+   * else `text`. Exact-text comparisons use this so they agree with the skeleton label.
+   */
+  shownText?: string;
   textFields: readonly string[];
   textSources: Readonly<Record<string, string>>;
   capturedTextLength?: number;
@@ -101,10 +107,10 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
   const capturedValue =
     editable && typeof properties.value === "string" ? properties.value : undefined;
   const value = nonEmptyString(capturedValue);
+  const shownText = [value, text].find(Boolean);
   const label = [
     getToggleContentDescription(properties),
-    value,
-    text,
+    shownText,
     description,
     accessibleLabel,
     iosEditableHint,
@@ -124,6 +130,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     elementId: nativeId ?? nodeKey,
     label,
     displayedLabel,
+    shownText,
     accessibleLabel,
     textSources: Object.fromEntries(
       Object.entries({

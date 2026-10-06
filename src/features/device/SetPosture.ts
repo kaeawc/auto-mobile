@@ -16,10 +16,14 @@ import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlPro
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import type { DisplayPanel } from "../../models/DisplayPanel";
+import { POSTURE_PANEL_ROLES, type DisplayPanel } from "../../models/DisplayPanel";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  emulatorConsoleFailureReason,
+  emulatorConsoleReportsFailure,
+} from "../utility/DeviceState";
 import { withEpilogueWarning } from "../../utils/bestEffortEpilogue";
 import { logger } from "../../utils/logger";
 import { displayInventoryOutcome } from "../../models/DeviceInfo";
@@ -229,6 +233,34 @@ const DISPLAY_PRESET_IDS: Record<DisplayPreset, number> = {
   tablet: 2,
 };
 
+function withWarnings(
+  result: SetPostureResult,
+  candidates: (string | undefined)[],
+): SetPostureResult {
+  const added = candidates.filter((warning): warning is string => warning !== undefined);
+  return added.length === 0
+    ? result
+    : { ...result, warnings: [...(result.warnings ?? []), ...added] };
+}
+
+/** A committed posture whose panel has not swapped yet; panel roles come from the inventory. */
+function activePanelWarning(
+  requested: RequestedPosture,
+  activeRole: DisplayPanel["role"],
+  panels: DisplayPanel[] | undefined,
+): string | undefined {
+  const expectedRole = POSTURE_PANEL_ROLES.find(
+    ([posture]) => posture === requested && posture !== "rear_display",
+  )?.[1];
+  const hasBothPanels =
+    panels?.some((panel) => panel.role === "cover") &&
+    panels.some((panel) => panel.role === "inner");
+  if (!expectedRole || !hasBothPanels || activeRole === "unknown" || activeRole === expectedRole) {
+    return undefined;
+  }
+  return `The device committed posture '${requested}', but the active display is still the ${activeRole} panel rather than the ${expectedRole} panel. Re-observe before acting.`;
+}
+
 function isEmulator(device: BootedDevice): boolean {
   return device.deviceId.startsWith("emulator-");
 }
@@ -244,6 +276,26 @@ function validateSupportedPosture(
     );
   }
 }
+
+/** The console answers `OK`/`KO: <reason>` with a zero adb exit code either way. */
+async function runEmulatorConsoleCommand(
+  adb: ReturnType<AdbClientFactory["create"]>,
+  command: string,
+  refusal: string,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const { stdout, stderr } = await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
+  if (emulatorConsoleReportsFailure(stdout, stderr)) {
+    throw new ActionableError(
+      `The emulator console refused '${command}': ${emulatorConsoleFailureReason(stdout, stderr)}. ${refusal}`,
+    );
+  }
+}
+
+const POSTURE_REFUSED = "The posture did not change.";
+const presetRefused = (preset: DisplayPreset): string =>
+  `The posture command was accepted, but the '${preset}' display preset was not applied. ` +
+  "Emulators refuse resize-display when run headless (-no-window) and when the AVD is not the Resizable profile.";
 
 async function setEmulatorPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
@@ -269,13 +321,15 @@ async function setEmulatorPosture(
   throwIfAborted(signal);
   let presetPending = Boolean(displayPreset);
   try {
-    await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
+    await runEmulatorConsoleCommand(adb, command, POSTURE_REFUSED, signal);
     assertCurrent();
     if (displayPreset) {
       throwIfAborted(signal);
       presetPending = false;
-      await awaitWhileRequestIsLive(
-        adb.executeCommand(`emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`),
+      await runEmulatorConsoleCommand(
+        adb,
+        `emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`,
+        presetRefused(displayPreset),
         signal,
       );
       assertCurrent();
@@ -919,7 +973,9 @@ export class SetPosture {
       operation,
     );
     operation.assertCurrent();
-    return result;
+    return withWarnings(result, [
+      activePanelWarning(requested, result.display.role, this.device.displays?.panels),
+    ]);
   }
 
   private async observeFinalPosture(

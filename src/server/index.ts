@@ -25,7 +25,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
-import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
+import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { dropMcpRecording } from "./mcpRecordingManager";
@@ -1239,7 +1239,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         executionTracker.endExecution(execution.id);
       }
     };
-    const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
+    const requestSignal = combineRequestAbortSignals(
+      execution.abortController.signal,
+      extra.signal,
+    );
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
         ? {

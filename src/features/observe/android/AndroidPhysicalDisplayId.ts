@@ -7,6 +7,7 @@ import { displayTransitions } from "../DisplayTransition";
 import {
   parseAndroidDisplayInfos,
   parseSurfaceFlingerDisplayIds,
+  physicalDisplayIdForLogicalId,
 } from "../../../utils/android-cmdline-tools/AndroidDisplayParsers";
 
 const SURFACE_FLINGER_DISPLAY_IDS_COMMAND = "shell dumpsys SurfaceFlinger --display-id";
@@ -66,15 +67,34 @@ export function decodePngBase64Output(output: string): Buffer {
   return stripLeadingPngNoise(Buffer.from(cleanedOutput.slice(signatureOffset), "base64"));
 }
 
+/** What a screenshot capture needs from display resolution (fakes implement this). */
+export interface PhysicalDisplayIdResolver {
+  resolve(adb: AdbExecutor, deviceId: string, signal?: AbortSignal): Promise<string | null>;
+  resolveLogical(
+    adb: AdbExecutor,
+    deviceId: string,
+    logicalId: number,
+    signal?: AbortSignal,
+  ): Promise<string | null>;
+}
+
 /**
  * Per-device display resolution cache. Single-display and unambiguous
  * multi-display results are cached for the host display revision; unavailable
  * or ambiguous results are retried.
  */
-export class AndroidPhysicalDisplayIdResolver {
+export class AndroidPhysicalDisplayIdResolver implements PhysicalDisplayIdResolver {
   private readonly cache = new Map<
     string,
     { displayId: string | null; expiresAt: number; revision: number }
+  >();
+  private readonly logicalCache = new Map<
+    string,
+    {
+      infos: ReturnType<typeof parseAndroidDisplayInfos>;
+      expiresAt: number;
+      revision: number;
+    }
   >();
   private readonly timer: Timer;
   private readonly ttlMs: number;
@@ -90,7 +110,7 @@ export class AndroidPhysicalDisplayIdResolver {
     this.timer = options.timer ?? defaultTimer;
     this.ttlMs = options.ttlMs ?? PHYSICAL_DISPLAY_ID_CACHE_TTL_MS;
     this.displayRevision =
-      options.displayRevision ?? ((deviceId) => displayTransitions.revision(deviceId));
+      options.displayRevision ?? ((deviceId) => displayTransitions.displayStateRevision(deviceId));
   }
 
   async resolve(adb: AdbExecutor, deviceId: string, signal?: AbortSignal): Promise<string | null> {
@@ -109,6 +129,69 @@ export class AndroidPhysicalDisplayIdResolver {
       return displayId;
     }
     return null;
+  }
+
+  /**
+   * Resolve an Android logical display id (as listed by `cmd display
+   * get-displays`) to the physical id `screencap -d` takes. Returns null when
+   * the list is unreadable or the display has no `local:` physical id; the
+   * caller decides how to proceed, because the logical id itself is rejected by
+   * `screencap -d`. A cached list that lacks the requested id is refetched once
+   * (a hot-plugged display or a lagging fold transition), never more.
+   */
+  async resolveLogical(
+    adb: AdbExecutor,
+    deviceId: string,
+    logicalId: number,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const revision = this.displayRevision(deviceId);
+    const cached = this.logicalCache.get(deviceId);
+    if (cached && cached.expiresAt > this.timer.now() && cached.revision === revision) {
+      const hit = physicalDisplayIdForLogicalId(cached.infos, logicalId);
+      if (hit !== undefined) {
+        return hit;
+      }
+    }
+    this.logicalCache.delete(deviceId);
+    const infos = await this.readLogicalDisplayInfos(adb, deviceId, revision, signal);
+    const physicalId = infos ? physicalDisplayIdForLogicalId(infos, logicalId) : undefined;
+    if (infos && physicalId === undefined) {
+      logger.warn(
+        `[AndroidPhysicalDisplayId] Logical display ${logicalId} has no physical display id in the display list`,
+      );
+    }
+    return physicalId ?? null;
+  }
+
+  private async readLogicalDisplayInfos(
+    adb: AdbExecutor,
+    deviceId: string,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<ReturnType<typeof parseAndroidDisplayInfos> | null> {
+    try {
+      const output = await adb.executeCommand(
+        DEFAULT_DISPLAY_INFO_COMMAND,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      const infos = parseAndroidDisplayInfos(output.stdout);
+      if (infos.length > 0) {
+        this.logicalCache.set(deviceId, {
+          infos,
+          expiresAt: this.timer.now() + this.ttlMs,
+          revision,
+        });
+      }
+      return infos;
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`[AndroidPhysicalDisplayId] Logical display lookup failed: ${error}`, error);
+      return null;
+    }
   }
 }
 

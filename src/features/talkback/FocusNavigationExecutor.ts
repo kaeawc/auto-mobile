@@ -9,7 +9,11 @@ import {
 } from "../../models";
 import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 import { DeviceDetection } from "../../utils/DeviceDetection";
+import { isDeviceLostError } from "../../models/DeviceLostError";
+import { combineWithAmbientAbort, getRequestContext } from "../../utils/AbortContext";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient, type A11ySwipeResult } from "../observe/android";
 import { FocusElementMatcher } from "./FocusElementMatcher";
@@ -23,6 +27,58 @@ interface NavigationOptions {
   onFocusObserved?: (element: Element | null) => void;
   /** Called immediately before a swipe request; even failed requests may move the screen. */
   onSwipeRequested?: () => void;
+  /**
+   * Request cancellation. The ambient request signal is always honoured too, so a caller
+   * that runs inside a request context needs no explicit signal.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * A request ended focus navigation (cancelled, timed out, session released, or out of time
+ * budget). Deliberately not an ActionableError: callers must never treat it as a navigation
+ * failure with a coordinate fallback, because the request is over.
+ */
+export class FocusNavigationStoppedError extends Error {}
+
+const BUDGET_EXHAUSTED_MESSAGE = "Request time budget exhausted during focus navigation.";
+
+/**
+ * Describe a stop that happened after `swipesSent` swipe requests. Swipes move the TalkBack
+ * cursor, so the device is not where the request found it. Device-loss errors keep their typed
+ * carrier, and a stop before any swipe changed nothing, so both pass through unchanged.
+ */
+export function stoppedFocusNavigationError(error: unknown, swipesSent: number): unknown {
+  if (error instanceof FocusNavigationStoppedError || isDeviceLostError(error) || swipesSent <= 0) {
+    return error;
+  }
+  const reason = errorMessage(error);
+  return new FocusNavigationStoppedError(
+    `${reason.endsWith(".") ? reason : `${reason}.`} Focus navigation partially applied: ${swipesSent} swipe` +
+      `${swipesSent === 1 ? "" : "s"} already moved the TalkBack cursor and the target was not ` +
+      "activated. Observe before retrying; do not retry automatically.",
+    { cause: error },
+  );
+}
+
+/**
+ * Throw when the request was cancelled or its time budget is spent. Called before every swipe
+ * and before the activation, so nothing further is dispatched for a request that is over.
+ */
+export function assertFocusNavigationLive(
+  signal: AbortSignal | undefined,
+  timer: Timer,
+  swipesSent: number,
+): void {
+  try {
+    throwIfAborted(signal);
+  } catch (error) {
+    throw stoppedFocusNavigationError(error, swipesSent);
+  }
+  const deadlineMs = getRequestContext()?.getDeadlineMs?.();
+  if (deadlineMs !== undefined && timer.now() >= deadlineMs) {
+    throw stoppedFocusNavigationError(new Error(BUDGET_EXHAUSTED_MESSAGE), swipesSent);
+  }
 }
 
 export interface FocusNavigationDriver {
@@ -34,6 +90,7 @@ export interface FocusNavigationDriver {
     x2: number,
     y2: number,
     durationMs: number,
+    signal?: AbortSignal,
   ): Promise<A11ySwipeResult>;
   getScreenSize(): Promise<ScreenSize>;
 }
@@ -78,8 +135,20 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
     x2: number,
     y2: number,
     durationMs: number,
+    signal?: AbortSignal,
   ): Promise<A11ySwipeResult> {
-    return this.accessibilityService.requestSwipe(x1, y1, x2, y2, durationMs);
+    return this.accessibilityService.requestSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      durationMs,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   async getScreenSize(): Promise<ScreenSize> {
@@ -130,6 +199,38 @@ export class FocusNavigationExecutor {
     path: FocusNavigationPath,
     options: NavigationOptions = {},
   ): Promise<boolean> {
+    const signal = combineWithAmbientAbort(options.signal);
+    const progress = { swipesSent: 0 };
+    try {
+      return await this.runNavigation(
+        deviceId,
+        targetSelector,
+        path,
+        {
+          ...options,
+          signal,
+          onSwipeRequested: () => {
+            progress.swipesSent += 1;
+            options.onSwipeRequested?.();
+          },
+        },
+        progress,
+      );
+    } catch (error) {
+      // A request that ended mid-navigation (even an in-flight read rejected by the abort)
+      // must say the cursor already moved, whatever error the interrupted call raised.
+      throw signal?.aborted ? stoppedFocusNavigationError(error, progress.swipesSent) : error;
+    }
+  }
+
+  private async runNavigation(
+    deviceId: string,
+    targetSelector: FocusElementSelector,
+    path: FocusNavigationPath,
+    options: NavigationOptions,
+    progress: { swipesSent: number },
+  ): Promise<boolean> {
+    const { signal } = options;
     const maxSwipes = options.maxSwipes ?? FocusNavigationExecutor.DEFAULT_MAX_SWIPES;
     const verificationInterval = Math.max(
       1,
@@ -166,7 +267,8 @@ export class FocusNavigationExecutor {
     };
 
     if (remainingSwipes === 0) {
-      const initialVerification = await this.verifyNavigationState(driver, targetSelector);
+      assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
+      const initialVerification = await this.verifyNavigationState(driver, targetSelector, signal);
       if (initialVerification.reachedTarget) {
         options.onFocusObserved?.(initialVerification.currentFocus);
         return true;
@@ -188,13 +290,8 @@ export class FocusNavigationExecutor {
     }
 
     while (remainingSwipes > 0) {
-      await this.performFocusSwipe(
-        driver,
-        currentPath.direction,
-        screenSize,
-        options.displayFence,
-        options.onSwipeRequested,
-      );
+      assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
+      await this.performFocusSwipe(driver, currentPath.direction, screenSize, options);
       totalSwipes += 1;
       remainingSwipes -= 1;
 
@@ -206,8 +303,9 @@ export class FocusNavigationExecutor {
       }
 
       if (swipeDelay > 0) {
-        await this.timer.sleep(swipeDelay);
+        await awaitWhileRequestIsLive(this.timer.sleep(swipeDelay), signal);
       }
+      assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
 
       const shouldVerify = remainingSwipes === 0 || totalSwipes % verificationInterval === 0;
       // Fidelity reporting observes each cursor step, but keeps path
@@ -216,7 +314,7 @@ export class FocusNavigationExecutor {
       // a failed verification would turn that normal delay into a false trap.
       let verification: NavigationVerification | undefined;
       if (options.onFocusObserved) {
-        verification = await this.verifyNavigationState(driver, targetSelector);
+        verification = await this.verifyNavigationState(driver, targetSelector, signal);
         options.onFocusObserved(verification.currentFocus);
         if (verification.reachedTarget) {
           return true;
@@ -226,7 +324,7 @@ export class FocusNavigationExecutor {
         continue;
       }
 
-      verification ??= await this.verifyNavigationState(driver, targetSelector);
+      verification ??= await this.verifyNavigationState(driver, targetSelector, signal);
       options.onFocusObserved?.(verification.currentFocus);
 
       if (verification.reachedTarget) {
@@ -254,7 +352,8 @@ export class FocusNavigationExecutor {
       }
     }
 
-    const finalVerification = await this.verifyNavigationState(driver, targetSelector);
+    assertFocusNavigationLive(signal, this.timer, progress.swipesSent);
+    const finalVerification = await this.verifyNavigationState(driver, targetSelector, signal);
     options.onFocusObserved?.(finalVerification.currentFocus);
     return finalVerification.reachedTarget;
   }
@@ -353,19 +452,22 @@ export class FocusNavigationExecutor {
     driver: FocusNavigationDriver,
     direction: "forward" | "backward",
     screenSize: ScreenSize,
-    fence?: DisplayFence,
-    onSwipeRequested?: () => void,
+    options: NavigationOptions,
   ): Promise<void> {
     const { x1, y1, x2, y2 } = this.getSwipeCoordinates(direction, screenSize);
     // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-    fence?.assertCurrent();
-    onSwipeRequested?.();
-    const result = await driver.requestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      FocusNavigationExecutor.DEFAULT_SWIPE_DURATION_MS,
+    options.displayFence?.assertCurrent();
+    options.onSwipeRequested?.();
+    const result = await awaitWhileRequestIsLive(
+      driver.requestSwipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        FocusNavigationExecutor.DEFAULT_SWIPE_DURATION_MS,
+        options.signal,
+      ),
+      options.signal,
     );
     if (!result.success) {
       throw new ActionableError(result.error || "Failed to perform focus swipe.");
@@ -386,8 +488,9 @@ export class FocusNavigationExecutor {
   private async verifyNavigationState(
     driver: FocusNavigationDriver,
     targetSelector: FocusElementSelector,
+    signal?: AbortSignal,
   ): Promise<NavigationVerification> {
-    const traversal = await driver.requestTraversalOrder();
+    const traversal = await awaitWhileRequestIsLive(driver.requestTraversalOrder(), signal);
     if (traversal.error) {
       throw new ActionableError(`Failed to get traversal order: ${traversal.error}`);
     }
@@ -400,7 +503,7 @@ export class FocusNavigationExecutor {
       currentFocus = orderedElements[traversal.focusedIndex] ?? null;
     }
     if (!currentFocus) {
-      const focusResult = await driver.requestCurrentFocus();
+      const focusResult = await awaitWhileRequestIsLive(driver.requestCurrentFocus(), signal);
       if (focusResult.error) {
         logger.warn(`[FocusNavigation] Failed to get current focus: ${focusResult.error}`);
       }

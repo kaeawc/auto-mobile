@@ -323,6 +323,12 @@ const recordStepsResultSchema = z.object({
   planContent: z.string().optional(),
   stepCount: z.number().optional(),
   durationMs: z.number().optional(),
+  warnings: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
+    ),
   error: z.string().optional(),
 });
 
@@ -380,6 +386,7 @@ const recordStepsTool = async (params: {
       planContent: result.planContent,
       stepCount: result.stepCount,
       durationMs: result.durationMs,
+      ...(result.warnings.length > 0 && { warnings: result.warnings }),
     });
   } catch (error) {
     logger.error(`[recordSteps] Failed: ${errorMessage(error)}`);

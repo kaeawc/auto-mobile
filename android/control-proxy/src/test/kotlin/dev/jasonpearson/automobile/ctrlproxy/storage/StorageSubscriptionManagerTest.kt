@@ -4,6 +4,8 @@ import android.content.ContentProvider
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
@@ -322,6 +324,98 @@ class StorageSubscriptionManagerTest {
     assertEquals("com.example.app", subscription.packageName)
     assertEquals("auth", subscription.fileName)
     assertEquals("com.example.app:auth", subscription.subscriptionId)
+  }
+
+  // ================= Subscribe to an app that is not running (#10210) =================
+
+  private fun disabledReply() =
+    Bundle().apply {
+      putBoolean("success", false)
+      putString("errorType", "DISABLED")
+      putString("error", "SharedPreferences inspection is disabled")
+    }
+
+  /** Stubs the package manager so [packageName] is installed and stopped (or not). */
+  private fun givenInstalledPackage(packageName: String, stopped: Boolean) {
+    val packageManager = mockk<PackageManager>(relaxed = true)
+    val appInfo =
+      ApplicationInfo().apply {
+        this.packageName = packageName
+        flags = if (stopped) ApplicationInfo.FLAG_STOPPED else 0
+      }
+    @Suppress("DEPRECATION")
+    every { packageManager.getApplicationInfo(eq(packageName), any<Int>()) } returns appInfo
+    every { context.packageManager } returns packageManager
+  }
+
+  @Test
+  fun `subscribe to a stopped app reports it is not running rather than inspection disabled`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      disabledReply()
+
+    val result = manager.subscribe("com.example.app", "auth")
+
+    val error = result.exceptionOrNull()
+    assertTrue(error is StorageError.AppNotRunning)
+    assertEquals(
+      "app com.example.app is not running; launch it and subscribe again",
+      error?.message,
+    )
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+  }
+
+  @Test
+  fun `subscribe to a running app that reports inspection disabled keeps the SDK message`() {
+    givenInstalledPackage("com.example.app", stopped = false)
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      disabledReply()
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", error?.message)
+  }
+
+  @Test
+  fun `subscribe to a stopped app that answers is still accepted`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply { putBoolean("success", true) }
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+  }
+
+  @Test
+  fun `a stopped app failing for another reason keeps its own error`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "FileNotFound")
+        putString("error", "Preferences file not found: auth")
+      }
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("Preferences file not found: auth", error?.message)
+  }
+
+  @Test
+  fun `a package the runner cannot look up keeps the SDK message`() {
+    val packageManager = mockk<PackageManager>(relaxed = true)
+    @Suppress("DEPRECATION")
+    every { packageManager.getApplicationInfo(any<String>(), any<Int>()) } throws
+      PackageManager.NameNotFoundException("com.example.app")
+    every { context.packageManager } returns packageManager
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      disabledReply()
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", error?.message)
   }
 
   @Test

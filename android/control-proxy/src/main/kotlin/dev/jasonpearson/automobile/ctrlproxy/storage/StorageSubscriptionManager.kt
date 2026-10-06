@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Bundle
@@ -461,13 +463,22 @@ class StorageSubscriptionManager(
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
       val extras = Bundle().apply { putString("fileName", fileName) }
+      // Read before the call: the call itself starts the process and clears the stopped state.
+      val wasStopped = isPackageStopped(packageName)
       val result = context.contentResolver.call(uri, "subscribeToFile", null, extras)
 
       if (result == null) {
         Result.failure(StorageError.SdkNotInstalled(packageName))
       } else if (!result.getBoolean("success", false)) {
         val error = result.getString("error") ?: "Unknown error"
-        Result.failure(StorageError.SdkError(error))
+        // A provider call into a stopped app starts its process, and can land before the app has
+        // enabled inspection; the SDK then reports DISABLED although it is embedded and enabled
+        // (#10210). Tell the client what to do instead of blaming the SDK setting.
+        if (wasStopped && result.getString("errorType") == "DISABLED") {
+          Result.failure(StorageError.AppNotRunning(packageName))
+        } else {
+          Result.failure(StorageError.SdkError(error))
+        }
       } else {
         val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
         Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
@@ -479,6 +490,21 @@ class StorageSubscriptionManager(
       Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
     }
   }
+
+  /**
+   * True when [packageName] is installed but in the stopped state (force-stopped, never launched),
+   * i.e. it has no process. False when it is running, not installed, or not visible to the runner.
+   */
+  private fun isPackageStopped(packageName: String): Boolean =
+    try {
+      @Suppress("DEPRECATION")
+      val flags = context.packageManager.getApplicationInfo(packageName, 0).flags
+      flags and ApplicationInfo.FLAG_STOPPED != 0
+    } catch (e: PackageManager.NameNotFoundException) {
+      // Not installed or not visible: the provider call reports that itself, so no stopped hint.
+      Log.d(TAG, "No package info for $packageName: ${e.message}")
+      false
+    }
 
   private fun rollBackSubscribeToFile(
     packageName: String,
@@ -1076,6 +1102,14 @@ sealed class StorageError(message: String) : Exception(message) {
 
   class InspectionDisabled(packageName: String) :
     StorageError("SharedPreferences inspection is disabled in: $packageName")
+
+  /**
+   * The target app's process is not running, so its SDK provider has not initialized yet. A
+   * provider call starts the process but can arrive before the app enables inspection, which looks
+   * like "inspection is disabled" although the SDK is embedded and enabled (#10210).
+   */
+  class AppNotRunning(packageName: String) :
+    StorageError("app $packageName is not running; launch it and subscribe again")
 
   class FileNotFound(fileName: String) : StorageError("Preferences file not found: $fileName")
 

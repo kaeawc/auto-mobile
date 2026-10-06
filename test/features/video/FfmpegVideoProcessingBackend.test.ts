@@ -404,7 +404,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     (backend as any).ensureFfmpegAvailable = async () => {};
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-recording-udid" };
 
-    await backend.start(mockConfig);
+    const handle = await backend.start(mockConfig);
 
     expect(receivedArgs).toEqual([
       "io",
@@ -412,6 +412,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       "recordVideo",
       path.join(mockConfig.outputDirectory, "test-recording-raw.mov"),
     ]);
+    expect(handle.liveCapturePath).toBe(receivedArgs[3]);
     expect(receivedOptions).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
   });
 
@@ -661,6 +662,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(attempts).toEqual([capturePath, retryCapturePath]);
     expect(removed).toEqual([capturePath]);
     expect(handle.recordingId).toBe("test-recording");
+    // The size monitor must watch the file simctl writes (the retry's raw .mov), not
+    // `outputPath`, which only exists after stop's post-process (#10017).
+    expect(handle.liveCapturePath).toBe(retryCapturePath);
+    expect(handle.liveCapturePath).not.toBe(handle.outputPath);
   });
 
   test("uses a distinct capture path per attempt so a surviving partial cannot exit-17 the retry (#6851)", async function () {

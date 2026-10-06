@@ -68,6 +68,14 @@ export interface RecordingHandle {
   effectiveConfig?: VideoRecordingConfig;
   warning?: string;
   physicalDisplayId?: string;
+  /**
+   * File the capture is writing while it runs, when that is not `outputPath`.
+   * The in-progress size cap (issue #4762) stats this path, so a backend that
+   * captures to a raw file and only produces `outputPath` at stop (iOS Simulator:
+   * `<id>-raw.mov`, then ffmpeg post-process) must report it. Absent means the
+   * capture writes `outputPath` directly (or its host file only appears at stop).
+   */
+  liveCapturePath?: string;
   backendHandle?: unknown;
 }
 
@@ -182,6 +190,8 @@ export interface ActiveVideoRecording {
   recordedPanel?: VideoRecordingPanel;
   physicalDisplayId?: string;
   warning?: string;
+  /** See {@link RecordingHandle.liveCapturePath}. */
+  liveCapturePath?: string;
 }
 
 export interface VideoRecorderServiceDependencies {
@@ -334,6 +344,7 @@ export class VideoRecorderService {
       active.handle = handle;
       active.outputPath = handle.outputPath || outputPath;
       active.fileName = path.basename(active.outputPath);
+      active.liveCapturePath = handle.liveCapturePath;
       active.startedAt = handle.startedAt || startedAt;
       active.config = toPublicRecordingConfig(handle.effectiveConfig ?? config);
       applyBackendDisplayOutcome(active, handle);
@@ -351,6 +362,7 @@ export class VideoRecorderService {
         recordedPanel: active.recordedPanel,
         physicalDisplayId: active.physicalDisplayId,
         warning: active.warning,
+        liveCapturePath: active.liveCapturePath,
       };
     } catch (error) {
       return await this.handleStartFailure(error, active);
@@ -364,6 +376,11 @@ export class VideoRecorderService {
    */
   listActiveRecordingIds(): string[] {
     return Array.from(this.activeRecordings.keys());
+  }
+
+  /** The file an active capture is writing, when it differs from its output path. */
+  getLiveCapturePath(recordingId: string): string | undefined {
+    return this.activeRecordings.get(recordingId)?.liveCapturePath;
   }
 
   hasActiveRecordingForDevice(deviceId: string): boolean {

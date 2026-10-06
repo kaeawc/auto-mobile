@@ -54,6 +54,9 @@ import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 import {
   AndroidImeCatalog,
   AUTO_MOBILE_IME_ID,
+  createForegroundUserSource,
+  imeUserArgs,
+  pinnedUser,
   type ImeSubtypeSnapshot,
   type KeyboardIdentity,
 } from "./AndroidImeCatalog";
@@ -425,6 +428,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly timer: Timer;
   private androidKeyCombinationSupported: Promise<boolean> | undefined;
   private androidCaretUnsafe = false;
+  /** Foreground user pinned for one IME commit; set and cleared under the device IME lock. */
+  private imeUserId: number | undefined;
 
   // IME-mode typing captures the prior IME and profile, then restores both. The shared
   // per-device lock also protects persistent keyboard selection from a concurrent restore.
@@ -1037,9 +1042,52 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     // second call cannot borrow/restore the IME while this one is mid-flight (#7464).
     return withAndroidImeLock(
       this.device.deviceId,
-      () => this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode),
+      async () => {
+        try {
+          return await this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode);
+        } finally {
+          this.imeUserId = undefined;
+        }
+      },
       signal,
     );
+  }
+
+  /**
+   * Every `ime` and `settings` command of one commit (read, activate, restore) must target the
+   * same user, so the foreground user is resolved once here. `ime` defaults to the current
+   * user and `settings` to user 0.
+   */
+  private async pinImeUser(
+    signal?: AbortSignal,
+  ): Promise<{ success: true } | { success: false; error: string }> {
+    try {
+      this.imeUserId = await createForegroundUserSource(this.adb).foregroundUserId(signal);
+      return { success: true };
+    } catch (error) {
+      this.checkAbort(signal, error);
+      logger.warn("[SendKeys] Failed to resolve the foreground Android user", error);
+      return {
+        success: false,
+        error: `Failed to resolve the foreground Android user: ${errorMessage(error)}`,
+      };
+    }
+  }
+
+  /** The pinned user as ` --user <id>` command text; empty for user 0. */
+  private imeUserFlag(): string {
+    if (this.imeUserId === undefined) {
+      throw new Error("IME user was not pinned before an IME command.");
+    }
+    const args = imeUserArgs(this.imeUserId);
+    return args.length === 0 ? "" : ` ${args.join(" ")}`;
+  }
+
+  private pinnedImeCatalog(): AndroidImeCatalog {
+    if (this.imeUserId === undefined) {
+      throw new Error("IME user was not pinned before an IME command.");
+    }
+    return new AndroidImeCatalog(this.adb, this.device.deviceId, pinnedUser(this.imeUserId));
   }
 
   private async runAndroidImeCommit(
@@ -1083,20 +1131,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { ...profileSupport, resolvedMode: mode };
     }
 
-    const priorResult = await this.readDefaultIme();
-    this.checkAbort(signal);
-    if (!priorResult.success) {
-      return priorResult;
+    const captured = await this.captureImeState(signal);
+    if (!captured.success) {
+      return captured;
     }
-    const prior = priorResult.imeId;
-    const enabledResult = await this.readCommitImeEnabled();
-    this.checkAbort(signal);
-    if (!enabledResult.success) {
-      return enabledResult;
-    }
-    const wasEnabled = enabledResult.enabled;
-    const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
-    const priorSubtype = await catalog.readSubtype(prior ?? AUTO_MOBILE_IME_ID, signal);
+    const { prior, wasEnabled, priorSubtype } = captured;
 
     return this.commitWithActiveIme({
       text,
@@ -1108,6 +1147,36 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       routing,
       mode,
     });
+  }
+
+  /** Pins the foreground user, then reads the IME state that the commit must restore. */
+  private async captureImeState(
+    signal?: AbortSignal,
+  ): Promise<
+    | { success: true; prior: string | null; wasEnabled: boolean; priorSubtype: ImeSubtypeSnapshot }
+    | { success: false; error: string }
+  > {
+    const pinned = await this.pinImeUser(signal);
+    this.checkAbort(signal);
+    if (!pinned.success) {
+      return pinned;
+    }
+    const priorResult = await this.readDefaultIme();
+    this.checkAbort(signal);
+    if (!priorResult.success) {
+      return priorResult;
+    }
+    const prior = priorResult.imeId;
+    const enabledResult = await this.readCommitImeEnabled();
+    this.checkAbort(signal);
+    if (!enabledResult.success) {
+      return enabledResult;
+    }
+    const priorSubtype = await this.pinnedImeCatalog().readSubtype(
+      prior ?? AUTO_MOBILE_IME_ID,
+      signal,
+    );
+    return { success: true, prior, wasEnabled: enabledResult.enabled, priorSubtype };
   }
 
   private async commitWithActiveIme(
@@ -1447,7 +1516,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async readDefaultIme(): Promise<DefaultImeReadResult> {
     try {
       const result = await this.adb.executeCommand(
-        "shell settings get secure default_input_method",
+        `shell settings${this.imeUserFlag()} get secure default_input_method`,
       );
       const stderr = result.stderr.trim();
       if (stderr) {
@@ -1470,7 +1539,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     { success: true; enabled: boolean } | { success: false; error: string }
   > {
     try {
-      const result = await this.adb.executeCommand("shell ime list -s");
+      const result = await this.adb.executeCommand(`shell ime list${this.imeUserFlag()} -s`);
       if (result.stderr.trim()) {
         logger.warn(`[SendKeys] Failed to list enabled IMEs: ${result.stderr.trim()}`);
         return { success: false, error: `Failed to list enabled IMEs: ${result.stderr.trim()}` };
@@ -1492,7 +1561,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const imeId = this.commitImeId;
     try {
       if (!wasEnabled) {
-        const enableResult = await this.adb.executeCommand(`shell ime enable ${imeId}`);
+        const enableResult = await this.adb.executeCommand(
+          `shell ime enable${this.imeUserFlag()} ${imeId}`,
+        );
         if (enableResult.stderr.trim()) {
           logger.warn(
             `[SendKeys] Failed to enable the text-commit IME: ${enableResult.stderr.trim()}`,
@@ -1500,7 +1571,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return false;
         }
       }
-      const setResult = await this.adb.executeCommand(`shell ime set ${imeId}`);
+      const setResult = await this.adb.executeCommand(
+        `shell ime set${this.imeUserFlag()} ${imeId}`,
+      );
       if (setResult.stderr.trim()) {
         logger.warn(`[SendKeys] Failed to select the text-commit IME: ${setResult.stderr.trim()}`);
         return false;
@@ -1527,7 +1600,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     wasEnabled: boolean,
     subtype: ImeSubtypeSnapshot,
   ): Promise<void> {
-    const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
+    const catalog = this.pinnedImeCatalog();
     try {
       await this.restoreComponentAndSubtype(catalog, priorImeId, subtype);
       await this.verifyRestoredIme(catalog, priorImeId, wasEnabled);
@@ -1602,7 +1675,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private async disableCommitIme(): Promise<void> {
     // This removes the companion from the keyboard picker; activateCommitIme re-enables it next time.
-    const result = await this.adb.executeCommand(`shell ime disable ${this.commitImeId}`);
+    const result = await this.adb.executeCommand(
+      `shell ime disable${this.imeUserFlag()} ${this.commitImeId}`,
+    );
     if (result.stderr.trim()) {
       throw new Error(`Failed to disable the text-commit IME: ${result.stderr.trim()}`);
     }

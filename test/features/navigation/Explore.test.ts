@@ -39,7 +39,12 @@ import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
-import { swipeOnSchema, tapAtSchema, tapOnSchema } from "../../../src/server/interactionTools";
+import {
+  pressButtonSchema,
+  swipeOnSchema,
+  tapAtSchema,
+  tapOnSchema,
+} from "../../../src/server/interactionTools";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
@@ -1814,6 +1819,295 @@ describe("Explore", () => {
       } finally {
         swipe.mockRestore();
       }
+    });
+  });
+
+  describe("dead-end Back and blocker taps are recorded as what they are (#9989 follow-up)", () => {
+    const event = (destination: string) => ({
+      destination,
+      source: "TEST" as const,
+      arguments: {},
+      metadata: {},
+      timestamp: 1,
+      sequenceNumber: 0,
+      applicationId: "com.test.app",
+    });
+
+    async function historySize(): Promise<number> {
+      return (await fakeGraph.getStats()).toolCallHistorySize;
+    }
+
+    function backSeam(): (progress?: undefined, observation?: ObserveResult) => Promise<void> {
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      return Reflect.get(explore, "handleDeadEnd").bind(explore);
+    }
+
+    test("the dead-end Back records pressButton back, and the edge it creates replays as that Back", async () => {
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        fakeGraph.recordNavigationEvent(event("Settings"));
+        await backSeam()(undefined, createMockObservation());
+        fakeGraph.recordNavigationEvent(event("Home"));
+      } finally {
+        press.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      const [toolName, args] = fakeGraph.getMethodCallArgs("recordToolCall", 0) ?? [];
+      expect(toolName).toBe("pressButton");
+      expect(args).toEqual({ button: "back" });
+      expect(pressButtonSchema.safeParse(args).success).toBe(true);
+      const [edge] = fakeGraph.getEdgesFrom("Settings");
+      expect(edge.to).toBe("Home");
+      expect(edge.interaction?.toolName).toBe("pressButton");
+      expect(edge.interaction?.args).toEqual({ button: "back" });
+    });
+
+    test("a Back that fails withdraws its record", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({
+        success: false,
+        error: "no keyevent",
+      });
+      try {
+        await backSeam()();
+      } finally {
+        press.mockRestore();
+        warn.mockRestore();
+      }
+
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(1);
+      expect(await historySize()).toBe(0);
+      expect(Reflect.get(explore, "stopReason")).toContain("no keyevent");
+    });
+
+    test("the iOS dead-end Back records pressButton back and withdraws it when the tool fails", async () => {
+      const ios = { deviceId: "ios-1", platform: "ios", source: "local" } as BootedDevice;
+      let succeed = true;
+      ToolRegistry.register("pressButton", "pressButton", {}, async () =>
+        succeed ? { success: true } : { success: false, error: "boom" },
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        explore = new Explore(ios, mockAdb, fakeTimer, fakeGraph);
+        const run = Reflect.get(explore, "handleDeadEnd").bind(explore) as () => Promise<void>;
+        await run();
+        expect(fakeGraph.getMethodCallArgs("recordToolCall", 0)).toEqual([
+          "pressButton",
+          { button: "back" },
+          undefined,
+        ]);
+        expect(await historySize()).toBe(1);
+
+        succeed = false;
+        await run();
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
+        expect(await historySize()).toBe(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("a root-screen dead end presses no Back and records nothing", async () => {
+      fakeGraph.setCurrentScreenValue("Home");
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      Reflect.get(explore, "rootScreens").add("Home");
+      const press = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        await (Reflect.get(explore, "handleDeadEnd") as () => Promise<void>).call(explore);
+      } finally {
+        press.mockRestore();
+      }
+
+      expect(press).not.toHaveBeenCalled();
+      expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(0);
+    });
+
+    // Decision: blocker handling is device/app state interference, not navigation
+    // a later navigateTo should replay (a permission prompt is system UI the SDK
+    // never reports; a rating prompt appears only sometimes). Recording the tap
+    // would leave an unconsumed record that the next navigation event inside the
+    // correlation window could be attributed to, so the handlers record nothing.
+    const blockerDialogs = {
+      permission: () =>
+        createMockObservation([
+          createMockViewHierarchyNode({
+            text: "Allow",
+            "resource-id": "com.android.permissioncontroller:id/permission_allow_button",
+          }),
+          createMockViewHierarchyNode({
+            class: "android.widget.TextView",
+            text: "This app needs camera permission",
+            clickable: "false",
+          }),
+        ]),
+      rating: () =>
+        createMockObservation([
+          createMockViewHierarchyNode({
+            text: "Not now",
+            "resource-id": "com.test:id/rating_not_now",
+          }),
+          createMockViewHierarchyNode({
+            class: "android.widget.TextView",
+            text: "Rate this app",
+            "resource-id": "com.test:id/rating_title",
+            clickable: "false",
+          }),
+        ]),
+    };
+
+    for (const kind of ["permission", "rating"] as const) {
+      test(`a ${kind} dialog dismissal records no tool call, so no later edge can be attributed to it`, async () => {
+        const fakeTap = new FakeDialogTapAction();
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph, undefined, fakeTap.factory);
+        const dialog = blockerDialogs[kind]();
+        const normal = createMockObservation();
+        let observeCount = 0;
+        spyOn(explore.observeScreen, "execute").mockImplementation(async () =>
+          ++observeCount === 1 ? dialog : normal,
+        );
+        Reflect.set(explore, "performInteraction", async () => true);
+
+        await explore.execute({ maxInteractions: 1, timeoutMs: 5000, packageName: "com.test.app" });
+
+        expect(fakeTap.calls).toHaveLength(1);
+        expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(0);
+        expect(await historySize()).toBe(0);
+      });
+    }
+
+    describe("validate mode replays a recorded Back", () => {
+      const completionReason = "All edges in navigation graph have been traversed";
+
+      function addBackEdge(from: string, to: string): void {
+        fakeGraph.addEdge({
+          from,
+          to,
+          edgeType: "tool",
+          timestamp: fakeTimer.now(),
+          interaction: {
+            toolName: "pressButton",
+            args: { button: "back" },
+            timestamp: fakeTimer.now(),
+          },
+        });
+      }
+
+      function setup(start: string, backLandsOn: string | null, success = true) {
+        fakeGraph.setCurrentScreenValue(start);
+        explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+        const observation = spyOn(explore.observeScreen, "execute").mockResolvedValue(
+          createMockObservation(),
+        );
+        const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async (args) => {
+          fakeGraph.setCurrentScreenValue(
+            args.elementId === "com.test:id/settings_btn" ? "B" : "C",
+          );
+          return { success: true, action: "tap", element: createMockElement() };
+        });
+        const back = spyOn(PressButton.prototype, "press").mockImplementation(async (button) => {
+          if (success) {
+            fakeGraph.setCurrentScreenValue(backLandsOn);
+            return { success: true, button, keyCode: 4 };
+          }
+          return { success: false, button, error: "keyevent rejected" };
+        });
+        return {
+          tap,
+          back,
+          restore: () => {
+            observation.mockRestore();
+            tap.mockRestore();
+            back.mockRestore();
+          },
+        };
+      }
+
+      test("presses Back, records it, and validates the screen it lands on", async () => {
+        addBackEdge("B", "A");
+        const run = setup("B", "A");
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toBe(completionReason);
+          expect(result.graphTraversal?.edgesTraversed).toBe(1);
+          expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+            success: true,
+            actualTo: "A",
+          });
+          expect(result.graphTraversal?.edgeValidationResults[0]?.skipped).toBeUndefined();
+          expect(run.back).toHaveBeenCalledTimes(1);
+          expect(run.tap).not.toHaveBeenCalled();
+          expect(fakeGraph.getMethodCallArgs("recordToolCall", 0)?.slice(0, 2)).toEqual([
+            "pressButton",
+            { button: "back" },
+          ]);
+          expect(fakeTimer.getSleepHistory()).toEqual([500]);
+        } finally {
+          run.restore();
+        }
+      });
+
+      test("validates a tap edge and then the Back edge that returns from it", async () => {
+        fakeGraph.addEdge({
+          from: "A",
+          to: "B",
+          edgeType: "tool",
+          timestamp: fakeTimer.now(),
+          interaction: { toolName: "tapOn", args: { text: "Settings" }, timestamp: 0 },
+        });
+        addBackEdge("B", "A");
+        const run = setup("A", "A");
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toBe(completionReason);
+          expect(result.graphTraversal?.edgesTraversed).toBe(2);
+          expect(result.graphTraversal?.edgeValidationResults.every((edge) => edge.success)).toBe(
+            true,
+          );
+          expect(run.tap).toHaveBeenCalledTimes(1);
+          expect(run.back).toHaveBeenCalledTimes(1);
+          expect(Reflect.get(explore, "consecutiveBackCount")).toBe(0);
+        } finally {
+          run.restore();
+        }
+      });
+
+      test("reports divergence when Back lands on a different screen than the recorded one", async () => {
+        addBackEdge("B", "A");
+        const run = setup("B", "Elsewhere");
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toContain('Expected to reach "A", but reached "Elsewhere"');
+          expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+            success: false,
+            actualTo: "Elsewhere",
+          });
+        } finally {
+          run.restore();
+        }
+      });
+
+      test("a Back that cannot be pressed fails the edge instead of skipping it", async () => {
+        addBackEdge("B", "A");
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const run = setup("B", null, false);
+        try {
+          const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+
+          expect(result.stopReason).toContain("Back press failed for edge B->A");
+          expect(result.graphTraversal?.edgeValidationResults[0]).toMatchObject({
+            success: false,
+            error: "Back press failed",
+          });
+          expect(result.graphTraversal?.edgeValidationResults[0]?.skipped).toBeUndefined();
+        } finally {
+          run.restore();
+          warn.mockRestore();
+        }
+      });
     });
   });
 

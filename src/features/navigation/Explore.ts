@@ -133,6 +133,8 @@ export class Explore extends BaseVisualChange {
   /** @internal Exposed for focused traversal report tests. */
   graphTraversalState: GraphTraversalState | null = null;
   private currentTargetEdge: NavigationEdge | null = null;
+  /** Validate mode: the recorded Back edge selected for the next iteration (no element to tap). */
+  private recordedBackEdge: NavigationEdge | null = null;
   private currentElementConfidence: number = 0;
   private sessionUuid?: string;
   private readonly tapActionFactory?: DialogTapActionFactory;
@@ -246,6 +248,7 @@ export class Explore extends BaseVisualChange {
     this.loopDetection.clear();
     this.rootScreens.clear();
     this.pendingBackScreen = null;
+    this.recordedBackEdge = null;
     this.awaitingRelaunchScreen = false;
     this.hasObservedTargetApp = false;
     this.elementSelections = [];
@@ -293,8 +296,9 @@ export class Explore extends BaseVisualChange {
       }
 
       if (!nextElement) {
-        logger.info("[Explore] No suitable element found, checking dead-end recovery");
-        await this.handleDeadEnd(progress);
+        if (!(await this.recoverWithoutElement(context, observation))) {
+          break;
+        }
         continue;
       }
 
@@ -321,6 +325,68 @@ export class Explore extends BaseVisualChange {
 
       await this.reportProgressAndReset(context);
     }
+  }
+
+  /**
+   * No element was selected. In validate mode a recorded Back edge is replayed
+   * with the Back button and its resulting screen checked; otherwise this is a
+   * dead end. Returns false when the run must stop.
+   */
+  private async recoverWithoutElement(
+    context: ExplorationLoopContext,
+    observation: ObserveResult,
+  ): Promise<boolean> {
+    const { progress } = context;
+    if (!this.recordedBackEdge) {
+      logger.info("[Explore] No suitable element found, checking dead-end recovery");
+      await this.handleDeadEnd(progress, observation);
+      return true;
+    }
+    if (!(await this.validateRecordedBack(this.recordedBackEdge, observation, progress))) {
+      return false;
+    }
+    await this.reportProgressAndReset(context);
+    return true;
+  }
+
+  /**
+   * Validate a recorded Back edge: press Back (recorded like any other action,
+   * so the resulting navigation event is attributed to it) and check the screen
+   * it lands on. A Back that cannot be dispatched fails the edge and stops the
+   * run.
+   */
+  private async validateRecordedBack(
+    edge: NavigationEdge,
+    observation: ObserveResult,
+    progress?: ProgressCallback,
+  ): Promise<boolean> {
+    this.recordedBackEdge = null;
+    if (progress) {
+      await progress(
+        this.interactionCount,
+        this.interactionCount + 1,
+        `Validating Back edge ${edge.from}->${edge.to}...`,
+      );
+    }
+    try {
+      await this.dispatchBack(observation);
+    } catch (error) {
+      this.stopReason = `Validate mode: Back press failed for edge ${edge.from}->${edge.to}: ${errorMessage(error)}`;
+      logger.warn(`[Explore] ${this.stopReason}`, error);
+      if (this.graphTraversalState) {
+        markEdgeTraversed(
+          this.graphTraversalState,
+          edge,
+          null,
+          false,
+          this.timer,
+          "Back press failed",
+        );
+      }
+      return false;
+    }
+    this.consecutiveBackCount = 0;
+    return await this.recordInteractionResult(true, "validate");
   }
 
   private async prepareExplorationObservation(
@@ -761,6 +827,7 @@ export class Explore extends BaseVisualChange {
     perf: PerformanceTracker,
   ): Promise<Element | null> {
     return await perf.track("selectNextElement", async () => {
+      this.recordedBackEdge = null;
       const viewHierarchy = observation.viewHierarchy;
       const safeCandidates = this.getSafeExplorationCandidates(observation);
 
@@ -853,6 +920,13 @@ export class Explore extends BaseVisualChange {
         // A property of the recorded edge, not of the app: skip it and try the next one.
         markEdgeSkipped(state, targetEdge, resolution.reason, this.timer);
         continue;
+      }
+      if (resolution.status === "back") {
+        // Nothing to tap: the loop replays this edge with the Back button.
+        this.currentTargetEdge = targetEdge;
+        this.currentElementConfidence = 1;
+        this.recordedBackEdge = targetEdge;
+        return null;
       }
       if (resolution.status === "not-found") {
         this.stopReason =
@@ -1090,7 +1164,7 @@ export class Explore extends BaseVisualChange {
   private async runRecorded<T extends { success: boolean }>(
     toolName: string | null,
     args: Record<string, unknown>,
-    observation: ObserveResult,
+    observation: ObserveResult | undefined,
     run: () => Promise<T>,
   ): Promise<T> {
     const withdraw = toolName
@@ -1113,9 +1187,48 @@ export class Explore extends BaseVisualChange {
   }
 
   /**
+   * Press Back on the device, recorded as `pressButton { button: "back" }` so the
+   * edge the resulting navigation creates replays (and validates) as a recorded
+   * Back instead of an unknown interaction.
+   */
+  private async dispatchBack(observation?: ObserveResult): Promise<void> {
+    // Recovery dispatches below bypass BaseVisualChange's action boundary.
+    await beginPostActionCaptureAction();
+    await this.runRecorded("pressButton", { button: "back" }, observation, async () => {
+      await this.pressBackOnPlatform();
+      return { success: true };
+    });
+  }
+
+  private async pressBackOnPlatform(): Promise<void> {
+    if (this.device.platform === "android") {
+      // Preserve the Explore instance's injected transport and timer. Calling
+      // press() avoids nested observed-interaction progress on this operation.
+      const result = await new PressButton(this.device, this.adb, this.timer).press("back");
+      if (!result.success) {
+        throw new Error(result.error ?? "Android back navigation failed");
+      }
+      return;
+    }
+    // iOS recovery must route through the selected device/session tool.
+    // Do not forward the outer progress callback: the nested action has a
+    // different scale and would make exploration progress jump backward.
+    const response = await ToolRegistry.callInternal("pressButton", {
+      button: "back",
+      platform: this.device.platform,
+      deviceId: this.device.deviceId,
+      ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
+    });
+    throwIfInternalToolFailed(response, "pressButton", this.device.platform);
+  }
+
+  /**
    * Handle dead-end situation by going back
    */
-  private async handleDeadEnd(progress?: ProgressCallback): Promise<void> {
+  private async handleDeadEnd(
+    progress?: ProgressCallback,
+    observation?: ObserveResult,
+  ): Promise<void> {
     const currentScreen = this.navigationManager.getCurrentScreen();
     if (currentScreen && currentScreen !== "unknown" && this.rootScreens.has(currentScreen)) {
       this.stopReason = `No unexplored interactions on the root screen: ${currentScreen}`;
@@ -1131,27 +1244,7 @@ export class Explore extends BaseVisualChange {
         );
       }
 
-      // Recovery dispatches below bypass BaseVisualChange's action boundary.
-      await beginPostActionCaptureAction();
-      if (this.device.platform === "android") {
-        // Preserve the Explore instance's injected transport and timer. Calling
-        // press() avoids nested observed-interaction progress on this operation.
-        const result = await new PressButton(this.device, this.adb, this.timer).press("back");
-        if (!result.success) {
-          throw new Error(result.error ?? "Android back navigation failed");
-        }
-      } else {
-        // iOS recovery must route through the selected device/session tool.
-        // Do not forward the outer progress callback: the nested action has a
-        // different scale and would make exploration progress jump backward.
-        const response = await ToolRegistry.callInternal("pressButton", {
-          button: "back",
-          platform: this.device.platform,
-          deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
-        });
-        throwIfInternalToolFailed(response, "pressButton", this.device.platform);
-      }
+      await this.dispatchBack(observation);
       this.pendingBackScreen = currentScreen === "unknown" ? null : currentScreen;
       this.consecutiveBackCount++;
 

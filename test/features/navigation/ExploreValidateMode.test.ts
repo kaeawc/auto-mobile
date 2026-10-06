@@ -651,8 +651,22 @@ describe("ExploreValidateMode", () => {
       expect(findElementMatchingEdge([homeTab()], edge)).toBeNull();
     });
 
+    test("a recorded Back press resolves to back, with no element to tap", () => {
+      const edge = interactionEdge("pressButton", { button: "back" });
+
+      expect(resolveEdgeTarget([homeTab(), openSettings()], edge)).toEqual({ status: "back" });
+      expect(resolveEdgeTarget([], edge)).toEqual({ status: "back" });
+      expect(findElementMatchingEdge([homeTab()], edge)).toBeNull();
+    });
+
+    test("a recorded Back press stays a back edge when the recording carries device targeting", () => {
+      const edge = interactionEdge("pressButton", { button: "back", platform: "android" });
+
+      expect(resolveEdgeTarget([], edge)).toEqual({ status: "back" });
+    });
+
     for (const [toolName, args] of [
-      ["pressButton", { button: "back" }],
+      ["pressButton", { button: "home" }],
       ["sendKeys", { text: "hello" }],
       ["swipeOn", { direction: "up" }],
       ["tapOn", { action: "tap" }],

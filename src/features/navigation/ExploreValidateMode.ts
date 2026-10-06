@@ -217,10 +217,12 @@ interface TargetDescriptor {
 /**
  * How validate mode resolves the on-screen target for a recorded edge.
  * `not-validatable` is a property of the recorded edge (no replayable element
- * interaction), not a sign that the app diverged from the graph.
+ * interaction), not a sign that the app diverged from the graph. `back` is a
+ * recorded Back press: replayed with the Back button, so it has no element.
  */
 export type EdgeTargetResolution =
   | { status: "matched"; element: Element; confidence: number }
+  | { status: "back" }
   | { status: "not-validatable"; reason: string }
   | { status: "not-found"; bestScore: number };
 
@@ -297,6 +299,12 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
   return { descriptors };
 }
 
+/** An edge recorded as a Back press (`pressButton { button: "back" }`). */
+export function isRecordedBackEdge(edge: NavigationEdge): boolean {
+  const interaction = edge.interaction;
+  return interaction?.toolName === "pressButton" && interaction.args?.button === "back";
+}
+
 /** Coordinate containment is weaker evidence than a selector match on identity. */
 const COORDINATE_CONFIDENCE = 0.7;
 
@@ -371,6 +379,9 @@ function bestDescriptorMatch(
  * (`edge.interaction.args`). Never matches against `uiState.selectedElements`.
  */
 export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
+  if (isRecordedBackEdge(edge)) {
+    return { status: "back" };
+  }
   if (edge.interaction?.toolName === "tapAt") {
     return resolveCoordinateTap(elements, edge, edge.interaction.args ?? {});
   }

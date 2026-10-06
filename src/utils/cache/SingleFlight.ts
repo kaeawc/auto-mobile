@@ -10,6 +10,11 @@
 export class SingleFlight<K, V> {
   private readonly inFlight = new Map<K, Flight<V>>();
 
+  /** Whether a flight for `key` is still joinable (running and not abandoned). */
+  has(key: K): boolean {
+    return this.inFlight.has(key);
+  }
+
   delete(key: K): void {
     this.inFlight.delete(key);
   }

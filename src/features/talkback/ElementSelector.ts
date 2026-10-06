@@ -14,8 +14,8 @@ interface SelectorBounds {
  * Relocated here from the deleted `utils/AccessibilityFocusTracker` (#3919): the
  * tracker class was dead and matched on camelCase keys that CtrlProxy never
  * emits, but this type is the live selector shape used by the focus-navigation
- * path — {@link FocusElementMatcher}, {@link FocusPathCalculator} and
- * {@link FocusNavigationExecutor} — so it lives with its consumers.
+ * path — {@link FocusElementMatcher} and {@link FocusNavigationExecutor} — so it
+ * lives with its consumers.
  */
 export interface ElementSelector {
   /** Match by resource ID */

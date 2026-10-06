@@ -6,6 +6,7 @@ import android.net.Uri
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.File
 import java.util.ArrayDeque
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
@@ -58,6 +59,13 @@ internal class SharedPreferencesDriverImpl(
 
   /** Monotonically increasing sequence counter for ordering changes. */
   private val sequenceCounter = AtomicLong(0)
+
+  /**
+   * Identifies this driver's in-memory state (listeners, queues and [sequenceCounter]), all of
+   * which are lost when the app process restarts. CtrlProxy compares it across calls to notice a
+   * restart and reset its per-file sequence cursor (#10069).
+   */
+  internal val processToken: String = UUID.randomUUID().toString()
 
   override fun getPreferenceFiles(): List<PreferenceFileDescriptor> {
     val sharedPrefsDir = File(context.applicationInfo.dataDir, "shared_prefs")

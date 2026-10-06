@@ -1121,8 +1121,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     const guardedDriver: TalkBackNavigationDriver = {
       requestTraversalOrder: driver.requestTraversalOrder.bind(driver),
       requestCurrentFocus: driver.requestCurrentFocus.bind(driver),
-      requestSwipe: driver.requestSwipe.bind(driver),
-      getScreenSize: driver.getScreenSize.bind(driver),
       requestAction: driver.requestAction.bind(driver),
       requestNodeAction: driver.requestNodeAction.bind(driver),
       supportsNodeActionSelectors: driver.supportsNodeActionSelectors.bind(driver),

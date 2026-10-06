@@ -22,6 +22,40 @@ export const combineAbortSignals = (
   return activeSignals.length === 1 ? activeSignals[0] : AbortSignal.any(activeSignals);
 };
 
+// Combined request signal -> the client-owned half of it (undefined when the
+// request carried no client signal). Only the client half means the transport
+// drops the reply; the daemon-owned half (device loss, session release) aborts
+// handlers whose completed result is still returned to the client.
+const clientHalves = new WeakMap<AbortSignal, AbortSignal | undefined>();
+
+/**
+ * Combine the daemon-owned execution signal with the client's own request signal,
+ * remembering which half is the client's so {@link isClientCancelled} can tell a
+ * discarded reply from a daemon-side abort.
+ */
+export const combineRequestAbortSignals = (
+  daemonSignal: AbortSignal | undefined,
+  clientSignal: AbortSignal | undefined,
+): AbortSignal | undefined => {
+  const combined = combineAbortSignals(daemonSignal, clientSignal);
+  if (combined !== undefined && daemonSignal !== undefined && combined !== clientSignal) {
+    clientHalves.set(combined, clientSignal);
+  }
+  return combined;
+};
+
+/**
+ * Whether the client cancelled (or timed out) this request, so its response is
+ * discarded. A signal not built by {@link combineRequestAbortSignals} has no
+ * known client half, so any abort on it counts as client cancellation.
+ */
+export const isClientCancelled = (signal: AbortSignal | undefined): boolean => {
+  if (signal === undefined) {
+    return false;
+  }
+  return clientHalves.has(signal) ? (clientHalves.get(signal)?.aborted ?? false) : signal.aborted;
+};
+
 export const runWithAbortSignal = async <T>(
   signal: AbortSignal | undefined,
   fn: () => Promise<T>,
@@ -29,6 +63,16 @@ export const runWithAbortSignal = async <T>(
 ): Promise<T> => {
   return abortContext.run({ signal, request }, fn);
 };
+
+/**
+ * Run `fn` with NO ambient request context and NO abort signal. `runWithAbortSignal(undefined, …)`
+ * does not do this: it keeps the ambient request context (and with it the request's deadline).
+ * Use it for work that is not part of the live tool request that happened to start it, such as
+ * a recording auto-stop armed during the `start` call: a timer captures the store that was
+ * ambient when it was armed, so without this it would fire with that request's long-expired
+ * deadline and abort signal.
+ */
+export const runOutsideRequestContext = <T>(fn: () => T): T => abortContext.exit(fn);
 
 export const getRequestContext = (): RequestContext | undefined => abortContext.getStore()?.request;
 

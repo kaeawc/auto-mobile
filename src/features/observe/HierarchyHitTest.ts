@@ -32,6 +32,24 @@ function candidate(entry: SearchableEntry) {
   };
 }
 
+/**
+ * Linked-window captures reach the same node object from the merged roots and from
+ * `windows[i].hierarchy`, so the projection holds it twice. Keep the copy with the lowest
+ * window rank (the owning window), as `ElementResolver` does.
+ */
+function uniqueBySource(entries: readonly SearchableEntry[]): SearchableEntry[] {
+  const seen = new Set<SearchableEntry["source"]>();
+  return [...entries]
+    .sort((left, right) => left.windowRank - right.windowRank || left.index - right.index)
+    .filter((entry) => {
+      if (seen.has(entry.source)) {
+        return false;
+      }
+      seen.add(entry.source);
+      return true;
+    });
+}
+
 /** Estimate accessible hierarchy nodes under a point; never inspect native event dispatch. */
 export function previewHierarchyHitTest(
   options: TapAtOptions,
@@ -43,7 +61,7 @@ export function previewHierarchyHitTest(
     throw new ActionableError(point.error);
   }
   const entries = observation.viewHierarchy
-    ? new SearchableHierarchy().project(observation.viewHierarchy)
+    ? uniqueBySource(new SearchableHierarchy().project(observation.viewHierarchy))
     : [];
   const candidates = entries
     .filter((entry) => entry.bounds && contains(entry.bounds, point.x, point.y))

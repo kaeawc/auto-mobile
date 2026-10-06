@@ -27,13 +27,75 @@ import type {
 } from "../../../utils/interfaces/SystemConfigurationAdapter";
 import {
   extractCalendarFromLocale,
+  localeTagsEquivalent,
   normalizeSettingValue,
   normalizeTimeFormat,
   parseBooleanSetting,
   parseLocaleList,
+  timeZoneIdsEquivalent,
+  validateLocaleTag,
 } from "./parsing";
 
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
+
+/**
+ * Result of reading an app's locales with `cmd locale get-app-locales`.
+ * `list` is the raw comma-separated list inside the brackets ("" when the app
+ * has no override), kept whole so a restore can put back every locale and not
+ * just the first one.
+ */
+type AppLocaleRead = { readable: true; list: string } | { readable: false };
+
+/** The first locale of an app-locale read, or null when unset or unreadable. */
+function firstAppLocale(read: AppLocaleRead): string | null {
+  return read.readable ? parseLocaleList(read.list) : null;
+}
+
+function normalizeLocaleList(list: string): string[] {
+  return list
+    .split(",")
+    .map((tag) => tag.trim().replace(/_/g, "-").toLowerCase())
+    .filter(Boolean);
+}
+
+function sameLocaleList(a: string, b: string): boolean {
+  return normalizeLocaleList(a).join(",") === normalizeLocaleList(b).join(",");
+}
+
+function describeAppLocales(read: AppLocaleRead): string {
+  if (!read.readable) {
+    return "unknown (it could not be read)";
+  }
+  return read.list ? `"${read.list}"` : "unset";
+}
+
+/**
+ * Error for a locale change that was sent but whose result could not be read
+ * back. Nothing is restored: the device may or may not hold the new locale, and
+ * writing again on a guess is how a second framework restart or a clobbered
+ * locale happens.
+ */
+function indeterminateLocaleError(languageTag: string, reason: string, subject: string): string {
+  return `Locale change outcome is indeterminate: "${languageTag}" was sent but no result was confirmed (${reason}). ${subject} was not restored and may have changed. Do not retry automatically. Check the current locale before retrying.`;
+}
+
+const TIME_ZONE_READ = "shell getprop persist.sys.timezone";
+const ANDROID_TIME_ZONE_STORED_WARNING =
+  "persist.sys.timezone was stored and read back, which does not confirm the zone is in effect: a raw setprop bypasses the system time-zone setter, so already-running apps may keep the previous zone until restarted.";
+
+function timeZoneRestoreFailureText(
+  failures: Array<{ label: string; message: string }>,
+  fallbackAttempted: boolean,
+): string {
+  if (failures.length === 0) {
+    return "";
+  }
+  if (failures.length === 1 && !fallbackAttempted) {
+    return ` (${failures[0]?.message})`;
+  }
+  return ` (${failures.map(({ label, message }) => `${label}: ${message}`).join("; ")})`;
+}
+
 const MIN_APP_LOCALE_API_LEVEL = 33;
 
 // Bounds for waiting on the framework to come back after the legacy (<33)
@@ -70,6 +132,13 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         error:
           "appId is required for Android locale changes. Provide the target app package so AutoMobile can choose the supported Android locale path.",
       };
+    }
+
+    // Reject a tag Android cannot resolve to a real locale before sending anything:
+    // the device would otherwise keep the `und`/truncated value it makes of it.
+    const invalidTagError = validateLocaleTag(languageTag);
+    if (invalidTagError) {
+      return { success: false, languageTag, error: invalidTagError };
     }
 
     return this.setTargetAppLocale(languageTag, options.appId, options);
@@ -113,13 +182,32 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     // property, readable even while the framework is still coming up, so this
     // never races the restart the way the old `am get-config` read-back did.
     const persistedLanguageTag = await this.readSetting("shell getprop persist.sys.locale");
-    if (!this.localeTagsMatch(persistedLanguageTag, languageTag)) {
+    if (persistedLanguageTag === null) {
+      // An unreadable read-back proves nothing about the device. Restoring on it
+      // would issue a second `stop; start` against a framework that may still be
+      // coming up, so leave the device alone and say the outcome is unknown.
       return {
         success: false,
         languageTag,
         previousLanguageTag,
         localeScope: "system",
-        error: `Read-back verification failed: expected persist.sys.locale "${languageTag}" but got "${persistedLanguageTag ?? "null"}"`,
+        error: indeterminateLocaleError(
+          languageTag,
+          `persist.sys.locale could not be read back${frameworkReady ? "" : ` and the framework did not report boot_completed within ${FRAMEWORK_RESTART_READY_TIMEOUT_MS}ms after stop; start`}`,
+          "the device-wide locale",
+        ),
+      };
+    }
+    if (!localeTagsEquivalent(persistedLanguageTag, languageTag)) {
+      // The call is failing, so do not leave the device on a locale the caller
+      // was told did not apply (issue #10155).
+      const restoreNote = await this.restoreSystemLocale(previousLanguageTag, persistedLanguageTag);
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        localeScope: "system",
+        error: `Read-back verification failed: expected persist.sys.locale "${languageTag}" but got "${persistedLanguageTag ?? "null"}"${restoreNote}`,
       };
     }
 
@@ -141,6 +229,45 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       localeScope: "system",
       broadcasted,
     };
+  }
+
+  /**
+   * Put `persist.sys.locale` back after a device-wide change that did not read
+   * back as asked. Returns a sentence (with a leading ". ") to append to the
+   * caller's error, or "" when the device still holds the earlier value so
+   * nothing needed restoring. When the restore does not take, the sentence names
+   * the value the device is left with.
+   */
+  private async restoreSystemLocale(
+    previous: string | null,
+    persisted: string | null,
+  ): Promise<string> {
+    const sameAsPrevious = (value: string | null): boolean =>
+      previous === null ? value === null : localeTagsEquivalent(value, previous);
+    if (sameAsPrevious(persisted)) {
+      return "";
+    }
+
+    const previousLabel = previous === null ? "unset" : `"${previous}"`;
+    let restoreFailure = "";
+    try {
+      // An empty value clears the prop, which is how an unset locale is restored.
+      await this.runShellCommand(`shell setprop persist.sys.locale ${shellQuote(previous ?? "")}`);
+      await this.runShellCommand("shell stop; start");
+    } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to restore device-wide locale: ${errorMessage(error)}`,
+        error,
+      );
+      restoreFailure = ` (${errorMessage(error)})`;
+    }
+
+    await this.waitForFrameworkReady();
+    const afterRestore = await this.readSetting("shell getprop persist.sys.locale");
+    if (sameAsPrevious(afterRestore)) {
+      return `. Restored the previous device-wide locale (${previousLabel}).`;
+    }
+    return `. Restoring the previous device-wide locale (${previousLabel}) failed${restoreFailure}; persist.sys.locale is left as "${afterRestore ?? "null"}".`;
   }
 
   /**
@@ -203,7 +330,10 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return { success: false, languageTag, error: target.error };
     }
     const targetUserId = target.userId;
-    const previousLanguageTag = await this.getAppLocaleTag(appId, targetUserId);
+    // One read of the app's locales before the change: it supplies both
+    // `previousLanguageTag` and the value to restore if the change does not stick.
+    const previousLocales = await this.readAppLocales(appId, targetUserId);
+    const previousLanguageTag = firstAppLocale(previousLocales);
 
     try {
       await this.adb.executeCommand(
@@ -223,13 +353,36 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       };
     }
 
-    const effectiveLanguageTag = await this.getAppLocaleTag(appId, targetUserId);
-    if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
+    const effectiveLocales = await this.readAppLocales(appId, targetUserId);
+    if (!effectiveLocales.readable) {
+      // Same as the device-wide path: an unreadable read-back is not evidence the
+      // change failed, so do not write the app's locale again on a guess.
       return {
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Read-back verification failed for ${appId}: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`,
+        error: indeterminateLocaleError(
+          languageTag,
+          `the app's locale could not be read back for ${appId}`,
+          `the app's locale (previously ${describeAppLocales(previousLocales)})`,
+        ),
+      };
+    }
+    const effectiveLanguageTag = firstAppLocale(effectiveLocales);
+    if (!localeTagsEquivalent(effectiveLanguageTag, languageTag)) {
+      // The call is failing, so do not leave the app on whatever the device made
+      // of the rejected tag (issue #10155): put the earlier locales back.
+      const restoreNote = await this.restoreAppLocales(
+        appId,
+        targetUserId,
+        previousLocales,
+        effectiveLocales,
+      );
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: `Read-back verification failed for ${appId}: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"${restoreNote}`,
       };
     }
 
@@ -346,38 +499,161 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   }
 
   async setTimeZone(zoneId: string): Promise<SetTimeZoneResult> {
-    const previousZoneId = await this.readSetting("shell getprop persist.sys.timezone");
+    const previousZoneId = await this.readSetting(TIME_ZONE_READ);
+    const setpropError = await this.attemptTimeZoneWrite(
+      `shell setprop persist.sys.timezone ${shellQuote(zoneId)}`,
+      "Failed to set time zone",
+    );
 
-    try {
-      await this.adb.executeCommand(`shell setprop persist.sys.timezone ${shellQuote(zoneId)}`);
-      const effectiveZoneId = await this.readSetting("shell getprop persist.sys.timezone");
-      if (effectiveZoneId !== zoneId) {
-        return {
-          success: false,
-          zoneId,
-          previousZoneId,
-          error: `Read-back verification failed: expected "${zoneId}" but got "${effectiveZoneId ?? "null"}"`,
-        };
-      }
+    let persistedZoneId = await this.readSetting(TIME_ZONE_READ);
+    if (persistedZoneId === null) {
+      // An unreadable read-back proves nothing about the device, so do not write
+      // again on a guess (same contract as the locale path, issue #10155).
+      return {
+        success: false,
+        zoneId,
+        previousZoneId,
+        error: `${this.indeterminateTimeZoneError(zoneId, previousZoneId)}${this.timeZoneWriteFailure(setpropError)}`,
+      };
+    }
+    if (setpropError.success && timeZoneIdsEquivalent(persistedZoneId, zoneId)) {
       return {
         success: true,
         zoneId,
         previousZoneId,
         method: "setprop persist.sys.timezone",
+        warning: ANDROID_TIME_ZONE_STORED_WARNING,
       };
-    } catch (error) {
-      logger.warn(
-        `[SystemConfigurationManager] Failed to set time zone: ${errorMessage(error)}`,
-        error,
-      );
-      const errorMsg = errorMessage(error);
+    }
+
+    const fallbackError = await this.attemptTimeZoneWrite(
+      `shell cmd alarm set-timezone ${shellQuote(zoneId)}`,
+      "cmd alarm set-timezone fallback failed",
+    );
+    persistedZoneId = await this.readSetting(TIME_ZONE_READ);
+    if (persistedZoneId === null) {
       return {
         success: false,
         zoneId,
         previousZoneId,
-        error: `Failed to set time zone: ${errorMsg}`,
+        error: `${this.indeterminateTimeZoneError(zoneId, previousZoneId)}${this.timeZoneWriteFailure(setpropError, fallbackError)}`,
       };
     }
+    if (!timeZoneIdsEquivalent(persistedZoneId, zoneId)) {
+      const restoreNote = await this.restoreSystemTimeZone(previousZoneId, persistedZoneId);
+      return {
+        success: false,
+        zoneId,
+        previousZoneId,
+        error: `Read-back verification failed: expected "${zoneId}" but got "${persistedZoneId}"${restoreNote}${this.timeZoneWriteFailure(setpropError, fallbackError)}`,
+      };
+    }
+    return {
+      success: true,
+      zoneId,
+      previousZoneId,
+      method: "cmd alarm set-timezone",
+    };
+  }
+
+  private async attemptTimeZoneWrite(
+    command: string,
+    warning: string,
+  ): Promise<{ success: true } | { success: false; error: unknown }> {
+    try {
+      await this.adb.executeCommand(command);
+      return { success: true };
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] ${warning}: ${errorMessage(error)}`, error);
+      return { success: false, error };
+    }
+  }
+
+  private indeterminateTimeZoneError(zoneId: string, previousZoneId: string | null): string {
+    return `Time zone change outcome is indeterminate: "${zoneId}" was sent but no result was confirmed (persist.sys.timezone could not be read back). The device-wide time zone was not restored and may have changed${previousZoneId === null ? "" : ` (previously "${previousZoneId}")`}. Do not retry automatically. Check the current time zone before retrying.`;
+  }
+
+  private timeZoneWriteFailure(
+    setprop: { success: true } | { success: false; error: unknown },
+    fallback?: { success: true } | { success: false; error: unknown },
+  ): string {
+    const failures: string[] = [];
+    if (!setprop.success) {
+      failures.push(errorMessage(setprop.error));
+    }
+    if (fallback && !fallback.success) {
+      failures.push(`cmd alarm set-timezone: ${errorMessage(fallback.error)}`);
+    }
+    return failures.length === 0 ? "" : ` Failed to set time zone: ${failures.join("; ")}.`;
+  }
+
+  /**
+   * Put `persist.sys.timezone` back after a change that did not read back as
+   * asked. Returns a sentence (with a leading ". ") to append to the caller's
+   * error, or "" when the device still holds the earlier value so nothing needed
+   * restoring. When the restore does not take, the sentence names the value the
+   * device is left with.
+   */
+  private async restoreSystemTimeZone(
+    previous: string | null,
+    persisted: string | null,
+  ): Promise<string> {
+    const sameAsPrevious = (value: string | null): boolean =>
+      previous === null ? value === null : timeZoneIdsEquivalent(value, previous);
+    if (sameAsPrevious(persisted)) {
+      return "";
+    }
+
+    const previousLabel = previous === null ? "unset" : `"${previous}"`;
+    const restoreFailures: Array<{ label: string; message: string }> = [];
+    let fallbackAttempted = false;
+    let leftAs = persisted;
+    try {
+      // An empty value clears the prop, which is how an unset zone is restored.
+      await this.adb.executeCommand(
+        `shell setprop persist.sys.timezone ${shellQuote(previous ?? "")}`,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to restore time zone: ${errorMessage(error)}`,
+        error,
+      );
+      restoreFailures.push({ label: "setprop", message: errorMessage(error) });
+    }
+
+    const afterRestore = await this.readSetting(TIME_ZONE_READ);
+    if (sameAsPrevious(afterRestore)) {
+      return `. Restored the previous time zone (${previousLabel}).`;
+    }
+    if (previous !== null) {
+      fallbackAttempted = true;
+      const fallbackRestore = await this.restoreTimeZoneWithAlarm(previous);
+      leftAs = fallbackRestore.value;
+      if (fallbackRestore.error) {
+        restoreFailures.push({ label: "cmd alarm set-timezone", message: fallbackRestore.error });
+      }
+      if (sameAsPrevious(fallbackRestore.value)) {
+        return `. Restored the previous time zone (${previousLabel}).`;
+      }
+    }
+    const failures = timeZoneRestoreFailureText(restoreFailures, fallbackAttempted);
+    return `. Restoring the previous time zone (${previousLabel}) failed${failures}; persist.sys.timezone is left as "${leftAs ?? "null"}".`;
+  }
+
+  private async restoreTimeZoneWithAlarm(
+    previous: string,
+  ): Promise<{ value: string | null; error?: string }> {
+    let errorMessageFromCommand: string | undefined;
+    try {
+      await this.adb.executeCommand(`shell cmd alarm set-timezone ${shellQuote(previous)}`);
+    } catch (error) {
+      errorMessageFromCommand = errorMessage(error);
+      logger.warn(
+        `[SystemConfigurationManager] Failed to restore time zone with cmd alarm: ${errorMessageFromCommand}`,
+        error,
+      );
+    }
+    return { value: await this.readSetting(TIME_ZONE_READ), error: errorMessageFromCommand };
   }
 
   async setTextDirection(rtl: boolean, options: BroadcastOptions): Promise<SetTextDirectionResult> {
@@ -645,7 +921,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     return language;
   }
 
-  private async getAppLocaleTag(appId: string, userId: number): Promise<string | null> {
+  private async readAppLocales(appId: string, userId: number): Promise<AppLocaleRead> {
     try {
       const result = await this.adb.executeCommand(
         `shell cmd locale get-app-locales ${shellQuote(appId)} --user ${userId}`,
@@ -658,20 +934,64 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       logger.warn(
         `[SystemConfigurationManager] Failed to read Android app locale for ${appId}: ${error}`,
       );
-      return null;
+      return { readable: false };
     }
   }
 
-  private parseAppLocalesOutput(output: string): string | null {
+  private parseAppLocalesOutput(output: string): AppLocaleRead {
     const normalized = normalizeSettingValue(output);
     if (!normalized) {
-      return null;
+      return { readable: false };
     }
     const bracketedLocales = normalized.match(/\bare\s+\[([^\]]*)\]\s*$/)?.[1];
     if (bracketedLocales === undefined) {
-      return null;
+      return { readable: false };
     }
-    return parseLocaleList(bracketedLocales);
+    return { readable: true, list: bracketedLocales.trim() };
+  }
+
+  /**
+   * Put an app's locales back after a change that did not read back as asked.
+   * Returns a sentence (with a leading ". ") to append to the caller's error,
+   * stating what was done and, when the restore did not take, the state the app
+   * is left in. Returns "" when nothing needed restoring because the device
+   * still reports the earlier locales.
+   */
+  private async restoreAppLocales(
+    appId: string,
+    userId: number,
+    previous: AppLocaleRead,
+    current: AppLocaleRead,
+  ): Promise<string> {
+    if (!previous.readable) {
+      return `. The app's previous locale could not be read before the change, so it was not restored; the app's locale is now ${describeAppLocales(current)}.`;
+    }
+    if (current.readable && sameLocaleList(current.list, previous.list)) {
+      return "";
+    }
+
+    // An empty `--locales` clears the app's override, which is how an app that
+    // had none goes back to following the system. This is the form
+    // scripts/local-dev/probe-android-locale.sh uses to reset; the quotes keep
+    // the empty argument alive through the device shell.
+    let restoreFailure = "";
+    try {
+      await this.adb.executeCommand(
+        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId} --locales ${shellQuote(previous.list)}`,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to restore app locale for ${appId}: ${errorMessage(error)}`,
+        error,
+      );
+      restoreFailure = ` (${errorMessage(error)})`;
+    }
+
+    const afterRestore = await this.readAppLocales(appId, userId);
+    if (afterRestore.readable && sameLocaleList(afterRestore.list, previous.list)) {
+      return `. Restored the app's previous locale (${describeAppLocales(previous)}).`;
+    }
+    return `. Restoring the app's previous locale (${describeAppLocales(previous)}) failed${restoreFailure}; the app's locale is left as ${describeAppLocales(afterRestore)}.`;
   }
 
   private async getEffectiveLocaleTag(): Promise<string | null> {
@@ -709,12 +1029,5 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     const languageOnlyMatch = normalized.match(/(?:^|[-\s])([a-z]{2,3})(?=[-\s]|$)/);
     return languageOnlyMatch?.[1] ?? null;
-  }
-
-  private localeTagsMatch(actual: string | null, expected: string): boolean {
-    if (!actual) {
-      return false;
-    }
-    return actual.replace(/_/g, "-").toLowerCase() === expected.replace(/_/g, "-").toLowerCase();
   }
 }

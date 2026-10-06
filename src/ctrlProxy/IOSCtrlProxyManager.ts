@@ -22,6 +22,7 @@ import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../utils/H
 import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";
 import { XcodebuildClient, type Xcodebuild } from "../utils/ios-cmdline-tools/XcodebuildClient";
 import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
+import { SimctlCommandTimeoutError } from "../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { exponentialBackoff } from "../utils/Backoff";
 import { ForcedRestartBudget } from "./ForcedRestartBudget";
@@ -1847,6 +1848,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         this.device.deviceId,
         IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
         simulator,
+        { throwOnLookupTimeout: true },
       );
       if (isInstalled === null) {
         return;
@@ -1861,6 +1863,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       );
       logger.info(`[IOSCtrlProxy] Legacy app uninstalled`);
     } catch (error) {
+      if (error instanceof SimctlCommandTimeoutError) {
+        // The lookup was killed, so the legacy app's presence is unknown rather than absent:
+        // do not record the check as done, so the next setup looks again.
+        this.legacyCheckDone = false;
+      }
       logger.warn(`[IOSCtrlProxy] Failed to check/uninstall legacy app: ${error}`);
     }
   }

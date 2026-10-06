@@ -72,23 +72,49 @@ describe("IdentifyInteractions scoring characterization", () => {
     ).toBe(0);
   });
 
-  test("scores selected identifiers independently and keeps the strongest score", () => {
+  test("reads a recorded tapOn's target from args.selector and falls back to top-level keys", () => {
+    expect(
+      classifier["scoreEdgeMatch"](
+        identifiers,
+        edge("tapOn", { selector: { elementId: "submit" } }),
+      ),
+    ).toBe(0.95);
+    expect(
+      classifier["scoreEdgeMatch"](
+        identifiers,
+        edge("tapOn", { selector: { text: " SEND " }, index: 1, action: "tap" }),
+      ),
+    ).toBe(0.85);
+    expect(
+      classifier["scoreEdgeMatch"](
+        identifiers,
+        edge("tapOn", { selector: { elementId: "other" } }),
+      ),
+    ).toBe(0);
+    // A selector without a usable target does not hide a legacy top-level target.
+    expect(
+      classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { selector: {}, id: "submit" })),
+    ).toBe(0.95);
+    expect(classifier["scoreEdgeMatch"](identifiers, edge("tapOn", { selector: "submit" }))).toBe(
+      0,
+    );
+    expect(
+      classifier["scoreEdgeMatch"](
+        identifiers,
+        edge("swipeOn", { selector: { elementId: "submit" } }),
+      ),
+    ).toBe(0);
+  });
+
+  test("selected elements recorded with an edge never attribute it to an element", () => {
     const selectedEdge = edge("swipeOn");
-    for (const [selected, expected] of [
-      [{ resourceId: "submit" }, 0.8],
-      [{ text: " SUBMIT " }, 0.75],
-      [{ contentDesc: " send " }, 0.7],
-      [{}, 0],
-      [{ resourceId: "wrong", text: "Wrong", contentDesc: "Wrong" }, 0],
-    ] as const) {
-      selectedEdge.interaction!.uiState = { selectedElements: [selected] };
-      expect(classifier["scoreEdgeMatch"](identifiers, selectedEdge)).toBe(expected);
-    }
     selectedEdge.interaction!.uiState = {
-      selectedElements: [{ contentDesc: "Send" }, { text: "Submit" }, { resourceId: "submit" }],
+      selectedElements: [{ resourceId: "submit", text: "Submit", contentDesc: "Send" }],
     };
-    expect(classifier["scoreEdgeMatch"](identifiers, selectedEdge)).toBe(0.8);
-    expect(classifier["scoreEdgeMatch"]({ className: "button" }, selectedEdge)).toBe(0);
+    expect(classifier["scoreEdgeMatch"](identifiers, selectedEdge)).toBe(0);
+    const tapEdge = edge("tapOn", { selector: { elementId: "elsewhere" } });
+    tapEdge.interaction!.uiState = { selectedElements: [{ text: "Submit" }] };
+    expect(classifier["scoreEdgeMatch"](identifiers, tapEdge)).toBe(0);
   });
 
   test("confidence retains type floors, identifier weights, boolean/string flags, and cap", () => {
@@ -381,6 +407,44 @@ describe("IdentifyInteractions", () => {
       destination: "DetailScreen",
       confidence: 0.95,
     });
+  });
+
+  test("predicts the tapped element from a recorded edge, not the one already selected", () => {
+    // Shaped as the recorder writes it: the tool's own args, and the UI state cached before the call.
+    const edge: NavigationEdge = {
+      from: "HomeScreen",
+      to: "DetailScreen",
+      timestamp: 1_700_000_000_000,
+      edgeType: "tool",
+      interaction: {
+        toolName: "tapOn",
+        args: { selector: { elementId: "btn_submit" }, action: "tap" },
+        timestamp: 1_700_000_000_000,
+        uiState: { selectedElements: [{ text: "Home" }] },
+      },
+    };
+
+    const result = classifier.analyze(
+      hierarchyOf([
+        {
+          class: "android.widget.Button",
+          clickable: "true",
+          text: "Submit",
+          "resource-id": "btn_submit",
+        },
+        { class: "android.widget.TextView", clickable: "true", text: "Home", selected: "true" },
+      ]),
+      { platform: "android" },
+      "HomeScreen",
+      [edge],
+    );
+
+    expect(
+      result.interactions.find((i) => i.element?.resourceId === "btn_submit")?.predictedOutcome,
+    ).toEqual({ type: "screen_change", destination: "DetailScreen", confidence: 0.95 });
+    expect(
+      result.interactions.find((i) => i.element?.text === "Home")?.predictedOutcome,
+    ).toBeUndefined();
   });
 
   test("summarises interactions by type", () => {

@@ -86,6 +86,10 @@ class FakeFileSystem implements FileSystem {
     return file.data;
   }
 
+  async readFileHead(p: string, byteCount: number): Promise<Buffer> {
+    return (await this.readFileBuffer(p)).subarray(0, byteCount);
+  }
+
   existsSync(p: string): boolean {
     const normalized = this.normalize(p);
     return this.files.has(normalized) || this.directories.has(normalized);

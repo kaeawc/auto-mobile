@@ -19,6 +19,7 @@ import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { logger } from "../../src/utils/logger";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 
 describe("IosCtrlProxyBuilder", function () {
   let originalProjectRoot: string | undefined;
@@ -2212,6 +2213,92 @@ describe("IosCtrlProxyBuilder", function () {
       expect(second.success).toBe(false);
       downloader.download = download;
       expect((await builder.build("simulator")).success).toBe(true);
+      expect(downloader.extractedPaths).toHaveLength(1);
+    });
+  });
+
+  // Issue #10200: the shared bundle flight belongs to the builder, not to whichever
+  // request created it. The fake binds to the ambient signal like
+  // DefaultFileDownloader (`signal ??= getAbortSignal()`) and captures it.
+  describe("shared bundle flight ownership (#10200)", function () {
+    class SignalBoundDownloader extends FakeIOSCtrlProxyBundleDownloader {
+      public readonly signals: Array<AbortSignal | undefined> = [];
+      public gate = Promise.withResolvers<void>();
+      public started = Promise.withResolvers<void>();
+
+      public override async download(url: string, destination: string): Promise<void> {
+        const signal = getAbortSignal();
+        this.signals.push(signal);
+        this.started.resolve();
+        await new Promise<void>((resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("Download aborted")), {
+            once: true,
+          });
+          void this.gate.promise.then(resolve);
+        });
+        // Like DefaultFileDownloader, nothing reaches `destination` unless the
+        // transfer completed (temp file + rename).
+        await super.download(url, destination);
+      }
+    }
+
+    function createBuilder(downloader: SignalBoundDownloader) {
+      downloader.checksum = "expected-checksum";
+      IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+      return IosCtrlProxyBuilder.getInstance(
+        {
+          derivedDataPath: path.join(tempDir, "DerivedData"),
+          bundleCacheDir: path.join(tempDir, "cache"),
+        },
+        { downloader },
+      );
+    }
+
+    test("a cancelled first caller does not fail or restart the download for a waiting second caller", async function () {
+      const downloader = new SignalBoundDownloader();
+      const builder = createBuilder(downloader);
+      const first = new AbortController();
+
+      const cancelled = runWithAbortSignal(first.signal, () => builder.build("simulator"));
+      const survivor = runWithAbortSignal(undefined, () => builder.build("simulator"));
+      first.abort(new Error("first caller cancelled"));
+
+      // The cancelled caller stops waiting at once, before the download finishes.
+      expect((await cancelled).success).toBe(false);
+      await downloader.started.promise;
+      expect(downloader.signals[0]?.aborted).toBe(false);
+
+      downloader.gate.resolve();
+      const result = await survivor;
+      expect(result.success).toBe(true);
+      expect(downloader.signals).toHaveLength(1);
+      expect(downloader.extractedPaths).toHaveLength(1);
+    });
+
+    test("the download is cancelled once no waiter is left and leaves no bundle behind", async function () {
+      const downloader = new SignalBoundDownloader();
+      const builder = createBuilder(downloader);
+      const first = new AbortController();
+      const second = new AbortController();
+
+      const results = Promise.all([
+        runWithAbortSignal(first.signal, () => builder.build("simulator")),
+        runWithAbortSignal(second.signal, () => builder.build("simulator")),
+      ]);
+      await downloader.started.promise;
+      first.abort(new Error("first caller cancelled"));
+      second.abort(new Error("second caller cancelled"));
+
+      expect((await results).map((result) => result.success)).toEqual([false, false]);
+      expect(downloader.signals[0]?.aborted).toBe(true);
+      expect(await fs.readdir(path.join(tempDir, "cache"))).toEqual([]);
+      expect(downloader.extractedPaths).toHaveLength(0);
+
+      // A fresh call after the abandoned flight starts a new download and succeeds.
+      downloader.gate.resolve();
+      expect((await builder.build("simulator")).success).toBe(true);
+      expect(downloader.signals).toHaveLength(2);
+      expect(downloader.signals[1]?.aborted).toBe(false);
       expect(downloader.extractedPaths).toHaveLength(1);
     });
   });

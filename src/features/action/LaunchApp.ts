@@ -5,6 +5,7 @@ import { BaseVisualChange } from "./BaseVisualChange";
 import {
   BootedDevice,
   ClearAppDataResult,
+  DeviceLockState,
   LaunchAppResult,
   ObserveResult,
   TerminateAppResult,
@@ -17,6 +18,7 @@ import {
 } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
+import { adbFailureOutput } from "../../utils/android-cmdline-tools/adbFailureOutput";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { InstalledAppsRepository } from "../../db/installedAppsRepository";
 import {
@@ -65,6 +67,8 @@ const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 const SHADE_COLLAPSE_RETRY_INTERVAL_MS = 1_000;
+// One bounded lock re-read before a launch timeout names a SystemUI blocker (#10182).
+const LAUNCH_BLOCKER_LOCK_REREAD_TIMEOUT_MS = 3_000;
 const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const ANDROID_COLD_FRAME_TIMEOUT_MS = 2_500;
@@ -75,6 +79,15 @@ export function amStartReportedFailure(stdout: string, stderr: string): boolean 
     /^Error(?::| type \d+)/m.test(`${stdout}\n${stderr}`) ||
     /does not exist/i.test(`${stdout}\n${stderr}`)
   );
+}
+
+const PACKAGE_NOT_INSTALLED_ERROR = "App is not installed";
+
+/** Raised inside the launch action when a live read shows the package was removed (#10192). */
+class LaunchPackageRemovedError extends ActionableError {
+  constructor() {
+    super(PACKAGE_NOT_INSTALLED_ERROR);
+  }
 }
 
 export interface TargetUserDetector {
@@ -840,18 +853,21 @@ export class LaunchApp extends BaseVisualChange {
       return true;
     }
     return perf.track("confirmInstalledLive", () =>
-      this.confirmInstalledLive(packageName, userId, signal),
+      this.confirmInstalledLive(packageName, userId, false, signal),
     );
   }
 
   /**
    * A listing may be served from the installed-apps cache, which an out-of-band
    * install (adb, Gradle) does not invalidate. Confirm a negative with one live
-   * read before telling the caller the app is absent (#9976).
+   * read before telling the caller the app is absent (#9976). The mirror case, a
+   * cached "installed" for an app removed out of band, is confirmed by
+   * {@link failFastWhenPackageRemoved} once the first launch attempt fails (#10192).
    */
   private async confirmInstalledLive(
     packageName: string,
     userId: number,
+    cacheListedPackage: boolean,
     signal?: AbortSignal,
   ): Promise<boolean> {
     this.installedAppsCacheStaleMarker ??= new InstalledAppsRepository();
@@ -861,8 +877,40 @@ export class LaunchApp extends BaseVisualChange {
       packageName,
       userId,
       staleMarker: this.installedAppsCacheStaleMarker,
+      cacheListedPackage,
       signal,
     });
+  }
+
+  /**
+   * The cache said installed and the launcher intent was rejected with an `am`
+   * error. That is also what a package removed outside the tools looks like, and
+   * the remaining fallbacks (about a dozen adb calls) cannot launch it. One live
+   * read settles it before they run; the success path never pays for it (#10192).
+   * A failed read is not evidence either way, so the fallbacks still run.
+   */
+  private async failFastWhenPackageRemoved(
+    packageName: string,
+    userId: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let installed = true;
+    try {
+      installed = await perf.track("confirmInstalledAfterLaunchFailure", () =>
+        this.confirmInstalledLive(packageName, userId, true, signal),
+      );
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      logger.warn(
+        `[LaunchApp] Could not confirm ${packageName} is still installed after the launcher intent failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    if (!installed) {
+      logger.error(`[LaunchApp] ${packageName} is no longer installed for user ${userId}`);
+      throw new LaunchPackageRemovedError();
+    }
   }
 
   private async detectTargetUserId(
@@ -993,7 +1041,7 @@ export class LaunchApp extends BaseVisualChange {
         success: false,
         packageName: packageName,
         userId: targetUserId,
-        error: "App is not installed",
+        error: PACKAGE_NOT_INSTALLED_ERROR,
       };
     }
 
@@ -1182,9 +1230,18 @@ export class LaunchApp extends BaseVisualChange {
         deferPostActionScreenshot: true,
         signal,
       },
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof LaunchPackageRemovedError) {
+        perf.end();
+        return { success: false, packageName, userId: targetUserId, error: error.message };
+      }
+      throw error;
+    });
 
     signal?.throwIfAborted();
+    if (!launchResult.success && launchResult.error === PACKAGE_NOT_INSTALLED_ERROR) {
+      return launchResult;
+    }
     const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
       launchResult,
       packageName,
@@ -1476,8 +1533,7 @@ export class LaunchApp extends BaseVisualChange {
       latestObservation,
       expectedPackageName,
       timeoutMs,
-      coldBoot,
-      expectedUserId,
+      { coldBoot, expectedUserId, signal },
     );
   }
 
@@ -1562,14 +1618,14 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private resolveLaunchObservationTimeout(
+  private async resolveLaunchObservationTimeout(
     result: LaunchAppResult,
     latestObservation: ObserveResult,
     expectedPackageName: string,
     timeoutMs: number,
-    coldBoot?: boolean,
-    expectedUserId?: number,
-  ): LaunchAppResult {
+    options: { coldBoot?: boolean; expectedUserId?: number; signal?: AbortSignal },
+  ): Promise<LaunchAppResult> {
+    const { coldBoot, expectedUserId, signal } = options;
     // Distinguish "genuinely launched but no foreground window could be read at
     // all" from "observed a different/stale app" (issue #6220 follow-up). The
     // latter is a real mismatch — reject and strip the stale observation, as
@@ -1608,30 +1664,84 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     const foregroundDescription = this.describeLaunchObservationPackages(latestObservation);
+    const lock = await this.resolveLockForLaunchBlocker(latestObservation, signal);
     return this.withoutStaleLaunchObservation(
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, foregroundDescription, expectedPackageName, coldBoot)}`,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, lock, foregroundDescription, expectedPackageName, coldBoot)}`,
       },
       expectedPackageName,
       latestObservation,
     );
   }
 
+  private isSystemUiOverlayObservation(observation: ObserveResult): boolean {
+    const activeWindow = observation.activeWindow;
+    return activeWindow?.appId === "com.android.systemui" && activeWindow.systemOverlay === true;
+  }
+
+  /**
+   * The lock sample the timeout message is based on (#10182). The observation's
+   * own sample can be absent (the `dumpsys window policy` read failed or lacked
+   * the keyguard fields) or taken before the keyguard settled, so when a SystemUI
+   * surface covers the app and the observation does not already say the device is
+   * locked, take one more read bounded by the request signal and a short
+   * deadline. A failed re-read falls back to the observation's sample, then to
+   * `undefined` (unknown) — never to a guessed "unlocked".
+   */
+  private async resolveLockForLaunchBlocker(
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<DeviceLockState | undefined> {
+    if (
+      this.device.platform !== "android" ||
+      !this.isSystemUiOverlayObservation(observation) ||
+      observation.deviceLock?.locked === true ||
+      signal?.aborted
+    ) {
+      return observation.deviceLock;
+    }
+    try {
+      const fresh = await raceWithDeadline(() => this.adb.getDeviceLock(signal), {
+        timer: this.timer,
+        timeoutMs: LAUNCH_BLOCKER_LOCK_REREAD_TIMEOUT_MS,
+        signal,
+        label: "Launch blocker lock re-read",
+        relabelDefaultAbort: false,
+      });
+      return fresh ?? observation.deviceLock;
+    } catch (error) {
+      logger.warn(
+        `[LaunchApp] Lock re-read for the launch timeout message failed: ${errorMessage(error)}`,
+        error,
+      );
+      return observation.deviceLock;
+    }
+  }
+
   private describeLaunchObservationBlocker(
     latestObservation: ObserveResult,
+    lock: DeviceLockState | undefined,
     foregroundDescription: string,
     expectedPackageName: string,
     coldBoot?: boolean,
   ): string {
-    const activeWindow = latestObservation.activeWindow;
-    if (latestObservation.deviceLock?.locked === true) {
-      return "the device is locked; call `wakeAndUnlock` first.";
+    // The hierarchy read itself can name the keyguard (`device_locked`) when the
+    // lock sample is missing from the observation.
+    if (
+      lock?.locked === true ||
+      latestObservation.viewHierarchy?.hierarchy?.unavailableReason === "device_locked"
+    ) {
+      return "the device is locked (the lock screen is covering the app); call `wakeAndUnlock` first.";
     }
 
-    if (activeWindow?.appId === "com.android.systemui" && activeWindow.systemOverlay === true) {
-      return "the system UI (notification shade) is covering the app.";
+    if (this.isSystemUiOverlayObservation(latestObservation)) {
+      // Only a lock sample that says "not locked" makes the shade the evidence-backed
+      // cause. Without one, a keyguard the lock read missed looks identical (#10182).
+      return lock?.locked === false
+        ? "the system UI (notification shade) is covering the app."
+        : "the system UI is covering the app and the lock state could not be determined, so it may be the lock screen or the notification shade; call `wakeAndUnlock` to clear a lock screen, or collapse the shade, then retry.";
     }
 
     if (coldBoot) {
@@ -1959,15 +2069,46 @@ export class LaunchApp extends BaseVisualChange {
     signal?.throwIfAborted();
   }
 
+  private async resolveAndroidLauncherComponent(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const command = `shell cmd package resolve-activity --brief --user ${userId} -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+    try {
+      const result = await this.adb.executeCommand(command);
+      this.assertLaunchNotAborted(signal);
+      const lastLine = result.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1);
+      const componentMatch = lastLine?.match(/^([^/\s]+)\/([^/\s]+)$/);
+      const [, componentPackage, componentActivity] = componentMatch ?? [];
+      if (!componentPackage || !componentActivity || componentPackage !== packageName) {
+        return undefined;
+      }
+      const component = `${componentPackage}/${componentActivity}`;
+      return resolveComponentActivity(component, packageName) ? component : undefined;
+    } catch (error) {
+      this.assertLaunchNotAborted(signal);
+      // Older Android versions may lack this resolver; the bare intent remains the fallback.
+      logger.debug(`[LaunchApp] Launcher component resolution unavailable: ${errorMessage(error)}`);
+      return undefined;
+    }
+  }
+
   private async tryAndroidIntentLaunch(
     packageName: string,
     userId: number,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean }> {
+  ): Promise<{ success: boolean; amReportedError?: boolean }> {
     logger.info(`[LaunchApp] Trying am start with intent for user ${userId}`);
     try {
-      // Let PackageManager resolve the app's launcher activity instead of guessing MainActivity.
-      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
+      const component = await this.resolveAndroidLauncherComponent(packageName, userId, signal);
+      this.assertLaunchNotAborted(signal);
+      const launcherTarget = component ? `-n ${shellQuote(component)}` : shellQuote(packageName);
+      const intentCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${launcherTarget}`;
       logger.info(`[LaunchApp] Intent command: ${intentCmd}`);
       const result = await this.adb.executeCommand(intentCmd);
       this.assertLaunchNotAborted(signal);
@@ -1977,13 +2118,23 @@ export class LaunchApp extends BaseVisualChange {
         return { success: true };
       }
       logger.info(`[LaunchApp] Intent launch returned error: ${result.stdout}${result.stderr}`);
-      return { success: false };
+      // Classified from am's own output; the echoed intent (and its package) is not searched.
+      return {
+        success: false,
+        amReportedError: amStartReportedFailure(result.stdout, result.stderr),
+      };
     } catch (error) {
       this.assertLaunchNotAborted(signal);
       logger.warn(
         `[LaunchApp] Intent launch failed: ${errorMessage(error)}, falling back to monkey`,
       );
-      return { success: false };
+      // A non-zero exit from `am start` rejects the call; classify am's own output, not the
+      // message, so a transport failure (no output of its own) is not read as an am error.
+      const output = adbFailureOutput(error);
+      return {
+        success: false,
+        amReportedError: amStartReportedFailure(output.stdout, output.stderr),
+      };
     }
   }
 
@@ -2040,6 +2191,9 @@ export class LaunchApp extends BaseVisualChange {
           activityName: "intent_launch",
           userId,
         };
+      }
+      if (intentResult.amReportedError) {
+        await this.failFastWhenPackageRemoved(packageName, userId, perf, signal);
       }
     }
 

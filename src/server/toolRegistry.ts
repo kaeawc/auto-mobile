@@ -3,6 +3,8 @@ import {
   postActionCaptures,
 } from "../utils/PostActionCaptureContext";
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
+import { runWithToolDispatchReporter } from "../utils/ToolDispatchContext";
+import type { NavigationToolCallHandle } from "../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
 import {
@@ -48,6 +50,7 @@ import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
@@ -93,7 +96,7 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-import { getAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, isClientCancelled } from "../utils/AbortContext";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -450,7 +453,7 @@ interface NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): (() => void) | undefined;
+  ): NavigationToolCallHandle | undefined;
 }
 
 /** Removes routing and execution implementation details before persisting a navigation edge. */
@@ -1192,13 +1195,50 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "sendKeys",
 ]);
 
+/**
+ * Tools that always end an app's process. `appLifecycle` `killBackgrounded` is deliberately not
+ * here: it is the state-preserving kill, so the app comes back on the screen it was left on.
+ */
+const APP_STOPPING_TOOLS: ReadonlySet<string> = new Set([
+  "terminateApp",
+  "crashApp",
+  "uninstallApp",
+]);
+
+/**
+ * Tools that replace a process without naming the app in their arguments: `installApp` takes an
+ * artifact path, and installing over a running app restarts it, so every remembered screen is
+ * forgotten rather than guessing which app it was (#10206 review).
+ */
+const PROCESS_REPLACING_TOOLS: ReadonlySet<string> = new Set(["installApp"]);
+
+/**
+ * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
+ * was on (#10193): a fresh process must not get an edge from a stale screen. `launchApp` only
+ * counts when it asks for a cold boot or cleared data.
+ */
+function appStoppedByToolCall(name: string, args: any): string | undefined {
+  const stops =
+    APP_STOPPING_TOOLS.has(name) ||
+    (name === "launchApp" && (args?.coldBoot === true || args?.clearAppData === true));
+  const appId = args?.appId ?? args?.packageName;
+  return stops && typeof appId === "string" && appId.length > 0 ? appId : undefined;
+}
+
 class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   record(
     name: string,
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): (() => void) | undefined {
+  ): NavigationToolCallHandle | undefined {
+    const stoppedApp = appStoppedByToolCall(name, args);
+    if (stoppedApp) {
+      this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
+    }
+    if (PROCESS_REPLACING_TOOLS.has(name)) {
+      this.navigationManager(sessionUuid).forgetAllAppScreens();
+    }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
     if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
@@ -1208,10 +1248,18 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
       ? RealObserveScreen.getRecentCachedResultForDevice(device.deviceId)
       : RealObserveScreen.getRecentCachedResult();
     const uiState = new UIStateExtractor().extractFromObservation(cachedResult);
-    const navManager = sessionUuid
+    return this.navigationManager(sessionUuid).recordToolCall(
+      name,
+      stripNavigationInternalParams(args),
+      uiState,
+      device?.deviceId,
+    );
+  }
+
+  private navigationManager(sessionUuid: string | undefined): NavigationGraphManager {
+    return sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();
-    return navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
   }
 }
 
@@ -1233,6 +1281,12 @@ export type SettleObserveFactory = (
 ) => SettleObserve | undefined;
 
 export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
+  // One writer per (timer, resolved directory), built lazily through the factory.
+  // The writer's directory-validation cache and 60s prune throttle are instance
+  // state, so a writer per tool call defeated both (issue #10079). Keyed by timer
+  // identity too because the writer captures its timer; production passes one.
+  private readonly artifactWriters = new WeakMap<Timer, Map<string, ObservationArtifactWriter>>();
+
   constructor(
     private readonly createArtifactWriter: ObservationArtifactWriterFactory = (
       outputDirectory,
@@ -1242,6 +1296,21 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     private readonly createSettleObserve: SettleObserveFactory = (device, timer) =>
       new RealSettleObserve(new RealObserveScreen(device), timer),
   ) {}
+
+  private getArtifactWriter(outputDirectory: string, timer: Timer): ObservationArtifactWriter {
+    let writersByDirectory = this.artifactWriters.get(timer);
+    if (!writersByDirectory) {
+      writersByDirectory = new Map();
+      this.artifactWriters.set(timer, writersByDirectory);
+    }
+    const key = resolvePathFromDaemonLaunchWorkingDirectory(outputDirectory);
+    let writer = writersByDirectory.get(key);
+    if (!writer) {
+      writer = this.createArtifactWriter(outputDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION);
+      writersByDirectory.set(key, writer);
+    }
+    return writer;
+  }
 
   async handle(input: AfterToolCallInput): Promise<AfterToolCallResult> {
     const {
@@ -1374,9 +1443,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const artifactMode = configuredArtifactDirectory ? "always" : "oversized";
     const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
     const artifactWriter = !internalCall
-      ? configuredArtifactDirectory
-        ? this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
-        : this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
+      ? this.getArtifactWriter(artifactDirectory, timer)
       : undefined;
 
     const finalizedResponse = finalizeToolResponse(response, {
@@ -1388,6 +1455,12 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       internal: internalCall,
       artifactWriter,
       artifactMode,
+      // A call the client cancelled or timed out has its response discarded by the
+      // transport, so it must not advance the diff baseline or metadata snapshot
+      // (#10081). A daemon-side abort (device loss, session release) does not
+      // discard a completed success, which is still returned to the client, so only
+      // a failure is treated as undelivered when the combined signal aborted.
+      delivered: !isClientCancelled(signal) && (toolSuccess || !signal?.aborted),
     });
 
     const telemetryArgs = { ...args };
@@ -1692,6 +1765,14 @@ function sessionDisplayPinnedHandler(input: {
     });
 }
 
+/** Run a tool so the action it executes can report its dispatch to the recorded call. */
+function runReportingDispatch<T>(
+  call: NavigationToolCallHandle | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  return runWithToolDispatchReporter(call?.markDispatched, run);
+}
+
 async function invokeResolvedDeviceHandler(input: {
   options: DeviceAwareToolOptions;
   selectionContext: ReturnType<typeof getToolSelectionContext>;
@@ -1720,14 +1801,18 @@ async function invokeResolvedDeviceHandler(input: {
     if (signal?.aborted) {
       withdraw?.();
     }
-    const response = await input.auditRunner.run({
-      name,
-      args,
-      device: target.device,
-      handler,
-      progress,
-      signal,
-    });
+    // The action reports when its gesture goes out, so a tool that waited for its target
+    // is attributed from the dispatch, not from the start (#10196).
+    const response = await runReportingDispatch(withdraw, () =>
+      input.auditRunner.run({
+        name,
+        args,
+        device: target.device,
+        handler,
+        progress,
+        signal,
+      }),
+    );
     succeeded = !isToolResponseFailure(response);
     return response;
   } finally {

@@ -5,7 +5,7 @@ import {
 } from "../../observe/cache/ObserveCacheRegistry";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../observe/DeviceHierarchyCapture";
 import { hasWrongWindowEvidence } from "../../observe/observationFreshness";
-import { executeAndroidSearchDrag } from "./androidSearchDrag";
+import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
@@ -18,6 +18,7 @@ import {
 } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { SwipeSearchCancelledError } from "./searchCancellation";
 import {
   BaseVisualChange,
   INTERMEDIATE_OBSERVATION_OPTIONS,
@@ -749,6 +750,40 @@ export class SwipeOn extends BaseVisualChange {
     }
   }
 
+  /** The TalkBack executor exposes no send point, so its swipes are counted as attempted. */
+  private executeDisplayTalkBackSwipe(input: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    duration: number;
+    direction: SwipeDirection;
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    searchDragState?: AndroidSearchDragState;
+    signal?: AbortSignal;
+    onDispatched?: () => void;
+  }): Promise<SwipeResult> {
+    input.onDispatched?.();
+    return this.talkBackExecutor.executeSwipeGesture(
+      input.x1,
+      input.y1,
+      input.x2,
+      input.y2,
+      input.direction,
+      null,
+      {
+        displayFence: { assertCurrent: input.target.assertCurrent },
+        duration: input.duration,
+        scrollMode: input.options.scrollMode,
+        searchDragState: input.searchDragState,
+      },
+      undefined,
+      undefined,
+      input.signal,
+    );
+  }
+
   private async searchOnAndroidDisplay({
     options,
     target,
@@ -817,7 +852,7 @@ export class SwipeOn extends BaseVisualChange {
       signal,
       strategy: {
         observe,
-        swipe: async ({ previousObservation, searchDragState, ...coordinates }) => {
+        swipe: async ({ previousObservation, searchDragState, onDispatched, ...coordinates }) => {
           const result = await this.observedInteraction(
             async () => {
               const fallback = async () => {
@@ -827,28 +862,21 @@ export class SwipeOn extends BaseVisualChange {
                   target,
                   useCtrlProxy: false,
                   signal,
+                  onDispatched,
                 });
                 dispatched = true;
                 return { ...coordinates, success: true };
               };
               const gesture = await (talkBack.enabled
-                ? this.talkBackExecutor.executeSwipeGesture(
-                    coordinates.x1,
-                    coordinates.y1,
-                    coordinates.x2,
-                    coordinates.y2,
-                    direction.direction as SwipeDirection,
-                    null,
-                    {
-                      displayFence: { assertCurrent: target.assertCurrent },
-                      duration: coordinates.duration,
-                      scrollMode: options.scrollMode,
-                      searchDragState,
-                    },
-                    undefined,
-                    undefined,
+                ? this.executeDisplayTalkBackSwipe({
+                    ...coordinates,
+                    direction: direction.direction as SwipeDirection,
+                    options,
+                    target,
+                    searchDragState,
                     signal,
-                  )
+                    onDispatched,
+                  })
                 : useCtrlProxy
                   ? executeAndroidSearchDrag({
                       ...coordinates,
@@ -858,6 +886,7 @@ export class SwipeOn extends BaseVisualChange {
                       displayId: target.displayId === 0 ? undefined : target.displayId,
                       beforeSend: target.assertCurrent,
                       fallback,
+                      onDispatched,
                       onIndeterminate: (cause) => {
                         throw new DispatchedObservationError(cause);
                       },
@@ -937,8 +966,10 @@ export class SwipeOn extends BaseVisualChange {
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     useCtrlProxy: boolean;
     signal?: AbortSignal;
+    /** Fires as the gesture is handed to the device, after the pre-send checks. */
+    onDispatched?: () => void;
   }): Promise<void> {
-    const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal } = options;
+    const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal, onDispatched } = options;
     target.assertCurrent();
     throwIfAborted(signal);
     if (useCtrlProxy) {
@@ -951,7 +982,7 @@ export class SwipeOn extends BaseVisualChange {
         undefined,
         undefined,
         undefined,
-        undefined,
+        onDispatched,
         signal,
         target.displayId === 0 ? undefined : target.displayId,
         target.assertCurrent,
@@ -967,6 +998,7 @@ export class SwipeOn extends BaseVisualChange {
         target.displayId,
         signal,
         target.assertCurrent,
+        { onDispatch: onDispatched },
       );
     }
   }
@@ -1041,6 +1073,10 @@ export class SwipeOn extends BaseVisualChange {
               );
         }
       } catch (error) {
+        // throwIfAborted would replace this with a generic cancellation that loses the swipe count.
+        if (error instanceof SwipeSearchCancelledError) {
+          throw error;
+        }
         throwIfAbortedKeepingForwardNote(signal, error);
         if (error instanceof Error && error.name === "AbortError") {
           throw error;
@@ -1222,6 +1258,9 @@ export class SwipeOn extends BaseVisualChange {
       return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
     } catch (error) {
       perf.end();
+      if (error instanceof SwipeSearchCancelledError) {
+        throw error;
+      }
       throwIfAbortedKeepingForwardNote(signal, error);
 
       logger.warn(`Swipe failed: ${errorMessage(error)}`, error);

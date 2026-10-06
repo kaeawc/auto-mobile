@@ -29,6 +29,11 @@ test("errorsOnly mirrors the classifier and composes with explicit status filter
     { statusCode: 200, error: "" },
     { statusCode: 200, error: " \t\n\u00a0\ufeff" },
     { statusCode: -1, error: null },
+    { statusCode: 200, error: "mocked:mock-1" },
+    { statusCode: 201, error: " mocked:mock-1" },
+    { statusCode: 503, error: "mocked:mock-1" },
+    { statusCode: 200, error: "simulated:timeout" },
+    { statusCode: 200, error: "Mocked:mock-1" },
   ];
   const expectedIds: number[] = [];
   for (const outcome of outcomes) {
@@ -54,15 +59,18 @@ test("errorsOnly mirrors the classifier and composes with explicit status filter
   }
   const errors = await getNetworkEvents({ errorsOnly: true }, db);
   expect(errors.map((event) => event.id).sort((a, b) => a - b)).toEqual(expectedIds);
-  expect(errors).toHaveLength(6);
+  expect(errors).toHaveLength(9);
+  expect(errors.some((event) => event.statusCode === 200 && event.error === "mocked:mock-1")).toBe(
+    false,
+  );
   expect(
     (await getNetworkEvents({ errorsOnly: true, minStatusCode: 400 }, db))
       .map((event) => event.statusCode)
       .sort(),
-  ).toEqual([404, 500]);
+  ).toEqual([404, 500, 503]);
   expect(
-    (await getNetworkEvents({ errorsOnly: true, statusCode: "200" }, db)).map(
-      (event) => event.error,
-    ),
-  ).toEqual(["cancelled"]);
+    (await getNetworkEvents({ errorsOnly: true, statusCode: "200" }, db))
+      .map((event) => event.error)
+      .sort(),
+  ).toEqual(["Mocked:mock-1", "cancelled", "simulated:timeout"]);
 });

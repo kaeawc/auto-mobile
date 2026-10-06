@@ -2380,6 +2380,45 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ).toBeLessThan(events.indexOf(`adb:shell ime disable ${commitImeId}`));
   });
 
+  test("ime mode with a non-zero foreground user pins every ime and settings command to that user", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+    adb.setCommandResponse("shell ime list --user 10 -a -s", {
+      stdout: `${priorImeId}\n${commitImeId}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponse("shell ime list --user 10 -s", {
+      stdout: `${priorImeId}\n`,
+      stderr: "",
+    });
+    // prior read, activation readback, restore pre-read, restore readback, verification.
+    adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+      { stdout: priorImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({ commitViaIme: async () => ({ success: true }) });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      { create: () => adb },
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "*bold*", mode: "ime" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    const imeAndSettings = adb
+      .getExecutedCommands()
+      .filter((command) => /^shell (ime|settings) /.test(command));
+    expect(imeAndSettings).toContain(`shell ime enable --user 10 ${commitImeId}`);
+    expect(imeAndSettings).toContain(`shell ime set --user 10 ${commitImeId}`);
+    expect(imeAndSettings).toContain(`shell ime set --user 10 ${priorImeId}`);
+    expect(imeAndSettings).toContain(`shell ime disable --user 10 ${commitImeId}`);
+    expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
+  });
+
   test.each([
     ["5551234567", "(555) 123-4567", true, false, "ime", "insert"],
     ["5551234567", "(555) 123-45", false, false, "ime", "insert"],

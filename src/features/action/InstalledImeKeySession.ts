@@ -13,6 +13,7 @@ import { toSearchable } from "../utility/SearchableNode";
 import {
   AndroidImeCatalog,
   AUTO_MOBILE_IME_ID,
+  createForegroundUserSource,
   type ImeCatalogState,
   type ImeSubtypeSnapshot,
   type KeyboardIdentity,
@@ -63,11 +64,16 @@ export async function tapFrameBoundImeKey(
   );
 }
 
+type SessionImeCatalog = Pick<
+  AndroidImeCatalog,
+  "list" | "selectWithinLock" | "readSubtype" | "restoreSubtypeWithinLock" | "identity"
+>;
+
 export interface InstalledImeKeySessionDependencies {
-  catalog: Pick<
-    AndroidImeCatalog,
-    "list" | "selectWithinLock" | "readSubtype" | "restoreSubtypeWithinLock" | "identity"
-  >;
+  /** `pinForeground` fixes the user once so the temporary switch and its restore share it. */
+  catalog: SessionImeCatalog & {
+    pinForeground(signal?: AbortSignal): Promise<SessionImeCatalog>;
+  };
   keyboard: {
     execute(action: "open", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
   };
@@ -106,13 +112,17 @@ export class InstalledImeKeySession {
   }
 
   private async tapKeyLocked(imeId: string, key: string, signal?: AbortSignal) {
-    const { catalog } = this.dependencies;
-    const { before, subtype, editorBefore } = await this.validateStartingState(imeId, signal);
+    const catalog = await this.dependencies.catalog.pinForeground(signal);
+    const { before, subtype, editorBefore } = await this.validateStartingState(
+      catalog,
+      imeId,
+      signal,
+    );
     const original = before.activeImeId!;
     let result: Awaited<ReturnType<typeof this.performTap>> | undefined;
     let failure: unknown;
     try {
-      result = await this.performTap(imeId, key, editorBefore, signal);
+      result = await this.performTap(catalog, imeId, key, editorBefore, signal);
     } catch (error) {
       failure = error;
     }
@@ -162,6 +172,7 @@ export class InstalledImeKeySession {
   }
 
   private async validateStartingState(
+    catalog: SessionImeCatalog,
     imeId: string,
     signal?: AbortSignal,
   ): Promise<{
@@ -169,7 +180,7 @@ export class InstalledImeKeySession {
     subtype: ImeSubtypeSnapshot;
     editorBefore: FocusedEditorEvidence | null;
   }> {
-    const { catalog, hierarchy } = this.dependencies;
+    const { hierarchy } = this.dependencies;
     const before = await catalog.list(signal);
     const original = before.activeImeId;
     if (!original || !before.installed.some((ime) => ime.id === original && ime.enabled)) {
@@ -193,12 +204,13 @@ export class InstalledImeKeySession {
   }
 
   private async performTap(
+    catalog: SessionImeCatalog,
     imeId: string,
     key: string,
     editorBefore: FocusedEditorEvidence | null,
     signal?: AbortSignal,
   ) {
-    const { catalog, tap } = this.dependencies;
+    const { tap } = this.dependencies;
     signal?.throwIfAborted();
     await catalog.selectWithinLock(imeId, signal);
     signal?.throwIfAborted();
@@ -488,7 +500,7 @@ export function createInstalledImeKeySession(device: BootedDevice): InstalledIme
   const viewHierarchy = new ViewHierarchy(device);
   const cache = AndroidCtrlProxyClient.getInstance(device);
   return new InstalledImeKeySession(device.deviceId, {
-    catalog: new AndroidImeCatalog(adb, device.deviceId),
+    catalog: new AndroidImeCatalog(adb, device.deviceId, createForegroundUserSource(adb)),
     keyboard: new Keyboard(device),
     hierarchy: {
       read: (signal) => {

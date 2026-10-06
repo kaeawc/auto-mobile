@@ -53,6 +53,7 @@ import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { boundAllocationTimeoutMs } from "./planAllocationBudget";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -587,9 +588,9 @@ export class PlanExecutionOrchestrator {
     const previousDeviceLabels = sessionManager.getDeviceLabels(sessionUuid);
     sessionManager.setDeviceLabels(sessionUuid, labelToSessionMap);
 
-    logger.info(
-      `Requesting allocation of ${sessionIds.length} devices for labels: ${Object.keys(labelToSessionMap).join(", ")} ` +
-        `(timeout: ${this.request.deviceAllocationTimeoutMs / 1000}s)`,
+    const allocationTimeoutMs = this.resolveAllocationTimeoutMs(
+      sessionIds.length,
+      Object.keys(labelToSessionMap),
     );
 
     const restorePreviousDeviceLabels = (error: unknown): never => {
@@ -608,6 +609,7 @@ export class PlanExecutionOrchestrator {
         effectiveLabels,
         labelToSessionMap,
         sessionIds,
+        allocationTimeoutMs,
       ),
     );
 
@@ -639,17 +641,40 @@ export class PlanExecutionOrchestrator {
     return deviceMapping;
   }
 
+  /**
+   * The wait never outlasts the request that asked for it, so a plan that cannot
+   * be satisfied reports its own error instead of a client transport timeout.
+   */
+  private resolveAllocationTimeoutMs(deviceCount: number, labels: string[]): number {
+    const requestedMs = this.request.deviceAllocationTimeoutMs;
+    const timeoutMs = boundAllocationTimeoutMs(
+      requestedMs,
+      getToolSelectionContext()?.planRequest,
+      this.timer.now(),
+    );
+    const bound =
+      timeoutMs < requestedMs
+        ? `, bounded from ${requestedMs / 1000}s by the request's remaining budget`
+        : "";
+    logger.info(
+      `Requesting allocation of ${deviceCount} devices for labels: ${labels.join(", ")} ` +
+        `(timeout: ${timeoutMs / 1000}s${bound})`,
+    );
+    return timeoutMs;
+  }
+
   private requestDeviceAllocation(
     devicePool: DevicePool,
     normalized: NormalizedPlanDevices,
     effectiveLabels: string[],
     labelToSessionMap: Record<string, string>,
     sessionIds: string[],
+    allocationTimeoutMs: number,
   ): Promise<Map<string, string>> {
     if (!normalized.hasDefinitions) {
       return devicePool.assignMultipleDevices(
         sessionIds,
-        this.request.deviceAllocationTimeoutMs,
+        allocationTimeoutMs,
         this.request.platform,
       );
     }
@@ -674,10 +699,7 @@ export class PlanExecutionOrchestrator {
       };
     });
 
-    return devicePool.assignMultipleDevicesByCriteria(
-      requests,
-      this.request.deviceAllocationTimeoutMs,
-    );
+    return devicePool.assignMultipleDevicesByCriteria(requests, allocationTimeoutMs);
   }
 
   private buildDeviceMapping(

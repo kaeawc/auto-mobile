@@ -13,6 +13,8 @@ import {
 } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
+import { migratePlanStep } from "../utils/plan/PlanMigrator";
+import { formatStepError, parseStepParams } from "../utils/plan/planStepParams";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { isDeviceLostError } from "./deviceLossOutcome";
@@ -38,8 +40,6 @@ const criticalSectionStepSchema = z
       });
     }
   });
-
-type CriticalSectionStepInput = z.infer<typeof criticalSectionStepSchema>;
 
 // Critical section tool schema
 const criticalSectionSchema = addDeviceTargetingToSchema(
@@ -144,7 +144,7 @@ class CriticalSectionStepError extends ActionableError {
 
 function handleCriticalSectionStepFailure(
   error: unknown,
-  step: { tool: string; optional?: boolean },
+  step: { tool: string; optional?: boolean; params?: Record<string, unknown> },
   context: {
     deviceId: string;
     lock: string;
@@ -152,17 +152,25 @@ function handleCriticalSectionStepFailure(
     totalSteps: number;
     signal?: AbortSignal;
     warnings: string[];
+    schema?: z.ZodType;
   },
 ): void {
-  const { deviceId, lock, stepNumber, totalSteps, signal, warnings } = context;
-  if (
-    isDeviceLostError(error) ||
-    (step.optional && (signal?.aborted || error instanceof z.ZodError))
-  ) {
+  const { deviceId, lock, stepNumber, totalSteps, signal, warnings, schema } = context;
+  if (isDeviceLostError(error) || (step.optional && signal?.aborted)) {
     throw error;
   }
 
-  const errorMsg = errorMessage(error);
+  // A schema failure reads like the top-level plan step's (and the MCP boundary's)
+  // "Invalid parameters for tool ..." rather than a raw zod issue dump (#9927).
+  const errorMsg =
+    error instanceof z.ZodError
+      ? formatStepError(step.tool, error, step.params, schema)
+      : errorMessage(error);
+  // An optional step with invalid params is a plan authoring error, not a
+  // transient failure: it fails the section instead of being skipped.
+  if (step.optional && error instanceof z.ZodError) {
+    throw new ActionableError(errorMsg);
+  }
   if (step.optional && !(error instanceof CriticalSectionToolNotFoundError)) {
     warnings.push(`step ${stepNumber} (${step.tool}): optional step failed; skipped: ${errorMsg}`);
     logger.warn(
@@ -198,6 +206,7 @@ async function executeCriticalSectionSteps(
       `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`,
     );
 
+    let schema: z.ZodType | undefined;
     try {
       // Critical-section steps are plan steps, so use the same lookup rules
       // as executePlan for tools hidden from MCP discovery.
@@ -205,8 +214,12 @@ async function executeCriticalSectionSteps(
       if (!tool) {
         throw new CriticalSectionToolNotFoundError(`Tool "${step.tool}" not found in registry`);
       }
+      schema = tool.schema;
 
-      const result = await ToolRegistry.callInternal(tool, step.params, undefined, signal, {
+      // callInternal does not parse, so apply the same schema parse a top-level
+      // plan step gets: defaults, aliases and strict unknown-key rejection (#9927).
+      const params = parseStepParams(tool.schema, step.params);
+      const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,
       });
@@ -238,6 +251,7 @@ async function executeCriticalSectionSteps(
         totalSteps,
         signal,
         warnings,
+        schema,
       });
     }
   }
@@ -286,7 +300,13 @@ const criticalSectionHandler = async (
   signal?: AbortSignal,
 ): Promise<any> => {
   const { lock, steps, deviceCount, timeout, __lockNamespace: namespace } = params;
-  const normalizedSteps = PlanNormalizer.normalizeSteps(steps as CriticalSectionStepInput[]);
+  // Sub-steps are not in `plan.steps`, so migratePlan never saw them; apply the
+  // same legacy-shape migration here so `tapOn { text }` and friends behave as
+  // they do at the top level (#9927).
+  const migratedSteps = steps.map((step, index) =>
+    migratePlanStep(step, index, { platform: device.platform }),
+  );
+  const normalizedSteps = PlanNormalizer.normalizeSteps(migratedSteps);
   const coordinator = CriticalSectionCoordinator.getInstance();
 
   logger.info(

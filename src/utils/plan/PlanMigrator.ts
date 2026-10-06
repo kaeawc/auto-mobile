@@ -596,6 +596,25 @@ const migrateStepFields = (
   return changed;
 };
 
+/**
+ * Apply the per-step legacy-shape migration to one step outside `plan.steps` (a
+ * `criticalSection` sub-step, #9927) so it matches a top-level step. Returns a
+ * migrated copy; the input is left untouched. Idempotent, so a step that was
+ * already migrated (or authored in the current shape) comes back equivalent.
+ */
+export const migratePlanStep = (
+  step: unknown,
+  stepIndex: number,
+  context: { platform?: unknown; devices?: unknown } = {},
+): unknown => {
+  if (!isRecord(step)) {
+    return step;
+  }
+  const copy = structuredClone(step);
+  migrateStepFields(copy, stepIndex, [], context.platform, context.devices);
+  return copy;
+};
+
 export const migratePlan = (
   rawPlan: unknown,
 ): { plan: Record<string, any>; report: PlanMigrationReport } => {

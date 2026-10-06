@@ -69,6 +69,38 @@ describe("ChildProcessTracker", () => {
       expect(exitState.signal).toBeNull();
     });
 
+    test("keeps only the most recent stderr when a bound is given, and all of it otherwise", () => {
+      function trackerWithStderr(options?: { maxStderrChars?: number }): {
+        stderr: string[];
+        write: (chunk: string) => void;
+      } {
+        const process = new EventEmitter() as TrackedChildProcess;
+        const stream = new EventEmitter();
+        process.exitCode = null;
+        process.signalCode = null;
+        process.killed = false;
+        process.stderr = stream;
+        process.kill = () => true;
+        const stderr: string[] = [];
+        createExitTracker(process, stderr, options);
+        return { stderr, write: (chunk) => stream.emit("data", chunk) };
+      }
+
+      const bounded = trackerWithStderr({ maxStderrChars: 10 });
+      for (const chunk of ["aaaa", "bbbb", "cccc", "dddd"]) {
+        bounded.write(chunk);
+      }
+      expect(bounded.stderr.join("")).toBe("ccccdddd");
+      bounded.write("x".repeat(50));
+      expect(bounded.stderr.join("")).toBe("x".repeat(10));
+
+      const unbounded = trackerWithStderr();
+      for (const chunk of ["aaaa", "bbbb", "cccc", "dddd"]) {
+        unbounded.write(chunk);
+      }
+      expect(unbounded.stderr.join("")).toBe("aaaabbbbccccdddd");
+    });
+
     test("keeps tracking an aborted spawned child until its exit event", async () => {
       const process = new EventEmitter() as TrackedChildProcess;
       process.pid = 123;

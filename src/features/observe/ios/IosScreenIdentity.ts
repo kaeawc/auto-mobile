@@ -19,6 +19,18 @@ const MODAL_CLASSES = new Set([
 
 export const IOS_KEYBOARD_CONTAINER_CLASSES = new Set(["UIKeyboard", "XCUIElementTypeKeyboard"]);
 
+/** An individual iOS keycap; may appear without a container in a partial capture. */
+export const IOS_KEYBOARD_KEY_CLASS = "UIKeyboardKey";
+
+/**
+ * Whether a class name belongs to the iOS soft keyboard: its container or one
+ * of its keycaps. The single source of truth for the screen identity, the
+ * element collector (and so the skeleton `<ime>` row) and the diff flattening.
+ */
+export function isIosKeyboardClass(cls: string | undefined): boolean {
+  return IOS_KEYBOARD_CONTAINER_CLASSES.has(cls ?? "") || cls === IOS_KEYBOARD_KEY_CLASS;
+}
+
 interface CandidateSignals {
   bundleId?: string;
   navigationTitle?: string;
@@ -221,7 +233,7 @@ function hasKeyboard(root: HierarchyNodeLike | undefined): boolean {
       return;
     }
     const cls = className(attrsOf(node));
-    keyboardVisible = IOS_KEYBOARD_CONTAINER_CLASSES.has(cls ?? "") || cls === "UIKeyboardKey";
+    keyboardVisible = isIosKeyboardClass(cls);
   });
   return keyboardVisible;
 }

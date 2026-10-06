@@ -36,8 +36,11 @@ import {
   isDeviceLostError,
   rememberDeviceLossAbort,
 } from "../../models/DeviceLostError";
-import { formatToolParamError } from "../toolParamError";
-import { stripUndeclaredSessionUuid } from "../toolParams";
+import {
+  UNEVALUATED_EXPECTATIONS_WARNING,
+  formatStepError,
+  parseStepParams,
+} from "./planStepParams";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -46,24 +49,6 @@ import {
 
 function formatToolError(error: unknown): string {
   return formatStructuredToolError(error) ?? String(error);
-}
-
-// The MCP boundary (`src/server/index.ts`) renders a schema `ZodError` through
-// `formatToolParamError` as "Invalid parameters for tool <name>: …". PlanExecutor
-// parses against the same tool schemas, so a validation failure on the plan path
-// must read identically instead of leaking the raw zod issue dump (#5854 §3).
-// Non-Zod errors fall through unchanged; the `instanceof ZodError` shape is left
-// intact for callers that branch on it (e.g. optional-step handling below).
-function formatStepError(
-  toolName: string,
-  error: unknown,
-  rawInput?: unknown,
-  schema?: unknown,
-): string {
-  if (error instanceof ZodError) {
-    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error, rawInput, schema)}`;
-  }
-  return `${error}`;
 }
 
 type StepExecutionStatus = "completed" | "failed" | "skipped";
@@ -78,13 +63,7 @@ interface StepExecutionContext {
   debugLog?: boolean;
 }
 
-/**
- * Plan steps may carry `expectations` (accepted by the plan schema) but nothing evaluates them
- * yet (#9925). Say so on the step's warnings rather than let a plan author believe the
- * assertions were checked and passed.
- */
-export const UNEVALUATED_EXPECTATIONS_WARNING =
-  "This step declares `expectations`, but expectations are not evaluated yet; the step ran without checking them.";
+export { UNEVALUATED_EXPECTATIONS_WARNING };
 
 function withUnevaluatedExpectationsWarning(
   step: PlanStep,
@@ -440,9 +419,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // (`observe` always resets it). This capture is for the plan's failure
       // summary, not shown to the agent. Parse against the tool schema first, then
       // pass the resolved tool to the seam so the timeout race stays local.
-      const parsedParams = observeTool.schema.parse(
-        stripUndeclaredSessionUuid(enhancedParams, observeTool.schema),
-      ) as Record<string, unknown>;
+      const parsedParams = parseStepParams(observeTool.schema, enhancedParams);
 
       const response = await this.callObserveWithDeadline(observeTool, parsedParams, signal);
 
@@ -595,9 +572,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // below so finalize emits the full observation on the step envelope - never
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
-      const parsedParams = tool.schema.parse(
-        stripUndeclaredSessionUuid(enhancedParams, tool.schema),
-      ) as Record<string, unknown>;
+      const parsedParams = parseStepParams(tool.schema, enhancedParams);
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);

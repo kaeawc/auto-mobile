@@ -491,14 +491,6 @@ export class NavigationRetention {
   }
 
   /**
-   * LONG tier: delete observation rows last seen before the cutoff, except those
-   * on a protected (active) build key. Each bounded delete batch runs in its
-   * own transaction, so an overdue retention pass cannot monopolize the single
-   * daemon connection in one predicate-wide SQLite delete. Each table takes one
-   * full protected-set snapshot, then transactionally revalidates only the apps
-   * represented by its selected rows before deleting them.
-   */
-  /**
    * Bound the `navigation_edges` traversal log (#10194): keep the newest
    * `maxEdgeTraversalsPerTransition` rows (by id, i.e. insertion order, immune to a
    * device clock stepping backwards) of every distinct (app, from, to, tool, args)
@@ -552,6 +544,14 @@ export class NavigationRetention {
     }
   }
 
+  /**
+   * LONG tier: delete observation rows last seen before the cutoff, except those
+   * on a protected (active) build key. Each bounded delete batch runs in its
+   * own transaction, so an overdue retention pass cannot monopolize the single
+   * daemon connection in one predicate-wide SQLite delete. Each table takes one
+   * full protected-set snapshot, then transactionally revalidates only the apps
+   * represented by its selected rows before deleting them.
+   */
   private async pruneObservationsByTtl(
     now: number,
     summary: NavigationRetentionSummary,

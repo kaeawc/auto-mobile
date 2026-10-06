@@ -31,6 +31,7 @@ import {
   normalizeSettingValue,
   normalizeTimeFormat,
   parseBooleanSetting,
+  parseAppLocalesReply,
   parseLocaleList,
   timeZoneIdsEquivalent,
   validateLocaleTag,
@@ -44,7 +45,13 @@ type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
  * has no override), kept whole so a restore can put back every locale and not
  * just the first one.
  */
-type AppLocaleRead = { readable: true; list: string } | { readable: false };
+type AppLocaleRead =
+  | { readable: true; list: string }
+  | {
+      readable: false;
+      /** Android answered `Unknown package ...`: the app is not installed for that user. */
+      notInstalled: boolean;
+    };
 
 /** The first locale of an app-locale read, or null when unset or unreadable. */
 function firstAppLocale(read: AppLocaleRead): string | null {
@@ -60,6 +67,20 @@ function normalizeLocaleList(list: string): string[] {
 
 function sameLocaleList(a: string, b: string): boolean {
   return normalizeLocaleList(a).join(",") === normalizeLocaleList(b).join(",");
+}
+
+function isNotInstalled(read: AppLocaleRead): boolean {
+  return !read.readable && read.notInstalled;
+}
+
+/**
+ * Error for an app-scoped locale change against a package Android reports as not
+ * installed for the target user. Unlike an unreadable read-back this is
+ * definite: the device refused the package by name, so nothing was changed and
+ * there is nothing to restore or to check.
+ */
+function notInstalledLocaleError(appId: string, userId: number): string {
+  return `Cannot change the locale: app ${appId} is not installed for user ${userId}; nothing was changed. Check the appId, or install the app first.`;
 }
 
 function describeAppLocales(read: AppLocaleRead): string {
@@ -290,6 +311,23 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     }
   }
 
+  /** Below Android 13 there is no app-scoped command: use the root-backed device-wide path. */
+  private async setLegacyAppLocale(
+    languageTag: string,
+    options: BroadcastOptions,
+    apiLevel: number,
+  ): Promise<SetLocaleResult> {
+    const rootResult = await this.ensureRootForLegacyLocale(apiLevel);
+    if (!rootResult.success) {
+      return { success: false, languageTag, error: rootResult.error };
+    }
+    return this.setSystemLocale(
+      languageTag,
+      options,
+      "setprop persist.sys.locale + stop/start after adb root",
+    );
+  }
+
   private async setTargetAppLocale(
     languageTag: string,
     appId: string,
@@ -297,19 +335,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   ): Promise<SetLocaleResult> {
     const apiLevel = await readAndroidDeviceApiLevel(this.adb);
     if (apiLevel !== null && apiLevel < MIN_APP_LOCALE_API_LEVEL) {
-      const rootResult = await this.ensureRootForLegacyLocale(apiLevel);
-      if (!rootResult.success) {
-        return {
-          success: false,
-          languageTag,
-          error: rootResult.error,
-        };
-      }
-      return this.setSystemLocale(
-        languageTag,
-        options,
-        "setprop persist.sys.locale + stop/start after adb root",
-      );
+      return this.setLegacyAppLocale(languageTag, options, apiLevel);
     }
 
     const target = await this.resolveTargetUserId(appId);
@@ -321,26 +347,25 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     // `previousLanguageTag` and the value to restore if the change does not stick.
     const previousLocales = await this.readAppLocales(appId, targetUserId);
     const previousLanguageTag = firstAppLocale(previousLocales);
-
-    try {
-      await this.adb.executeCommand(
-        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${targetUserId} --locales ${shellQuote(languageTag)}`,
-      );
-    } catch (error) {
-      logger.warn(
-        `[SystemConfigurationManager] Failed to set app locale: ${errorMessage(error)}`,
-        error,
-      );
-      const errorMsg = errorMessage(error);
-      return {
-        success: false,
-        languageTag,
-        previousLanguageTag,
-        error: `Failed to set app locale for ${appId}: ${errorMsg}`,
-      };
+    const notInstalledResult: SetLocaleResult = {
+      success: false,
+      languageTag,
+      previousLanguageTag,
+      error: notInstalledLocaleError(appId, targetUserId),
+    };
+    const sent = await this.sendAppLocale(appId, targetUserId, languageTag, previousLocales);
+    if (sent === "notInstalled") {
+      return notInstalledResult;
+    }
+    if (sent !== "sent") {
+      return { success: false, languageTag, previousLanguageTag, error: sent.error };
     }
 
     const effectiveLocales = await this.readAppLocales(appId, targetUserId);
+    if (isNotInstalled(effectiveLocales)) {
+      // The app went away between the write and the read-back: nothing to restore.
+      return notInstalledResult;
+    }
     if (!effectiveLocales.readable) {
       // Same as the device-wide path: an unreadable read-back is not evidence the
       // change failed, so do not write the app's locale again on a guess.
@@ -384,6 +409,36 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       broadcasted,
       ...(target.warning ? { warning: target.warning } : {}),
     };
+  }
+
+  /**
+   * Send `set-app-locales`, unless the read before it already said the package is
+   * unknown. `cmd` exits 0 for an unknown package, so the reply text is the only
+   * signal that nothing was changed (#10211).
+   */
+  private async sendAppLocale(
+    appId: string,
+    userId: number,
+    languageTag: string,
+    previousLocales: AppLocaleRead,
+  ): Promise<"sent" | "notInstalled" | { error: string }> {
+    if (isNotInstalled(previousLocales)) {
+      return "notInstalled";
+    }
+    try {
+      const reply = await this.adb.executeCommand(
+        `shell cmd locale set-app-locales ${shellQuote(appId)} --user ${userId} --locales ${shellQuote(languageTag)}`,
+      );
+      return parseAppLocalesReply(reply.stdout, reply.stderr).kind === "notInstalled"
+        ? "notInstalled"
+        : "sent";
+    } catch (error) {
+      logger.warn(
+        `[SystemConfigurationManager] Failed to set app locale: ${errorMessage(error)}`,
+        error,
+      );
+      return { error: `Failed to set app locale for ${appId}: ${errorMessage(error)}` };
+    }
   }
 
   /**
@@ -849,25 +904,17 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
         undefined,
         true,
       );
-      return this.parseAppLocalesOutput(result.stdout);
+      const reply = parseAppLocalesReply(result.stdout, result.stderr);
+      if (reply.kind === "list") {
+        return { readable: true, list: reply.list };
+      }
+      return { readable: false, notInstalled: reply.kind === "notInstalled" };
     } catch (error) {
       logger.warn(
         `[SystemConfigurationManager] Failed to read Android app locale for ${appId}: ${error}`,
       );
-      return { readable: false };
+      return { readable: false, notInstalled: false };
     }
-  }
-
-  private parseAppLocalesOutput(output: string): AppLocaleRead {
-    const normalized = normalizeSettingValue(output);
-    if (!normalized) {
-      return { readable: false };
-    }
-    const bracketedLocales = normalized.match(/\bare\s+\[([^\]]*)\]\s*$/)?.[1];
-    if (bracketedLocales === undefined) {
-      return { readable: false };
-    }
-    return { readable: true, list: bracketedLocales.trim() };
   }
 
   /**

@@ -50,6 +50,40 @@ export function parseLocaleList(value: string | null): string | null {
 }
 
 /**
+ * What `cmd locale get-app-locales` / `set-app-locales` printed, as captured on an
+ * API 36 emulator (test/fixtures/android-locale/):
+ *
+ * - `Locales for <pkg> for user <n> are [he-IL]` for a package that is installed;
+ *   `are []` when the app has no override. A list is comma-joined inside the brackets.
+ * - `Unknown package <pkg> for userId <n>` for a package that is not installed for
+ *   that user. The command still exits 0, so the text is the only signal.
+ */
+export type AppLocalesReply =
+  | { kind: "list"; list: string }
+  | { kind: "notInstalled" }
+  | { kind: "unreadable" };
+
+const APP_LOCALES_LIST = /\bare\s+\[([^\]]*)\]\s*$/;
+const UNKNOWN_PACKAGE = /\bUnknown package\s+\S+\s+for userId\s+\d+/;
+
+/**
+ * Classify a `cmd locale get-app-locales` or `set-app-locales` reply from the
+ * command's own stdout and stderr (never from a later probe). A reply that is
+ * neither a locale list nor an unknown-package line is unreadable.
+ */
+export function parseAppLocalesReply(stdout: string, stderr: string = ""): AppLocalesReply {
+  const normalized = normalizeSettingValue(stdout);
+  const list = normalized?.match(APP_LOCALES_LIST)?.[1];
+  if (list !== undefined) {
+    return { kind: "list", list: list.trim() };
+  }
+  if (UNKNOWN_PACKAGE.test(stdout) || UNKNOWN_PACKAGE.test(stderr)) {
+    return { kind: "notInstalled" };
+  }
+  return { kind: "unreadable" };
+}
+
+/**
  * Extract the calendar identifier from a BCP-47 / POSIX locale string,
  * supporting both `@calendar=…` and `-u-ca-…` extensions.
  */
@@ -288,8 +322,11 @@ function explicitRegion(tag: string): string | null {
 /**
  * Whether the locale a device reports back is the locale that was requested.
  * Compares canonical forms rather than strings, so the legacy `iw`/`in`/`ji`
- * spellings match the `he`/`id`/`yi` Android reports, and a region or script the
- * device fills in (`he-IL` for a request of `he`) is not a mismatch. When the
+ * spellings match the `he`/`id`/`yi` Android reports (captured on an API 36
+ * emulator: `iw` reads back `he`, `in-ID` reads back `id-ID`). A region or script
+ * the report names beyond the request (`he-IL` for a request of `he`) is
+ * tolerated, although the same captures show the device echoing `he` as `he`:
+ * that tolerance is not something a device was seen to need. When the
  * request named a region the report must name the same one, so `fr-FR` matches
  * neither `fr-CA` nor a report that dropped the region (`fr`). Variants and extensions must be equal. A null, empty or
  * unparseable report never matches.

@@ -1140,7 +1140,9 @@ export const skeletonElementSchema = z
     occluded: z
       .literal(true)
       .optional()
-      .describe("Fully covered by the Android IME window; this row has no actionable affordance."),
+      .describe(
+        "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
+      ),
     checked: z.boolean().optional(),
     enabled: z
       .literal(false)

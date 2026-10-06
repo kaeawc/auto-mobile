@@ -113,7 +113,7 @@ export interface SkeletonElement {
   bounds: [number, number, number, number];
   /** Actionable affordances, in canonical order tap, long-press, input, scroll, toggle. */
   affordances: Affordance[];
-  /** Fully covered by the Android IME window; this row has no actionable affordance. */
+  /** Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance. */
   occluded?: true;
   /** Present only for a `toggle` affordance: the current checked state. */
   checked?: boolean;

@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import android.view.KeyEvent
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
@@ -48,6 +51,7 @@ class OverlayDetachedWindowTest {
         densityProvider = { 2.5f },
         onWindowLost = { lost++ },
         isBlocked = ::isBlocked,
+        backScope = CoroutineScope(Dispatchers.Unconfined),
       )
     controller =
       OverlayController(
@@ -89,6 +93,25 @@ class OverlayDetachedWindowTest {
     controller.destroy()
     timer.advance(TTL * 2)
     assertEquals(size, events.size)
+  }
+
+  @Test
+  fun `back on a focusable text overlay dismisses through the controller once as user`() = runTest {
+    val field = OverlayTextFieldNode(stateKey = "query")
+    controller.show(
+      null,
+      spec().copy(root = field, state = mapOf("query" to OverlayScalar.Text(""))),
+    )
+    fun back(action: Int) =
+      manager.view!!.dispatchKeyEvent(KeyEvent(0L, 0L, action, KeyEvent.KEYCODE_BACK, 0))
+    assertTrue(back(KeyEvent.ACTION_DOWN))
+    assertTrue(host.isShowing)
+    assertTrue(back(KeyEvent.ACTION_UP))
+    assertFalse(host.isShowing)
+    assertNull(controller.activeRuntime)
+    assertSingleDismiss("user")
+    assertEquals(1, detached)
+    assertNoFurtherEvents()
   }
 
   @Test

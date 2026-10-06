@@ -55,6 +55,10 @@ import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.overlay.CoroutineOverlayScheduler
 import dev.jasonpearson.automobile.ctrlproxy.overlay.DefaultInteractiveOverlayHost
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetController
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetDirectory
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayAssetStore
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayBase64Decoder
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayController
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayEventSink
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayLifecycle
@@ -964,6 +968,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var overlayController: OverlayController
+  private val overlayResultSink = OverlayResultSink { requestId, success, error ->
+    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+      resultBroadcaster.guard(requestId, "overlay_result") {
+        webSocketServer.broadcastWithPerf { _ -> overlayResultFrame(requestId, success, error) }
+      }
+    }
+  }
+  // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
+  private val overlayAssets by lazy {
+    OverlayAssetStore(OverlayAssetDirectory(File(cacheDir, "overlay-assets")))
+  }
+  private val overlayAssetController by lazy {
+    OverlayAssetController(
+      overlayAssets,
+      overlayResultSink,
+      OverlayBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
+    )
+  }
   private lateinit var overlayManager: OverlayManager
   private val permissionManager by lazy { PermissionManager(this) }
   private lateinit var overlayDrawer: OverlayDrawer
@@ -1596,16 +1618,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               onWindowAttached = { overlayManager.setInteractiveOverlayAttached(true) },
               onWindowLost = ::refreshOverlayWindow,
               isBlocked = ::isOverlayBlocked,
+              backScope = serviceScope,
             ),
-            OverlayResultSink { requestId, success, error ->
-              if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-                resultBroadcaster.guard(requestId, "overlay_result") {
-                  webSocketServer.broadcastWithPerf { _ ->
-                    overlayResultFrame(requestId, success, error)
-                  }
-                }
-              }
-            },
+            overlayResultSink,
             onDismissed = {
               withContext(Dispatchers.Main.immediate) {
                 overlayManager.setInteractiveOverlayAttached(false)
@@ -1633,7 +1648,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   }
                 }
               },
+            clearAssets = { overlayAssets.clear() },
           )
+        // Service start: drop anything a previous process left in the cache directory.
+        overlayAssets.clear()
       }
       overlayManager.setInteractiveOverlayAttached(overlayController.isShowing)
 
@@ -2950,6 +2968,21 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {
     launchRequestScope(requestId) { overlayController.dismiss(requestId, id, all) }
+  }
+
+  override fun putOverlayAsset(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    dataBase64: String,
+  ) {
+    launchRequestScope(requestId) {
+      overlayAssetController.put(requestId, id, mimeType, dataBase64)
+    }
+  }
+
+  override fun removeOverlayAsset(requestId: String?, id: String) {
+    launchRequestScope(requestId) { overlayAssetController.remove(requestId, id) }
   }
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) =
